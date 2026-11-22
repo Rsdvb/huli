@@ -6,7 +6,8 @@ import {
   PencilEdit02Icon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
-import { MAX_NOTE_TEXT, diffNotePlace, type DiffNote } from '@shared/diff-notes'
+import { MAX_NOTE_TEXT, diffNotePlace } from '@shared/diff-notes'
+import { MAX_PAGE_NOTE_TEXT } from '@shared/page-notes'
 import { Button } from '@renderer/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
 import { Spinner } from '@renderer/components/ui/spinner'
@@ -15,9 +16,13 @@ import { OutsideConfirm } from '@renderer/features/session/composer/held-strip'
 import { outsideConfirmed } from '@renderer/features/session/composer/outside-confirmed'
 import {
   readDraftNotes,
+  readDraftPageNotes,
   useDraftNotes,
+  useDraftPageNotes,
   writeDraftNotes,
+  writeDraftPageNotes,
 } from '@renderer/features/session/composer/drafts'
+import { editPageNote, removePageNote } from '@renderer/features/page-notes/notes'
 import { PaneIcon } from '@renderer/features/shell/panel-button'
 import { errorMessage } from '@renderer/lib/host'
 import { isMod } from '@renderer/lib/platform'
@@ -28,11 +33,13 @@ import { editNote, removeNote, sendNotes } from './notes'
 
 /**
  * The session's comments on diff lines waiting to go: how many, a list to read, edit or delete
- * them, Send to agent and Clear. Above the composer's box, and under the Files pane's diff.
+ * them, Send to agent and Clear. Above the composer's box, and under the Files pane's diff. Huli:
+ * with the comments on page elements from the browser pane's pick mode, which go with them.
  */
 export function NotesTray({ sessionId, place }: { sessionId: string; place: 'composer' | 'pane' }) {
   const { t } = useTranslation('files')
   const notes = useDraftNotes(sessionId)
+  const pageNotes = useDraftPageNotes(sessionId)
   const listed = useSessionsStore((s) => s.byId[sessionId]?.status ?? null)
   const status = useThreadsStore((s) => s.replicas[sessionId]?.state?.session.status) ?? listed
   const heldOutside = useThreadsStore(
@@ -44,7 +51,8 @@ export function NotesTray({ sessionId, place }: { sessionId: string; place: 'com
   const [sending, setSending] = useState(false)
   const [asking, setAsking] = useState(false)
   const [listOpen, setListOpen] = useState(false)
-  if (notes.length === 0) return null
+  const count = notes.length + pageNotes.length
+  if (count === 0) return null
 
   const unavailable = status === null || status === 'starting' || heldOutside
   const send = () => {
@@ -70,11 +78,16 @@ export function NotesTray({ sessionId, place }: { sessionId: string; place: 'com
   }
   const clear = () => {
     const kept = [...readDraftNotes(sessionId)]
+    const keptPages = [...readDraftPageNotes(sessionId)]
     writeDraftNotes(sessionId, [])
+    writeDraftPageNotes(sessionId, [])
     setListOpen(false)
-    toast(t('notes.cleared', { count: kept.length }), {
+    toast(t('notes.cleared', { count: kept.length + keptPages.length }), {
       label: t('notes.undo'),
-      onClick: () => writeDraftNotes(sessionId, [...kept, ...readDraftNotes(sessionId)]),
+      onClick: () => {
+        writeDraftNotes(sessionId, [...kept, ...readDraftNotes(sessionId)])
+        writeDraftPageNotes(sessionId, [...keptPages, ...readDraftPageNotes(sessionId)])
+      },
     })
   }
 
@@ -92,7 +105,7 @@ export function NotesTray({ sessionId, place }: { sessionId: string; place: 'com
           render={<button type="button" className="kp-notes-tray__count focus-ring" />}
         >
           <PaneIcon icon={BubbleChatIcon} size={14} />
-          {t('notes.count', { count: notes.length })}
+          {t('notes.count', { count })}
           <PaneIcon icon={ArrowDown01Icon} size={12} className="kp-notes-tray__chevron" />
         </PopoverTrigger>
         <PopoverContent
@@ -102,7 +115,26 @@ export function NotesTray({ sessionId, place }: { sessionId: string; place: 'com
         >
           <p className="px-2 pt-1 pb-0.5 text-xs text-tertiary">{t('notes.listTitle')}</p>
           {notes.map((note) => (
-            <NoteRow key={note.id} sessionId={sessionId} note={note} />
+            <NoteRow
+              key={note.id}
+              place={diffNotePlace(note)}
+              text={note.text}
+              max={MAX_NOTE_TEXT}
+              onSave={(text) => editNote(sessionId, note.id, text)}
+              onDelete={() => removeNote(sessionId, note.id)}
+            />
+          ))}
+          {pageNotes.map((note) => (
+            <NoteRow
+              key={note.id}
+              place={note.label}
+              title={`${note.selector}\n${note.url}`}
+              thumb={note.shot?.thumb ?? null}
+              text={note.comment}
+              max={MAX_PAGE_NOTE_TEXT}
+              onSave={(text) => editPageNote(sessionId, note.id, text)}
+              onDelete={() => removePageNote(sessionId, note.id)}
+            />
           ))}
         </PopoverContent>
       </Popover>
@@ -135,20 +167,38 @@ export function NotesTray({ sessionId, place }: { sessionId: string; place: 'com
 }
 
 /** A comment in the tray's list: where, what, and Edit and Delete. */
-function NoteRow({ sessionId, note }: { sessionId: string; note: DiffNote }) {
+function NoteRow({
+  place,
+  title,
+  thumb = null,
+  text: saved,
+  max,
+  onSave,
+  onDelete,
+}: {
+  place: string
+  title?: string
+  /** An element's screenshot, for a comment on a page. */
+  thumb?: string | null
+  text: string
+  max: number
+  onSave: (text: string) => void
+  onDelete: () => void
+}) {
   const { t } = useTranslation('files')
   const [editing, setEditing] = useState(false)
-  const [text, setText] = useState(note.text)
+  const [text, setText] = useState(saved)
   const save = () => {
     if (!text.trim()) return
-    editNote(sessionId, note.id, text.trim())
+    onSave(text.trim())
     setEditing(false)
   }
   return (
     <div className="kp-notes-list__row">
       <div className="kp-notes-list__head">
-        <span className="kp-notes-list__place" title={diffNotePlace(note)}>
-          {diffNotePlace(note)}
+        {thumb && <img src={thumb} alt="" className="kp-notes-list__thumb" />}
+        <span className="kp-notes-list__place" title={title ?? place}>
+          {place}
         </span>
         {!editing && (
           <Button
@@ -157,7 +207,7 @@ function NoteRow({ sessionId, note }: { sessionId: string; note: DiffNote }) {
             aria-label={t('notes.edit')}
             title={t('notes.edit')}
             onClick={() => {
-              setText(note.text)
+              setText(saved)
               setEditing(true)
             }}
           >
@@ -169,7 +219,7 @@ function NoteRow({ sessionId, note }: { sessionId: string; note: DiffNote }) {
           size="icon-xs"
           aria-label={t('notes.delete')}
           title={t('notes.delete')}
-          onClick={() => removeNote(sessionId, note.id)}
+          onClick={onDelete}
         >
           <PaneIcon icon={Delete02Icon} size={13} />
         </Button>
@@ -180,8 +230,8 @@ function NoteRow({ sessionId, note }: { sessionId: string; note: DiffNote }) {
             autoFocus
             value={text}
             rows={3}
-            maxLength={MAX_NOTE_TEXT}
-            aria-label={t('notes.editorLabel', { place: diffNotePlace(note) })}
+            maxLength={max}
+            aria-label={t('notes.editorLabel', { place })}
             className="kp-note-editor__text"
             onChange={(event) => setText(event.target.value)}
             onKeyDown={(event) => {
@@ -212,7 +262,7 @@ function NoteRow({ sessionId, note }: { sessionId: string; note: DiffNote }) {
           </div>
         </div>
       ) : (
-        <p className="kp-notes-list__text">{note.text}</p>
+        <p className="kp-notes-list__text">{saved}</p>
       )}
     </div>
   )

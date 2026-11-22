@@ -29,6 +29,10 @@ import { panelSession } from '@renderer/stores/view'
 import { AddressField } from './address-field'
 import { SurfaceTabs } from '@renderer/features/shell/surface-tabs'
 import { OriginBar } from './origin-bar'
+import { PickHint, PickLayer, PickToggle, PickTray } from './pick-mode'
+import { startPicking, stopPicking } from './pick'
+import { PortsButton } from '@renderer/features/ports/ports-button'
+import { openOnHost } from '@renderer/features/ports/ports'
 import { BringSignInsOffer, SignInChip } from './sign-in-offer'
 
 /**
@@ -49,6 +53,7 @@ export function BrowserPane({
   const state = useBrowserStore((s) => (sessionId ? s.bySession[sessionId] : undefined))
   const still = useBrowserStore((s) => (sessionId ? s.stills[sessionId] : undefined))
   const hidden = useBrowserStore((s) => (sessionId ? !!s.unseen[sessionId] : false))
+  const picked = useBrowserStore((s) => (sessionId ? s.picked[sessionId] : undefined))
   const agentId = useSessionsStore((s) => (sessionId ? s.byId[sessionId]?.agentId : null)) ?? null
   const hostId = useSessionsStore((s) =>
     sessionId ? hostOfPath(s.byId[sessionId]?.projectPath ?? '') : null,
@@ -85,7 +90,10 @@ export function BrowserPane({
   )
 
   const navigate = (url: string) => {
-    if (sessionId) void window.kettu.browser.navigate(sessionId, url)
+    if (!sessionId) return
+    // Huli: another host's localhost opens through a forward to it, as its agent's pages do.
+    if (hostId !== null && openOnHost(hostId, sessionId, url)) return
+    void window.kettu.browser.navigate(sessionId, url)
   }
 
   // Main shows the session's page while the pane is open, and keeps it while the pane is hidden;
@@ -137,6 +145,8 @@ export function BrowserPane({
     if (!sessionId) return
     if (!overlayOpen) {
       if (!useBrowserStore.getState().stills[sessionId]) return
+      // The still holds a picked element's comment, which ends it itself.
+      if (useBrowserStore.getState().picked[sessionId]) return
       void window.kettu.browser.thaw(sessionId).finally(() => {
         useBrowserStore.getState().setStill(sessionId, null)
       })
@@ -162,6 +172,36 @@ export function BrowserPane({
     }
   }, [overlayOpen, sessionId])
 
+  // Huli: leaving the pane or its session ends pick mode.
+  useEffect(() => {
+    if (!sessionId) return
+    return () => stopPicking(sessionId)
+  }, [sessionId])
+
+  // Huli: a picked element's comment opens over a still of the page; once it closes the page
+  // comes back, and picking goes on while the mode is on.
+  useEffect(() => {
+    if (!sessionId || !picked) return
+    let cancelled = false
+    void window.kettu.browser
+      .freeze(sessionId)
+      .then((image) => {
+        if (cancelled) return
+        if (image) useBrowserStore.getState().setStill(sessionId, image)
+        else if (!useBrowserStore.getState().stills[sessionId]) {
+          useBrowserStore.getState().setPicked(sessionId, null)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      void window.kettu.browser.thaw(sessionId).finally(() => {
+        useBrowserStore.getState().setStill(sessionId, null)
+        if (useBrowserStore.getState().picking[sessionId]) void startPicking(sessionId)
+      })
+    }
+  }, [picked, sessionId])
+
   // Leaving the pane or its session drops a still that is no longer in front of anything.
   useEffect(() => {
     if (!sessionId) return
@@ -173,6 +213,7 @@ export function BrowserPane({
   }, [sessionId])
 
   const url = state?.url ?? null
+  const agentHasPage = state?.control.kind === 'agent' && state.selected === state.agentTab
 
   return (
     <PaneSheet pane="browser" maximized={maximized} data-browser-panel="">
@@ -242,6 +283,10 @@ export function BrowserPane({
                   />
                 }
               />
+              {sessionId && <PickToggle sessionId={sessionId} disabled={agentHasPage} />}
+              {sessionId && hostId !== null && (
+                <PortsButton hostId={hostId} sessionId={sessionId} />
+              )}
               {state.loading && (
                 <span role="progressbar" aria-label={t('loading')} className="kp-load" />
               )}
@@ -262,9 +307,14 @@ export function BrowserPane({
               />
             )}
             {state.notice && <Notice notice={state.notice} sessionId={sessionId} />}
+            {sessionId && <PickHint sessionId={sessionId} />}
             <div ref={page} className="kp-view">
               {still && <img src={still} alt="" aria-hidden className="kp-view__still" />}
+              {sessionId && picked && still && (
+                <PickLayer sessionId={sessionId} pick={picked} hostId={hostId} zoom={zoom} />
+              )}
             </div>
+            {sessionId && <PickTray sessionId={sessionId} />}
           </>
         ) : (
           <>

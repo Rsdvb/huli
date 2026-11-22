@@ -6,7 +6,7 @@ import type { FileDiff } from '@shared/git'
 import { RenderCount } from '@renderer/features/diff-notes/notes'
 import { NotesLayer, type NoteEditing } from '@renderer/features/diff-notes/notes-layer'
 import { NotesTray } from '@renderer/features/diff-notes/notes-tray'
-import { useDraftNotes } from '@renderer/features/session/composer/drafts'
+import { useNoteCount } from '@renderer/features/session/composer/drafts'
 import { PaneIcon, PanelButton } from '@renderer/features/shell/panel-button'
 import { closeDiff, openFile, type DiffView } from '@renderer/stores/files'
 import { DiffFileToggle, PathCopy } from './file-header'
@@ -253,7 +253,7 @@ function Changes({
 
 /** Under the diff: the session's comments waiting to go, or the hint while there are none. */
 function NotesFoot({ sessionId, hint }: { sessionId: string; hint: string }) {
-  const count = useDraftNotes(sessionId).length
+  const count = useNoteCount(sessionId)
   if (count === 0) return <span className="kp-doc__hint">{hint}</span>
   return (
     <div className="kp-notes-foot">

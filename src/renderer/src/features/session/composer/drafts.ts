@@ -1,12 +1,14 @@
 import { useSyncExternalStore } from 'react'
 import { parseDiffNotes, type DiffNote } from '@shared/diff-notes'
+import { parsePageNotes, type PageNote } from '@shared/page-notes'
 import { isAttachment, type Attachment } from '@shared/thread'
 import { removeKey } from '@renderer/lib/storage'
 
 // Unsent composer text and attachments per session, in localStorage under `draft:<sessionId>` as
 // JSON `{ text, attachments, notes }`, written 300 ms after the last change. One stored as plain
 // text, before drafts had attachments, reads as text alone. A draft that is too large or fails to
-// save stays in memory. `notes` are comments on diff lines waiting to go to the agent together;
+// save stays in memory. `notes` are comments on diff lines waiting to go to the agent together,
+// and `pageNotes` (Huli) those on elements of a page in the session's browser, which go with them;
 // sending the composer's message leaves them, deleting the session drops them.
 
 /** The New session screen's draft, kept like a session's until the session it starts exists. */
@@ -27,6 +29,7 @@ interface Draft {
   text: string
   attachments: SavedAttachment[]
   notes: DiffNote[]
+  pageNotes: PageNote[]
 }
 
 const WRITE_DELAY_MS = 300
@@ -37,7 +40,7 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>()
 
 const PREFIX = 'draft:'
 const key = (sessionId: string) => `${PREFIX}${sessionId}`
-const EMPTY: Draft = { text: '', attachments: [], notes: [] }
+const EMPTY: Draft = { text: '', attachments: [], notes: [], pageNotes: [] }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -66,13 +69,14 @@ export function parseDraft(raw: string): Draft {
           text: value.text,
           attachments: value.attachments.filter(isSaved),
           notes: parseDiffNotes(value.notes),
+          pageNotes: parsePageNotes(value.pageNotes),
         }
       }
     } catch {
       // Text that only starts like JSON.
     }
   }
-  return { text: raw, attachments: [], notes: [] }
+  return { text: raw, attachments: [], notes: [], pageNotes: [] }
 }
 
 function read(sessionId: string): Draft {
@@ -124,7 +128,12 @@ export function flushDraft(sessionId: string): void {
   timers.delete(sessionId)
   const draft = memory.get(sessionId)
   if (draft === undefined) return
-  if (!draft.text && draft.attachments.length === 0 && draft.notes.length === 0) {
+  if (
+    !draft.text &&
+    draft.attachments.length === 0 &&
+    draft.notes.length === 0 &&
+    draft.pageNotes.length === 0
+  ) {
     removeKey(key(sessionId))
     memory.delete(sessionId)
     return
@@ -161,22 +170,27 @@ export function draftedSessions(): string[] {
   return draftIds().filter((id) => {
     if (id === NEW_SESSION_DRAFT) return false
     const draft = read(id)
-    return draft.text.trim() !== '' || draft.attachments.length > 0 || draft.notes.length > 0
+    return (
+      draft.text.trim() !== '' ||
+      draft.attachments.length > 0 ||
+      draft.notes.length > 0 ||
+      draft.pageNotes.length > 0
+    )
   })
 }
 
 /** Empties the draft's message, its text and attachments, as a send does; its notes stay. */
 export function clearDraft(sessionId: string): void {
-  const { notes } = read(sessionId)
+  const { notes, pageNotes } = read(sessionId)
   const timer = timers.get(sessionId)
   if (timer) clearTimeout(timer)
   timers.delete(sessionId)
   memory.delete(sessionId)
-  if (notes.length === 0) {
+  if (notes.length === 0 && pageNotes.length === 0) {
     removeKey(key(sessionId))
     return
   }
-  memory.set(sessionId, { text: '', attachments: [], notes })
+  memory.set(sessionId, { text: '', attachments: [], notes, pageNotes })
   flushDraft(sessionId)
 }
 
@@ -187,12 +201,14 @@ export function forgetDraft(sessionId: string): void {
   timers.delete(sessionId)
   memory.delete(sessionId)
   removeKey(key(sessionId))
-  if (shownNotes.delete(sessionId)) emitNotes()
+  const shown = shownNotes.delete(sessionId)
+  if (shownPageNotes.delete(sessionId) || shown) emitNotes()
 }
 
 // The notes as the views last read them, one array per session until they change, so a view that
 // reads them renders again only when its session's notes do.
 const shownNotes = new Map<string, readonly DiffNote[]>()
+const shownPageNotes = new Map<string, readonly PageNote[]>()
 const noteListeners = new Set<() => void>()
 
 function emitNotes(): void {
@@ -229,3 +245,36 @@ export function useDraftNotes(sessionId: string | null): readonly DiffNote[] {
 }
 
 const NO_NOTES: readonly DiffNote[] = []
+
+/** Huli: the session's comments on elements of its browser's pages, in the order written. */
+export function readDraftPageNotes(sessionId: string): readonly PageNote[] {
+  let notes = shownPageNotes.get(sessionId)
+  if (!notes) shownPageNotes.set(sessionId, (notes = read(sessionId).pageNotes))
+  return notes
+}
+
+/** Replaces the session's page notes and stores them at once, as its diff notes are. */
+export function writeDraftPageNotes(sessionId: string, notes: PageNote[]): void {
+  shownPageNotes.set(sessionId, notes)
+  write(sessionId, { ...read(sessionId), pageNotes: notes })
+  flushDraft(sessionId)
+  emitNotes()
+}
+
+/** The session's page notes, rendering again only when they change; none for no session. */
+export function useDraftPageNotes(sessionId: string | null): readonly PageNote[] {
+  return useSyncExternalStore(subscribeNotes, () =>
+    sessionId === null ? NO_PAGE_NOTES : readDraftPageNotes(sessionId),
+  )
+}
+
+const NO_PAGE_NOTES: readonly PageNote[] = []
+
+/** How many comments of either kind the session holds. */
+export function useNoteCount(sessionId: string | null): number {
+  return useSyncExternalStore(subscribeNotes, () =>
+    sessionId === null
+      ? 0
+      : readDraftNotes(sessionId).length + readDraftPageNotes(sessionId).length,
+  )
+}

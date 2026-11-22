@@ -1909,6 +1909,10 @@
         "foreign": "{{path}} on {{name}} was not installed by Kettu’s install script, so Kettu there was left as it is.",
         "running": "A Kettu daemon still runs on {{name}} outside its service, as kettu run does. Its service was removed; stop that daemon there and try again.",
         "failed": "Could not uninstall Kettu from {{name}}."
+      },
+      "ports": {
+        "label": "Ports",
+        "note": "Forward a dev server of {{name}} to this computer to open it here. It goes over the connection Kite already has to {{name}}, and stops when that connection ends."
       }
     },
     "web": {
