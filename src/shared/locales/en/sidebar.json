@@ -116,7 +116,7 @@
       "issues": "Issues",
       "autoApprove": "Auto-approve",
       "sandbox": "Sandbox",
-      "folders": "Folders…"
+      "folders": "Project folders…"
     },
     "remove": {
       "title": "Remove {{name}}?",

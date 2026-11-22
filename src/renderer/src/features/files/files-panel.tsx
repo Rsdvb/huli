@@ -933,11 +933,8 @@ function RootPicker({ panel, root, roots }: { panel: string; root: string; roots
         <SelectContent>
           <SelectGroup>
             {items.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate">{item.label}</span>
-                  <span className="truncate font-mono text-meta text-tertiary">{item.value}</span>
-                </span>
+              <SelectItem key={item.value} value={item.value} title={item.value}>
+                {item.label}
               </SelectItem>
             ))}
           </SelectGroup>

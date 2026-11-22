@@ -289,8 +289,13 @@ function FolderRow({
           <span className="truncate text-control font-medium text-primary">{name}</span>
           {badge}
         </span>
-        <span className="truncate font-mono text-meta text-tertiary" title={path}>
-          {path}
+        {/* The end of a long path says the most, so it is the start that gives way. */}
+        <span
+          dir="rtl"
+          className="truncate text-left font-mono text-meta text-tertiary"
+          title={path}
+        >
+          <bdi dir="ltr">{path}</bdi>
         </span>
       </span>
       {action}

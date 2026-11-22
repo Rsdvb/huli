@@ -111,7 +111,7 @@
       "issues": "议题",
       "autoApprove": "自动批准",
       "sandbox": "沙箱",
-      "folders": "文件夹…"
+      "folders": "项目文件夹…"
     },
     "remove": {
       "title": "移除 {{name}}？",
