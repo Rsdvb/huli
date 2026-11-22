@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { answeredUnasked } from '@shared/thread'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { cn } from '@renderer/lib/utils'
 import { toolMedia } from '../media/named'
@@ -114,7 +115,7 @@ export const ToolCard = memo(function ToolCard({
   }
   // A request waiting for the user, and once answered its folded card over the call: one element
   // throughout, so the card folds where it stands.
-  if (permission || (result && (typeof result !== 'object' || result.by !== 'routine'))) {
+  if (permission || (result && !answeredUnasked(result))) {
     return (
       <PermissionEntry
         ref={ref}

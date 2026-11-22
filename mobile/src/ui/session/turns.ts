@@ -1,7 +1,13 @@
 // The conversation as rows: its entries, and after each turn that ended, the files that turn
 // changed and a footer with its time, its length and what can be done with its reply.
 
-import type { PlanEntry, ThreadEntry, ThreadState, ToolEntry } from '@shared/thread'
+import {
+  answeredUnasked,
+  type PlanEntry,
+  type ThreadEntry,
+  type ThreadState,
+  type ToolEntry,
+} from '@shared/thread'
 import { writingId } from '@shared/turn-phase'
 import { workflowCardOf } from '../../components/entries/workflowTools'
 import { diffTexts, type Diff } from '../../diff'
@@ -145,7 +151,7 @@ export function foldsIntoRun(entry: ThreadEntry): boolean {
   if (entry.elicitation !== undefined || entry.permission) return false
   if (workflowCardOf(entry)) return false
   const result = entry.permissionResult
-  if (result && (typeof result !== 'object' || result.by !== 'routine')) return false
+  if (result && !answeredUnasked(result)) return false
   return true
 }
 

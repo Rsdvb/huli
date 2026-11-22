@@ -38,7 +38,8 @@
     "move_other": "移动了 {{count}} 个文件",
     "moveNamed": "移动了 {{names}}",
     "moveMore": "移动了 {{names}} 及另外 {{more}} 个文件",
-    "failed": "{{failed}} 项失败"
+    "failed": "{{failed}} 项失败",
+    "autoApproved_other": "已自动批准 {{count}} 项"
   },
   "refusal": {
     "title": "模型拒绝继续",
@@ -201,9 +202,15 @@
       "rejectOnce": "已拒绝",
       "rejectAlways": "已始终拒绝",
       "allowedByRoutine": "由定时任务允许",
+      "autoApproved": "已自动批准 · {{level}}",
       "cancelled": "已取消",
       "withdrawn": "已不再需要",
       "onDevice": "{{answer}} · {{device}}"
+    },
+    "risk": {
+      "low": "低风险",
+      "medium": "中风险",
+      "high": "高风险"
     },
     "answeredOn": "已在 {{device}} 上回答过。",
     "answeredInWindow": "已在另一个窗口中回答过。",

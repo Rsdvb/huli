@@ -24,6 +24,7 @@ import type {
   TurnRefusal,
   UserContent,
 } from '@shared/thread'
+import type { RiskSubject } from './risk/classify'
 import type { MapperContext, MapperOutput } from './session-updates'
 
 export interface PermissionRequest {
@@ -40,6 +41,11 @@ export interface PermissionRequest {
   elicitation?: PendingElicitation
   /** Huli: why the agent asks, in its words, which the card shows beside the request. */
   reason?: string
+  /**
+   * Huli: what the request does, for its risk, where the driver knows more than the tool entry
+   * shows, such as the shell a command runs in or an MCP tool's server; else read from the entry.
+   */
+  subject?: RiskSubject
   /**
    * The agent does not wait for the answer, so its turn goes on or ends and the card stays until
    * the user answers it or the session closes.

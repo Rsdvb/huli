@@ -77,6 +77,12 @@ export function StepCard({
     if (note === undefined && typeof result === 'object' && result?.by === 'routine') {
       note = t('permission.answer.allowedByRoutine')
     }
+    // Huli: what the host allowed by itself says so, with the level it judged.
+    if (note === undefined && typeof result === 'object' && result?.by === 'risk') {
+      note = t('permission.answer.autoApproved', {
+        level: t(`permission.risk.${result.risk?.level ?? 'low'}`),
+      })
+    }
     // Huli: a denied call reads Denied, not Cancelled, and says what denied it.
     const denial = entry.denied
     if (note === undefined && denial && denial.by !== 'user') note = t(`tool.deniedBy.${denial.by}`)

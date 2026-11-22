@@ -1486,5 +1486,47 @@
       "toldComment": "新的评论",
       "separator": "、"
     }
+  },
+  "risk": {
+    "level": {
+      "low": "低风险",
+      "medium": "中风险",
+      "high": "高风险"
+    },
+    "withLevel": "{{text}} · {{level}}",
+    "detail": "{{reason}}：{{detail}}",
+    "reason": {
+      "readProject": "只读取项目内的内容",
+      "readCommand": "只读命令",
+      "projectCheck": "运行项目的测试、检查或构建",
+      "editProject": "修改项目内的文件",
+      "editConfig": "修改工具或 Agent 的配置",
+      "readOutside": "读取项目外的内容",
+      "install": "安装或移除依赖包",
+      "download": "下载并运行软件包",
+      "network": "访问网络",
+      "projectScript": "运行项目里的脚本或程序",
+      "outsideProject": "在项目文件夹外运行",
+      "gitWrite": "修改 Git 仓库",
+      "mcp": "调用 MCP 工具，效果由该服务决定",
+      "globRead": "通配符可能读到隐藏文件",
+      "unclearScope": "涉及的范围不明确",
+      "grant": "扩大沙箱权限",
+      "unsafe": "可能删除、改权限、结束进程，或运行看不到的命令",
+      "delete": "删除文件",
+      "gitDanger": "改写、丢弃或推送 Git 历史",
+      "writeOutside": "写入项目外",
+      "gitDir": "修改 .git 文件夹",
+      "sensitive": "涉及凭据或密钥",
+      "system": "涉及系统文件",
+      "unparsed": "无法确定这条命令会做什么",
+      "unknownCommand": "未识别的程序",
+      "unknown": "无法判断的操作",
+      "globalInstall": "安装到项目外（全局或整台电脑）",
+      "publish": "发布、部署或改动外部服务",
+      "upload": "通过网络发送数据或文件",
+      "mcpDanger": "可能删除、发送或执行操作的 MCP 工具",
+      "input": "向正在运行的命令输入内容"
+    }
   }
 }

@@ -37,7 +37,7 @@ async function isThere(target: string): Promise<boolean> {
 }
 
 // A worktree takes a dozen git processes, which Windows starts slowly under a full run's load.
-describe('createWorktreeGit', { timeout: 30_000 }, () => {
+describe('createWorktreeGit', { timeout: process.platform === 'win32' ? 90_000 : 30_000 }, () => {
   const exec = createExec(() => ({ ...process.env, ...ENV })).exec
   let dir: string
   let project: string

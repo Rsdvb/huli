@@ -4,6 +4,7 @@ import type { IdleSessionsSettings } from './idle-release'
 import type { LanguageSetting, Locale } from './locale'
 import type { MarketServer, MarketSkill } from './marketplace'
 import type { DirectAddress } from './remote/protocol'
+import type { AutoApprove } from './risk'
 import { DEFAULT_SUPERVISOR, type SupervisorSettings } from './supervisor'
 import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
@@ -154,6 +155,9 @@ export interface SettingsFile {
   onboarding: OnboardingState
   // Huli: the daily backup of this computer's data folder; see tools/huli/README.md.
   backup: BackupSettings
+  // Huli: which permission requests the host allows once by itself, for a project that keeps the
+  // default; a project may choose its own. Agents never change it.
+  permissions: { autoApprove: AutoApprove }
 }
 
 /**
@@ -387,6 +391,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   cloud: { enabled: false },
   onboarding: { done: false, step: 'welcome' },
   backup: { enabled: true, time: '03:00', keep: 7, folder: null },
+  permissions: { autoApprove: 'off' },
 }
 
 /** The zoom one step in (1) or out (-1), held at the ends; 0 returns to the default. */
@@ -449,6 +454,7 @@ export interface SettingsPatch {
     relay?: boolean
     discoverable?: boolean
   }
+  permissions?: Partial<SettingsFile['permissions']>
   // Huli: the folder can only be cleared here, back to the default; one is picked in main's dialog.
   backup?: {
     enabled?: boolean
@@ -485,6 +491,9 @@ export interface HostSettings {
   // Kettu's download service may be asked, as for the harness compatibility manifest: off in
   // Local mode and with GitHub only as the download source.
   downloadService: boolean
+  // Huli: the requests the host allows by itself in a project that keeps the default; absent from
+  // a parent older than it, which allows none.
+  autoApprove?: AutoApprove
 }
 
 /** The part of the settings the terminal host receives. */

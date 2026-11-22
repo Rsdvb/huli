@@ -374,6 +374,42 @@ none.
   the probe), `sessions.test.ts` (sessions started together, the setup command's and the agent's
   variables, archive, restart and restore), `storage.test.ts` (the stored block and column).
 
+### Risk levels and auto-approve (风险等级、自动批准低风险操作)
+
+After Codex's risk before an action, Kiro's Approve for me and Claude Code's auto mode, without
+a model: every permission request gets a level (低, 中, 高) and a one-line reason from a pure,
+deterministic classifier, and the user may have the host answer low ones by itself.
+
+- `src/agent-host/risk/`: `shell-words.ts` reads a command line as a POSIX shell, PowerShell or
+  cmd.exe would (redirections, wildcards, `2>&1` and the null device; expansions, subshells,
+  here-documents and anything unclear are refused), `places.ts` places a path (the project or its
+  worktree, its `.git`, elsewhere, the system's folders, or a credential such as `.env`, `.ssh` or
+  `*.pem`; Git Bash's `/c/...`, drive-relative and UNC paths, case-insensitively on Windows),
+  `command.ts` judges each step by its program, and `classify.ts` judges requests (`RiskSubject`:
+  a command, reads, edits, a fetch, an MCP tool, a sandbox grant) and decides `autoApproves`.
+  Low: reads in the project, read-only programs and the project's tests, checks and builds run in
+  the project. Medium: edits in the project, installs, the network, scripts. High: whatever
+  `command-safety.ts` calls unsafe, deleting, Git's push/reset/rebase and the like, writes
+  elsewhere, keys and system files, programs it does not know, lines it cannot read. A shell of
+  unknown kind on Windows is read as all three and the highest kept. `risk.test.ts` holds the table.
+- Drivers say what the tool entry cannot (`PermissionRequest.subject`): Claude Code's tool and
+  its shell (Bash or PowerShell), MCP tools by server, Codex's command, `cwd`, network requests and
+  sandbox grants; every other agent's request is read from its tool entry.
+- `sessions.ts` puts `risk: { level, reason }` on `PendingPermission` (cards, the phone, the
+  notification's line, the chat bridge) and, when the setting allows, answers `allow_once` itself:
+  `permissionResult.by === 'risk'`, folded as work with 已自动批准 · 低风险, and counted on a folded
+  run's line. Never a medium or high request (except, at the edits level, an edit inside the
+  project outside agents', editors', hooks' and CI's settings), never in plan mode, never a
+  routine's run, never an `allow_always` option.
+- Setting: `permissions.autoApprove` (`off`, `low`, `edits`; Settings › Agents › 批准), and each
+  project's own in `projects.json` (`autoApprove`, the project menu's 自动批准; absent keeps the
+  default). `projects.setAutoApprove` is the windows' alone, so neither a paired device nor a chat
+  bridge can widen it, and agents' settings tools may only read the row. The edits level asks to
+  confirm.
+- Limits: string work only, so a link inside the project that leads out is not seen; running the
+  project's tests runs its code, which edits allowed by the agent's own mode (or the edits level)
+  may have changed.
+
 ### Backup
 
 A daily backup of Kite's own data folder into one zip a day, and restoring one: Settings › Backup,

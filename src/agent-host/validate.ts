@@ -65,6 +65,7 @@ import {
 } from '@shared/git'
 import type { Platform } from '@shared/platform'
 import { isProfileId } from '@shared/provider-profiles'
+import { AUTO_APPROVE_LEVELS, isAutoApprove } from '@shared/risk'
 import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/session-groups'
 import { BOARD_STATUSES, isBoardStatus } from '@shared/session-board'
 import { REPORT_ERROR_MAX, REPORT_ORIGINS, type ReportOrigin } from '@shared/report'
@@ -1840,6 +1841,14 @@ export function createValidators(platform: Platform): Validators {
     'projects.pin': (params) => {
       const o = fields(params)
       return { path: absolutePath(o, 'path', platform), pinned: flag(o, 'pinned') }
+    },
+    'projects.setAutoApprove': (params) => {
+      const o = fields(params)
+      const level = o.autoApprove
+      if (level !== null && !isAutoApprove(level)) {
+        throw invalidParams(`autoApprove must be one of ${AUTO_APPROVE_LEVELS.join(', ')} or null`)
+      }
+      return { path: absolutePath(o, 'path', platform), autoApprove: level }
     },
     'projects.worktreeSettings': folder,
     'projects.setWorktreeSettings': (params) => {

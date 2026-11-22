@@ -587,6 +587,18 @@ describe('createValidators', () => {
     rejects(() => windows['sessions.create']({ agentId: 'codex', projectPath: 'app' }))
   })
 
+  it("takes only a known auto-approve level, or null for the settings' default", () => {
+    const set = posix['projects.setAutoApprove']
+    for (const autoApprove of ['off', 'low', 'edits', null] as const) {
+      expect(set({ path: '/repo', autoApprove })).toEqual({ path: '/repo', autoApprove })
+    }
+    rejects(() => set({ path: '/repo', autoApprove: 'all' }))
+    rejects(() => set({ path: '/repo', autoApprove: 'high' }))
+    rejects(() => set({ path: '/repo', autoApprove: true }))
+    rejects(() => set({ path: '/repo' }))
+    rejects(() => set({ path: 'repo', autoApprove: 'low' }))
+  })
+
   it('requires an absolute project path and an explicit boolean for pinning', () => {
     const pin = posix['projects.pin']
     expect(pin({ path: '/repo', pinned: false })).toEqual({ path: '/repo', pinned: false })
