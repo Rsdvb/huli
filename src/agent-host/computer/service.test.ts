@@ -626,4 +626,15 @@ describe('Huli: apps run as administrator', () => {
     expect(code(result)).toBe('not_allowed')
     expect(h.holds.at(-1)?.elevated ?? null).toBeNull()
   })
+
+  it('keeps a no on the card for the rest of the turn', async () => {
+    const { h, started } = elevatedHarness()
+    h.settings.allowElevated = true
+    expect(code(await answered(h, 'a', 'computer_get_window_state', NOTES, 'deny'))).toBe(
+      'not_allowed',
+    )
+    expect(code(await h.service.call('a', 'computer_get_window_state', NOTES))).toBe('not_allowed')
+    expect(h.asked).toHaveLength(1)
+    expect(started).toEqual([])
+  })
 })

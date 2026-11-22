@@ -1039,6 +1039,9 @@ export class ComputerUse {
   private async approveElevated(sessionId: string, app: ComputerApp): Promise<void> {
     if (this.elevatedRefused.has(sessionId)) throw elevatedEnded(app)
     if (this.elevatedGranted.get(sessionId)?.has(app.id)) return
+    // A no on the card holds for the rest of the turn, as a first use's does.
+    const deniedKey = `elevated:${app.id}`
+    if (this.denied.get(sessionId)?.has(deniedKey)) throw elevatedDenied(app)
     const key = `${sessionId}\n${app.id}\nelevated`
     let asking = this.asking.get(key)
     if (!asking) {
@@ -1055,12 +1058,16 @@ export class ComputerUse {
       return
     }
     if (this.stopped.has(sessionId)) throw stoppedError()
-    throw new ComputerToolError(
-      'not_allowed',
-      answer === 'timeout'
-        ? `The user did not answer whether computer use may drive ${app.name} as administrator.`
-        : `The user did not allow driving ${app.name} as administrator in this turn.`,
-    )
+    if (answer === 'timeout') {
+      throw new ComputerToolError(
+        'not_allowed',
+        `The user did not answer whether computer use may drive ${app.name} as administrator.`,
+      )
+    }
+    const denied = this.denied.get(sessionId) ?? new Set<string>()
+    denied.add(deniedKey)
+    this.denied.set(sessionId, denied)
+    throw elevatedDenied(app)
   }
 
   /**
@@ -1079,6 +1086,8 @@ export class ComputerUse {
     }
     if (run?.driver?.running) return run.driver
     if (run?.starting) return run.starting
+    // The switch may have gone off while the card waited.
+    if (!this.deps.settings().allowElevated) throw elevatedError(app, true)
     const elevate = this.deps.elevate!
     const starting = elevate(pid).then((driver) => {
       if (driver) return driver
@@ -1491,6 +1500,13 @@ function elevatedError(app: ComputerApp, canAsk: boolean): ComputerToolError {
         ? 'Ask the user to run it normally, or, if they want you to drive it as administrator, to ' +
           'turn on “Allow operating chosen programs as administrator” in Settings › Computer use.'
         : 'Ask the user to run it normally, or to do this step themselves.'),
+  )
+}
+
+function elevatedDenied(app: ComputerApp): ComputerToolError {
+  return new ComputerToolError(
+    'not_allowed',
+    `The user did not allow driving ${app.name} as administrator in this turn.`,
   )
 }
 
