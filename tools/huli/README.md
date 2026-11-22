@@ -917,6 +917,48 @@ Three small things Claude Code, Cursor and Moshi have, on the desktop and the ph
 - The simulator's `85-recap-compact-markup` flow walks the phone's part; a developer build's
   `-huliRecapAwayMs` launch argument shortens the half hour for it.
 
+### Dev servers on the phone (开发服务器预览)
+
+The phone previews the computer's dev servers, which usually listen on the computer's loopback
+alone, in a web view of the app, as Moshi's and Replit's phone previews do.
+
+- List: 开发服务器, from a session's ⋯ menu (that session's first) and the computer's page
+  (Settings › 线路), is `ports.list` read when it opens and on a pull, never on a timer
+  (`mobile/src/devServers.ts`). Each port is named by the worktree session whose folder or
+  `KITE_PORT` block it is in, or by its project.
+- Proxy (`src/remote-host/previews.ts`, contract in `src/shared/dev-preview.ts`): `preview.open`
+  `{ port }` lists the ports again and takes only one a program of the computer's user listens on
+  above 1024, on the loopback or every interface; the preview then connects to 127.0.0.1 or ::1
+  alone. It opens a listener of its own on the address the phone's direct connection came in on
+  (one per device and port, the same port again while free, so the dev server keeps its origin and
+  what its pages stored) and answers `{ port, path, idleMs }`. Its own listener, not a path under
+  the direct port, gives the dev server an origin apart from the web client's, so its absolute
+  paths and HMR socket work as on localhost.
+- Who gets through: `path` is `/__kite_preview/<ticket>`, a one-time ticket good for 2 minutes
+  that the entry trades for the preview's cookie (`kite_preview_<port>`, 32 random bytes,
+  HttpOnly, SameSite=Lax) and a redirect to the preview's own path. Every request then needs that
+  cookie, a Host as a browser sends one, and to come from the preview's own pages (Origin, and
+  `Sec-Fetch-Site` same-origin or none), since another preview's page shares the site and so the
+  cookies. Only origin-form requests pass: an absolute URL, `*` or `CONNECT` is refused, so it is
+  never a forward proxy.
+- Headers: Host becomes `localhost:<port>`, the preview's Origin and Referer localhost's, which
+  Vite's and Next.js's host and origin checks accept; the preview's cookies, hop-by-hop headers
+  and `X-Forwarded-*` stay behind. A redirect to the dev server's own address becomes a path; a
+  Set-Cookie loses its Domain and Secure, and one naming a preview's cookie is dropped.
+- Streams both ways, a WebSocket upgrade (HMR) becomes a byte tunnel; 64 MiB a request body, 1 GiB
+  a response, 48 connections a preview, 8 previews a device, 32 in all.
+- Ends: unused for 30 minutes (a request or WebSocket bytes are use), 8 hours in any case, the
+  phone leaving the preview (`preview.close`), the device removed, direct connections off, or the
+  remote host stopping. Nothing listens until a phone opens one.
+- The relay carries no preview: the phone's web view needs an address of the computer to load a
+  page from, and tunnelling it over the encrypted channel would need a local HTTP listener on the
+  phone (a native module) for the web view, so the phone says 需要直连（同一 Wi-Fi 或 Tailscale）才能
+  预览 and the host answers `needs_direct`. A computer behind a port-based firewall needs the
+  preview's port open too; Windows' and macOS' per-app rules already allow it.
+- iOS: `NSAllowsLocalNetworking` lets the web view load the computer's address over http. The
+  simulator flow `90-dev-preview` checks a page, a fetch and a WebSocket through it against
+  `tools/huli/ios/sim/dev-server.mjs`, which `run.sh` starts for it.
+
 ### Doubao (豆包)
 
 ByteDance's Doubao CLI (`@bytedance/doubao-cli`, checked on 2.37.2) as the agent 豆包 / Doubao,

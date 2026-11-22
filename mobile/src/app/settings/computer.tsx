@@ -114,6 +114,17 @@ export default function Computer() {
           ) : null}
         </ListGroup>
 
+        {connected ? (
+          <ListGroup footer="电脑上正在运行的开发服务器，点一下就能在手机上预览。">
+            <ListRow
+              title="开发服务器"
+              icon="server"
+              chevron
+              onPress={() => router.push('/dev-servers')}
+            />
+          </ListGroup>
+        ) : null}
+
         <ListGroup header="线路">
           {ROUTE_PICKS.map((option) => {
             const offered =

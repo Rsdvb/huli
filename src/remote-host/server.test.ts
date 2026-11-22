@@ -309,6 +309,82 @@ describe('a paired device', () => {
     ).toEqual([])
   })
 
+  it('opens previews of listed loopback ports on direct connections alone, until unpaired', async () => {
+    const held = new Set<net.Socket>()
+    const dev = net.createServer((socket) => {
+      held.add(socket)
+      socket.on('error', () => {})
+      socket.once('data', () =>
+        socket.end('HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok'),
+      )
+    })
+    await new Promise<void>((resolve) => dev.listen(0, '127.0.0.1', resolve))
+    cleanups.push(async () => {
+      for (const socket of held) socket.destroy()
+      await new Promise<void>((resolve) => dev.close(() => resolve()))
+    })
+    const devPort = (dev.address() as net.AddressInfo).port
+    const t = await setup({
+      listPorts: async () => [
+        { port: devPort, address: '127.0.0.1', pid: 9, process: 'node', folder: null },
+        { port: 5174, address: '192.168.1.8', pid: 9, process: 'node', folder: null },
+      ],
+    })
+    cleanups.push(async () => t.server.previews.closeAll())
+    const connectVia = async (via: 'direct' | 'relay', local: string | null) => {
+      const [deviceEnd, hostEnd] = memoryTransports()
+      t.server.accept(hostEnd, via, local)
+      const device = await connectDevice({
+        transport: deviceEnd,
+        hostKey: t.hostKey.publicKey,
+        key: t.phoneKey,
+      })
+      await device.first
+      return (method: string, params: unknown) =>
+        device.port.request(method as never, params as never) as Promise<unknown>
+    }
+    // On the relay, or through SSH's loopback listener, there is no address to load a page from.
+    const relayed = await connectVia('relay', '127.0.0.1')
+    await expect(relayed('preview.open', { port: devPort })).rejects.toMatchObject({
+      code: 'needs_direct',
+    })
+    const ssh = await connectVia('direct', null)
+    await expect(ssh('preview.open', { port: devPort })).rejects.toMatchObject({
+      code: 'needs_direct',
+    })
+    const request = await connectVia('direct', '127.0.0.1')
+    for (const [port, code] of [
+      [80, 'invalid_params'],
+      ['3000', 'invalid_params'],
+      [3999, 'not_found'],
+      [5174, 'forbidden'],
+    ] as const) {
+      await expect(request('preview.open', { port })).rejects.toMatchObject({ code })
+    }
+    const opened = (await request('preview.open', { port: devPort })) as {
+      port: number
+      path: string
+      idleMs: number
+    }
+    expect(opened.path).toMatch(/^\/__kite_preview\/[A-Za-z0-9_-]{43}$/)
+    expect(opened.idleMs).toBe(30 * 60 * 1000)
+    const entry = await fetch(`http://127.0.0.1:${opened.port}${opened.path}`, {
+      redirect: 'manual',
+    })
+    expect(entry.status).toBe(303)
+    const cookie = entry.headers.get('set-cookie')!.split(';')[0]!
+    const page = await fetch(`http://127.0.0.1:${opened.port}/`, { headers: { Cookie: cookie } })
+    expect(await page.text()).toBe('ok')
+    expect(t.logs.join('\n')).not.toContain(cookie.split('=')[1]!)
+    // Unpairing the device ends its previews at once.
+    expect(await t.server.removeDevice(t.phone.id)).toBe(true)
+    await expect(fetch(`http://127.0.0.1:${opened.port}/`)).rejects.toThrow()
+    expect(t.server.previews.size).toBe(0)
+    expect(
+      t.forwarded.filter((m) => String((m as { method?: string }).method).startsWith('preview.')),
+    ).toEqual([])
+  })
+
   it("hands an attachment's upload to the agent host as a file, which it moves in", async () => {
     const t = await setup()
     const device = await t.connect()

@@ -1,0 +1,40 @@
+# 开发服务器 on the phone: the computer's page lists the runner's dev server (dev-server.mjs, on
+# 127.0.0.1:41730 alone), and a tap previews it in the app over the direct route, its script, a
+# fetch and its WebSocket (as HMR's) each through the computer's preview proxy, which the server
+# sees as localhost.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '账户与设置'
+- scrollUntilVisible:
+    element: '线路'
+    centerElement: true
+- tapOn: '线路'
+- waitForAnimationToEnd
+- takeScreenshot: d01-computer
+- tapOn: '开发服务器'
+- extendedWaitUntil:
+    visible:
+      text: '.*41730.*'
+    timeout: 20000
+- takeScreenshot: d02-list
+- tapOn:
+    text: '.*41730.*'
+- extendedWaitUntil:
+    visible: '纸鸢预览正常'
+    timeout: 30000
+- extendedWaitUntil:
+    visible:
+      text: 'HMR：已连接 localhost:41730.*'
+    timeout: 15000
+- assertVisible: '脚本：已加载'
+- assertVisible: '接口：pong localhost:41730'
+- takeScreenshot: d03-preview

@@ -20,6 +20,14 @@ import { isPortError, type PortError } from '@shared/port-rpc'
 import type { ActivityActor, NewActivity } from '@shared/remote/activity'
 import { forbiddenToDevices, namesUploadFile } from '@shared/remote/allow-list'
 import { isPort, parsePortFolders, type ListeningPort } from '@shared/port-forwards'
+import {
+  isPreviewPort,
+  loopbackTarget,
+  PREVIEW_CLOSE,
+  PREVIEW_IDLE_MS,
+  PREVIEW_OPEN,
+  type PreviewOpened,
+} from '@shared/dev-preview'
 import { Channel, type ChannelMessage } from '@shared/remote/channel'
 import {
   normalizeDeviceName,
@@ -107,6 +115,7 @@ import { bytesSource, Downloads, fileSource } from './downloads'
 import { HostForwards } from './forwards'
 import { listListeningPorts, type ListOptions } from './listening-ports'
 import { ArtifactFrames, FRAME_PATH } from './frames'
+import { DevPreviews, PreviewError } from './previews'
 import type { DeviceNotifications } from './notifications'
 import { IN_FLIGHT_BYTES, Outbox, type OutboxLimits } from './outbox'
 import type { PairingCode, PairingCodes } from './pairing'
@@ -235,9 +244,12 @@ export class RemoteServer {
   readonly uploads: UploadCounts
   /** The artifact frames devices' sessions opened, which the direct port serves. */
   readonly frames = new ArtifactFrames<DeviceSession>()
+  /** Huli: the dev server previews devices opened, each on a port of its own. */
+  readonly previews: DevPreviews
 
   constructor(readonly options: RemoteServerOptions) {
     this.now = options.now ?? Date.now
+    this.previews = new DevPreviews({ log: options.log, now: this.now })
     this.uploads = new UploadCounts(MAX_UPLOADS, options.maxUnwritten)
     this.terminalAllowed = options.terminal ?? false
   }
@@ -245,10 +257,22 @@ export class RemoteServer {
   /**
    * Takes a device's connection, which ends at its first message unless that names a device.
    * Only one the relay joined, and so signed in to the host's account, may ask to be added.
+   * `local` is the address of this computer a direct connection came in on, where its device's
+   * previews listen; null for the relay's and SSH's, which have none the device could load.
    */
-  accept(transport: Transport, via: 'direct' | 'relay' = 'direct'): void {
+  accept(
+    transport: Transport,
+    via: 'direct' | 'relay' = 'direct',
+    local: string | null = null,
+  ): void {
     if (this.stopped) return transport.close()
-    this.connections.add(new DeviceConnection(transport, this, via === 'relay'))
+    const bind = via === 'relay' ? null : local
+    this.connections.add(new DeviceConnection(transport, this, via === 'relay', bind))
+  }
+
+  /** Huli: direct connections stopped, so the previews on their addresses go too. */
+  directStopped(): void {
+    this.previews.closeAll()
   }
 
   /** The welcome's relay, while the host uses it. */
@@ -324,6 +348,7 @@ export class RemoteServer {
   async removeDevice(id: string, by: 'owner' | 'unseen' | 'reset' = 'owner'): Promise<boolean> {
     // The store forgets the device before its write, so a handshake meanwhile finds it removed.
     const removing = this.options.devices.remove(id)
+    this.previews.revokeDevice(id)
     const closing = [
       ...[...this.connections]
         .filter((connection) => connection.device?.id === id)
@@ -416,6 +441,7 @@ export class RemoteServer {
     this.sweeper = null
     this.options.pairing.stop()
     this.options.discovery?.stop()
+    this.previews.closeAll()
     await Promise.all([
       ...[...this.connections].map((connection) => connection.close(reason)),
       ...[...this.sessions].map((session) => session.close(reason)),
@@ -581,6 +607,8 @@ class DeviceConnection {
     readonly transport: Transport,
     private readonly server: RemoteServer,
     private readonly viaRelay: boolean,
+    /** The address of this computer a direct connection came in on, or null. */
+    readonly local: string | null = null,
   ) {
     const { options } = server
     this.timer = setTimeout(() => this.end(), options.helloTimeoutMs ?? HELLO_TIMEOUT_MS)
@@ -1532,6 +1560,8 @@ class DeviceSession {
     if (method === 'ports.forward' || method === 'ports.unforward') {
       return this.forwardPort(id, method, params)
     }
+    if (method === PREVIEW_OPEN) return void this.openPreview(id, params)
+    if (method === PREVIEW_CLOSE) return this.closePreview(id, params)
     if (method === 'artifacts.openFrame') return void this.openFrame(id, params)
     if (method === 'artifacts.closeFrame') return this.closeFrame(id, params)
     if (method === 'artifacts.frameRuntime') return this.frameRuntime(id, params)
@@ -1600,6 +1630,62 @@ class DeviceSession {
       const message = 'The device has as many forwards as it may'
       return this.send({ type: 'error', id, error: { code: 'busy', message } })
     }
+    this.send({ type: 'response', id, result: null })
+  }
+
+  /**
+   * Huli: a device's `preview.open`: a port of this computer, on the address its connection came
+   * in on, that proxies to a dev server on this computer's loopback, for the device's web view.
+   * Only a port the listing names now, held by a program of this host's user, and only on a
+   * direct connection, whose address the device can load a page from.
+   */
+  private async openPreview(id: unknown, params: unknown): Promise<void> {
+    if (typeof id !== 'number') return
+    const reply = (message: unknown): void => {
+      if (this.live) this.send(message)
+    }
+    const fail = (code: string, message: string): void =>
+      reply({ type: 'error', id, error: { code, message } })
+    const port = (params as { port?: unknown } | null)?.port
+    if (!isPreviewPort(port)) return fail('invalid_params', 'A preview names a port above 1024')
+    const bind = this.connection?.local ?? null
+    if (!bind) {
+      return fail(
+        'needs_direct',
+        'A preview needs a direct connection: the same network or Tailscale',
+      )
+    }
+    const list = this.server.options.listPorts ?? listListeningPorts
+    const ports = await list({ folders: [], skipPids: new Set([process.pid, process.ppid]) }).catch(
+      () => null,
+    )
+    if (!this.live) return
+    if (!ports) return fail('unavailable', 'The computer could not list its ports')
+    const listed = ports.find((entry) => entry.port === port)
+    if (!listed)
+      return fail('not_found', `No program of the computer's user listens on port ${port}`)
+    const host = loopbackTarget(listed.address)
+    if (!host) return fail('forbidden', `Port ${port} does not listen on the computer's loopback`)
+    try {
+      const opened = await this.server.previews.open(this.device.id, { host, port }, bind)
+      if (!this.live) return this.server.previews.close(this.device.id, port)
+      const result: PreviewOpened = { ...opened, idleMs: PREVIEW_IDLE_MS }
+      reply({ type: 'response', id, result })
+    } catch (error) {
+      if (error instanceof PreviewError && error.code === 'busy') return fail('busy', error.message)
+      fail('unavailable', 'The computer could not open a port for the preview')
+    }
+  }
+
+  /** Huli: a device's `preview.close`: its preview of the port goes, with its connections. */
+  private closePreview(id: unknown, params: unknown): void {
+    if (typeof id !== 'number') return
+    const port = (params as { port?: unknown } | null)?.port
+    if (!isPort(port)) {
+      const message = 'A preview names its port'
+      return this.send({ type: 'error', id, error: { code: 'invalid_params', message } })
+    }
+    this.server.previews.close(this.device.id, port)
     this.send({ type: 'response', id, result: null })
   }
 

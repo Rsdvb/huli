@@ -19,6 +19,7 @@
       "infoPlist": {
         "CFBundleAllowMixedLocalizations": true,
         "NSLocalNetworkUsageDescription": "纸鸢通过局域网或 Tailscale 连接你电脑上的纸鸢。",
+        "NSAppTransportSecurity": { "NSAllowsLocalNetworking": true },
         "NSPhotoLibraryAddUsageDescription": "纸鸢把你选择保存的图片存进相册，比如登录用的二维码。",
         "ITSAppUsesNonExemptEncryption": false
       }

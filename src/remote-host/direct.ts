@@ -13,6 +13,7 @@ import type { DirectSettings } from '@shared/settings'
 import type { LogFn } from '../agent-host/storage'
 import { directAddresses, findAddresses, type Interfaces } from './addresses'
 import { CLOSE_GRACE_MS, HandshakeLimits } from './limits'
+import { previewBind } from './previews'
 import type { RemoteServer } from './server'
 import { streamTransport } from './stream-transport'
 import { WebServer } from './web'
@@ -32,7 +33,8 @@ export const MAX_UNREAD = 64
 const SOCKET_OPTIONS = { noDelay: true, keepAlive: true, keepAliveInitialDelay: KEEPALIVE_MS }
 
 export interface DirectListenerOptions {
-  server: Pick<RemoteServer, 'accept' | 'refusedOne' | 'setAddresses' | 'frameFile'>
+  server: Pick<RemoteServer, 'accept' | 'refusedOne' | 'setAddresses' | 'frameFile'> &
+    Partial<Pick<RemoteServer, 'directStopped'>>
   /** The status changed. */
   changed(): void
   log: LogFn
@@ -96,6 +98,7 @@ export class DirectListener {
     this.stopped = true
     this.closeListener()
     this.endUnclaimed()
+    this.options.server.directStopped?.()
   }
 
   private async applyNow(settings: DirectSettings | undefined): Promise<void> {
@@ -107,6 +110,7 @@ export class DirectListener {
       this.failure = null
       this.own = []
       for (const socket of this.sockets) socket.destroy()
+      this.options.server.directStopped?.()
       return this.refresh()
     }
     this.own = Array.isArray(settings.addresses) ? settings.addresses : []
@@ -214,7 +218,11 @@ export class DirectListener {
       return
     }
     socket.once('close', settle)
-    this.options.server.accept(directTransport(socket, settle))
+    this.options.server.accept(
+      directTransport(socket, settle),
+      'direct',
+      previewBind(socket.localAddress),
+    )
   }
 
   private refresh(): void {
