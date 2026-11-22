@@ -81,19 +81,18 @@
     },
     "choice": "{{tier}} · {{network}}",
     "offNote": "As today: the agent works with your rights",
-    "unsupported": "This agent does not support it",
     "block": {
-      "noSandbox": "This agent has no sandbox of its own",
-      "notWired": "It has one, which Kite does not drive yet",
-      "platform": "Not on this computer",
-      "protocol": "The way Kite runs it cannot go in a container yet"
+      "noSandbox": "it has no sandbox of its own",
+      "notWired": "it has one, which Kite does not drive yet",
+      "platform": "not on this computer",
+      "protocol": "the way Kite runs it cannot go in a container yet"
     },
     "networkUnsupported": "This tier cannot hold it to that",
     "cost": {
       "native": "Almost free: each command starts a little slower",
       "container": "Starts in about {{start}} s; Docker holds about {{memory}} MB while it runs",
-      "drive": "This project is on a Windows drive: builds and tests ran {{build}}× slower ({{native}} s → {{container}} s), searches {{search}}× slower",
-      "wsl": "In WSL's own disk a project runs at full speed"
+      "drive": "this project is on a Windows drive: builds and tests ran {{build}}× slower ({{native}} s → {{container}} s), searches {{search}}× slower",
+      "wsl": "in WSL's own disk a project runs at full speed"
     },
     "setup": {
       "claudeWindows": "Needs `claude sandbox install` once (one administrator prompt)",
@@ -113,6 +112,10 @@
       "containerTools": "No Kite tools inside (artifacts, memory)",
       "network": "Network: {{network}}"
     },
-    "switching": "Switching the sandbox…"
+    "switching": "Switching the sandbox…",
+    "joinCost": "{{first}}; {{next}}",
+    "joinSetup": "{{first}}. {{next}}",
+    "unsupportedBecause": "This agent does not support it: {{reason}}",
+    "withHint": "{{tier}} · {{hint}}"
   }
 }

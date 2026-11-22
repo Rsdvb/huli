@@ -59,6 +59,7 @@ function manager(
     } as unknown as AgentManager,
     projects: {
       list: () => [],
+      sandbox: () => null,
       resolveDirectory: async (folder: string) => folder,
       add: async (folder: string) => {
         added.push(folder)

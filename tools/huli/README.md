@@ -447,7 +447,7 @@ holds the choices, what each harness offers on each system and the measured cost
   `..`, device paths and characters a mount option could be bent with, as written and again once
   links are followed. Engines: Docker or Podman; on Windows Docker Desktop, else Docker inside WSL
   through `wsl.exe -e docker`, with paths from `wslpath` and keys passed in `WSLENV`. The image is
-  `node:22-bookworm-slim` by digest (80 MB download, about 230 MB on disk), pulled only from
+  `node:22-bookworm-slim` by digest (80 MB download, about 330 MB on disk), pulled only from
   Settings after a dialog that names its size, and removable there. Nothing of this loads until a
   container session starts or Settings asks (`sandbox.containerStatus`); the container starts with
   the session's agent, stops when the session lets it go (the idle-session rules), and the ones a

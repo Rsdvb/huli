@@ -81,9 +81,8 @@
     },
     "choice": "{{tier}} · {{network}}",
     "offNote": "和现在一样：Agent 用你的权限做事",
-    "unsupported": "这个 Agent 不支持",
     "block": {
-      "noSandbox": "这个 Agent 没有自带沙箱",
+      "noSandbox": "它没有自带沙箱",
       "notWired": "它有自带沙箱，纸鸢还没接上",
       "platform": "这台电脑上用不了",
       "protocol": "纸鸢跑它的方式暂时放不进容器"
@@ -113,6 +112,10 @@
       "containerTools": "容器里没有纸鸢的工具（制品、记忆等）",
       "network": "网络：{{network}}"
     },
-    "switching": "正在切换沙箱…"
+    "switching": "正在切换沙箱…",
+    "joinCost": "{{first}}；{{next}}",
+    "joinSetup": "{{first}}。{{next}}",
+    "unsupportedBecause": "这个 Agent 不支持：{{reason}}",
+    "withHint": "{{tier}} · {{hint}}"
   }
 }

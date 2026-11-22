@@ -12,6 +12,7 @@ import {
   SANDBOX_MEASURED,
   SANDBOX_NETWORKS,
   SANDBOX_TIERS,
+  type ContainerEngineKind,
   type ContainerStatus,
   type SandboxSettings,
 } from '@shared/sandbox'
@@ -41,6 +42,13 @@ import { useApply } from './use-apply'
 
 function useSandbox(): SandboxSettings {
   return useHostScope().useSettingsStore((s) => s.settings.sandbox ?? DEFAULT_SANDBOX_SETTINGS)
+}
+
+/** The engines by their product names, which stay as they are in every language. */
+const ENGINE_NAMES: Record<ContainerEngineKind, string> = {
+  docker: 'Docker',
+  podman: 'Podman',
+  'wsl-docker': 'Docker · WSL',
 }
 
 const ratio = (a: number, b: number): string => (a / b).toFixed(1).replace(/\.0$/, '')
@@ -148,7 +156,7 @@ function ContainerImage() {
         )
       : status.image.present
         ? t('agents.sandbox.image.present', {
-            engine: `${status.engine.kind} ${status.engine.version ?? ''}`.trim(),
+            engine: `${ENGINE_NAMES[status.engine.kind]} ${status.engine.version ?? ''}`.trim(),
             mb: status.image.diskMb,
           })
         : t('agents.sandbox.image.missing', { mb: status.image.downloadMb })

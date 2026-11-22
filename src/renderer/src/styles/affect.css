@@ -5273,11 +5273,13 @@ li[data-row-exit='dust'] > * {
   border: 0;
   background: none;
   font: inherit;
-  color: var(--link);
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
 }
 :is(.kettu-settings, .kettu-sd) .k-sandbox-more:hover {
-  text-decoration: underline;
+  color: var(--text);
 }
 :is(.kettu-settings, .kettu-sd) .k-sandbox-more:focus-visible {
   outline: 2px solid var(--focus-ring-color);
@@ -5847,6 +5849,21 @@ li[data-row-exit='dust'] > * {
 }
 .kettu-sandbox-tip > b {
   font-weight: 600;
+}
+/* The sandbox menu says what each tier protects and costs under its title, wrapped to its width. */
+.kettu-sandbox-menu .ui-as-menu {
+  width: 340px;
+}
+.kettu-sandbox-menu .ui-as-menu__heading {
+  flex-wrap: wrap;
+}
+.kettu-sandbox-menu .ui-as-menu__heading-note {
+  flex: 1 1 100%;
+  margin-left: 0;
+  white-space: normal;
+}
+.kettu-sandbox-menu .ui-as-menu__label small {
+  white-space: normal;
 }
 .ui-as-tray-link > :is(.kettu-tray-link__text, .kettu-branch__name) {
   min-width: 0;

@@ -39,9 +39,9 @@ export function sandboxCost(t: T, tier: SandboxTier, folder: string | null): str
       container: m.containerWindowsDrive,
       search: Math.round(m.searchShare / m.searchWindows),
     })
-    return `${start}; ${drive}`
+    return t('sandbox.joinCost', { first: start, next: drive })
   }
-  return `${start}; ${t('sandbox.cost.wsl')}`
+  return t('sandbox.joinCost', { first: start, next: t('sandbox.cost.wsl') })
 }
 
 /** What the sandbox allows, line by line, for the badge's tooltip. */
@@ -61,4 +61,9 @@ export function sandboxAllowed(t: T, choice: SandboxChoice): string[] {
         t('sandbox.allowed.containerSignIn'),
         t('sandbox.allowed.containerTools'),
       ]
+}
+
+/** Whether a container would slow this folder down, as one on a Windows drive measured. */
+export function slowContainer(folder: string | null): boolean {
+  return platform === 'win32' && folder !== null && onWindowsDrive(folder)
 }

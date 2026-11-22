@@ -515,11 +515,23 @@ export class ContainerSandbox {
   }
 
   private async imagePresent(engine: Engine): Promise<boolean> {
+    return (await this.imageBytes(engine)) !== null
+  }
+
+  /** What the image takes on disk as the engine reports it; null while it is not there. */
+  private async imageBytes(engine: Engine): Promise<number | null> {
     try {
-      await this.run(engine, ['image', 'inspect', '--format', '{{.Id}}', SANDBOX_IMAGE.ref])
-      return true
+      const out = await this.run(engine, [
+        'image',
+        'inspect',
+        '--format',
+        '{{.Size}}',
+        SANDBOX_IMAGE.ref,
+      ])
+      const bytes = Number(out.trim())
+      return Number.isFinite(bytes) && bytes > 0 ? bytes : 0
     } catch {
-      return false
+      return null
     }
   }
 
@@ -535,9 +547,14 @@ export class ContainerSandbox {
       this.engine = null
       return { engine: null, engineProblem: found.problem, image, pulling: false }
     }
+    const bytes = await this.imageBytes(found)
     return {
       engine: { kind: found.kind, version: found.version },
-      image: { ...image, present: await this.imagePresent(found) },
+      image: {
+        ...image,
+        present: bytes !== null,
+        ...(bytes ? { diskMb: Math.round(bytes / 1e6) } : {}),
+      },
       pulling: this.pulling !== null,
     }
   }

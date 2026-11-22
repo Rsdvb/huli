@@ -204,7 +204,7 @@ export function onWindowsDrive(folder: string): boolean {
 }
 
 /** Kite's container image: what a pull downloads and what it then takes on disk, in MB. */
-export const SANDBOX_IMAGE_MB = { download: 80, disk: 230 } as const
+export const SANDBOX_IMAGE_MB = { download: 80, disk: 330 } as const
 
 /**
  * What was measured on the owner's computer on 2026-11-22 (Windows 11, Ryzen 9 9950X3D, NVMe, WSL 2

@@ -17,7 +17,7 @@ import type { AgentId } from '@shared/thread'
 import { Dropdown, type MenuItem } from '@renderer/components/affect/app-shell'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { agentsOn, useAgentsStore } from '@renderer/stores/agents'
-import { sandboxAllowed, sandboxCost, sandboxLabel, type T } from './sandbox-text'
+import { sandboxAllowed, sandboxCost, sandboxLabel, slowContainer, type T } from './sandbox-text'
 
 function tierItems(
   t: T,
@@ -26,18 +26,25 @@ function tierItems(
   value: SandboxChoice,
   folder: string | null,
   onChange: (choice: SandboxChoice) => void,
+  recommended: boolean,
 ): MenuItem[] {
   const own = support[tier]
   const setup = own.setup
     ? t(`sandbox.setup.${own.setup}`, { mb: SANDBOX_IMAGE_MB.download })
     : null
   const heading: MenuItem = {
-    label: t(`sandbox.tier.${tier}`),
+    label: recommended
+      ? t('sandbox.withHint', { tier: t(`sandbox.tier.${tier}`), hint: t('sandbox.recommended') })
+      : t(`sandbox.tier.${tier}`),
     heading: true,
     divider: true,
     description: own.available
-      ? [sandboxCost(t, tier, folder), setup].filter(Boolean).join('. ')
-      : `${t('sandbox.unsupported')}: ${t(`sandbox.block.${own.block ?? 'noSandbox'}`)}`,
+      ? setup
+        ? t('sandbox.joinSetup', { first: sandboxCost(t, tier, folder), next: setup })
+        : sandboxCost(t, tier, folder)
+      : t('sandbox.unsupportedBecause', {
+          reason: t(`sandbox.block.${own.block ?? 'noSandbox'}`),
+        }),
   }
   if (!own.available) return [heading]
   return [
@@ -78,6 +85,14 @@ export function SandboxChip({
   const { t } = useTranslation('agents')
   const support = useAgentsStore((s) => agentsOn(s, hostId).byId[agentId]?.sandbox)
   if (!support) return null
+  const usable = supportsChoice(support, value)
+  // A hint from what was measured, never a choice made for the user: the harness's own sandbox
+  // costs next to nothing; a container is suggested only where it does not slow the project.
+  const recommend = support.native.available
+    ? 'native'
+    : support.container.available && !slowContainer(folder)
+      ? 'container'
+      : null
   const items: MenuItem[] = [
     {
       label: t('sandbox.tier.off'),
@@ -85,8 +100,8 @@ export function SandboxChip({
       checked: value.tier === 'off',
       onSelect: () => value.tier !== 'off' && onChange({ tier: 'off', network: 'open' }),
     },
-    ...tierItems(t, 'native', support, value, folder, onChange),
-    ...tierItems(t, 'container', support, value, folder, onChange),
+    ...tierItems(t, 'native', support, value, folder, onChange, recommend === 'native'),
+    ...tierItems(t, 'container', support, value, folder, onChange, recommend === 'container'),
   ]
   const label = sandboxLabel(t, value)
   const allowed = sandboxAllowed(t, value)
@@ -94,6 +109,7 @@ export function SandboxChip({
     <Dropdown
       side="top"
       align="start"
+      className="kettu-sandbox-menu"
       title={t('sandbox.menu')}
       items={items}
       trigger={({ open, toggle }) => (
@@ -108,8 +124,8 @@ export function SandboxChip({
                 aria-label={`${t('sandbox.menu')}: ${label}`}
                 aria-disabled={disabledHint ? true : undefined}
                 className="ui-as-tray-link kettu-tray-link--sandbox"
-                data-on={value.tier !== 'off' || undefined}
-                data-tone={supportsChoice(support, value) ? undefined : 'warn'}
+                data-on={(value.tier !== 'off' && usable) || undefined}
+                data-tone={usable ? undefined : 'warn'}
                 onClick={() => !disabledHint && toggle()}
               />
             }
