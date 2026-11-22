@@ -818,6 +818,22 @@ const subagent: Scenario = async (turn) => {
     })
     return 'end_turn'
   }
+  for (let index = 0; index < Math.floor(turn.options.finished); index++) {
+    const quick = `${turn.session.id}-sub-${n}-done-${index}`
+    await turn.send({
+      sessionUpdate: 'subagent_update',
+      sessionId: quick,
+      title: `Check part ${index + 1} of the repository`,
+      description: 'Look for clock reads in one folder',
+      state: { state: 'running' },
+    })
+    await turn.sleep(20)
+    await turn.send({
+      sessionUpdate: 'subagent_update',
+      sessionId: quick,
+      state: { state: 'idle', stopReason: 'end_turn' },
+    })
+  }
   const child = `${turn.session.id}-sub-${n}`
   let childCancelled = false
   turn.registerChild(child, () => {
@@ -848,6 +864,22 @@ const subagent: Scenario = async (turn) => {
     child,
   )
   await stream(turn, 'Looking for clock reads.', { sessionId: child, messageId: `child-${n}-1` })
+  for (let index = 0; index < Math.floor(turn.options.busy) && !childCancelled; index++) {
+    const toolCallId = `child-busy-${n}-${index}`
+    await turn.send(
+      {
+        sessionUpdate: 'tool_call',
+        toolCallId,
+        title: `Read src/part-${index + 1}.ts`,
+        kind: 'read',
+        status: 'in_progress',
+        locations: [{ path: filePath(turn, `src/part-${index + 1}.ts`) }],
+      },
+      child,
+    )
+    await turn.sleep(1000)
+    await turn.send({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' }, child)
+  }
   for (const [index, file] of ['src/clock.ts', 'src/auth/session.ts'].entries()) {
     const toolCallId = `child-read-${n}-${index}`
     await turn.send(
