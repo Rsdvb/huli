@@ -144,6 +144,10 @@
   background: var(--success-tint);
   color: var(--success);
 }
+.km-pill[data-state='limit'] {
+  background: var(--warning-tint);
+  color: var(--warning);
+}
 .km-pill[data-state='failed'] {
   background: var(--danger-tint);
   color: var(--danger);

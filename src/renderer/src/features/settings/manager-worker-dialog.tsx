@@ -1,5 +1,5 @@
 // Huli: Settings › 总管模式's worker dialog: a roster entry's name, role, agent, model, level,
-// profile, mode, worktree choice and persona, checked as the settings file checks it.
+// profile, mode, sandbox, worktree choice and persona, checked as the settings file checks it.
 
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -15,6 +15,12 @@ import {
   type RosterWorker,
   type WorkerRole,
 } from '@shared/manager'
+import {
+  resolveSandbox,
+  SANDBOX_NETWORKS,
+  supportsChoice,
+  type SandboxChoice,
+} from '@shared/sandbox'
 import type { AgentId, ConfigOption } from '@shared/thread'
 import { Button } from '@renderer/components/ui/button'
 import {
@@ -28,11 +34,29 @@ import {
 import { Input } from '@renderer/components/ui/input'
 import { Switch } from '@renderer/components/ui/switch'
 import { Textarea } from '@renderer/components/ui/textarea'
+import { sandboxLabel } from '@renderer/features/session/composer/sandbox-text'
 import { useAgentOptionsStore } from '@renderer/stores/agent-options'
 import { isInstalled, usableAgents, useAgentsStore } from '@renderer/stores/agents'
+import { useSettingsStore } from '@renderer/stores/settings'
 import { Segmented, SettingSelect } from './controls'
 
 const DEFAULT = '__default__'
+
+const SANDBOXES: SandboxChoice[] = [
+  { tier: 'off', network: 'open' },
+  ...(['native', 'container'] as const).flatMap((tier) =>
+    SANDBOX_NETWORKS.map((network) => ({ tier, network })),
+  ),
+]
+
+const sandboxValue = (choice: SandboxChoice): string => `${choice.tier}:${choice.network}`
+
+/** The entry with this sandbox, or with none of its own for null. */
+function withSandbox(worker: RosterWorker, sandbox: SandboxChoice | null): RosterWorker {
+  const rest = { ...worker }
+  delete rest.sandbox
+  return sandbox ? { ...rest, sandbox } : rest
+}
 
 /** The flat choices of a select option, its groups' ones included. */
 function choicesOf(option: ConfigOption | undefined): { value: string; name: string }[] {
@@ -58,6 +82,8 @@ export function WorkerDialog({
   onClose: () => void
 }) {
   const { t } = useTranslation('settings')
+  const { t: ta } = useTranslation('agents')
+  const fallback = useSettingsStore((s) => s.settings.sandbox)
   const [draft, setDraft] = useState(worker)
   const [seen, setSeen] = useState(worker)
   if (seen !== worker) {
@@ -82,6 +108,12 @@ export function WorkerDialog({
   const modeOption = options?.config.find((o) => o.category === 'mode' && o.type === 'select')
   const modes = choicesOf(modeOption)
   const profiles = agent?.profiles?.items ?? []
+  const support = agent?.sandbox
+  const sandboxes = SANDBOXES.filter((choice) => !support || supportsChoice(support, choice))
+  const projectSandbox = resolveSandbox(undefined, null, fallback)
+  const sandboxName = (choice: SandboxChoice): string =>
+    choice.tier === 'off' ? ta('sandbox.tier.off') : sandboxLabel(ta, choice)
+  const contained = (draft.sandbox ?? projectSandbox).tier === 'container'
   const set = (changes: Partial<RosterWorker>) => setDraft((d) => ({ ...d, ...changes }))
   const others = roster.filter((w) => w.id !== draft.id)
   const repeated = draft.name.trim() !== '' && !!findWorker(others, draft.name)
@@ -130,13 +162,19 @@ export function WorkerDialog({
                 className="w-full"
                 options={agents.map((a) => ({ value: a.id, label: a.name }))}
                 onChange={(agentId) =>
-                  set({
-                    agentId: agentId as AgentId,
-                    model: null,
-                    effort: null,
-                    profileId: null,
-                    mode: null,
-                  })
+                  setDraft((d) =>
+                    withSandbox(
+                      {
+                        ...d,
+                        agentId: agentId as AgentId,
+                        model: null,
+                        effort: null,
+                        profileId: null,
+                        mode: null,
+                      },
+                      null,
+                    ),
+                  )
                 }
               />
             </label>
@@ -201,6 +239,37 @@ export function WorkerDialog({
               </label>
             )}
           </div>
+          {support && (
+            <label className="grid gap-1 text-xs">
+              <span className="text-(--shell-muted)">{t('manager.worker.sandbox')}</span>
+              <SettingSelect<string>
+                label={t('manager.worker.sandbox')}
+                value={draft.sandbox ? sandboxValue(draft.sandbox) : DEFAULT}
+                className="w-full"
+                options={[
+                  {
+                    value: DEFAULT,
+                    label: t('manager.worker.sandboxDefault', {
+                      choice: sandboxName(projectSandbox),
+                    }),
+                  },
+                  ...sandboxes.map((choice) => ({
+                    value: sandboxValue(choice),
+                    label: sandboxName(choice),
+                  })),
+                ]}
+                onChange={(value) =>
+                  setDraft((d) =>
+                    withSandbox(d, sandboxes.find((c) => sandboxValue(c) === value) ?? null),
+                  )
+                }
+              />
+              <span className="text-(--shell-muted)">{t('manager.worker.sandboxHint')}</span>
+              {contained && (
+                <span className="text-(--shell-muted)">{t('manager.worker.container')}</span>
+              )}
+            </label>
+          )}
           {!writes(draft.role) && (
             <p className="text-xs text-(--shell-muted)">{t('manager.worker.readOnly')}</p>
           )}

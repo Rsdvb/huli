@@ -17,11 +17,12 @@ import {
 import type { IconSvgElement } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import type { SessionSummary } from '@shared/agent-host'
-import type { ThreadEntry, ToolEntry } from '@shared/thread'
+import type { SecretRequestEntry, ThreadEntry, ToolEntry } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/textarea'
 import { PermissionEntry } from '@renderer/features/session/entries/permission-card'
+import { SecretCard } from '@renderer/features/session/entries/secret-request-entry'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { PaneEmpty, PaneHead, PaneIcon, PaneSheet } from '@renderer/features/shell/panel-button'
 import { clockTime } from '@renderer/lib/format'
@@ -51,6 +52,7 @@ const STATE_GLYPH: Record<WorkerState, IconSvgElement> = {
   starting: Loading03Icon,
   running: Loading03Icon,
   waiting: Alert02Icon,
+  limit: PauseIcon,
   done: CheckmarkCircle02Icon,
   failed: Alert02Icon,
   stopped: StopCircleIcon,
@@ -248,6 +250,13 @@ const WorkerRow = memo(function WorkerRow({ id, nested }: { id: string; nested?:
         </span>
       </div>
       {loop && <p className="km-row__loop">{loop}</p>}
+      {state === 'limit' && (
+        <p className="km-row__loop">
+          {summary.limitPause
+            ? t('manager.worker.limitResumes', { time: clockTime(summary.limitPause.resumeAt) })
+            : t('manager.worker.limitStopped')}
+        </p>
+      )}
       {worker.line && <p className="km-row__line">“{worker.line}”</p>}
       {summary.permissionCount > 0 && <WorkerRequests summary={summary} />}
       <div className="km-row__actions">
@@ -325,9 +334,11 @@ function WorkerMessage({ id, name, onDone }: { id: string; name: string; onDone:
   )
 }
 
-/** The requests a worker waits on, answered here as in its own thread. */
+type Waiting = ToolEntry | SecretRequestEntry
+
+/** The requests and secret cards a worker waits on, answered here as in its own thread. */
 function WorkerRequests({ summary }: { summary: SessionSummary }) {
-  const [entries, setEntries] = useState<ToolEntry[] | null>(null)
+  const [entries, setEntries] = useState<Waiting[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const { id, permissionCount } = summary
@@ -338,7 +349,9 @@ function WorkerRequests({ summary }: { summary: SessionSummary }) {
         if (!live) return
         setEntries(
           all.filter(
-            (entry: ThreadEntry): entry is ToolEntry => entry.kind === 'tool' && !!entry.permission,
+            (entry: ThreadEntry): entry is Waiting =>
+              (entry.kind === 'tool' && !!entry.permission) ||
+              (entry.kind === 'secret_request' && entry.outcome === null),
           ),
         )
         setError(null)
@@ -353,17 +366,21 @@ function WorkerRequests({ summary }: { summary: SessionSummary }) {
   const name = agentName(summary.agentId, hostOfPath(summary.projectPath))
   return (
     <div ref={ref} className="km-requests">
-      {entries.map((entry) => (
-        <PermissionEntry
-          key={entry.permission?.requestId ?? entry.id}
-          ref={ref}
-          sessionId={id}
-          entry={entry}
-          projectPath={summary.projectPath}
-          agentName={name}
-          media={[]}
-        />
-      ))}
+      {entries.map((entry) =>
+        entry.kind === 'secret_request' ? (
+          <SecretCard key={entry.id} sessionId={id} entry={entry} agentName={name} />
+        ) : (
+          <PermissionEntry
+            key={entry.permission?.requestId ?? entry.id}
+            ref={ref}
+            sessionId={id}
+            entry={entry}
+            projectPath={summary.projectPath}
+            agentName={name}
+            media={[]}
+          />
+        ),
+      )}
     </div>
   )
 }

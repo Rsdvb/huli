@@ -6,8 +6,9 @@ import { memo, useEffect, useMemo, useState } from 'react'
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
-import type { ThreadEntry, ToolEntry } from '@shared/thread'
+import type { SecretRequestEntry as SecretEntry, ThreadEntry, ToolEntry } from '@shared/thread'
 import { CardButton } from '../../components/entries/kit'
+import { SecretRequestEntry } from '../../components/entries/SecretRequestEntry'
 import { managerLine } from '../../components/ManagerBanner'
 import { call } from '../../git'
 import { useAgents, useLink, useSessions } from '../../host'
@@ -32,10 +33,15 @@ function stateOf(s: SessionSummary): {
   tone: 'warning' | 'accent' | 'danger' | 'success' | 'plain'
 } {
   if (s.permissionCount > 0) return { text: '等你批准', tone: 'warning' }
+  // A turn the plan's limit stopped is no failure: it goes on after the reset, or waits for a word.
+  if (s.limitPause) return { text: '到套餐上限', tone: 'warning' }
   if (s.status === 'starting' || s.status === 'running' || s.status === 'awaiting_permission') {
     return { text: '运行中', tone: 'accent' }
   }
   const report = s.worker?.status
+  if (report === 'limit' && s.status !== 'auth_required') {
+    return { text: '到套餐上限', tone: 'warning' }
+  }
   if (
     s.status === 'failed' ||
     report === 'failed' ||
@@ -200,11 +206,12 @@ const WorkerRow = memo(function WorkerRow({ worker }: { worker: SessionSummary }
   )
 })
 
-/** A worker's waiting requests, each with its one-time answers. */
+/** A worker's waiting requests, each with its one-time answers, and the secret cards it waits on. */
 function WorkerRequests({ worker }: { worker: SessionSummary }) {
   const { c, s } = useSessionTokens()
   const link = useLink()
   const [entries, setEntries] = useState<ToolEntry[]>([])
+  const [secrets, setSecrets] = useState<SecretEntry[]>([])
   const [answering, setAnswering] = useState<string | null>(null)
   const { id, permissionCount } = worker
   useEffect(() => {
@@ -218,9 +225,19 @@ function WorkerRequests({ worker }: { worker: SessionSummary }) {
                 entry.kind === 'tool' && !!entry.permission,
             ),
           )
+          setSecrets(
+            all.filter(
+              (entry: ThreadEntry): entry is SecretEntry =>
+                entry.kind === 'secret_request' && entry.outcome === null,
+            ),
+          )
         }
       })
-      .catch(() => live && setEntries([]))
+      .catch(() => {
+        if (!live) return
+        setEntries([])
+        setSecrets([])
+      })
     return () => {
       live = false
     }
@@ -244,6 +261,9 @@ function WorkerRequests({ worker }: { worker: SessionSummary }) {
   }
   return (
     <>
+      {secrets.map((entry) => (
+        <SecretRequestEntry key={entry.id} entry={entry} sessionId={id} place="dock" />
+      ))}
       {entries.map((entry) => (
         <View
           key={entry.id}

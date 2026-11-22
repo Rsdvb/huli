@@ -11,16 +11,22 @@ import { useProjectsStore } from '@renderer/stores/projects'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { useSettingsStore } from '@renderer/stores/settings'
 
-/** What a worker row shows: working, waiting for the user, done, failed, stopped or idle. */
+/**
+ * What a worker row shows: working, waiting for the user, held at its plan's limit, done, failed,
+ * stopped or idle.
+ */
 export type WorkerState =
-  'starting' | 'running' | 'waiting' | 'done' | 'failed' | 'stopped' | 'idle'
+  'starting' | 'running' | 'waiting' | 'limit' | 'done' | 'failed' | 'stopped' | 'idle'
 
 export function workerState(summary: SessionSummary): WorkerState {
   if (summary.permissionCount > 0) return 'waiting'
+  // A turn the plan's limit stopped is no failure: it goes on after the reset, or waits for a word.
+  if (summary.limitPause) return 'limit'
   if (summary.status === 'starting') return 'starting'
   if (summary.status === 'running' || summary.status === 'awaiting_permission') return 'running'
-  if (summary.status === 'failed' || summary.status === 'auth_required') return 'failed'
   const status = summary.worker?.status
+  if (status === 'limit' && summary.status !== 'auth_required') return 'limit'
+  if (summary.status === 'failed' || summary.status === 'auth_required') return 'failed'
   if (status === 'failed' || status === 'blocked' || status === 'needs_user') return 'failed'
   if (status === 'stopped' || status === 'interrupted') return 'stopped'
   if (status === 'done') return 'done'
