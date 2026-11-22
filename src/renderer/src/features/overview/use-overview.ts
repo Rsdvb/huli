@@ -29,16 +29,19 @@ export function useOverviewCount(): number {
   })
 }
 
-export type OverviewView = 'inbox' | 'flow' | 'timeline'
+// Huli: `board`, the user's task board (features/task-board).
+export type OverviewView = 'inbox' | 'flow' | 'timeline' | 'board'
 export type GroupBy = 'state' | 'project'
 
 interface Prefs {
   view: OverviewView
   groupBy: GroupBy
+  /** Huli: the project the board shows, null for every project. */
+  boardProject: string | null
 }
 
 const KEY = 'kettu:overview'
-const DEFAULTS: Prefs = { view: 'flow', groupBy: 'state' }
+const DEFAULTS: Prefs = { view: 'flow', groupBy: 'state', boardProject: null }
 const listeners = new Set<() => void>()
 let prefs: Prefs = { ...DEFAULTS, ...readJson<Partial<Prefs>>(KEY, {}) }
 

@@ -351,6 +351,13 @@
       "choose": "Choose…",
       "reset": "Reset"
     },
+    "worktreePorts": {
+      "name": "Worktree ports",
+      "description": "Each session Kite makes a worktree for holds 10 ports from this one on that no other open session holds, for its dev servers. Its setup command sees them as KITE_PORT and KITE_PORT_COUNT.",
+      "keywords": "port ports KITE_PORT dev server worktree",
+      "invalid": "Enter a port from {{min}} to {{max}}.",
+      "from": "From"
+    },
     "groups": {
       "tools": "Tools",
       "sync": "Sync",

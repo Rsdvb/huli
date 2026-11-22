@@ -126,6 +126,7 @@ import { sessionFolder } from '@renderer/lib/session-folder'
 import { prFlowActive, prFlowTarget, setPrFlow } from '@renderer/features/git/flow-model'
 import { copyResumeCommand, resumeInTerminal } from '@renderer/features/agents/agent-terminal'
 import { MoveToFolderMenu } from '@renderer/features/session-folders/move-menu'
+import { BoardStatusMenu } from '@renderer/features/task-board/status'
 import { askExport, canExport } from '@renderer/features/session/export/export'
 import {
   askRemoveWorktree,
@@ -350,6 +351,8 @@ export function SessionMenuItems({
             {t('row.autoResume')}
           </DropdownMenuCheckboxItem>
         )
+      case 'board':
+        return <BoardStatusMenu key={name} summary={summary} />
       case 'autoMerge':
       case 'watchPr': {
         if (!prTarget) return null

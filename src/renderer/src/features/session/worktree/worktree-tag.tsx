@@ -1,18 +1,35 @@
 import { Trans, useTranslation } from 'react-i18next'
 import type { SessionWorktree } from '@shared/git'
+import { lastPort, type PortBlock } from '@shared/worktree-ports'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { CopyButton } from '@renderer/features/git/copy-button'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { hostPath } from '@renderer/lib/host-paths'
+import { cn } from '@renderer/lib/utils'
 import { WORKTREE_ICON } from './worktree-icon'
 
-/** The tooltip of a worktree's mark: its branch, then its folder. */
-export function WorktreeHint({ worktree }: { worktree: Pick<SessionWorktree, 'path' | 'branch'> }) {
+/** The tooltip of a worktree's mark: its branch, then its folder, and the ports it holds. */
+export function WorktreeHint({
+  worktree,
+}: {
+  worktree: Pick<SessionWorktree, 'path' | 'branch' | 'ports'>
+}) {
   const { t } = useTranslation('session')
   return (
     <span className="flex flex-col gap-0.5">
       <span>{t('worktree.inWorktree', { branch: worktree.branch })}</span>
       <span className="font-mono text-meta break-all opacity-80">{hostPath(worktree.path)}</span>
+      {worktree.ports && <WorktreePorts ports={worktree.ports} className="opacity-80" />}
+    </span>
+  )
+}
+
+/** Huli: the block of ports a worktree session holds, as "Ports 20000–20009". */
+export function WorktreePorts({ ports, className }: { ports: PortBlock; className?: string }) {
+  const { t } = useTranslation('session')
+  return (
+    <span className={cn('text-meta tabular-nums', className)}>
+      {t('worktree.ports', { first: ports.first, last: lastPort(ports) })}
     </span>
   )
 }
@@ -21,7 +38,7 @@ export function WorktreeHint({ worktree }: { worktree: Pick<SessionWorktree, 'pa
 export function WorktreeTrayTag({
   worktree,
 }: {
-  worktree: Pick<SessionWorktree, 'path' | 'branch'>
+  worktree: Pick<SessionWorktree, 'path' | 'branch' | 'ports'>
 }) {
   return (
     <Tooltip>

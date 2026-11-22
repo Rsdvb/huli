@@ -15,7 +15,23 @@
     "label": "视图",
     "inbox": "收件箱",
     "flow": "流程",
-    "timeline": "时间线"
+    "timeline": "时间线",
+    "board": "看板"
+  },
+  "board": {
+    "description": "按你自己的进度整理会话，拖到另一列就行。",
+    "project": "项目",
+    "allProjects": "全部项目",
+    "empty": {
+      "todo": "还没开始的会话放这里。",
+      "in_progress": "新会话会先出现在这里。",
+      "review": "做完等你检查的放这里，Agent 也会把自己挪过来。",
+      "done": "检查完的放这里。"
+    },
+    "none": {
+      "title": "看板还是空的",
+      "text": "你开始的会话会出现在「进行中」，归档后离开看板。"
+    }
   },
   "groupBy": {
     "label": "分组",

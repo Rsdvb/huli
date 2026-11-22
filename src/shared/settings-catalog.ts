@@ -20,6 +20,7 @@ import {
 } from './settings'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from './supervisor'
 import type { AgentId, HarnessId } from './thread'
+import { PORT_BASE_MAX, PORT_BASE_MIN } from './worktree-ports'
 
 export const SETTINGS_SECTIONS = [
   'general',
@@ -1188,6 +1189,22 @@ const ENTRIES = {
     part: 'host',
     kind: 'path',
     get: (file) => file.git.worktreeRoot,
+  },
+  // Huli: where the port blocks of worktree sessions start.
+  'git.worktree-ports': {
+    section: 'git',
+    row: 'worktree-ports',
+    group: 'git.groups.worktrees',
+    name: 'git.worktreePorts.name',
+    description: 'git.worktreePorts.description',
+    keywords: 'git.worktreePorts.keywords',
+    part: 'host',
+    access: 'change',
+    kind: 'number',
+    min: PORT_BASE_MIN,
+    max: PORT_BASE_MAX,
+    get: (file) => file.git.portBase,
+    patch: (value) => ({ git: { portBase: Number(value) } }),
   },
 
   // ---- Archived

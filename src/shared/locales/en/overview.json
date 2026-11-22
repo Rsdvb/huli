@@ -17,7 +17,23 @@
     "label": "View",
     "inbox": "Inbox",
     "flow": "Flow",
-    "timeline": "Timeline"
+    "timeline": "Timeline",
+    "board": "Board"
+  },
+  "board": {
+    "description": "Sort your sessions by where you are with them: drag one to another column.",
+    "project": "Project",
+    "allProjects": "All projects",
+    "empty": {
+      "todo": "Sessions you have not started on go here.",
+      "in_progress": "New sessions start here.",
+      "review": "Work waiting for your check goes here; agents move their own sessions here too.",
+      "done": "Sessions you have checked go here."
+    },
+    "none": {
+      "title": "The board is empty",
+      "text": "Sessions you start appear In progress, and leave the board when archived."
+    }
   },
   "groupBy": {
     "label": "Group by",

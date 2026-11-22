@@ -10,6 +10,7 @@ export type SessionMenuItem =
   | 'unread'
   | 'rename'
   | 'autoResume'
+  | 'board'
   | 'autoMerge'
   | 'watchPr'
   | 'fork'
@@ -97,7 +98,7 @@ export interface SessionMenuContext {
  * not hold.
  */
 export function sessionMenuGroups(
-  summary: Pick<SessionSummary, 'status' | 'parentId' | 'origin' | 'pr' | 'prs'>,
+  summary: Pick<SessionSummary, 'status' | 'parentId' | 'origin' | 'pr' | 'prs' | 'archivedAt'>,
   {
     canFork,
     shown = false,
@@ -129,8 +130,11 @@ export function sessionMenuGroups(
     ...(topLevel ? (['archive'] as const) : []),
     'delete',
   ]
-  // Huli: a session of the user's own goes on by itself after a plan limit, or not.
-  const own: SessionMenuItem[] = summary.origin === 'user' ? ['autoResume'] : []
+  // Huli: a session of the user's own goes on by itself after a plan limit, or not, and a
+  // top-level one sits in a column of the task board.
+  const onBoard = topLevel && summary.origin === 'user' && summary.archivedAt === null
+  const own: SessionMenuItem[] =
+    summary.origin === 'user' ? [...(onBoard ? (['board'] as const) : []), 'autoResume'] : []
   // Huli: its pull request merged once its checks pass, or watched for its agent.
   const flow: SessionMenuItem[] = prFlow && topLevel ? ['autoMerge', 'watchPr'] : []
   const state: SessionMenuItem[] = running

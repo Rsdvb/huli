@@ -1251,6 +1251,7 @@
     "noteNamedAt": "Starts on <branch/>, cut from <base/> at <oid/>.",
     "branch": "Branch",
     "inWorktree": "Works in a worktree on {{branch}}",
+    "ports": "Ports {{first}}–{{last}} (KITE_PORT)",
     "creating": "Creating the worktree…",
     "preparing": "Preparing the worktree…",
     "showOutput": "Show output",
