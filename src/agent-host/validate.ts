@@ -136,6 +136,7 @@ import { isAbsolutePath } from './paths'
 import { networkValidators } from './node-proxy/validate'
 import { nodeRuntimeValidators } from './node-runtime/validate'
 import { folderValidators } from './session-folders'
+import { moveValidators } from './session-move/validate'
 import { MAX_WORKTREE_COPY_PATHS } from './storage'
 import { checkIncludeEntry } from './worktrees/copy'
 import { branchFromTemplate, checkWorktreeBranch } from './worktrees/names'
@@ -3193,5 +3194,6 @@ export function createValidators(platform: Platform): Validators {
     ...folderValidators,
     ...networkValidators,
     ...nodeRuntimeValidators,
+    ...moveValidators(platform),
   }
 }

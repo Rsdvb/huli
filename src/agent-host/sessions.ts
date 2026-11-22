@@ -231,6 +231,7 @@ import { t } from './i18n'
 import type { ProviderProfiles } from './provider-profiles'
 import { claudeProfileEnv, takesProfiles } from '@shared/provider-profiles'
 import { NEW_BOARD_STATUS, type BoardStatus, type SessionBoard } from '@shared/session-board'
+import type { MovedTo, MoveProblem } from '@shared/session-move'
 import { DEFAULT_PORT_BASE, isPortBase, portEnv, type PortBlock } from '@shared/worktree-ports'
 import {
   GITHUB_ISSUE_URL,
@@ -1758,6 +1759,7 @@ export class SessionManager {
       issue: record.issue ? sessionIssue(record.issue) : null,
       prFlow: record.prFlow ? this.prFlowSummary(record.id, record.prFlow) : null,
       board: this.boardOf(record),
+      ...(record.movedTo ? { movedTo: { ...record.movedTo } } : {}),
       ...(record.worktree
         ? { worktree: this.worktreeSummary(record.worktree, this.portsOf(record)) }
         : {}),
@@ -12810,6 +12812,164 @@ export class SessionManager {
     return this.summary(record.id)
   }
 
+  // Huli: moving a session to another computer (session-move/service.ts).
+
+  /** What a move needs of a session here, and why it cannot move now. */
+  moveFacts(sessionId: string): MoveFacts {
+    const record = this.recordOf(sessionId)
+    const live = this.live.get(sessionId)
+    const problems: MoveProblem[] = []
+    if (record.origin === 'subagent' || record.parentId !== null) problems.push('subagent')
+    if (live?.prepared) problems.push('prepared')
+    if (this.deps.scratch.contains(record.projectPath)) problems.push('noProject')
+    if (live) {
+      const { status } = live.thread.session
+      const working =
+        status === 'running' || status === 'awaiting_permission' || status === 'starting'
+      if (
+        working ||
+        live.turn ||
+        waitingCount(live) > 0 ||
+        live.thread.session.queue.length > 0 ||
+        this.backgroundWork(live) !== null
+      ) {
+        problems.push('busy')
+      }
+    }
+    const worktree =
+      record.worktree && record.worktree.removed === undefined ? record.worktree : null
+    return {
+      agentId: record.agentId,
+      acpSessionId: record.acpSessionId,
+      projectPath: record.projectPath,
+      cwd: workDir(record),
+      worktree: worktree ? { base: worktree.base, baseOid: worktree.baseOid } : null,
+      title: record.customTitle ?? live?.thread.session.title ?? record.title,
+      createdAt: record.createdAt,
+      configDir: record.configDir ?? null,
+      // A takeover whose first turn never went has no session of the new agent's to move.
+      carry: record.carry !== undefined || record.acpSessionId === '',
+      problems,
+    }
+  }
+
+  /** Kite's copy of the thread with the pictures it holds, for an agent whose own cannot move. */
+  async moveThread(sessionId: string): Promise<{ entries: ThreadEntry[]; blobs: StoredBlob[] }> {
+    const live = await this.revive(sessionId)
+    const entries = threadEntries(live.thread).filter((entry) => entry.kind !== 'subagent')
+    const blobs = await Promise.all(
+      [...storedBlobs(entries)].map((hash) => this.storedBlob(live.id, hash).catch(() => null)),
+    )
+    return { entries, blobs: blobs.filter((blob) => blob !== null) }
+  }
+
+  /**
+   * A session moved here from another computer: its agent resumes its own copied session, or
+   * starts from Kite's copy of the thread, carried with its first turn as a takeover's is.
+   */
+  async adoptMoved(input: MoveAdoption): Promise<SessionSummary> {
+    if (!this.deps.agents.has(input.agentId)) throw invalidParams(`Unknown agent ${input.agentId}`)
+    this.deps.agents.assertEnabled(input.agentId)
+    const now = this.now()
+    const ports = input.worktree ? await this.takePorts() : null
+    const resumes = 'acpSessionId' in input.resume
+    const record: SessionRecord = {
+      id: randomUUID(),
+      agentId: input.agentId,
+      acpSessionId: 'acpSessionId' in input.resume ? input.resume.acpSessionId : '',
+      projectPath: input.projectPath,
+      title: input.title,
+      ...(input.title !== null ? { customTitle: input.title } : {}),
+      createdAt: input.createdAt,
+      updatedAt: now,
+      lastViewedAt: now,
+      parentId: null,
+      origin: 'user',
+      description: null,
+      branch: input.worktree?.branch ?? null,
+      ...(input.worktree ? { worktree: { ...input.worktree } } : {}),
+      ...(ports ? { ports: { ...ports } } : {}),
+      // As an import: Claude Code keeps the instructions its transcript recorded.
+      ...(resumes && harnessOf(input.agentId) === 'claude-code'
+        ? { instructionsAhead: true as const }
+        : {}),
+      board: { status: NEW_BOARD_STATUS, at: now },
+    }
+    Object.assign(record, this.defaultProfile(input.agentId))
+    this.stampConfig(record)
+    if ('acpSessionId' in input.resume) {
+      this.records.set(record.id, record)
+      this.saveIndex()
+      this.writeIndexNow()
+    } else {
+      const { entries, blobs } = input.resume
+      const live = this.makeLive(record, false, 'starting')
+      live.unread = false
+      live.used = true
+      live.blobs = new Map(blobs.map((blob) => [blob.hash, blob]))
+      for (const entry of entries) live.counter = Math.max(live.counter, idNumber(entry.id))
+      const entryId = this.nextId(live)
+      record.carry = { entryId, fromTurn: 1 }
+      this.emit(
+        live,
+        entries.map((entry): Patch => ({ op: 'entry.add', entry })),
+      )
+      this.emit(live, [
+        {
+          op: 'entry.add',
+          entry: {
+            kind: 'takeover',
+            id: entryId,
+            agentId: input.agentId,
+            turns: 0,
+            omitted: 0,
+            carried: '',
+            after: agentEntryBefore(live.thread),
+          },
+        },
+      ])
+      this.update(live, {
+        agentId: input.agentId,
+        acpSessionId: '',
+        config: this.deps.options?.get(input.agentId)?.config ?? [],
+        usage: null,
+        status: 'closed',
+      })
+      this.save(live)
+      this.persist(live)
+    }
+    if (ports) this.pendingPorts.delete(ports.first)
+    this.touch(record.id)
+    if (record.worktree) this.prepareWorktree(input.projectPath, record.worktree)
+    return this.summary(record.id)
+  }
+
+  /** Takes out a session `adoptMoved` added, for a move undone; its agent's files are the mover's. */
+  async removeAdopted(sessionId: string): Promise<void> {
+    const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
+    if (!record) return
+    if (record.worktree) this.deps.worktrees?.stop(record.worktree.path)
+    await this.settled(sessionId)
+    await this.closeAll([record], false)
+    const live = this.live.get(sessionId)
+    if (live) this.dropLive(live)
+    this.deps.events.ended([sessionId])
+    this.forget(sessionId)
+    this.saveIndex()
+    this.removeThreads([sessionId])
+  }
+
+  /** The session went on on another computer, or (null) goes on here again. */
+  setMovedTo(sessionId: string, movedTo: MovedTo | null): void {
+    const record = this.recordOf(sessionId)
+    if (movedTo) record.movedTo = { ...movedTo }
+    else delete record.movedTo
+    const live = this.live.get(sessionId)
+    if (live) this.persist(live)
+    else this.saveIndex()
+    this.touch(sessionId)
+  }
+
   /**
    * Refuses a Claude Code session that a process outside Kettu, as in a terminal, is at work in:
    * two processes writing one transcript tangle it. Huli: an idle one lets it go on here, which
@@ -12929,6 +13089,30 @@ export class SessionManager {
     this.followTimer = null
     this.stopped = true
   }
+}
+
+/** Huli: what a move needs of a session on its source. */
+export interface MoveFacts {
+  agentId: AgentId
+  acpSessionId: string
+  projectPath: string
+  cwd: string
+  worktree: { base: string; baseOid: string } | null
+  title: string | null
+  createdAt: number
+  configDir: string | null
+  carry: boolean
+  problems: MoveProblem[]
+}
+
+/** Huli: a session moved here, as `adoptMoved` takes it. */
+export interface MoveAdoption {
+  agentId: AgentId
+  projectPath: string
+  worktree: WorktreeRecord | null
+  title: string | null
+  createdAt: number
+  resume: { acpSessionId: string } | { entries: ThreadEntry[]; blobs: StoredBlob[] }
 }
 
 /** Huli: the fields `importSession` takes over from another app's index. */

@@ -10,6 +10,7 @@ import { ArtifactConsentDialog } from '@renderer/features/artifacts/consent-dial
 import { GitDialogsHost } from '@renderer/features/git/git-dialogs'
 import { MediaViewer } from '@renderer/features/session/media/media-viewer'
 import { SessionExportDialog } from '@renderer/features/session/export/export-dialog'
+import { useMoveStore } from '@renderer/features/session/move/move'
 import { HostBanner } from '@renderer/features/shell/host-banner'
 import { LaunchCover } from '@renderer/features/shell/launch-cover'
 import { SplitDragProvider } from '@renderer/features/split/session-drag'
@@ -53,6 +54,12 @@ const SettingsPage = lazy(() => import('@renderer/features/settings/settings-pag
 const HostPathDialog = lazy(() => import('@renderer/web/host-path-dialog'))
 // The first run on a fresh install, over the whole window until it is done.
 const Onboarding = lazy(() => import('@renderer/features/onboarding/onboarding'))
+// Huli: 搬到另一台电脑…, loaded once first asked for.
+const SessionMoveDialog = lazy(() =>
+  import('@renderer/features/session/move/move-dialog').then((m) => ({
+    default: m.SessionMoveDialog,
+  })),
+)
 
 export function App() {
   const settingsOpen = useViewStore((s) => s.settings.open)
@@ -71,6 +78,10 @@ export function App() {
   if (settingsOpen && !settingsLoaded) setSettingsLoaded(true)
   const pathAsked = usePathRequest((s) => s.asked !== null)
   const [pathPicker, setPathPicker] = useState(false)
+  // Huli: the move dialog stays mounted once loaded, so it closes with its own exit.
+  const moveAsked = useMoveStore((s) => s.summary !== null)
+  const [moveLoaded, setMoveLoaded] = useState(false)
+  if (moveAsked && !moveLoaded) setMoveLoaded(true)
   if (pathAsked && !pathPicker) setPathPicker(true)
   useKeyboardShortcuts()
   useAppCommands()
@@ -142,6 +153,11 @@ export function App() {
         <GitDialogsHost />
         {/* Huli: Export… in a session's menu, which main saves. */}
         {!isWeb && <SessionExportDialog />}
+        {moveLoaded && (
+          <Suspense fallback={null}>
+            <SessionMoveDialog />
+          </Suspense>
+        )}
         <Toaster />
         <QuitHint />
       </div>

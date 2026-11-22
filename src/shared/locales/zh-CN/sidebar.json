@@ -214,6 +214,7 @@
     "copySessionId": "复制会话 ID",
     "copiedSessionId": "已复制会话 ID",
     "export": "导出…",
+    "move": "搬到另一台电脑…",
     "showInParent": "在父会话中显示",
     "agentOf": "{{harness}} · {{agent}}",
     "tokensUsed": "{{tokens}} tokens",

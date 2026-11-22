@@ -52,6 +52,7 @@ import {
   ThreadSkeleton,
 } from './session-states'
 import { SessionSignIn, SignIn } from './sign-in'
+import { MovedComposer } from './move/moved-composer'
 import { SubagentBar } from './subagent-bar'
 import { Thread } from './thread'
 import { ThreadWidthGrips } from './thread-width-grips'
@@ -343,6 +344,8 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
                     <SubagentBar summary={summary} session={session} />
                   ) : archived ? (
                     <ArchivedComposer sessionId={sessionId} />
+                  ) : summary.movedTo ? (
+                    <MovedComposer summary={summary} />
                   ) : summary.worktree?.state === 'gone' ? (
                     // Its history stays readable; nothing more can run without the branch.
                     <WorktreeGoneComposer />

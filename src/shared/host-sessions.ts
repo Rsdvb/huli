@@ -11,13 +11,15 @@ const METHODS: ReadonlySet<string> = new Set([...HOST_METHODS, ...TERMINAL_METHO
 
 /**
  * What a window may ask another host: its agent host's and terminal host's methods, and its
- * owner's calls to it, but not the answers to the host's browser calls, which main gives. The host
- * refuses the terminal's while its owner does not allow it. A new site's card is the user's to
- * answer, from any window.
+ * owner's calls to it, but not the answers to the host's browser calls, which main gives, nor a
+ * move's steps, which main runs. The host refuses the terminal's while its owner does not allow
+ * it. A new site's card is the user's to answer, from any window.
  */
 export function isOtherHostMethod(method: unknown): method is string {
   if (typeof method !== 'string') return false
   if (method.startsWith('browser.') && method !== 'browser.answerOrigin') return false
+  // Huli: a move between hosts is main's to run.
+  if (method.startsWith('moves.')) return false
   return METHODS.has(method) || isHostAdminMethod(method)
 }
 

@@ -214,6 +214,8 @@ export type MainToHost =
   // The user handed back a terminal the session's agent started.
   | { type: 'host:terminal-handed-back'; sessionId: string; durationMs: number }
   | { type: 'host:shutdown' }
+  /** Huli: main's own request of a host method, answered by host:main-answer. */
+  | { type: 'host:main-call'; callId: number; method: string; params: unknown }
 
 /**
  * What the settings' owner knows beyond the file, by the row's tool id: an account's email, a
@@ -464,6 +466,8 @@ export type HostToMain =
   // Null when no session holds a window, or the driver could not find it.
   | { type: 'host:computer-frame'; requestId: number; frame: ComputerFrame | null }
   | { type: 'host:stopped' }
+  | { type: 'host:main-answer'; callId: number; result: unknown }
+  | { type: 'host:main-answer'; callId: number; error: PortError }
 
 export type MainToTerminalHost =
   | {

@@ -155,6 +155,15 @@ import type {
 import type { ClockRequest, UsageScope, UsageStatus, UsageSummary, UsageTotal } from './usage'
 import type { ImageClear, ImageClearScope, StorageUsage } from './data-usage'
 import type { TurnWork } from './turn-phase'
+import type {
+  MoveApply,
+  MovedTo,
+  MovePack,
+  MovePrepared,
+  MoveRemote,
+  MoveSource,
+  MoveTarget,
+} from './session-move'
 import type { LimitPause, LimitPauseAction, Stall, StallAction } from './supervisor'
 import type {
   AgentId,
@@ -881,6 +890,8 @@ export interface SessionSummary {
   // Huli: its column on the user's task board, for the user's own top-level session; null for
   // the others; absent from older hosts
   board?: SessionBoard | null
+  // Huli: moved to another computer, where it goes on; absent while it was not
+  movedTo?: MovedTo
 }
 
 /**
@@ -2180,6 +2191,39 @@ export interface HostContract {
   'folders.reorder': { params: { folderIds: string[] }; result: void }
   // Into a folder, or out of every folder with null; ids of sessions not on the host are skipped.
   'folders.move': { params: { sessionIds: string[]; folderId: string | null }; result: void }
+  // Huli: moving a session to another computer (shared/session-move.ts). Main alone asks these:
+  // of this computer's host through its own messages, of the others as a desktop device.
+  // The source's: what the session holds, its pack in parts, and the mark once it went.
+  'moves.inspect': { params: { sessionId: string }; result: MoveSource }
+  'moves.pack': {
+    params: { sessionId: string; moveId: string; haves: string[] }
+    result: MovePack
+  }
+  'moves.part': {
+    params: { moveId: string; name: string; offset: number }
+    result: { bytes: Uint8Array }
+  }
+  'moves.finish': { params: { moveId: string; sessionId: string; to: MovedTo }; result: void }
+  'moves.abort': { params: { moveId: string }; result: void }
+  // The target's: what it would do, its project (a clone made when it has none), the pack's parts,
+  // the session, and the undo of all of it until main commits the move.
+  'moves.check': {
+    params: { agentId: AgentId; remotes: MoveRemote[]; remote: string | null }
+    result: MoveTarget
+  }
+  'moves.prepare': {
+    params: { moveId: string; project: { path: string } | { clone: true }; url: string }
+    result: MovePrepared
+  }
+  'moves.receive': {
+    params: { moveId: string; name: string; offset: number; size: number; bytes: Uint8Array }
+    result: void
+  }
+  'moves.apply': { params: MoveApply; result: { sessionId: string; projectPath: string } }
+  'moves.undo': { params: { moveId: string }; result: { undone: boolean } }
+  'moves.commit': { params: { moveId: string }; result: void }
+  // Huli: a moved session goes on here again.
+  'sessions.clearMoved': { params: { sessionId: string }; result: void }
 }
 
 export type HostMethod = keyof HostContract
@@ -2533,6 +2577,18 @@ export const HOST_METHODS = [
   'folders.delete',
   'folders.reorder',
   'folders.move',
+  'moves.inspect',
+  'moves.pack',
+  'moves.part',
+  'moves.finish',
+  'moves.abort',
+  'moves.check',
+  'moves.prepare',
+  'moves.receive',
+  'moves.apply',
+  'moves.undo',
+  'moves.commit',
+  'sessions.clearMoved',
 ] as const satisfies readonly HostMethod[]
 
 /** One that has a session in front: the host's own windows as one, or a paired device. */

@@ -77,6 +77,7 @@ import type { HostSessions } from './host-sessions'
 import type { HostPairingListener, RemoteHost } from './remote-host'
 import { isRendererUrl, rendererPage } from './renderer'
 import { exportSession } from './session-export'
+import { MoveFailed, type SessionMover } from './session-move'
 import type { TrayPanel } from './tray-panel'
 import type { SettingsStore } from './settings'
 import type { Sharing } from './sharing'
@@ -1136,6 +1137,44 @@ export function registerChatBridgeIpc(store: ChatBridgeStore): void {
     actionLog.info('chat-bridge.unbind')
     return store.unbind(platform, accountId)
   })
+}
+
+/** Huli: a move's host: null for this computer, else a host's id. */
+function moveHostArg(value: unknown): string | null {
+  return value === null ? null : hostIdArg(value)
+}
+
+/** Huli: a session's id as a host names it. */
+function moveSessionArg(value: unknown): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,256}$/.test(value)) {
+    throw new Error('Not a session id')
+  }
+  return value
+}
+
+/** Huli: moving a session to another computer, which main runs between the hosts. */
+export function registerSessionMoveIpc(mover: SessionMover): void {
+  handle('sessions:move-preview', 3, async (_, source, session, target) => {
+    try {
+      const preview = await mover.preview(
+        moveHostArg(source),
+        moveSessionArg(session),
+        moveHostArg(target),
+      )
+      return { ok: true, preview }
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error instanceof MoveFailed ? error.reason : null,
+        message: (error as Error)?.message ?? String(error),
+      }
+    }
+  })
+  handle('sessions:move-start', 3, (_, source, session, target) => {
+    actionLog.info('session.move')
+    return mover.start(moveHostArg(source), moveSessionArg(session), moveHostArg(target))
+  })
+  handle('sessions:moves', 0, () => mover.list())
 }
 
 /** Huli: Export… in a session's menu; the request is checked before the save dialog. */

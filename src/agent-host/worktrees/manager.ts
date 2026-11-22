@@ -56,6 +56,11 @@ export class WorktreeManager {
     return this.deps.settings(projectPath)
   }
 
+  /** Huli: the folder the project's worktrees go in, made when missing. */
+  rootFor(projectPath: string): Promise<string> {
+    return this.deps.git.rootFor(projectPath, this.deps.root())
+  }
+
   /** Creates the branch and the worktree; rejects as the git side does, before any session. */
   create(
     projectPath: string,

@@ -60,12 +60,14 @@ import {
   registerChatBridgeIpc,
   registerIpcHandlers,
   registerSessionExportIpc,
+  registerSessionMoveIpc,
   registerSignInIpc,
   registerTrayIpc,
 } from './ipc'
 import { Reports } from './report'
 import { MediaGrants, mediaScheme, serveMedia } from './media'
 import { createLogger } from './log'
+import { SessionMover } from './session-move'
 import { installMenu } from './menu'
 import { isOpenedAtLogin, startMode, syncLoginItem } from './login-item'
 import { notifyAttention, notifyDiscovery } from './notifications'
@@ -1116,6 +1118,22 @@ async function start(): Promise<void> {
   registerBackupIpc(backup)
   registerChatBridgeIpc(chatBridge)
   registerSessionExportIpc()
+  registerSessionMoveIpc(
+    new SessionMover({
+      call: (host, method, params) =>
+        host === null ? agentHost.call(method, params) : hostSessions.call(host, method, params),
+      hostName: (host) =>
+        host === null
+          ? hostName()
+          : (remoteHost.hosts?.find((known) => known.id === host)?.name ?? host),
+      online: (host) =>
+        host === null
+          ? agentHost.state === 'ready'
+          : remoteHost.hosts?.find((known) => known.id === host)?.connection.state === 'online',
+      changed: (progress) => broadcast('sessions:move-progress', progress),
+      log: (level, message) => log[level](message),
+    }),
+  )
   ipcReady = true
   installMenu(menuDeps)
 

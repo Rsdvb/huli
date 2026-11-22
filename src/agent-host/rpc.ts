@@ -46,6 +46,9 @@ export interface PortHubDeps {
 
 const METHODS: ReadonlySet<string> = new Set(HOST_METHODS)
 
+/** Huli: the port id main's own requests run under; no window's port has it. */
+export const MAIN_PORT = 'main'
+
 /**
  * Requests one paired device may have running at once; the rest wait in the order they came. Long
  * operations, which have no time limit, such as installs and git's network work, take no place.
@@ -410,6 +413,14 @@ export class PortHub {
         resolve()
       }),
     )
+  }
+
+  /** Huli: main's own request, checked and run as a window's, on no port. */
+  callFromMain(method: string, params: unknown): Promise<unknown> {
+    if (!METHODS.has(method)) {
+      return Promise.reject(new HostError('unknown_method', `Unknown method "${method}"`))
+    }
+    return this.dispatch(method as HostMethod, params, { portId: MAIN_PORT, device: null })
   }
 
   private async dispatch<M extends HostMethod>(
