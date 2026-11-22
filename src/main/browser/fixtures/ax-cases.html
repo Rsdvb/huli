@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+  <head>
+    <title>More cases</title>
+  </head>
+  <body>
+    <div contenteditable="true">Editable <b>rich</b> text</div>
+    <textarea>Area value</textarea>
+    <input type="search" placeholder="Search docs" />
+    <select>
+      <option>One</option>
+      <option selected>Two</option>
+    </select>
+    <div role="log">
+      <div>Event A</div>
+      <div>Event B</div>
+    </div>
+    <details open>
+      <summary>More info</summary>
+      <p>Details body</p>
+    </details>
+    <img src="x.png" alt="Company logo" />
+    <div aria-label="Labelled box">Inner text</div>
+    <div id="host"></div>
+    <script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML =
+        '<p>Shadow text</p><button>Shadow button</button>'
+    </script>
+    <div role="dialog" aria-label="Confirm">
+      <p>Are you sure?</p>
+      <button>Yes</button><button disabled>No</button>
+    </div>
+    <a href="#"><span>Read</span> <span>more</span></a>
+    <div><input type="checkbox" id="c1" /><label for="c1">Remember me</label></div>
+    <label><input type="radio" name="r" /> Option A</label>
+    <span>Inline lonely span</span>
+    <p>Price: <strong>$9</strong><br />Tax: <em>$1</em></p>
+    <nav aria-label="Pages">
+      <ul>
+        <li><a href="#">1</a></li>
+        <li aria-current="page"><a href="#">2</a></li>
+      </ul>
+    </nav>
+  </body>
+</html>

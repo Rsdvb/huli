@@ -186,7 +186,8 @@ export const BROWSER_TOOLS: Tool[] = [
     title: 'Snapshot',
     description:
       'Returns the page as an outline of its accessibility tree, with a ref on each element ' +
-      'you can act on: buttons, links, fields, options and the like.',
+      'you can act on (buttons, links, fields, options and the like) and the page’s text ' +
+      'under the element that holds it.',
     inputSchema: object({}),
     outputSchema: output(PAGE),
     annotations: { ...READ_ONLY },

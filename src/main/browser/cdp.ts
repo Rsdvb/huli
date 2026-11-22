@@ -16,11 +16,10 @@ import {
   type SurfaceControls,
   type UploadConsent,
 } from '@shared/control'
+import { buildOutline, mergeFrames, outlineText, type AXNode } from './outline'
 import { isNeverOpened } from './policy'
 import { UploadRefused, type UploadFile } from './upload'
 
-/** The outline an agent reads, before its "… N more lines" marker. */
-export const MAX_SNAPSHOT_LINES = 2_000
 /** How long the network stays quiet before a page counts as settled. */
 export const QUIET_MS = 500
 /** The longest a page is waited for after an action. */
@@ -149,211 +148,6 @@ interface FileChooser {
   nav: number
   /** Not yet reported to the agent. */
   fresh: boolean
-}
-
-// Accessibility node, as Accessibility.getFullAXTree reports it.
-interface AXNode {
-  nodeId: string
-  ignored?: boolean
-  role?: { value?: string }
-  name?: { value?: string }
-  description?: { value?: string }
-  value?: { value?: unknown }
-  properties?: { name: string; value?: { value?: unknown } }[]
-  childIds?: string[]
-  backendDOMNodeId?: number
-  parentId?: string
-}
-
-export interface Outline {
-  lines: string[]
-  /** `eN` to the node's backend id, in the order the page holds them. */
-  refs: Map<string, number>
-  /** Lines left out beyond the cap. */
-  more: number
-}
-
-const ROLE_NAMES: Record<string, string> = {
-  RootWebArea: 'page',
-  StaticText: 'text',
-  InlineTextBox: 'text',
-  TextField: 'textbox',
-  SearchBox: 'searchbox',
-  CheckBox: 'checkbox',
-  RadioButton: 'radio',
-  ComboBox: 'combobox',
-  ListBox: 'listbox',
-  ListBoxOption: 'option',
-  MenuListPopup: 'menu',
-  MenuItem: 'menuitem',
-  MenuBar: 'menubar',
-  Menu: 'menu',
-  ToggleButton: 'button',
-  DisclosureTriangle: 'button',
-  PopUpButton: 'button',
-  Slider: 'slider',
-  SpinButton: 'spinbutton',
-  ProgressIndicator: 'progressbar',
-  Image: 'image',
-  Iframe: 'iframe',
-  Heading: 'heading',
-  Paragraph: 'paragraph',
-  ListItem: 'listitem',
-  UnorderedList: 'list',
-  OrderedList: 'list',
-  DescriptionList: 'list',
-  Term: 'term',
-  Description: 'definition',
-  Link: 'link',
-}
-
-const ACTIONABLE = new Set([
-  'link',
-  'button',
-  'textbox',
-  'searchbox',
-  'combobox',
-  'listbox',
-  'checkbox',
-  'radio',
-  'switch',
-  'slider',
-  'spinbutton',
-  'tab',
-  'menuitem',
-  'menuitemcheckbox',
-  'menuitemradio',
-  'option',
-  'treeitem',
-  'textfield',
-])
-
-// Wrappers that add nothing an agent needs; their children take their place.
-const TRANSPARENT = new Set(['none', 'presentation', 'generic', 'ignored', 'paragraph'])
-
-// Roles that hold other elements, so their line ends in a colon.
-const CONTAINERS = new Set([
-  'page',
-  'banner',
-  'main',
-  'navigation',
-  'region',
-  'form',
-  'list',
-  'menu',
-  'menubar',
-  'tablist',
-  'tree',
-  'row',
-  'rowgroup',
-  'table',
-  'listbox',
-  'combobox',
-  'grid',
-  'group',
-  'toolbar',
-  'dialog',
-  'alertdialog',
-  'iframe',
-])
-
-const STATES: Record<string, string> = {
-  checked: 'checked',
-  expanded: 'expanded',
-  selected: 'selected',
-  pressed: 'pressed',
-  level: 'level',
-  invalid: 'invalid',
-  haspopup: 'popup',
-  readonly: 'readonly',
-  multiselectable: 'multiselectable',
-}
-
-function roleOf(node: AXNode): string {
-  const role = node.role?.value ?? ''
-  return ROLE_NAMES[role] ?? role.toLowerCase()
-}
-
-function clean(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
-}
-
-function quoted(text: string): string {
-  return `"${clean(text).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
-}
-
-/** The outline of a page's accessibility tree, with a ref on every element an agent can act on. */
-export function buildOutline(nodes: readonly AXNode[]): Outline {
-  const byId = new Map<string, AXNode>()
-  for (const node of nodes) byId.set(node.nodeId, node)
-  const roots = nodes.filter((node) => node.parentId === undefined || !byId.has(node.parentId))
-  const refs = new Map<string, number>()
-  const lines: string[] = []
-  const seen = new Set<string>()
-
-  const walk = (node: AXNode, depth: number): void => {
-    if (seen.has(node.nodeId)) return
-    seen.add(node.nodeId)
-    const children = (node.childIds ?? [])
-      .map((id) => byId.get(id))
-      .filter((child): child is AXNode => !!child)
-    const role = roleOf(node)
-    const name = clean(node.name?.value ?? '')
-    if (node.ignored) {
-      for (const child of children) walk(child, depth)
-      return
-    }
-    // The page itself heads the outline, which outlineText writes.
-    if (role === 'page' && node.role?.value === 'RootWebArea') {
-      for (const child of children) walk(child, depth)
-      return
-    }
-    // A text node repeats its container's words; the container already says them.
-    if (node.role?.value === 'StaticText') return
-    if (node.role?.value === 'InlineTextBox') return
-    const transparent = TRANSPARENT.has(role) && name === ''
-    if (transparent && children.length === 1) {
-      walk(children[0]!, depth)
-      return
-    }
-    let line = `${'  '.repeat(depth)}- ${role}`
-    if (name !== '') line += ` ${quoted(name)}`
-    else if (node.description?.value && clean(node.description.value) !== '')
-      line += ` ${quoted(node.description.value)}`
-    const props = new Map((node.properties ?? []).map((p) => [p.name, p.value?.value]))
-    for (const [prop, label] of Object.entries(STATES)) {
-      const value = props.get(prop)
-      if (value === undefined || value === false || value === 'false') continue
-      if (prop === 'level') line += ` [level=${String(value)}]`
-      else if (value === true || value === 'true') line += ` [${label}]`
-      else line += ` [${label}=${String(value)}]`
-    }
-    if (props.get('disabled') === true) line += ' [disabled]'
-    const value = props.get('valuetext') ?? node.value?.value
-    if (typeof value === 'string' && value !== '' && (role === 'textbox' || role === 'combobox'))
-      line += ` [value=${quoted(value.slice(0, 80))}]`
-    if (ACTIONABLE.has(role) && node.backendDOMNodeId !== undefined) {
-      const ref = `e${refs.size + 1}`
-      refs.set(ref, node.backendDOMNodeId)
-      line += ` [ref=${ref}]`
-    }
-    if (CONTAINERS.has(role) && children.length > 0) line += ':'
-    lines.push(line)
-    for (const child of children) walk(child, depth + 1)
-  }
-
-  for (const root of roots) walk(root, 0)
-
-  const more = Math.max(0, lines.length - MAX_SNAPSHOT_LINES)
-  return { lines: more > 0 ? lines.slice(0, MAX_SNAPSHOT_LINES) : lines, refs, more }
-}
-
-/** The text an agent reads for a snapshot: the page's title and address, then the outline. */
-export function outlineText(page: { title: string | null; url: string }, outline: Outline): string {
-  const head = `- Page: ${clean(page.title ?? '') || 'Untitled'} (${page.url || 'about:blank'})`
-  const lines = [head, ...outline.lines]
-  if (outline.more > 0) lines.push(`… ${outline.more} more lines`)
-  return lines.join('\n')
 }
 
 /** Whether a page has settled: nothing loading, nothing in flight, and a quiet network. */
@@ -963,16 +757,26 @@ export class BrowserCdp {
     sessionId: string,
     page: PageState,
   ): Promise<{ outline: string; refs: Map<string, number>; nav: number }> {
-    // Each frame has a tree of its own; the same-origin ones sit under their iframe's node.
-    const nodes: AXNode[] = []
+    // Each frame has a tree of its own, which goes under the element of the frame that holds it.
+    let main: AXNode[] | null = null
+    const frames: { owner: number | null; nodes: AXNode[] }[] = []
     for (const frameId of await this.frameIds(sessionId)) {
-      const tree = await this.send<{ nodes: AXNode[] }>(sessionId, 'Accessibility.getFullAXTree', {
+      const tree = await this.send<{ nodes: AXNode[] }>(
+        sessionId,
+        'Accessibility.getFullAXTree',
+        frameId === '' ? {} : { frameId },
+      ).catch(() => null)
+      if (!tree) continue
+      if (main === null) {
+        main = tree.nodes
+        continue
+      }
+      const owner = await this.send<{ backendNodeId?: number }>(sessionId, 'DOM.getFrameOwner', {
         frameId,
       }).catch(() => null)
-      if (!tree) continue
-      if (nodes.length === 0) nodes.push(...tree.nodes)
-      else nodes.push(...tree.nodes.filter((node) => node.role?.value !== 'RootWebArea'))
+      frames.push({ owner: owner?.backendNodeId ?? null, nodes: tree.nodes })
     }
+    const nodes = mergeFrames(main ?? [], frames)
     const contents = this.contentsOf(sessionId)
     const built = buildOutline(nodes)
     const url = contents.getURL()
