@@ -31,6 +31,8 @@ import {
   type PromptBlock,
   type PromptResult,
   type RevertPoint,
+  type RewindPoint,
+  type RewoundSession,
   type SessionOptions,
   type SessionSetup,
   type SessionTarget,
@@ -113,9 +115,12 @@ import type {
   ThreadItem,
   ThreadItemsListResponse,
   ThreadListResponse,
+  ThreadReadResponse,
   ThreadResponse,
+  ThreadRevertResponse,
   ThreadStatus,
   ThreadTokenUsage,
+  ThreadTurnsListResponse,
   TokenUsageBreakdown,
   Turn,
   TurnError,
@@ -696,6 +701,7 @@ export class CodexConnection implements AgentConnection {
         ownTitles: null,
         logout: this.launch !== null,
         steering: true,
+        rewind: true,
         mcpHttp: true,
         // Codex speaks streamable HTTP and stdio to MCP servers; it has no SSE client.
         mcpSse: false,
@@ -734,7 +740,7 @@ export class CodexConnection implements AgentConnection {
   /** `codex logout`, with the program and environment the agent runs with. */
   async logout(): Promise<void> {
     const launch = this.launch
-    if (!launch) throw new AgentRequestError('agent_error', 'Codex cannot sign out here')
+    if (!launch) throw new AgentRequestError('agent_error', t('codex.cannotSignOut'))
     const timeoutMs = 30_000
     const run = await (launch.run ?? runProgram)({
       program: launch.spec.command,
@@ -1069,6 +1075,64 @@ export class CodexConnection implements AgentConnection {
     throw new AgentRequestError('agent_error', t('codex.noForkPoint'))
   }
 
+  // `thread/revert` finds only a thread the app-server has loaded; one it loaded itself would keep
+  // the options it last ran with, without Kettu's MCP server.
+  readonly rewindsOpen = true
+
+  /** Only a paginated thread's history can be cut; a legacy one keeps it in one rollout. */
+  async canRewind(sessionId: string): Promise<boolean> {
+    const { thread } = await this.call<ThreadReadResponse>('thread/read', { threadId: sessionId })
+    return thread.historyMode === 'paginated'
+  }
+
+  /** `thread/revert` before the turn the prompt `point` names started; the thread keeps its id. */
+  async rewindSession(
+    sessionId: string,
+    _cwd: string,
+    point: RewindPoint,
+  ): Promise<RewoundSession> {
+    await this.requireSignIn()
+    if (!(await this.canRewind(sessionId))) {
+      throw new AgentRequestError('agent_error', t('rewind.olderThread'))
+    }
+    const beforeTurnId = await this.turnStartedBy(sessionId, point)
+    await this.call<ThreadRevertResponse>('thread/revert', { threadId: sessionId, beforeTurnId })
+    return { sessionId }
+  }
+
+  /**
+   * The turn a prompt started: the one `turn/start` answered with, when the thread still has it,
+   * else the turn of the nth user message with the prompt's text.
+   */
+  private async turnStartedBy(threadId: string, point: RewindPoint): Promise<string> {
+    if (point.ref !== null && (await this.turnIds(threadId)).has(point.ref)) return point.ref
+    const text = point.text.trim()
+    const same = text
+      ? (await this.items(threadId)).filter(
+          ({ item }) =>
+            item.type === 'userMessage' &&
+            item.content.some((input) => input.type === 'text' && input.text.includes(text)),
+        )
+      : []
+    const found = same[point.occurrence - 1]
+    if (found) return found.turnId
+    throw new AgentRequestError('agent_error', t('rewind.noPoint'))
+  }
+
+  private async turnIds(threadId: string): Promise<Set<string>> {
+    const ids = new Set<string>()
+    let cursor: string | null = null
+    do {
+      const page: ThreadTurnsListResponse = await this.call<ThreadTurnsListResponse>(
+        'thread/turns/list',
+        { threadId, cursor, limit: 200, itemsView: 'notLoaded' },
+      )
+      for (const turn of page.data) ids.add(turn.id)
+      cursor = page.nextCursor
+    } while (cursor)
+    return ids
+  }
+
   /**
    * `thread/revert` before the first turn `point` takes out. Codex leaves the files as they are,
    * and reverts only a thread with paginated history, which a thread an older Codex started lacks.
@@ -1106,7 +1170,9 @@ export class CodexConnection implements AgentConnection {
   ): Promise<SideAnswer> {
     await this.requireSignIn()
     const parent = this.threads.get(sessionId)
-    if (!parent?.cwd) throw new AgentRequestError('agent_error', 'The Codex session is not open')
+    if (!parent?.cwd) {
+      throw new AgentRequestError('agent_error', t('agentRun.notOpen', { id: sessionId }))
+    }
     const cwd = parent.cwd
     signal.throwIfAborted()
     const source = parent.known ? parent.settings : undefined
@@ -1736,10 +1802,14 @@ export class CodexConnection implements AgentConnection {
     return model ? tierFor(model, settings.tier) : settings.tier
   }
 
-  async prompt(sessionId: string, prompt: readonly PromptBlock[]): Promise<PromptResult> {
+  async prompt(
+    sessionId: string,
+    prompt: readonly PromptBlock[],
+    sent?: (ref: string) => void,
+  ): Promise<PromptResult> {
     const record = this.thread(sessionId)
     if (record.prompting || record.command) {
-      throw new AgentRequestError('agent_error', 'A turn is already running in this session')
+      throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
     }
     const command = parseCommand(prompt)
     if (command) return this.runCommand(record, command)
@@ -1749,6 +1819,7 @@ export class CodexConnection implements AgentConnection {
         'turn/start',
         this.turnParams(record, userInputs(prompt)),
       )
+      sent?.(response.turn.id)
       return response.turn.id
     })
   }
@@ -1918,7 +1989,9 @@ export class CodexConnection implements AgentConnection {
     value: string | boolean,
   ): Promise<ConfigOption[]> {
     const record = this.threads.get(sessionId)
-    if (!record) throw new AgentRequestError('agent_error', `Codex has no session ${sessionId}`)
+    if (!record) {
+      throw new AgentRequestError('agent_error', t('agentRun.noSession', { id: sessionId }))
+    }
     const models = await this.listModels()
     // Huli: full access runs in no sandbox, so a sandboxed session never takes it.
     if (record.sandbox && optionId === MODE_ID && value === FULL_ACCESS_MODE) {

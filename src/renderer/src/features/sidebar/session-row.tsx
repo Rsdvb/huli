@@ -50,7 +50,7 @@ import { isReturning, rowVariants } from './row-exit'
 import { rowStatus } from './row-status'
 import { cacheGone, useGoneLabel, useSessionCache } from './session-cache'
 import { SessionCard } from './session-card'
-import { RowEnd, SessionIndicator } from './session-indicator'
+import { RowBody, RowEnd, SessionIndicator } from './session-indicator'
 import {
   DeleteSessionDialog,
   MultiSessionMenuItems,
@@ -190,6 +190,8 @@ export const SessionRow = memo(function SessionRow({
         { ...view, hosts: sidebarHosts(), away: awayHosts() },
         useSessionsStore.getState().byId,
         useProjectsStore.getState().projects,
+        {},
+        useProjectsStore.getState().noProjects,
       )
       selectRange(summary.id, current, withFolderOrder(order))
       return true
@@ -278,55 +280,57 @@ export const SessionRow = memo(function SessionRow({
       style={{ paddingLeft: pad }}
     >
       {caret}
-      {mark}
-      <span className="ui-as-side__text" dir="auto">
-        {/* Huli: a manager's worker leads with its roster name; a manager says it is one. */}
-        {summary.worker && <span className="text-(--faint)">{summary.worker.name} · </span>}
-        {title}
-      </span>
-      {summary.manager && (
-        <span
-          aria-label={t('row.manager')}
-          title={t('row.manager')}
-          className="shrink-0 text-[11px] font-normal text-(--faint)"
-        >
-          {t('row.managerBadge')}
+      <RowBody>
+        {mark}
+        <span className="ui-as-side__text" dir="auto">
+          {/* Huli: a manager's worker leads with its roster name; a manager says it is one. */}
+          {summary.worker && <span className="text-(--faint)">{summary.worker.name} · </span>}
+          {title}
         </span>
-      )}
-      {node.subagents.length > 0 && !away && (
-        <SubagentBadge
-          parent={summary}
-          subagents={node.subagents}
-          onEnter={() => setCardOpen(false)}
-        />
-      )}
-      {summary.worktree && (
-        <WorktreeRowMark worktree={summary.worktree} onEnter={() => setCardOpen(false)} />
-      )}
-      {summary.issue && issueBadge && (
-        <IssueBadge issue={summary.issue} onEnter={() => setCardOpen(false)} />
-      )}
-      <PrBadge summary={summary} onEnter={() => setCardOpen(false)} />
-      {summary.board && boardMark && onBoard(summary) && (
-        <BoardRowMark status={summary.board.status} onEnter={() => setCardOpen(false)} />
-      )}
-      {hasChildren && !expanded && (
-        <span
-          aria-label={t('row.subSessions', { count: children.length })}
-          className="shrink-0 text-[12px] font-normal text-(--faint) tabular-nums"
-        >
-          {children.length}
-        </span>
-      )}
-      {gone && <span className="sr-only">{gone}</span>}
-      <RowEnd>
-        {showHost && hostName && (
-          <span className="max-w-24 truncate text-[12px] font-normal text-(--faint)">
-            {hostName}
+        {summary.manager && (
+          <span
+            aria-label={t('row.manager')}
+            title={t('row.manager')}
+            className="shrink-0 text-[11px] font-normal text-(--faint)"
+          >
+            {t('row.managerBadge')}
           </span>
         )}
-        {!away && <SessionIndicator status={status} expiring={expiring} waitingApart={waiting} />}
-      </RowEnd>
+        {summary.worktree && (
+          <WorktreeRowMark worktree={summary.worktree} onEnter={() => setCardOpen(false)} />
+        )}
+        {summary.issue && issueBadge && (
+          <IssueBadge issue={summary.issue} onEnter={() => setCardOpen(false)} />
+        )}
+        <PrBadge summary={summary} onEnter={() => setCardOpen(false)} />
+        {summary.board && boardMark && onBoard(summary) && (
+          <BoardRowMark status={summary.board.status} onEnter={() => setCardOpen(false)} />
+        )}
+        {hasChildren && !expanded && (
+          <span
+            aria-label={t('row.subSessions', { count: children.length })}
+            className="shrink-0 text-[12px] font-normal text-(--faint) tabular-nums"
+          >
+            {children.length}
+          </span>
+        )}
+        {gone && <span className="sr-only">{gone}</span>}
+        {node.subagents.length > 0 && !away && (
+          <SubagentBadge
+            parent={summary}
+            subagents={node.subagents}
+            onEnter={() => setCardOpen(false)}
+          />
+        )}
+        <RowEnd>
+          {showHost && hostName && (
+            <span className="max-w-24 truncate text-[12px] font-normal text-(--faint)">
+              {hostName}
+            </span>
+          )}
+          {!away && <SessionIndicator status={status} expiring={expiring} waitingApart={waiting} />}
+        </RowEnd>
+      </RowBody>
     </button>
   )
 
@@ -338,6 +342,7 @@ export const SessionRow = memo(function SessionRow({
       onRename={rename.menu.onRename}
       onNewSubSession={rename.menu.onLeave}
       onDelete={() => setDeleting(true)}
+      subagents={away ? undefined : node.subagents}
     />
   )
 
@@ -390,7 +395,7 @@ export const SessionRow = memo(function SessionRow({
               >
                 <HoverCardTrigger
                   delay={600}
-                  closeDelay={0}
+                  closeDelay={150}
                   render={<ContextMenuTrigger render={button} />}
                 />
                 <HoverCardContent
@@ -398,9 +403,14 @@ export const SessionRow = memo(function SessionRow({
                   align="start"
                   sideOffset={10}
                   alignOffset={-4}
-                  className="pointer-events-none w-[340px] p-0"
+                  className="w-[340px] p-0"
                 >
-                  <SessionCard summary={summary} cache={cache} status={status} />
+                  <SessionCard
+                    summary={summary}
+                    cache={cache}
+                    status={status}
+                    onOpen={() => setCardOpen(false)}
+                  />
                 </HoverCardContent>
               </HoverCard>
               <ContextMenuContent

@@ -123,6 +123,8 @@ import { RunningWorkList } from './running-work-list'
 import { dissolveRows } from './row-dust'
 import { markReturning } from './row-exit'
 import { sessionPullRequests } from './session-prs'
+import { SubagentsMenu } from './subagents-menu'
+import { listedSubagents } from './subagents'
 import { sessionFolder } from '@renderer/lib/session-folder'
 import { prFlowActive, prFlowTarget, setPrFlow } from '@renderer/features/git/flow-model'
 import { copyResumeCommand, resumeInTerminal } from '@renderer/features/agents/agent-terminal'
@@ -227,6 +229,7 @@ export function SessionMenuItems({
   onRename,
   onNewSubSession,
   onDelete,
+  subagents,
 }: {
   summary: SessionSummary
   place?: SessionMenuPlace
@@ -235,6 +238,8 @@ export function SessionMenuItems({
   /** New session opens for a sub-session, and its composer takes the focus from the menu. */
   onNewSubSession: () => void
   onDelete: () => void
+  /** The row's sub-agents, which the menu lists as its badge does; left out where it has none. */
+  subagents?: readonly SessionSummary[]
 }) {
   const { t } = useTranslation(['sidebar', 'common'])
   // The agents of the session's host that can run one now; More options opens New session with
@@ -265,6 +270,8 @@ export function SessionMenuItems({
   const subSessions = useListedSubSessions([id])
   const currentPr = useGitStore((s) => s.currentPr[sessionFolder(summary)] ?? null)
   const prTarget = prFlowTarget(summary, currentPr)
+  const showFinished = useViewStore((s) => s.showFinishedSubagents)
+  const listed = subagents ? listedSubagents(subagents, showFinished) : []
 
   const item = (name: SessionMenuItem) => {
     const accelerator = ACCELERATORS[name]
@@ -468,6 +475,10 @@ export function SessionMenuItems({
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         )
+      case 'subagents':
+        return (
+          <SubagentsMenu key={name} parent={summary} listed={listed} showFinished={showFinished} />
+        )
       case 'openInSplit':
         return <OpenInSplit summary={summary} key={name} />
       case 'pullRequest': {
@@ -667,6 +678,7 @@ export function SessionMenuItems({
     exportable: canExport(),
     movable: canMove() && !summary.scratch && summary.origin !== 'subagent',
     prFlow: prTarget !== null,
+    subagents: listed.length > 0,
   }
   return sessionMenuGroups(summary, context).map((group, index) => (
     <DropdownMenuGroup key={group[0]}>

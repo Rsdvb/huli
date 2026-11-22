@@ -47,7 +47,7 @@ function switchAgent(alert: PlanAlert, hostId: string | null): void {
 
 /** A host's alert, shown when the window is in front and Plan limit alerts is on. */
 export function showLimitAlert(alert: PlanAlert, hostId: string | null): void {
-  if (!useSettingsStore.getState().settings.notifications.limits) return
+  if (!useSettingsStore.getState().settings.notifications.planLimits) return
   const key = alertKey(alert)
   if (shown.has(key)) return
   shown.add(key)

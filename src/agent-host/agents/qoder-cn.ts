@@ -9,9 +9,17 @@ export const QODER_CN: AgentDefinition = {
   launch: {
     kind: 'package',
     package: '@qodercn-ai/qoderclicn',
+    command: 'qoderclicn',
     fromVendor: true,
     args: ['--acp'],
   },
   requiresNode: '>=20',
-  install: { hint: 'detect.hint.node', url: 'https://nodejs.org/en/download' },
+  install: {
+    hint: 'detect.hint.node',
+    url: 'https://nodejs.org/en/download',
+    guide: 'https://docs.qoder.cn/cli/installation',
+  },
+  // Its script installs a native build and leaves the command and folder to the program, so only npm
+  // is listed.
+  installs: { npm: '@qodercn-ai/qoderclicn' },
 }

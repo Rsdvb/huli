@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { GROUP_RUNS_MAX, GROUP_RUNS_MIN } from '@shared/session-groups'
+import { GROUP_RUNS_MAX, GROUP_RUNS_MIN } from '@shared/run-groups'
 import { isAgentId, type AgentId } from '@shared/thread'
 import { readJson, writeJson } from '@renderer/lib/storage'
 

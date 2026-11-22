@@ -135,3 +135,33 @@ it("shows the balances an earlier run read as that run's until they are read aga
   expect(read?.limits.length).toBeGreaterThan(0)
   expect(read?.balancesStale).toBeUndefined()
 })
+
+it('covers a used-up window with extra usage until an event says it is over', async () => {
+  const host = await startTestHost()
+  hosts.push(host)
+  const window = host.connect()
+  const { id } = await window.request('sessions.create', {
+    agentId: 'fake-agent',
+    projectPath: host.project,
+  })
+  await window.open(id)
+  await window.untilStatus(id, 'ready')
+  const say = async (text: string) => {
+    await window.request('sessions.prompt', { sessionId: id, content: [{ type: 'text', text }] })
+    await window.untilStatus(id, 'ready')
+  }
+  const fiveHour = () => fakeStatus(window)?.limits.find((limit) => limit.window === 'five_hour')
+
+  await say('/extra-usage')
+  await window.until(() => fiveHour()?.extraUsage === true)
+  expect(fiveHour()).toMatchObject({ state: 'reached', usedPercent: 100, extraUsage: true })
+
+  // Extra usage stops covering the window while it is still used up: the block stays.
+  await say('/extra-usage refused')
+  await window.until(() => fiveHour()?.extraUsage === undefined)
+  expect(fiveHour()).toMatchObject({ state: 'reached', usedPercent: 100 })
+
+  await say('/extra-usage off')
+  await window.until(() => fiveHour()?.extraUsage === undefined && fiveHour()?.state === 'ok')
+  expect(fiveHour()).toMatchObject({ usedPercent: 12, state: 'ok' })
+})

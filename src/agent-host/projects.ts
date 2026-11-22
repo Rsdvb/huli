@@ -2,7 +2,7 @@
 
 import { realpath as fsRealpath, stat } from 'node:fs/promises'
 import path from 'node:path'
-import { MAX_PROJECT_FOLDERS, type Project } from '@shared/agent-host'
+import { MAX_PROJECT_FOLDERS, type NoProject, type Project } from '@shared/agent-host'
 import { DEFAULT_WORKTREE_SETTINGS, type ProjectWorktreeSettings } from '@shared/git'
 import type { ProjectManagerSettings } from '@shared/manager'
 import type { Platform } from '@shared/platform'
@@ -58,8 +58,9 @@ async function isDirectory(value: string): Promise<boolean> {
 
 export class Projects {
   private records: ProjectRecord[] = []
+  private noProjectPinnedAt: number | undefined
   private missing = new Map<string, boolean>()
-  private listeners = new Set<(projects: Project[]) => void>()
+  private listeners = new Set<(projects: Project[], noProject: NoProject) => void>()
   private readonly now: () => number
   private readonly realpath: (value: string) => Promise<string>
   private readonly isDirectory: (value: string) => Promise<boolean>
@@ -71,7 +72,9 @@ export class Projects {
   }
 
   async load(): Promise<void> {
-    this.records = (await this.deps.file.load()).projects
+    const file = await this.deps.file.load()
+    this.records = file.projects
+    this.noProjectPinnedAt = file.noProjectPinnedAt
     await this.refreshMissing(false)
   }
 
@@ -80,23 +83,38 @@ export class Projects {
   }
 
   list(): Project[] {
-    return [...this.records]
-      .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
-      .map((record) => ({
-        path: record.path,
-        name: record.name,
-        missing: this.missing.get(this.key(record.path)) ?? false,
-        lastOpenedAt: record.lastOpenedAt,
-        pinnedAt: record.pinnedAt ?? null,
-        autoApprove: record.autoApprove ?? null,
-        sandbox: record.sandbox ? { ...record.sandbox } : null,
-        folders: (record.folders ?? []).map((folder) => ({
-          path: folder,
-          name: folderName(folder, this.deps.platform),
-          missing: this.missing.get(this.key(folder)) ?? false,
-        })),
-        ...(record.manager ? { manager: record.manager } : {}),
-      }))
+    return this.ordered().map((record) => ({
+      path: record.path,
+      name: record.name,
+      missing: this.missing.get(this.key(record.path)) ?? false,
+      lastOpenedAt: record.lastOpenedAt,
+      pinnedAt: record.pinnedAt ?? null,
+      order: record.order ?? null,
+      autoApprove: record.autoApprove ?? null,
+      sandbox: record.sandbox ? { ...record.sandbox } : null,
+      folders: (record.folders ?? []).map((folder) => ({
+        path: folder,
+        name: folderName(folder, this.deps.platform),
+        missing: this.missing.get(this.key(folder)) ?? false,
+      })),
+      ...(record.manager ? { manager: record.manager } : {}),
+    }))
+  }
+
+  /** The user's order once they moved a project, the latest opened first until then. */
+  private ordered(): ProjectRecord[] {
+    if (!this.records.some((record) => record.order !== undefined)) {
+      return [...this.records].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
+    }
+    // A record without a place, such as one an older version added, goes after the others.
+    return [...this.records].sort(
+      (a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || a.addedAt - b.addedAt,
+    )
+  }
+
+  /** The No project group, which holds the sessions started without a project. */
+  noProject(): NoProject {
+    return { pinnedAt: this.noProjectPinnedAt ?? null }
   }
 
   paths(): string[] {
@@ -132,15 +150,16 @@ export class Projects {
    */
   async resolveDirectory(value: string): Promise<string> {
     if (!isAbsolutePath(value, this.deps.platform)) {
-      throw invalidParams('projectPath must be an absolute path')
+      throw invalidParams(t('project.notAbsolute'))
     }
     let canonical: string
     try {
       canonical = await canonicalizePath(value, this.deps.platform, this.realpath)
     } catch {
-      throw invalidParams(`${value} does not exist`)
+      throw invalidParams(t('project.notExist', { path: value }))
     }
-    if (!(await this.isDirectory(canonical))) throw invalidParams(`${value} is not a folder`)
+    if (!(await this.isDirectory(canonical)))
+      throw invalidParams(t('project.notFolder', { path: value }))
     return canonical
   }
 
@@ -153,11 +172,14 @@ export class Projects {
       this.missing.set(this.key(existing.path), false)
     } else {
       const now = this.now()
+      const places = this.records.flatMap((record) => record.order ?? [])
       this.records.push({
         path: canonical,
         name: folderName(canonical, this.deps.platform),
         addedAt: now,
         lastOpenedAt: now,
+        // Once the user has an order, a new project goes to its end.
+        ...(places.length > 0 ? { order: Math.max(...places) + 1 } : {}),
       })
       this.missing.set(this.key(canonical), false)
     }
@@ -221,7 +243,7 @@ export class Projects {
     }
     const api = this.deps.platform === 'win32' ? path.win32 : path.posix
     const record = this.find(api.resolve(value))
-    if (!record) throw notFound(`No project at ${value}`)
+    if (!record) throw notFound(t('project.noProject', { path: value }))
     return record
   }
 
@@ -234,7 +256,7 @@ export class Projects {
   /** Stores only what differs from the defaults; a project that is not listed is refused. */
   setWorktreeSettings(value: string, settings: ProjectWorktreeSettings): void {
     const record = this.find(value)
-    if (!record) throw notFound(`No project at ${value}`)
+    if (!record) throw notFound(t('project.noProject', { path: value }))
     const differs: Partial<ProjectWorktreeSettings> = {}
     for (const key of Object.keys(DEFAULT_WORKTREE_SETTINGS) as (keyof ProjectWorktreeSettings)[]) {
       if (JSON.stringify(settings[key]) !== JSON.stringify(DEFAULT_WORKTREE_SETTINGS[key])) {
@@ -304,6 +326,21 @@ export class Projects {
     this.changed()
   }
 
+  /** Puts a project just before `before`, or last with null; every project then has a place. */
+  move(record: ProjectRecord, before: ProjectRecord | null): void {
+    if (before === record) throw invalidParams(t('project.moveBeforeItself'))
+    const ordered = this.ordered().filter((item) => item !== record)
+    ordered.splice(before ? ordered.indexOf(before) : ordered.length, 0, record)
+    for (const [index, item] of ordered.entries()) item.order = index
+    this.changed()
+  }
+
+  pinNoProject(pinned: boolean): void {
+    if (pinned === (this.noProjectPinnedAt !== undefined)) return
+    this.noProjectPinnedAt = pinned ? this.now() : undefined
+    this.changed()
+  }
+
   /** Marks projects whose folder is gone; they stay listed, so an unmounted drive loses nothing. */
   async refreshMissing(notify = true): Promise<void> {
     let changed = false
@@ -321,19 +358,26 @@ export class Projects {
     if (changed && notify) this.notify()
   }
 
-  onChange(listener: (projects: Project[]) => void): () => void {
+  onChange(listener: (projects: Project[], noProject: NoProject) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
 
   private changed(): void {
-    this.deps.file.save({ version: 1, projects: this.records.map((record) => ({ ...record })) })
+    this.deps.file.save({
+      version: 1,
+      projects: this.records.map((record) => ({ ...record })),
+      ...(this.noProjectPinnedAt === undefined
+        ? {}
+        : { noProjectPinnedAt: this.noProjectPinnedAt }),
+    })
     this.notify()
   }
 
   private notify(): void {
     const projects = this.list()
-    for (const listener of this.listeners) listener(projects)
+    const noProject = this.noProject()
+    for (const listener of this.listeners) listener(projects, noProject)
   }
 
   flush(): Promise<void> {

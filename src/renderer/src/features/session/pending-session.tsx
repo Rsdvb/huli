@@ -11,12 +11,15 @@ import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Button } from '@renderer/components/ui/button'
 import { InputGroup, InputGroupTextarea } from '@renderer/components/ui/input-group'
 import { AccountMovedAlert } from '@renderer/features/agents/moved-accounts'
+import { HarnessPageButton } from '@renderer/features/agents/fix-button'
+import { harnessAtFault } from '@renderer/features/agents/problem-fix'
 import { openHostSettings } from '@renderer/features/settings/host-sections'
 import { HeaderTools } from '@renderer/features/shell/header-tools'
 import { NoDrag, TopBar } from '@renderer/features/shell/top-bar'
 import { usePane } from '@renderer/features/split/pane-context'
 import { useScrollbarGutter } from '@renderer/hooks/use-scrollbar-gutter'
 import { routeOf } from '@renderer/lib/host'
+import { useMissingCopy } from '@renderer/features/settings/harness-install'
 import { agentName, agentsOn, useAgentsStore } from '@renderer/stores/agents'
 import { newSessionPanel, openHarnessSettings } from '@renderer/stores/view'
 import { sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
@@ -24,6 +27,7 @@ import {
   ColumnScroller,
   FailedState,
   FirstMessage,
+  InstallCopyButton,
   StartingAgent,
   ThreadSkeleton,
 } from './session-states'
@@ -58,6 +62,7 @@ export function PendingSessionView({ pending }: { pending: PendingSession }) {
     signInBefore.current = signIn
     if (error?.code === 'auth_required' && signIn === 'signed-in' && before !== 'signed-in') retry()
   }, [signIn, error?.code, retry])
+  const missing = useMissingCopy(pending.agentId, hostId)
 
   let body
   if (error?.code === 'auth_required') {
@@ -89,6 +94,8 @@ export function PendingSessionView({ pending }: { pending: PendingSession }) {
       </ColumnScroller>
     )
   } else if (error) {
+    const fromHarness =
+      !!status && (error.code === 'agent_unavailable' || harnessAtFault(status)) ? status : null
     body = (
       <ColumnScroller>
         <div className="ks-thread__column mx-auto w-full px-8 pt-8">
@@ -96,6 +103,13 @@ export function PendingSessionView({ pending }: { pending: PendingSession }) {
             title={t('pending.couldntStart', { agent: name })}
             message={error.message}
             onRetry={retry}
+            action={
+              missing ? (
+                <InstallCopyButton missing={missing} />
+              ) : (
+                fromHarness && <HarnessPageButton status={fromHarness} hostId={hostId} />
+              )
+            }
             report={{
               hostId,
               agentId: pending.agentId,
@@ -160,9 +174,11 @@ export function PendingSessionView({ pending }: { pending: PendingSession }) {
                 placeholder={
                   error
                     ? t('pending.notRunning', { agent: name })
-                    : t(installing ? 'agentStart.installing' : 'agentStart.starting', {
-                        agent: name,
-                      })
+                    : installing && status?.package?.isSdk
+                      ? t('agentStart.installingSdk')
+                      : t(installing ? 'agentStart.installing' : 'agentStart.starting', {
+                          agent: name,
+                        })
                 }
                 className="min-h-(--composer-min) py-[15px] pl-4 text-prose leading-[22px] md:text-prose"
               />

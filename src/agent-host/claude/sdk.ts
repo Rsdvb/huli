@@ -5,6 +5,7 @@
 import type { ClaudeSandboxOption } from '../sandbox/native'
 import { pathToFileURL } from 'node:url'
 import type { ChildProcess } from 'node:child_process'
+import { t } from '../i18n'
 
 export type PermissionMode =
   'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk' | 'auto'
@@ -520,7 +521,7 @@ export interface ClaudeSdk {
   deleteSession(sessionId: string, options: { dir?: string }): Promise<void>
   forkSession(
     sessionId: string,
-    options: { dir: string; upToMessageId?: string },
+    options: { dir: string; upToMessageId?: string; title?: string },
   ): Promise<{ sessionId: string }>
   resolveSettings(options: {
     cwd: string
@@ -549,7 +550,7 @@ export async function loadClaudeSdk(entry: string): Promise<ClaudeSdk> {
   >
   const missing = EXPORTS.filter((name) => typeof module[name] !== 'function')
   if (missing.length > 0) {
-    throw new Error(`The Claude Agent SDK at ${entry} lacks ${missing.join(', ')}`)
+    throw new Error(t('agent.sdkLacks', { entry, missing: missing.join(', ') }))
   }
   return module as unknown as ClaudeSdk
 }

@@ -1,6 +1,6 @@
 // What the agent is doing now in its running turn, read from the thread's latest entries. The
-// desktop's working row shows it, and the agent host puts it in a session's summary, so a device
-// and its Live Activity can say it too.
+// desktop's working row and the thread's nine dots show it, and the agent host puts it in a
+// session's summary, so a device, its Live Activity and the notch island can say it too.
 
 import type { ThreadState, ToolEntry, ToolKind } from './thread'
 
@@ -18,15 +18,22 @@ export type TurnPhaseName =
 
 /**
  * What the agent is doing now in its running turn. For a tool call's work, `count` is how many
- * such calls run at once; it is 1 otherwise.
+ * such calls run at once; it is 1 otherwise. A wait on questions alone reads as `question`, one for
+ * the user's answer rather than approval.
  */
 export interface TurnPhase {
-  phase: TurnPhaseName
+  phase: TurnPhaseName | 'question'
   count: number
 }
 
-/** The phase and, for a tool call's work, the title of the latest such call, as the command. */
-export interface TurnWork extends TurnPhase {
+/**
+ * Huli: the phase and, for a tool call's work, the title of the latest such call, as the command.
+ * It keeps `approval` for a wait on questions too, as the devices that read the summary's
+ * `working` know no other.
+ */
+export interface TurnWork {
+  phase: TurnPhaseName
+  count: number
   step: string | null
 }
 
@@ -52,6 +59,7 @@ const QUIET = new Set([
   'memory',
   'control_ask',
   'control_note',
+  'task_delivery',
 ])
 
 // The phase is read on every streamed chunk, so a long run of tool calls is read no further back.
@@ -125,7 +133,9 @@ export function turnWork(state: ThreadState | null | undefined): TurnWork {
  * The phase with what it works on, as a person would say it: the file a call reads or edits, the
  * command it runs, what it searches for, or the heading of the thought being written.
  */
-export interface TurnDoing extends TurnPhase {
+export interface TurnDoing {
+  phase: TurnPhaseName
+  count: number
   /** One line; null when there is nothing to name. */
   detail: string | null
   /** Whether `detail` is a search's query, which reads in quotes. */
@@ -201,10 +211,30 @@ export function turnDoing(state: ThreadState | null | undefined): TurnDoing {
   return { ...base, detail: null, quoted: false }
 }
 
-/** The phase alone, as the desktop's working row reads it. */
+/** The phase alone, as the desktop, the summary's `phase` and the notch island read it. */
 export function turnPhase(state: ThreadState | null | undefined): TurnPhase {
   const { phase, count } = turnWork(state)
-  return { phase, count }
+  return phase === 'approval' && awaitsAnswer(state)
+    ? { phase: 'question', count }
+    : { phase, count }
+}
+
+/**
+ * Whether what the session waits on is a question to answer, not a permission, a plan or an MCP
+ * server's request to decide: every pending request is one, as the thread's cards tell them apart.
+ */
+export function awaitsAnswer(state: ThreadState | null | undefined): boolean {
+  if (!state) return false
+  const { order, byId } = state
+  let asked = false
+  for (let i = order.length - 1; i >= Math.max(0, order.length - LOOKBACK); i--) {
+    const entry = byId[order[i]!]
+    if (entry?.kind !== 'tool' || !entry.permission) continue
+    const { plan, elicitation, questions } = entry.permission
+    if (plan || elicitation || (!questions && entry.question === undefined)) return false
+    asked = true
+  }
+  return asked
 }
 
 /**

@@ -108,6 +108,7 @@
   },
   "kettuTool": {
     "read_kettu_guide": "读取 Kettu 指南",
+    "call_kettu_tool": "查看 Kettu 工具",
     "create_artifact": "创建产物",
     "read_artifact": "读取产物",
     "update_artifact": "更新产物",
@@ -504,7 +505,8 @@
     "label": "{{names, list(style: narrow)}} 上也开着这个会话"
   },
   "userEntry": {
-    "device": "从 {{device}} 发送"
+    "device": "从 {{device}} 发送",
+    "kettu": "Kettu"
   },
   "sessionReport": {
     "agent": "该会话",
@@ -536,8 +538,19 @@
     "created": "已创建",
     "updated": "已更新",
     "restored": "已恢复",
+    "restoredVersion": "已恢复 v{{version}}",
     "version": "v{{version}}",
-    "versions": "v{{from}} → v{{to}}"
+    "versions": "v{{from}} → v{{to}}",
+    "changes": {
+      "frames_other": "{{count}} 个画框有改动",
+      "files_other": "{{count}} 个文件有改动",
+      "sections_other": "{{count}} 个小节有改动",
+      "slides_other": "{{count}} 页有改动",
+      "slide": "第 {{number}} 页",
+      "start": "开头",
+      "more": "+{{count}}",
+      "showFrame": "在侧边面板里打开 {{name}}"
+    }
   },
   "planChip": {
     "label": "计划：第 {{step}} 步，共 {{total}} 步，{{content}}",
@@ -548,7 +561,21 @@
   "userActions": {
     "steered": "已插入当前对话",
     "copyMessage": "复制消息",
-    "label": "消息操作"
+    "label": "消息操作",
+    "edit": "从这里重新编辑",
+    "editShort": "重新编辑"
+  },
+  "editFrom": {
+    "title": "从这里重新编辑？",
+    "body_other": "这条消息和它之后的对话都会拿掉，一共 {{count}} 轮。消息回到输入框。",
+    "files_other": "之后改过的 {{count}} 个文件保持原样",
+    "stopsTurn": "会停掉正在跑的一轮",
+    "stopsTasks_other": "会停掉 {{count}} 个后台任务",
+    "cacheKept": "提示词缓存还在 · 还剩 {{time}}",
+    "cacheExpired": "提示词缓存已过期 · 会重新发送 {{tokens}} 个 token",
+    "cacheExpiredOnly": "提示词缓存已过期",
+    "confirm": "重新编辑",
+    "failed": "没能从这里重新编辑：{{error}}"
   },
   "replyFooter": {
     "copyReply": "复制回复",
@@ -583,6 +610,7 @@
     "attachment": "附件",
     "from": "来自 {{device}}",
     "fromSession": "来自 {{title}}",
+    "fromKettu": "来自 Kettu",
     "attachments_other": "{{count}} 个附件",
     "sendNow": "立即发送",
     "steer": "立即插入当前对话",
@@ -591,15 +619,19 @@
     "remove": "移除",
     "count_other": "{{count}} 条排队",
     "title": "排队",
-    "collapse": "收起队列"
+    "collapse": "收起队列",
+    "comments_other": "{{count}} 条评论 · {{text}}"
   },
   "agentStart": {
     "installing": "正在安装 {{agent}}…",
+    "installingSdk": "正在安装 Claude Agent SDK…",
     "starting": "正在启动 {{agent}}…",
     "loading": "正在加载对话…"
   },
   "failed": {
-    "reportProblem": "报告问题"
+    "reportProblem": "报告问题",
+    "install": "安装…",
+    "installing": "正在安装…"
   },
   "pending": {
     "back": "返回",
@@ -626,7 +658,6 @@
     "openProject": "打开项目…",
     "agent": "智能体",
     "chooseAgentShort": "选择智能体",
-    "notInstalled": "未安装",
     "noProject": "不属于项目",
     "searchProjects": "搜索项目…",
     "searchProjectsLabel": "搜索项目",
@@ -660,7 +691,7 @@
     "noAgent": "没有可用的智能体，先添加或启用一个再开始。",
     "noAgentOnHost": "{{host}} 上暂时没有可以启动的智能体。",
     "noAgentNode_other": "暂时没有可以启动的 Agent：{{agents, list(style: narrow)}} 需要 Node.js。",
-    "noAgentUpdate_other": "暂时没有可以启动的智能体：你的 {{agents, list(style: narrow)}} 版本比 Kettu 要的旧，更新后才能开始。",
+    "noAgentBecause": "暂时没有可以启动的智能体。{{agents, list(style: narrow)}}：{{reason}}",
     "setUpAgents": "设置智能体…",
     "agentMenu": {
       "label": "智能体和模型",
@@ -675,8 +706,6 @@
       "valueUsed": "已用 {{percent}}%",
       "valueLeft": "剩余 {{percent}}%",
       "setsUpLong": "{{agent}} 会在首次使用时自动配置：Kettu 会为它安装适配器，适配器运行你的 {{command}}。",
-      "needsUpdate": "需要更新",
-      "updateLong": "你的 {{command}} {{current}} 比 Kettu 要的旧（至少 {{minimum}}），更新后才能用。",
       "updateOnHost": "在 {{host}} 上更新 {{agent}} 后才能用。",
       "updateTo": "更新到 {{version}}",
       "updating": "正在更新…",
@@ -715,6 +744,7 @@
       "switchOn": "{{agent}} 启动时 {{option}} 为开启，而不是关闭。"
     },
     "installHarness": "安装 Harness…",
+    "openHarness": "打开 Harness 设置…",
     "updateHarness": "更新 Harness…",
     "thisComputer": "本机",
     "hostOffline": "离线",
@@ -745,12 +775,38 @@
       "noMatch": "没有匹配的智能体",
       "signedOut": "需要登录",
       "failed": "启动失败",
-      "needsUpdate": "版本太旧 · 点击更新",
+      "needsUpdate": "{{problem}} · 点击更新",
+      "needsFix": "{{problem}} · 点击解决",
       "versionBroken": "{{version}} 和 Kettu 不能一起用",
       "versionUnsupported": "{{version}} 不在 Kettu 能用的版本里",
       "limitUsed": "已用 {{limit}}限额的 {{percent}}%",
       "limitLeft": "{{limit}}限额剩余 {{percent}}%",
       "limitReached": "已达 {{limit}}限额",
+      "limitUsedUp": "{{limit}}限额已用完",
+      "limitReachedResets": "{{limit}}限额已用完 · {{time}} 重置",
+      "limitExtraUsage": "{{limit}}限额已用完 · 正在用额外用量",
+      "balanceUsedUp": "余额已用完",
+      "limit": {
+        "used": "{{limit}}限额已用 {{percent}}%",
+        "left": "{{limit}}限额剩 {{percent}}%"
+      },
+      "tag": {
+        "unsupported": "版本不支持",
+        "update": "更新",
+        "updating": "正在更新…",
+        "fix": "解决",
+        "failed": "失败",
+        "signIn": "登录",
+        "installing": "正在安装…",
+        "setsUp": "待配置",
+        "noBalance": "余额用完",
+        "usedUp": "{{window}}已用完",
+        "resets": "{{window}} · {{time}}",
+        "extraUsage": "额外用量",
+        "used": "{{window}} {{percent}}%",
+        "left": "{{window}}剩 {{percent}}%"
+      },
+      "rowState": "{{name}}，{{state}}",
       "manage": "管理智能体…",
       "needsNode": "需要 Node.js · 点击去安装"
     },
@@ -1113,10 +1169,11 @@
   },
   "reply": {
     "button": "回复",
-    "placeholder": "回复 {{agent}}…",
-    "send": "发送回复",
+    "placeholder": "写评论…",
     "quote": "引用的文字",
-    "side": "侧聊"
+    "side": "侧聊",
+    "add": "加入",
+    "addKeys": "{{add}} 加入 · {{send}} 加入并立即发送"
   },
   "planCard": {
     "label": "计划",
@@ -1292,27 +1349,100 @@
     "whoDoes": "谁做{{step}}",
     "pinEveryTask": "为每个需求固定步骤",
     "suggest": {
-      "title": "作为工作流来做？",
-      "description": "每一步一个会话。",
-      "descriptionReview_other": "每一步一个会话；{{steps}}等你审。",
-      "label": "{{agent}} 的建议 · 等你回答",
-      "workflow": "工作流",
+      "steps_other": "{{count}} 步"
+    },
+    "card": {
+      "label": "{{agent}} 的建议",
+      "labelWaiting": "{{agent}} 的建议 · 等你处理",
+      "labelSave": "{{agent}} 写的工作流 · 等你处理",
+      "title": "我打算这样做",
+      "saveTitle": "存一个新工作流「{{name}}」",
       "steps_other": "{{count}} 步",
-      "task": "需求 · {{agent}} 写的，可以修改",
-      "taskLabel": "需求",
-      "who": "每一步由谁做 · Auto 步骤开始时再选",
-      "edit": "修改",
-      "doneEditing": "完成",
+      "comma": "，",
+      "youSee": "{{steps}}给你看",
+      "youDo": "{{steps}}由你来做",
+      "otherAgent": "{{steps}}换一个智能体",
+      "saveSummary_other": "{{count}} 步，存进你的工作流，以后智能体会在合适的时候推荐它",
+      "firstRun": "第一次用，估不出时间",
+      "about": "大约 {{time}}",
+      "usesMore": "比直接做多用一些额度",
+      "usesMuchMore": "比直接做多用不少额度",
+      "worktree": "新工作树",
+      "projectFolder": "在项目文件夹里做",
+      "agentSteps_other": "{{count}} 步由智能体做",
+      "waits_other": "{{count}} 处等你",
+      "node": {
+        "yours": "你来做",
+        "firstSee": "先给你看",
+        "see": "给你看",
+        "other": "换一个智能体",
+        "uses": "用 {{tools}}"
+      },
+      "tip": {
+        "yours": "这一步由你来做。",
+        "first": "{{agent}} 接着做。",
+        "picks": "智能体：{{who}}，开始时再定",
+        "see": "你批准了才往下走，退回就带着你的话再做一次。"
+      },
+      "tool": {
+        "mcp": "MCP",
+        "skill": "技能",
+        "signIn": "要先登录",
+        "keys": "要填密钥",
+        "connected": "已连接",
+        "atStart": "开始时自动安装"
+      },
+      "item": {
+        "connected": "{{name}} 已连接",
+        "add": "添加「{{name}}」工作流",
+        "install": {
+          "mcp": "安装 MCP 服务器 {{name}}",
+          "skill": "安装技能 {{name}}"
+        },
+        "start": "开始第一步「{{step}}」"
+      },
+      "version": "版本 {{version}}",
+      "starting": "正在开始…",
+      "retryNote": "已经成功的不重做",
+      "connectFirst": "先连接 {{names}} 才能开始",
+      "saveNote": "存起来就算批准了这一版",
+      "approvesWritten": "点了就算批准这个工作流",
+      "approvesVersion": "点了就算批准这一版",
+      "save": "存起来",
+      "retry": "重试",
+      "addAndStart": "添加并开始",
       "start": "开始",
-      "decline": "不用，直接做",
-      "declineMessage": "这个不用工作流，你直接做吧。",
-      "unusable": "{{workflow}} 现在不能开始需求。换一个工作流，或者不用工作流直接做。",
-      "missing": "这个工作流已经不在库里了。换一个，或者不用工作流直接做。",
-      "emptyTask": "先写好需求。",
-      "started": "已作为需求开始",
+      "notNow": "不要",
+      "doItHere": "直接在这里做",
+      "edit": "改一下",
+      "details": "详情",
+      "source": {
+        "library": "用你装的「{{name}}」工作流",
+        "marketplace": "市场里的「{{name}}」工作流（@{{handle}}）",
+        "marketplaceAdd": "市场里的「{{name}}」工作流（@{{handle}}），开始时先添加",
+        "draft": "{{agent}} 为这条需求写的，只跟着这条需求",
+        "save": "存为你的工作流「{{name}}」"
+      },
+      "publisher": "发布者",
+      "official": "Kettu 官方",
+      "installs_other": "{{value}} 次添加",
+      "mayLabel": "会让智能体",
+      "may": {
+        "worktree": "在新工作树里改文件、运行命令",
+        "folder": "在项目文件夹里改文件、运行命令",
+        "withTools": "{{where}}，用 {{tools}}"
+      },
+      "viewFile": "查看工作流文件",
+      "another": "换一个做法",
+      "reading": "正在读取…",
       "openTask": "打开",
-      "declined": "不用工作流，直接做",
-      "chooseWorkflow": "选择工作流"
+      "declined": "没有用工作流，就在这里做",
+      "useInstead": "改用它",
+      "saved": "已存为你的工作流「{{name}}」",
+      "open": "打开",
+      "notSaved": "没有存「{{name}}」",
+      "startedAs": "已开始 · {{workflow}}",
+      "startedWritten": "已开始 · {{agent}} 写的工作流"
     },
     "saved": {
       "pending": "已保存“{{name}}”，等你批准",
@@ -1338,6 +1468,7 @@
           "outcomePlain": "报告的是这一步的结果之一",
           "note": "要交的说明已经写好",
           "document": "要交的文档是在这一步里写的",
+          "deliverables": "交出的文件都在",
           "committed": "改动都已提交",
           "merged": "合并已提交",
           "picks": "选择都成立"
@@ -1369,6 +1500,20 @@
       },
       "showDetails": "Kettu 的回复",
       "hideDetails": "收起"
+    },
+    "delivery": {
+      "done_one": "需求完成 · {{count}} 步 · {{time}}",
+      "done_other": "需求完成 · {{count}} 步 · {{time}}",
+      "dropped_one": "需求结束：不值得做 · {{count}} 步 · {{time}}",
+      "dropped_other": "需求结束：不值得做 · {{count}} 步 · {{time}}",
+      "cancelled_one": "需求已取消 · {{count}} 步 · {{time}}",
+      "cancelled_other": "需求已取消 · {{count}} 步 · {{time}}",
+      "openTask": "打开需求",
+      "written": "这个工作流是 {{agent}} 为这次需求写的，已经跑通：",
+      "save": "存为我的工作流",
+      "saved": "已在我的工作流中",
+      "publish": "发布到市场",
+      "publishAsked": "{{agent}} 正在先把它改成通用版本，发布前会在卡片里等你确认。"
     }
   },
   "marketPublish": {
@@ -1460,6 +1605,13 @@
       "expired": "没有及时回答",
       "ended": "这一轮先结束了",
       "interrupted": "市场回复之前 Kettu 停止了"
+    },
+    "fromTask": {
+      "label": "改了什么",
+      "same": "步骤和流向与需求跑的一样",
+      "changed": "步骤或流向与需求跑的不同",
+      "compare": "和需求“{{title}}”用的版本对比",
+      "hide": "收起对比"
     }
   },
   "sideChat": {

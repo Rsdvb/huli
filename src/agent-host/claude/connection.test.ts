@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ import {
   type SessionView,
   type ThreadEntry,
   type ThreadState,
+  type ToolEntry,
 } from '@shared/thread'
 import type { LaunchSpec } from '../catalog'
 import { CLAUDE_CODE } from '../catalog'
@@ -27,6 +28,7 @@ import {
   type ProjectMcpGate,
 } from '../connection'
 import type { HostedContext, HostedSpawnOptions } from '../driver'
+import { planMarkdown } from '../plan-revision'
 import {
   newTurnScope,
   type MapperContext,
@@ -2586,6 +2588,31 @@ describe('permissions', () => {
     expect(config.find((option) => option.id === 'mode')?.value).toBe('plan')
   })
 
+  it('keeps a plan sent back as its first Markdown, for the next plan to compare with', async () => {
+    const plan = '# Plan\n\n1. Edit'
+    s.sdk.script = (query) => {
+      query.running()
+      query.emit(
+        assistant(query, 'msg_1', [
+          { type: 'tool_use', id: 'toolu_p1', name: 'ExitPlanMode', input: { plan } },
+        ]),
+      )
+      query.emit(
+        toolResult(
+          query,
+          'toolu_p1',
+          'The user wants you to keep planning and revise the plan. Their note: Keep the old API',
+          true,
+        ),
+      )
+      query.finish()
+    }
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
+    const entry = target.entries().find((e) => e.id === 't:toolu_p1')
+    expect(entry).toMatchObject({ kind: 'tool', status: 'failed' })
+    expect(planMarkdown(entry as ToolEntry)).toBe(plan)
+  })
+
   function elicit(request: Record<string, unknown>) {
     return s.sdk.last.options.onElicitation!(
       { serverName: 'linear', message: 'Sign in to Linear', ...request },
@@ -2952,6 +2979,64 @@ describe('sessions', () => {
     })
     await s.connection.deleteSession('a')
     expect(s.sdk.calls.find((call) => call.method === 'deleteSession')?.args[0]).toBe('a')
+  })
+
+  it('reports the uuid of each prompt, which the transcript keeps', async () => {
+    const s = await setup()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, new Target())
+    const refs: string[] = []
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'Hi' }], (ref) => refs.push(ref))
+    expect(refs).toEqual([s.sdk.last.inputs[0]!.uuid])
+  })
+
+  it('cuts a session for an edit with a fork that ends before the prompt', async () => {
+    const config = await mkdtemp(path.join(os.tmpdir(), 'kettu-claude-rewind-'))
+    dirs.push(config)
+    const s = await setup({ CLAUDE_CONFIG_DIR: config })
+    const folder = path.join(config, 'projects', '-repo')
+    await mkdir(folder, { recursive: true })
+    const lines = (records: unknown[]) => records.map((r) => JSON.stringify(r)).join('\n')
+    const said = (uuid: string, parentUuid: string | null, text: string) => ({
+      type: 'user',
+      uuid,
+      parentUuid,
+      message: { role: 'user', content: [{ type: 'text', text }] },
+    })
+    const done = (uuid: string, parentUuid: string) => ({
+      type: 'assistant',
+      uuid,
+      parentUuid,
+      message: { content: [{ type: 'text', text: 'Done.' }] },
+    })
+    await writeFile(
+      path.join(folder, 's1.jsonl'),
+      lines([said('u1', null, 'One'), done('a1', 'u1'), said('u2', 'a1', 'Two')]),
+    )
+    await writeFile(
+      path.join(folder, 'fork-of-s1.jsonl'),
+      lines([
+        { ...said('f1', null, 'One'), forkedFrom: { sessionId: 's1', messageUuid: 'u1' } },
+        { ...done('f2', 'f1'), forkedFrom: { sessionId: 's1', messageUuid: 'a1' } },
+      ]),
+    )
+    const point = { ref: 'u2', text: 'Two', occurrence: 1 }
+    expect(await s.connection.rewindSession!('s1', '/repo', point, 'Docs')).toEqual({
+      sessionId: 'fork-of-s1',
+      refs: { u1: 'f1', a1: 'f2' },
+    })
+    expect(s.sdk.calls.find((call) => call.method === 'forkSession')?.args).toEqual([
+      's1',
+      { dir: '/repo', upToMessageId: 'a1', title: 'Docs' },
+    ])
+    // Nothing came before the first prompt: the host starts a session of its own.
+    const first = { ref: 'u1', text: 'One', occurrence: 1 }
+    expect(await s.connection.rewindSession!('s1', '/repo', first, null)).toEqual({ sessionId: '' })
+    expect(s.sdk.calls.filter((call) => call.method === 'forkSession')).toHaveLength(1)
+    const missing = { ref: null, text: 'Three', occurrence: 1 }
+    await expect(s.connection.rewindSession!('s1', '/repo', missing, null)).rejects.toBeInstanceOf(
+      AgentRequestError,
+    )
   })
 
   it('copies a session under a new id without opening it', async () => {

@@ -105,6 +105,8 @@ export function blockedText(reason: BlockedReason, agentName: (id: string) => st
     }
     case 'unusable':
       return UNUSABLE_TEXT[reason.why](agentName(reason.agentId))
+    case 'tools':
+      return `它要用 ${reason.missing.join('、')}，这台电脑上没装或已关掉。在市场里装好后重试。`
     case 'no_agent':
       return '没有允许 Auto 选的 Agent。去 设置 › Agent 打开一个，或者固定一个。'
     case 'no_picker':

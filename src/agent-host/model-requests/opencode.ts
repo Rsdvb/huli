@@ -14,6 +14,7 @@ import {
   type RequestTurn,
 } from '@shared/model-requests'
 import type { AgentId } from '@shared/thread'
+import { t } from '../i18n'
 import { arr, num, obj, preview, str, summarizeActions } from './claude-transcript'
 import { foldAll, type ModelRequestsReader } from './reader'
 
@@ -32,7 +33,8 @@ export interface OpenCodeSessions {
 
 /** How many of OpenCode's pages one read takes at most, looking for the start of a turn. */
 const PAGES = 8
-const MESSAGE_IDS = /^msg_[A-Za-z0-9]+(,msg_[A-Za-z0-9]+)*$/
+// A fork's copied messages end in `_` and a number.
+const MESSAGE_IDS = /^msg_[A-Za-z0-9_]+(,msg_[A-Za-z0-9_]+)*$/
 
 /** The cursor of the messages older than one, made the way OpenCode makes its own. */
 export function cursorBefore(messageId: string): string {
@@ -342,13 +344,13 @@ export function opencodeModelRequests(deps: {
 
     async raw(target, raw, full) {
       const sessions = deps.sessions(target.agentId)
-      if (!sessions) throw new Error('This agent keeps no record Kettu reads')
+      if (!sessions) throw new Error(t('modelRequest.noRecord'))
       if (!MESSAGE_IDS.test(raw)) throw new Error('Not a request of this session')
       const records = await Promise.all(
         raw.split(',').map((id) => sessions.message(target.acpSessionId, id)),
       )
       if (records.some((r) => r === null)) {
-        throw new Error('OpenCode no longer has these messages; open the request again')
+        throw new Error(t('modelRequest.openCodeGone'))
       }
       return foldAll(records, full)
     },
