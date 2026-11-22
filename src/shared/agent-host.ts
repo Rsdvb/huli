@@ -130,6 +130,7 @@ import type { AgentProfiles, ProfileBalance } from './provider-profiles'
 import type { PathCompletion } from './remote/host-admin'
 import type { ReportOrigin } from './report'
 import type { AutoApprove } from './risk'
+import type { AgentSandboxSupport, ContainerStatus, SandboxChoice } from './sandbox'
 import type {
   RoutineChanges,
   RoutineDraft,
@@ -446,6 +447,8 @@ export interface AgentStatus {
   profiles?: AgentProfiles
   // Huli: the balances the vendors of its profiles report, by profile, where a vendor has an API.
   profileBalances?: ProfileBalance[]
+  // Huli: the sandbox tiers it can run in on this host; absent from older hosts, which have none.
+  sandbox?: AgentSandboxSupport
   state: AgentState
   // From `initialize`, a binary agent's `--version`, or the `requires` program's (Pi's `pi`); for
   // Kettu's own install of a program that reports none, the release it installed.
@@ -794,6 +797,9 @@ export interface Project {
   // Huli: which permission requests the host allows by itself in this project; null keeps the
   // settings' default, absent on hosts older than it.
   autoApprove?: AutoApprove | null
+  // Huli: the sandbox its sessions start in; null keeps the settings' default, absent on hosts
+  // older than sandboxes.
+  sandbox?: SandboxChoice | null
 }
 
 export type SessionAttention = 'none' | 'permission' | 'unread' | 'error'
@@ -853,6 +859,11 @@ export interface SessionSummary {
   // Huli: the API provider profile it runs with, by id among its agent's; null or absent for the
   // agent's own sign-in.
   profileId?: string | null
+  // Huli: the sandbox it runs in; null for none, absent from hosts older than sandboxes.
+  // `sandboxUnknown` marks one stored by a newer version, which does not start until another is
+  // picked.
+  sandbox?: SandboxChoice | null
+  sandboxUnknown?: boolean
   pinnedAt: number | null // when the user pinned it; a top-level session only
   archivedAt: number | null // when the user archived it; off the sidebar while set
   acpSessionId: string | null // the harness's own id for it, which its CLI resumes; null until known
@@ -1301,6 +1312,9 @@ export interface HostContract {
     params: { path: string; autoApprove: AutoApprove | null }
     result: void
   }
+  // Huli: the sandbox the project's new sessions start in; null keeps the default. The windows'
+  // alone, like what is allowed without asking.
+  'projects.setSandbox': { params: { path: string; sandbox: SandboxChoice | null }; result: void }
   // How the project names and prepares its sessions' worktrees.
   'projects.worktreeSettings': { params: { path: string }; result: ProjectWorktreeSettings }
   // A device needs the owner's leave to use the terminal to change these, as they run a command.
@@ -1329,6 +1343,9 @@ export interface HostContract {
       // Huli: the agent's API provider profile it runs with; null for the agent's own sign-in,
       // absent for the agent's default.
       profileId?: string | null
+      // Huli: the sandbox it runs in; absent for the project's or the default. A device's choice
+      // is ignored: it starts in the computer's.
+      sandbox?: SandboxChoice
     }
     result: SessionSummary
   }
@@ -1418,6 +1435,7 @@ export interface HostContract {
       replace?: boolean
       // Huli: as for sessions.create.
       profileId?: string | null
+      sandbox?: SandboxChoice
     }
     result: SessionSummary
   }
@@ -1425,6 +1443,9 @@ export interface HostContract {
   // Huli: the API provider profile the session runs with from its next turn, between turns; null
   // for its agent's own sign-in. Its agent starts again on the session's history.
   'sessions.setProfile': { params: { sessionId: string; profileId: string | null }; result: void }
+  // Huli: the sandbox the session runs in from its next turn, between turns; its agent starts again
+  // on the session's history in it. The windows' alone.
+  'sessions.setSandbox': { params: { sessionId: string; sandbox: SandboxChoice }; result: void }
   // `fork`: a copy of the session is imported instead, for one another program still has open.
   'sessions.import': {
     // Huli: `source`, chosen among the Claude desktop app's sessions, so it takes the app's title,
@@ -2130,6 +2151,12 @@ export interface HostContract {
   // A subscription's address goes in with `addSubscription` and never comes out; the host
   // downloads it before it adds it.
   'agentNetwork.status': { params: void; result: AgentNetworkStatus }
+  // Huli: the container engine and Kite's container image, looked for only when asked. Pulling the
+  // image downloads it, which the window asks the user about first with its size; removing it
+  // frees its space. The windows' alone.
+  'sandbox.containerStatus': { params: void; result: ContainerStatus }
+  'sandbox.pullImage': { params: void; result: ContainerStatus }
+  'sandbox.removeImage': { params: void; result: ContainerStatus }
   'agentNetwork.addSubscription': { params: { name: string; url: string }; result: { id: string } }
   // A subscription from a file's text, Clash YAML or a list of node links, at most 10 MiB; it is
   // never refreshed, only imported again.
@@ -2290,6 +2317,7 @@ export const HOST_METHODS = [
   'projects.touch',
   'projects.pin',
   'projects.setAutoApprove',
+  'projects.setSandbox',
   'projects.worktreeSettings',
   'projects.setWorktreeSettings',
   'paths.complete',
@@ -2298,6 +2326,7 @@ export const HOST_METHODS = [
   'sessions.prepare',
   'sessions.discard',
   'sessions.setProfile',
+  'sessions.setSandbox',
   'sessions.import',
   'sessions.open',
   'sessions.snapshot',
@@ -2514,6 +2543,9 @@ export const HOST_METHODS = [
   'agentHistory.planCopy',
   'agentHistory.copy',
   'agentNetwork.status',
+  'sandbox.containerStatus',
+  'sandbox.pullImage',
+  'sandbox.removeImage',
   'agentNetwork.addSubscription',
   'agentNetwork.importSubscription',
   'agentNetwork.reimportSubscription',

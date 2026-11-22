@@ -71,6 +71,7 @@ import {
   ConfigValueError,
   DEFAULT_MODE,
   effortFor,
+  MODE_ID,
   modeFromPolicy,
   modeOf,
   type Settings,
@@ -120,6 +121,7 @@ import type {
   UserInput,
 } from './protocol'
 import { messageStream, methodNotFound, RpcClosed, RpcError, RpcPeer } from './rpc'
+import { codexPolicy, codexWindowsReady, type SessionSandbox } from '../sandbox/native'
 
 /** What the driver knows of the launch, for the sign-in and sign-out Codex runs in a terminal. */
 export interface CodexLaunch {
@@ -457,6 +459,8 @@ interface ThreadRecord {
   plan: string | null
   /** The items of questions Codex asked without waiting, each asked of the user once. */
   asked: Set<string>
+  /** Huli: the session's own sandbox, which every turn's policy is held to; null for none. */
+  sandbox: SessionSandbox | null
 }
 
 function threadRecord(
@@ -476,7 +480,31 @@ function threadRecord(
     watch: null,
     plan: null,
     asked: new Set(),
+    sandbox: null,
   }
+}
+
+/** The mode whose turns run in no sandbox. */
+const FULL_ACCESS_MODE = 'agent-full-access'
+
+/** Huli: a sandboxed session's settings: full access gives way to the default mode. */
+function sandboxedSettings(settings: Settings, sandbox: SessionSandbox | null): Settings {
+  return sandbox && settings.mode === FULL_ACCESS_MODE
+    ? { ...settings, mode: DEFAULT_MODE }
+    : settings
+}
+
+/** Huli: the native sandbox a session asks for, which Codex holds; null for none or a container. */
+function nativeSandbox(options: SessionOptions): SessionSandbox | null {
+  return options.sandbox?.tier === 'native' ? options.sandbox : null
+}
+
+/** Huli: the policy a mode's turns run with, held to the session's sandbox. */
+function heldPolicy(policy: SandboxPolicy, sandbox: SessionSandbox | null): SandboxPolicy {
+  if (!sandbox) return policy
+  // Kite's modes never name Codex's external sandbox, which would hand the holding to Kite.
+  if (policy.type === 'externalSandbox') throw new Error("An external sandbox is not Codex's own")
+  return codexPolicy(policy, sandbox)
 }
 
 const UNKNOWN_SETTINGS: Settings = {
@@ -805,18 +833,45 @@ export class CodexConnection implements AgentConnection {
     return buildConfig(record.settings, await this.listModels())
   }
 
+  /**
+   * Huli: the session's sandbox once Codex can hold it. On Windows its sandbox must have been set
+   * up, which Codex reports; one that is not, or a Codex too old to say, stops the start.
+   */
+  private async sandboxReady(options: SessionOptions): Promise<SessionSandbox | null> {
+    const sandbox = nativeSandbox(options)
+    if (!sandbox) return null
+    if (sandbox.network === 'agent') {
+      throw new AgentRequestError('agent_error', t('sandbox.codexNetwork'))
+    }
+    if (this.launch?.platform !== 'win32') return sandbox
+    let ready: ReturnType<typeof codexWindowsReady> = null
+    try {
+      ready = codexWindowsReady(await this.call<unknown>('windowsSandbox/readiness', null))
+    } catch (error) {
+      if (!(error instanceof RpcError)) throw error
+    }
+    if (ready !== 'ready') {
+      throw new AgentRequestError(
+        'agent_error',
+        t(ready === 'updateRequired' ? 'sandbox.codexWindowsUpdate' : 'sandbox.codexWindowsSetup'),
+      )
+    }
+    return sandbox
+  }
+
   async newSession(cwd: string, options: SessionOptions = {}): Promise<OpenedSession> {
     await this.requireSignIn()
     // A read of the agent's options has nobody waiting on it, so it lists what Codex offers now.
     if (options.hidden === 'options') await this.readModels()
     const mode = modeOf(DEFAULT_MODE)!
     const hidden = options.hidden !== undefined
+    const sandbox = await this.sandboxReady(options)
     await this.setSkillRoots(options.skillRoots)
     const response = await this.call<ThreadResponse>('thread/start', {
       cwd,
       approvalPolicy: mode.approvalPolicy,
       approvalsReviewer: mode.approvalsReviewer,
-      sandbox: sandboxMode(mode.sandbox),
+      sandbox: sandboxMode(heldPolicy(mode.sandbox, sandbox)),
       config: sessionConfig(cwd, options),
       ...developerInstructions(options),
       ephemeral: hidden,
@@ -824,6 +879,7 @@ export class CodexConnection implements AgentConnection {
     })
     const record = await this.record(response.thread.id, cwd, response, hidden)
     record.settings = { ...record.settings, mode: DEFAULT_MODE }
+    record.sandbox = sandbox
     return { sessionId: record.id, config: await this.config(record) }
   }
 
@@ -834,7 +890,9 @@ export class CodexConnection implements AgentConnection {
   ): Promise<ThreadRecord> {
     await this.requireSignIn()
     const seen = this.threads.get(threadId)
-    const known = seen?.known ? seen.settings : undefined
+    const sandbox = await this.sandboxReady(options)
+    // Huli: full access runs in no sandbox, so a sandboxed session goes on in the default mode.
+    const known = seen?.known ? sandboxedSettings(seen.settings, sandbox) : undefined
     const mode = known ? modeOf(known.mode) : null
     await this.setSkillRoots(options.skillRoots)
     const response = await this.call<ThreadResponse>('thread/resume', {
@@ -844,14 +902,18 @@ export class CodexConnection implements AgentConnection {
         ? {
             approvalPolicy: mode.approvalPolicy,
             approvalsReviewer: mode.approvalsReviewer,
-            sandbox: sandboxMode(mode.sandbox),
+            sandbox: sandboxMode(heldPolicy(mode.sandbox, sandbox)),
           }
-        : {}),
+        : sandbox
+          ? { sandbox: sandboxMode(heldPolicy(modeOf(DEFAULT_MODE)!.sandbox, sandbox)) }
+          : {}),
       config: sessionConfig(cwd, options),
       ...developerInstructions(options),
       excludeTurns: true,
     })
     const record = await this.record(threadId, cwd, response, options.hidden !== undefined, known)
+    record.settings = sandboxedSettings(record.settings, sandbox)
+    record.sandbox = sandbox
     record.prompted = true
     return record
   }
@@ -928,7 +990,9 @@ export class CodexConnection implements AgentConnection {
     const source = from?.known ? from.settings : undefined
     const lastTurnId = point ? await this.turnOf(sessionId, point) : null
     const hidden = options.hidden !== undefined
-    const mode = modeOf(source?.mode ?? DEFAULT_MODE)!
+    const sandbox = await this.sandboxReady(options)
+    const held = source ? sandboxedSettings(source, sandbox) : undefined
+    const mode = modeOf(held?.mode ?? DEFAULT_MODE)!
     await this.setSkillRoots(options.skillRoots)
     const response = await this.call<ThreadResponse>('thread/fork', {
       threadId: sessionId,
@@ -936,7 +1000,7 @@ export class CodexConnection implements AgentConnection {
       cwd,
       approvalPolicy: mode.approvalPolicy,
       approvalsReviewer: mode.approvalsReviewer,
-      sandbox: sandboxMode(mode.sandbox),
+      sandbox: sandboxMode(heldPolicy(mode.sandbox, sandbox)),
       // A fork takes the model and effort of the configuration, not of its source.
       ...(source ? { model: source.model } : {}),
       config: sessionConfig(cwd, options),
@@ -944,7 +1008,8 @@ export class CodexConnection implements AgentConnection {
       ephemeral: hidden,
       excludeTurns: true,
     })
-    const record = await this.record(response.thread.id, cwd, response, hidden, source)
+    const record = await this.record(response.thread.id, cwd, response, hidden, held)
+    record.sandbox = sandbox
     record.prompted = true
     return { sessionId: record.id, config: await this.config(record) }
   }
@@ -1611,7 +1676,7 @@ export class CodexConnection implements AgentConnection {
       threadId: record.id,
       approvalPolicy: mode.approvalPolicy,
       approvalsReviewer: mode.approvalsReviewer,
-      sandboxPolicy: mode.sandbox,
+      sandboxPolicy: heldPolicy(mode.sandbox, record.sandbox),
       summary: 'auto',
       ...(settings.model ? { model: settings.model } : {}),
       ...(settings.effort ? { effort: settings.effort } : {}),
@@ -1779,6 +1844,10 @@ export class CodexConnection implements AgentConnection {
     const record = this.threads.get(sessionId)
     if (!record) throw new AgentRequestError('agent_error', `Codex has no session ${sessionId}`)
     const models = await this.listModels()
+    // Huli: full access runs in no sandbox, so a sandboxed session never takes it.
+    if (record.sandbox && optionId === MODE_ID && value === FULL_ACCESS_MODE) {
+      throw new AgentRequestError('agent_error', t('sandbox.codexFullAccess'), -32602)
+    }
     try {
       record.settings = applyOption(record.settings, models, optionId, value)
     } catch (error) {
@@ -2030,7 +2099,7 @@ export class CodexConnection implements AgentConnection {
       effort: record.settings.effort,
       cwd: record.cwd ?? '',
       approval: String(mode.approvalPolicy),
-      sandbox: sandboxMode(mode.sandbox),
+      sandbox: sandboxMode(heldPolicy(mode.sandbox, record.sandbox)),
       account,
       sessionId: record.id,
       usage: record.usage,

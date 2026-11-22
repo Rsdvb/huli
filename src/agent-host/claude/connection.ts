@@ -48,6 +48,7 @@ import type { HostedContext } from '../driver'
 import { formFields, isWebUrl } from '../elicitation'
 import type { Env } from '../find-command'
 import { t } from '../i18n'
+import { claudeSandbox } from '../sandbox/native'
 import {
   addTokenTotals,
   firstUserMessage,
@@ -1142,6 +1143,11 @@ export class ClaudeConnection implements AgentConnection {
       ...(Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
       ...(plugins.length > 0 ? { plugins } : {}),
       ...(Object.keys(flags).length > 0 ? { settings: flags } : {}),
+      // Huli: the session's shell commands in Claude Code's own sandbox, which fails the start
+      // where it cannot run rather than run them unheld.
+      ...(options.sandbox?.tier === 'native' && !bare
+        ? { sandbox: claudeSandbox(options.sandbox, os.homedir(), process.platform) }
+        : {}),
       ...runLimits(this.context.claudeRun?.() ?? null, options, mainModel),
       // Only for the user's own sessions: Kettu's own never offer a next prompt.
       ...(!hidden && !how.quiet && this.context.claudePromptSuggestions?.()

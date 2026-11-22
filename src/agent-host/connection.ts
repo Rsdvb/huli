@@ -25,6 +25,7 @@ import type {
   UserContent,
 } from '@shared/thread'
 import type { RiskSubject } from './risk/classify'
+import type { SessionSandbox } from './sandbox/native'
 import type { MapperContext, MapperOutput } from './session-updates'
 
 export interface PermissionRequest {
@@ -441,6 +442,12 @@ export interface SessionOptions {
    * sessions each run a process of their own; the others' processes serve several sessions.
    */
   env?: Record<string, string>
+  /**
+   * Huli: the sandbox the session runs in; absent for none. `native` is the driver's to turn on
+   * with the harness's own sandbox, failing the start where it cannot; `container` is already held
+   * by the container the agent runs in.
+   */
+  sandbox?: SessionSandbox
 }
 
 /** Kettu's memory as a session starts with it. */

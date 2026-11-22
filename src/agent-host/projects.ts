@@ -6,6 +6,7 @@ import type { Project } from '@shared/agent-host'
 import { DEFAULT_WORKTREE_SETTINGS, type ProjectWorktreeSettings } from '@shared/git'
 import type { Platform } from '@shared/platform'
 import type { AutoApprove } from '@shared/risk'
+import { sameSandbox, type SandboxChoice } from '@shared/sandbox'
 import { invalidParams, notFound } from './errors'
 import { canonicalizePath, folderName, isAbsolutePath, pathKey } from './paths'
 import type { JsonFile, ProjectRecord, ProjectsFile } from './storage'
@@ -59,6 +60,7 @@ export class Projects {
         lastOpenedAt: record.lastOpenedAt,
         pinnedAt: record.pinnedAt ?? null,
         autoApprove: record.autoApprove ?? null,
+        sandbox: record.sandbox ? { ...record.sandbox } : null,
       }))
   }
 
@@ -151,6 +153,20 @@ export class Projects {
     if ((record.autoApprove ?? null) === level) return
     if (level === null) delete record.autoApprove
     else record.autoApprove = level
+    this.changed()
+  }
+
+  /** Huli: the sandbox the project's new sessions start in; null keeps the default. */
+  sandbox(value: string): SandboxChoice | null {
+    const record = this.find(value)
+    return record?.sandbox ? { ...record.sandbox } : null
+  }
+
+  setSandbox(record: ProjectRecord, choice: SandboxChoice | null): void {
+    const before = record.sandbox ?? null
+    if (before === null ? choice === null : choice !== null && sameSandbox(before, choice)) return
+    if (choice === null) delete record.sandbox
+    else record.sandbox = { ...choice }
     this.changed()
   }
 

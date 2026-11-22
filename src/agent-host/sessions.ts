@@ -63,6 +63,14 @@ import type {
 } from '@shared/host-control'
 import type { Platform } from '@shared/platform'
 import type { AutoApprove, PermissionRisk } from '@shared/risk'
+import {
+  resolveSandbox,
+  sameSandbox,
+  supportsChoice,
+  type SandboxChoice,
+  type SandboxSettings,
+} from '@shared/sandbox'
+import type { SessionSandbox } from './sandbox/native'
 import type { PortDevice } from '@shared/remote/device'
 import type { PermissionScope } from '@shared/routines'
 import type { HostSettings } from '@shared/settings'
@@ -546,6 +554,13 @@ export interface SessionManagerDeps {
    * it, none.
    */
   autoApprove?(): AutoApprove
+  /**
+   * Huli: the sandbox default of a project that keeps none of its own, and its approvals rule;
+   * without it every session starts in none.
+   */
+  sandbox?(): SandboxSettings | undefined
+  /** Huli: the port of the listener the agent's network setting gives it; null for none. */
+  agentProxyPort?(agentId: AgentId): number | null
   /** Where threads are stored; without it every session opens through its agent. */
   threads: ThreadStore | null
   /**
@@ -661,6 +676,8 @@ interface PrepareParams {
   parentId?: string
   /** Huli: the profile it runs with, resolved; absent for the agent's own sign-in. */
   profileId?: string
+  /** Huli: the sandbox it runs in, resolved; absent for none. */
+  sandbox?: SandboxChoice
 }
 
 /** A session opened for a window's New session, outside the index until its first message. */
@@ -1259,6 +1276,8 @@ function sessionIssue(url: string): SessionIssue | null {
 
 export class SessionManager {
   private readonly records = new Map<string, SessionRecord>()
+  /** Huli: the sessions whose agent runs in a container of their own now. */
+  private readonly containerLives = new Set<string>()
   /** Huli: what each session's pull request automation saw last; in memory, read again at start. */
   private readonly prFlowStates = new Map<string, PrFlowState>()
   private readonly live = new Map<string, Live>()
@@ -1395,6 +1414,7 @@ export class SessionManager {
     deps.agents.hooks = {
       liveSessions: (agentId) => this.connectedCount(agentId),
       agentExited: (agentId) => this.agentExited(agentId),
+      containerExited: (sessionId) => this.containerExited(sessionId),
       signedIn: (agentId) => this.agentSignedIn(agentId),
       optionsKnown: (agentId) => !deps.options || deps.options.known(agentId),
       optionsSeen: (agentId, config, folder) => {
@@ -1652,7 +1672,9 @@ export class SessionManager {
   private connectedCount(agentId: AgentId): number {
     let count = 0
     for (const live of this.live.values()) {
-      if (live.record.agentId === agentId && CONNECTED.has(live.thread.session.status)) count++
+      // Huli: a session in its own container holds nothing of the agent's shared process.
+      if (live.record.agentId !== agentId || this.contained(live)) continue
+      if (CONNECTED.has(live.thread.session.status)) count++
     }
     return count
   }
@@ -1738,6 +1760,8 @@ export class SessionManager {
       cache: record.cache ?? null,
       model: record.model ?? null,
       profileId: record.profileId ?? null,
+      sandbox: record.sandbox ? { ...record.sandbox } : null,
+      ...(record.sandboxUnknown ? { sandboxUnknown: true } : {}),
       pinnedAt: record.pinnedAt ?? null,
       archivedAt: record.archivedAt ?? null,
       acpSessionId: record.acpSessionId || null,
@@ -4083,10 +4107,17 @@ export class SessionManager {
         )
       : null
     const provider = this.providerOf(record)
+    const sandbox = this.sessionSandbox(record)
+    // Huli: a container reaches none of the computer's programs, so neither MCP servers, skills
+    // nor plugins from the computer go in.
+    const contained = sandbox?.tier === 'container'
     return {
-      mcpServers: [...own, ...this.libraryServers(sessionId, record, runtime, own)],
+      mcpServers: contained
+        ? []
+        : [...own, ...this.libraryServers(sessionId, record, runtime, own)],
       ...(provider ? { provider } : {}),
-      ...skills,
+      ...(sandbox ? { sandbox } : {}),
+      ...(contained ? {} : skills),
       ...(projectMcp ? { projectMcp } : {}),
       ...(projectHooks ? { projectHooks } : {}),
       ...(memory ? { memory } : {}),
@@ -4094,6 +4125,131 @@ export class SessionManager {
       ...(append ? { systemPromptAppend: append } : {}),
       ...(record.origin === 'routine' ? { routine: true } : {}),
       ...(ports ? { env: portEnv(ports) } : {}),
+    }
+  }
+
+  /**
+   * Huli: the sandbox a new session runs in: the one it inherits from the session that started it
+   * or its parent, else the one asked for, else its project's, else the default; undefined for
+   * none. One the agent cannot run in here is refused, never traded for another.
+   */
+  private sandboxFor(
+    agentId: AgentId,
+    projectPath: string | null,
+    asked: SandboxChoice | undefined,
+    from: string | undefined,
+  ): SandboxChoice | undefined {
+    const inherited = from === undefined ? undefined : this.records.get(from)?.sandbox
+    const project = projectPath === null ? null : this.deps.projects.sandbox(projectPath)
+    const choice = inherited ?? resolveSandbox(asked, project, this.deps.sandbox?.())
+    if (choice.tier === 'off') return undefined
+    this.assertSandbox(agentId, choice)
+    return choice
+  }
+
+  /** Huli: the record field of the sandbox a session Kite starts itself runs in. */
+  private defaultSandbox(agentId: AgentId, projectPath: string): { sandbox?: SandboxChoice } {
+    const sandbox = this.sandboxFor(agentId, projectPath, undefined, undefined)
+    return sandbox ? { sandbox } : {}
+  }
+
+  private assertSandbox(agentId: AgentId, choice: SandboxChoice): void {
+    if (choice.tier === 'off') return
+    if (supportsChoice(this.deps.agents.sandboxSupport(agentId), choice)) return
+    throw invalidParams(
+      t('sandbox.unsupported', {
+        agent: this.deps.agents.name(agentId),
+        tier: t(`sandbox.tier.${choice.tier}`),
+        network: t(`sandbox.network.${choice.network}`),
+      }),
+    )
+  }
+
+  /**
+   * Huli: the sandbox as the session's driver gets it; undefined for none. A choice stored by a
+   * newer version stops the start, as does one its agent cannot run in any longer.
+   */
+  private sessionSandbox(record: SessionRecord): SessionSandbox | undefined {
+    if (record.sandboxUnknown) throw new HostError('invalid_params', t('sandbox.unknown'))
+    const choice = record.sandbox
+    if (!choice || choice.tier === 'off') return undefined
+    this.assertSandbox(record.agentId, choice)
+    const roots = [...new Set([workDir(record), record.projectPath])]
+    const proxyPort =
+      choice.network === 'agent' ? (this.deps.agentProxyPort?.(record.agentId) ?? null) : null
+    if (choice.network === 'agent' && proxyPort === null) {
+      throw new HostError(
+        'invalid_params',
+        t('sandbox.noExit', { agent: this.deps.agents.name(record.agentId) }),
+      )
+    }
+    return { tier: choice.tier, network: choice.network, roots, proxyPort }
+  }
+
+  /** Huli: whether the session's agent runs in a container of the session's own. */
+  private contained(live: Live): boolean {
+    return live.record.sandbox?.tier === 'container' || this.containerLives.has(live.id)
+  }
+
+  /**
+   * Huli: the agent the session attaches to: the agent's shared process, or for a container
+   * session a process of its own in its container, which starts with the session.
+   */
+  private async runtimeFor(live: Live): Promise<AgentRuntime> {
+    const { record } = live
+    if (record.sandbox?.tier !== 'container') {
+      if (record.sandboxUnknown) throw new HostError('invalid_params', t('sandbox.unknown'))
+      return this.deps.agents.ensureReady(record.agentId)
+    }
+    this.assertSandbox(record.agentId, record.sandbox)
+    const network = record.sandbox.network === 'none' ? 'none' : 'open'
+    const runtime = await this.deps.agents.containerRuntime(
+      live.id,
+      record.agentId,
+      await this.cwdOf(live),
+      network,
+    )
+    this.containerLives.add(live.id)
+    return runtime
+  }
+
+  /**
+   * Huli: the sandbox the session runs in from its next turn; its agent starts again in it on the
+   * session's history. Between turns only, as a profile changes.
+   */
+  async setSandbox(sessionId: string, choice: SandboxChoice): Promise<void> {
+    this.assertRegistered(sessionId)
+    const record = this.recordOf(sessionId)
+    if (record.origin === 'subagent') {
+      throw new HostError('restricted', t('session.subagent.noConfig'))
+    }
+    const next = choice.tier === 'off' ? undefined : choice
+    if (next) this.assertSandbox(record.agentId, next)
+    const before = record.sandbox
+    if (!record.sandboxUnknown && (before && next ? sameSandbox(before, next) : before === next)) {
+      return
+    }
+    const live = this.live.get(sessionId)
+    if (live?.prepared) throw invalidParams(t('sandbox.prepared'))
+    if (live) {
+      const status = live.thread.session.status
+      const idle = !live.turn && SWITCHABLE.has(status)
+      if (!idle || (live.connection && (!live.saved || this.holdReason(live) !== null))) {
+        throw new HostError('busy', t('sandbox.betweenTurns'))
+      }
+    }
+    delete record.sandboxUnknown
+    if (next) record.sandbox = { ...next }
+    else delete record.sandbox
+    if (live?.saved) this.save(live)
+    else if (!live) this.saveRecord(sessionId)
+    this.touch(sessionId)
+    this.deps.diagnostics.log('info', `Session ${sessionId} changed its sandbox`)
+    if (!live?.connection) return
+    try {
+      await this.attachAgain(live)
+    } catch (error) {
+      throw agentError(error)
     }
   }
 
@@ -5051,6 +5207,8 @@ export class SessionManager {
       worktree?: { base: string; branch?: string }
       /** Huli: the profile it runs with; null for the agent's own sign-in, absent for its default. */
       profileId?: string | null
+      /** Huli: the sandbox it runs in; absent for its project's or the default. */
+      sandbox?: SandboxChoice
       /** Huli: the best-of-N group it is a run of. */
       group?: StoredGroup
       /** Huli: the GitHub issue it is started for, by its canonical URL. */
@@ -5062,6 +5220,13 @@ export class SessionManager {
     if (!agents.has(params.agentId)) throw invalidParams(`Unknown agent ${params.agentId}`)
     agents.assertEnabled(params.agentId)
     const profileId = this.profileFor(params.agentId, params.profileId)
+    // Huli: a session another session's agent starts, or a sub-session, is held as that one is.
+    const sandbox = this.sandboxFor(
+      params.agentId,
+      params.projectPath,
+      params.sandbox,
+      params.startedBy ?? params.parentId,
+    )
     // Before a prepared session is taken over, so a refused prompt leaves it prepared.
     const prompt = params.prompt && this.hydrate(params.prompt)
     // A prepared session's agent already works in the project's folder, so a worktree starts anew.
@@ -5072,6 +5237,7 @@ export class SessionManager {
         prompt,
         device: params.device,
         profileId,
+        sandbox,
       })
       if (adopted) return adopted
     }
@@ -5136,6 +5302,7 @@ export class SessionManager {
       description: null,
       branch: null,
       ...(profileId !== undefined ? { profileId } : {}),
+      ...(sandbox ? { sandbox } : {}),
       ...(params.group ? { group: { ...params.group } } : {}),
       ...(params.issue && GITHUB_ISSUE_URL.test(params.issue) ? { issue: params.issue } : {}),
       ...(params.parentId === undefined ? { board: { status: NEW_BOARD_STATUS, at: now } } : {}),
@@ -5224,6 +5391,7 @@ export class SessionManager {
       description: null,
       branch: null,
       ...this.defaultProfile(params.agentId),
+      ...this.defaultSandbox(params.agentId, projectPath),
     }
     const live = this.makeLive(record, false, 'starting')
     live.unread = false
@@ -5291,6 +5459,7 @@ export class SessionManager {
       description: null,
       branch: null,
       ...this.defaultProfile(params.agentId),
+      ...this.defaultSandbox(params.agentId, projectPath),
     }
     const live = this.makeLive(record, false, 'starting')
     live.unread = false
@@ -5385,10 +5554,11 @@ export class SessionManager {
    * answers. Resolves once `session/new` has answered and the start values are set.
    */
   async prepare(
-    asked: Omit<PrepareParams, 'profileId'> & {
+    asked: Omit<PrepareParams, 'profileId' | 'sandbox'> & {
       options?: Record<string, string | boolean>
       replace?: boolean
       profileId?: string | null
+      sandbox?: SandboxChoice
     },
     portId: string,
   ): Promise<SessionSummary> {
@@ -5396,9 +5566,16 @@ export class SessionManager {
       throw invalidParams(`Unknown agent ${asked.agentId}`)
     }
     this.deps.agents.assertEnabled(asked.agentId)
-    const { profileId: askedProfile, ...rest } = asked
+    const { profileId: askedProfile, sandbox: askedSandbox, ...rest } = asked
     const profileId = this.profileFor(asked.agentId, askedProfile)
-    const params = { ...rest, ...(profileId !== undefined ? { profileId } : {}) }
+    const sandbox = this.sandboxFor(asked.agentId, asked.projectPath, askedSandbox, asked.parentId)
+    // Huli: a container starts with the session's first message, never for New session's screen.
+    if (sandbox?.tier === 'container') throw invalidParams(t('sandbox.container.noPrepare'))
+    const params = {
+      ...rest,
+      ...(profileId !== undefined ? { profileId } : {}),
+      ...(sandbox ? { sandbox } : {}),
+    }
     const key = preparedKey(params)
     const slot = this.slotOf(portId)
     const held = slot.next ?? (slot.stale ? null : slot.current)
@@ -5482,6 +5659,7 @@ export class SessionManager {
       description: null,
       branch: null,
       ...(params.profileId !== undefined ? { profileId: params.profileId } : {}),
+      ...(params.sandbox ? { sandbox: { ...params.sandbox } } : {}),
     }
     const options = params.options ?? {}
     const live = this.makeLive(record, false, 'starting')
@@ -5494,6 +5672,7 @@ export class SessionManager {
         projectPath: params.projectPath,
         ...(params.parentId !== undefined ? { parentId: params.parentId } : {}),
         ...(params.profileId !== undefined ? { profileId: params.profileId } : {}),
+        ...(params.sandbox ? { sandbox: params.sandbox } : {}),
       },
       openedAt: now,
       notices: [],
@@ -5650,11 +5829,17 @@ export class SessionManager {
     prompt: UserContent[] | undefined
     device?: FromDevice
     profileId: string | undefined
+    sandbox: SandboxChoice | undefined
   }): Promise<SessionSummary | null> {
     const asked = this.live.get(params.preparedId)
     if (!asked?.prepared || asked.record.agentId !== params.agentId) return null
     // Huli: one prepared with another profile runs elsewhere than the message is meant for.
     if (asked.record.profileId !== params.profileId) return null
+    // Huli: and one prepared in another sandbox is held otherwise than the message is meant to be.
+    const preparedIn = asked.record.sandbox
+    if (preparedIn ? !params.sandbox || !sameSandbox(preparedIn, params.sandbox) : params.sandbox) {
+      return null
+    }
     const { portId, key } = asked.prepared
     const slot = this.preparedSlots.get(portId)
     const live = slot?.stale && slot.next?.prepared?.key === key ? slot.next : asked
@@ -5700,7 +5885,7 @@ export class SessionManager {
     const gone = (): boolean => live.closing || this.live.get(live.id) !== live
     let runtime: AgentRuntime
     try {
-      runtime = await this.deps.agents.ensureReady(live.record.agentId)
+      runtime = await this.runtimeFor(live)
     } catch (error) {
       // Its failure, such as the agent's exit, no longer belongs to a session that went meanwhile.
       if (gone()) throw removedWhileStarting()
@@ -6211,7 +6396,7 @@ export class SessionManager {
     this.touch(live.id)
     let runtime: AgentRuntime
     try {
-      runtime = await this.deps.agents.ensureReady(live.record.agentId)
+      runtime = await this.runtimeFor(live)
     } catch (error) {
       throw this.failStart(live, error, { action: 'load' })
     }
@@ -6405,10 +6590,30 @@ export class SessionManager {
    * the agent, so a crash never brings back sessions no one is using.
    */
   private agentExited(agentId: AgentId): void {
+    // Huli: the sessions in containers of their own run on, on processes of their own.
+    this.connectionsGone(
+      agentId,
+      (live) => live.record.agentId === agentId && !this.contained(live),
+    )
+  }
+
+  /** Huli: a session's own agent in its container exited: that session, and its subagents, close. */
+  private containerExited(sessionId: string): void {
+    const root = this.live.get(sessionId)
+    if (!root) return
+    const connection = root.connection
+    this.containerLives.delete(sessionId)
+    this.connectionsGone(
+      root.record.agentId,
+      (live) => live.id === sessionId || (connection !== null && live.connection === connection),
+    )
+  }
+
+  private connectionsGone(agentId: AgentId, gone: (live: Live) => boolean): void {
     const name = this.deps.agents.name(agentId)
     const held: SessionRecord[] = []
     for (const live of [...this.live.values()]) {
-      if (live.record.agentId !== agentId) continue
+      if (!gone(live)) continue
       // New session prepares another once it needs one.
       if (live.prepared) {
         void this.dropPrepared(live, { agentGone: true })
@@ -7099,7 +7304,7 @@ export class SessionManager {
   private async attachStored(live: Live): Promise<AgentConnection> {
     const { record } = live
     const own = live.thread.session.config
-    const runtime = await this.deps.agents.ensureReady(record.agentId)
+    const runtime = await this.runtimeFor(live)
     const caps = runtime.init.capabilities
     const { connection } = runtime
     // A takeover's agent opens its own session at the values chosen for it, not the session's.
@@ -7698,6 +7903,9 @@ export class SessionManager {
     this.refuseIfCannotSend(sessionId)
     if (!this.deps.agents.has(agentId)) throw invalidParams(`Unknown agent ${agentId}`)
     this.deps.agents.assertEnabled(agentId)
+    // Huli: the session keeps its sandbox with another agent, which must be able to hold it.
+    const held = this.recordOf(sessionId).sandbox
+    if (held) this.assertSandbox(agentId, held)
     this.reportsSent.delete(sessionId)
     const hydrated = this.hydrate(params.content)
     const live = await this.revive(sessionId)
@@ -8816,6 +9024,8 @@ export class SessionManager {
       delete record.profileId
       Object.assign(record, this.defaultProfile(agentId))
     }
+    // Huli: a fork keeps its source's sandbox, which its agent must be able to hold.
+    if (record.sandbox) this.assertSandbox(agentId, record.sandbox)
     if (title === null) delete record.customTitle
     else record.customTitle = title
     // The takeovers it keeps, none of whose sessions it resumes: they belong to the source.
@@ -10620,8 +10830,12 @@ export class SessionManager {
     risk: Assessment | null,
   ): string | null {
     if (!risk || live.record.origin === 'routine') return null
-    const setting =
+    const chosen =
       this.deps.projects.autoApprove(live.record.projectPath) ?? this.deps.autoApprove?.() ?? 'off'
+    // Huli: in a sandbox the user lets allow project edits, an edit inside the project goes too;
+    // a high request never does.
+    const sandboxed = live.record.sandbox !== undefined && live.record.sandbox.tier !== 'off'
+    const setting = sandboxed && this.deps.sandbox?.()?.autoApproveEdits === true ? 'edits' : chosen
     if (!autoApproves(setting, risk)) return null
     if (this.planning(live)) return null
     return request.options.find((option) => option.kind === 'allow_once')?.id ?? null
@@ -12385,6 +12599,8 @@ export class SessionManager {
       this.checkpoint(live, { final: true })
     }
     this.dropLive(live)
+    // Huli: a session's container goes with it; it starts again when the session is used.
+    if (this.containerLives.delete(sessionId)) void this.deps.agents.stopContainer(sessionId)
     this.updateBadge()
     // A session that never reached the index has nothing to come back to.
     if (live.saved) this.touch(sessionId)
@@ -13232,6 +13448,7 @@ function preparedKey(params: PrepareParams): string {
     params.projectPath,
     params.parentId ?? null,
     params.profileId ?? null,
+    params.sandbox ?? null,
   ])
 }
 

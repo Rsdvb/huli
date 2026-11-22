@@ -187,6 +187,13 @@ import {
   type SignInImage,
 } from './connection'
 import type { Diagnostics } from './diagnostics'
+import {
+  agentSandboxSupport,
+  type AgentSandboxSupport,
+  type ContainerLaunch,
+} from '@shared/sandbox'
+import type { ContainerAgent, ContainerSandbox } from './sandbox/container'
+import type { ContainerRuntime } from './sandbox/runtimes'
 import type { AgentDriver, AgentTransport } from './driver'
 import { driverOf, preferredProtocol, protocolFor, type DriverOverrides } from './drivers'
 import { HostError, invalidParams } from './errors'
@@ -387,6 +394,8 @@ export interface AgentSessionHooks {
   optionsSeen(agentId: AgentId, config: ConfigOption[], folder: string): void
   /** The agent's configuration folder was changed in Settings; it applies from its next start. */
   configChanged(agentId: AgentId): void
+  /** Huli: a session's own agent in its container exited without being stopped. */
+  containerExited?(sessionId: string): void
 }
 
 /** The configuration folder an agent runs with, and the one picked in Settings, if any. */
@@ -468,6 +477,12 @@ export interface AgentManagerDeps extends DriverOverrides {
   secretStore?: SecretStore
   /** Huli: removes what the agent keeps of a hidden session it never prompted. */
   copies?: Pick<AgentCopies, 'discardUnprompted'>
+  /** Huli: the container tier's engine and image, made on first use; without it there is none. */
+  containers?(): Promise<ContainerSandbox>
+  /** Huli: the variables of the API keys Kite holds for the agent, which a container may get. */
+  envKeyNames?(agentId: AgentId): string[]
+  /** Huli: Kite's data folder, which no container mounts. */
+  dataDir?: string
 }
 
 /** An install that was stopped on purpose, which leaves the agent as it was rather than failed. */
@@ -644,6 +659,36 @@ class Slot {
   get name(): string {
     return this.added?.name ?? this.h.def.name
   }
+}
+
+/** Huli: why a session's container did not start, in the user's words, with what to do. */
+async function containerFailure(error: unknown, agent: string): Promise<HostError> {
+  const [{ ContainerError, SANDBOX_IMAGE }, { MountError }] = await Promise.all([
+    import('./sandbox/container'),
+    import('./sandbox/mounts'),
+  ])
+  if (error instanceof MountError) {
+    const reason = t(`sandbox.container.mountReason.${error.problem}`)
+    return new HostError('agent_unavailable', t('sandbox.container.mount', { reason }))
+  }
+  if (error instanceof ContainerError) {
+    const message =
+      error.reason === 'engine' && error.message === 'engineNotFound'
+        ? t('sandbox.container.engineNotFound')
+        : error.reason === 'engine' && error.message === 'engineNotRunning'
+          ? t('sandbox.container.engineNotRunning')
+          : error.reason === 'image'
+            ? t('sandbox.container.imageMissing', { mb: String(SANDBOX_IMAGE.downloadMb) })
+            : error.reason === 'install'
+              ? t('sandbox.container.install', { agent, detail: error.message })
+              : t('sandbox.container.failed', { agent, detail: error.message })
+    return new HostError('agent_unavailable', message)
+  }
+  if (error instanceof HostError) return error
+  return new HostError(
+    'agent_unavailable',
+    t('sandbox.container.failed', { agent, detail: (error as Error).message ?? String(error) }),
+  )
 }
 
 // For diagnostics, which stay in English.
@@ -846,6 +891,8 @@ export class AgentManager {
   /** The update command for each harness's user program, and what it was worked out for. */
   private readonly cliCommands = new Map<Harness, string>()
   private readonly cliCommandKeys = new Map<Harness, string>()
+  /** Huli: the sessions' own agents in containers, by session. */
+  private readonly containerRuns = new Map<string, ContainerRuntime>()
   hooks: AgentSessionHooks = {
     liveSessions: () => 0,
     agentExited: () => {},
@@ -3633,6 +3680,136 @@ export class AgentManager {
     return trees.reap(root, slot.name, this.tools())
   }
 
+  /** Huli: how a container would run the agent: an ACP package Kite installs, or a script. */
+  containerLaunch(agentId: AgentId): ContainerLaunch {
+    const def = this.slots.get(agentId)?.def
+    if (!def || (def.protocol ?? 'acp') !== 'acp') return 'other'
+    if (def.launch.kind === 'node-script') return 'node-script'
+    if (def.launch.kind === 'package' && !def.launch.library) return 'acp-package'
+    return 'other'
+  }
+
+  /** Huli: the sandbox tiers the agent can run in here. */
+  sandboxSupport(agentId: AgentId): AgentSandboxSupport {
+    const support = agentSandboxSupport(agentId, this.containerLaunch(agentId), this.deps.platform)
+    return this.deps.containers
+      ? support
+      : {
+          ...support,
+          container: { ...support.container, available: false, block: 'platform', networks: [] },
+        }
+  }
+
+  /** What a container runs for the agent: its package at the version a start wants, or its script. */
+  private containerAgent(slot: Slot): ContainerAgent {
+    const { def } = slot
+    const { launch } = def
+    if (launch.kind === 'node-script') {
+      return {
+        kind: 'script',
+        agentId: slot.id,
+        folder: path.dirname(launch.script),
+        file: path.basename(launch.script),
+        args: [],
+      }
+    }
+    const detection = slot.h.detection
+    const version =
+      detection?.state === 'available'
+        ? (detection.spec?.version ?? detection.adapter?.version ?? null)
+        : null
+    if (launch.kind !== 'package' || !version) {
+      throw new HostError('agent_unavailable', t('agent.notAvailable', { agent: slot.name }))
+    }
+    return {
+      kind: 'package',
+      agentId: slot.id,
+      package: launch.package,
+      version,
+      args: [...(launch.args ?? [])],
+    }
+  }
+
+  /**
+   * Huli: an agent process of the session's own, in a container that mounts `folder` alone. It
+   * shares nothing with the agent's other sessions: its exit reaches only this session.
+   */
+  async containerRuntime(
+    sessionId: string,
+    agentId: AgentId,
+    folder: string,
+    network: 'none' | 'open',
+  ): Promise<AgentRuntime> {
+    const running = this.containerRuns.get(sessionId)
+    if (running && !running.launched.hasExited) return running.runtime
+    const slot = this.registeredSlot(agentId)
+    this.assertEnabled(agentId)
+    if (this.stopped) throw new Error(`${slot.name} was not started: the host is stopping.`)
+    if (!this.deps.containers || this.containerLaunch(agentId) === 'other') {
+      throw new HostError(
+        'agent_unavailable',
+        t('sandbox.container.unsupported', { agent: slot.name }),
+      )
+    }
+    await this.detectAll()
+    const driver = driverOf(slot.def, this.deps, null)
+    if (driver.kind !== 'process') {
+      throw new HostError(
+        'agent_unavailable',
+        t('sandbox.container.unsupported', { agent: slot.name }),
+      )
+    }
+    const base = this.deps.env.agentEnv(agentId)
+    const env = this.deps.launchEnv?.(agentId, base) ?? base
+    const { startContainerRuntime } = await import('./sandbox/runtimes')
+    const containers = await this.deps.containers()
+    this.deps.diagnostics.event(agentId, 'container start', sessionId)
+    const run = await startContainerRuntime({
+      sessionId,
+      agentId,
+      def: slot.def,
+      agent: this.containerAgent(slot),
+      folder,
+      network,
+      env,
+      keyNames: this.deps.envKeyNames?.(agentId) ?? [],
+      platform: this.deps.platform,
+      dataDir: this.deps.dataDir ?? path.dirname(this.deps.adaptersDir),
+      launcher: this.deps.launcher,
+      driver,
+      hooks: this.connectionHooks(slot),
+      output: {
+        stderr: (text) => this.onStderr(slot, text),
+        event: (event, detail) => this.deps.diagnostics.event(slot.id, event, detail),
+      },
+      appVersion: this.deps.appVersion,
+      // The first start installs the agent into the container's volume.
+      initializeMs: Math.max(this.timings.initializeMs, 120_000),
+      containers,
+    }).catch(async (error: unknown) => {
+      throw await containerFailure(error, slot.name)
+    })
+    this.containerRuns.set(sessionId, run)
+    void run.launched.exited.then((info) => {
+      if (this.containerRuns.get(sessionId) !== run) return
+      this.containerRuns.delete(sessionId)
+      this.deps.diagnostics.event(agentId, 'container exited', describeExit(info))
+      void containers.removeContainer(run.name)
+      this.hooks.containerExited?.(sessionId)
+    })
+    return run.runtime
+  }
+
+  /** Huli: stops the session's container, once its sessions closed on it. */
+  async stopContainer(sessionId: string): Promise<void> {
+    const run = this.containerRuns.get(sessionId)
+    if (!run) return
+    this.containerRuns.delete(sessionId)
+    await run.stop().catch((error: unknown) => {
+      this.deps.diagnostics.log('warn', `Could not stop a sandbox container: ${String(error)}`)
+    })
+  }
+
   /**
    * Stops every agent in parallel, with the documented sequence, and every task and check, for a
    * quit. After `quitStopMs` it kills what still runs instead, so that the host still writes its
@@ -3662,6 +3839,7 @@ export class AgentManager {
       ...harnesses.map((h) => this.stopAutoUpdate(h, QUIT_REASON)),
       ...harnesses.map((h) => h.taskRun?.catch(() => {})),
       ...slots.map((slot) => this.stop(slot.id)),
+      ...[...this.containerRuns.keys()].map((sessionId) => this.stopContainer(sessionId)),
       ...[...this.givenUp].map(([launched, slot]) => this.reapTree(slot, launched)),
     ]).then(() => true)
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -6064,6 +6242,7 @@ export class AgentManager {
           ? { set: slot.apiKey, providers: slot.def.id === 'claude-code' }
           : null,
       ...profilesOf(this.deps.profiles?.(agentId)),
+      sandbox: this.sandboxSupport(agentId),
       state: slot.state,
       // Kettu's own install names its release when the program reports no version of its own.
       version: init?.version ?? h.binaryVersion ?? installed?.version ?? null,
