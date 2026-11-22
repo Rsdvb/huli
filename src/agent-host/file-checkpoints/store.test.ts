@@ -417,6 +417,18 @@ describe('the store', () => {
     expect(await store.has(SESSION, 'e:1', [folder])).toBe(false)
   })
 
+  it('keeps a file changed within the millisecond the listing ended in', async () => {
+    const folder = path.join(root, 'plain')
+    await write(folder, 'f.txt', 'just written')
+    let fixed: number | null = Math.floor((await stat(path.join(folder, 'f.txt'))).ctimeMs)
+    const store = checkpoints({ now: () => fixed ?? Date.now() })
+    await take(store, 'e:1', [folder])
+    fixed = null
+    await write(folder, 'f.txt', 'changed by the turn')
+    const preview = await store.preview(SESSION, { entryId: 'e:1' }, [folder])
+    expect(preview!.folders[0]!.changes.map((change) => change.key)).toEqual(['f.txt'])
+  })
+
   it('keeps nothing of a checkpoint whose turn did not wait for it', async () => {
     const folder = path.join(root, 'plain')
     await write(folder, 'f.txt', 'text\n')

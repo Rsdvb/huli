@@ -257,6 +257,14 @@ function sorted(files: Record<string, FileState>): Record<string, FileState> {
   return out
 }
 
+/**
+ * Whether a file changed after `at`, a time in whole milliseconds; a file system's times carry a
+ * fraction, and a change within the millisecond the listing ended in came before it.
+ */
+function changedAfter(info: { ctimeMs: number }, at: number): boolean {
+  return Math.floor(info.ctimeMs) > at
+}
+
 function identity(info: {
   dev: number
   ino: number
@@ -280,7 +288,7 @@ async function keep(
   spent: () => number,
 ): Promise<{ state: FileState; added: number } | null> {
   const before = await lstat(abs)
-  if (before.ctimeMs > at) return null
+  if (changedAfter(before, at)) return null
   if (before.isSymbolicLink()) {
     const target = await readlink(abs)
     const after = await lstat(abs)
