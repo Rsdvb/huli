@@ -2,7 +2,12 @@
 // is handed, and where a profile's key may go to read its balance.
 
 import { describe, expect, it, vi } from 'vitest'
-import { claudeProfileEnv, presetOf, type StoredProfile } from '@shared/provider-profiles'
+import {
+  claudeProfileEnv,
+  presetOf,
+  profileProblem,
+  type StoredProfile,
+} from '@shared/provider-profiles'
 import { ProviderProfiles } from './provider-profiles'
 
 const KEY = 'sk-profile-SECRET-0123456789abcd'
@@ -102,6 +107,33 @@ describe('the profiles the agent host holds', () => {
     })
     expect(custom.plain.ANTHROPIC_MODEL).toBe('')
     expect(custom.plain.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('')
+    expect(custom.secret).toEqual({ ANTHROPIC_AUTH_TOKEN: KEY })
+  })
+
+  it('sends a Console key to Anthropic’s own API as its API key, with Claude Code’s models', () => {
+    const preset = presetOf('anthropic')!
+    expect(preset.baseUrl).toBe('https://api.anthropic.com')
+    const { plain, secret } = claudeProfileEnv({
+      id: 'p-anthropic',
+      name: 'Anthropic',
+      preset: 'anthropic',
+      baseUrl: preset.baseUrl,
+      key: KEY,
+    })
+    expect(secret).toEqual({ ANTHROPIC_API_KEY: KEY })
+    expect(JSON.stringify(plain)).not.toContain('SECRET')
+    expect(plain).toMatchObject({
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+      // A token of the agent's own settings would outrank the key, so it stays empty.
+      ANTHROPIC_AUTH_TOKEN: '',
+      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_MODEL: '',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: '',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: '',
+    })
+    expect(
+      profileProblem({ name: 'Anthropic', preset: 'anthropic', baseUrl: preset.baseUrl, key: KEY }),
+    ).toBeNull()
   })
 })
 

@@ -75,6 +75,12 @@ import {
   type WorktreeInspection,
 } from '@shared/git'
 import type { Platform } from '@shared/platform'
+import {
+  isManagerChoices,
+  projectManagerProblem,
+  type ManagerChoices,
+  type ProjectManagerSettings,
+} from '@shared/manager'
 import { isProfileId } from '@shared/provider-profiles'
 import { AUTO_APPROVE_LEVELS, isAutoApprove } from '@shared/risk'
 import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
@@ -1027,6 +1033,14 @@ function optionalFlag(o: Fields, key: string): boolean | undefined {
   if (value !== undefined && typeof value !== 'boolean')
     throw invalidParams(`${key} must be a boolean`)
   return value
+}
+
+/** Huli: a manager session's choices: the review loop, and who answers its workers' requests. */
+function managerChoices(value: unknown): ManagerChoices {
+  if (!isManagerChoices(value)) {
+    throw invalidParams('manager must be { autoReview: true or false, approvals: user or low }')
+  }
+  return { autoReview: value.autoReview, approvals: value.approvals }
 }
 
 function flag(o: Fields, key: string): boolean {
@@ -2033,6 +2047,17 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       return { path: absolutePath(o, 'path', platform), pinned: flag(o, 'pinned') }
     },
+    'projects.setManager': (params) => {
+      const o = fields(params)
+      if (o.manager !== null) {
+        const problem = projectManagerProblem(o.manager)
+        if (problem) throw invalidParams(`manager ${problem}`)
+      }
+      return {
+        path: absolutePath(o, 'path', platform),
+        manager: o.manager === null ? null : structuredClone(o.manager as ProjectManagerSettings),
+      }
+    },
     'projects.setSandbox': (params) => {
       const o = fields(params)
       return {
@@ -2048,6 +2073,21 @@ export function createValidators(platform: Platform): Validators {
       }
       return { path: absolutePath(o, 'path', platform), autoApprove: level }
     },
+    'projects.addFolder': (params) => {
+      const o = fields(params)
+      return {
+        path: absolutePath(o, 'path', platform),
+        folder: absolutePath(o, 'folder', platform),
+      }
+    },
+    'projects.removeFolder': (params) => {
+      const o = fields(params)
+      return {
+        path: absolutePath(o, 'path', platform),
+        folder: absolutePath(o, 'folder', platform),
+      }
+    },
+    'projects.suggestFolders': folder,
     'projects.worktreeSettings': folder,
     'projects.setWorktreeSettings': (params) => {
       const o = fields(params)
@@ -2087,6 +2127,7 @@ export function createValidators(platform: Platform): Validators {
         ...(o.prompt !== undefined ? { prompt: promptContent(o.prompt) } : {}),
         ...(preparedId !== undefined ? { preparedId } : {}),
         ...(o.worktree !== undefined ? { worktree: worktreeRequest(o.worktree) } : {}),
+        ...(o.manager !== undefined ? { manager: managerChoices(o.manager) } : {}),
       }
     },
     'sessions.prepare': (params) => {
@@ -2342,6 +2383,24 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       return { sessionId: sessionId(o), on: flag(o, 'on') }
     },
+    'manager.set': (params) => {
+      const o = fields(params)
+      return {
+        sessionId: sessionId(o),
+        on: flag(o, 'on'),
+        ...(o.choices !== undefined ? { choices: managerChoices(o.choices) } : {}),
+      }
+    },
+    'manager.stopAll': session,
+    'manager.pause': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), paused: flag(o, 'paused') }
+    },
+    'manager.detach': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), detached: flag(o, 'detached') }
+    },
+    'manager.moreTurns': session,
     'sessions.setBoardStatus': (params) => {
       const o = fields(params)
       if (!isBoardStatus(o.status)) {
@@ -2372,6 +2431,15 @@ export function createValidators(platform: Platform): Validators {
         throw invalidParams(`action must be one of ${STALL_ACTIONS.join(', ')}`)
       }
       return { sessionId: sessionId(o), action: o.action as StallAction }
+    },
+    'sessions.allowDenied': (params) => {
+      const o = fields(params)
+      const confirmed = optionalFlag(o, 'confirmed')
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ACP_ID_CHARS),
+        ...(confirmed === undefined ? {} : { confirmed }),
+      }
     },
     'sessions.blob': (params) => {
       const o = fields(params)

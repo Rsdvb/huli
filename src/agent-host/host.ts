@@ -195,6 +195,7 @@ import { STEP_HARNESSES } from './workflow/picks'
 import { createTaskGit } from './workflow/git'
 import { createGroupGit } from './groups/git'
 import { SessionGroups } from './groups/groups'
+import { managerGit } from './manager/git'
 import { GithubFlow } from './github-flow/flow'
 import { optionsOfPick, pickOfOptions, workflowAgents } from './workflow/host-agents'
 import { WorkflowLibrary, workflowsFile } from './workflow/library'
@@ -713,7 +714,12 @@ export class AgentHost {
       settle: (sessionId, entryId, outcome) =>
         this.sessions.themeSettled(sessionId, entryId, outcome),
     })
-    this.projects = new Projects({ file: projectsFile(options.userDataPath, log), platform })
+    this.projects = new Projects({
+      file: projectsFile(options.userDataPath, log, platform),
+      platform,
+      home: options.homeDir ?? os.homedir(),
+      dataDir: options.userDataPath,
+    })
     this.scratch = new ScratchFolders(path.join(options.userDataPath, 'scratch'), platform)
     this.remembered = agentsFile(options.userDataPath, log)
     this.updates = agentUpdatesFile(options.userDataPath, log)
@@ -1031,7 +1037,10 @@ export class AgentHost {
         mode: (sessionId) => this.sessions.toolMode(sessionId),
         starterRank: (sessionId) => this.sessions.starterRank(sessionId),
         startMode: (agentId) => startModeIn(this.settings, agentId),
+        sendRefusal: (callerId, sessionId) =>
+          this.sessions.manager.sendRefusal(callerId, sessionId),
       },
+      manager: () => this.sessions.manager,
       log,
       appVersion: options.appVersion,
     })
@@ -1146,6 +1155,7 @@ export class AgentHost {
       },
       takenByPullRequest: (projectPath, branch) =>
         this.git?.branchPullRequests(projectPath).has(branch) ?? false,
+      severalFolders: (projectPath) => this.projects.folders(projectPath).length > 0,
       log,
     })
     this.idleRelease = new IdleRelease({
@@ -1160,6 +1170,7 @@ export class AgentHost {
     this.sessions = new SessionManager({
       platform,
       agents: this.agents,
+      managerGit: managerGit(this.execRunner.exec),
       projects: this.projects,
       autoApprove: () => this.settings.autoApprove ?? 'off',
       sandbox: () => this.settings.sandbox,
@@ -3199,11 +3210,12 @@ export class AgentHost {
   }
 
   /**
-   * Refuses a canonical folder that is not a registered project, a scratch folder or a worktree a
-   * session works in: files, git and media are read nowhere else.
+   * Refuses a canonical folder that is not a registered project, a further folder of one, a
+   * scratch folder or a worktree a session works in: files, git and media are read nowhere else.
    */
   private assertOpenFolder(canonical: string): void {
     if (this.scratch.contains(canonical) || this.sessions.isSessionWorktree(canonical)) return
+    if (this.projects.isFolder(canonical)) return
     this.projects.match(canonical)
   }
 
@@ -3522,6 +3534,16 @@ export class AgentHost {
       'projects.pin': ({ path, pinned }) => projects.pin(projects.match(path), pinned),
       'projects.setSandbox': ({ path, sandbox }) =>
         projects.setSandbox(projects.match(path), sandbox),
+      'projects.addFolder': ({ path, folder }) => projects.addFolder(projects.match(path), folder),
+      'projects.removeFolder': ({ path, folder }) =>
+        projects.removeFolder(projects.match(path), folder),
+      'projects.suggestFolders': async ({ path }) => {
+        const record = projects.match(path)
+        const { suggestFolders } = await import('./project-folders')
+        return suggestFolders(record.path, record.folders ?? [], {
+          platform: this.options.platform,
+        })
+      },
       'sessions.setSandbox': ({ sessionId, sandbox }) =>
         this.sessions.setSandbox(sessionId, sandbox),
       'sandbox.containerStatus': async () => (await this.containerSandbox()).status(),
@@ -3529,6 +3551,8 @@ export class AgentHost {
       'sandbox.removeImage': async () => (await this.containerSandbox()).remove(),
       'projects.setAutoApprove': ({ path, autoApprove }) =>
         projects.setAutoApprove(projects.match(path), autoApprove),
+      'projects.setManager': ({ path, manager }) =>
+        projects.setManager(projects.match(path), manager),
       'projects.worktreeSettings': ({ path }) =>
         projects.worktreeSettings(projects.match(path).path),
       'projects.setWorktreeSettings': ({ path, settings }) =>
@@ -3634,6 +3658,11 @@ export class AgentHost {
       'sessions.setAutoResume': ({ sessionId, on }) => sessions.setAutoResume(sessionId, on),
       'sessions.setBoardStatus': ({ sessionId, status }) =>
         sessions.setBoardStatus(sessionId, status),
+      'manager.set': ({ sessionId, on, choices }) => sessions.setManager(sessionId, on, choices),
+      'manager.stopAll': ({ sessionId }) => sessions.stopAllWorkers(sessionId),
+      'manager.pause': ({ sessionId, paused }) => sessions.pauseManager(sessionId, paused),
+      'manager.detach': ({ sessionId, detached }) => sessions.detachWorker(sessionId, detached),
+      'manager.moreTurns': ({ sessionId }) => sessions.moreManagerTurns(sessionId),
       'sessions.setPrFlow': ({ sessionId, url, autoMerge, watch }) =>
         this.gitCall(() =>
           sessions.setPrFlow(sessionId, url, {
@@ -3642,6 +3671,8 @@ export class AgentHost {
           }),
         ),
       'sessions.stall': ({ sessionId, action }) => sessions.stallAction(sessionId, action),
+      'sessions.allowDenied': ({ sessionId, entryId, confirmed }) =>
+        sessions.allowDenied(sessionId, entryId, confirmed === true),
       'sessions.blob': ({ sessionId, hash }) => sessions.blob(sessionId, hash),
       'sessions.setConfigOption': ({ sessionId, optionId, value }) =>
         sessions.setConfigOption(sessionId, optionId, value),

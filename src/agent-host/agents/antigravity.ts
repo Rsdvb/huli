@@ -14,6 +14,8 @@ export const ANTIGRAVITY: AgentDefinition = {
     args: ['acp'],
     perSession: true,
     sessionFlag: '--dangerously-skip-permissions',
+    // Huli: `agy acp --add-dir <folder>`, repeatable, as 1.5.14's help lists it.
+    dirFlag: '--add-dir',
   },
   install: {
     hint: 'detect.hint.antigravity',

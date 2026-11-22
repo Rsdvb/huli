@@ -2,8 +2,17 @@ import { useDeferredValue, useEffect, useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { ThreadState } from '@shared/thread'
 import { loadFiles, useFilesStore, watchFiles, type ProjectFiles } from '@renderer/stores/files'
+import { useFurtherFolders } from '@renderer/stores/projects'
 import { useThreadsStore } from '@renderer/stores/threads'
-import { foldersOf, matchMentions, usedFiles, type MentionRow } from './mentions'
+import {
+  foldersOf,
+  joinedFiles,
+  matchMentions,
+  usedFiles,
+  withRoots,
+  type MentionRoot,
+  type MentionRow,
+} from './mentions'
 
 export interface MentionList {
   rows: MentionRow[]
@@ -16,6 +25,7 @@ export interface MentionList {
 
 const NO_PATHS: string[] = []
 const NO_ROWS: MentionRow[] = []
+const NO_FILES: (ProjectFiles | undefined)[] = []
 
 const usedCache = new WeakMap<
   ThreadState,
@@ -52,6 +62,34 @@ export function useMentionList(
     return watchFiles(projectPath)
   }, [active, projectPath])
   const files = useFilesStore((s) => (active ? s.byProject[projectPath] : undefined))
+  // Huli: a project's further folders are listed too, only while a mention is open.
+  const folders = useFurtherFolders(projectPath)
+  const roots = useMemo<MentionRoot[]>(
+    () =>
+      folders
+        .filter((folder) => !folder.missing)
+        .map((folder) => ({ path: folder.path, name: folder.name })),
+    [folders],
+  )
+  const rootKey = roots.map((root) => root.path).join('\n')
+  useEffect(() => {
+    if (!active || rootKey === '') return
+    const stops = rootKey.split('\n').map((root) => {
+      void loadFiles(root)
+      return watchFiles(root)
+    })
+    return () => stops.forEach((stop) => stop())
+  }, [active, rootKey])
+  const furtherFiles = useFilesStore(
+    useShallow((s) => (active ? roots.map((root) => s.byProject[root.path]) : NO_FILES)),
+  )
+  const joined = useMemo(() => {
+    if (!files || roots.length === 0) return null
+    return joinedFiles(
+      files.paths,
+      roots.map((root, i) => ({ root, paths: furtherFiles[i]?.paths ?? NO_PATHS })),
+    )
+  }, [files, roots, furtherFiles])
   // Matching tens of thousands of paths can trail the typing rather than hold it up; the rows
   // shown are always those of the query they were matched for.
   const typed = useDeferredValue(query)
@@ -62,10 +100,12 @@ export function useMentionList(
         : NO_PATHS,
     ),
   )
-  const matched = useMemo(
-    () => (files && typed ? matchMentions(typed, files.paths, foldersOf(files.paths)) : NO_ROWS),
-    [files, typed],
-  )
+  const matched = useMemo(() => {
+    if (!files || !typed) return NO_ROWS
+    if (!joined) return matchMentions(typed, files.paths, foldersOf(files.paths))
+    const rows = matchMentions(typed, joined.paths, foldersOf(joined.paths))
+    return withRoots(rows, joined.roots, new Set(foldersOf(files.paths)), roots)
+  }, [files, typed, joined, roots])
   const usedRows = useMemo(
     () => used.map((path) => ({ path, folder: false, positions: [] })),
     [used],

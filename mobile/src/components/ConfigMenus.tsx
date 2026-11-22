@@ -238,6 +238,7 @@ export function profilesPage(
 }
 
 const PRESET_NAMES: Record<string, string> = {
+  anthropic: 'Anthropic 官方（Console API 额度）',
   zhipu: '智谱 GLM 编程套餐',
   zai: 'Z.ai GLM 编程套餐（国际）',
   kimi: 'Kimi（月之暗面）',

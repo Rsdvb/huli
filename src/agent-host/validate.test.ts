@@ -634,6 +634,25 @@ describe('createValidators', () => {
     rejects(() => windows['sessions.create']({ agentId: 'codex', projectPath: 'app' }))
   })
 
+  it("wants a project's further folder as an absolute path by the platform rules", () => {
+    for (const method of ['projects.addFolder', 'projects.removeFolder'] as const) {
+      const call = posix[method]
+      expect(call({ path: '/repo', folder: '/api' })).toEqual({ path: '/repo', folder: '/api' })
+      rejects(() => call({ path: '/repo' }))
+      rejects(() => call({ path: '/repo', folder: 'api' }))
+      rejects(() => call({ path: '/repo', folder: '/a\0b' }))
+      rejects(() => call({ path: '/repo', folder: 3 }))
+      rejects(() => call({ path: 'repo', folder: '/api' }))
+      rejects(() => windows[method]({ path: 'C:\\repo', folder: '\\api' }))
+      expect(windows[method]({ path: 'C:\\repo', folder: 'D:\\api' })).toEqual({
+        path: 'C:\\repo',
+        folder: 'D:\\api',
+      })
+    }
+    expect(posix['projects.suggestFolders']({ path: '/repo' })).toEqual({ path: '/repo' })
+    rejects(() => posix['projects.suggestFolders']({ path: 'repo' }))
+  })
+
   it("takes only a known auto-approve level, or null for the settings' default", () => {
     const set = posix['projects.setAutoApprove']
     for (const autoApprove of ['off', 'low', 'edits', null] as const) {
@@ -1107,6 +1126,66 @@ describe('routine requests', () => {
     rejects(() => posix['sessions.setBoardStatus']({ status: 'done' }))
   })
 
+  it("takes manager mode's choices, switches and a project's own roster only as they are", () => {
+    const choices = { autoReview: true, approvals: 'low' }
+    expect(
+      posix['sessions.create']({ agentId: 'codex', projectPath: '/repo', manager: choices }),
+    ).toEqual({ agentId: 'codex', projectPath: '/repo', manager: choices })
+    for (const manager of [
+      { autoReview: true },
+      { autoReview: 'yes', approvals: 'user' },
+      { autoReview: true, approvals: 'all' },
+      { ...choices, extra: 1 },
+      true,
+    ]) {
+      rejects(() => posix['sessions.create']({ agentId: 'codex', projectPath: '/repo', manager }))
+    }
+    expect(posix['manager.set']({ sessionId: 's', on: true, choices })).toEqual({
+      sessionId: 's',
+      on: true,
+      choices,
+    })
+    expect(posix['manager.set']({ sessionId: 's', on: false })).toEqual({
+      sessionId: 's',
+      on: false,
+    })
+    rejects(() => posix['manager.set']({ sessionId: 's', on: 'yes' }))
+    expect(posix['manager.pause']({ sessionId: 's', paused: true })).toEqual({
+      sessionId: 's',
+      paused: true,
+    })
+    rejects(() => posix['manager.detach']({ sessionId: 's' }))
+    rejects(() => posix['manager.stopAll']({}))
+    const writer = {
+      id: 'w-0a1b2c3d',
+      name: '写手',
+      role: 'implement',
+      agentId: 'codex',
+      model: null,
+      effort: null,
+      profileId: null,
+      mode: null,
+      worktree: false,
+      persona: '',
+    }
+    const manager = { workers: [writer], reviewerId: null }
+    expect(posix['projects.setManager']({ path: '/repo', manager })).toEqual({
+      path: '/repo',
+      manager,
+    })
+    expect(posix['projects.setManager']({ path: '/repo', manager: null })).toEqual({
+      path: '/repo',
+      manager: null,
+    })
+    rejects(() =>
+      posix['projects.setManager']({
+        path: '/repo',
+        manager: { workers: [writer, writer], reviewerId: null },
+      }),
+    )
+    rejects(() => posix['projects.setManager']({ path: '/repo', manager: { workers: [] } }))
+  })
+
   it("reads a project's issues and starts a session only for an issue of a project", () => {
     expect(posix['github.issues']({ projectPath: '/repo', filter: 'mine' })).toEqual({
       projectPath: '/repo',
@@ -1411,6 +1490,21 @@ describe('attachments', () => {
     })
     rejects(() => posix['sessions.entry']({ sessionId: 's' }))
     rejects(() => posix['sessions.entry']({ sessionId: 's', entryId: 'x'.repeat(1025) }))
+    // Huli: allowing a call the review denied names its entry, and a confirmation only as a flag.
+    const allow = posix['sessions.allowDenied']
+    expect(allow({ sessionId: 's', entryId: 't:cmd-1', more: 1 })).toEqual({
+      sessionId: 's',
+      entryId: 't:cmd-1',
+    })
+    expect(allow({ sessionId: 's', entryId: 't:cmd-1', confirmed: true })).toEqual({
+      sessionId: 's',
+      entryId: 't:cmd-1',
+      confirmed: true,
+    })
+    rejects(() => allow({ sessionId: 's', entryId: 't:cmd-1', confirmed: 'yes' }))
+    rejects(() => allow({ sessionId: 's' }))
+    rejects(() => allow({ entryId: 't:cmd-1' }))
+    rejects(() => allow({ sessionId: 's', entryId: 'x'.repeat(1025) }))
     expect(posix['sessions.requests']({ sessionId: 's', more: 1 })).toEqual({ sessionId: 's' })
     rejects(() => posix['sessions.requests']({}))
     expect(posix['attachments.read']({ id: 'a1', more: 1 })).toEqual({ id: 'a1' })

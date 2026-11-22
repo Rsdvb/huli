@@ -265,6 +265,55 @@ exists: the session list, its events and the phone get the groups for free.
   be (`components/BestOfRow.tsx`), opening to the runs' rows; a finished run's menu offers 保留这个.
 - The fake agent's `/write [file] [text]` makes a real edit, to compare runs with.
 
+### Manager mode (总管模式)
+
+One session is the manager: it never changes files, splits the user's task, dispatches each step
+to a worker from a roster (an agent, model, level, profile and persona), checks the reports and
+goes on, while the user talks only to it. T3 Code (MIT) was read for the idea, not copied: its
+issues with parents left unwoken and interjections that interrupted children shaped the wake.
+
+- `src/shared/manager.ts`: the roster and its checks (`managerSettingsProblem`,
+  `readManagerSettings`, a project's own `ProjectManagerSettings` over the settings'), what records
+  and summaries carry, and the pure decisions: `canDispatch` (stopped, paused, turns or tokens
+  spent, slots, one writer per folder, a writer's folder kept through its review loop),
+  `reviewNext` (the loop's next step), `readOnlyDecision` (what a reading session runs, is
+  refused or asks), `managerMayAnswer`, `restartPlan`, digest merging. Settings key `manager`;
+  a project's choice in its record (`projects.setManager`, the windows' alone).
+- `src/agent-host/manager/hub.ts` holds the rest behind a port to the session manager: a worker
+  reports once it **settles** (no turn, nothing waiting, its queue empty or paused, no plan-limit
+  pause), not at each turn's end, so an interjection, a queued follow-up or a turn the agent
+  starts itself wakes the manager once, with what the user said quoted. `worker.owed` is saved
+  when a turn starts and cleared only after the digest is in the manager's saved queue; a digest
+  still waiting there takes newer reports (one wake for several workers), and the manager is
+  never steered or interrupted by one. After a restart, owed workers go on by themselves (or the
+  manager is told, by the setting), at most a manager's slots at once and once per 10 minutes.
+  The review loop is Kite's: a finished implementation goes to the default reviewer (in the
+  implementer's folder), changes go back, and the manager hears only of the end.
+- `report_work` is checked against its schema and refused with what to fix; a turn that ends
+  without it is reminded once, then read from its reply. `start_worker`, `list_workers`,
+  `get_worker`, `stop_worker` and `answer_worker_request` are listed for a manager alone (and
+  `start_session` is not); `answer_worker_request` answers only what Kite rates low now, when the
+  user chose 总管可以批低风险的.
+- Read-only: Claude Code loses `Edit`, `Write`, `MultiEdit` and `NotebookEdit`; every harness runs
+  in its asking mode (`readOnlyModeOf`), and the guard in `requestPermission` allows reads and
+  project checks and refuses changes with a reason the agent reads. A manager's own edit that
+  still gets through pauses it.
+- Desktop: Settings › 总管模式 (`features/settings/manager-*.ts*`), New session's chip
+  (`features/manager/new-session-chip.tsx`), the 工人 pane (`workers-pane.tsx`, lazily loaded),
+  the strip above the composer, the 汇报 card and the session menu's switch. Phone: the banner,
+  the 工人 screen with approvals (`mobile/src/app/workers/[id].tsx`) and New session's switch.
+- Sandboxes: a worker starts in its manager's sandbox, else its roster entry's, else the
+  project's or the default (`createWorker`). A container gets no Kite tools, so a contained
+  worker's last reply is its report (a reviewer's verdict from a `VERDICT:` line) and it is never
+  reminded of `report_work`; a manager cannot run in a container.
+- A manager, and a worker its manager still runs, refuse to move to another computer
+  (`moveFacts`). A worker paused at its plan limit keeps its slot and folder; a limit stop that
+  does not resume reports `limit`, not a failure. A worker's secret cards are answered in the 工人
+  pane and on the phone, never by the manager.
+- The fake agent's `fake:/manager-demo`, `/work` (`--ask`, `--secret`, `--fail-once`, `--read`)
+  and `/review` drive it end to end; simulator flow `95-manager` with a roster `seed-manager.mjs`
+  writes.
+
 ### GitHub flow (议题、自动合并、盯 PR、GitHub 触发)
 
 After T3 Code's Issues page, Conductor, Claude desktop's merge when ready and JetBrains Air's
@@ -1362,6 +1411,63 @@ low until Kite (or the daemon) restarts. A host that started that low or lower, 
 left alone. The daemon's agent host does the same from the same setting.
 `src/agent-host/priority.ts` (with its test) and `start.ts` hold it; the row is in
 `section-defs.tsx` and `settings-catalog.ts`.
+
+### Keeping the computer awake (Agent 干活时不让电脑睡眠)
+
+With `general.keepAwake` on (the default, Settings › General › Sessions), main holds one
+`powerSaveBlocker` of the `prevent-app-suspension` kind, which stops idle system sleep but not the
+display's, while any session's turn runs or waits on a permission (the tray's `running` count from
+`host:busy-changed`) or a routine run works (`host:routines-working`), and lets it go once all are
+idle. A session paused at a plan limit holds none. The system's lid and battery rules still apply.
+It is all events, nothing polls. `src/main/power-save.ts` (with its test) holds it, wired in
+`src/main/index.ts`. The `kettu` daemon holds nothing: Node.js has no portable way to, and it
+mostly runs on machines that do not sleep.
+
+### Anthropic's own API as a profile (Anthropic 官方（Console API 额度）)
+
+Claude Code's API profiles (`src/shared/provider-profiles.ts`) have an `anthropic` preset:
+`https://api.anthropic.com`, no model (Claude Code's own defaults and model menu), and a key from
+the Claude Console. Its key goes in `ANTHROPIC_API_KEY`, which Claude Code sends as `x-api-key`,
+while the other presets' go in `ANTHROPIC_AUTH_TOKEN` as a bearer token; both are set empty on the
+command line and the key follows over the control channel, as before. A key of the Console
+organization linked to a Max, Ultra or Team plan spends the plan's monthly API credits
+([Anthropic's article](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan));
+signed in with the plan instead, the SDK draws on the plan's own limits. The Claude Code page's
+API profiles group says so, side by side and neutrally (`agent-profiles.tsx`).
+
+### A ChatGPT plan's allowance used up (ChatGPT 套餐额度用完)
+
+An agent signed in with a ChatGPT plan stops when the plan has no allowance left for it, and each
+says so its own way: OpenCode's session error `provider.chatgpt-limit` (its name for OpenAI's 429
+`subscription_sharing_usage_limit_exceeded`, with `retryAfterMs` when the provider gave one), Pi's
+"You have hit your ChatGPT usage limit (... plan). Try again in ~N min." (pi-ai's `openai-codex`
+provider for any 429 of the ChatGPT backend), that error code anywhere in an agent's words or data,
+and Codex's `usageLimitExceeded` whose words name `chatgpt.com/` (since December's allowance that
+ChatGPT and Codex share), not a workspace's credits or spend cap. `src/agent-host/chatgpt-limit.ts`
+matches them (with its test); such a turn counts as a plan limit stop (`limit-resume.ts`), so it
+pauses and goes on by itself, at the wait given or else after the growing checks, and its notice
+says where the cap is raised (ChatGPT Settings › Usage › App limits, or the plan's usage page for
+Codex) or to use an API key. OpenCode's `retryAfterMs` now reaches the turn's error
+(`opencode/connection.ts`).
+
+### Allowing what Codex's auto-review denied (仍然允许)
+
+Codex 0.171's app-server takes back a denial of its auto-review (`thread/approveGuardianDeniedAction`
+with the core's `GuardianAssessmentEvent`), adding the user's approval of that exact action to the
+thread; the model's retry still goes through the review. The Codex mapper (`codex/mapper.ts`,
+`deniedEvent`) turns a denied `item/autoApprovalReview/completed` into that event, in the core's
+snake_case, and keeps it as JSON on the call's `review.appeal` (`ToolAppeal` in
+`src/shared/thread.ts`, so it survives a restart or an idle release), for commands, execve,
+patches, network access and MCP calls; input to a running command and a permissions request are
+not carried over. The connection offers appeals only from Codex 0.171.0 on, read from
+`initialize`'s user agent; an older Codex shows the denial and its reason only. An `appeal`
+effect has the host judge the call's risk as a permission request's (`assessRisk` of the tool
+entry). `sessions.allowDenied` checks the appeal, needs `confirmed` when `appealConfirms` (the
+host's level high, or the review's high or critical), hands Codex the event, marks it allowed,
+and with no turn running sends a short message asking the model to retry. The desktop shows it in
+the denied call's card (`denial-appeal.tsx`), the phone in the call's screen (`mobile/src/app/tool.tsx`),
+both with the risk and a confirmation for a high one. Tests: `codex/mapper.test.ts`,
+`codex-appeal-host.test.ts`, `validate.test.ts`.
 
 ### Kite's own Node.js
 

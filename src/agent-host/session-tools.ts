@@ -67,6 +67,8 @@ export interface ToolSession {
   board: BoardStatus | null
   /** Huli: the ports its worktree holds while it is live; null without a block. */
   ports: PortBlock | null
+  /** Huli: a manager session (总管模式), which starts workers rather than sessions. */
+  manager?: boolean
 }
 
 export interface SessionToolsDeps {
@@ -114,6 +116,8 @@ export interface SessionToolsDeps {
   starterRank(sessionId: string): ModeRank | null
   /** The mode the user set for an agent's new sessions in Settings › Agent. */
   startMode(agentId: AgentId): string | undefined
+  /** Huli: why a manager may not send this worker a message now, or null; managers only. */
+  sendRefusal?(callerId: string, sessionId: string): string | null
   now?(): number
 }
 
@@ -1027,6 +1031,12 @@ export class SessionTools {
         'A session you started cannot start sessions. Only a session the user started can.',
       )
     }
+    if (callerInfo.manager) {
+      throw new SessionToolError(
+        'not_allowed',
+        'You are the manager: dispatch work with start_worker to a worker from the roster.',
+      )
+    }
     const limit = startLimit(caller.sessionId, this.deps.started(caller.sessionId), this.now())
     if (limit) throw limitError(limit)
     if (agentId !== undefined && agentId !== callerInfo.agentId) this.checkAgent(agentId)
@@ -1107,6 +1117,8 @@ export class SessionTools {
     if (session.id === caller.sessionId || !canTarget(session, caller.sessionId)) {
       throw notAllowed()
     }
+    const refused = this.deps.sendRefusal?.(caller.sessionId, session.id) ?? null
+    if (refused) throw new SessionToolError('limit', refused)
     const { delivered, reason } = await this.deps.send(
       session.id,
       value,

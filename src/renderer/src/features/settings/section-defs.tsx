@@ -293,6 +293,12 @@ export function useGeneralSection(): SectionDef {
         ),
       },
       {
+        id: 'keep-awake',
+        setting: 'general.keep-awake',
+        group: sessions,
+        render: () => <GeneralSwitch field="keepAwake" label={t('general.keepAwake.name')} />,
+      },
+      {
         id: 'outline-summaries',
         setting: 'general.outline-summaries',
         group: thread,

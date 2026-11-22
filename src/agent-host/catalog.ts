@@ -84,6 +84,7 @@ import { compareVersions } from './versions'
 export const FOLDER_PER_SESSION = '--folder-per-session'
 /** The router's flag naming the flag a session's process may start with when Kettu asks. */
 const SESSION_FLAG = '--session-flag='
+const DIR_FLAG = '--dir-flag='
 
 export type LaunchKind =
   // Installed from npm into the data directory and run on the user's Node.js. With `perSession`,
@@ -111,7 +112,15 @@ export type LaunchKind =
   // With `perSession`, through the session router, which starts each session's process in the
   // session's own folder, for a program that runs everything in the folder it started in, and
   // with `sessionFlag` added for a session Kettu asks for it, once the program's help lists it.
-  | { kind: 'binary'; command: string; args: string[]; perSession?: true; sessionFlag?: string }
+  // Huli: `dirFlag` adds each further folder of a session's project, as `<flag> <folder>`.
+  | {
+      kind: 'binary'
+      command: string
+      args: string[]
+      perSession?: true
+      sessionFlag?: string
+      dirFlag?: string
+    }
   // Run as `uvx <package>==<version> <args>`, which installs the package on first use.
   | { kind: 'uvx'; package: string; args: string[]; minimum?: string }
   // A script run with Electron's own Node.js, so it needs no Node.js on the machine.
@@ -663,7 +672,10 @@ function routedDetection(
   env: Record<string, string>,
 ): Detection {
   const runtime = ctx.nodeRuntime
-  const flag = launch.sessionFlag ? [`${SESSION_FLAG}${launch.sessionFlag}`] : []
+  const flag = [
+    ...(launch.sessionFlag ? [`${SESSION_FLAG}${launch.sessionFlag}`] : []),
+    ...(launch.dirFlag ? [`${DIR_FLAG}${launch.dirFlag}`] : []),
+  ]
   return {
     state: 'available',
     spec: {

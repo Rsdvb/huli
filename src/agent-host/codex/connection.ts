@@ -41,6 +41,7 @@ import {
 import type { AgentTransport } from '../driver'
 import type { Env } from '../find-command'
 import { t } from '../i18n'
+import { versionAtLeast } from '../versions'
 import { planMarkdown } from '../plan-revision'
 import { addEntry, mergeConfig, type MapperEffect, type MapperOutput } from '../session-updates'
 import { SIDE_INSTRUCTIONS, sideTurnText } from '../side-chat'
@@ -135,6 +136,8 @@ export interface CodexLaunch {
 const RESOURCE_NOT_FOUND = -32002
 const INVALID_REQUEST = -32600
 const METHOD_NOT_FOUND = -32601
+/** Huli: the first Codex whose app-server was checked to take a denied action back. */
+const APPEALS_VERSION = '0.171.0'
 
 // Updates for a thread nobody registered yet wait here, as ACP's do.
 const PENDING_THREADS = 32
@@ -461,6 +464,8 @@ interface ThreadRecord {
   asked: Set<string>
   /** Huli: the session's own sandbox, which every turn's policy is held to; null for none. */
   sandbox: SessionSandbox | null
+  /** Huli: the project's further folders, which are the thread's workspace roots beside its own. */
+  folders: readonly string[]
 }
 
 function threadRecord(
@@ -481,7 +486,27 @@ function threadRecord(
     plan: null,
     asked: new Set(),
     sandbox: null,
+    folders: [],
   }
+}
+
+/**
+ * Huli: the thread's workspace roots, its folder and then the project's further folders, which
+ * `:workspace_roots` stands for in its policies; nothing for none, as Codex then takes `cwd` alone.
+ */
+function workspaceRoots(
+  cwd: string | null,
+  folders: readonly string[] | undefined,
+): { runtimeWorkspaceRoots?: string[] } {
+  return cwd !== null && folders && folders.length > 0
+    ? { runtimeWorkspaceRoots: [cwd, ...folders] }
+    : {}
+}
+
+/** Huli: a policy that writes in the workspace writes in the project's further folders too. */
+function withFolders(policy: SandboxPolicy, folders: readonly string[]): SandboxPolicy {
+  if (policy.type !== 'workspaceWrite' || folders.length === 0) return policy
+  return { ...policy, writableRoots: [...new Set([...policy.writableRoots, ...folders])] }
 }
 
 /** The mode whose turns run in no sandbox. */
@@ -537,6 +562,8 @@ export class CodexConnection implements AgentConnection {
   private modelsReadAt: number | null = null
   private modelsRead: Promise<Model[]> | null = null
   private initialized = false
+  /** Huli: this Codex takes back a denial of its auto-review, which a denied call offers. */
+  private appeals = false
   /** The skill folders last set on app-server, as JSON. */
   private skillRoots: string | null = null
   private account: AgentAccount | null = null
@@ -568,6 +595,11 @@ export class CodexConnection implements AgentConnection {
 
   get isClosed(): boolean {
     return this.rpc.isClosed
+  }
+
+  /** Huli: a thread opened with further folders has them as runtime workspace roots of its own. */
+  takesFolders(sessionId: string): boolean {
+    return (this.threads.get(sessionId)?.folders.length ?? 0) > 0
   }
 
   get ownInstructions(): boolean {
@@ -646,6 +678,7 @@ export class CodexConnection implements AgentConnection {
     this.initialized = true
     // `<client>/<Codex version> (...)`, the only place app-server says its version.
     const version = /^[^/\s]+\/(\S+)/.exec(response.userAgent ?? '')?.[1] ?? null
+    this.appeals = versionAtLeast(version, APPEALS_VERSION)
     void this.refreshAccount()
     return {
       name: 'Codex',
@@ -821,7 +854,7 @@ export class CodexConnection implements AgentConnection {
       hidden,
       known: true,
       prompted: false,
-      mapper: seen?.mapper ?? new ThreadMapper(),
+      mapper: seen?.mapper ?? this.newMapper(),
     })
     record.usage = seen?.usage ?? null
     this.threads.set(id, record)
@@ -874,12 +907,14 @@ export class CodexConnection implements AgentConnection {
       sandbox: sandboxMode(heldPolicy(mode.sandbox, sandbox)),
       config: sessionConfig(cwd, options),
       ...developerInstructions(options),
+      ...workspaceRoots(cwd, options.folders),
       ephemeral: hidden,
       experimentalRawEvents: false,
     })
     const record = await this.record(response.thread.id, cwd, response, hidden)
     record.settings = { ...record.settings, mode: DEFAULT_MODE }
     record.sandbox = sandbox
+    record.folders = [...(options.folders ?? [])]
     return { sessionId: record.id, config: await this.config(record) }
   }
 
@@ -909,11 +944,13 @@ export class CodexConnection implements AgentConnection {
           : {}),
       config: sessionConfig(cwd, options),
       ...developerInstructions(options),
+      ...workspaceRoots(cwd, options.folders),
       excludeTurns: true,
     })
     const record = await this.record(threadId, cwd, response, options.hidden !== undefined, known)
     record.settings = sandboxedSettings(record.settings, sandbox)
     record.sandbox = sandbox
+    record.folders = [...(options.folders ?? [])]
     record.prompted = true
     return record
   }
@@ -1005,11 +1042,13 @@ export class CodexConnection implements AgentConnection {
       ...(source ? { model: source.model } : {}),
       config: sessionConfig(cwd, options),
       ...developerInstructions(options),
+      ...workspaceRoots(cwd, options.folders),
       ephemeral: hidden,
       excludeTurns: true,
     })
     const record = await this.record(response.thread.id, cwd, response, hidden, held)
     record.sandbox = sandbox
+    record.folders = [...(options.folders ?? [])]
     record.prompted = true
     return { sessionId: record.id, config: await this.config(record) }
   }
@@ -1086,6 +1125,7 @@ export class CodexConnection implements AgentConnection {
       ...(source ? { model: source.model } : {}),
       config: sessionConfig(cwd, { ...options, mcpServers: servers }),
       developerInstructions: own ? `${own}\n\n${SIDE_INSTRUCTIONS}` : SIDE_INSTRUCTIONS,
+      ...workspaceRoots(cwd, parent.folders),
       ephemeral: true,
       excludeTurns: true,
     })
@@ -1266,7 +1306,7 @@ export class CodexConnection implements AgentConnection {
       hidden: false,
       known: false,
       prompted: true,
-      mapper: new ThreadMapper(),
+      mapper: this.newMapper(),
     })
     this.threads.set(id, record)
     return record
@@ -1282,7 +1322,7 @@ export class CodexConnection implements AgentConnection {
       hidden: false,
       known: false,
       prompted: true,
-      mapper: new ThreadMapper(),
+      mapper: this.newMapper(),
     })
     this.threads.set(id, created)
     return created
@@ -1676,7 +1716,8 @@ export class CodexConnection implements AgentConnection {
       threadId: record.id,
       approvalPolicy: mode.approvalPolicy,
       approvalsReviewer: mode.approvalsReviewer,
-      sandboxPolicy: heldPolicy(mode.sandbox, record.sandbox),
+      sandboxPolicy: withFolders(heldPolicy(mode.sandbox, record.sandbox), record.folders),
+      ...workspaceRoots(record.cwd, record.folders),
       summary: 'auto',
       ...(settings.model ? { model: settings.model } : {}),
       ...(settings.effort ? { effort: settings.effort } : {}),
@@ -1759,6 +1800,41 @@ export class CodexConnection implements AgentConnection {
       this.unregister(sessionId)
     }
     return messages
+  }
+
+  private newMapper(): ThreadMapper {
+    return new ThreadMapper({ appeals: this.appeals })
+  }
+
+  /**
+   * Huli: `thread/approveGuardianDeniedAction` with the denial as Codex recorded it. Codex adds the
+   * user's approval of that exact action to the thread, into the running turn or ahead of the next,
+   * and the model's retry goes through the auto-review again.
+   */
+  async allowDenied(sessionId: string, event: string): Promise<void> {
+    const unsupported = () =>
+      new AgentRequestError('agent_error', t('codex.review.appealUnsupported'))
+    if (!this.appeals) throw unsupported()
+    let denial: unknown
+    try {
+      denial = JSON.parse(event)
+    } catch {
+      throw new AgentRequestError('agent_error', t('codex.review.appealGone'))
+    }
+    const record = this.thread(sessionId)
+    try {
+      await this.rpc.request('thread/approveGuardianDeniedAction', {
+        threadId: record.id,
+        event: denial,
+      })
+    } catch (error) {
+      // An app-server that lacks the method cannot read the request it names.
+      const lacks =
+        error instanceof RpcError &&
+        (error.code === METHOD_NOT_FOUND || /unknown variant/i.test(error.message))
+      if (lacks) throw unsupported()
+      throw this.toError(error)
+    }
   }
 
   /** `thread/inject_items`, as Responses API messages; false on a Codex that lacks it. */

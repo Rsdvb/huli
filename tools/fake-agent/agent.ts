@@ -33,6 +33,7 @@ import {
   type Env,
   type ScenarioName,
 } from './options.ts'
+import { managerRoute, withoutBlocks } from './manager.ts'
 import { SCENARIO_RUNNERS, compact, syntheticAttachments, syntheticHistory } from './scenarios.ts'
 import { isReportDraftPrompt, reportDraft } from './report-draft.ts'
 import { isTitlesPrompt, titles } from './titles.ts'
@@ -970,7 +971,9 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
       if (!session) throw RequestError.resourceNotFound(ctx.params.sessionId)
       if (session.turn) throw RequestError.invalidRequest(undefined, 'A turn is already running')
       const text = promptText(ctx.params.prompt)
-      const choice = chooseScenario(text, env)
+      // Huli: Kite's blocks ahead of a prompt, and manager mode's own prompts, route first.
+      const ahead = withoutBlocks(text)
+      const choice = chooseScenario(managerRoute(ahead.rest) ?? ahead.rest, env)
       const abort = new AbortController()
       session.turn = { abort, ignoreCancel: choice.options.ignoreCancel }
       session.turns++

@@ -2,12 +2,13 @@
 
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
-import type {
-  AgentAccount,
-  AgentUpdate,
-  PlanLimit,
-  ProviderBalance,
-  VersionMoveReason,
+import {
+  MAX_PROJECT_FOLDERS,
+  type AgentAccount,
+  type AgentUpdate,
+  type PlanLimit,
+  type ProviderBalance,
+  type VersionMoveReason,
 } from '@shared/agent-host'
 import {
   GITHUB_ISSUE_URL,
@@ -15,6 +16,18 @@ import {
   type ProjectWorktreeSettings,
 } from '@shared/git'
 import { isGithubEvent } from '@shared/github-flow'
+import type { Platform } from '@shared/platform'
+import {
+  DIGEST_ITEMS_MAX,
+  isDigestItem,
+  readProjectManager,
+  readStoredManager,
+  readStoredWorker,
+  type DigestItem,
+  type ProjectManagerSettings,
+  type StoredManager,
+  type StoredWorker,
+} from '@shared/manager'
 import { isProfileId } from '@shared/provider-profiles'
 import { isBoardStatus, type SessionBoard } from '@shared/session-board'
 import { isAutoApprove, type AutoApprove } from '@shared/risk'
@@ -49,6 +62,7 @@ import {
   type RoutineRef,
 } from '@shared/routines'
 import type { AgentInit } from './connection'
+import { isAbsolutePath, pathKey } from './paths'
 import { isVersion } from './versions'
 
 export type LogFn = (level: 'info' | 'warn' | 'error', message: string) => void
@@ -291,7 +305,10 @@ export interface ProjectRecord {
   pinnedAt?: number
   worktree?: Partial<ProjectWorktreeSettings> // only what differs from the defaults
   autoApprove?: AutoApprove // Huli: absent keeps the settings' default
+  manager?: ProjectManagerSettings // Huli: its own manager-mode roster and choices
   sandbox?: SandboxChoice // Huli: the sandbox its sessions start in; absent keeps the default
+  // Huli: further folders its sessions work in, absolute and resolved, each once; absent for none.
+  folders?: string[]
 }
 
 /**
@@ -399,6 +416,12 @@ export interface SessionRecord {
    * no live session took them meanwhile; only a live session's block holds them.
    */
   ports?: PortBlock
+  /** Huli: a manager session (总管模式): its choices, the task's counters, its loops. */
+  manager?: StoredManager
+  /** Huli: a worker a manager session started from its roster. */
+  worker?: StoredWorker
+  /** Huli: manager mode was switched off; the next prompt tells its agent so. */
+  managerOff?: true
   /** Huli: moved to another computer, where it goes on; this one stays as it was left. */
   movedTo?: MovedTo
 }
@@ -727,7 +750,10 @@ const isNullable =
   (value: unknown): value is V | null =>
     value === null || guard(value)
 
-export function parseProjectsFile(data: Record<string, unknown>): ProjectsFile | string {
+export function parseProjectsFile(
+  data: Record<string, unknown>,
+  platform: Platform = process.platform as Platform,
+): ProjectsFile | string {
   if (!Array.isArray(data.projects)) return 'projects is not a list'
   const projects: ProjectRecord[] = []
   for (const [index, item] of data.projects.entries()) {
@@ -748,10 +774,41 @@ export function parseProjectsFile(data: Record<string, unknown>): ProjectsFile |
       ...(isTime(item.pinnedAt) ? { pinnedAt: item.pinnedAt } : {}),
       ...projectWorktreeOf(item.worktree),
       ...(isAutoApprove(item.autoApprove) ? { autoApprove: item.autoApprove } : {}),
+      ...projectManagerOf(item.manager),
       ...sandboxField(item.sandbox),
+      ...projectFoldersOf(item.folders, item.path, platform),
     })
   }
   return { version: 1, projects }
+}
+
+/** The longest further folder path stored; a longer one is dropped. */
+const MAX_FOLDER_PATH = 4096
+
+/**
+ * Huli: a project's further folders: absolute paths by the platform's rules, resolved, each once
+ * and never the project's own, at most MAX_PROJECT_FOLDERS; one that does not read is dropped.
+ */
+function projectFoldersOf(
+  value: unknown,
+  projectPath: string,
+  platform: Platform,
+): { folders?: string[] } {
+  if (!Array.isArray(value)) return {}
+  const api = platform === 'win32' ? path.win32 : path.posix
+  const seen = new Set([pathKey(projectPath, platform)])
+  const folders: string[] = []
+  for (const item of value) {
+    if (folders.length >= MAX_PROJECT_FOLDERS) break
+    if (!isString(item) || item.length > MAX_FOLDER_PATH || item.includes('\0')) continue
+    if (!isAbsolutePath(item, platform)) continue
+    const resolved = api.resolve(item)
+    const key = pathKey(resolved, platform)
+    if (seen.has(key)) continue
+    seen.add(key)
+    folders.push(resolved)
+  }
+  return folders.length > 0 ? { folders } : {}
 }
 
 // A queue that does not parse is dropped rather than failing the whole index.
@@ -782,9 +839,17 @@ function withFrom(item: QueuedPrompt): QueuedPrompt {
           sessionId: from.sessionId,
           title: from.title,
           ...(from.report === false ? { report: false as const } : {}),
+          ...digestOf(from.digest),
         },
       }
     : rest
+}
+
+/** Huli: a manager's queued digest keeps the workers it reports on. */
+function digestOf(value: unknown): { digest?: DigestItem[] } {
+  if (!Array.isArray(value)) return {}
+  const items = value.filter(isDigestItem).slice(0, DIGEST_ITEMS_MAX)
+  return items.length > 0 ? { digest: items } : {}
 }
 
 function cacheOf(value: unknown): { cache?: PromptCache } {
@@ -990,6 +1055,22 @@ function portsOf(value: unknown): { ports?: PortBlock } {
   return { ports: { first, count } }
 }
 
+/** Huli: a manager field that does not read is dropped, and the session is an ordinary one. */
+function managerOf(value: unknown, now: number): { manager?: StoredManager } {
+  const manager = readStoredManager(value, now)
+  return manager ? { manager } : {}
+}
+
+function workerOf(value: unknown): { worker?: StoredWorker } {
+  const worker = readStoredWorker(value)
+  return worker ? { worker } : {}
+}
+
+function projectManagerOf(value: unknown): { manager?: ProjectManagerSettings } {
+  const manager = readProjectManager(value)
+  return manager ? { manager } : {}
+}
+
 /** A run's group; one that does not read is dropped, and the run is then a session on its own. */
 function groupOf(value: unknown): { group?: StoredGroup } {
   if (
@@ -1100,6 +1181,9 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...prFlowOf(item.prFlow),
       ...boardOf(item.board),
       ...portsOf(item.ports),
+      ...managerOf(item.manager, item.updatedAt),
+      ...workerOf(item.worker),
+      ...(item.managerOff === true ? { managerOff: true as const } : {}),
       ...movedToOf(item.movedTo),
     })
   }
@@ -1424,12 +1508,16 @@ export function parseAgentProcessesFile(
   return { version: 1, processes }
 }
 
-export function projectsFile(userDataPath: string, log: LogFn): JsonFile<ProjectsFile> {
+export function projectsFile(
+  userDataPath: string,
+  log: LogFn,
+  platform: Platform = process.platform as Platform,
+): JsonFile<ProjectsFile> {
   return new JsonFile<ProjectsFile>({
     file: path.join(userDataPath, 'state', 'projects.json'),
     version: PROJECTS_VERSION,
     migrations: PROJECTS_MIGRATIONS,
-    parse: parseProjectsFile,
+    parse: (data) => parseProjectsFile(data, platform),
     empty: () => ({ version: 1, projects: [] }),
     log,
   })

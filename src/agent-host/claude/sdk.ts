@@ -209,6 +209,8 @@ export interface QueryOptions {
   settings?: FlagSettings
   /** Huli: the part of the SDK's `SandboxSettings` Kite sets for a sandboxed session. */
   sandbox?: ClaudeSandboxOption
+  /** Huli: folders Claude Code may work in beside `cwd`, as its `--add-dir` takes them. */
+  additionalDirectories?: string[]
   extraArgs?: Record<string, string | null>
   persistSession?: boolean
   /** Taken while the main model is overloaded or unavailable; the SDK throws when it is `model`. */

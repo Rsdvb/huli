@@ -2,6 +2,7 @@ import { DEFAULT_AGENT_NETWORK, type AgentNetworkSettings } from './agent-networ
 import type { ComputerUseSettings } from './computer-use'
 import type { IdleSessionsSettings } from './idle-release'
 import type { LanguageSetting, Locale } from './locale'
+import { DEFAULT_MANAGER_SETTINGS, type ManagerSettings } from './manager'
 import type { MarketServer, MarketSkill } from './marketplace'
 import type { DirectAddress } from './remote/protocol'
 import type { AutoApprove } from './risk'
@@ -66,6 +67,8 @@ export interface SettingsFile {
     lightModel: LightModel // replaced whole
     // Huli: the agent host runs below normal priority, and so does every program it starts.
     lowerAgentPriority: boolean
+    // Huli: no idle sleep while a session's turn runs or waits on the user, or a routine runs.
+    keepAwake: boolean
   }
   thread: {
     outlineSummaries: boolean // a small model titles the outline's messages
@@ -161,6 +164,8 @@ export interface SettingsFile {
   // Huli: which permission requests the host allows once by itself, for a project that keeps the
   // default; a project may choose its own. Agents never change it.
   permissions: { autoApprove: AutoApprove }
+  // Huli: manager mode's roster, review loop, approvals and limits; a project may have its own.
+  manager: ManagerSettings
   // Huli: the sandbox a session of a project that keeps the default starts in, and whether a
   // sandboxed session's edits inside its project need no asking. Agents never change it.
   sandbox: SandboxSettings
@@ -347,6 +352,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     promptSuggestions: true,
     lightModel: { mode: 'small' },
     lowerAgentPriority: true,
+    keepAwake: true,
   },
   thread: { outlineSummaries: true, confirmLinks: true, openLinksIn: 'browser', alwaysOpenIn: {} },
   appearance: {
@@ -399,6 +405,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   onboarding: { done: false, step: 'welcome' },
   backup: { enabled: true, time: '03:00', keep: 7, folder: null },
   permissions: { autoApprove: 'off' },
+  manager: DEFAULT_MANAGER_SETTINGS,
   sandbox: { ...DEFAULT_SANDBOX_SETTINGS },
 }
 
@@ -463,6 +470,7 @@ export interface SettingsPatch {
     discoverable?: boolean
   }
   permissions?: Partial<SettingsFile['permissions']>
+  manager?: ManagerSettings // replaced whole
   sandbox?: Partial<SandboxSettings>
   // Huli: the folder can only be cleared here, back to the default; one is picked in main's dialog.
   backup?: {
@@ -505,6 +513,8 @@ export interface HostSettings {
   autoApprove?: AutoApprove
   // Huli: the host lowers its own priority; absent from a parent older than it, which leaves it.
   lowerAgentPriority?: boolean
+  // Huli: manager mode's settings; absent from a parent older than it, which has none.
+  manager?: ManagerSettings
   // Huli: the sandbox default and its approvals rule; absent from a parent older than it, which
   // starts every session unsandboxed.
   sandbox?: SandboxSettings

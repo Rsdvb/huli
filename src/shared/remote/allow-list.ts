@@ -30,6 +30,9 @@ const WINDOW_ONLY: ReadonlySet<string> = new Set<HostMethod>([
   'agentHistory.copy',
   // Huli: what the host allows by itself without asking is set at the computer, never by a device.
   'projects.setAutoApprove',
+  // Huli: so is a manager's roster, and whether its agent may answer its workers' requests.
+  'projects.setManager',
+  'manager.set',
   // Huli: what holds an agent back is set at the computer: a device could loosen it, or download
   // an image the user was not shown the size of.
   'projects.setSandbox',
@@ -69,11 +72,23 @@ export function namesUploadFile(method: string, params: unknown): boolean {
  */
 export function forbiddenToDevices(method: string, params: unknown): boolean {
   if (MAIN_ONLY.has(method) || WINDOW_ONLY.has(method)) return true
+  if (method === 'sessions.create' && managerAnswers(params)) return true
   // Huli: a device's session starts in the sandbox the computer's settings pick for its project.
   if ((method === 'sessions.create' || method === 'sessions.prepare') && namesSandbox(params)) {
     return true
   }
   return method === 'attachments.add' && hasGrant(params)
+}
+
+/** Huli: a manager session whose agent answers its workers' requests, which a device never starts. */
+function managerAnswers(params: unknown): boolean {
+  if (typeof params !== 'object' || params === null) return false
+  const manager = (params as { manager?: unknown }).manager
+  return (
+    typeof manager === 'object' &&
+    manager !== null &&
+    (manager as { approvals?: unknown }).approvals !== 'user'
+  )
 }
 
 function namesSandbox(params: unknown): boolean {

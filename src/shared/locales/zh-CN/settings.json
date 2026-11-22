@@ -21,7 +21,8 @@
     "computer-use": "Computer use",
     "agent-network": "Agent 网络",
     "backup": "备份",
-    "chat-bridge": "聊天软件"
+    "chat-bridge": "聊天软件",
+    "manager": "总管模式"
   },
   "page": {
     "title": "设置",
@@ -117,6 +118,11 @@
       "descriptionLinux": "关闭窗口后，会话和定时任务在系统托盘中继续运行。",
       "keywords": "后台 托盘 菜单栏 通知区域 关闭 窗口 继续运行 background tray menu bar close window",
       "lockedByRemote": "远程访问开启时保持开启。"
+    },
+    "keepAwake": {
+      "name": "Agent 干活时不让电脑睡眠",
+      "description": "有会话在运行或在等你批准、或有定时任务在跑时，电脑不会自动睡眠，屏幕照常熄灭。合上笔记本盖子、电量不足等情况仍按系统的规则睡眠。",
+      "keywords": "睡眠 休眠 唤醒 保持唤醒 防止睡眠 电源 合盖 电池 sleep awake keep awake power lid battery"
     },
     "openAtLogin": {
       "name": "登录时打开",
@@ -1438,7 +1444,13 @@
     "backToAgent": "回到它的设置",
     "profiles": {
       "group": "API 配置",
-      "hint": "用其他服务商的 API key 运行会话。新会话默认用标为「默认」的配置，会话里也可以在模型菜单中切换。纸鸢把 key 加密保存在这台电脑上，保存后不再显示。",
+      "hint": "新会话默认用标为「默认」的那一项，会话里也可以在模型菜单中切换。纸鸢把 key 加密保存在这台电脑上，保存后不再显示。",
+      "ways": {
+        "intro": "纸鸢运行 Claude Code 有两种方式：",
+        "own": "<b>你自己的 Claude 登录（订阅额度）</b>：用 Claude Code 登录的账号，用量算在你的套餐额度里。",
+        "api": "<b>API 配置（按 key 计费；Max/Ultra/Team 每月附带的 API 额度可用）</b>：用 API key，按用量计费。key 来自与 Max、Ultra 或 Team 套餐关联的 Claude Console 组织时，可以用套餐每月附带的 API 额度。",
+        "link": "Anthropic 对套餐额度用于 Agent SDK 的说明"
+      },
       "ownHint": "用它自己的账号，或它配置里的 API key",
       "makeDefault": "设为默认",
       "add": "添加 API 配置",
@@ -1453,6 +1465,7 @@
         "editTitle": "编辑 {{name}}",
         "description": "选好服务商，粘贴它的 API key 即可：地址和模型按服务商自己的 Claude Code 接入文档填好。",
         "provider": "服务商",
+        "anthropicHint": "用 Claude Console 里的 API key。key 来自与你的 Max、Ultra 或 Team 套餐关联的组织时，可以用套餐每月附带的 API 额度。模型留空即用 Claude Code 自己的默认。",
         "name": "名称",
         "key": "API key",
         "keyKeep": "留空保留尾号 {{end}} 的 key",
@@ -1632,7 +1645,8 @@
     "computer-use": "让智能体读取并操作这台电脑上的桌面应用，同一时间只用一个应用、只给一个会话。",
     "agent-network": "让每个 Agent 的流量经由你的机场订阅里的节点出去，绝不绕开它。",
     "backup": "每天把 Kettu 自己的数据备份一份，存在这台电脑上，丢失后可以恢复。",
-    "chat-bridge": "在飞书、钉钉、企业微信、QQ 或 Telegram 里看会话、回答请求、给 Agent 发消息。"
+    "chat-bridge": "在飞书、钉钉、企业微信、QQ 或 Telegram 里看会话、回答请求、给 Agent 发消息。",
+    "manager": "一个总管拆分任务、派给别的智能体当工人去改代码，你只和总管说话。"
   },
   "archived": {
     "description": "{{project}} · {{when}}归档",
@@ -2917,6 +2931,146 @@
       },
       "telegram": {
         "token": "Bot Token"
+      }
+    }
+  },
+  "manager": {
+    "keywords": "总管 管理者 大内总管 工人 名单 人设 审阅 派活 manager roster worker persona review",
+    "groups": {
+      "scope": "范围",
+      "manager": "总管",
+      "roster": "工人名单",
+      "review": "审阅与权限",
+      "limits": "限制"
+    },
+    "notes": {
+      "scope": "每个项目可以单独设一份名单；没有单独设的项目用这里的全局名单。",
+      "manager": "新建总管会话时默认用它。总管只读、只派活，便宜的模型就够。",
+      "roster": "总管按名字把活派给工人。人设只放进这个工人会话的第一条消息，不改智能体自己的设置文件。★ 是默认审阅者。",
+      "limits": "任务从你给总管发一条消息算起；超出限制时 Kite 会让总管停下来问你。"
+    },
+    "scope": {
+      "name": "设置哪里",
+      "description": "全局名单，或某个项目自己的名单。",
+      "global": "全局（所有项目）",
+      "own": "{{name}}（单独设置）"
+    },
+    "project": {
+      "name": "本项目单独设置",
+      "description": "开启后，这个项目的总管会话用下面这份名单和选项；关闭就回到全局设置。"
+    },
+    "suggestion": {
+      "name": "总管建议",
+      "description": "新建总管会话时默认用的智能体、服务商和模型。",
+      "agent": "智能体",
+      "profile": "服务商",
+      "model": "模型",
+      "none": "不建议，沿用当前选择",
+      "ownSignIn": "自己的登录",
+      "defaultModel": "默认模型"
+    },
+    "empty": {
+      "title": "还没有工人",
+      "hint": "可以按这台电脑上的智能体生成一份推荐名单，再按需修改。"
+    },
+    "actions": {
+      "add": "添加工人",
+      "suggest": "用推荐名单",
+      "edit": "编辑",
+      "remove": "删除",
+      "makeReviewer": "设为默认审阅者"
+    },
+    "autoReview": {
+      "name": "自动审阅",
+      "description": "写代码的活做完后，Kite 自动交给默认审阅者，来回修改到通过或到轮数上限。新总管会话的默认值。",
+      "noReviewer": "名单里还没有默认审阅者，自动审阅不会生效。"
+    },
+    "rounds": {
+      "name": "审阅最多",
+      "description": "到了轮数仍未通过，就停下来问你。",
+      "count_other": "{{count}} 轮"
+    },
+    "approvals": {
+      "name": "工人的权限请求",
+      "description": "新总管会话的默认值，开会话时也能改。项目自己的自动批准级别总是先生效。",
+      "user": "只能我批",
+      "low": "总管可以批低风险的"
+    },
+    "concurrent": {
+      "name": "同时干活的工人",
+      "description": "再派活就排队，等有工人做完。写代码的工人一个文件夹里同时只有一个。",
+      "count_other": "{{count}} 个"
+    },
+    "turns": {
+      "name": "每个任务最多",
+      "description": "工人回合用完后，总管不再派活，问你是否继续。",
+      "count_other": "{{count}} 个工人回合"
+    },
+    "budget": {
+      "name": "令牌预算",
+      "description": "每个任务里总管和工人一共能用的令牌；Kite 知道价格的模型会显示大约花费。",
+      "none": "不限",
+      "tokens": "{{wan}} 万"
+    },
+    "afterRestart": {
+      "name": "Kite 重启后",
+      "description": "被重启打断的工人怎么办：一个一个接着做（受同时干活的上限约束），或只告诉总管。",
+      "resume": "让工人接着做",
+      "tell": "只告诉总管"
+    },
+    "roles": {
+      "implement": "写代码",
+      "review": "审阅",
+      "plan": "规划调研",
+      "other": "杂活"
+    },
+    "worker": {
+      "addTitle": "添加工人",
+      "editTitle": "编辑工人",
+      "lead": "总管按名字派活；审阅和规划调研的工人只读。",
+      "name": "名字",
+      "namePlaceholder": "比如：写手",
+      "role": "角色",
+      "agent": "智能体",
+      "model": "模型",
+      "effort": "思考",
+      "profile": "服务商",
+      "mode": "权限",
+      "agentDefault": "智能体默认",
+      "profileDefault": "智能体默认",
+      "modeDefault": "新会话的默认权限",
+      "readOnly": "这个角色只读：Kite 让它不改文件，读文件和只读命令照常。",
+      "worktree": "每次派活开一个新工作树",
+      "worktreeHint": "可以和别的写代码的工人同时干活；改动留在新分支上，Kite 不会自动合并。",
+      "worktreeShort": "独立工作树",
+      "sandbox": "沙箱",
+      "sandboxDefault": "跟项目一致（{{choice}}）",
+      "sandboxHint": "总管自己在沙箱里时，它的工人都跑在总管的沙箱里。",
+      "container": "在容器里的工人用不了 Kite 的工具，没法调用 report_work 汇报；Kite 会把它最后一条回复当成汇报，审阅结论从回复里的 VERDICT 行读。",
+      "persona": "人设",
+      "personaPlaceholder": "比如：你写代码干净利落，改动尽量小，先读懂再动手。",
+      "personaNote": "只放进这个工人会话的第一条消息，不改智能体自己的设置。",
+      "repeated": "名单里已经有这个名字了。",
+      "agentGone": "智能体不在了",
+      "cancel": "取消",
+      "save": "保存"
+    },
+    "suggested": {
+      "writer": {
+        "name": "写手",
+        "persona": "你写代码干净利落，改动尽量小，先读懂再动手，改完跑相关测试。"
+      },
+      "reviewer": {
+        "name": "审阅",
+        "persona": "你是严格但务实的审阅者：看 git diff，查正确性、边界情况、测试和项目约定。只有必须改的问题才给 changes；小问题记为 nit 仍可 approve。"
+      },
+      "planner": {
+        "name": "规划",
+        "persona": "你负责调研和拆方案：读代码、查文档，给出可执行的步骤和风险，不改文件。"
+      },
+      "helper": {
+        "name": "杂活",
+        "persona": "你做简单明确的活：补测试、改名、整理文档、跑格式化，照任务说的做，不自作主张。"
       }
     }
   }

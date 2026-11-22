@@ -110,7 +110,8 @@
       "remove": "移除项目…",
       "issues": "议题",
       "autoApprove": "自动批准",
-      "sandbox": "沙箱"
+      "sandbox": "沙箱",
+      "folders": "项目文件夹…"
     },
     "remove": {
       "title": "移除 {{name}}？",
@@ -233,7 +234,9 @@
     "deleteRemovesAgentCopy_other": "也会从 {{agent}} 自己的本地历史里删除，官方客户端和应用里不会再显示。",
     "autoMerge": "检查通过后自动合并",
     "watchPr": "盯着这个 PR",
-    "issue": "议题 #{{number}}"
+    "issue": "议题 #{{number}}",
+    "manager": "总管会话",
+    "managerBadge": "总管"
   },
   "work": {
     "turn": "当前这一轮",
@@ -494,5 +497,25 @@
     "waitHint": "复制完文件、跑完命令后，智能体才开始工作。",
     "save": "保存",
     "forbidden": "只有这台电脑的主人能在这里改这些设置，除非主人允许已配对的设备使用终端。"
+  },
+  "projectFolders": {
+    "title": "{{project}} 的文件夹",
+    "description": "这个项目里的会话可以读取和修改这里列出的每个文件夹，比如前端和后端两个仓库。新会话马上就能用；已打开的会话在 Agent 下次启动时生效。",
+    "own": "项目文件夹",
+    "missing": "未找到",
+    "none": "还没有其他文件夹。添加这里的会话也要用到的文件夹。",
+    "add": "添加文件夹…",
+    "remove": "把 {{name}} 移出项目",
+    "removed": "{{name}} 已移出项目，里面的文件不会动。",
+    "found": "在项目里找到",
+    "foundHint": "项目文件夹里的 Git 仓库，以及 .code-workspace 文件列出的文件夹。",
+    "addFound": "添加",
+    "addAll": "全部添加",
+    "searching": "正在查找仓库…",
+    "noneFound": "没有找到其他仓库或工作区文件夹。",
+    "repo": "Git",
+    "workspace": "工作区",
+    "worktrees": "项目有多个文件夹时不能用工作树：工作树只能隔开项目文件夹。",
+    "done": "完成"
   }
 }

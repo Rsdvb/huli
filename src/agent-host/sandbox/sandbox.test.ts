@@ -16,7 +16,9 @@ import {
   egressArgs,
   engineName,
   findEngine,
+  folderTargets,
   installArgs,
+  mapFolders,
   mapPaths,
   runArgs,
   type ContainerRun,
@@ -218,6 +220,65 @@ describe("a session's container", () => {
     expect(args[args.indexOf('--network') + 1]).toBe('bridge')
     expect(args.filter((word) => word.includes('.git'))).toEqual([])
     expect(args.filter((word) => word === '-e')).toHaveLength(1)
+  })
+
+  it("mounts each of the project's further folders writable in a place of its own", () => {
+    const args = runArgs({
+      ...RUN,
+      folders: [
+        { source: '/mnt/e/api', target: '/folders/api', gitDir: true },
+        { source: '/mnt/e/web', target: '/folders/web', gitDir: false },
+      ],
+    })
+    const mounts = args.flatMap((word, i) => (word === '--mount' ? [args[i + 1]!] : []))
+    expect(mounts.slice(-3)).toEqual([
+      'type=bind,source=/mnt/e/api,target=/folders/api',
+      'type=bind,source=/mnt/e/api/.git,target=/folders/api/.git,readonly',
+      'type=bind,source=/mnt/e/web,target=/folders/web',
+    ])
+    const bad = (source: string, target: string) => () =>
+      runArgs({ ...RUN, folders: [{ source, target, gitDir: false }] })
+    expect(bad('/mnt/e/a,readonly=false', '/folders/a')).toThrow()
+    expect(bad('/mnt/e/a', '/etc')).toThrow()
+    expect(bad('/mnt/e/a', '/folders/../etc')).toThrow()
+    expect(bad('/mnt/e/a', '/folders/a/b')).toThrow()
+    expect(folderTargets(['API', 'api', 'Mon Projet!', '..', ''])).toEqual([
+      '/folders/api',
+      '/folders/api-2',
+      '/folders/mon-projet',
+      '/folders/folder',
+      '/folders/folder-2',
+    ])
+  })
+
+  it('names every folder as the container does and back, the longest first', () => {
+    const inward: [string, string][] = [
+      ['E:\\dvb\\app', '/workspace'],
+      ['E:\\dvb\\app\\vendor\\lib', '/folders/lib'],
+      ['D:\\api', '/folders/api'],
+    ]
+    expect(
+      mapFolders(
+        {
+          a: 'e:\\dvb\\app\\x.ts',
+          b: 'E:\\dvb\\app\\vendor\\lib\\y.ts',
+          c: 'D:\\api',
+          d: 'D:\\apis',
+        },
+        inward,
+        false,
+        'win32',
+      ),
+    ).toEqual({ a: '/workspace/x.ts', b: '/folders/lib/y.ts', c: '/folders/api', d: 'D:\\apis' })
+    const outward = inward.map(([host, inside]): [string, string] => [inside, host])
+    expect(
+      mapFolders(
+        { p: '/folders/api/src/z.ts', u: 'file:///folders/api/z' },
+        outward,
+        true,
+        'win32',
+      ),
+    ).toEqual({ p: 'D:\\api\\src\\z.ts', u: 'file:///D:/api/z' })
   })
 
   it('refuses names and folders a command line could be bent with', () => {

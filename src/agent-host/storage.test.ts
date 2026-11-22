@@ -598,6 +598,87 @@ describe('the host files', () => {
     }
   })
 
+  it("keeps a manager session's field and a worker's, and drops what does not read", () => {
+    const manager = {
+      autoReview: true,
+      approvals: 'low',
+      task: { since: 1, turns: 4, extraTurns: 0, tokens: 900, cost: 0.1, unpriced: 0, wakes: 1 },
+      held: [],
+      loops: [
+        {
+          id: 'l1',
+          implementerId: 's2',
+          reviewerId: 's3',
+          round: 2,
+          state: 'fixing',
+          startedAt: 1,
+        },
+      ],
+      answers: [],
+    }
+    const worker = {
+      managerId: 's1',
+      workerId: 'w-0a1b2c3d',
+      name: '写手',
+      role: 'implement',
+      kind: 'implement',
+      title: '修复时钟',
+      owed: 3,
+      tokens: 100,
+      cost: 0,
+    }
+    const both = [
+      { ...session, id: 's1', manager },
+      { ...session, id: 's2', parentId: 's1', startedBy: 's1', worker },
+    ]
+    expect(parseSessionsFile({ sessions: both })).toEqual({ version: 1, sessions: both })
+    const off = { ...session, managerOff: true }
+    expect(parseSessionsFile({ sessions: [off] })).toEqual({ version: 1, sessions: [off] })
+    for (const bad of [
+      { manager: 'x' },
+      { manager: {} },
+      { worker: { ...worker, role: 'boss' } },
+    ]) {
+      expect(parseSessionsFile({ sessions: [{ ...session, ...bad }] })).toEqual({
+        version: 1,
+        sessions: [session],
+      })
+    }
+  })
+
+  it("keeps a project's own manager roster, dropping entries that do not read", () => {
+    const project = { path: '/repo', name: 'repo', addedAt: 1, lastOpenedAt: 2 }
+    const writer = {
+      id: 'w-0a1b2c3d',
+      name: '写手',
+      role: 'implement',
+      agentId: 'codex',
+      model: null,
+      effort: null,
+      profileId: null,
+      mode: null,
+      worktree: true,
+      persona: '',
+    }
+    const manager = { workers: [writer], reviewerId: null, approvals: 'low' }
+    expect(parseProjectsFile({ projects: [{ ...project, manager }] })).toEqual({
+      version: 1,
+      projects: [{ ...project, manager }],
+    })
+    expect(
+      parseProjectsFile({
+        projects: [{ ...project, manager: { workers: [writer, { id: 1 }], reviewerId: 'gone' } }],
+      }),
+    ).toEqual({
+      version: 1,
+      projects: [{ ...project, manager: { workers: [writer], reviewerId: null } }],
+    })
+    expect(parseProjectsFile({ projects: [{ ...project, manager: 3 }] })).toEqual({
+      version: 1,
+      projects: [project],
+    })
+  })
+
   it("keeps a project's worktree settings key by key", () => {
     const project = { path: '/repo', name: 'repo', addedAt: 1, lastOpenedAt: 2 }
     const worktree = {
@@ -747,6 +828,88 @@ describe('the host files', () => {
     expect(store.file).toBe(path.join(dir, 'state', 'projects.json'))
   })
 
+  it("keeps a project's further folders, resolved and each once, and drops what does not read", () => {
+    const project = { path: '/repo', name: 'repo', addedAt: 1, lastOpenedAt: 2 }
+    const folders = ['/api', '/web/', '/api', '/repo', 'relative', 3, '/x\0y', '/a/../b']
+    expect(parseProjectsFile({ projects: [{ ...project, folders }] }, 'linux')).toEqual({
+      version: 1,
+      projects: [{ ...project, folders: ['/api', '/web', '/b'] }],
+    })
+    // Windows compares without case and takes drive and UNC paths only.
+    const win = { ...project, path: 'C:\\repo' }
+    const winFolders = ['D:\\API', 'd:\\api\\', 'c:\\Repo', '/api', '\\\\server\\share\\web']
+    expect(parseProjectsFile({ projects: [{ ...win, folders: winFolders }] }, 'win32')).toEqual({
+      version: 1,
+      projects: [{ ...win, folders: ['D:\\API', '\\\\server\\share\\web'] }],
+    })
+    expect(parseProjectsFile({ projects: [{ ...project, folders: 'x' }] }, 'linux')).toEqual({
+      version: 1,
+      projects: [project],
+    })
+    const many = Array.from({ length: 40 }, (_, i) => `/f${i}`)
+    const parsed = parseProjectsFile({ projects: [{ ...project, folders: many }] }, 'linux')
+    expect(typeof parsed !== 'string' && parsed.projects[0]!.folders).toHaveLength(32)
+  })
+
+  it('adds and removes further folders, refusing the project, the home folder and roots', async () => {
+    const project = { path: '/home/me/app', name: 'app', addedAt: 1, lastOpenedAt: 2 }
+    const file = projectsFile(dir, log, 'linux')
+    file.save({ version: 1, projects: [project] })
+    await file.flush()
+    const present = new Set([
+      '/home/me/app',
+      '/home/me/api',
+      '/home/me/web',
+      '/',
+      '/home/me',
+      '/home',
+    ])
+    const registry = () =>
+      new Projects({
+        file: projectsFile(dir, log, 'linux'),
+        platform: 'linux',
+        home: '/home/me',
+        dataDir: '/home/me/.kite-data',
+        realpath: async (value) => {
+          if (!present.has(value)) throw new Error('missing')
+          return value
+        },
+        isDirectory: async (value) => present.has(value),
+      })
+    const first = registry()
+    await first.load()
+    const record = first.match('/home/me/app')
+    const added = await first.addFolder(record, '/home/me/api/')
+    expect(added.folders).toEqual([{ path: '/home/me/api', name: 'api', missing: false }])
+    await first.addFolder(record, '/home/me/api')
+    await first.addFolder(record, '/home/me/web')
+    expect(first.folders('/home/me/app')).toEqual(['/home/me/api', '/home/me/web'])
+    expect(first.isFolder('/home/me/web')).toBe(true)
+    expect(first.isFolder('/home/me/other')).toBe(false)
+    for (const refused of ['/home/me/app', '/home/me', '/home', '/', 'relative', '/nowhere']) {
+      await expect(first.addFolder(record, refused)).rejects.toMatchObject({
+        code: 'invalid_params',
+      })
+    }
+    await first.flush()
+
+    const next = registry()
+    await next.load()
+    expect(next.list()[0]!.folders).toEqual([
+      { path: '/home/me/api', name: 'api', missing: false },
+      { path: '/home/me/web', name: 'web', missing: false },
+    ])
+    present.delete('/home/me/web')
+    await next.refreshMissing()
+    expect(next.list()[0]!.folders?.[1]).toMatchObject({ missing: true })
+    expect(next.presentFolders('/home/me/app')).toEqual(['/home/me/api'])
+    next.removeFolder(next.match('/home/me/app'), '/home/me/web/')
+    expect(() => next.removeFolder(next.match('/home/me/app'), '/home/me/web')).toThrow()
+    next.removeFolder(next.match('/home/me/app'), '/home/me/api')
+    await next.flush()
+    expect((await projectsFile(dir, log, 'linux').load()).projects).toEqual([project])
+  })
+
   it('keeps project pins across loads and ignores invalid stored pin times', async () => {
     const project = { path: '/repo', name: 'repo', addedAt: 1, lastOpenedAt: 2 }
     const file = projectsFile(dir, log)
@@ -771,6 +934,7 @@ describe('the host files', () => {
         pinnedAt: null,
         autoApprove: null,
         sandbox: null,
+        folders: [],
       },
     ])
     first.pin(first.match('/repo'), true)

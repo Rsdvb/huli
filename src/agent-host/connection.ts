@@ -443,6 +443,11 @@ export interface SessionOptions {
    */
   env?: Record<string, string>
   /**
+   * Huli: manager mode holds the session to reading: an agent that can take its file-writing
+   * tools away does, and Kite's guard answers the rest.
+   */
+  readOnly?: boolean
+  /**
    * Huli: the sandbox the session runs in; absent for none. `native` is the driver's to turn on
    * with the harness's own sandbox, failing the start where it cannot; `container` is already held
    * by the container the agent runs in.
@@ -453,6 +458,12 @@ export interface SessionOptions {
    * for an agent that runs such a file before each of its commands by itself.
    */
   envFile?: string
+  /**
+   * Huli: the further folders of the session's project, absolute, which its agent may read and
+   * change as it does its own folder: as the harness's own extra workspace roots where it takes
+   * them; absent for none.
+   */
+  folders?: readonly string[]
 }
 
 /** Kettu's memory as a session starts with it. */
@@ -511,6 +522,11 @@ export interface AgentConnection {
    * themselves, as Claude Code does with `CLAUDE_ENV_FILE`; absent where none do.
    */
   loadsEnvFile?(sessionId: string): boolean
+  /**
+   * Huli: whether the session's agent was handed `SessionOptions.folders` as workspace roots of its
+   * own; where not, the host names them ahead of the session's next prompt.
+   */
+  takesFolders?(sessionId: string): boolean
   readonly isClosed: boolean
   close(): void
 
@@ -574,6 +590,11 @@ export interface AgentConnection {
   stopTask?(sessionId: string, taskId: string): Promise<void>
   /** The end of a background task's output, at most 8 KiB. */
   taskOutput?(sessionId: string, taskId: string): Promise<{ output: string; truncated: boolean }>
+  /**
+   * Huli: tells the agent the user allowed a call its automatic review denied, with `event`, the
+   * agent's own record of the denial a tool entry's appeal keeps. Absent where it takes none.
+   */
+  allowDenied?(sessionId: string, event: string): Promise<void>
   /**
    * Answers a side question from the session's own conversation, beside its turn and without
    * adding to it. Absent where the agent has no side question of its own; rejects with

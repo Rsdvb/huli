@@ -83,8 +83,27 @@ export function StepCard({
         level: t(`permission.risk.${result.risk?.level ?? 'low'}`),
       })
     }
+    // Huli: manager mode's guard, or the manager's agent, answered it.
+    if (note === undefined && typeof result === 'object' && result?.by === 'readonly') {
+      note = t(
+        result.kind === 'allow_once'
+          ? 'permission.answer.readOnlyAllowed'
+          : 'permission.answer.readOnlyDenied',
+      )
+    }
+    if (note === undefined && typeof result === 'object' && result?.by === 'manager') {
+      note = t(
+        result.kind === 'allow_once'
+          ? 'permission.answer.managerAllowed'
+          : 'permission.answer.managerDenied',
+      )
+    }
     // Huli: a denied call reads Denied, not Cancelled, and says what denied it.
     const denial = entry.denied
+    const appeal = entry.review?.status === 'denied' ? entry.review.appeal : undefined
+    if (note === undefined && appeal) {
+      note = t(appeal.allowed ? 'tool.appeal.noteAllowed' : 'tool.appeal.note')
+    }
     if (note === undefined && denial && denial.by !== 'user') note = t(`tool.deniedBy.${denial.by}`)
     // Huli: how far a running call says it got.
     const running = entry.status === 'pending' || entry.status === 'in_progress'

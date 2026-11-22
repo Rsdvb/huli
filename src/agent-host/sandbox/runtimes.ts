@@ -19,6 +19,7 @@ import {
   ContainerError,
   engineCommand,
   engineName,
+  folderTargets,
   mappedTransport,
   runArgs,
   type ContainerAgent,
@@ -34,6 +35,11 @@ export interface ContainerStart {
   agent: ContainerAgent
   /** The session's folder on the computer. */
   folder: string
+  /**
+   * Huli: the project's further folders on the computer, each mounted as the session's folder is,
+   * after the same checks; one that fails them refuses the start.
+   */
+  folders?: readonly string[]
   /**
    * `model`: out only to the model's addresses; `agent`: out only through the agent's listener of
    * Agent 网络, at `proxyPort`; `open`: the engine's bridge.
@@ -72,12 +78,15 @@ const KEY_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/
 
 export async function startContainerRuntime(start: ContainerStart): Promise<ContainerRuntime> {
   const { containers, platform } = start
-  const folder = await projectMount(start.folder, {
+  const mountContext = {
     platform,
     home: os.homedir(),
     dataDir: start.dataDir,
-    realpath: (value) => realpath(value),
-  })
+    realpath: (value: string) => realpath(value),
+  }
+  const folder = await projectMount(start.folder, mountContext)
+  const further: string[] = []
+  for (const item of start.folders ?? []) further.push(await projectMount(item, mountContext))
   if (start.network === 'model' && start.modelHosts.length === 0) {
     throw new ContainerError('noModelHosts', 'network')
   }
@@ -86,12 +95,21 @@ export async function startContainerRuntime(start: ContainerStart): Promise<Cont
   }
   const engine = await containers.prepare(start.agent)
   const project = await containers.engineFolder(engine, folder)
-  const gitDir =
-    !start.gitWritable &&
-    (await stat(path.join(folder, '.git')).then(
+  const hasGitDir = (at: string): Promise<boolean> =>
+    stat(path.join(at, '.git')).then(
       (info) => info.isDirectory(),
       () => false,
-    ))
+    )
+  const gitDir = !start.gitWritable && (await hasGitDir(folder))
+  const targets = folderTargets(further.map((item) => path.basename(item)))
+  const folders = await Promise.all(
+    further.map(async (item, i) => ({
+      host: item,
+      source: await containers.engineFolder(engine, item),
+      target: targets[i]!,
+      gitDir: !start.gitWritable && (await hasGitDir(item)),
+    })),
+  )
   const keyNames = start.keyNames.filter((name) => KEY_NAME.test(name) && start.env[name])
   const name = engineName('kite-sbx', start.sessionId)
   const command = agentCommand(start.agent)
@@ -131,6 +149,9 @@ export async function startContainerRuntime(start: ContainerStart): Promise<Cont
     ...containerLimits(os.cpus().length, os.totalmem()),
     command,
     ...(agentFolder ? { agentFolder } : {}),
+    ...(folders.length > 0
+      ? { folders: folders.map(({ source, target, gitDir }) => ({ source, target, gitDir })) }
+      : {}),
     podman: engine.kind === 'podman',
   })
   const line = engineCommand(engine, args)
@@ -158,7 +179,7 @@ export async function startContainerRuntime(start: ContainerStart): Promise<Cont
     await unwind()
     throw new ContainerError('The agent does not speak over its stdio', 'engine')
   }
-  const transport: StdioTransport = mappedTransport(launched.transport, folder, platform)
+  const transport: StdioTransport = mappedTransport(launched.transport, folder, platform, folders)
   const connection: AgentConnection = start.driver.connect(transport, {
     def: start.def,
     hooks: start.hooks,

@@ -21,7 +21,8 @@
     "computer-use": "Computer use",
     "agent-network": "Agent network",
     "backup": "Backup",
-    "chat-bridge": "Chat apps"
+    "chat-bridge": "Chat apps",
+    "manager": "Manager mode"
   },
   "page": {
     "title": "Settings",
@@ -119,6 +120,11 @@
       "descriptionLinux": "Keeps sessions and routines running in the system tray after you close the window.",
       "keywords": "background tray menu bar notification area close window keep running",
       "lockedByRemote": "On while remote access is on."
+    },
+    "keepAwake": {
+      "name": "Keep the computer awake while agents work",
+      "description": "While a session works or waits for your answer, or a routine runs, the computer doesn't go to sleep on its own; the display still turns off. Closing a laptop's lid or a low battery still puts it to sleep as the system's settings say.",
+      "keywords": "sleep awake keep awake prevent sleep power lid battery caffeinate"
     },
     "openAtLogin": {
       "name": "Open at login",
@@ -1458,7 +1464,13 @@
     "backToAgent": "Back to its settings",
     "profiles": {
       "group": "API profiles",
-      "hint": "Run sessions on another provider's API key. New sessions start with the default, and a session can switch in its model menu. Kite keeps the keys encrypted on this computer and never shows them again.",
+      "hint": "New sessions start with the default, and a session can switch in its model menu. Kite keeps the keys encrypted on this computer and never shows them again.",
+      "ways": {
+        "intro": "Kite runs Claude Code in one of two ways:",
+        "own": "<b>Your own Claude sign-in (plan usage)</b>: the account Claude Code is signed in to; use counts toward your plan's limits.",
+        "api": "<b>API profiles (billed per key; Max, Ultra and Team monthly API credits apply)</b>: an API key, billed by use. With a key from the Claude Console organization linked to a Max, Ultra or Team plan, the plan's monthly API credits apply.",
+        "link": "How plan credits apply to the Agent SDK"
+      },
       "ownHint": "Its account, or the API key in its own settings",
       "makeDefault": "Make default",
       "add": "Add API profile",
@@ -1473,6 +1485,7 @@
         "editTitle": "Edit {{name}}",
         "description": "Pick a provider and paste its API key: the address and models come from the provider's own Claude Code guide.",
         "provider": "Provider",
+        "anthropicHint": "Use an API key from the Claude Console. A key of the organization linked to your Max, Ultra or Team plan can use the plan's monthly API credits. Leave the model empty for Claude Code's own default.",
         "name": "Name",
         "key": "API key",
         "keyKeep": "Empty keeps the key ending in {{end}}",
@@ -1652,7 +1665,8 @@
     "computer-use": "Lets agents read and drive the desktop apps of this computer, one app and one session at a time.",
     "agent-network": "Each agent’s traffic through a node of your proxy subscriptions, and never around it.",
     "backup": "A copy of Kettu’s own data each day, kept on this computer, to restore after a loss.",
-    "chat-bridge": "See sessions, answer requests and write to the agents from Feishu, DingTalk, WeCom, QQ or Telegram."
+    "chat-bridge": "See sessions, answer requests and write to the agents from Feishu, DingTalk, WeCom, QQ or Telegram.",
+    "manager": "One agent splits your task and dispatches it to workers on other agents, which change the files, while you talk only to it."
   },
   "archived": {
     "description": "{{project}} · archived {{when}}",
@@ -2959,6 +2973,149 @@
       },
       "telegram": {
         "token": "Bot token"
+      }
+    }
+  },
+  "manager": {
+    "keywords": "manager orchestrator roster worker persona review dispatch",
+    "groups": {
+      "scope": "Scope",
+      "manager": "Manager",
+      "roster": "Roster",
+      "review": "Review and permissions",
+      "limits": "Limits"
+    },
+    "notes": {
+      "scope": "A project may have a roster of its own; the others use this one.",
+      "manager": "What new manager sessions start with. A manager only reads and dispatches, so a cheap model does.",
+      "roster": "The manager dispatches to workers by name. A persona goes only into that worker session's first message, never into the agent's own files. ★ marks the default reviewer.",
+      "limits": "A task starts when you write to the manager; past a limit Kite has the manager stop and ask you."
+    },
+    "scope": {
+      "name": "Settings for",
+      "description": "The roster for every project, or one project’s own.",
+      "global": "All projects",
+      "own": "{{name}} (its own)"
+    },
+    "project": {
+      "name": "Own settings for this project",
+      "description": "On, this project's manager sessions use the roster and choices below; off, they use the ones for all projects."
+    },
+    "suggestion": {
+      "name": "Suggested manager",
+      "description": "The agent, profile and model new manager sessions start with.",
+      "agent": "Agent",
+      "profile": "Profile",
+      "model": "Model",
+      "none": "No suggestion: keep the current choice",
+      "ownSignIn": "Its own sign-in",
+      "defaultModel": "Default model"
+    },
+    "empty": {
+      "title": "No workers yet",
+      "hint": "Start from a roster suggested by the agents on this computer, then change it as you like."
+    },
+    "actions": {
+      "add": "Add worker",
+      "suggest": "Use suggested roster",
+      "edit": "Edit",
+      "remove": "Remove",
+      "makeReviewer": "Make default reviewer"
+    },
+    "autoReview": {
+      "name": "Automatic review",
+      "description": "When code is finished, Kite hands it to the default reviewer and back until it is approved or the rounds run out. The default for new manager sessions.",
+      "noReviewer": "The roster has no default reviewer yet, so automatic review does nothing."
+    },
+    "rounds": {
+      "name": "Review rounds",
+      "description": "Not approved by then, the manager stops and asks you.",
+      "count_one": "{{count}} round",
+      "count_other": "{{count}} rounds"
+    },
+    "approvals": {
+      "name": "Workers' permission requests",
+      "description": "The default for new manager sessions, which each can change. The project's own auto-approve level always applies first.",
+      "user": "Only I answer",
+      "low": "The manager answers low risk"
+    },
+    "concurrent": {
+      "name": "Workers at once",
+      "description": "More dispatches wait for a worker to finish. Only one code-writing worker works in a folder at a time.",
+      "count_one": "{{count}} worker",
+      "count_other": "{{count}} workers"
+    },
+    "turns": {
+      "name": "Per task, at most",
+      "description": "Once the worker turns are spent, the manager dispatches no more and asks you.",
+      "count_one": "{{count}} worker turn",
+      "count_other": "{{count}} worker turns"
+    },
+    "budget": {
+      "name": "Token budget",
+      "description": "Tokens the manager and its workers may use per task; models Kite has prices for also show a cost.",
+      "none": "No limit",
+      "tokens": "{{short}} tokens"
+    },
+    "afterRestart": {
+      "name": "After Kite restarts",
+      "description": "What workers a restart cut do: go on one at a time, within the workers-at-once limit, or only tell the manager.",
+      "resume": "Workers go on",
+      "tell": "Only tell the manager"
+    },
+    "roles": {
+      "implement": "Code",
+      "review": "Review",
+      "plan": "Planning",
+      "other": "Odd jobs"
+    },
+    "worker": {
+      "addTitle": "Add worker",
+      "editTitle": "Edit worker",
+      "lead": "The manager dispatches by name; review and planning workers only read.",
+      "name": "Name",
+      "namePlaceholder": "Such as: Writer",
+      "role": "Role",
+      "agent": "Agent",
+      "model": "Model",
+      "effort": "Thinking",
+      "profile": "Profile",
+      "mode": "Permissions",
+      "agentDefault": "The agent's default",
+      "profileDefault": "The agent's default",
+      "modeDefault": "New sessions’ default",
+      "readOnly": "This role only reads: Kite keeps it from changing files; reading and read-only commands work.",
+      "worktree": "A new worktree for each dispatch",
+      "worktreeHint": "It can work beside other code-writing workers; its changes stay on a new branch, which Kite never merges itself.",
+      "worktreeShort": "own worktree",
+      "sandbox": "Sandbox",
+      "sandboxDefault": "As the project ({{choice}})",
+      "sandboxHint": "When the manager runs in a sandbox, its workers run in the manager's.",
+      "container": "A worker in a container gets none of Kite's tools, so it cannot report with report_work. Kite takes its last reply as its report instead, and a review's verdict from the VERDICT line in it.",
+      "persona": "Persona",
+      "personaPlaceholder": "Such as: You write clean code with small changes, and read before you change.",
+      "personaNote": "Goes only into this worker session's first message, never into the agent's own settings.",
+      "repeated": "The roster already has this name.",
+      "agentGone": "agent gone",
+      "cancel": "Cancel",
+      "save": "Save"
+    },
+    "suggested": {
+      "writer": {
+        "name": "Writer",
+        "persona": "You write clean code with small changes, read before you change, and run the tests that matter."
+      },
+      "reviewer": {
+        "name": "Reviewer",
+        "persona": "You are a strict but practical reviewer: read git diff, check correctness, edge cases, tests and project conventions. Give changes only for what must change; note small things as nit and still approve."
+      },
+      "planner": {
+        "name": "Planner",
+        "persona": "You research and plan: read code and docs, give steps that can be acted on and the risks, and change no files."
+      },
+      "helper": {
+        "name": "Helper",
+        "persona": "You do small, clear jobs: tests, renames, docs, formatting, as the task says, without improvising."
       }
     }
   }

@@ -5,6 +5,7 @@ import {
   BubbleChatQuestionIcon,
   Cancel01Icon,
   ComputerIcon,
+  UserGroupIcon,
   DashboardSquare02Icon,
   File01Icon,
   MoreHorizontalIcon,
@@ -140,7 +141,10 @@ export function HeaderTools({
   // The window an agent uses shows only on the computer whose apps it uses, while it uses them.
   const computer = !isWeb && !!session?.computer && !!summary && hostOfSession(summary) === null
   const requests = !!sessionId && readsModelRequests(summary?.agentId)
+  // Huli: a manager session's workers.
+  const workers = !!sessionId && !!summary?.manager
   const available: Pane[] = [
+    ...(workers ? (['workers'] as const) : []),
     ...(computer ? (['computer'] as const) : []),
     ...(terminal ? (['terminal'] as const) : []),
     ...(browser ? (['browser'] as const) : []),
@@ -366,8 +370,17 @@ function useBarTools({
     })
   }
   pane('requests', t('headerTools.requests'), REQUESTS_ICON, 8, { common: false })
+  pane('workers', t('headerTools.workers'), UserGroupIcon, 0, { common: true })
   pane('files', t('headerTools.files'), File01Icon, 1, { common: true })
-  const order: Tool['id'][] = ['board', 'sideChat', 'computer', 'surfaces', 'requests', 'files']
+  const order: Tool['id'][] = [
+    'workers',
+    'board',
+    'sideChat',
+    'computer',
+    'surfaces',
+    'requests',
+    'files',
+  ]
   return tools.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
 }
 

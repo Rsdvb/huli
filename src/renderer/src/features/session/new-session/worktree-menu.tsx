@@ -657,6 +657,29 @@ function baseOid(base: string | null, status: GitStatus, loaded: Loaded): string
 const NOTE = 'flex h-5 min-w-0 items-center gap-1.5 px-2.75 text-xs text-secondary'
 
 /**
+ * Huli: under the tray of a project with further folders while New worktree is still chosen for
+ * it: worktrees are off there, so the message would be refused until the project folder is.
+ */
+export function FoldersWorktreeNote({ projectPath }: { projectPath: string }) {
+  const { t } = useTranslation('session')
+  const where = useWorktreeChoice((s) => s.where[projectPath] ?? 'local')
+  if (where !== 'worktree') return null
+  return (
+    <p className={NOTE}>
+      <Glyph icon={WORKTREE_ICON} size={12} className="shrink-0 text-icon" />
+      <span className="min-w-0 truncate">{t('worktree.severalFolders')}</span>
+      <button
+        type="button"
+        className="shrink-0 font-medium text-control-on hover:underline"
+        onClick={() => chooseWhere(projectPath, 'local')}
+      >
+        {t('worktree.useProjectFolder')}
+      </button>
+    </p>
+  )
+}
+
+/**
  * Under the tray while New worktree is chosen: the base it is cut from and the branch it starts
  * on, or that Kettu names it when the message is sent.
  */

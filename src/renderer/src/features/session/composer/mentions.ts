@@ -23,6 +23,70 @@ export interface MentionRow {
   folder: boolean
   /** Indexes into `path` of the matched characters; a folder's path is read with a `/` after it. */
   positions: number[]
+  /**
+   * Huli: the further folder of the project the row is in, whose name and `/` start `path`; absent
+   * for the project's own folder.
+   */
+  root?: MentionRoot
+}
+
+/** Huli: a further folder of the project, as its files are mentioned. */
+export interface MentionRoot {
+  /** The folder, as its files are read from the host. */
+  path: string
+  name: string
+}
+
+/** Huli: the row's path inside the folder it is in. */
+export function rowPath(row: Pick<MentionRow, 'path' | 'root'>): string {
+  return row.root ? row.path.slice(row.root.name.length + 1) : row.path
+}
+
+/**
+ * Huli: the project's files with each further folder's after them, each under its folder's name,
+ * and which folder each of those is in; the project's own paths come first and keep a name both
+ * share.
+ */
+export function joinedFiles(
+  own: readonly string[],
+  further: readonly { root: MentionRoot; paths: readonly string[] }[],
+): { paths: string[]; roots: Map<string, MentionRoot> } {
+  const paths = [...own]
+  const taken = new Set(own)
+  const roots = new Map<string, MentionRoot>()
+  for (const { root, paths: inside } of further) {
+    for (const path of inside) {
+      const joined = `${root.name}/${path}`
+      if (taken.has(joined)) continue
+      taken.add(joined)
+      paths.push(joined)
+      roots.set(joined, root)
+    }
+  }
+  return { paths, roots }
+}
+
+/**
+ * Huli: the rows with the further folder each is in; a folder row of the further folder itself is
+ * left out, as the folder is the project's already.
+ */
+export function withRoots(
+  rows: readonly MentionRow[],
+  roots: ReadonlyMap<string, MentionRoot>,
+  own: ReadonlySet<string>,
+  further: readonly MentionRoot[],
+): MentionRow[] {
+  const out: MentionRow[] = []
+  for (const row of rows) {
+    if (!row.folder || own.has(`${row.path}/`)) {
+      const root = row.folder ? undefined : roots.get(row.path)
+      out.push(root ? { ...row, root } : row)
+    } else if (!further.some((r) => r.name === row.path)) {
+      const root = further.find((r) => row.path.startsWith(`${r.name}/`))
+      out.push(root ? { ...row, root } : row)
+    }
+  }
+  return out
 }
 
 // A full-width at sign is what some input methods type for `@`.
