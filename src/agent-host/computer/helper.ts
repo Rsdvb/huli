@@ -79,6 +79,8 @@ export class ComputerHelper implements ComputerHelperLike {
   private nextId = 1
   private readonly pending = new Map<number, Pending>()
   private idle: ReturnType<typeof setTimeout> | null = null
+  /** The program is not there, as in a checkout that never fetched it: no start is tried again. */
+  private missing = false
 
   constructor(private readonly deps: ComputerHelperDeps) {}
 
@@ -117,6 +119,8 @@ export class ComputerHelper implements ComputerHelperLike {
   }
 
   private request<T>(op: string, fields: Record<string, unknown>, timeoutMs: number): Promise<T> {
+    if (this.missing)
+      return Promise.reject(new Error('Kite’s computer use helper is not installed.'))
     const child = this.start()
     this.clearIdle()
     const id = this.nextId++
@@ -142,7 +146,8 @@ export class ComputerHelper implements ComputerHelperLike {
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (chunk: string) => this.read(chunk))
     child.stdin.on('error', () => {})
-    child.on('error', (error) => {
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') this.missing = true
       this.deps.log('warn', `Computer use helper failed: ${error.message}`)
       if (this.child === child) this.stop()
     })
