@@ -5,14 +5,15 @@
 // sub-session of that session, in its project.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, Project, SessionSummary } from '@shared/agent-host'
+import { canManage } from '@shared/manager'
 import { limitsForModel } from '@shared/plan-limits'
 import { fallbackAgent, planQuota } from '@shared/plan-quota'
-import type { ConfigOption, UserContent } from '@shared/thread'
+import type { AgentId, ConfigOption, UserContent } from '@shared/thread'
 import { useAgentOptions } from '../agentOptions'
 import { useAttachPages } from '../components/AttachMenu'
 import { Composer, keyboardOverlap, type ComposerHandle } from '../components/Composer'
@@ -128,6 +129,8 @@ export default function NewSession() {
         : profiles.defaultId
       : undefined
   const [usageOpen, setUsageOpen] = useState(false)
+  // Huli: the session starts as a manager (总管模式); a phone leaves workers' requests to the user.
+  const [managing, setManaging] = useState(false)
   const [attachCount, setAttachCount] = useState(0)
   const connected = state.kind === 'connected'
 
@@ -220,6 +223,10 @@ export default function NewSession() {
     ) : null
   const notices = entry && agent ? startNotices(entry, picks, agent.name) : []
 
+  const manager =
+    managing && !parent && agentId && canManage(agentId as AgentId)
+      ? { manager: { autoReview: true, approvals: 'user' as const } }
+      : {}
   const create = async (prompt: UserContent[]) => {
     if (!agentId) return
     const values = entry ? startValues(entry, picks) : {}
@@ -230,6 +237,7 @@ export default function NewSession() {
       ...(Object.keys(values).length > 0 ? { options: values } : {}),
       ...(profileId !== undefined ? { profileId } : {}),
       ...(prompt.length > 0 ? { prompt } : {}),
+      ...manager,
     })) as SessionSummary
     router.replace(`/session/${summary.id}`)
   }
@@ -249,6 +257,7 @@ export default function NewSession() {
           ...(parentId ? { parentId } : {}),
           ...(Object.keys(values).length > 0 ? { options: values } : {}),
           ...(profileId !== undefined ? { profileId } : {}),
+          ...manager,
         },
       },
       message,
@@ -489,6 +498,26 @@ export default function NewSession() {
             onCountChange={setAttachCount}
             top={
               <>
+                {!parent && agentId && canManage(agentId as AgentId) ? (
+                  <Pressable
+                    onPress={() => setManaging((on) => !on)}
+                    accessibilityRole="switch"
+                    accessibilityState={{ checked: managing }}
+                    accessibilityLabel="总管模式"
+                    style={[
+                      styles.managerRow,
+                      { backgroundColor: s.dockCard, borderColor: c.border },
+                    ]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.managerTitle, { color: c.text }]}>总管模式</Text>
+                      <Text style={[styles.managerSub, { color: c.textSecondary }]}>
+                        总管只拆分、派活、验收，自己不改文件
+                      </Text>
+                    </View>
+                    <Switch value={managing} onValueChange={setManaging} />
+                  </Pressable>
+                ) : null}
                 <PendingSessions
                   {...(parentId ? { parentId } : {})}
                   agentName={(id) => agentMap.get(id)?.name ?? 'Agent'}
@@ -641,6 +670,19 @@ function recentProjects(known: Project[], sessions: Map<string, SessionSummary>)
 }
 
 const styles = StyleSheet.create({
+  managerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+  },
+  managerTitle: { fontSize: 15, fontWeight: '600' },
+  managerSub: { fontSize: 13, lineHeight: 18 },
   content: { paddingHorizontal: 22, paddingTop: 12, paddingBottom: 24 },
   hello: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   greeting: { fontSize: 24, lineHeight: 30, fontWeight: '700' },
