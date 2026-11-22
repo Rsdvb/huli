@@ -12,8 +12,8 @@ export interface HostClient {
   close(): void
 }
 
-/** How long a request may take before the bridge stops waiting, as a phone's would. */
-const REQUEST_TIMEOUT_MS = 60_000
+/** How long a request may take before the bridge stops waiting; a new session may install first. */
+const REQUEST_TIMEOUT_MS = 3 * 60_000
 
 /**
  * A client whose port `serve` hands the host. Messages cross in a later microtask each way, as
