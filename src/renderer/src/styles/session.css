@@ -981,6 +981,80 @@
     animation: none;
   }
 }
+/* Huli: what happened while the user was away, one quiet line over the thread's top. */
+.ks-recap {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 15;
+  display: flex;
+  width: max-content;
+  max-width: min(calc(var(--thread-column) + 16px), calc(100% - 32px));
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 0 4px 0 12px;
+  border-radius: var(--radius-xl);
+  background: var(--thread-card);
+  box-shadow: var(--thread-float-shadow);
+  color: var(--muted-foreground);
+  font-size: var(--text-small);
+  line-height: var(--text-small--line-height);
+  transform: translateX(-50%);
+  animation: ks-recap-in var(--duration-base) var(--ease-standard) both;
+}
+.ks-recap__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ks-recap__lead {
+  color: var(--thread-ink);
+  font-weight: 500;
+}
+.ks-recap__jump,
+.ks-recap__close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 22px;
+  border-radius: var(--radius-lg);
+  color: var(--thread-ink);
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+.ks-recap__jump {
+  margin-left: 4px;
+  padding: 0 7px 0 5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ks-recap__close {
+  width: 22px;
+  color: var(--muted-foreground);
+}
+.ks-recap__jump:hover,
+.ks-recap__close:hover {
+  background: var(--bg-app);
+}
+.ks-recap__jump:focus-visible,
+.ks-recap__close:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+@keyframes ks-recap-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ks-recap {
+    animation: none;
+  }
+}
 /* The find bar over the thread's top right, and the words it marks in the messages. */
 .ks-find {
   position: absolute;
