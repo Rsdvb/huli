@@ -3,10 +3,18 @@
 // the call while it runs.
 
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
-import type { ThreadEntry, ToolEntry } from '@shared/thread'
+import { appealConfirms, type ThreadEntry, type ToolEntry } from '@shared/thread'
 import { call, sessionFolder } from '../git'
 import { hostErrorText } from '../hostErrors'
 import { PictureStrip, pictureOf, type Picture } from '../components/Pictures'
@@ -87,6 +95,87 @@ function Block(props: { label: string; text: string; tone?: 'plain' | 'muted' })
           </Text>
         </Pressable>
       </ScrollView>
+    </View>
+  )
+}
+
+const RISK: Record<'low' | 'medium' | 'high', string> = {
+  low: '低风险',
+  medium: '中风险',
+  high: '高风险',
+}
+
+/**
+ * Huli: a call the agent's automatic review denied: why, and where the agent takes it back, the
+ * host's risk of it and 仍然允许, which a high risk confirms first.
+ */
+function Denial(props: { tool: ToolEntry; sessionId: string; onAllowed(): void }) {
+  const { c } = useSessionTokens()
+  const link = useLink()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const { tool } = props
+  const review = tool.review
+  const appeal = review?.status === 'denied' ? review.appeal : undefined
+  const reason = tool.denied?.reason ?? null
+  if (!reason && !appeal) return null
+  const send = (confirmed: boolean) => {
+    setBusy(true)
+    setError(null)
+    call(link, 'sessions.allowDenied', {
+      sessionId: props.sessionId,
+      entryId: tool.id,
+      ...(confirmed ? { confirmed } : {}),
+    })
+      .then(props.onAllowed, (failed: unknown) =>
+        setError(hostErrorText(failed, '没能放行这一步。')),
+      )
+      .finally(() => setBusy(false))
+  }
+  const allow = () => {
+    if (!review || !appealConfirms(review)) return send(false)
+    const lines = [
+      appeal?.risk ? `纸鸢的判断：${appeal.risk.reason}` : null,
+      review.rationale ? `自动审查的理由：${review.rationale}` : null,
+      '这一步风险高。只放行这一次完全相同的操作。',
+    ]
+    Alert.alert('仍然允许这一步？', lines.filter(Boolean).join('\n'), [
+      { text: '取消', style: 'cancel' },
+      { text: '仍然允许', style: 'destructive', onPress: () => send(true) },
+    ])
+  }
+  const level = appeal?.risk?.level
+  const tone = level === 'high' ? c.danger : level === 'medium' ? c.warning : c.success
+  return (
+    <View style={{ gap: 8 }}>
+      <Text style={[styles.label, { color: c.textSecondary }]}>拒绝原因</Text>
+      {reason ? <Text style={[styles.description, { color: c.text }]}>{reason}</Text> : null}
+      {appeal?.risk && level ? (
+        <Text style={[styles.risk, { color: c.textSecondary }]}>
+          <Text style={{ color: tone, fontWeight: '600' }}>{RISK[level]}</Text>
+          {` · ${appeal.risk.reason}`}
+        </Text>
+      ) : null}
+      {appeal?.allowed ? (
+        <Text style={[styles.risk, { color: c.textSecondary }]}>已允许，Agent 会重试这一步。</Text>
+      ) : appeal ? (
+        <View style={{ gap: 6, alignItems: 'flex-start' }}>
+          <PressScale
+            onPress={allow}
+            disabled={busy || !appeal.risk}
+            accessibilityRole="button"
+            accessibilityLabel="仍然允许"
+            style={[styles.allow, { borderColor: c.borderStrong, opacity: busy ? 0.6 : 1 }]}
+          >
+            {busy ? <ActivityIndicator size="small" color={c.textSecondary} /> : null}
+            <Text style={[styles.allowText, { color: c.text }]}>仍然允许</Text>
+          </PressScale>
+          <Text style={[styles.risk, { color: c.textTertiary }]}>
+            只放行这一次完全相同的操作，Agent 重试时仍会经过自动审查。
+          </Text>
+        </View>
+      ) : null}
+      {error ? <Text style={[styles.risk, { color: c.danger }]}>{error}</Text> : null}
     </View>
   )
 }
@@ -195,6 +284,7 @@ export default function ToolScreen() {
         {tool.description ? (
           <Text style={[styles.description, { color: c.text }]}>{tool.description}</Text>
         ) : null}
+        <Denial tool={tool} sessionId={sessionId} onAllowed={load} />
         {titled && titled !== target(tool, root) ? (
           <Text style={[styles.description, { color: c.textSecondary }]}>{titled}</Text>
         ) : null}
@@ -277,4 +367,15 @@ const styles = StyleSheet.create({
   block: { borderRadius: 12, borderWidth: StyleSheet.hairlineWidth },
   mono: { fontFamily: MONO, fontSize: 12, lineHeight: 17 },
   kind: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  risk: { fontSize: 13, lineHeight: 18 },
+  allow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 44,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  allowText: { fontSize: 15, fontWeight: '600' },
 })

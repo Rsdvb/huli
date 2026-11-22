@@ -85,6 +85,10 @@ export function StepCard({
     }
     // Huli: a denied call reads Denied, not Cancelled, and says what denied it.
     const denial = entry.denied
+    const appeal = entry.review?.status === 'denied' ? entry.review.appeal : undefined
+    if (note === undefined && appeal) {
+      note = t(appeal.allowed ? 'tool.appeal.noteAllowed' : 'tool.appeal.note')
+    }
     if (note === undefined && denial && denial.by !== 'user') note = t(`tool.deniedBy.${denial.by}`)
     // Huli: how far a running call says it got.
     const running = entry.status === 'pending' || entry.status === 'in_progress'

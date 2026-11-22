@@ -1374,6 +1374,25 @@ says where the cap is raised (ChatGPT Settings › Usage › App limits, or the 
 Codex) or to use an API key. OpenCode's `retryAfterMs` now reaches the turn's error
 (`opencode/connection.ts`).
 
+### Allowing what Codex's auto-review denied (仍然允许)
+
+Codex 0.171's app-server takes back a denial of its auto-review (`thread/approveGuardianDeniedAction`
+with the core's `GuardianAssessmentEvent`), adding the user's approval of that exact action to the
+thread; the model's retry still goes through the review. The Codex mapper (`codex/mapper.ts`,
+`deniedEvent`) turns a denied `item/autoApprovalReview/completed` into that event, in the core's
+snake_case, and keeps it as JSON on the call's `review.appeal` (`ToolAppeal` in
+`src/shared/thread.ts`, so it survives a restart or an idle release), for commands, execve,
+patches, network access and MCP calls; input to a running command and a permissions request are
+not carried over. The connection offers appeals only from Codex 0.171.0 on, read from
+`initialize`'s user agent; an older Codex shows the denial and its reason only. An `appeal`
+effect has the host judge the call's risk as a permission request's (`assessRisk` of the tool
+entry). `sessions.allowDenied` checks the appeal, needs `confirmed` when `appealConfirms` (the
+host's level high, or the review's high or critical), hands Codex the event, marks it allowed,
+and with no turn running sends a short message asking the model to retry. The desktop shows it in
+the denied call's card (`denial-appeal.tsx`), the phone in the call's screen (`mobile/src/app/tool.tsx`),
+both with the risk and a confirmation for a high one. Tests: `codex/mapper.test.ts`,
+`codex-appeal-host.test.ts`, `validate.test.ts`.
+
 ### Kite's own Node.js
 
 Agents that run on Node.js (most package agents; DeepSeek wants ≥ 24.9) said 「需要 Node.js」 and

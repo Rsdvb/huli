@@ -120,6 +120,7 @@ export function toolHasBody(entry: ToolEntry, projectPath: string): boolean {
     (!command && !!entry.description) ||
     !!entry.denied?.reason ||
     !!entry.review?.rationale ||
+    !!entry.review?.appeal ||
     toolInputFields(entry) !== null
   )
 }
