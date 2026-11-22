@@ -6,6 +6,7 @@ import type { SelectMessage } from './artifact-runtime/page-messages'
 import type { ArtifactExportFormat } from './artifact-types'
 import type { GrantedAttachment } from './attachments'
 import type { BackupStatus, RestorePick } from './backup'
+import type { ChatBridgeView, ChatPlatform, ChatPlatformPatch } from './chat-bridge'
 import type { BrowserBounds, BrowserOriginDecision, BrowserState } from './browser'
 import type { ControlAgent, ControlOutcome } from './control'
 import type { DebugStatus } from './debug'
@@ -528,6 +529,19 @@ export interface IpcInvokeContract {
   'backup:restore': { args: [token: string]; result: void }
   // Huli: a session as the page built it, saved where main's dialog says; false when cancelled.
   'session:export': { args: [request: SessionExportRequest]; result: boolean }
+  // Huli: the chat bridges (Settings › 聊天软件). The page sends credentials and never reads them
+  // back: each answer is the view, with a secret's last characters at most.
+  'chat-bridge:state': { args: []; result: ChatBridgeView }
+  'chat-bridge:save': {
+    args: [platform: ChatPlatform, patch: ChatPlatformPatch]
+    result: ChatBridgeView
+  }
+  'chat-bridge:start-binding': { args: [platform: ChatPlatform]; result: ChatBridgeView }
+  'chat-bridge:cancel-binding': { args: []; result: ChatBridgeView }
+  'chat-bridge:unbind': {
+    args: [platform: ChatPlatform, accountId: string]
+    result: ChatBridgeView
+  }
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeContract
@@ -570,6 +584,8 @@ export interface IpcEventContract {
   'tray:shown': null
   /** Huli: the backup's status changed. */
   'backup:changed': BackupStatus
+  /** Huli: the chat bridges' view changed: a connection, an account, the binding. */
+  'chat-bridge:changed': ChatBridgeView
 }
 
 export type IpcEventChannel = keyof IpcEventContract
@@ -1076,6 +1092,17 @@ export interface KettuApi {
      * null where the browser saves it and the page never learns where.
      */
     saveCapture(device: string, kind: DeviceCaptureKind, data: ArrayBuffer): Promise<string | null>
+  }
+  /** Huli: the chat bridges of this computer (Settings › 聊天软件); absent in the web client. */
+  chatBridge?: {
+    state(): Promise<ChatBridgeView>
+    /** Sets credentials (null clears one) or the switch; the credentials never come back. */
+    save(platform: ChatPlatform, patch: ChatPlatformPatch): Promise<ChatBridgeView>
+    /** A one-time code for the user's own account to send the bot. */
+    startBinding(platform: ChatPlatform): Promise<ChatBridgeView>
+    cancelBinding(): Promise<ChatBridgeView>
+    unbind(platform: ChatPlatform, accountId: string): Promise<ChatBridgeView>
+    onChanged(listener: (view: ChatBridgeView) => void): () => void
   }
   /** Huli: the daily backup of this computer's data folder; absent in the web client. */
   backup?: {

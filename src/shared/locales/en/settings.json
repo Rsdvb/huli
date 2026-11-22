@@ -20,7 +20,8 @@
     "devices": "Mobile devices",
     "computer-use": "Computer use",
     "agent-network": "Agent network",
-    "backup": "Backup"
+    "backup": "Backup",
+    "chat-bridge": "Chat apps"
   },
   "page": {
     "title": "Settings",
@@ -1563,7 +1564,8 @@
     "devices": "Simulators and phones agents may use without asking.",
     "computer-use": "Lets agents read and drive the desktop apps of this computer, one app and one session at a time.",
     "agent-network": "Each agent’s traffic through a node of your proxy subscriptions, and never around it.",
-    "backup": "A copy of Kettu’s own data each day, kept on this computer, to restore after a loss."
+    "backup": "A copy of Kettu’s own data each day, kept on this computer, to restore after a loss.",
+    "chat-bridge": "See sessions, answer requests and write to the agents from Feishu, DingTalk, WeCom, QQ or Telegram."
   },
   "archived": {
     "description": "{{project}} · archived {{when}}",
@@ -2762,6 +2764,111 @@
       "relay": "Devices will reach this computer through the Kettu relay from any network.",
       "proxy": "Agents, npx and updates will go through this proxy.",
       "source": "Changes where Kettu downloads its updates from."
+    }
+  },
+  "chatBridge": {
+    "keywords": "chat bot feishu lark dingtalk wecom qq telegram remote notifications phone",
+    "platforms": {
+      "feishu": "Feishu",
+      "dingtalk": "DingTalk",
+      "wecom": "WeCom",
+      "qq": "QQ",
+      "telegram": "Telegram"
+    },
+    "enabled": "Turn on the {{platform}} bot",
+    "connection": {
+      "name": "Bot",
+      "description": "The bot's credentials, its switch and its connection"
+    },
+    "accounts": {
+      "name": "Bound accounts",
+      "description": "Only bound accounts can drive the agents through the bot; anyone else who writes to it gets no answer",
+      "none": "No account is bound yet",
+      "another": "Bind another account",
+      "hint": "Choose Bind, then send the bot the one-time code from your own account, in a direct chat.",
+      "turnOnFirst": "Add the credentials and turn the bot on first.",
+      "bind": "Bind",
+      "bound": "{{id}} · bound {{time}}",
+      "remove": "Unbind"
+    },
+    "binding": {
+      "send": {
+        "feishu": "Send the bot these 6 digits in a direct chat in Feishu, before {{until}}.",
+        "dingtalk": "Send the bot these 6 digits in a direct chat in DingTalk, before {{until}}.",
+        "wecom": "Send the bot these 6 digits in a direct chat in WeCom, before {{until}}.",
+        "qq": "Add the bot as a friend, then send it these 6 digits in a direct chat, before {{until}}.",
+        "telegram": "Send the bot these 6 digits in a direct chat in Telegram, before {{until}}."
+      },
+      "openTelegram": "Open in Telegram",
+      "cancel": "Cancel"
+    },
+    "state": {
+      "noCredentials": "No credentials yet",
+      "disabled": "Off",
+      "starting": "Starting…",
+      "connecting": "Connecting…",
+      "connected": "Connected",
+      "connectedAs": "Connected · {{bot}}",
+      "error": "Cannot connect"
+    },
+    "problem": {
+      "credentials": "The platform refused these credentials; check them and save again",
+      "rejected": "The platform refused the request",
+      "network": "The network is down; trying again",
+      "conflict": "Another program uses this bot",
+      "unsupported": "The platform does not support this",
+      "failed": "Something went wrong"
+    },
+    "about": {
+      "feishu": "Write to the bot in a direct chat in Feishu to drive the agents; its buttons allow or deny.",
+      "dingtalk": "Write to the bot in a direct chat in DingTalk to drive the agents; answer with text commands such as /y and /n.",
+      "wecom": "Write to the bot in a direct chat in WeCom to drive the agents; its buttons allow or deny.",
+      "qq": "Write to the bot in a direct chat in QQ to drive the agents; answer with text commands such as /y and /n.",
+      "telegram": "Write to the bot in a direct chat in Telegram to drive the agents; its buttons allow or deny."
+    },
+    "notes": {
+      "feishu": "Make a custom app in Feishu's open platform, add the bot ability, and receive events over the long connection. Free plans have a monthly call quota.",
+      "dingtalk": "Make an internal app in DingTalk's open platform, add a bot, and receive messages in Stream mode. Free plans have a monthly call quota.",
+      "wecom": "Create an AI bot in WeCom's Workbench › AI bots in API mode, with the long connection.",
+      "qq": "Create a bot in QQ's open platform and connect over WebSocket. It answers direct chats only, and QQ limits the messages it starts per day.",
+      "telegram": "Send /newbot to @BotFather to make a bot. Telegram's requests go through Advanced › Proxy."
+    },
+    "credentials": {
+      "add": "Add credentials",
+      "edit": "Credentials",
+      "title": "The {{platform}} bot's credentials",
+      "where": {
+        "feishu": "Copy them from the app's Credentials & Basic Info in Feishu's open platform.",
+        "dingtalk": "Copy them from the app's Credentials & Basic Info in DingTalk's open platform.",
+        "wecom": "Shown when you choose the long connection while creating the AI bot.",
+        "qq": "Copy them from the bot's Development settings in QQ's open platform.",
+        "telegram": "The token @BotFather sent when it made the bot."
+      },
+      "keep": "Set ({{shown}}); leave empty to keep it",
+      "clear": "Clear credentials",
+      "save": "Save",
+      "saveOn": "Save and turn on"
+    },
+    "fields": {
+      "feishu": {
+        "appId": "App ID",
+        "appSecret": "App Secret"
+      },
+      "dingtalk": {
+        "clientId": "Client ID (AppKey)",
+        "clientSecret": "Client Secret (AppSecret)"
+      },
+      "wecom": {
+        "botId": "Bot ID",
+        "secret": "Secret"
+      },
+      "qq": {
+        "appId": "AppID",
+        "appSecret": "AppSecret"
+      },
+      "telegram": {
+        "token": "Bot token"
+      }
     }
   }
 }

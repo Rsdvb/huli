@@ -250,6 +250,8 @@ import { claudeDesktopFolders } from './claude-desktop'
 import { SessionFolders, sessionFoldersFile } from './session-folders'
 import { DeletedSessions, deletedSessionsFile } from './deleted-sessions'
 import { ProviderProfiles } from './provider-profiles'
+import { anyBridgeOn, parseChatBridgeConfig, type ChatBridgeConfig } from '@shared/chat-bridge'
+import type { ChatBridgeService } from './chat-bridge/service'
 
 // The agent menu reads a running agent's options again once they are older than this.
 const OPTIONS_FRESH_MS = 5 * 60_000
@@ -575,6 +577,10 @@ export class AgentHost {
   private readonly publishDrafts: PublishDrafts
   /** The Marketplace tools of Kettu's MCP service. */
   private readonly marketTools: MarketTools
+  /** Huli: the chat bridges, loaded once one is turned on; see tools/huli/README.md (Chat apps). */
+  private chatBridge: ChatBridgeService | null = null
+  private chatBridgeLoad: Promise<ChatBridgeService> | null = null
+  private chatBridgeConfig: ChatBridgeConfig | null = null
   private lastProcesses = '[]'
   private sentFolders: string | null = null
   private stopping: Promise<void> | null = null
@@ -1534,7 +1540,18 @@ export class AgentHost {
       harnessesFolder(options),
       (message) => writeLog('warn', 'host', message),
     )
-    const host = new AgentHost(options)
+    // Huli: what needs the user goes to the chat bridges as well as to main's notifications.
+    let started: AgentHost | null = null
+    const host = new AgentHost({
+      ...options,
+      send: (message) => {
+        options.send(message)
+        if (message.type === 'host:attention' && 'sessionId' in message) {
+          started?.chatBridge?.attention(message)
+        }
+      },
+    })
+    started = host
     const [, , , remembered, updates, listing, manifest] = await Promise.all([
       host.scratch.ready(),
       host.projects.load(),
@@ -1795,6 +1812,44 @@ export class AgentHost {
     const turnedOff = next.disabledAgents.filter((id) => !previous.disabledAgents.includes(id))
     const gone = [...removed, ...turnedOff]
     if (gone.length > 0) await this.sessions.agentsRemoved(gone)
+  }
+
+  /**
+   * Huli: `host:chat-bridge`. The bridges' code loads only once one is on; with none on, it does
+   * nothing and holds nothing.
+   */
+  setChatBridge(raw: unknown): void {
+    const config = parseChatBridgeConfig(raw)
+    if (!config) {
+      this.diagnostics.log('warn', 'host:chat-bridge was not a configuration; ignored')
+      return
+    }
+    this.chatBridgeConfig = config
+    if (this.chatBridge) {
+      this.chatBridge.setConfig(config)
+      return
+    }
+    if (!anyBridgeOn(config) || this.stopping) return
+    this.chatBridgeLoad ??= import('./chat-bridge/service').then(({ ChatBridgeService }) => {
+      const service = new ChatBridgeService({
+        serve: (channel, device) => void this.hub.add(channel, device),
+        route: () => routeFor(this.ownProxy()),
+        send: (message) => this.options.send(message),
+        defaultAgent: () => this.settings.defaultAgent,
+        log: (level, message) => this.diagnostics.log(level, message),
+      })
+      this.chatBridge = service
+      return service
+    })
+    void this.chatBridgeLoad.then(
+      (service) => {
+        if (this.chatBridgeConfig && !this.stopping) service.setConfig(this.chatBridgeConfig)
+      },
+      (error: unknown) => {
+        this.chatBridgeLoad = null
+        this.diagnostics.log('error', `The chat bridges did not load: ${(error as Error).message}`)
+      },
+    )
   }
 
   /** `host:market-account`: the Kettu account the Marketplace tools publish with, or none. */
@@ -2810,6 +2865,7 @@ export class AgentHost {
   /** Stops every agent with the documented sequence, flushes the state files, then reports. */
   shutdown(): Promise<void> {
     this.stopping ??= (async () => {
+      this.chatBridge?.stop()
       await this.routines.shutdown()
       this.sessions.shutdown()
       this.idleRelease.stop()

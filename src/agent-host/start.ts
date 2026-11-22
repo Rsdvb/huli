@@ -112,6 +112,9 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
           h.setProfiles(message.profiles)
         })
         break
+      case 'host:chat-bridge':
+        withHost((h) => h.setChatBridge(message.config))
+        break
       case 'host:market-account':
         withHost((h) => h.setMarketAccount(message.account))
         break

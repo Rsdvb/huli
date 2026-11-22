@@ -34,6 +34,7 @@ const SECTIONS: readonly SettingsSection[] = [
   'account',
   'hosts',
   'browser',
+  'chat-bridge',
   'backup',
   'agents',
   'harnesses',
@@ -328,7 +329,8 @@ function useSectionEntries(): SearchEntry[] {
     const english = i18n.getFixedT('en', ['settings', 'usage'])
     const noAccount = isWeb || cloudOff
     const shown = SECTIONS.filter(
-      (id) => !(noAccount && id === 'account') && !(isWeb && id === 'backup'),
+      (id) =>
+        !(noAccount && id === 'account') && !(isWeb && (id === 'backup' || id === 'chat-bridge')),
     )
     return shown.map((id): SearchEntry => {
       const usage = id === 'usage'

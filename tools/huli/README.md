@@ -1003,6 +1003,64 @@ before the first detection, `nodeSetupChanged`, the handlers, `ownProxy`),
 `harness-section.tsx`, `new-session.tsx`, `mobile/src/app/settings/agents.tsx` and the
 `node`/`nodeRuntime` keys of `locales/*/{agents,settings,host}.json`.
 
+### Chat apps (聊天软件)
+
+Settings › 聊天软件 lets the user drive the agents from a bot of their own in Feishu, DingTalk,
+WeCom, QQ or Telegram. Every bot connects out from this computer, so no public address is needed:
+
+| Platform | Mode                                                           | Buttons               | Files in / out |
+| -------- | -------------------------------------------------------------- | --------------------- | -------------- |
+| Feishu   | custom app, events and card callbacks over the long connection | card JSON 2.0 buttons | yes / yes      |
+| DingTalk | internal app's bot in Stream mode (bot message callback only)  | text commands         | yes / yes      |
+| WeCom    | AI bot (智能机器人) in API mode over the long connection       | button cards (≤ 6)    | yes / yes      |
+| QQ       | QQ open platform bot over the WebSocket gateway, C2C only      | text commands         | yes / no       |
+| Telegram | Bot API long polling (getUpdates), through Kite's own proxy    | inline keyboards      | yes / yes      |
+
+All of them speak the platforms' raw protocols; no SDK is added. Feishu's frames are the
+`pbbp2.Frame` protobuf of its official SDKs, coded by hand in `feishu-frame.ts`. Every request and
+connection goes the way Kite's own requests go (Advanced › Proxy, else the environment's proxy
+variables, else directly), through `node-proxy/download.ts`'s tunnel and the `ws` package the
+remote host already bundles.
+
+- Where: the agent host loads `src/agent-host/chat-bridge/` with `import()` only once a bridge is
+  on with its credentials; with none on, nothing of it runs or loads. Each bridge has its own port
+  into the host's `PortHub`, served as a paired device's (`chat-<platform>`), so every request it
+  makes takes the phone's validation and refusals, and what it sends or answers is marked as from
+  that app. It hears what needs the user from the same `host:attention` main's notifications get.
+- Credentials: main keeps them with the bound accounts in `chat-bridge.json`, encrypted by the
+  system like the Marketplace's keys (nothing is kept where the system cannot encrypt), read off
+  the start's path, and sends them whole to the agent host (`host:chat-bridge`). A window gets
+  `ChatBridgeView` alone: which credentials are set, a secret's last 4 characters, the accounts,
+  each connection's state and last error (`host:chat-bridge-status`). The values are log secrets in
+  the agent host. The backup leaves the file out.
+- Who: only bound accounts, and only in a one-to-one chat with the bot, get any answer; everyone
+  else, and every group, gets none. Binding: 绑定 makes a 6-digit code in main, good for 10 minutes
+  and for one account; the agent host reports it when an unbound account sends it
+  (`host:chat-bridge-bind`), main checks it is the code under way and keeps the account. Five wrong
+  codes use a binding up. Button presses are checked against the bound accounts too, and carry
+  only a random key the bridge maps to the request. New credentials of another bot drop the
+  accounts of the one before.
+- In the chat: `/list` (sessions that need you first), `/s 3`, plain text to the chosen session
+  (`sessions.queue`, `/now` steers with `sessions.sendNow`), `/new 2 1` then the first message
+  (`sessions.create`), `/stop`, `/y` `/n` `/2 note` for the request in front, answers to questions
+  (one at a time for an ask of several; secret ones are refused), plans with their options,
+  `/get 1` for the last turn's artifact as a file, `//` to send a slash command to the agent.
+  Pictures and files become attachments as the phone's do (`attachments.add`, 20 MB). A finished
+  turn's reply comes whole for a session the chat chose or wrote to in the last day, else as a
+  line; replies are cut to each platform's size, code blocks closed and reopened (`split.ts`).
+- Pace: each platform's published limits (`pacing.ts`), a 429 or its code waits as told,
+  reconnects back off from 1 s to 5 minutes; a timer runs only while a message waits or a
+  reconnect is due. Free Feishu and DingTalk organizations have a monthly API quota.
+- Files: `src/shared/chat-bridge.ts`, `src/main/chat-bridge.ts` (+ test), `src/agent-host/chat-bridge/`
+  (`service.ts`, `controller.ts`, `commands.ts`, `access.ts`, `split.ts`, `pacing.ts`, `net.ts`,
+  `lifeline.ts`, `markdown.ts`, `host-client.ts`, one file per platform, tests for the commands,
+  the allowlist and binding, splitting, Feishu's frames and WeCom's file decryption), and
+  `features/settings/chat-bridge-*.tsx`, `stores/chat-bridge.ts`, `chatBridge` in
+  `locales/*/{settings,host}.json`. Hooks: `host-control.ts`, `ipc.ts`, `preload/index.ts`,
+  `main/index.ts`, `main/agent-host.ts`, `main/ipc.ts`, `agent-host/host.ts`, `start.ts`,
+  `settings-catalog.ts`, `settings-page.tsx`, `web-sections.ts`, `use-search-entries.ts`. The daemon
+  has no chat bridges.
+
 ## Tests
 
 `pnpm test` passes on Linux, as CI runs it, and on Windows. Tests of what Huli changes read the
