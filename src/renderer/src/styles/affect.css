@@ -6220,6 +6220,13 @@ li[data-row-exit='dust'] > * {
   align-items: center;
   gap: 7px;
 }
+.kettu-ctx__link-hint {
+  font-size: 12px;
+}
+.kettu-ctx__note--alert {
+  padding-top: 6px;
+  color: var(--danger);
+}
 .kettu-ctx__plan {
   display: flex;
   flex-direction: column;

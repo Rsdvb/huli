@@ -42,6 +42,7 @@ import Reanimated, { useAnimatedStyle, type SharedValue } from 'react-native-rea
 import { useIsFocused } from 'expo-router'
 import type { ThreadState } from '@shared/thread'
 import { devMode } from '../dev/devMode'
+import { useComputerId } from '../host'
 import { keepResult } from '../dev/FrameMeter'
 import type { WritableStore } from '../select'
 import { useThreadSelector, type ThreadView } from '../thread'
@@ -54,6 +55,7 @@ import { observeTools } from '../ui/session/work'
 import { MarksShown, ToBottomButton } from '../ui/session/Working'
 import { SubSessionStart } from './entries/NoteEntries'
 import { ThreadRow } from './EntryView'
+import { RecapLine, useRecap } from './RecapLine'
 
 // How far up the conversation may be scrolled before the way back to its end shows.
 const AWAY = 280
@@ -130,7 +132,8 @@ export function Conversation(props: {
   const { view, sessionId: id, running } = props
   // Covered by another screen, the conversation holds what it showed rather than following every
   // patch out of sight, and catches up once in front again.
-  const thread = useThreadSelector(view, selectThread, undefined, !useIsFocused())
+  const focused = useIsFocused()
+  const thread = useThreadSelector(view, selectThread, undefined, !focused)
   const list = useRef<LegendListRef>(null)
   const [away, setAway] = useState(false)
   const [fresh, setFresh] = useState(false)
@@ -207,6 +210,25 @@ export function Conversation(props: {
     },
     [scrolling, place],
   )
+
+  // What happened while the user was away, and the way back to where they left off.
+  const recap = useRecap(useComputerId(), id, view, thread, focused)
+  const recapFrom = recap.recap?.from ?? null
+  const { dismiss: dismissRecap } = recap
+  const toRecap = useCallback(() => {
+    dismissRecap()
+    if (!thread || recapFrom === null) return
+    const start = thread.order.indexOf(recapFrom)
+    if (start < 0) return
+    const after = new Set(thread.order.slice(start))
+    const index = rows.findIndex((row) =>
+      row.type === 'run'
+        ? row.entries.some((entry) => after.has(entry.id))
+        : (row.type === 'entry' || row.type === 'reply') && after.has(row.entry.id),
+    )
+    if (index < 0) return
+    void list.current?.scrollToIndex({ index, animated: true, viewOffset: headerRoom.current })
+  }, [thread, rows, recapFrom, dismissRecap])
 
   const toBottom = useCallback(() => {
     haptic.tap()
@@ -337,6 +359,14 @@ export function Conversation(props: {
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       />
+      {recap.recap && (
+        <RecapLine
+          recap={recap.recap}
+          top={props.paddingTop - 4}
+          onJump={toRecap}
+          onDismiss={dismissRecap}
+        />
+      )}
       <Reanimated.View pointerEvents="box-none" style={[styles.overDock, overDock]}>
         <ToBottomButton
           visible={away}

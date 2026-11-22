@@ -347,6 +347,21 @@ export interface SlashCommand {
   inputHint?: string
 }
 
+// Huli: the commands that compact a session's context, by the names agents give them: Claude Code,
+// Codex, OpenCode, Pi and agy's `/compact`, and Gemini CLI's and Qwen Code's `/compress`.
+const COMPACT_COMMANDS = ['compact', 'compress'] as const
+
+/**
+ * Huli: the prompt that compacts the session's context, `/compact` or the name its agent gives it,
+ * or null for an agent that offers no such command.
+ */
+export function compactPrompt(commands: readonly SlashCommand[]): string | null {
+  for (const name of COMPACT_COMMANDS) {
+    if (commands.some((command) => command.name === name)) return `/${name}`
+  }
+  return null
+}
+
 export type ThreadEntry =
   // `at`: when the message was sent or began, for live messages only; a replay carries no times.
   // `steered`: sent into a running turn rather than as a turn of its own.

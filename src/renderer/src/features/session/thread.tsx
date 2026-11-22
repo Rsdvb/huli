@@ -37,6 +37,7 @@ import { hoverReply } from './reply-hover'
 import { ReplyToSelection } from './reply-selection'
 import { SubSessionStart } from './subagent/sub-session-start'
 import { itemAtTop, leaveThread, readingPosition, type ReadingPosition } from './reading-position'
+import { RecapLine } from './recap/recap-line'
 import { playEntrance } from './thread-entrance'
 import { TurnStatus } from './turn-status'
 import {
@@ -468,6 +469,8 @@ export const Thread = memo(function Thread({
   useLayoutEffect(() => {
     latest.current = { items, shownFrom, returnPending }
   })
+  // Read when the recap's jump is pressed, so the line never redraws as the items change.
+  const itemsNow = useCallback(() => latest.current.items, [])
   useLayoutEffect(() => {
     const view = viewport.current
     const column = content.current
@@ -612,6 +615,15 @@ export const Thread = memo(function Thread({
         />
         <JumpToLatest sessionId={sessionId} working={working} />
         <OlderLoading sessionId={sessionId} />
+        <RecapLine
+          key={sessionId}
+          sessionId={sessionId}
+          items={itemsNow}
+          sent={sent}
+          viewport={viewport}
+          content={content}
+          jumps={jumps}
+        />
         <MessageOutline sessionId={sessionId} viewport={viewport} content={content} jumps={jumps} />
         <RevealTarget sessionId={sessionId} viewport={viewport} content={content} jumps={jumps} />
         <FindInSession

@@ -105,7 +105,39 @@
     "retry": "重试",
     "wait": "继续等"
   },
+  "markup": {
+    "title": "标注图片",
+    "tools": "标注工具",
+    "tool": {
+      "pen": "画笔",
+      "arrow": "箭头",
+      "rect": "方框",
+      "text": "文字",
+      "crop": "裁剪"
+    },
+    "color": "颜色",
+    "colors": {
+      "red": "红色",
+      "yellow": "黄色",
+      "green": "绿色",
+      "blue": "蓝色"
+    },
+    "undo": "撤销",
+    "canvas": "{{name}}，绘制区域",
+    "label": "标注文字",
+    "labelPlaceholder": "输入文字",
+    "loadFailed": "没能打开图片：{{error}}",
+    "saveFailed": "没能保存标注：{{error}}",
+    "hint": "直接在图片上画，完成后替换原附件。",
+    "cropNote": "完成后只保留裁剪框里的部分。",
+    "done": "完成",
+    "open": "标注 {{name}}",
+    "announceDone": "已标注 {{name}}"
+  },
   "usage": {
+    "compact": "压缩上下文",
+    "compactHint": "把之前的对话总结成摘要",
+    "compactFailed": "没能压缩：{{error}}",
     "title": "用量",
     "contextPercent": "上下文已使用 {{percent}}%",
     "contextPercentStale": "上次读取的上下文用量为 {{percent}}%，正在重试",

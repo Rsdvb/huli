@@ -108,7 +108,39 @@
     "retry": "Retry",
     "wait": "Keep waiting"
   },
+  "markup": {
+    "title": "Mark up image",
+    "tools": "Markup tools",
+    "tool": {
+      "pen": "Pen",
+      "arrow": "Arrow",
+      "rect": "Box",
+      "text": "Text",
+      "crop": "Crop"
+    },
+    "color": "Color",
+    "colors": {
+      "red": "Red",
+      "yellow": "Yellow",
+      "green": "Green",
+      "blue": "Blue"
+    },
+    "undo": "Undo",
+    "canvas": "{{name}}, drawing area",
+    "label": "Label text",
+    "labelPlaceholder": "Type a label",
+    "loadFailed": "Couldn’t open the image: {{error}}",
+    "saveFailed": "Couldn’t save the marks: {{error}}",
+    "hint": "Draw on the image. Done replaces the attachment.",
+    "cropNote": "Done keeps only what’s inside the crop.",
+    "done": "Done",
+    "open": "Mark up {{name}}",
+    "announceDone": "Marked up {{name}}"
+  },
   "usage": {
+    "compact": "Compact context",
+    "compactHint": "Summarizes the conversation so far",
+    "compactFailed": "Couldn’t compact: {{error}}",
     "title": "Usage",
     "contextPercent": "Context {{percent}}% used",
     "contextPercentStale": "Context {{percent}}% used at last reading; retrying",

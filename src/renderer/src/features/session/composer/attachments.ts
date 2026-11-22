@@ -499,6 +499,41 @@ async function addFromHost(
   }
 }
 
+/** Huli: an image attachment's bytes, from the host that holds it, for the markup editor. */
+export async function readImage(attachment: Attachment): Promise<Blob> {
+  const read = await on(attachmentHost(attachment.id), 'attachments.read', { id: attachment.id })
+  return new Blob([read.bytes], { type: read.mimeType || attachment.mimeType || '' })
+}
+
+/**
+ * Huli: puts a marked-up picture in place of an image tile's: the same tile and name, so a chip in
+ * the text still names it, with a new record on the host `hostId` names and the old one let go.
+ */
+export async function replaceImage(
+  draft: string,
+  key: string,
+  image: Blob,
+  hostId: string | null,
+): Promise<void> {
+  const item = draftAttachments(draft).find((each) => each.key === key)
+  if (!item) return
+  removeRecord(item)
+  // The old thumbnail stays until the new one is made, so the tile never blinks empty.
+  const adding: DraftAttachment = {
+    ...item,
+    kind: 'image',
+    status: 'adding',
+    attachment: null,
+    size: image.size,
+    pixels: null,
+    scaled: null,
+    error: null,
+  }
+  patchDraftAttachment(draft, key, adding)
+  const file = new File([image], item.name, { type: image.type || 'image/png' })
+  await addImage(draft, adding, file, hostId)
+}
+
 function isHeld(draft: string, key: string): boolean {
   return draftAttachments(draft).some((item) => item.key === key)
 }

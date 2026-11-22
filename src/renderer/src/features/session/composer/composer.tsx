@@ -4,6 +4,7 @@ import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { cacheExpiry, knownExpiry } from '@shared/prompt-cache'
 import {
+  compactPrompt,
   harnessOf,
   type AgentId,
   type ConfigOption,
@@ -902,6 +903,11 @@ export function Composer({
                   holding={modelLimits}
                   account={agent?.account ?? null}
                   model={modelName}
+                  compact={
+                    status === 'ready' && session.queue.length === 0 && !pending && !mustSwitch
+                      ? compactPrompt(session.commands)
+                      : null
+                  }
                 />
               </AgentMarkHost.Provider>
             </span>

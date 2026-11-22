@@ -1,0 +1,123 @@
+# The recap, one-tap compact and markup: a session is left while a run of tool calls goes on, and
+# opened again it greets the user with what happened meanwhile (the developer build's
+# huliRecapAwayMs launch argument shortens the half hour to three seconds) and jumps to where they
+# left off. The context sheet then compacts the session in one tap. Last, a photo added to the
+# simulator is attached, marked up with the pen and an arrow, and Done puts it back in its tile.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliRecapAwayMs: '3000'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/basic-turn'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+# A run of tool calls that goes on for about ten seconds, left at once.
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/tool-storm --count 24 --rate 2.5'
+- tapOn: '发送'
+- tapOn: '返回'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 14000
+    optional: true
+- tapOn:
+    text: '.*Fix the flaky login test.*'
+- extendedWaitUntil:
+    visible:
+      text: '你离开期间.*'
+    timeout: 20000
+    optional: true
+- takeScreenshot: r01-recap
+- tapOn:
+    text: '.*跳到离开处'
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: r02-jumped
+# One-tap compact, from the context sheet once the turn is over.
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 60000
+- tapOn:
+    text: '上下文已用.*'
+- waitForAnimationToEnd
+- takeScreenshot: c01-context-sheet
+- tapOn:
+    text: '压缩上下文.*'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 4000
+    optional: true
+- takeScreenshot: c02-compacted
+# Markup: a photo from the simulator's library, marked up with the pen and an arrow.
+- addMedia:
+    - '../../../../../mobile/assets/icon.png'
+- tapOn: '添加照片、文件或命令'
+- tapOn: '照片'
+- extendedWaitUntil:
+    visible:
+      text: '(Photo|照片|Photos).*'
+    timeout: 10000
+    optional: true
+- takeScreenshot: k00-picker
+- tapOn:
+    point: '18%,24%'
+    optional: true
+- tapOn:
+    text: '(添加|Add)'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 4000
+    optional: true
+- takeScreenshot: k01-attached
+- tapOn:
+    text: '.*\.(png|jpg|jpeg|PNG|JPG|JPEG|heic|HEIC)'
+    optional: true
+- tapOn:
+    text: '标注'
+    optional: true
+- extendedWaitUntil:
+    visible: '画笔'
+    timeout: 10000
+    optional: true
+- swipe:
+    start: 30%, 35%
+    end: 70%, 45%
+    duration: 600
+- tapOn:
+    text: '箭头'
+    optional: true
+- swipe:
+    start: 65%, 55%
+    end: 40%, 40%
+    duration: 400
+- takeScreenshot: k02-marked
+- tapOn:
+    text: '完成'
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 5000
+    optional: true
+- takeScreenshot: k03-done

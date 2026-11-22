@@ -1,5 +1,5 @@
 import type { ComponentProps, MouseEvent } from 'react'
-import { Alert02Icon, Cancel01Icon, File02Icon } from '@hugeicons/core-free-icons'
+import { Alert02Icon, Cancel01Icon, File02Icon, PencilEdit02Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { Attachment } from '@shared/thread'
 import { Skeleton } from '@renderer/components/ui/skeleton'
@@ -35,6 +35,8 @@ export function AttachmentTile({
   picture = 'small',
   onRemove,
   removeLabel,
+  onMarkup,
+  markupLabel,
   className,
   ...props
 }: {
@@ -43,6 +45,9 @@ export function AttachmentTile({
   picture?: 'small' | 'large'
   onRemove?: () => void
   removeLabel?: string
+  /** Huli: opens the picture in the markup editor, for a composer's added image. */
+  onMarkup?: () => void
+  markupLabel?: string
 } & ComponentProps<'div'>) {
   const { t } = useTranslation('composer')
   const failed = view.status === 'failed'
@@ -51,6 +56,10 @@ export function AttachmentTile({
   const remove = (event: MouseEvent) => {
     event.stopPropagation()
     onRemove?.()
+  }
+  const markup = (event: MouseEvent) => {
+    event.stopPropagation()
+    onMarkup?.()
   }
   return (
     <Tooltip>
@@ -160,6 +169,18 @@ export function AttachmentTile({
             className="absolute -top-1.5 -right-1.5 grid size-4.5 place-items-center rounded-full bg-surface text-icon opacity-0 shadow-card transition-opacity duration-(--duration-fast) group-focus-visible/tile:opacity-100 group-hover/tile:opacity-100 hover:text-primary"
           >
             <Glyph icon={Cancel01Icon} className="size-2.5" />
+          </button>
+        )}
+        {image && view.status === 'ready' && onMarkup && (
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label={markupLabel}
+            title={markupLabel}
+            onClick={markup}
+            className="absolute right-1 bottom-1 grid size-6 place-items-center rounded-full bg-surface text-icon opacity-0 shadow-card transition-opacity duration-(--duration-fast) group-focus-visible/tile:opacity-100 group-hover/tile:opacity-100 hover:text-primary"
+          >
+            <Glyph icon={PencilEdit02Icon} className="size-3.5" />
           </button>
         )}
       </TooltipTrigger>
