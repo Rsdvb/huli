@@ -125,7 +125,10 @@ async function side(
 
 /** Calls a side's service as its host would: through the method's validator first. */
 async function dispatch(moves: SessionMoves, method: string, raw: unknown): Promise<unknown> {
-  const validators = moveValidators(PLATFORM) as Record<string, (params: unknown) => never>
+  const validators = moveValidators(PLATFORM) as unknown as Record<
+    string,
+    (params: unknown) => never
+  >
   const params = validators[method]!(structuredClone(raw)) as Record<string, never>
   switch (method) {
     case 'moves.inspect':
@@ -139,7 +142,7 @@ async function dispatch(moves: SessionMoves, method: string, raw: unknown): Prom
     case 'moves.abort':
       return moves.abort(params.moveId)
     case 'moves.check':
-      return moves.check(params)
+      return moves.check(params as never)
     case 'moves.prepare':
       return moves.prepare(params.moveId, params.project, params.url)
     case 'moves.receive':
