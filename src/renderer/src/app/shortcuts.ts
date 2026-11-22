@@ -23,6 +23,7 @@ import {
   useViewStore,
 } from '@renderer/stores/view'
 import { paneOrder } from '@renderer/features/split/layout'
+import { ownUndo, undoLatest, undoOffered } from '@renderer/features/sidebar/undo'
 import { newSession, openProjectDialog } from './actions'
 import { closeCurrent } from './close'
 import { emitAppEvent } from './events'
@@ -110,6 +111,11 @@ export function useKeyboardShortcuts(): void {
       }
 
       const key = event.key.toLowerCase()
+      // Huli: the latest archive, settle or snooze is undone while its toast shows, unless a text
+      // field with text has the key for its own undo.
+      if (key === 'z' && !event.shiftKey && undoOffered() && !ownUndo(event.target)) {
+        return run(event, () => void undoLatest())
+      }
       // A new tab in the browser the user used last; elsewhere the key is left alone.
       if (key === 't' && !event.shiftKey && usedPane()?.kind === 'browser' && !layerOpen()) {
         return run(event, () => emitAppEvent({ kind: 'new-browser-tab' }))

@@ -58,3 +58,31 @@ export function isParked(summary: {
 }): boolean {
   return !!summary.snooze || !!summary.settled
 }
+
+/** The snooze menu's quick choices, as the desktop's menu and the phone's list them. */
+export type SnoozePreset = 'hour' | 'tonight' | 'tomorrow' | 'monday'
+
+/** The hour "tonight" means, and the one a morning choice comes back at. */
+export const TONIGHT_HOUR = 20
+export const MORNING_HOUR = 9
+
+/**
+ * The quick choices from `now`, each with when it comes back in local time: an hour on, tonight at
+ * 20:00 while that is more than an hour away, tomorrow at 9:00, and next Monday at 9:00.
+ */
+export function snoozePresets(now: number): { preset: SnoozePreset; until: number }[] {
+  const at = (days: number, hour: number): number => {
+    const date = new Date(now)
+    date.setDate(date.getDate() + days)
+    date.setHours(hour, 0, 0, 0)
+    return date.getTime()
+  }
+  const out: { preset: SnoozePreset; until: number }[] = [{ preset: 'hour', until: now + HOUR_MS }]
+  const tonight = at(0, TONIGHT_HOUR)
+  if (tonight - now > HOUR_MS) out.push({ preset: 'tonight', until: tonight })
+  out.push({ preset: 'tomorrow', until: at(1, MORNING_HOUR) })
+  // Sunday is 0: the Monday after today, a week on from a Monday.
+  const toMonday = (8 - new Date(now).getDay()) % 7 || 7
+  if (toMonday > 1) out.push({ preset: 'monday', until: at(toMonday, MORNING_HOUR) })
+  return out
+}

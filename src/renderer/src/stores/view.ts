@@ -113,6 +113,10 @@ export interface Step {
 // The No project and Pinned groups' keys in `collapsedProjects`, which no folder's path can take.
 export const NO_PROJECT_GROUP = 'no-project'
 export const PINNED_GROUP = 'pinned'
+// Huli: the snoozed sessions' group, open by default in `collapsedProjects`, and the settled
+// ones', closed by default, opened in `expandedParents` (会话整理).
+export const SNOOZED_GROUP = 'huli:snoozed'
+export const SETTLED_GROUP = 'huli:settled'
 
 /** This computer as the host the sidebar is narrowed to, which has no id of its own. */
 export const THIS_COMPUTER = 'this-computer'

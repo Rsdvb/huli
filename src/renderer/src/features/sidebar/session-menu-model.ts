@@ -10,6 +10,9 @@ export type SessionMenuItem =
   | 'pin'
   | 'unread'
   | 'rename'
+  | 'snooze'
+  | 'settle'
+  | 'neverSettle'
   | 'autoResume'
   | 'board'
   | 'manager'
@@ -155,6 +158,14 @@ export function sessionMenuGroups(
   // Huli: its pull request merged once its checks pass, or watched for its agent.
   const flow: SessionMenuItem[] =
     prFlow && topLevel && entryShown('sessionMenu.prFlow') ? ['autoMerge', 'watchPr'] : []
+  // Huli: 稍后提醒, 收起 and 永不收起, for a session of the user's own in the list (会话整理).
+  const tidy: SessionMenuItem[] =
+    topLevel &&
+    summary.origin === 'user' &&
+    summary.archivedAt === null &&
+    entryShown('sessionMenu.snooze')
+      ? ['snooze', 'settle', 'neverSettle']
+      : []
   const state: SessionMenuItem[] = running
     ? ['stop']
     : status === 'failed' || status === 'auth_required'
@@ -165,6 +176,7 @@ export function sessionMenuGroups(
       ? [
           state,
           ['rename', ...(topLevel ? (['pin'] as const) : []), ...forks],
+          tidy,
           own,
           flow,
           ['openInEditor', 'showInFolder', 'openTerminal', 'resumeInTerminal'],
@@ -174,6 +186,7 @@ export function sessionMenuGroups(
       : [
           state,
           topLevel ? ['pin', 'unread', 'rename'] : ['unread', 'rename'],
+          tidy,
           own,
           flow,
           [...forks, 'newSubSession'],
@@ -205,7 +218,7 @@ export function sessionMenuGroups(
 }
 
 export type MultiSessionMenuItem =
-  'stop' | 'read' | 'unread' | 'pin' | 'unpin' | 'archive' | 'delete'
+  'stop' | 'read' | 'unread' | 'pin' | 'unpin' | 'snooze' | 'settle' | 'archive' | 'delete'
 
 export const MULTI_ACCELERATORS: Partial<Record<MultiSessionMenuItem, string>> = {
   stop: 'Mod+.',
@@ -240,9 +253,15 @@ export function multiSessionMenuGroups(
       : every((s) => s.pinnedAt === null)
         ? ['pin']
         : []
+  // Huli: the user's own top-level sessions snooze and settle together (会话整理).
+  const tidy: MultiSessionMenuItem[] =
+    topLevel && every((s) => s.origin === 'user') && entryShown('sessionMenu.snooze')
+      ? ['snooze', 'settle']
+      : []
   const groups: MultiSessionMenuItem[][] = [
     running ? ['stop'] : [],
     own ? [...reading, ...pinning] : [],
+    tidy,
     [
       ...(topLevel ? (['archive'] as const) : []),
       ...(own && every((s) => !isRunning(s)) ? (['delete'] as const) : []),

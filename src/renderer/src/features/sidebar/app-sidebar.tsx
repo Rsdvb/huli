@@ -80,6 +80,7 @@ import { limitRows, rowInSight, ROWS_SHOWN } from './row-limit'
 import { SessionRow } from './session-row'
 import { TaskRow } from './task-row'
 import { RunGroupRow } from './run-group-row'
+import { ParkedGroup } from './parked-group'
 
 /**
  * The sidebar's list under its menu, in App Shell's look: Pinned, then the projects as folders
@@ -179,6 +180,8 @@ export function SidebarList() {
                 onImport={importSessions}
               />
             ))}
+            <ParkedGroup kind="snoozed" stop={stop} hosts={hosts} />
+            <ParkedGroup kind="settled" stop={stop} hosts={hosts} />
           </>
         ) : (
           <>
@@ -205,6 +208,8 @@ export function SidebarList() {
               <ProjectGroup project={null} stop={stop} onImport={importSessions} />
             </div>
             <FolderSection hostId={null} at="below" stop={stop} />
+            <ParkedGroup kind="snoozed" stop={stop} />
+            <ParkedGroup kind="settled" stop={stop} />
           </>
         )}
       </div>

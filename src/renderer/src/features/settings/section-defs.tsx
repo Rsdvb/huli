@@ -60,6 +60,7 @@ import { useIdleSessionRows } from './idle-sessions'
 import { useAutoApproveRows } from './auto-approve'
 import { useSandboxRows } from './sandbox'
 import { ResumeAfterLimit, ResumeText, StallMinutesChoice } from './supervisor-rows'
+import { AutoSettle, SettleDaysChoice, SettleMerged } from './tidy-rows'
 import { useWorkflowRows } from './workflow-settings'
 import {
   AgentListItem,
@@ -196,6 +197,8 @@ export function useGeneralSection(): SectionDef {
   })
   const loginItem = useLoginItemStatus()
   const agentHistory = useAgentHistoryRow()
+  // Huli: 会话整理's rules, while Settings > Features has it on.
+  const tidyOn = useEntry('settings.autoSettle')
   const openAtLoginDescription = loginItem
     ? !loginItem.available
       ? t('general.openAtLogin.unavailable')
@@ -281,6 +284,28 @@ export function useGeneralSection(): SectionDef {
         group: sessions,
         render: () => <StallMinutesChoice label={t('general.stallMinutes.name')} />,
       },
+      ...(tidyOn
+        ? [
+            {
+              id: 'auto-settle',
+              setting: 'general.auto-settle',
+              group: sessions,
+              render: () => <AutoSettle label={t('general.autoSettle.name')} />,
+            } satisfies RowDef,
+            {
+              id: 'settle-days',
+              setting: 'general.settle-days',
+              group: sessions,
+              render: () => <SettleDaysChoice label={t('general.settleDays.name')} />,
+            } satisfies RowDef,
+            {
+              id: 'settle-merged',
+              setting: 'general.settle-merged',
+              group: sessions,
+              render: () => <SettleMerged label={t('general.settleMerged.name')} />,
+            } satisfies RowDef,
+          ]
+        : []),
       {
         id: 'background',
         setting: 'general.background',
