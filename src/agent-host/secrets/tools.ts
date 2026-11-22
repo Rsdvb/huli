@@ -459,16 +459,18 @@ export class SecretTools {
       )
     }
     if (delivered.kind === 'env') {
+      // Git Bash takes a Windows path with forward slashes, as PowerShell does.
+      const sh = delivered.sh.replace(/\\/g, '/')
       const powershell = delivered.ps1
-        ? ` or \`. '${delivered.ps1}'; <command>\` in PowerShell`
+        ? `; in PowerShell, \`. '${delivered.ps1}'; <command>\` with ${names.map((name) => `$env:${name}`).join(', ')}`
         : ''
       return reply(
-        `The user provided ${list}. They are in a private file of this session, outside the project: ${delivered.sh}. Load it in the same command that needs them, as \`. '${delivered.sh}' && <command>\` in bash or zsh${powershell}, and use ${refs}. ${never}`,
+        `The user provided ${list}. They are in a private file of this session, outside the project. Load it in the same command that needs them: in bash or zsh, \`. '${sh}' && <command>\` with ${refs}${powershell}. ${never}`,
         {
           status: 'provided',
           names,
           target: 'env',
-          file: delivered.sh,
+          file: sh,
           ...(delivered.ps1 ? { powershellFile: delivered.ps1 } : {}),
         },
       )

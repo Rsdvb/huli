@@ -115,7 +115,7 @@ describe('request_secrets', () => {
     const result = await call
     const sh = await readFile(path.join(envDir, 's1.sh'), 'utf8')
     expect(sh).toBe(`export OPENAI_API_KEY='pa ss'\\''wo$rd'\n`)
-    expect(text(result)).toContain(path.join(envDir, 's1.sh'))
+    expect(text(result)).toContain(path.join(envDir, 's1.sh').replace(/\\/g, '/'))
     expect(JSON.stringify(result)).not.toContain('wo$rd')
   })
 
