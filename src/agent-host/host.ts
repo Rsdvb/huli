@@ -3,6 +3,7 @@
 // shell and git.
 
 import { DEVICE_ACCESS_WAIT_MS, type DeviceCall, type DeviceCallAnswer } from '@shared/device-agent'
+import type { AgentSync } from './agent-sync/service'
 import {
   replyRunNotice,
   type TerminalCall,
@@ -563,6 +564,7 @@ export class AgentHost {
   private readonly marketPlugins: MarketPluginsService
   /** The skills catalog, the skills Kettu keeps, and what each agent gets of them. */
   private readonly marketSkills: MarketSkillsService
+  private agentSyncService: Promise<AgentSync> | null = null
   /** The Kettu Marketplace's listings, the downloads of their files and its plugins. */
   private readonly marketCommunity: MarketCommunityService
   private readonly marketBundles: MarketBundlesService
@@ -3084,6 +3086,21 @@ export class AgentHost {
     return run(canonical)
   }
 
+  /** Huli: Agent sync, loaded the first time Marketplace › Sync asks for it. */
+  private agentSync(): Promise<AgentSync> {
+    this.agentSyncService ??= import('./agent-sync/service').then(
+      ({ AgentSync }) =>
+        new AgentSync({
+          userDataPath: this.options.userDataPath,
+          home: this.options.homeDir ?? os.homedir(),
+          platform: this.options.platform,
+          log: (level, message) => this.diagnostics.log(level, message),
+          agents: () => this.agents.syncContexts(this.settings.disabledAgents),
+        }),
+    )
+    return this.agentSyncService
+  }
+
   /** For Settings › MCP servers: Kettu's own server and where each agent keeps its own. */
   private async mcpStatus(): Promise<McpStatus> {
     const service = this.artifactService
@@ -3299,6 +3316,10 @@ export class AgentHost {
       'market.bundlePrepare': ({ id }) => this.marketBundles.prepare(id),
       'market.bundleCommit': ({ token, values }) => this.marketBundles.commit(token, values),
       'market.bundleCancel': ({ token }) => this.marketBundles.cancel(token),
+      'sync.read': async () => (await this.agentSync()).read(),
+      'sync.preview': async ({ changes }) => (await this.agentSync()).preview(changes),
+      'sync.apply': async ({ previewId }) => (await this.agentSync()).apply(previewId),
+      'sync.saveSnippets': async ({ snippets }) => (await this.agentSync()).saveSnippets(snippets),
       'mcp.retry': async () => {
         await this.artifactService.start()
         this.options.send({ type: 'host:service-port', port: this.artifactService.listeningPort })

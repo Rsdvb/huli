@@ -15,7 +15,8 @@
       "plugins": "Plugins",
       "skills": "Skills",
       "workflow": "Workflows",
-      "published": "Published"
+      "published": "Published",
+      "sync": "Sync"
     },
     "searchPublished": "Search what you published"
   },
@@ -981,5 +982,126 @@
     "multipleHint": "Add as many as you need.",
     "keepHint": "Leave empty to keep the value you set before.",
     "updateSubmit": "Update"
+  },
+  "sync": {
+    "title": "Sync across agents",
+    "intro": "Kite reads each agent's own files only while this tab is open. Before anything is written you see each file's exact changes, and the old files are backed up to Kite's data folder first.",
+    "refresh": "Read again",
+    "readFailed": "Could not read the agents' files: {{error}}",
+    "noMatch": "Nothing matches “{{query}}”.",
+    "newFile": "Not created yet",
+    "sections": {
+      "mcp": "MCP servers",
+      "skills": "Skills",
+      "instructions": "Instructions"
+    },
+    "transport": {
+      "stdio": "Local",
+      "http": "HTTP",
+      "sse": "SSE"
+    },
+    "readProblem": {
+      "not-utf8": "Not UTF-8 text, left alone",
+      "too-large": "Too large to read",
+      "not-file": "Not a file",
+      "parse": "Could not be read: {{detail}}",
+      "unpaired": "A Kite marker has no partner; fix it in the file",
+      "several": "More than one Kite block; fix it in the file"
+    },
+    "mcp": {
+      "server": "Server",
+      "none": "None of these agents has an MCP server in its own files yet.",
+      "noAgentsTitle": "No agent files found",
+      "noAgents": "None of the agents here keeps MCP servers in a file Kite knows.",
+      "disabled": "Off",
+      "differs": "Differs",
+      "differsLine": "The agents' copies of this server are not the same; a copy takes the first column's.",
+      "unreadable_other": "{{count}} entries Kite cannot read: {{names}}",
+      "addTo": "{{server}} in {{agent}}",
+      "removeFrom": "{{server}} in {{agent}}",
+      "noTransport": "{{agent}} cannot connect to a {{transport}} server",
+      "unreadable_one": "{{count}} entry Kite cannot read: {{names}}"
+    },
+    "skills": {
+      "skill": "Skill",
+      "none": "None of these folders holds a skill yet.",
+      "noneTitle": "No skills folders",
+      "has": "In this folder",
+      "via": "Read elsewhere",
+      "reachable": "These agents already read this skill from another folder",
+      "readOnly": "Also read by {{agents}}",
+      "alsoRead": "Also read by {{agents}}",
+      "copyTo": "Copy {{skill}} to {{agent}}",
+      "syncTo": "Sync to…",
+      "syncToTitle": "Copy {{skill}} to"
+    },
+    "instructions": {
+      "note": "The snippets chosen for a file go into Kite's block at its end, between <!-- kite:shared start --> and <!-- kite:shared end -->. Nothing outside the block changes, not a byte.",
+      "snippets": "Shared snippets",
+      "snippet": "Snippet",
+      "add": "New snippet",
+      "untitled": "Untitled snippet",
+      "titleLabel": "Snippet title",
+      "bodyLabel": "Snippet text",
+      "bodyPlaceholder": "Instructions every chosen agent should follow, in Markdown",
+      "save": "Save",
+      "delete": "Delete",
+      "saveFailed": "Could not save the snippets: {{error}}",
+      "noneTitle": "No snippets yet",
+      "none": "Add a snippet, then choose which agents' instructions files hold it.",
+      "include": "Put {{snippet}} in {{agent}}'s instructions",
+      "overwrite": "Replace with Kite's",
+      "block": {
+        "none": "No block",
+        "synced": "In sync",
+        "outdated": "To update",
+        "edited": "Edited in the file"
+      }
+    },
+    "bar": {
+      "count_other": "{{count}} changes waiting",
+      "discard": "Discard",
+      "preview": "Preview changes",
+      "count_one": "{{count}} change waiting"
+    },
+    "preview": {
+      "title": "Write these changes?",
+      "description": "These are the exact lines each file gets; secrets show only their last characters. The old files are backed up first, and if a file changes after this preview, nothing is written.",
+      "nothing": "No file needs a change.",
+      "lines": "Changed lines",
+      "added": "Added: ",
+      "removed": "Removed: ",
+      "action": {
+        "edit": "Edit",
+        "create": "New file",
+        "copy": "Copy folder"
+      },
+      "copyLine_other": "Copies {{count}} files ({{size}}).",
+      "converted": "{{server}} is converted from {{from}}'s format to {{to}}'s.",
+      "convertedDropped": "{{server}} is converted from {{from}}'s format to {{to}}'s, without {{fields}}, which it does not take.",
+      "outsideEdit": "Kite's block in this file was edited in the file; writing replaces those edits.",
+      "newFile": "The file does not exist yet and is created.",
+      "problems": "Left out",
+      "confirm_other": "Write {{count}} changes",
+      "changed": "Nothing was written: {{files}} changed after the preview. Preview again.",
+      "failed": "Could not write {{path}}: {{error}}. The files before it were written and backed up.",
+      "done_other": "Wrote {{count}} files; the old ones are backed up",
+      "doneNoBackup_other": "Wrote {{count}} changes",
+      "showBackup": "Show backup",
+      "copyLine_one": "Copies {{count}} file ({{size}}).",
+      "confirm_one": "Write {{count}} change",
+      "done_one": "Wrote {{count}} file; the old one is backed up",
+      "doneNoBackup_one": "Wrote {{count}} change"
+    },
+    "problem": {
+      "unknown-place": "That place is not one of the agents' here",
+      "missing": "The source no longer has it",
+      "exists": "The target already has one by this name",
+      "transport": "The agent cannot connect to it ({{detail}})",
+      "unreadable": "The file cannot be read ({{detail}})",
+      "unsupported": "The file writes it in a way Kite cannot change safely; change it by hand",
+      "skill-link": "The skill folder holds a link, which Kite does not copy ({{detail}})",
+      "skill-too-large": "The skill folder is too large to copy"
+    }
   }
 }

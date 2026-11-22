@@ -2,6 +2,13 @@
 
 import type { CodebuddyShellOverride, CodebuddySite, PromptCacheTtl } from './agents'
 import type { AgentRemovalPreview, AgentRemovalProgress, AgentRemovalResult } from './agent-removal'
+import type {
+  AgentSyncState,
+  SyncApplied,
+  SyncChange,
+  SyncPreview,
+  SyncSnippet,
+} from './agent-sync'
 import type { AgentResetCategory, AgentResetPreview, AgentResetResult } from './agent-reset'
 import type { DeviceAccessDecision } from './device-agent'
 import type { ArtifactConsentAsk, ArtifactConsentRow, RuntimeAnswer } from './artifact-capabilities'
@@ -1136,6 +1143,16 @@ export interface HostContract {
   'mcp.status': { params: void; result: McpStatus }
   // Listens again when Kettu's MCP server does not, then sends main its port.
   'mcp.retry': { params: void; result: McpStatus }
+  // Huli: Agent sync (Marketplace › Sync). Reads each agent's user-level MCP servers, skills and
+  // instructions now, when the page opens; secrets in them come masked.
+  'sync.read': { params: void; result: AgentSyncState }
+  // The exact lines the changes would write, masked, and the changes left out; writes nothing.
+  'sync.preview': { params: { changes: SyncChange[] }; result: SyncPreview }
+  // Writes a preview's files once, after copying the old ones into Kite's data; writes nothing
+  // when a file changed since the preview.
+  'sync.apply': { params: { previewId: string }; result: SyncApplied }
+  // Replaces the snippet library, which is Kite's own.
+  'sync.saveSnippets': { params: { snippets: SyncSnippet[] }; result: void }
   // The Marketplace's catalog of MCP servers from the registry, cached for a day; refresh skips the
   // cache, and cached answers from it however old, unless there is none.
   'market.catalog': { params: { refresh?: boolean; cached?: boolean }; result: MarketCatalog }
@@ -2220,6 +2237,10 @@ export const HOST_METHODS = [
   'agents.draftReport',
   'mcp.status',
   'mcp.retry',
+  'sync.read',
+  'sync.preview',
+  'sync.apply',
+  'sync.saveSnippets',
   'market.catalog',
   'market.search',
   'market.keys',

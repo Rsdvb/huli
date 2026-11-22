@@ -30,6 +30,12 @@ const WINDOW_ONLY: ReadonlySet<string> = new Set<HostMethod>([
   'agentHistory.copy',
   // Huli: what the host allows by itself without asking is set at the computer, never by a device.
   'projects.setAutoApprove',
+  // Huli: Agent sync rewrites the agents' own files, their instructions among them, from this
+  // computer's window alone.
+  'sync.read',
+  'sync.preview',
+  'sync.apply',
+  'sync.saveSnippets',
 ])
 
 function sourceHas(params: unknown, key: string): boolean {

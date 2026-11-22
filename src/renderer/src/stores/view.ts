@@ -71,7 +71,7 @@ type PageView =
 
 /** The Marketplace directory's tabs. */
 export type MarketplaceTab =
-  'all' | 'plugins' | 'skills' | 'mcp' | 'workflow' | 'installed' | 'published'
+  'all' | 'plugins' | 'skills' | 'mcp' | 'workflow' | 'installed' | 'sync' | 'published'
 
 // An artifact in the viewer, which Back leaves for what the main area showed before; `history`
 // opens it with its version history.
