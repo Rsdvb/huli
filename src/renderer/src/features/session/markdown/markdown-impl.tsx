@@ -58,7 +58,6 @@ import { BlockCode } from './code-frame'
 import { MarkdownTable } from './markdown-table'
 import {
   KeepInPlace,
-  PLACEHOLDER,
   saveParts,
   savedParts,
   useRenderedChunks,
@@ -331,7 +330,7 @@ const ChunkPlaceholder = memo(function ChunkPlaceholder({
   const style = slot
     ? { height: slot.height, marginTop: slot.before, marginBottom: slot.after }
     : { height: estimate }
-  return <div aria-hidden className="markdown-chunk" {...{ [PLACEHOLDER]: '' }} style={style} />
+  return <div aria-hidden className="markdown-chunk" data-part-placeholder="" style={style} />
 })
 
 /**

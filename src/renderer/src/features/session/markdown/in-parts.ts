@@ -31,10 +31,8 @@ const FAR = '200% 0px'
 /** Chunks whose text holds the words that a find renders before it settles for the first. */
 const FIND_TRIES = 8
 
-/** Marks a chunk's placeholder. */
-export const PLACEHOLDER = 'data-part-placeholder'
-
-const isPlaceholder = (el: Element): boolean => el.hasAttribute(PLACEHOLDER)
+/** A chunk's placeholder, which markdown-impl.tsx marks so. */
+const isPlaceholder = (el: Element): boolean => el.hasAttribute('data-part-placeholder')
 
 /** Which chunks are not rendered, and the place each that was rendered keeps. */
 interface View {
@@ -239,7 +237,9 @@ class Parts {
       const i = this.indexOf(entry.target)
       if (i >= 0) this.inFar.set(i, entry.isIntersecting)
     }
-    this.update(false)
+    // Chunks go at once, which costs little and moves nothing: in a transition they waited while a
+    // fast stream's updates kept coming, and a reply streamed in 8 s kept 30,000 elements at its end.
+    this.apply((view) => this.next(view, false), true)
   }
 
   private onFocus = (event: FocusEvent): void => {
@@ -278,16 +278,23 @@ class Parts {
     this.update(next !== null)
   }
 
-  /** The next view: placeholders near the view render, rendered chunks far from it go. */
-  private next(view: View): View {
+  /**
+   * The next view: rendered chunks far from the view go, and with `show`, placeholders near it
+   * render.
+   */
+  private next(view: View, show = true): View {
     const end = this.live ? this.chunks.length - 1 : this.chunks.length
     if (this.found >= 0 && this.inNear.get(this.found)) this.found = -1
     const hidden = new Set<number>()
     const selected = this.selected
     for (let i = 0; i < end; i++) {
-      if (i === this.found || i === this.focused || this.inNear.get(i) === true) continue
-      if (selected && i >= selected.from && i <= selected.to) continue
-      if (view.hidden.has(i) || this.inFar.get(i) === false) hidden.add(i)
+      const held =
+        i === this.found ||
+        i === this.focused ||
+        this.inNear.get(i) === true ||
+        (selected !== null && i >= selected.from && i <= selected.to)
+      const was = view.hidden.has(i)
+      if (was ? !show || !held : !held && this.inFar.get(i) === false) hidden.add(i)
     }
     if (sameSet(hidden, view.hidden)) return view
     const slots = new Map(view.slots)
@@ -382,9 +389,9 @@ export async function revealPart(
 
 /**
  * Which chunks of a text render: those near the view, the last while the text is written, and the
- * ones a selection, the focus or a find holds. A text shown already written renders only its end at first, where a thread
- * opens; one written while shown renders each chunk as it comes. A chunk that is not rendered keeps
- * its place (`slot`), so the text around it stays put, and a find renders the chunk it goes to.
+ * ones a selection, the focus or a find holds. A text shown already written renders only its end
+ * at first, where a thread opens; one written while shown renders each chunk as it comes. A chunk
+ * that is not rendered keeps its place (`slot`), so the text around it stays put.
  */
 export function useRenderedChunks(
   chunks: readonly string[],
@@ -414,7 +421,8 @@ export function useRenderedChunks(
   const last = chunks.length - 1
   return {
     view,
-    rendered: (index) => (live && index >= last) || !view.hidden.has(index),
+    // A text cut back to one chunk, as a footnote makes it, renders it whatever was hidden.
+    rendered: (index) => !windowed || (live && index >= last) || !view.hidden.has(index),
     slot: (index) => {
       const slot = view.slots.get(index)
       return slot && slot.length === chunks[index]?.length ? slot : null
