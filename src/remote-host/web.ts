@@ -21,6 +21,7 @@ import type { Transport } from '@shared/remote/transport'
 import type { LogFn } from '../agent-host/storage'
 import { FRAME_PATH } from './frames'
 import { CLOSE_GRACE_MS, type HandshakeLimits } from './limits'
+import { previewBind } from './previews'
 import type { RemoteServer } from './server'
 
 /** How long an HTTP connection has for a request's headers, at first and after each response. */
@@ -360,8 +361,9 @@ export class WebServer {
     }
     // A request ws turns down never reaches the callback; its socket closes.
     socket.once('close', settle)
+    const local = previewBind(socket.localAddress)
     this.sockets.handleUpgrade(request, socket, head, (ws) => {
-      this.options.server.accept(webSocketTransport(ws, settle))
+      this.options.server.accept(webSocketTransport(ws, settle), 'direct', local)
     })
   }
 }
