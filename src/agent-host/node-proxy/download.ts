@@ -263,7 +263,7 @@ async function connectHandshake(
  * A connection to `host:port` through the hop: a tunnel by CONNECT or SOCKS5. Every hop gets a
  * tunnel, for http addresses too, so one path serves all of them.
  */
-async function tunnel(
+export async function tunnel(
   hop: DownloadHop,
   host: string,
   port: number,

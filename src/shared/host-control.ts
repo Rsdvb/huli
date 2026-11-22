@@ -2,6 +2,7 @@
 // IPC of `child_process.fork` when a host runs under Node.js.
 
 import type { DeviceCall, DeviceCallAnswer } from './device-agent'
+import type { ChatAccount, ChatBridgeConfig, ChatBridgeStatus, ChatPlatform } from './chat-bridge'
 import type { RuntimeAnswer } from './artifact-capabilities'
 import type { ArtifactImportResult } from './artifacts'
 import type { ArtifactExportFormat, ArtifactTypeInfo, ExportedFile } from './artifact-types'
@@ -129,6 +130,9 @@ export type MainToHost =
       oauth?: Record<string, string>
       agentEnv?: Record<string, Record<string, string>>
     }
+  // Huli: the chat bridges' credentials, bound accounts and the binding under way, whole, after
+  // host:init at every start and whenever they change; only the agent host reads them.
+  | { type: 'host:chat-bridge'; config: ChatBridgeConfig }
   | { type: 'host:busy-request'; requestId: number }
   // A problem report's bundle, answered by host:report. The parent adds its own part; the host
   // reads the logs, its agents and sessions, and writes the zip under its data folder.
@@ -375,6 +379,15 @@ export type HostToMain =
       body: string
     }
   | { type: 'host:badge'; count: number } // pending permission requests across sessions
+  // Huli: each chat bridge's connection, when one changed.
+  | { type: 'host:chat-bridge-status'; statuses: Record<ChatPlatform, ChatBridgeStatus> }
+  // Huli: an account sent a bridge the binding's code; main checks it and keeps the account.
+  | {
+      type: 'host:chat-bridge-bind'
+      platform: ChatPlatform
+      code: string
+      account: Omit<ChatAccount, 'boundAt'>
+    }
   // What waits for the user, by session: the ids of the requests, new sites, apps and setups.
   | { type: 'host:waiting'; sessions: Record<string, string[]> }
   // The top-level sessions at work, and those whose turn just ended, for the devices' Live
