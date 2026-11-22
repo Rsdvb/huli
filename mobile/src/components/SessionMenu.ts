@@ -14,6 +14,8 @@ import type { SessionActions } from './SessionActions'
 import { optionOf, shownChoice } from './ConfigMenus'
 import { shortModelName } from '../ui/session/optionText'
 import { agentLabel } from '../agentName'
+import { BOARD_STATUSES } from '@shared/session-board'
+import { BOARD_ICON, BOARD_LABEL, boardStatusOf } from '../board'
 
 export interface SessionMenuContext {
   summary: SessionSummary
@@ -143,6 +145,17 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
         onPress: ctx.onMute,
       },
     ]
+    // Huli: its column on the user's task board.
+    const board = boardStatusOf(summary)
+    if (board) {
+      own.push({
+        key: 'board',
+        label: '看板',
+        icon: BOARD_ICON[board],
+        detail: BOARD_LABEL[board],
+        page: 'title-board',
+      })
+    }
     const forks: MenuEntry[] =
       topLevel && ctx.canFork
         ? [
@@ -233,6 +246,19 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
 
   return (id) => {
     if (id === 'title') return title()
+    if (id === 'title-board') {
+      const board = boardStatusOf(summary)
+      return {
+        title: '看板',
+        entries: BOARD_STATUSES.map((status) => ({
+          key: status,
+          label: BOARD_LABEL[status],
+          icon: BOARD_ICON[status],
+          checked: status === board,
+          onPress: () => actions.setBoard(summary, status),
+        })),
+      }
+    }
     if (id === 'title-prs') {
       return {
         title: 'Pull Request',
