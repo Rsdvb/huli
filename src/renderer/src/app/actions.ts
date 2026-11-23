@@ -573,6 +573,11 @@ export async function settleSession(sessionId: string, settled: boolean): Promis
   await host('sessions.settle', { sessionId, settled })
 }
 
+/** Huli: 静音通知: its finished turns and its agent's notes notify nothing, on any device. */
+export async function muteSession(sessionId: string, muted: boolean): Promise<void> {
+  await host('sessions.setMuted', { sessionId, muted })
+}
+
 /** Huli: 永不收起, which keeps the settings' rules from settling the session. */
 export async function setNeverSettle(sessionId: string, never: boolean): Promise<void> {
   await host('sessions.setNeverSettle', { sessionId, never })
