@@ -187,7 +187,8 @@
     },
     "outOfCredit": {
       "title": "{{model}} 余额不足",
-      "titleNoModel": "{{agent}} 的模型服务商余额不足"
+      "titleNoModel": "{{agent}} 的模型服务商余额不足",
+      "titleProvider": "{{provider}} 的额度或余额已用完"
     },
     "turnFailed": "本轮对话失败",
     "chatgptLimit": {

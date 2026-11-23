@@ -10759,6 +10759,7 @@ export class SessionManager {
                     this.deps.agents.name(live.record.agentId),
                     live.thread.session.config,
                     mapped.message,
+                    providerOfRefusal(mapped),
                   )
                 : {
                     title: chatgpt ? t('notice.chatgptLimit.title') : t('notice.turnFailed'),
@@ -16197,25 +16198,37 @@ function outOfCreditNotice(
   agent: string,
   config: readonly ConfigOption[],
   message: string,
+  provider: string | null = null,
 ): {
   severity: 'warning'
   title: string
   description: string
   cause: 'out_of_credit'
   model?: string
+  provider?: string
 } {
   const model = modelOf(config)
   const option = config.find((o) => o.category === 'model')
   const name = model && (option?.choices?.find((c) => c.value === model)?.name ?? model)
   return {
     severity: 'warning',
-    title: name
-      ? t('notice.outOfCredit.title', { model: name.slice(name.lastIndexOf('/') + 1) })
-      : t('notice.outOfCredit.titleNoModel', { agent }),
+    title: provider
+      ? t('notice.outOfCredit.titleProvider', { provider })
+      : name
+        ? t('notice.outOfCredit.title', { model: name.slice(name.lastIndexOf('/') + 1) })
+        : t('notice.outOfCredit.titleNoModel', { agent }),
     description: message,
     cause: 'out_of_credit',
     ...(model ? { model } : {}),
+    ...(provider ? { provider } : {}),
   }
+}
+
+/** Huli: the provider a connection names as having refused for want of quota, as Codex's does. */
+function providerOfRefusal(error: { data?: unknown }): string | null {
+  const data = (error.data as { data?: unknown } | undefined)?.data
+  const provider = (data as { providerQuota?: unknown } | undefined)?.providerQuota
+  return typeof provider === 'string' && provider !== '' ? provider : null
 }
 
 // The exit event and the failed prompt race, so both say the same thing. The notice ends the cut

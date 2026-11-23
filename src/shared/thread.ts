@@ -499,6 +499,7 @@ export type ThreadEntry =
       // first, which the session's own card offers while the notice stays.
       cause?: 'agent_stopped' | 'out_of_credit' | 'turn_failed' | 'sign_in'
       model?: string // out_of_credit: the session's model when the turn failed
+      provider?: string // Huli: out_of_credit: the model provider that refused, when it is named
       // turn_failed: the agent's plan refused the turn because a usage window ran out.
       planLimit?: true
       // The agent's entry before it, to put it back after a replay: set on the notices Kettu

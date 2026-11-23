@@ -187,7 +187,8 @@
     },
     "outOfCredit": {
       "title": "{{model}} is out of credit",
-      "titleNoModel": "{{agent}}'s model provider is out of credit"
+      "titleNoModel": "{{agent}}'s model provider is out of credit",
+      "titleProvider": "{{provider}}'s quota or balance has run out"
     },
     "turnFailed": "The turn failed",
     "chatgptLimit": {
