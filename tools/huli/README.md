@@ -260,11 +260,11 @@ which keeps the user's order from then on; a row dropped on a project of another
   motion drops the slide. A drop saves the order at once on the host and in the window. Over the
   sidebar the split takes no drop.
 - Onto another project: its header and rows show as a target only where a move can go (another
-  computer, both online, the session idle, top-level, not a manager's or a worker's, sent, not
-  moved, and the window the desktop app's); elsewhere a drop says why, as for two projects of the
-  same computer, which the move cannot do yet. The dialog previews the picked computer at once,
-  says when that computer's project for the repository is another than the one dropped on, and
-  moves several dropped sessions one after another.
+  project, its computer online, the session idle, top-level, not a manager's or a worker's, sent,
+  not moved, and the window the desktop app's); elsewhere a drop says why. On another computer
+  the dialog previews that computer at once and says when its project for the repository is
+  another than the one dropped on; on the same computer it moves the session into that project
+  (see Moving a session to another computer). Several dropped sessions move one after another.
 - The sidebar's sortable lists (projects, hosts) now join the session drag's manager instead of
   opening their own, whose scope had taken the session rows inside a project away from the split's
   and the folders' drops; each list's groups take a type of their own.
@@ -1151,6 +1151,18 @@ kind of agent.
   move. Afterwards the local session shows 已搬到 <computer> in place of its composer
   (`movedTo` in its record), with Open, Clean up local worktree… and 在这台继续
   (`sessions.clearMoved`). The phone does not offer moves.
+- Within one computer (a session dragged onto another project of its own computer): main runs the
+  same steps on the one host, the source's and the target's sides under ids of their own, with the
+  project named (`project` in `moves.check`, `sessions:move-preview` and `sessions:move-start`).
+  A project of the same repository takes the branch and changes into a new worktree, as another
+  computer does. Another repository, or a session without Git, takes the conversation alone
+  (`conversationOnly`: no bundle, `git: null`), into the project's own folder: Claude Code's
+  transcript under that folder's project folder, Codex's rollout, each under a new id as the
+  session here holds the old one, else Kite's copy; the code stays where it was. A session that
+  works in a worktree is refused there (`worktree`), as the work in it would stay behind, and
+  so is a move into its own project (`sameProject`). The session left gets `movedTo` with
+  `sameComputer` and is archived (its sub-sessions stay listed); it says where it went, opens the
+  new one, and 在原项目继续 unarchives it and clears the mark.
 - Tests: `src/agent-host/session-move/*.test.ts` (Git transfer with temp repositories, transcript
   rewriting, validation, Claude Code and Codex placement, crash undo) and
   `src/main/session-move.test.ts` (two whole agent hosts on temp folders, with rollbacks).
