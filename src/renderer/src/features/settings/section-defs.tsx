@@ -61,6 +61,7 @@ import { useAutoApproveRows } from './auto-approve'
 import { useSandboxRows } from './sandbox'
 import { ResumeAfterLimit, ResumeText, StallMinutesChoice } from './supervisor-rows'
 import { AutoSettle, SettleDaysChoice, SettleMerged } from './tidy-rows'
+import { ToolCallsChoice } from './zen-rows'
 import { useWorkflowRows } from './workflow-settings'
 import {
   AgentListItem,
@@ -199,6 +200,7 @@ export function useGeneralSection(): SectionDef {
   const agentHistory = useAgentHistoryRow()
   // Huli: 会话整理's rules, while Settings > Features has it on.
   const tidyOn = useEntry('settings.autoSettle')
+  const zenOn = useEntry('settings.zenView')
   const openAtLoginDescription = loginItem
     ? !loginItem.available
       ? t('general.openAtLogin.unavailable')
@@ -330,6 +332,16 @@ export function useGeneralSection(): SectionDef {
         group: thread,
         render: () => <OutlineSummaries label={t('general.outlineSummaries.name')} />,
       },
+      ...(zenOn
+        ? [
+            {
+              id: 'tool-calls',
+              setting: 'general.tool-calls',
+              group: thread,
+              render: () => <ToolCallsChoice label={t('general.toolCalls.name')} />,
+            } satisfies RowDef,
+          ]
+        : []),
       // Huli: the import from the agents is a window's alone; a paired device may not list.
       ...(isWeb ? [] : [agentHistory]),
       {

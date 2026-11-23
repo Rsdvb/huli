@@ -63,6 +63,7 @@ import { AUTO_APPROVE_LEVELS } from '@shared/risk'
 import { SANDBOX_NETWORKS, SANDBOX_TIERS } from '@shared/sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
 import { SETTLE_DAYS } from '@shared/session-tidy'
+import { TOOL_CALL_VIEWS } from '@shared/zen-view'
 import { THEME_ID } from '@shared/themes'
 import { isAbsolutePath } from '../agent-host/paths'
 import {
@@ -279,6 +280,7 @@ const SECTION_FIELDS = {
     confirmLinks: isBoolean,
     openLinksIn: oneOf('browser', 'session', 'ask'),
     alwaysOpenIn: isLinkSites,
+    toolCalls: oneOf(...TOOL_CALL_VIEWS),
   },
   appearance: {
     theme: oneOf('system', 'light', 'dark'),

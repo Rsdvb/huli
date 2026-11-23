@@ -119,6 +119,7 @@ import {
 } from './session-menu-model'
 import { confirmArchive } from './archive-confirm-model'
 import { NeverSettleItem, SettleItem, SnoozeMenu } from './tidy-menu'
+import { ZenMenu } from '@renderer/features/session/zen-menu'
 import { undoToast } from './undo'
 import { workAtStake, type WorkItem } from './running-work'
 import { RunningWorkList } from './running-work-list'
@@ -359,6 +360,8 @@ export function SessionMenuItems({
         return <SettleItem key={name} summaries={[summary]} />
       case 'neverSettle':
         return <NeverSettleItem key={name} summary={summary} />
+      case 'toolCalls':
+        return <ZenMenu key={name} sessionId={summary.id} />
       case 'board':
         return <BoardStatusMenu key={name} summary={summary} />
       case 'manager':

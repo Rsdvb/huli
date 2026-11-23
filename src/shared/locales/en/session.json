@@ -661,13 +661,34 @@
       "named": "{{hello}}, {{name}}",
       "first": "Hi, I’m Kettu",
       "lines": {
-        "morning": ["Where shall we start?", "What’s first?"],
-        "afternoon": ["What’s next?", "Time for the hard part"],
-        "evening": ["Anything to wrap up?", "Long day?"],
-        "late": ["Take it slow", "One more, then rest"],
-        "monday": ["New week. What’s first?", "Easing into Monday"],
-        "friday": ["Friday. Wrap it up", "Good week?"],
-        "weekend": ["Busy weekend?", "Something light today?"]
+        "morning": [
+          "Where shall we start?",
+          "What’s first?"
+        ],
+        "afternoon": [
+          "What’s next?",
+          "Time for the hard part"
+        ],
+        "evening": [
+          "Anything to wrap up?",
+          "Long day?"
+        ],
+        "late": [
+          "Take it slow",
+          "One more, then rest"
+        ],
+        "monday": [
+          "New week. What’s first?",
+          "Easing into Monday"
+        ],
+        "friday": [
+          "Friday. Wrap it up",
+          "Good week?"
+        ],
+        "weekend": [
+          "Busy weekend?",
+          "Something light today?"
+        ]
       }
     },
     "branchHint": "The session starts on this branch",
@@ -2067,5 +2088,13 @@
       "apply": "Put them back together on {{name}}",
       "finish": "Finish"
     }
+  },
+  "zen": {
+    "menu": "Tool calls",
+    "followSettings": "As in Settings ({{view}})",
+    "hidden_one": "{{count}} step hidden",
+    "hidden_other": "{{count}} steps hidden",
+    "show": "Show",
+    "findShowsAll": "Find shows every step while it is open."
   }
 }

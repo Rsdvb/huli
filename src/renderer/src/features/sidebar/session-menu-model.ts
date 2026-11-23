@@ -13,6 +13,7 @@ export type SessionMenuItem =
   | 'snooze'
   | 'settle'
   | 'neverSettle'
+  | 'toolCalls'
   | 'autoResume'
   | 'board'
   | 'manager'
@@ -176,6 +177,8 @@ export function sessionMenuGroups(
       ? [
           state,
           ['rename', ...(topLevel ? (['pin'] as const) : []), ...forks],
+          // Huli: how much of the agent's work the thread shows (简洁视图).
+          entryShown('session.zenView') ? ['toolCalls'] : [],
           tidy,
           own,
           flow,

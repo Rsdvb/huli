@@ -114,6 +114,7 @@ export const FEATURES = [
     methods: ['sessions.snooze', 'sessions.settle', 'sessions.setNeverSettle'],
   },
   { id: 'sessionMentions', entries: ['composer.sessionMention', 'phone.sessionMention'] },
+  { id: 'zenView', entries: ['session.zenView', 'settings.zenView', 'phone.zenView'] },
   { id: 'secrets', entries: [], toolGroups: ['secrets'] },
   { id: 'agentTheme', entries: [], toolGroups: ['theme'] },
 ] as const satisfies readonly FeatureDef[]

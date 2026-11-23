@@ -199,6 +199,14 @@
       "name": "Settle when the pull request merges",
       "description": "A session whose pull request merged settles after an hour of quiet.",
       "keywords": "settle merged pull request pr"
+    },
+    "toolCalls": {
+      "name": "Tool calls in the thread",
+      "description": "What a session shows of its agent's work, unless you chose otherwise in its menu. Requests, questions and errors always show.",
+      "keywords": "tool calls hide zen concise conclusions steps compact quiet",
+      "all": "Show all",
+      "hideSuccessful": "Hide successful tool calls",
+      "conclusions": "Conclusions only"
     }
   },
   "appearance": {
@@ -3218,6 +3226,10 @@
       "sessionMentions": {
         "name": "Mention a session",
         "description": "Type @ in the composer, or drag a session's row onto it, to point the agent at another session; it reads that session's history only when it needs to."
+      },
+      "zenView": {
+        "name": "Concise thread",
+        "description": "Hide tool calls that went well, or show only your messages and the agent's final replies, for each session or by default. Requests and questions always show."
       }
     }
   }

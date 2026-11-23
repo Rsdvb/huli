@@ -112,6 +112,8 @@ export type Item =
     }
   // The running turn's status, where the reply will start: right after a message you sent.
   | { key: string; type: 'status'; afterSent: boolean }
+  // Huli: the 简洁视图's line for a turn's hidden steps, which opens the turn (zen-items.ts).
+  | { key: string; type: 'hidden'; turn: string; count: number }
 
 /**
  * The thread's items. Work folds as it happens, so a running turn already reads as it will once it
@@ -288,7 +290,7 @@ const agentHeights = new WeakMap<ThreadEntry, number>()
  */
 export function estimateOf(item: Item, byId: Record<string, ThreadEntry> | undefined): number {
   if (item.type === 'run') return 28
-  if (item.type === 'group' || item.type === 'status') return 24
+  if (item.type === 'group' || item.type === 'status' || item.type === 'hidden') return 24
   if (item.type === 'reply') {
     const files = byId ? changedFiles(item.toolIds, byId) : 0
     const end = item.endId ? byId?.[item.endId] : undefined

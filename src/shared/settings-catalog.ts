@@ -23,6 +23,7 @@ import { AUTO_APPROVE_LEVELS } from './risk'
 import { SANDBOX_NETWORKS, SANDBOX_TIERS } from './sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from './supervisor'
 import { SETTLE_DAYS } from './session-tidy'
+import { TOOL_CALL_VIEWS } from './zen-view'
 import type { AgentId, HarnessId } from './thread'
 import { PORT_BASE_MAX, PORT_BASE_MIN } from './worktree-ports'
 
@@ -204,6 +205,7 @@ export const FEATURE_GROUP: Readonly<Record<FeatureId, FeatureGroup>> = {
   github: 'work',
   sessionTidy: 'work',
   sessionMentions: 'work',
+  zenView: 'work',
   sandbox: 'agents',
   devices: 'agents',
   secrets: 'agents',
@@ -386,6 +388,23 @@ const ENTRIES = {
     part: 'desktop',
     access: 'change',
     ...flag('thread', 'outlineSummaries', (file) => file.thread.outlineSummaries),
+  },
+  'general.tool-calls': {
+    section: 'general',
+    row: 'tool-calls',
+    group: 'general.groups.thread',
+    name: 'general.toolCalls.name',
+    description: 'general.toolCalls.description',
+    keywords: 'general.toolCalls.keywords',
+    part: 'desktop',
+    access: 'change',
+    feature: 'zenView',
+    ...pick(
+      'thread',
+      'toolCalls',
+      (file) => file.thread.toolCalls,
+      choices(TOOL_CALL_VIEWS, (view) => `general.toolCalls.${view}`),
+    ),
   },
   'general.open-at-login': {
     section: 'general',

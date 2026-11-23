@@ -10,6 +10,7 @@ import type { AutoApprove } from './risk'
 import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from './sandbox'
 import { DEFAULT_SUPERVISOR, type SupervisorSettings } from './supervisor'
 import { DEFAULT_TIDY, type TidySettings } from './session-tidy'
+import type { ToolCallView } from './zen-view'
 import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
 import { DEFAULT_PORT_BASE } from './worktree-ports'
@@ -78,6 +79,8 @@ export interface SettingsFile {
     openLinksIn: OpenLinksIn // where a click on a link in a reply opens it
     // By site: its registrable domain, or the whole host when that is the domain. Replaced whole.
     alwaysOpenIn: Record<string, LinkDestination>
+    // Huli: how much of a turn's work a session shows unless it has its own choice (简洁视图).
+    toolCalls: ToolCallView
   }
   appearance: {
     theme: 'system' | 'light' | 'dark' // the color mode, which picks a theme's variant
@@ -360,7 +363,13 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     lowerAgentPriority: true,
     keepAwake: true,
   },
-  thread: { outlineSummaries: true, confirmLinks: true, openLinksIn: 'browser', alwaysOpenIn: {} },
+  thread: {
+    outlineSummaries: true,
+    confirmLinks: true,
+    openLinksIn: 'browser',
+    alwaysOpenIn: {},
+    toolCalls: 'all',
+  },
   appearance: {
     theme: 'system',
     colorTheme: BUILTIN_THEME_ID,

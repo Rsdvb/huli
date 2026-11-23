@@ -196,6 +196,14 @@
       "name": "PR 合并后收起",
       "description": "会话的 Pull Request 合并、再安静一小时后收起。",
       "keywords": "收起 合并 拉取请求 PR"
+    },
+    "toolCalls": {
+      "name": "对话里的工具调用",
+      "description": "会话显示多少 Agent 干活的过程，会话菜单里可以单独改。授权请求、提问和错误一直显示。",
+      "keywords": "工具调用 隐藏 简洁 只看结论 步骤 折叠 zen",
+      "all": "全部显示",
+      "hideSuccessful": "隐藏成功的工具调用",
+      "conclusions": "只看结论"
     }
   },
   "appearance": {
@@ -3172,6 +3180,10 @@
       "sessionMentions": {
         "name": "在输入框里引用会话",
         "description": "在输入框里输入 @，或把侧栏的会话拖进输入框，让 Agent 参考另一个会话；只发引用，Agent 需要时再去读它的记录。"
+      },
+      "zenView": {
+        "name": "简洁视图",
+        "description": "隐藏成功的工具调用，或者只看你的消息和 Agent 的最终回复；每个会话可以单独设，也可以设默认。授权请求和提问一直显示。"
       }
     }
   }
