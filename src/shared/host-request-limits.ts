@@ -236,6 +236,8 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'sessions.snooze': HOST_MS,
   'sessions.settle': HOST_MS,
   'sessions.setNeverSettle': HOST_MS,
+  'sessions.setMuted': HOST_MS,
+  'sessions.setSeen': HOST_MS,
   'sessions.archive': AGENT_MS,
   'sessions.unarchive': HOST_MS,
   'sessions.markUnread': HOST_MS,

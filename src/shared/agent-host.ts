@@ -60,6 +60,7 @@ import type {
 import type { SessionFolder } from './session-folders'
 import type { BoardStatus, SessionBoard } from './session-board'
 import type { SessionSettled, SessionSnooze, SnoozeUntil } from './session-tidy'
+import type { SeenMark } from './recap'
 import type { GroupRunStart, KeptRun, RunChanges, SessionGroupRef } from './run-groups'
 import type { IssueInbox, SessionIssue, SessionPrFlow } from './github-flow'
 import type {
@@ -1255,6 +1256,11 @@ export interface SessionSummary {
   snooze?: SessionSnooze | null
   settled?: SessionSettled | null
   neverSettle?: boolean
+  // Huli: its finished turns and its agent's notes notify no device; absent from older hosts
+  muted?: boolean
+  // Huli: how far the user saw it, the latest of every device's (the recap); null before any
+  // device said, absent from older hosts
+  seen?: SeenMark | null
   // The tool its running turn calls now; null while none runs; absent from older hosts
   activity?: SessionActivity | null
   // What its running turn does now, as the thread's nine dots act it out; null between turns;
@@ -2293,6 +2299,16 @@ export interface HostContract {
   /** Huli: 永不收起: no rule of the settings settles the session. */
   'sessions.setNeverSettle': { params: { sessionId: string; never: boolean }; result: void }
   /**
+   * Huli: its finished turns and its agent's notes notify no device and no chat bridge;
+   * approvals and questions still do.
+   */
+  'sessions.setMuted': { params: { sessionId: string; muted: boolean }; result: void }
+  /** Huli: how far a device saw the session (the recap), kept when later than the host's. */
+  'sessions.setSeen': {
+    params: { sessionId: string; at: number; entry: string | null }
+    result: void
+  }
+  /**
    * `subSessions: false` archives the session alone, its sub-sessions staying in the list on their
    * own until it is restored; without it, its whole tree is archived.
    */
@@ -3144,6 +3160,8 @@ export const HOST_METHODS = [
   'sessions.snooze',
   'sessions.settle',
   'sessions.setNeverSettle',
+  'sessions.setMuted',
+  'sessions.setSeen',
   'sessions.archive',
   'sessions.unarchive',
   'sessions.markUnread',

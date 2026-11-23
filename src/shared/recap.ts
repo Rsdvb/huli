@@ -256,18 +256,103 @@ export function withSeen(
   return next
 }
 
+/** The longest entry id a seen mark names. */
+export const SEEN_ENTRY_CHARS = 512
+
+/** A seen mark as read back from storage, or null for anything else. */
+export function seenMarkOf(value: unknown): SeenMark | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { at, entry } = value as { at?: unknown; entry?: unknown }
+  if (typeof at !== 'number' || !Number.isFinite(at)) return null
+  if (entry !== null && (typeof entry !== 'string' || entry.length > SEEN_ENTRY_CHARS)) return null
+  return { at, entry }
+}
+
 /** The marks read back from storage, each one well formed; anything else is dropped. */
 export function parseSeenMarks(value: unknown): Record<string, SeenMark> {
   const marks: Record<string, SeenMark> = {}
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return marks
   for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof raw !== 'object' || raw === null) continue
-    const { at, entry } = raw as { at?: unknown; entry?: unknown }
-    if (typeof at !== 'number' || !Number.isFinite(at)) continue
-    if (entry !== null && (typeof entry !== 'string' || entry.length > 512)) continue
-    marks[id] = { at, entry }
+    const mark = seenMarkOf(raw)
+    if (mark) marks[id] = mark
   }
   return marks
+}
+
+/**
+ * Huli: the later of two marks of one session, as this device's and its host's, which keeps the
+ * latest any device reported; a tie keeps the first. Either may be missing.
+ */
+export function laterMark(
+  a: SeenMark | null | undefined,
+  b: SeenMark | null | undefined,
+): SeenMark | null {
+  if (!a) return b ?? null
+  if (!b) return a
+  return b.at > a.at ? b : a
+}
+
+/** The least time between two of a device's reports of one session's mark to its host. */
+export const SEEN_REPORT_MS = 5_000
+
+/** A device's reports of its seen marks to the host, at most one per session per wait. */
+export interface SeenReporter {
+  /**
+   * Sends the mark now, or once the wait since the session's last report is over, the latest
+   * mark then; a timer runs only while a mark waits.
+   */
+  report(sessionId: string, mark: SeenMark): void
+  /** Sends every mark that waits now, as when the window or the app goes away. */
+  flush(): void
+}
+
+export function seenReporter(
+  send: (sessionId: string, mark: SeenMark) => void,
+  clock: { now?: () => number; waitMs?: number } = {},
+): SeenReporter {
+  const now = clock.now ?? Date.now
+  const waitMs = clock.waitMs ?? SEEN_REPORT_MS
+  const sentAt = new Map<string, number>()
+  const held = new Map<string, { mark: SeenMark; timer: ReturnType<typeof setTimeout> }>()
+  const sendNow = (sessionId: string, mark: SeenMark): void => {
+    sentAt.set(sessionId, now())
+    send(sessionId, mark)
+  }
+  return {
+    report(sessionId, mark) {
+      const waiting = held.get(sessionId)
+      if (waiting) {
+        waiting.mark = laterMark(waiting.mark, mark)!
+        return
+      }
+      const at = now()
+      const last = sentAt.get(sessionId)
+      if (last === undefined || at - last >= waitMs) {
+        // A report the wait is over for needs no remembering.
+        for (const [id, when] of sentAt) if (at - when >= waitMs) sentAt.delete(id)
+        sendNow(sessionId, mark)
+        return
+      }
+      const entry = {
+        mark,
+        timer: setTimeout(
+          () => {
+            held.delete(sessionId)
+            sendNow(sessionId, entry.mark)
+          },
+          last + waitMs - at,
+        ),
+      }
+      held.set(sessionId, entry)
+    },
+    flush() {
+      for (const [sessionId, entry] of [...held]) {
+        clearTimeout(entry.timer)
+        held.delete(sessionId)
+        sendNow(sessionId, entry.mark)
+      }
+    },
+  }
 }
 
 /** Where a session is seen now: at this moment, at the thread's last entry. */

@@ -5,6 +5,7 @@ import {
   RECAP_AWAY_MS,
   SEEN_MARKS_KEPT,
   changedLines,
+  laterMark,
   parseSeenMarks,
   recapSince,
   recapStep,
@@ -226,6 +227,20 @@ describe('seen marks', () => {
       }),
     ).toEqual({ a: { at: 1, entry: 'e' }, e: { at: 3, entry: null } })
     expect(parseSeenMarks([1])).toEqual({})
+  })
+
+  // Huli: this device's mark and its host's, which keeps the latest any device reported.
+  it('takes the later of two marks, either of which may be missing', () => {
+    const phone: SeenMark = { at: 5, entry: 'e5' }
+    const desktop: SeenMark = { at: 9, entry: 'e9' }
+    expect(laterMark(phone, desktop)).toBe(desktop)
+    expect(laterMark(desktop, phone)).toBe(desktop)
+    expect(laterMark(phone, null)).toBe(phone)
+    expect(laterMark(undefined, phone)).toBe(phone)
+    expect(laterMark(null, undefined)).toBeNull()
+    // A tie keeps the first, so a host never rewrites the mark it has.
+    const same: SeenMark = { at: 5, entry: 'other' }
+    expect(laterMark(phone, same)).toBe(phone)
   })
 })
 

@@ -423,6 +423,69 @@ describe('restoring an archived session', () => {
   })
 })
 
+// Huli: a session's mute and how far the user saw it, kept in the index for every device.
+describe("a session's mute and seen mark", () => {
+  const record: SessionRecord = {
+    id: 's1',
+    agentId: 'claude-code',
+    acpSessionId: 'acp-1',
+    projectPath: '/repo',
+    title: 'Fix the build',
+    createdAt: 1,
+    updatedAt: 2,
+    lastViewedAt: null,
+    parentId: null,
+    origin: 'user',
+    description: null,
+    branch: null,
+  }
+
+  async function loaded() {
+    const store = sessionsFile(dir, log)
+    store.save({ version: 1, sessions: [record] })
+    await store.flush()
+    const { sessions } = manager()
+    await sessions.load()
+    return sessions
+  }
+
+  it('says a session is muted once muted, and keeps it in the index', async () => {
+    const sessions = await loaded()
+    expect(sessions.summary('s1')).toMatchObject({ muted: false, seen: null })
+    sessions.setMuted('s1', true)
+    expect(sessions.summary('s1').muted).toBe(true)
+    // The index's changes of 2 s share one write.
+    const written = { timeout: 5_000, interval: 100 }
+    await vi.waitFor(async () => expect((await index())?.sessions[0]?.muted).toBe(true), written)
+    sessions.setMuted('s1', false)
+    await vi.waitFor(
+      async () => expect((await index())?.sessions[0]).not.toHaveProperty('muted'),
+      written,
+    )
+    expect(() => sessions.setMuted('nope', true)).toThrow(HostError)
+  })
+
+  it('keeps the latest mark of every device, a time ahead of its clock taken as now', async () => {
+    const sessions = await loaded()
+    sessions.setSeen('s1', { at: 2_000, entry: 'e2' })
+    // A device that saw it earlier changes nothing.
+    sessions.setSeen('s1', { at: 1_000, entry: 'e1' })
+    expect(sessions.summary('s1').seen).toEqual({ at: 2_000, entry: 'e2' })
+    sessions.setSeen('s1', { at: 3_000, entry: null })
+    expect(sessions.summary('s1').seen).toEqual({ at: 3_000, entry: null })
+    const before = Date.now()
+    sessions.setSeen('s1', { at: before + 3_600_000, entry: 'e9' })
+    const ahead = sessions.summary('s1').seen!
+    expect(ahead.entry).toBe('e9')
+    expect(ahead.at).toBeGreaterThanOrEqual(before)
+    expect(ahead.at).toBeLessThanOrEqual(Date.now())
+    await vi.waitFor(async () => expect((await index())?.sessions[0]?.seen).toEqual(ahead), {
+      timeout: 5_000,
+      interval: 100,
+    })
+  })
+})
+
 describe('archiving a session without its sub-sessions', () => {
   const record = (id: string, parentId: string | null, extra: Partial<SessionRecord> = {}) =>
     ({

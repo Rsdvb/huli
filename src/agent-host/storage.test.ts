@@ -408,6 +408,31 @@ describe('the host files', () => {
     }
   })
 
+  // Huli: a session's mute and how far the user saw it, the latest of every device's.
+  it("keeps a session's mute and seen mark and drops ones that do not read", () => {
+    const kept: SessionRecord = { ...session, muted: true, seen: { at: 7_000, entry: 'e4' } }
+    expect(parseSeenFile([kept])).toEqual([kept])
+    const empty: SessionRecord = { ...session, seen: { at: 7_000, entry: null } }
+    expect(parseSeenFile([empty])).toEqual([empty])
+    for (const odd of [
+      { muted: 'yes' },
+      { muted: false },
+      { seen: { at: '7', entry: 'e4' } },
+      { seen: { at: 0, entry: 'e4' } },
+      { seen: { at: 7_000, entry: 4 } },
+      { seen: { at: 7_000 } },
+      { seen: { at: 7_000, entry: 'e'.repeat(513) } },
+      { seen: 'e4' },
+    ]) {
+      expect(parseSeenFile([{ ...session, ...odd }])).toEqual([session])
+    }
+  })
+
+  function parseSeenFile(sessions: unknown[]): unknown {
+    const parsed = parseSessionsFile({ sessions })
+    return typeof parsed === 'string' ? parsed : parsed.sessions
+  }
+
   // Huli: a snoozed or settled session, and the user's choices that keep the rules off it.
   it("keeps a session's tidy state and drops each part that does not read", () => {
     const tidy = {

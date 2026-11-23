@@ -94,6 +94,7 @@ import { AUTO_APPROVE_LEVELS, isAutoApprove } from '@shared/risk'
 import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
 import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/run-groups'
 import { BOARD_STATUSES, isBoardStatus } from '@shared/session-board'
+import { SEEN_ENTRY_CHARS } from '@shared/recap'
 import { isOrderId, MAX_ORDERED_ROWS, ORDER_ID_CHARS } from '@shared/session-order'
 import { REPORT_ERROR_MAX, REPORT_ORIGINS, type ReportOrigin } from '@shared/report'
 import {
@@ -2747,6 +2748,19 @@ export function createValidators(platform: Platform): Validators {
     'sessions.setNeverSettle': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), never: flag(o, 'never') }
+    },
+    'sessions.setMuted': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), muted: flag(o, 'muted') }
+    },
+    // Huli: a time and the thread's entry then, or null for an empty thread; nothing else.
+    'sessions.setSeen': (params) => {
+      const o = fields(params)
+      return {
+        sessionId: sessionId(o),
+        at: time(o, 'at'),
+        entry: o.entry === null ? null : string(o, 'entry', SEEN_ENTRY_CHARS),
+      }
     },
     'sessions.archive': (params) => {
       const o = fields(params)

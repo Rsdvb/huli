@@ -31,6 +31,7 @@ import {
 } from '@shared/manager'
 import { isProfileId } from '@shared/provider-profiles'
 import { isBoardStatus, type SessionBoard } from '@shared/session-board'
+import { seenMarkOf, type SeenMark } from '@shared/recap'
 import { isAutoApprove, type AutoApprove } from '@shared/risk'
 import type { MovedTo } from '@shared/session-move'
 import { storedOrder } from '@shared/session-order'
@@ -439,6 +440,10 @@ export interface SessionRecord {
   movedTo?: MovedTo
   /** Huli: snoozed or settled out of the active list, or kept from settling (会话整理). */
   tidy?: StoredTidy
+  /** Huli: its finished turns and its agent's notes notify no device and no chat bridge. */
+  muted?: true
+  /** Huli: how far the user saw it, the latest any device reported (the recap). */
+  seen?: SeenMark
   /**
    * Huli: the sessions the user referenced in its messages (@ in the composer), whose history its
    * agent may read wherever they are; the latest last.
@@ -1293,6 +1298,12 @@ function groupOf(value: unknown): { group?: StoredGroup } {
   }
 }
 
+/** Huli: how far a session was seen; a mark that does not read is dropped, as if none was. */
+function seenOf(value: unknown): { seen?: SeenMark } {
+  const mark = seenMarkOf(value)
+  return mark && mark.at > 0 ? { seen: mark } : {}
+}
+
 /** A stored limit pause; one that does not read is dropped, so the session simply stays stopped. */
 function limitPauseField(value: unknown): { limitPause?: LimitPause } {
   const pause = limitPauseOf(value)
@@ -1382,6 +1393,8 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...(item.managerOff === true ? { managerOff: true as const } : {}),
       ...movedToOf(item.movedTo),
       ...tidyOf(item.tidy),
+      ...(item.muted === true ? { muted: true as const } : {}),
+      ...seenOf(item.seen),
       ...refsOf(item.refs),
       ...lastTurnOf(item.lastTurn),
       ...rewoundOf(item.rewound),
