@@ -879,7 +879,7 @@
       "mcpFailedHint": "Its tools are unavailable in this session until it starts.",
       "mcpNeedsAuth_one": "MCP server {{names}} needs you to sign in",
       "mcpNeedsAuth_other": "MCP servers {{names}} need you to sign in",
-      "mcpNeedsAuthHint": "Sign in with /mcp in Claude Code in a terminal; until then its tools are unavailable.",
+      "mcpNeedsAuthHint": "Its tools are unavailable in this session until you sign in to it.",
       "refusalFallback": "{{from}} refused, so Claude Code asked {{to}} instead",
       "refusalFallbackLocal": "{{from}} refused a reply, so Claude Code asked {{to}} for that one",
       "writesLost": {
