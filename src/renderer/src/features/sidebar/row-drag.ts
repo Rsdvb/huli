@@ -356,7 +356,10 @@ function slide(sorting: Sorting, target: number | null): void {
   }
 }
 
-function setShift(item: Item, shift: number): void {
+function setShift(item: Item, by: number): void {
+  // The sum of the heights drifts from the measured tops by a rounding error; a row that stays
+  // takes no translate, which would start its transition and restyle it every frame.
+  const shift = Math.abs(by) < 0.5 ? 0 : by
   if (item.shift === shift) return
   item.shift = shift
   item.el.style.translate = shift ? `0 ${shift}px` : ''
