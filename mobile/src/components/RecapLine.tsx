@@ -90,16 +90,17 @@ export function useRecap(
     latest.current = { view, focused }
   })
   const sentAtRecap = useRef<string | null>(null)
-  // Back from the background: the read count then, as the next read holds what happened since.
-  const awaiting = useRef<number | null>(null)
+  // Back from the background: when, and the read count then, as the next read holds what happened
+  // meanwhile. The absence ends when the user came back, however long that read takes.
+  const awaiting = useRef<{ reads: number; at: number } | null>(null)
 
   const step = useCallback(
-    (event: RecapEvent) => {
+    (event: RecapEvent, at = Date.now()) => {
       const was = visit.current
       const now = latest.current.view.store.get()
       if (!computer || !was || !now) return
       const next = recapStep(was, event, now, {
-        now: Date.now(),
+        now: at,
         older: latest.current.view.hasOlder,
         awayMs: awayMs(),
       })
@@ -146,7 +147,7 @@ export function useRecap(
       } else if (state === 'active' && away) {
         away = false
         // The session was let go in the background and is read afresh now.
-        awaiting.current = latest.current.view.reads
+        awaiting.current = { reads: latest.current.view.reads, at: Date.now() }
       }
     })
     return () => {
@@ -157,9 +158,10 @@ export function useRecap(
   }, [focused, step])
 
   useEffect(() => {
-    if (awaiting.current === null || view.reads === awaiting.current) return
+    const back = awaiting.current
+    if (back === null || view.reads === back.reads) return
     awaiting.current = null
-    step('view')
+    step('view', back.at)
   }, [view.reads, step])
 
   // Another session or computer starts a visit of its own, after the leave above marked this one.
