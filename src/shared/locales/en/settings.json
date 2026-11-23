@@ -588,7 +588,8 @@
       "links": "Links from agents",
       "siteData": "Site data",
       "allowedSites": "Always allowed",
-      "webReader": "Background web reading"
+      "webReader": "Background web reading",
+      "savedStates": "Saved sign-ins"
     },
     "openLinksIn": {
       "name": "Open links in",
@@ -645,6 +646,24 @@
         "body": "Kite downloads Moli {{version}} from GitHub once: {{mb}} MB, checked against the SHA-256 it pins, into its own data folder. Moli is an open-source headless browser (Apache-2.0 or MIT); it runs only while an agent reads a page and exits when the read is done. Background web reading turns on with it.",
         "action": "Download {{mb}} MB"
       }
+    },
+    "profiles": {
+      "name": "Browser data for each session",
+      "description": "Which cookies and storage a session’s browser uses. A worktree’s own or a session’s own keeps parallel sessions testing the same app from sharing a sign-in; a session’s own is gone when Kite quits. A session takes the choice with its first page.",
+      "keywords": "browser profile partition worktree session cookies isolate login",
+      "shared": "Shared",
+      "worktree": "Each worktree",
+      "session": "Each session"
+    },
+    "savedStates": {
+      "name": "Saved sign-ins",
+      "description": "Sign-in states saved from the browser, to restore into another session.",
+      "keywords": "saved sign-in state login cookies storage restore",
+      "note": "Saved from the browser pane’s browser data button, or by an agent. Kite keeps them encrypted and never shows what they hold.",
+      "empty": "No saved sign-ins. Save one from the browser pane.",
+      "sites": "{{sites}} · saved {{date}}",
+      "delete": "Delete",
+      "deleted": "Deleted “{{name}}”"
     }
   },
   "computer": {

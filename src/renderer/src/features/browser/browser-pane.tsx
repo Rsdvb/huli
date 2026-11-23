@@ -44,6 +44,9 @@ import { PortsButton } from '@renderer/features/ports/ports-button'
 import { openOnHost } from '@renderer/features/ports/ports'
 import { useEntry } from '@renderer/lib/features'
 import { BringSignInsOffer, SignInChip } from './sign-in-offer'
+import { EmulationChip } from './emulation-chip'
+import { DownloadBar } from './download-bar'
+import { BrowserDataButton } from './browser-data'
 
 // Huli: pick mode's code loads only while the feature is on (Settings > Features).
 const pickMode = () => import('./pick-mode')
@@ -79,6 +82,13 @@ export function BrowserPane({
   const hostId = useSessionsStore((s) =>
     sessionId ? hostOfPath(s.byId[sessionId]?.projectPath ?? '') : null,
   )
+  // Huli: the worktree a session of this computer works in, whose browser data may be its own.
+  const worktree = useSessionsStore((s) => {
+    const summary = sessionId ? s.byId[sessionId] : undefined
+    const tree = summary?.worktree
+    if (!tree || tree.path === '' || tree.state === 'removed' || tree.state === 'gone') return null
+    return hostOfPath(summary.projectPath) === null ? tree.path : null
+  })
   const agent = useControlAgent(agentId, hostId)
   const overlayOpen = useOverlayOpen()
   const zoom = useSettingsStore((s) => s.settings.appearance.zoom)
@@ -116,6 +126,10 @@ export function BrowserPane({
     if (hostId !== null && portsOn && openOnHost(hostId, sessionId, url)) return
     void window.kettu.browser.navigate(sessionId, url)
   }
+
+  useEffect(() => {
+    if (sessionId) void window.kettu.browser.setWorktree(sessionId, worktree).catch(() => {})
+  }, [sessionId, worktree])
 
   // Main shows the session's page while the pane is open, and keeps it while the pane is hidden;
   // the pill on the page names the session's agent.
@@ -311,6 +325,13 @@ export function BrowserPane({
               {sessionId && hostId !== null && portsOn && (
                 <PortsButton hostId={hostId} sessionId={sessionId} />
               )}
+              {sessionId && (
+                <BrowserDataButton
+                  sessionId={sessionId}
+                  profile={state.profile}
+                  canSave={!!url && !agentHasPage}
+                />
+              )}
               {state.loading && (
                 <span role="progressbar" aria-label={t('loading')} className="kp-load" />
               )}
@@ -326,6 +347,25 @@ export function BrowserPane({
                     sessionId,
                     state.originRequest!.id,
                     decision,
+                  )
+                }
+              />
+            )}
+            {sessionId && state.emulation && (
+              <EmulationChip
+                emulation={state.emulation}
+                onReset={() => void window.kettu.browser.resetEmulation(sessionId)}
+              />
+            )}
+            {sessionId && state.downloadRequest && (
+              <DownloadBar
+                key={state.downloadRequest.id}
+                request={state.downloadRequest}
+                onAnswer={(allow) =>
+                  void window.kettu.browser.answerDownload(
+                    sessionId,
+                    state.downloadRequest!.id,
+                    allow,
                   )
                 }
               />
@@ -485,6 +525,7 @@ function Notice({ notice, sessionId }: { notice: BrowserNotice; sessionId: strin
       <span className="kp-origin__text">
         <span className="truncate">
           {notice.kind === 'downloaded' && t('notice.downloaded', { name: notice.name })}
+          {notice.kind === 'saved' && t('notice.saved', { name: notice.name })}
           {notice.kind === 'download-failed' && t('notice.downloadFailed', { name: notice.name })}
           {notice.kind === 'load-failed' && t('notice.loadFailed', { error: notice.description })}
           {notice.kind === 'crashed' && t('notice.crashed')}
@@ -496,15 +537,18 @@ function Notice({ notice, sessionId }: { notice: BrowserNotice; sessionId: strin
           {t('actions.openExternal')}
         </button>
       )}
-      {notice.kind !== 'download-failed' && notice.kind !== 'downloaded' && sessionId && (
-        <button
-          type="button"
-          onClick={() => void window.kettu.browser.reload(sessionId)}
-          className="kp-link"
-        >
-          {notice.kind === 'load-failed' ? t('actions.tryAgain') : t('actions.reload')}
-        </button>
-      )}
+      {notice.kind !== 'download-failed' &&
+        notice.kind !== 'downloaded' &&
+        notice.kind !== 'saved' &&
+        sessionId && (
+          <button
+            type="button"
+            onClick={() => void window.kettu.browser.reload(sessionId)}
+            className="kp-link"
+          >
+            {notice.kind === 'load-failed' ? t('actions.tryAgain') : t('actions.reload')}
+          </button>
+        )}
     </div>
   )
 }
