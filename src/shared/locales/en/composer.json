@@ -85,6 +85,9 @@
     "confirmOther": "This session is still open in another Claude Code. Once you carry on here, don't send messages there at the same time.",
     "confirm": "Carry on here"
   },
+  "modelCache": {
+    "note": "Now on {{model}}: the prompt cache starts over, so the next turn costs more"
+  },
   "outOfCredit": {
     "modelTitle": "{{model}} is out of credit",
     "strip": "The provider's balance for {{model}} ran out. Top up, or pick another model to keep going.",

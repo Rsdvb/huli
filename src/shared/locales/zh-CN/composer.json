@@ -85,6 +85,9 @@
     "confirmOther": "这个会话还在另一个 Claude Code 里开着。在这里继续后，别同时在那边发消息。",
     "confirm": "在这里继续"
   },
+  "modelCache": {
+    "note": "已换成 {{model}}：提示词缓存会重新开始，下一轮会贵一些"
+  },
   "outOfCredit": {
     "modelTitle": "{{model}} 余额不足",
     "strip": "{{model}} 的服务商余额已用完。充值或换一个模型后继续。",
