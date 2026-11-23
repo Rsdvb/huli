@@ -6,7 +6,6 @@ import {
   Alert02Icon,
   AlertCircleIcon,
   ArrowDown01Icon,
-  ArrowUpRight01Icon,
   Cancel01Icon,
   Download04Icon,
   RefreshIcon,
@@ -14,11 +13,11 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type {
-  AgentInstallMethod,
   AgentStatus,
   AgentTask,
   EnvironmentInfo,
   NodeRuntimeInfo,
+  ProgramMethod,
   VersionMoveReason,
 } from '@shared/agent-host'
 import { OWN_INTERFACE_HARNESSES } from '@shared/agents'
@@ -42,17 +41,22 @@ import {
   AlertDialogTitle,
 } from '@renderer/components/ui/alert-dialog'
 import { Checkbox } from '@renderer/components/ui/checkbox'
-import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
-import { RadioGroup, RadioGroupTile } from '@renderer/components/ui/radio-group'
 import { toast } from '@renderer/components/ui/toast'
 import { NodeInstallAction } from '@renderer/features/agents/node-install'
-import { needsNode, useNodeRuntime } from '@renderer/features/agents/node-runtime'
+import { needsNode } from '@renderer/features/agents/node-runtime'
 import {
   cliOutdated,
   listedInstalled,
+  programUnchecked,
   readiness,
   showsCurrent,
 } from '@renderer/features/agents/readiness'
+import {
+  harnessProblem,
+  programCopy,
+  programHere,
+  type HarnessProblem,
+} from '@renderer/features/agents/harness-problem'
 import { adapterOnlyUpdate } from '@renderer/features/agents/updates'
 import { PANEL } from '@renderer/features/session/entries/helpers'
 import { updateOffer } from '@renderer/features/updates/agent-updates'
@@ -64,7 +68,6 @@ import {
   awaitsPackage,
   harnessStatuses,
   hasProgram,
-  isInstalled,
   usableAgents,
   type AgentsStoreHook,
 } from '@renderer/stores/agents'
@@ -79,30 +82,30 @@ import {
   Log,
   LogCopyButton,
   MovedAccountsNotice,
+  ProblemFixButton,
   TaskLog,
+  WithCode,
 } from './agent-parts'
-import { installKind, startInstall, type InstallKind, type SettingsHook } from './harness-install'
+import {
+  installKind,
+  installRoute,
+  openInstall,
+  startInstall,
+  type InstallKind,
+  type SettingsHook,
+} from './harness-install'
 import { harnessVersion, useAction, VENDORS } from './agent-helpers'
 import {
   CommandLine,
   ControlError,
   CopyAction,
   DangerButton,
-  LinkButton,
   Pill,
   SetButton,
   SettingSwitch,
   Spin,
 } from './controls'
 import { PathActions, PathLine } from './places'
-import {
-  SETTINGS_TILE,
-  SettingsDialogBody,
-  SettingsDialogContent,
-  SettingsDialogFooter,
-  SettingsDialogHeader,
-  SettingsField,
-} from './settings-dialog'
 import {
   FlashMark,
   GroupLabel,
@@ -133,12 +136,6 @@ async function checkForUpdates(agents: AgentsStoreHook): Promise<void> {
   if (error) throw new Error(error)
 }
 
-/** The way Kettu would install it now, or null when it cannot. */
-function installMethod(status: AgentStatus, picked?: string): AgentInstallMethod | null {
-  const available = status.installMethods.filter((m) => m.available)
-  return available.find((m) => m.id === picked) ?? available[0] ?? null
-}
-
 function startUpdate(agents: AgentsStoreHook, harness: HarnessId): void {
   void agents.getState().update(harness)
 }
@@ -167,7 +164,7 @@ function retryTask(
   if (task.kind === 'update') {
     if (task.method) startCliUpdate(agents, harness, hostId)
     else startUpdate(agents, harness)
-  } else void startInstall(agents, settings, harness, task.method)
+  } else void startInstall(agents, settings, harness, installRoute(task))
 }
 
 /** Whether this computer's update of the harness waits for its running sessions to end. */
@@ -189,7 +186,7 @@ function useRunningSessions(harness: HarnessId): number {
   )
 }
 
-function methodName(t: SettingsT, method: AgentInstallMethod['id']): string {
+function methodName(t: SettingsT, method: ProgramMethod): string {
   return t(`harnesses.methods.${method}`)
 }
 
@@ -228,7 +225,6 @@ function HarnessState({ status }: { status: AgentStatus }) {
   const taskError = useAgentsStore((s) => s.taskErrors[status.id])
   const pending = useAgentsStore((s) => s.pending[status.id])
   const waiting = useWaitingUpdate(status)
-  const [installing, setInstalling] = useState(false)
   const task: AgentTask | null = status.task
   const harness = status.harnessId
   if (task?.state === 'running' || status.state === 'installing' || pending) {
@@ -289,7 +285,7 @@ function HarnessState({ status }: { status: AgentStatus }) {
   }
   if (status.uninstalled) {
     return (
-      <SetButton onClick={() => void startInstall(useAgentsStore, useSettingsStore, harness)}>
+      <SetButton onClick={() => void openInstall(harness, hostId)}>
         {t('agents.install.button')}
       </SetButton>
     )
@@ -327,27 +323,33 @@ function HarnessState({ status }: { status: AgentStatus }) {
     )
   }
   if (updated) return <StateDot label={t('agents.update.done')} />
-  if (cliOutdated(status) !== null)
-    return <Pill tone="attention">{t('harnesses.needsUpdate')}</Pill>
+  // A harness on the machine gets the fix for why it cannot run; one still to install keeps the
+  // same Install as the rest, whose window says what it needs, unless no version fits at all.
+  const problem = harnessProblem(status)
+  if (problem?.reason.kind === 'no-version') return null
+  if (problem && problem.fix !== 'install' && programHere(status)) {
+    return problem.fix && <ProblemFixButton status={status} fix={problem.fix} />
+  }
+  if (status.versionWarning) {
+    const { broken, supported } = status.versionWarning
+    return (
+      <Pill tone="attention">
+        {t(
+          broken || !supported
+            ? 'harnesses.versionWarning.pillBroken'
+            : 'harnesses.versionWarning.pillUnsupported',
+        )}
+      </Pill>
+    )
+  }
   const kind = installKind(status)
   // The SDK installs itself on first use beside the user's CLI.
   if (kind === 'package' && status.package?.isSdk) return null
   if (kind) {
     return (
-      <>
-        <SetButton
-          onClick={() =>
-            kind === 'package'
-              ? void startInstall(useAgentsStore, useSettingsStore, harness)
-              : setInstalling(true)
-          }
-        >
-          {t('agents.install.button')}
-        </SetButton>
-        {kind !== 'package' && (
-          <InstallDialog status={status} open={installing} onOpenChange={setInstalling} />
-        )}
-      </>
+      <SetButton onClick={() => void openInstall(harness, hostId)}>
+        {t('agents.install.button')}
+      </SetButton>
     )
   }
   // A harness that fails to start is no picture of health, whatever its version.
@@ -365,189 +367,6 @@ function StateDot({ label }: { label: string }) {
   )
 }
 
-/**
- * Installing the user's own program, such as Claude Code: the vendor's routes, the recommended
- * first, those whose tool is missing disabled, and the command that runs, which can be copied.
- */
-export function InstallDialog({
-  status,
-  open,
-  onOpenChange,
-}: {
-  status: AgentStatus
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const { useAgentsStore, useSettingsStore } = useHostScope()
-  const { t } = useTranslation(['settings', 'common', 'agents'])
-  const [picked, setPicked] = useState<AgentInstallMethod['id'] | undefined>(undefined)
-  const method = installMethod(status, picked)
-  const vendor = VENDORS[status.harnessId]
-  const [check, checking, error] = useAction()
-  const hasMethods = status.installMethods.length > 0
-  // Huli: Node.js is what is missing, which Kite installs itself: the harness needs it, or npm is
-  // its one route left, as for Doubao, Kimi and MiniMax, whose installs run npm alone.
-  const node = useNodeRuntime()
-  const npmMissing = !method && status.installMethods.some((m) => m.id === 'npm')
-  const nodeFix = (needsNode(status) || npmMissing) && !!node?.installable
-  const environment = useAgentsStore((s) => s.environment)
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <SettingsDialogContent className="sm:max-w-125">
-        <SettingsDialogHeader title={t('harnesses.install.title', { name: status.harnessName })}>
-          {t(
-            hasMethods
-              ? vendor
-                ? 'harnesses.install.body'
-                : 'harnesses.install.bodyPlain'
-              : 'harnesses.install.setupBody',
-            { name: status.harnessName, vendor },
-          )}
-        </SettingsDialogHeader>
-        <SettingsDialogBody>
-          {hasMethods && (
-            <SettingsField label={t('harnesses.install.method')}>
-              <RadioGroup
-                aria-label={t('harnesses.install.method')}
-                value={method?.id ?? null}
-                onValueChange={(id) => setPicked(id as AgentInstallMethod['id'])}
-                className="kettu-sd__choices"
-              >
-                {status.installMethods.map((m, index) => (
-                  <RadioGroupTile
-                    key={m.id}
-                    value={m.id}
-                    disabled={!m.available}
-                    className={SETTINGS_TILE}
-                  >
-                    <span className="ui-sg-label">
-                      <b className="k-row-title">
-                        {methodName(t, m.id)}
-                        {index === 0 && m.available && (
-                          <span className="ui-ss-badge" data-tone="ok">
-                            {t('harnesses.install.recommended')}
-                          </span>
-                        )}
-                      </b>
-                      {!m.available && <small>{t('agents.install.notFound')}</small>}
-                    </span>
-                  </RadioGroupTile>
-                ))}
-              </RadioGroup>
-            </SettingsField>
-          )}
-          {!method && status.detail && (
-            <p className="kettu-sd__text" data-selectable="">
-              {status.detail}
-            </p>
-          )}
-          {nodeFix && (
-            <>
-              <NodeInstallAction />
-              <span className="kettu-sd__hint">{t('agents:node.hint')}</span>
-            </>
-          )}
-          {method && (
-            <SettingsField
-              label={t(
-                method.id === 'archive' ? 'harnesses.install.downloads' : 'harnesses.install.runs',
-              )}
-            >
-              <div className="k-cmd k-cmd--wrap">
-                <code data-selectable="" title={method.command}>
-                  {method.command}
-                </code>
-                <CopyAction
-                  text={method.command}
-                  label={t(
-                    method.id === 'archive' ? 'common:actions.copy' : 'harnesses.install.copy',
-                  )}
-                />
-              </div>
-              <span className="kettu-sd__hint">
-                {t(
-                  method.id === 'archive'
-                    ? 'harnesses.install.downloadBody'
-                    : 'harnesses.install.ownTerminal',
-                )}
-              </span>
-            </SettingsField>
-          )}
-          {method && status.installNotice && (
-            <p className="kettu-sd__text" data-selectable="">
-              {status.installNotice}
-            </p>
-          )}
-          {status.installUrl && (
-            <span>
-              <LinkButton
-                href={status.installUrl}
-                icon={<Icon icon={ArrowUpRight01Icon} size={14} />}
-              >
-                {t('harnesses.install.guide')}
-              </LinkButton>
-            </span>
-          )}
-          {status.binaryCommand && (
-            <ChooseElsewhere harness={status.harnessId} onChosen={() => onOpenChange(false)} />
-          )}
-          <ControlError error={error} />
-        </SettingsDialogBody>
-        <SettingsDialogFooter>
-          <DialogClose render={<SetButton size="md" variant="ghost" />}>
-            {t('common:actions.cancel')}
-          </DialogClose>
-          {method ? (
-            <SetButton
-              size="md"
-              variant="primary"
-              onClick={() => {
-                void startInstall(useAgentsStore, useSettingsStore, status.harnessId, method.id)
-                onOpenChange(false)
-              }}
-            >
-              {t('agents.install.button')}
-            </SetButton>
-          ) : (
-            <SetButton
-              size="md"
-              variant={nodeFix ? 'secondary' : 'primary'}
-              loading={checking}
-              onClick={() => check(() => useAgentsStore.getState().reloadEnvironment())}
-            >
-              {t(reloadLabel(environment))}
-            </SetButton>
-          )}
-        </SettingsDialogFooter>
-      </SettingsDialogContent>
-    </Dialog>
-  )
-}
-
-/**
- * The install dialog's link to a program installed elsewhere, and why main refused the one chosen.
- * It mounts with the dialog's content, so a refusal is gone when the dialog opens again.
- */
-function ChooseElsewhere({ harness, onChosen }: { harness: HarnessId; onChosen: () => void }) {
-  const { api } = useHostScope()
-  const { t } = useTranslation('settings')
-  const [act, , error] = useAction()
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() =>
-          act(() => api.dialogs.chooseAgentBinary(harness).then((path) => path && onChosen()))
-        }
-        className="k-link k-self-start"
-      >
-        {t('agents.install.elsewhere')}
-      </button>
-      {error && <p className="kettu-sd__error">{error}</p>}
-    </>
-  )
-}
-
 /** One harness in the list: its version and how many agents use it, or what it needs first. */
 export function HarnessListItem({ status }: { status: AgentStatus }) {
   const { useAgentsStore } = useHostScope()
@@ -557,6 +376,7 @@ export function HarnessListItem({ status }: { status: AgentStatus }) {
     (s) => usableAgents(s.order, s.byId).filter((a) => a.harnessId === status.harnessId).length,
   )
   const r = readiness(status)
+  const problem = harnessProblem(status)
   const version = harnessVersion(status)
   const kind = installKind(status)
   const summary: ReactNode =
@@ -570,21 +390,23 @@ export function HarnessListItem({ status }: { status: AgentStatus }) {
       <span className="k-danger">{taskError.message}</span>
     ) : status.uninstalled ? (
       t('harnesses.removedLine')
-    ) : cliOutdated(status) !== null ? (
-      [version, t('harnesses.needsUpdate')].filter(Boolean).join(' · ')
+    ) : problem?.reason.kind === 'too-old' ? (
+      [version, problem.label].filter(Boolean).join(' · ')
     ) : awaitsPackage(status) && status.package?.isSdk ? (
       t('agents.installsOnFirstUse')
     ) : kind === 'package' && status.package?.isSdk ? (
       // Beside the user's own CLI the SDK installs itself on the first start.
       [version, t('harnesses.sdkOnFirstUse')].filter(Boolean).join(' · ')
-    ) : needsNode(status) ? (
-      t('agents:node.title')
-    ) : kind || awaitsPackage(status) ? (
-      t('harnesses.groups.notInstalled')
-    ) : r.kind === 'missing' || r.kind === 'failed' ? (
-      r.message
+    ) : problem ? (
+      <WithCode text={problem.text} />
+    ) : r.kind === 'failed' ? (
+      <WithCode text={r.message} />
     ) : (
-      [version, agents > 0 ? t('harnesses.agentCount', { count: agents }) : null]
+      [
+        version,
+        programCopy(status),
+        agents > 0 ? t('harnesses.agentCount', { count: agents }) : null,
+      ]
         .filter(Boolean)
         .join(' · ')
     )
@@ -693,8 +515,8 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
   const environment = useAgentsStore((s) => s.environment)
   const [act, busy, error] = useAction()
   const r = readiness(status)
-  const outdated = cliOutdated(status) !== null
-  const installed = listedInstalled(status) || isInstalled(status) || outdated
+  const problem = harnessProblem(status)
+  const installed = listedInstalled(status) || programHere(status)
   // A missing program has no version yet, nor has Kettu's package while it waits or installs;
   // only the SDK installs itself beside the user's program.
   const pkg = status.package
@@ -704,6 +526,9 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
   // Its first install runs from this page too, which no install kind covers while it runs.
   const notice: InstallKind | null =
     kind ?? (packageMissing && status.state === 'installing' ? 'package' : null)
+  // Installing fixes a missing harness, and the version notices a program too old.
+  const ownNotice =
+    problem && problem.fix !== 'install' && problem.reason.kind !== 'too-old' ? problem : null
   return (
     <div>
       <HarnessPageHeader status={status} />
@@ -711,19 +536,16 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
       <div>
         {r.kind !== 'failed' && r.kind !== 'missing' && status.detail && (
           <p className="ui-sg-hint" data-selectable="">
-            {status.detail}
+            <WithCode text={status.detail} />
           </p>
         )}
-        {r.kind === 'missing' && !kind && !outdated && (
-          <p className="ui-sg-hint" data-selectable="">
-            {r.message}{' '}
-            {r.url && (
-              <a href={r.url} target="_blank" rel="noreferrer" className="k-link">
-                {r.action}
-              </a>
-            )}
-          </p>
-        )}
+        {/* Huli: Kite installs its own Node.js from its own notice. */}
+        {ownNotice &&
+          (ownNotice.reason.kind === 'needs-node' ? (
+            <NodeNotice status={status} />
+          ) : (
+            <ProblemNotice status={status} problem={ownNotice} />
+          ))}
         {error && (
           <p className="ui-sg-hint k-error" data-wrap="">
             {error}
@@ -748,11 +570,13 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
               </SetButton>
             }
           >
-            <span data-selectable="">{r.message}</span>
+            <span data-selectable="">
+              <WithCode text={r.message} />
+            </span>
           </Notice>
         )}
         {status.uninstalled && <UninstalledNotice status={status} />}
-        {notice && <InstallNotice status={status} kind={notice} />}
+        {notice && !ownNotice && <InstallNotice status={status} kind={notice} />}
 
         {onMachine && <VersionGroup status={status} />}
         <ProgramGroup status={status} />
@@ -931,7 +755,8 @@ function VersionGroup({ status }: { status: AgentStatus }) {
   const version = harnessVersion(status)
   const checkedAt = status.updateCheckedAt
   const checks =
-    !!status.package || !!status.cli || !!status.release?.registry || checkedAt !== null
+    !programUnchecked(status) &&
+    (!!status.package || !!status.cli || !!status.release?.registry || checkedAt !== null)
   const updating = status.task?.kind === 'update' && status.task.state === 'running'
   const next = status.cli?.update?.version ?? status.update?.cliVersion ?? null
   // A stale check does not make a missing program current, so it gets no green dot.
@@ -1032,9 +857,11 @@ const SWITCH_BACK_LINE = {
 /**
  * The switch for Kettu's own install of a harness to follow its target by itself, from the ACP
  * Registry or Kettu's checks, and the last move it made: an update, or a switch back after a
- * withdrawal, and why.
+ * withdrawal, and why. A version without a checksum, which it does not install, is offered here
+ * by hand.
  */
 function AutomaticUpdatesRow({ status }: { status: AgentStatus }) {
+  const { useAgentsStore } = useHostScope()
   const { t } = useTranslation('settings')
   const now = useNow()
   const [apply, error] = useApply()
@@ -1043,24 +870,36 @@ function AutomaticUpdatesRow({ status }: { status: AgentStatus }) {
   const { moved } = automatic
   const ago = moved ? mediumAgo(moved.at, now) : ''
   const kettu = automatic.follows === 'kettu'
-  const line = !automatic.on
-    ? t(kettu ? 'harnesses.autoUpdate.offKettu' : 'harnesses.autoUpdate.off')
-    : moved
-      ? t(
-          moved.withdrawn ? WENT_BACK[moved.reason ?? 'registry'] : 'harnesses.autoUpdate.updated',
-          {
-            from: moved.from,
-            to: moved.to,
-            ago,
-          },
-        )
-      : t(kettu ? 'harnesses.autoUpdate.onKettu' : 'harnesses.autoUpdate.on')
+  const unchecked =
+    automatic.on && automatic.noChecksum && status.update ? status.update.adapterVersion : null
+  const busy = status.task?.state === 'running'
+  const line = unchecked
+    ? t('harnesses.autoUpdate.noChecksum')
+    : !automatic.on
+      ? t(kettu ? 'harnesses.autoUpdate.offKettu' : 'harnesses.autoUpdate.off')
+      : moved
+        ? t(
+            moved.withdrawn
+              ? WENT_BACK[moved.reason ?? 'registry']
+              : 'harnesses.autoUpdate.updated',
+            {
+              from: moved.from,
+              to: moved.to,
+              ago,
+            },
+          )
+        : t(kettu ? 'harnesses.autoUpdate.onKettu' : 'harnesses.autoUpdate.on')
   return (
     <RowFrame
       id="auto-update"
       text={<RowText name={entryText('harnesses.auto-update').name} description={line} />}
     >
       <ControlError error={error} />
+      {unchecked && !busy && (
+        <SetButton onClick={() => startUpdate(useAgentsStore, status.harnessId)}>
+          {t('harnesses.updateTo', { version: unchecked })}
+        </SetButton>
+      )}
       <SettingSwitch
         label={t('harnesses.autoUpdate.name')}
         checked={automatic.on}
@@ -1142,7 +981,7 @@ function VersionWarningNotice({ status }: { status: AgentStatus }) {
 /** An update on offer, under way, failed or just done, in one notice under the page's title. */
 function TaskNotice({ status, installed }: { status: AgentStatus; installed: boolean }) {
   const { hostId, useAgentsStore } = useHostScope()
-  const { t } = useTranslation(['settings', 'common', 'updates'])
+  const { t } = useTranslation(['settings', 'common', 'updates', 'agents'])
   const updated = useAgentsStore((s) => s.updated[status.id])
   const taskError = useAgentsStore((s) => s.taskErrors[status.id])
   const pending = useAgentsStore((s) => !!s.pending[status.id])
@@ -1224,7 +1063,7 @@ function TaskNotice({ status, installed }: { status: AgentStatus; installed: boo
         icon={outdated ? undefined : <Icon icon={Download04Icon} size={16} />}
         title={
           outdated
-            ? t('harnesses.cliOutdatedTitle', { name })
+            ? t('agents:problem.tooOldAt', { version: minimum ?? '' })
             : t('agents.update.noticeTitle', { name, version: cliUpdate.version })
         }
         action={
@@ -1252,7 +1091,7 @@ function TaskNotice({ status, installed }: { status: AgentStatus; installed: boo
     return (
       <Notice
         variant="warning"
-        title={t('harnesses.cliOutdatedTitle', { name })}
+        title={t('agents:problem.tooOldAt', { version: minimum })}
         action={
           <SetButton
             variant="primary"
@@ -1268,7 +1107,11 @@ function TaskNotice({ status, installed }: { status: AgentStatus; installed: boo
     )
   }
   if (status.update && status.automatic?.back) {
-    const current = status.release?.version ?? status.package?.version ?? version ?? ''
+    // Beside the user's own CLI, what moves is the SDK, so it is named, not the harness.
+    const moving = adapterOnlyUpdate(status)
+    const current = moving
+      ? moving.version
+      : (status.release?.version ?? status.package?.version ?? version ?? '')
     const to = status.update.adapterVersion
     const reason = status.automatic.backReason ?? 'registry'
     return (
@@ -1280,7 +1123,7 @@ function TaskNotice({ status, installed }: { status: AgentStatus; installed: boo
             : reason === 'broken'
               ? 'harnesses.switchBack.titleBroken'
               : 'harnesses.switchBack.titleKettu',
-          { name, current },
+          { name: moving?.name ?? name, current },
         )}
         action={
           <SetButton
@@ -1396,9 +1239,26 @@ function FailedTaskNotice({ status, task }: { status: AgentStatus; task: AgentTa
   )
 }
 
+/** Why the harness cannot run when installing it would not help, the host's words and the fix. */
+function ProblemNotice({ status, problem }: { status: AgentStatus; problem: HarnessProblem }) {
+  return (
+    <Notice
+      variant={problem.fix ? 'warning' : 'info'}
+      title={problem.label}
+      action={
+        problem.fix && <ProblemFixButton status={status} fix={problem.fix} variant="primary" />
+      }
+    >
+      <span data-selectable="">
+        <WithCode text={status.detail ?? problem.text} />
+      </span>
+    </Notice>
+  )
+}
+
 /** A harness that was uninstalled: Install brings it back with its configuration. */
 function UninstalledNotice({ status }: { status: AgentStatus }) {
-  const { useAgentsStore, useSettingsStore } = useHostScope()
+  const { hostId, useAgentsStore } = useHostScope()
   const { t } = useTranslation('settings')
   const pending = useAgentsStore((s) => !!s.pending[status.id])
   return (
@@ -1410,7 +1270,7 @@ function UninstalledNotice({ status }: { status: AgentStatus }) {
         <SetButton
           variant="primary"
           loading={pending}
-          onClick={() => void startInstall(useAgentsStore, useSettingsStore, status.harnessId)}
+          onClick={() => void openInstall(status.harnessId, hostId)}
         >
           {t('agents.install.button')}
         </SetButton>
@@ -1423,9 +1283,8 @@ function UninstalledNotice({ status }: { status: AgentStatus }) {
 
 /** Installing a harness: its program by a route in the dialog, or Kettu's package; then progress. */
 function InstallNotice({ status, kind }: { status: AgentStatus; kind: InstallKind }) {
-  const { api, useAgentsStore, useSettingsStore } = useHostScope()
+  const { api, hostId, useAgentsStore } = useHostScope()
   const { t } = useTranslation(['settings', 'common'])
-  const [open, setOpen] = useState(false)
   const [act, , error] = useAction()
   // Asked for, before the host reports the install: its settings and detection run first.
   const pending = useAgentsStore((s) => s.pending[status.id] === 'install')
@@ -1462,11 +1321,8 @@ function InstallNotice({ status, kind }: { status: AgentStatus; kind: InstallKin
         icon={<Icon icon={Download04Icon} size={16} />}
         title={t('agents.install.title', { name })}
         action={
-          <SetButton
-            variant="primary"
-            onClick={() => void startInstall(useAgentsStore, useSettingsStore, status.harnessId)}
-          >
-            {t('agents.install.button')}
+          <SetButton variant="primary" onClick={() => void openInstall(status.harnessId, hostId)}>
+            {t('harnesses.install.open')}
           </SetButton>
         }
       >
@@ -1480,12 +1336,12 @@ function InstallNotice({ status, kind }: { status: AgentStatus; kind: InstallKin
       icon={<Icon icon={Download04Icon} size={16} />}
       title={t('agents.install.title', { name })}
       action={
-        <SetButton variant="primary" onClick={() => setOpen(true)}>
+        <SetButton variant="primary" onClick={() => void openInstall(status.harnessId, hostId)}>
           {t('harnesses.install.open')}
         </SetButton>
       }
       more={
-        status.binaryCommand && (
+        (status.program ?? status.binaryCommand) && (
           <span className="k-end">
             <button
               type="button"
@@ -1502,7 +1358,6 @@ function InstallNotice({ status, kind }: { status: AgentStatus; kind: InstallKin
       {status.cli
         ? t('harnesses.install.cliBody', { name, command: status.cli.command })
         : t('agents.install.body')}
-      <InstallDialog status={status} open={open} onOpenChange={setOpen} />
     </Notice>
   )
 }
@@ -1522,26 +1377,65 @@ function NodeNotice({ status }: { status: AgentStatus }) {
       title={t('node.title')}
       more={<NodeInstallAction />}
     >
-      {joinSentences(status.detail ?? t('readiness.needsNode'), t('node.hint'))}
+      {joinSentences(status.detail ?? t('problem.needsNode'), t('node.hint'))}
     </Notice>
   )
 }
 
+/** The versions an npm range covers, as the page says them: `~0.2.2` is 0.2.x. */
+function rangeText(t: SettingsT, range: string): string {
+  const tilde = /^~(\d+)\.(\d+)\.\S+$/.exec(range)
+  if (tilde) return `${tilde[1]}.${tilde[2]}.x`
+  const from = /^>=\s*(\S+)$/.exec(range)
+  return from ? t('harnesses.unused.from', { version: from[1] }) : range
+}
+
+/** Why the user's own program found for the harness does not run, and what runs instead. */
+function unusedNote(t: SettingsT, status: AgentStatus): string | null {
+  const unused = status.unusedProgram
+  if (!unused) return null
+  const { command, version } = unused
+  const why =
+    unused.why.kind === 'range'
+      ? t('harnesses.unused.range', {
+          command,
+          version: version ?? '',
+          range: rangeText(t, unused.why.range),
+        })
+      : unused.why.kind === 'manifest'
+        ? t('harnesses.unused.manifest', { command, version: version ?? '' })
+        : unused.why.detail
+  const pkg = status.package
+  const instead = pkg?.installed
+    ? t('harnesses.unused.kettuRuns', { version: pkg.version })
+    : t('harnesses.unused.install', { name: status.harnessName })
+  return `${why} ${instead}`
+}
+
 /**
- * The program that runs: the user's own CLI or binary, with its version, how it was installed, and
- * another one picked in a dialog for a harness that runs a binary.
+ * The program that runs: the user's own CLI or binary, with its version and how it was installed,
+ * one picked in a dialog, or for a harness Kettu installs, its own copy and why the user's own
+ * program found beside it does not run.
  */
 function ProgramGroup({ status }: { status: AgentStatus }) {
   const { api, useSettingsStore } = useHostScope()
   const { t } = useTranslation('settings')
   const override = useSettingsStore((s) => s.settings.agents[status.harnessId]?.binaryPath)
   const [act, , error] = useAction()
+  // Older hosts name only a binary harness's program.
+  const program =
+    status.program ??
+    (status.binaryCommand ? { command: status.binaryCommand, onPath: true } : null)
   const installed = status.cli?.installed ?? null
-  const command = status.cli?.command ?? status.binaryCommand
+  const command = status.cli?.command ?? program?.command
   if (!command) return null
-  const version = harnessVersion(status)
+  const unused = status.unusedProgram ?? null
+  // Kettu's own copy runs, since none of the user's runs in its place.
+  const kettuInstalls = (!!status.package && !status.package.isSdk) || program?.onPath === false
+  const kettuCopy = kettuInstalls && !status.cli && !override
+  const version = unused && kettuCopy ? unused.version : harnessVersion(status)
   const method = status.cli?.method ?? null
-  const path = override ?? installed?.path ?? status.binaryPath ?? null
+  const path = override ?? installed?.path ?? status.binaryPath ?? unused?.path ?? null
   const problem = installed?.problem
   const note = installed?.variable
     ? t('agents.setBy', { env: installed.variable })
@@ -1549,9 +1443,11 @@ function ProgramGroup({ status }: { status: AgentStatus }) {
       ? t('agents.cli.unsupported', { command })
       : problem?.kind === 'failed'
         ? problem.reason
-        : !path
-          ? t('agents.cli.notFound', { command })
-          : null
+        : kettuCopy && unused
+          ? unusedNote(t, status)
+          : !path && program?.onPath !== false
+            ? t('agents.cli.notFound', { command })
+            : null
   return (
     <section className="k-group" aria-label={t('agents.program')}>
       <GroupLabel group={{ id: 'program', label: t('agents.program') }} />
@@ -1559,16 +1455,20 @@ function ProgramGroup({ status }: { status: AgentStatus }) {
         <ConfigFrame
           name={t('harnesses.programName', { command })}
           description={
-            method
-              ? t('harnesses.installedWith', { method: methodName(t, method) })
-              : status.package?.isSdk
-                ? t('harnesses.programSdk')
-                : status.release
-                  ? t('harnesses.programKettu')
-                  : t('harnesses.programOwn')
+            override
+              ? t('harnesses.programChosen')
+              : method
+                ? t('harnesses.installedWith', { method: methodName(t, method) })
+                : status.package?.isSdk
+                  ? t('harnesses.programSdk')
+                  : kettuCopy
+                    ? t(unused ? 'harnesses.programUnused' : 'harnesses.programKettuCopy')
+                    : status.release
+                      ? t('harnesses.programKettu')
+                      : t('harnesses.programOwn')
           }
           control={
-            status.binaryCommand && (
+            program && (
               <>
                 <ControlError error={error} />
                 {override && (
@@ -1599,7 +1499,8 @@ function ProgramGroup({ status }: { status: AgentStatus }) {
               {version && <span className="k-mono k-muted">{version}</span>}
             </PathLine>
           ) : (
-            <span className="k-muted">{t('agents.programOnPath', { command })}</span>
+            program?.onPath !== false &&
+            !kettuCopy && <span className="k-muted">{t('agents.programOnPath', { command })}</span>
           )}
           {note && (
             <span className="k-muted" data-selectable="">

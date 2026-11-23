@@ -12,7 +12,12 @@ export type AppEvent =
   // A mention, such as a terminal's, put after the text of the composer of `draft`.
   | { kind: 'mention-into-composer'; draft: string; mention: string }
   | { kind: 'command-into-composer'; sessionId: string; name: string } // a sent command, clicked
-  | { kind: 'draft-written'; draft: string } // written from outside its composer, which reloads it
+  // Sends what the session's composer holds, comments included, in the pane `paneId` or any.
+  | { kind: 'send-composer'; sessionId: string; paneId: string | null }
+  // Scrolls the thread to the passage a comment in the composer is on.
+  | { kind: 'reveal-comment'; sessionId: string; paneId: string | null; commentId: string }
+  // Written from outside its composer, which reloads it, and with `focus` takes the focus.
+  | { kind: 'draft-written'; draft: string; focus?: true }
   | { kind: 'add-attachments' } // Mod+U: the composer's Add files or photos…
   | { kind: 'open-add-menu' } // Mod+Shift+A: the composer's plus menu
   | { kind: 'find-in-session' } // Mod+F: the find bar of the session in focus

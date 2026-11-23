@@ -1,42 +1,20 @@
 import type { ControlStep } from '@shared/control'
 import type { SessionView, ThreadState } from '@shared/thread'
 import {
+  awaitsAnswer,
   turnDoing as sharedDoing,
-  turnPhase as sharedPhase,
   type TurnDoing as SharedDoing,
-  type TurnPhaseName as SharedPhaseName,
+  type TurnPhase,
 } from '@shared/turn-phase'
 
-export { writingId } from '@shared/turn-phase'
+export { awaitsAnswer, turnPhase, writingId, type TurnPhase } from '@shared/turn-phase'
 
-/**
- * The phase as the desktop says it: the host's, where a wait on questions alone reads as one for
- * your answer rather than your approval. The host's summary keeps `approval` for both, as the
- * devices that read it know no other.
- */
-export type TurnPhaseName = SharedPhaseName | 'question'
-
-/**
- * What the agent is doing now in its running turn. For a tool call's work, `count` is how many
- * such calls run at once; it is 1 otherwise.
- */
-export interface TurnPhase {
-  phase: TurnPhaseName
-  count: number
-}
+/** The phase as the desktop says it, where a wait on questions alone reads as `question`. */
+export type TurnPhaseName = TurnPhase['phase']
 
 /** The phase with what it works on; see the shared `TurnDoing`. */
 export interface TurnDoing extends Omit<SharedDoing, 'phase'> {
   phase: TurnPhaseName
-}
-
-// The turn's latest entries are read no further back than this, as they are on every chunk.
-const LOOKBACK = 64
-
-/** The phase, from the turn's latest entries; see the shared `turnPhase`. */
-export function turnPhase(state: ThreadState | null | undefined): TurnPhase {
-  const phase = sharedPhase(state)
-  return phase.phase === 'approval' && awaitsAnswer(state) ? { ...phase, phase: 'question' } : phase
 }
 
 /** What the agent is doing now, with what it works on; see the shared `turnDoing`. */
@@ -45,23 +23,8 @@ export function turnDoing(state: ThreadState | null | undefined): TurnDoing {
   return doing.phase === 'approval' && awaitsAnswer(state) ? { ...doing, phase: 'question' } : doing
 }
 
-/**
- * Whether what the session waits on is a question to answer, not a permission, a plan or an MCP
- * server's request to decide: every pending request is one, as the thread's cards tell them apart.
- */
-export function awaitsAnswer(state: ThreadState | null | undefined): boolean {
-  if (!state) return false
-  const { order, byId } = state
-  let asked = false
-  for (let i = order.length - 1; i >= Math.max(0, order.length - LOOKBACK); i--) {
-    const entry = byId[order[i]!]
-    if (entry?.kind !== 'tool' || !entry.permission) continue
-    const { plan, elicitation, questions } = entry.permission
-    if (plan || elicitation || (!questions && entry.question === undefined)) return false
-    asked = true
-  }
-  return asked
-}
+// These are read on every streamed chunk, so a long run of tool calls is read no further back.
+const LOOKBACK = 64
 
 /** The step the agent asked the user to do on a surface, while its card waits; else null. */
 export function askedStep(state: ThreadState | null | undefined): ControlStep | null {

@@ -281,7 +281,7 @@ steps:
   })
 
   // Writes 400 files and 10 MB, which a busy Windows disk with a virus scanner takes seconds over.
-  it('refuses links, and stops at the version’s limits', { timeout: 30_000 }, async () => {
+  it('refuses links, and stops at the version’s limits', { timeout: 60_000 }, async () => {
     await put({ 'SKILL.md': SKILL, 'real/a.md': 'x' })
     await linkFolder(path.join(root, 'real'), path.join(root, 'link'))
     const linked = await checkFolder(root)
@@ -289,7 +289,9 @@ steps:
 
     const many = path.join(root, 'many')
     await put({ 'SKILL.md': SKILL }, many)
-    for (let i = 0; i < PUBLISH_LIMITS.files; i++) await put({ [`f/${i}.txt`]: 'x' }, many)
+    await Promise.all(
+      Array.from({ length: PUBLISH_LIMITS.files }, (_, i) => put({ [`f/${i}.txt`]: 'x' }, many)),
+    )
     const tooMany = await checkFolder(many)
     expect(tooMany.problems.map((p) => p.message)).toContainEqual(
       expect.stringMatching(/more than 400 files/),

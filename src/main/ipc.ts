@@ -70,7 +70,8 @@ import { createLogger } from './log'
 import { parseActionBatch } from './action-records'
 import { clearVerboseRecords, dismissUnexpectedExit, unexpectedExitNotice } from './app-log'
 import { grantedPath, type MediaGrants } from './media'
-import { copyImage, ON_HOST, revealMedia, saveMediaAs } from './media-actions'
+import { copyImage, onHostText, revealMedia, saveMediaAs } from './media-actions'
+import type { IslandBridge } from './island/bridge'
 import { notifyTest } from './notifications'
 import type { QuitFlow } from './quit'
 import type { HostMedia } from './host-media'
@@ -131,6 +132,7 @@ export interface IpcDeps {
   updater: Updater
   quit: QuitFlow
   reports: Reports
+  island: Pick<IslandBridge, 'state' | 'retry'>
 }
 
 interface Caller {
@@ -493,6 +495,7 @@ export function registerIpcHandlers({
   updater,
   quit,
   reports,
+  island,
 }: IpcDeps): void {
   handle('app:get-info', 0, () => appInfo())
   handle('app:default-browser', 0, () => defaultBrowser(app))
@@ -715,12 +718,14 @@ export function registerIpcHandlers({
   handle('media:reveal', 1, (_, url) => revealMedia(url, mediaGrants, hostMedia))
 
   handle('media:open-external', 1, async (_, url) => {
-    if (hostMedia.byUrl(url)) throw new Error(ON_HOST)
+    if (hostMedia.byUrl(url)) throw new Error(onHostText())
     const error = await shell.openPath(await grantedPath(url, mediaGrants))
     if (error) throw new Error(error)
   })
 
   handle('notifications:test', 0, () => notifyTest(settings.get()))
+  handle('island:status', 0, () => island.state())
+  handle('island:retry', 0, () => island.retry())
 
   handle('update:get-status', 0, () => updater.getStatus())
   handle('update:check', 0, () => updater.check())
@@ -748,7 +753,11 @@ export function registerIpcHandlers({
   handle('artifact:thumbnail', 3, (_, id, version, layout) =>
     artifacts.thumbnail(id, version, layout),
   )
+  handle('artifact:part-thumbnail', 3, (_, id, version, part) =>
+    artifacts.partThumbnail(id, version, part),
+  )
   handle('artifact:open-external', 2, (_, id, version) => artifacts.openExternal(id, version))
+  handle('artifact:reveal', 2, (_, id, version) => artifacts.reveal(id, version))
   handle('artifact:export', 2, ({ window }, id, version) => artifacts.export(window, id, version))
   handle('artifact:page-image', 4, async (_, id, version, page, size) => {
     const image = await artifacts.png(id, version, page, size)

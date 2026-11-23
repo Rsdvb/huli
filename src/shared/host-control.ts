@@ -10,9 +10,11 @@ import type { AttachmentGrant } from './attachments'
 import type { BrowserForward, BrowserOriginAnswer, BrowserOriginDecision } from './browser'
 import type { ComputerApp, ComputerFrame, ComputerHold } from './computer-use'
 import type { ControlOutcome } from './control'
+import type { Locale } from './locale'
 import type { MarketAccount, MarketCall, MarketCallAnswer } from './market-publish'
 import type { MediaGrantRecord } from './media'
 import type { Platform } from './platform'
+import type { PlanLimitNoticeLevel } from './plan-limits'
 import type { PortError } from './port-rpc'
 import type { StoredProfile } from './provider-profiles'
 import type { ThemeCall, ThemeCallAnswer } from './theme-palette'
@@ -390,14 +392,30 @@ export type HostToMain =
       title: string
       body: string
     }
-  // A plan window of the agent's crossed 90% or ran out; it has no session and opens Usage.
+  // A plan limit window of an agent's account reached 90%, was used up, or reset after that.
   | {
       type: 'host:attention'
       kind: 'plan-limit'
       agentId: AgentId
-      window: string
+      level: PlanLimitNoticeLevel
+      /** The account and the window, alike on every host signed in to that account. */
+      key: string
+      usedPercent: number | null
+      /** The session the used-up window stopped, whose own notice this one replaces. */
+      sessionId?: string
       title: string
       body: string
+    }
+  // A workflow task starts to need the user, or it ended or was cancelled; it opens the task.
+  | {
+      type: 'host:attention'
+      kind: 'task-needs-you' | 'task-ended'
+      taskId: string
+      title: string
+      body: string
+      // A step's session, for devices, which open sessions rather than tasks.
+      sessionId?: string
+      front?: AttentionFront
     }
   | { type: 'host:badge'; count: number } // pending permission requests across sessions
   // Huli: each chat bridge's connection, when one changed.
@@ -490,6 +508,8 @@ export type MainToTerminalHost =
       type: 'terminal-host:init'
       platform: Platform
       appVersion: string
+      /** The language of the text the host writes for the user and for devices. */
+      locale: Locale
       settings: TerminalSettings
       projects: string[]
       authCommands: string[]
@@ -499,6 +519,7 @@ export type MainToTerminalHost =
   // The port travels in the transfer list; `device` names the paired device it serves, if any.
   | { type: 'terminal-host:connect'; windowId: number; device?: PortDevice }
   | { type: 'terminal-host:settings'; settings: TerminalSettings }
+  | { type: 'terminal-host:locale'; locale: Locale }
   | { type: 'terminal-host:projects'; paths: string[] }
   | { type: 'terminal-host:sessions-ended'; sessionIds: string[] }
   | { type: 'terminal-host:auth-commands'; commands: string[] }
@@ -521,6 +542,8 @@ export type MainToDeviceHost =
       type: 'device-host:init'
       platform: Platform
       appVersion: string
+      /** The language of the text the host writes for the user and for devices. */
+      locale: Locale
       nodeRuntime: NodeRuntime
       /** Kettu's data folder, where agent-device keeps its state. */
       dataDir: string
@@ -533,6 +556,7 @@ export type MainToDeviceHost =
   // The port travels in the transfer list; `device` names the paired device it serves, if any.
   | { type: 'device-host:connect'; windowId: number; device?: PortDevice }
   | { type: 'device-host:allow-devices'; allowed: boolean }
+  | { type: 'device-host:locale'; locale: Locale }
   | { type: 'device-host:sessions-ended'; sessionIds: string[] }
   /** An agent's device tool call, which the agent host sent its parent. */
   | { type: 'device-host:call'; callId: number; call: DeviceCall }
@@ -558,6 +582,8 @@ export type MainToRemoteHost =
       userDataPath: string
       appVersion: string
       platform: Platform
+      /** The language of the text the host writes for the user and for devices. */
+      locale: Locale
       /** The name devices show for this computer, and the one it suggests when it pairs. */
       hostName: string
       /**
@@ -623,6 +649,7 @@ export type MainToRemoteHost =
   | { type: 'remote-host:terminal'; allowed: boolean }
   // Huli: the features turned off in Settings > Features changed.
   | { type: 'remote-host:features'; off: string[] }
+  | { type: 'remote-host:locale'; locale: Locale }
   | { type: 'remote-host:add-device'; device: NewDevice }
   // Forgets the device and closes its sessions at once.
   | { type: 'remote-host:remove-device'; id: string }

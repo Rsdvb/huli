@@ -37,6 +37,8 @@ import {
   type PermissionAnswer,
   type PromptBlock,
   type PromptResult,
+  type RewindPoint,
+  type RewoundSession,
   type SessionOptions,
   type SessionSetup,
   type SessionTarget,
@@ -100,9 +102,11 @@ import {
   QUESTIONS_SKIPPED,
   riskSubject,
 } from './permissions'
+import { findClaudeTranscript } from '../prompt-cache'
 import { folderHooks } from './project-hooks'
 import { declaredServers } from './project-mcp'
 import { mapAccount, mapAuthStatus, mapContextUsage, mapUsageLimits } from './reports'
+import { forkedUuids, rewindCut, RewindPointMissing, transcriptRecords } from './rewind'
 import { TerminalCommands } from './terminal-commands'
 import type { RiskSubject } from '../risk/classify'
 import { askedQuestions } from './tools'
@@ -617,9 +621,23 @@ export class ClaudeConnection implements AgentConnection {
 
   /** Where Claude Code keeps its Plan mode plans: `plans` in its configuration folder. */
   private plansFolder(): string {
+    return path.join(this.configFolder(), 'plans')
+  }
+
+  private configFolder(): string {
     const env = this.env
     const home = env.HOME || env.USERPROFILE || os.homedir()
-    return path.join(env[CONFIG_DIR] || path.join(home, '.claude'), 'plans')
+    return env[CONFIG_DIR] || path.join(home, '.claude')
+  }
+
+  /** A session's transcript as records, read whole; a cut needs the turns a compaction folded. */
+  private async transcript(sessionId: string, cwd: string) {
+    const root = path.join(this.configFolder(), 'projects')
+    const file = await findClaudeTranscript(root, cwd, sessionId)
+    if (!file) {
+      throw new AgentRequestError('agent_error', t('agentRun.noSession', { id: sessionId }))
+    }
+    return transcriptRecords(await readFile(file, 'utf8'))
   }
 
   async initialize(_appVersion: string, signal?: AbortSignal): Promise<AgentInit> {
@@ -672,6 +690,7 @@ export class ClaudeConnection implements AgentConnection {
         ownTitles: 'sent',
         logout: true,
         steering: true,
+        rewind: true,
         mcpHttp: true,
         mcpSse: true,
         mcpStdio: true,
@@ -679,25 +698,18 @@ export class ClaudeConnection implements AgentConnection {
       },
       // A browser on another machine cannot finish the sign-in, so there Claude Code's own runs.
       authMethods: remote
-        ? [
-            terminal(
-              'claude-login',
-              t('claude.auth.login.name'),
-              t('claude.auth.login.description'),
-              [],
-            ),
-          ]
+        ? [terminal('claude-login', t('claude.auth.login'), t('claude.auth.loginDescription'), [])]
         : [
             terminal(
               'claude-ai-login',
-              t('claude.auth.subscription.name'),
-              t('claude.auth.subscription.description'),
+              t('claude.auth.subscription'),
+              t('claude.auth.subscriptionDescription'),
               ['auth', 'login', '--claudeai'],
             ),
             terminal(
               'console-login',
-              t('claude.auth.console.name'),
-              t('claude.auth.console.description'),
+              t('claude.auth.console'),
+              t('claude.auth.consoleDescription'),
               ['auth', 'login', '--console'],
             ),
           ],
@@ -724,7 +736,8 @@ export class ClaudeConnection implements AgentConnection {
     if (code !== 0) {
       throw new AgentRequestError(
         'agent_error',
-        stderr.trim() || `claude auth logout exited with ${code}`,
+        stderr.trim() ||
+          t('agent.program.exitedBare', { name: 'claude auth logout', code: String(code) }),
       )
     }
     this.account = null
@@ -732,13 +745,13 @@ export class ClaudeConnection implements AgentConnection {
 
   private requireSdk(): ClaudeSdk {
     if (this.done) throw this.closedError()
-    if (!this.sdk) throw new AgentRequestError('agent_error', 'Claude Code has not started')
+    if (!this.sdk) throw new AgentRequestError('agent_error', t('claude.notStarted'))
     return this.sdk
   }
 
   private requireCli(): string {
     if (!this.cli) {
-      throw new AgentRequestError('agent_error', 'No Claude Code program was found for the SDK')
+      throw new AgentRequestError('agent_error', t('claude.noProgram'))
     }
     return this.cli
   }
@@ -792,7 +805,11 @@ export class ClaudeConnection implements AgentConnection {
     const sdk = this.requireSdk()
     const history = await this.withConfigDir(() => sdk.getSessionMessages(sessionId, { dir: cwd }))
     if (history.length === 0) {
-      throw new AgentRequestError('agent_error', `No session ${sessionId}`, RESOURCE_NOT_FOUND)
+      throw new AgentRequestError(
+        'agent_error',
+        t('agentRun.noSession', { id: sessionId }),
+        RESOURCE_NOT_FOUND,
+      )
     }
     const session = await this.open(sessionId, cwd, options, { resume: true })
     this.rememberUuids(session, history)
@@ -840,7 +857,7 @@ export class ClaudeConnection implements AgentConnection {
     if (point && !upTo) {
       throw new AgentRequestError(
         'agent_error',
-        `Fork point message ${point.messageId} was not found in session ${sessionId}`,
+        t('agentRun.noForkPoint', { message: point.messageId, id: sessionId }),
         INVALID_PARAMS,
       )
     }
@@ -929,6 +946,37 @@ export class ClaudeConnection implements AgentConnection {
       })),
       nextCursor: infos.length === LIST_PAGE ? String(offset + LIST_PAGE) : null,
     }
+  }
+
+  /**
+   * Cuts before the prompt `point` names with a fork that ends at the record before it, which the
+   * fork copies with new uuids; the session itself is left as it is. Before the first prompt there
+   * is nothing to copy, so the cut is an empty session the host starts.
+   */
+  async rewindSession(
+    sessionId: string,
+    cwd: string,
+    point: RewindPoint,
+    title: string | null,
+  ): Promise<RewoundSession> {
+    const sdk = this.requireSdk()
+    let upTo: string | null
+    try {
+      upTo = rewindCut(await this.transcript(sessionId, cwd), point)
+    } catch (error) {
+      if (!(error instanceof RewindPointMissing)) throw error
+      throw new AgentRequestError('agent_error', t('rewind.noPoint'))
+    }
+    if (upTo === null) return { sessionId: '' }
+    const forked = await this.withConfigDir(() =>
+      sdk.forkSession(sessionId, {
+        dir: cwd,
+        upToMessageId: upTo,
+        ...(title ? { title } : {}),
+      }),
+    )
+    const refs = forkedUuids(await this.transcript(forked.sessionId, cwd))
+    return { sessionId: forked.sessionId, refs }
   }
 
   async copySession(sessionId: string, cwd: string): Promise<string> {
@@ -1365,7 +1413,7 @@ export class ClaudeConnection implements AgentConnection {
     if (this.done) turn.reject(this.closedError())
     else if (turn.cancelled) turn.resolve(this.turnResult(turn, 'cancelled'))
     else {
-      const message = failure ? errorText(failure) : 'Claude Code stopped before the turn ended'
+      const message = failure ? errorText(failure) : t('claude.stoppedEarly')
       turn.reject(new AgentRequestError('agent_error', message))
     }
   }
@@ -1724,7 +1772,7 @@ export class ClaudeConnection implements AgentConnection {
     if (!session) {
       throw new AgentRequestError(
         'agent_error',
-        `Session ${sessionId} is not open`,
+        t('agentRun.notOpen', { id: sessionId }),
         RESOURCE_NOT_FOUND,
       )
     }
@@ -1732,7 +1780,7 @@ export class ClaudeConnection implements AgentConnection {
       return session
     }
     if (session.options.hidden) {
-      throw new AgentRequestError('agent_error', `Session ${sessionId} has ended`)
+      throw new AgentRequestError('agent_error', t('agentRun.ended', { id: sessionId }))
     }
     let reopened: Session
     try {
@@ -1825,7 +1873,7 @@ export class ClaudeConnection implements AgentConnection {
     }
   }
 
-  private send(session: Session, blocks: readonly PromptBlock[], priority?: 'now'): void {
+  private send(session: Session, blocks: readonly PromptBlock[], priority?: 'now'): string {
     const content = promptContent(blocks)
     this.context.hooks.traffic('out', {
       method: priority ? 'steer' : 'prompt',
@@ -1836,14 +1884,17 @@ export class ClaudeConnection implements AgentConnection {
     this.noteTitle(session, `\n${text}\n`)
     session.suggestable = false
     this.offerSuggestion(session, null)
+    // Claude Code keeps it as the message's uuid in the transcript, where a rewind finds it.
+    const uuid = randomUUID()
     session.input!.push({
       type: 'user',
       message: { role: 'user', content },
       parent_tool_use_id: null,
-      uuid: randomUUID(),
+      uuid,
       session_id: session.id,
       ...(priority ? { priority } : {}),
     })
+    return uuid
   }
 
   private startTurn(session: Session, texts: string[] | null): Promise<PromptResult> {
@@ -1858,7 +1909,7 @@ export class ClaudeConnection implements AgentConnection {
       })
     }
     if (current) {
-      return Promise.reject(new AgentRequestError('agent_error', 'A turn is already running'))
+      return Promise.reject(new AgentRequestError('agent_error', t('agentRun.turnRunning')))
     }
     return new Promise((resolve, reject) => {
       session.turn = newTurn(resolve, reject, texts)
@@ -1886,10 +1937,15 @@ export class ClaudeConnection implements AgentConnection {
     this.deliver({ sessionId: session.id, map: () => ({ patches: [], effects: [effect] }) })
   }
 
-  async prompt(sessionId: string, prompt: readonly PromptBlock[]): Promise<PromptResult> {
+  async prompt(
+    sessionId: string,
+    prompt: readonly PromptBlock[],
+    sent?: (ref: string) => void,
+  ): Promise<PromptResult> {
     const session = await this.ready(sessionId)
     const turn = this.startTurn(session, null)
-    this.send(session, prompt)
+    const uuid = this.send(session, prompt)
+    sent?.(uuid)
     // Asked now, not after the turn: a long run would otherwise keep the raw message as its title.
     void this.title(session)
     return turn
@@ -1919,7 +1975,7 @@ export class ClaudeConnection implements AgentConnection {
       signal.addEventListener('abort', cancel, { once: true })
       this.send(session, prompt)
       const result = await turn
-      if (result.stopReason === 'cancelled') throw new Error('The question was cancelled')
+      if (result.stopReason === 'cancelled') throw new Error(t('agentRun.questionCancelled'))
       return texts.join('\n\n')
     } finally {
       signal.removeEventListener('abort', cancel)
@@ -1961,7 +2017,9 @@ export class ClaudeConnection implements AgentConnection {
 
   async stopTask(sessionId: string, taskId: string): Promise<void> {
     const query = this.sessions.get(sessionId)?.query
-    if (!query) throw new AgentRequestError('agent_error', 'Claude Code is not running')
+    if (!query) {
+      throw new AgentRequestError('agent_error', t('agentRun.notRunning', { agent: 'Claude Code' }))
+    }
     this.context.hooks.traffic('out', { method: 'stopTask', sessionId, taskId })
     await query.stopTask(taskId)
   }
@@ -1992,9 +2050,11 @@ export class ClaudeConnection implements AgentConnection {
     taskId: string,
   ): Promise<{ output: string; truncated: boolean }> {
     const query = this.sessions.get(sessionId)?.query
-    if (!query) throw new AgentRequestError('agent_error', 'Claude Code is not running')
+    if (!query) {
+      throw new AgentRequestError('agent_error', t('agentRun.notRunning', { agent: 'Claude Code' }))
+    }
     if (!query.getTaskOutput) {
-      throw new AgentRequestError('agent_error', 'This Claude Code cannot read task output')
+      throw new AgentRequestError('agent_error', t('claude.noTaskOutput'))
     }
     const read = await query.getTaskOutput(taskId)
     const output = typeof read.output === 'string' ? read.output : ''
@@ -2013,7 +2073,9 @@ export class ClaudeConnection implements AgentConnection {
   ): Promise<SideAnswer> {
     const session = await this.ready(sessionId)
     const query = session.query
-    if (!query) throw new AgentRequestError('agent_error', 'Claude Code is not running')
+    if (!query) {
+      throw new AgentRequestError('agent_error', t('agentRun.notRunning', { agent: 'Claude Code' }))
+    }
     if (!query.askSideQuestion) throw new SideQuestionUnsupported()
     this.context.hooks.traffic('out', { method: 'askSideQuestion', sessionId })
     const history = ask.history.map((turn) => ({ question: turn.question, response: turn.answer }))
@@ -2113,7 +2175,7 @@ export class ClaudeConnection implements AgentConnection {
     }
     throw new AgentRequestError(
       'agent_error',
-      `No option ${optionId} takes ${String(value)}`,
+      t('agentRun.noOptionTakes', { option: optionId, value: String(value) }),
       INVALID_PARAMS,
     )
   }
@@ -2130,11 +2192,7 @@ export class ClaudeConnection implements AgentConnection {
   /** The value a default choice inherits; unknown is refused rather than taken as off. */
   private inheritedUltracode(session: Session): boolean {
     if (session.ultracodeDefault === null) {
-      throw new AgentRequestError(
-        'agent_error',
-        "Ultracode's inherited value is unknown, so it cannot be applied",
-        INVALID_PARAMS,
-      )
+      throw new AgentRequestError('agent_error', t('claude.ultracodeUnknown'), INVALID_PARAMS)
     }
     return session.ultracodeDefault
   }

@@ -10,7 +10,6 @@ import { AnimatePresence, MotionConfig } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import {
   HELD_BUBBLE_MS,
-  OVERLAY_PILL_BOTTOM,
   OVERLAY_PILL_ROOM,
   type ControlOverlayApi,
   type ControlOverlayState,
@@ -19,10 +18,12 @@ import {
 } from '@shared/control'
 import { ControlPointer } from '@renderer/components/control/control-pointer'
 import { HeldBubble } from '@renderer/components/control/held-bubble'
+import { PillDock } from '@renderer/components/control/pill-dock'
 import { SurfaceLight } from '@renderer/components/control/surface-light'
 import { SurfacePill } from '@renderer/components/control/surface-pill'
 import { UploadConsentCard } from '@renderer/components/control/upload-consent'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { useSurfacePill } from '@renderer/stores/surface-pill'
 
 const overlay = (window.kettu as unknown as ControlOverlayApi).overlay
 
@@ -66,10 +67,13 @@ function OverlayPage() {
   const [clicks, setClicks] = useState<{ id: number; at: ControlPoint }[]>([])
   const [nudge, setNudge] = useState(0)
   const [consent, setConsent] = useState<UploadConsent | null>(null)
+  const [still, setStill] = useState<{ id: number; image: string } | null>(null)
   const current = useRef<ControlOverlayState | null>(null)
   const sequence = useRef(0)
   const bubbleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const wheel = useRef<{ x: number; y: number; deltaX: number; deltaY: number } | null>(null)
+  const pillSize = useRef<{ width: number; height: number } | null>(null)
+  const pillAt = useSurfacePill((s) => s.browser)
 
   /** A click or key the agent's turn held back: the pill bobs, and a click gets the bubble. */
   const held = useCallback((at: ControlPoint | null) => {
@@ -110,6 +114,11 @@ function OverlayPage() {
         if (at) setPointer((last) => ({ at, clicks: (last?.clicks ?? 0) + (click ? 1 : 0) }))
         return
       }
+      if (event.type === 'still') {
+        const { id, image } = event
+        setStill(image === null ? null : { id, image })
+        return
+      }
       held(event.at)
     })
     overlay.request({ type: 'ready' })
@@ -131,20 +140,27 @@ function OverlayPage() {
 
   useEffect(() => () => clearTimeout(bubbleTimer.current), [])
 
-  // Main sizes the overlay to the pill while the user has the surface.
-  const measurePill = useCallback((element: HTMLDivElement | null) => {
-    if (!element) return
-    const observer = new ResizeObserver(() => {
-      if (element.offsetWidth === 0 || element.offsetHeight === 0) return
-      overlay.request({
-        type: 'pill',
-        width: element.offsetWidth + 2 * OVERLAY_PILL_ROOM,
-        height: element.offsetHeight + 2 * OVERLAY_PILL_ROOM,
-      })
+  // Main sizes the overlay to the pill while the user has the surface, and puts it where they
+  // dragged it.
+  const reportPill = useCallback(() => {
+    const size = pillSize.current
+    if (!size) return
+    overlay.request({
+      type: 'pill',
+      width: size.width + 2 * OVERLAY_PILL_ROOM,
+      height: size.height + 2 * OVERLAY_PILL_ROOM,
+      ...(pillAt && { at: pillAt }),
     })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
+  }, [pillAt])
+  useEffect(reportPill, [reportPill])
+  const measurePill = useCallback(
+    (width: number, height: number) => {
+      if (width === 0 || height === 0) return
+      pillSize.current = { width, height }
+      reportPill()
+    },
+    [reportPill],
+  )
 
   /** The wheel goes through to the surface, once a frame. */
   const onWheel = (event: WheelEvent) => {
@@ -186,12 +202,30 @@ function OverlayPage() {
       style={{ '--surface-width': `${state.width}px` } as CSSProperties}
       onPointerDown={(event) => {
         if (!agentState || event.button !== 0) return
-        if ((event.target as Element).closest('.ctl-pill-nudge, .ctl-bubble, .ctl-consent')) return
+        if ((event.target as Element).closest('.ctl-dock, .ctl-bubble, .ctl-consent')) return
         held({ x: event.clientX, y: event.clientY })
       }}
       onWheel={full ? onWheel : undefined}
       onContextMenu={(event) => event.preventDefault()}
     >
+      {/* The surface as it was, while a capture changes how it draws under the overlay. */}
+      {full && still && (
+        <img
+          key={still.id}
+          src={still.image}
+          alt=""
+          aria-hidden
+          draggable={false}
+          className="pointer-events-none absolute inset-0 size-full"
+          onLoad={() => {
+            const { id } = still
+            // Two frames on, the still is on screen.
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => overlay.request({ type: 'still-shown', id })),
+            )
+          }}
+        />
+      )}
       <AnimatePresence>
         {agentState && (
           <SurfaceLight key="light" act={act.count} at={act.at} radius={state.radius} />
@@ -228,11 +262,7 @@ function OverlayPage() {
           onTakeOver={takeOver}
         />
       )}
-      <div
-        ref={measurePill}
-        className="ctl-overlay-pill"
-        style={{ bottom: full ? OVERLAY_PILL_BOTTOM : OVERLAY_PILL_ROOM }}
-      >
+      <PillDock kind="browser" still={!full} className="ctl-overlay-field" onSize={measurePill}>
         <AnimatePresence>
           {active && (
             <SurfacePill
@@ -248,7 +278,7 @@ function OverlayPage() {
             />
           )}
         </AnimatePresence>
-      </div>
+      </PillDock>
     </div>
   )
 }

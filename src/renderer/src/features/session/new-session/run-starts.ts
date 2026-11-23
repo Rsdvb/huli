@@ -1,4 +1,4 @@
-import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/session-groups'
+import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/run-groups'
 import type { ConfigOption } from '@shared/thread'
 import { optionsOn, useAgentOptionsStore } from '@renderer/stores/agent-options'
 import { agentsOn, useAgentsStore } from '@renderer/stores/agents'

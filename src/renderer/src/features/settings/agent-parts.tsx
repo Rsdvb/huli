@@ -1,8 +1,9 @@
 // What the Agent and Harness sections of Settings both draw: reading an agent's account and
 // usage, its plan meters, sign-in, task logs and the rows of its configuration.
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import {
+  ArrowUpRight01Icon,
   Cancel01Icon,
   ComputerTerminal01Icon,
   Copy01Icon,
@@ -15,9 +16,18 @@ import { harnessOf } from '@shared/agents'
 import type { HarnessId } from '@shared/thread'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { useRefresh } from '@renderer/components/refresh'
+import { FIX_URLS, type ProblemFix } from '@renderer/features/agents/harness-problem'
+import { codeSpans } from '@renderer/features/session/entries/helpers'
 import { planReset } from '@renderer/features/sidebar/plan-usage'
-import { addDays, dayOf, monthStartOf } from '@renderer/features/usage/model'
-import { balanceLabel, limitLabel, mediumAgo, money, planBalance } from '@renderer/lib/format'
+import { NodeInstallAction } from '@renderer/features/agents/node-install'
+import { confirmCliUpdate } from '@renderer/features/updates/command-confirm-model'
+import {
+  balanceLabel,
+  limitLabel,
+  limitWindowName,
+  mediumAgo,
+  planBalance,
+} from '@renderer/lib/format'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { errorMessage } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
@@ -27,20 +37,44 @@ import { openSignInPage, usePlanReadings } from '@renderer/stores/agents'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { openHarnessSettings } from '@renderer/stores/view'
 import { asksForKey, limitsReadable, percent, useAction } from './agent-helpers'
-import { CommandLine, ControlError, IconAction, Meter, SetButton, Spin } from './controls'
-import { Group, GroupLabel, Notice, RowFrame, RowGroup, RowShell, RowText } from './rows'
-import { agentCost } from './spend'
+import {
+  CommandLine,
+  ControlError,
+  IconAction,
+  LinkButton,
+  Meter,
+  SetButton,
+  Spin,
+} from './controls'
+import { GroupLabel, Notice, RowFrame, RowGroup, RowShell, RowText } from './rows'
+import { openInstall } from './harness-install'
 
-/** The window nearest its limit as a list row's end: its label and percent over a 4 px bar. */
-export function ListMeter({ limits }: { limits: PlanLimit[] }) {
+/**
+ * A list row's end: the window nearest its limit, named without its model, over a 4 px bar and the
+ * percent, in fixed columns so every row's bar lines up. With no limits, an empty bar and a dash:
+ * the agent reports its plan usage, which has not been read yet.
+ */
+export function ListMeter({ limits, reading = false }: { limits: PlanLimit[]; reading?: boolean }) {
   const { t } = useTranslation(['settings', 'composer'])
   const view = useLimitView()
+  if (limits.length === 0) {
+    const waiting = t(reading ? 'agents.readingUsage' : 'agents.usageOnceRunning')
+    return (
+      <span className="k-list-meter" title={waiting} role="img" aria-label={waiting}>
+        <span />
+        <span className="k-meter">
+          <span className="k-meter__bar" />
+          <span className="k-num k-meter__value">—</span>
+        </span>
+      </span>
+    )
+  }
   const limit = limits.reduce((most, next) =>
     (next.usedPercent ?? 0) > (most.usedPercent ?? 0) ? next : most,
   )
   return (
-    <span className="k-end" title={limitLabel(limit)}>
-      <span className="k-meter">{limitLabel(limit)}</span>
+    <span className="k-list-meter" title={limitLabel(limit)}>
+      <span className="k-list-meter__label">{limitWindowName(limit)}</span>
       <Meter
         value={limitPercent(limit, view) ?? 0}
         level={limitLevel(limit)}
@@ -53,10 +87,82 @@ export function ListMeter({ limits }: { limits: PlanLimit[] }) {
   )
 }
 
+/** A message from the host with its `code` spans set as code. */
+export function WithCode({ text }: { text: string }) {
+  return codeSpans(text).map((part, i) => (
+    <Fragment key={i}>
+      {part.code ? <code className="k-code">{part.text}</code> : part.text}
+    </Fragment>
+  ))
+}
+
 /** The small x at a notice's end that puts it away. */
 export function DismissButton({ onClick }: { onClick: () => void }) {
   const { t } = useTranslation('settings')
   return <IconAction label={t('agents.task.dismiss')} icon={Cancel01Icon} onClick={onClick} />
+}
+
+/**
+ * The button that fixes why a harness cannot run, as Settings draws it: a tool's guide opens in
+ * the browser, a program is chosen in the system's dialog, an install opens the install window, and
+ * an update shows its command first on this computer, or opens the harness's page on another.
+ */
+export function ProblemFixButton({
+  status,
+  fix,
+  variant,
+}: {
+  status: AgentStatus
+  fix: ProblemFix
+  variant?: 'primary' | 'secondary'
+}) {
+  const { api, hostId } = useHostScope()
+  const { t } = useTranslation('agents')
+  const [act, busy, error] = useAction()
+  switch (fix) {
+    case 'node':
+    case 'npm':
+      // Huli: Kite installs its own Node.js, npm with it, where the host can; else the link.
+      return <NodeInstallAction variant={variant ?? 'secondary'} />
+    case 'uv':
+      return (
+        <LinkButton href={FIX_URLS[fix]} icon={<Icon icon={ArrowUpRight01Icon} size={14} />}>
+          {t(`problem.fix.${fix}`)}
+        </LinkButton>
+      )
+    case 'choose':
+      return (
+        <>
+          <ControlError error={error} />
+          <SetButton
+            variant={variant}
+            loading={busy}
+            onClick={() => act(() => api.dialogs.chooseAgentBinary(status.harnessId))}
+          >
+            {t('problem.fix.choose')}
+          </SetButton>
+        </>
+      )
+    case 'install':
+      return (
+        <SetButton variant={variant} onClick={() => void openInstall(status.harnessId, hostId)}>
+          {t('problem.fix.install')}
+        </SetButton>
+      )
+    case 'update':
+      return (
+        <SetButton
+          variant={variant}
+          onClick={() =>
+            hostId === null && status.cli?.update
+              ? void confirmCliUpdate(status)
+              : openHarnessSettings(status.harnessId)
+          }
+        >
+          {t('problem.fix.update')}
+        </SetButton>
+      )
+  }
 }
 
 /**
@@ -335,72 +441,13 @@ export function LogCopyButton({ task }: { task: AgentTask }) {
   )
 }
 
-/** Plan usage, one row per window, read afresh while the page shows. */
-/**
- * What Kettu sent through an agent signed in with an API key this month, by its own record: an
- * API key has no plan limits to read.
- */
-export function SpendGroup({
-  status,
-  providers = false,
-}: {
-  status: AgentStatus
-  /** A provider-based agent: its provider usage is read elsewhere. */
-  providers?: boolean
-}) {
-  const { request } = useHostScope()
-  const { t } = useTranslation('settings')
-  // undefined while it is read; null when no model it used has a price.
-  const [cost, setCost] = useState<number | null | undefined>(undefined)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    const today = dayOf(Date.now())
-    const from = monthStartOf(today)
-    const to = addDays(today, 1)
-    request('usage.summary', { dayStarts: [from, to], from, to, scope: 'kettu' }).then(
-      (summary) => {
-        if (!cancelled) setCost(agentCost(summary.days, status.id))
-      },
-      (e: unknown) => {
-        if (!cancelled) setError(errorMessage(e))
-      },
-    )
-    return () => {
-      cancelled = true
-    }
-  }, [request, status.id])
-  return (
-    <Group label={t('agents.spend.group')}>
-      <RowFrame
-        text={
-          <RowText
-            name={t('agents.spend.month')}
-            description={t(
-              providers ? 'agents.spend.descriptionProviders' : 'agents.spend.description',
-              { name: status.harnessName },
-            )}
-          />
-        }
-      >
-        <ControlError error={error} />
-        {cost === undefined ? (
-          !error && <Spin />
-        ) : (
-          <span className="k-figure">
-            {cost === null ? t('agents.spend.unpriced') : money(cost, 'USD')}
-          </span>
-        )}
-      </RowFrame>
-    </Group>
-  )
-}
-
 /**
  * Huli: the harnesses whose running sessions report their plan limits; for the others, such as
  * Google Antigravity, whose limits only a read finds, the page offers that read while it runs too.
  */
 const LIMITS_FROM_SESSIONS: ReadonlySet<HarnessId> = new Set(['claude-code', 'codex'])
+
+/** Plan usage, one row per window, read afresh while the page shows. */
 export function UsageGroup({
   status,
   reading,

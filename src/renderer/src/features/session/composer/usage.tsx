@@ -47,8 +47,15 @@ import {
   type UsageTone,
 } from '@renderer/features/sidebar/plan-usage'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
-import { useShortWindow } from '@renderer/hooks/use-short-window'
-import { clockTime, countdown, fullTime, limitLabel, money, tokens } from '@renderer/lib/format'
+import {
+  clockTime,
+  countdown,
+  fullTime,
+  limitLabel,
+  limitShort,
+  money,
+  tokens,
+} from '@renderer/lib/format'
 import { errorMessage, host, sessionHost } from '@renderer/lib/host'
 import { isUsedUp, limitLevel, limitPercent, shownPercent } from '@renderer/lib/plan-limit'
 import { useClock, useNow } from '@renderer/lib/use-now'
@@ -478,9 +485,8 @@ async function compactContext(sessionId: string, prompt: string): Promise<void> 
 function TrayLimit({ limit }: { limit: PlanLimit }) {
   const { t } = useTranslation(['composer', 'common'])
   const view = useLimitView()
-  const shortName = useShortWindow()
   const reset = useClock((now) => inlineReset(limit, now))
-  const name = shortName(limit)
+  const name = limitShort(limit)
   const figure =
     reset && isUsedUp(limit)
       ? t('common:planInline.out')

@@ -18,7 +18,8 @@ import { cn } from '@renderer/lib/utils'
 import { loadToday, useUsageStore } from '@renderer/stores/usage'
 import { usePlanReadings } from '@renderer/stores/agents'
 import { useShownHostAgents } from '@renderer/stores/window-host'
-import { inlineReset, tightestLimit } from './plan-usage'
+import { tightestLimit } from '@shared/session-groups'
+import { inlineReset } from './plan-usage'
 import { costText } from './usage-row'
 
 // What the sidebar menu's rows end with: New session's shortcut, and the Routines and Usage marks.

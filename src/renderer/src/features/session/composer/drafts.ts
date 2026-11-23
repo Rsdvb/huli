@@ -4,12 +4,13 @@ import { parsePageNotes, type PageNote } from '@shared/page-notes'
 import { isAttachment, type Attachment } from '@shared/thread'
 import { removeKey } from '@renderer/lib/storage'
 
-// Unsent composer text and attachments per session, in localStorage under `draft:<sessionId>` as
-// JSON `{ text, attachments, notes }`, written 300 ms after the last change. One stored as plain
-// text, before drafts had attachments, reads as text alone. A draft that is too large or fails to
+// Unsent composer text, attachments and passage comments per session, in localStorage under
+// `draft:<sessionId>` as JSON `{ text, attachments, comments, notes, pageNotes }`, written 300 ms
+// after the last change. One stored as plain text, before drafts had attachments, reads as text
+// alone, and one stored before comments as one without them. A draft that is too large or fails to
 // save stays in memory. `notes` are comments on diff lines waiting to go to the agent together,
 // and `pageNotes` (Huli) those on elements of a page in the session's browser, which go with them;
-// sending the composer's message leaves them, deleting the session drops them.
+// clearing the draft's message leaves them, deleting the session drops them.
 
 /** The New session screen's draft, kept like a session's until the session it starts exists. */
 export const NEW_SESSION_DRAFT = 'new'
@@ -25,11 +26,25 @@ export interface SavedAttachment {
   hostId?: string
 }
 
+/**
+ * A comment on a passage of an agent message, waiting in the composer: `start` and `end` are the
+ * passage's offsets in the text of the message `entryId`, which mark it in the thread again.
+ */
+export interface DraftComment {
+  id: string
+  entryId: string
+  passage: string
+  start: number
+  end: number
+  comment: string
+}
+
 interface Draft {
   text: string
   attachments: SavedAttachment[]
   notes: DiffNote[]
   pageNotes: PageNote[]
+  comments: DraftComment[]
 }
 
 const WRITE_DELAY_MS = 300
@@ -40,7 +55,7 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>()
 
 const PREFIX = 'draft:'
 const key = (sessionId: string) => `${PREFIX}${sessionId}`
-const EMPTY: Draft = { text: '', attachments: [], notes: [], pageNotes: [] }
+const EMPTY: Draft = { text: '', attachments: [], comments: [], notes: [], pageNotes: [] }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -59,6 +74,18 @@ function isSaved(value: unknown): value is SavedAttachment {
   )
 }
 
+function isComment(value: unknown): value is DraftComment {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.entryId === 'string' &&
+    typeof value.passage === 'string' &&
+    typeof value.start === 'number' &&
+    typeof value.end === 'number' &&
+    typeof value.comment === 'string'
+  )
+}
+
 /** A stored draft; one stored as plain text, or that is not a draft's JSON, is text alone. */
 export function parseDraft(raw: string): Draft {
   if (raw.startsWith('{')) {
@@ -68,6 +95,7 @@ export function parseDraft(raw: string): Draft {
         return {
           text: value.text,
           attachments: value.attachments.filter(isSaved),
+          comments: Array.isArray(value.comments) ? value.comments.filter(isComment) : [],
           notes: parseDiffNotes(value.notes),
           pageNotes: parsePageNotes(value.pageNotes),
         }
@@ -76,7 +104,7 @@ export function parseDraft(raw: string): Draft {
       // Text that only starts like JSON.
     }
   }
-  return { text: raw, attachments: [], notes: [], pageNotes: [] }
+  return { text: raw, attachments: [], comments: [], notes: [], pageNotes: [] }
 }
 
 function read(sessionId: string): Draft {
@@ -96,6 +124,10 @@ export function readDraft(sessionId: string): string {
 
 export function readDraftAttachments(sessionId: string): SavedAttachment[] {
   return read(sessionId).attachments
+}
+
+export function readDraftComments(sessionId: string): DraftComment[] {
+  return read(sessionId).comments
 }
 
 /** Whether a draft holds what Send takes: text other than white space, or an attachment. */
@@ -121,6 +153,10 @@ export function writeDraftAttachments(sessionId: string, attachments: SavedAttac
   write(sessionId, { ...read(sessionId), attachments })
 }
 
+export function writeDraftComments(sessionId: string, comments: DraftComment[]): void {
+  write(sessionId, { ...read(sessionId), comments })
+}
+
 /** Writes a pending draft now, for example when the composer unmounts. */
 export function flushDraft(sessionId: string): void {
   const timer = timers.get(sessionId)
@@ -131,6 +167,7 @@ export function flushDraft(sessionId: string): void {
   if (
     !draft.text &&
     draft.attachments.length === 0 &&
+    draft.comments.length === 0 &&
     draft.notes.length === 0 &&
     draft.pageNotes.length === 0
   ) {
@@ -165,7 +202,7 @@ export function draftIds(): string[] {
   return [...ids].sort()
 }
 
-/** The sessions whose draft, saved or in memory, holds more than white space, or anything else. */
+/** The sessions whose draft, saved or in memory, holds text, an attachment or any comment. */
 export function draftedSessions(): string[] {
   return draftIds().filter((id) => {
     if (id === NEW_SESSION_DRAFT) return false
@@ -173,13 +210,14 @@ export function draftedSessions(): string[] {
     return (
       draft.text.trim() !== '' ||
       draft.attachments.length > 0 ||
+      draft.comments.length > 0 ||
       draft.notes.length > 0 ||
       draft.pageNotes.length > 0
     )
   })
 }
 
-/** Empties the draft's message, its text and attachments, as a send does; its notes stay. */
+/** Empties the draft's message, its text, attachments and passage comments; its notes stay. */
 export function clearDraft(sessionId: string): void {
   const { notes, pageNotes } = read(sessionId)
   const timer = timers.get(sessionId)
@@ -190,7 +228,7 @@ export function clearDraft(sessionId: string): void {
     removeKey(key(sessionId))
     return
   }
-  memory.set(sessionId, { text: '', attachments: [], notes, pageNotes })
+  memory.set(sessionId, { text: '', attachments: [], comments: [], notes, pageNotes })
   flushDraft(sessionId)
 }
 

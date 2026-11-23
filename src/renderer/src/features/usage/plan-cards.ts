@@ -2,7 +2,7 @@ import type { AgentStatus, PlanLimit, ProviderBalance } from '@shared/agent-host
 import { limitHolds } from '@shared/plan-limits'
 import type { AgentId } from '@shared/thread'
 import { joinPlanTier, planTier } from '@renderer/features/account/model'
-import { planName } from '@renderer/features/tray/model'
+import { planName } from '@shared/session-groups'
 import { limitLevel, type LimitLevel } from '@renderer/lib/plan-limit'
 import {
   accountCardKey,

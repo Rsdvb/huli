@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import { runPhase } from '@shared/session-groups'
+import { runPhase } from '@shared/run-groups'
 import {
   AlertDialog,
   AlertDialogCancel,

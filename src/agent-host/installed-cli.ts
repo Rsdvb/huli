@@ -1,6 +1,6 @@
-// The CLI the user installed (Claude Code's, Codex's, Antigravity's `agy`), the only one that runs:
-// found on PATH, resolved to a file that starts without a shell, asked its version and held against
-// the oldest that runs.
+// The CLI the user installed (Claude Code's, Codex's, Antigravity's `agy`, or the command of an npm
+// package harness): found on PATH, resolved to a file that starts without a shell, asked its
+// version and held against the oldest that runs.
 
 import { open, readFile, realpath, stat } from 'node:fs/promises'
 import os from 'node:os'
@@ -9,7 +9,8 @@ import type { InstalledCli } from '@shared/agent-host'
 import type { Platform } from '@shared/platform'
 import { programFailure, runProgram, type ProgramOptions, type ProgramRun } from './adapter-install'
 import { codexBinary, npmCodexEnv } from './codex-binary'
-import { findCommand, getEnv, needsShell, type Env } from './find-command'
+import { findCommand, findCommands, getEnv, needsShell, type Env } from './find-command'
+import { t } from './i18n'
 import { compareVersions } from './versions'
 
 /** File access, injected so tests can lay out any platform's install. */
@@ -44,6 +45,8 @@ const SHIM_LIMIT = 64 * 1024
 export interface ResolvedCli {
   path: string
   env: Record<string, string>
+  /** The program that runs `path`, a script, such as Node.js; none when `path` runs by itself. */
+  runner?: string
 }
 
 /** The user's CLI a harness runs: passed to its SDK, or run itself. */
@@ -56,8 +59,8 @@ export interface AdapterCli {
    */
   variable?: string
   /**
-   * Where its vendor's installer puts it, looked in when PATH has no such command, as for an
-   * install the shell profiles add to PATH only in new shells.
+   * Where its vendor's installer puts it, looked in after PATH, as for an install the shell
+   * profiles add to PATH only in new shells.
    */
   installedAt?(env: Env, platform: Platform): string[]
   /**
@@ -66,13 +69,15 @@ export interface AdapterCli {
    */
   pinsVersion: boolean
   /**
-   * The file that runs without a shell, or null when there is none. `env` is the agent's, for a
-   * CLI whose launcher finds its program by a variable.
+   * The file that runs without a shell, or null when there is none. `node` is the user's Node.js,
+   * for a script that runs on it. `env` is the agent's, for a CLI whose launcher finds its program
+   * by a variable.
    */
   resolve(
     found: string,
     platform: Platform,
     files: CliFiles,
+    node: string | null,
     env?: Env,
   ): Promise<ResolvedCli | null>
   /** The oldest CLI the SDK installed in `dir` runs, or null when it names none. */
@@ -135,10 +140,22 @@ async function readManifest(
   }
 }
 
+/** `~/.local/bin/<command>` off Windows, from the home folder the environment names. */
+function localBin(env: Env, platform: Platform, command: string): string {
+  const home = getEnv(env, 'HOME', platform) ?? os.homedir()
+  return path.posix.join(home, '.local', 'bin', command)
+}
+
+// Its install script puts `claude` in `~/.local/bin`, or `%USERPROFILE%\.local\bin` on Windows.
 export const CLAUDE_CLI: AdapterCli = {
   command: 'claude',
   variable: 'CLAUDE_CODE_EXECUTABLE',
   pinsVersion: true,
+  installedAt: (env, platform) => {
+    if (platform !== 'win32') return [localBin(env, platform, 'claude')]
+    const profile = getEnv(env, 'USERPROFILE', platform)
+    return profile ? [path.win32.join(profile, '.local', 'bin', 'claude')] : []
+  },
   // The SDK spawns it as a program, so on Windows it must be one itself.
   resolve: async (found, platform, files) => {
     const file = await startable(found, platform, files)
@@ -152,12 +169,19 @@ export const CLAUDE_CLI: AdapterCli = {
   },
 }
 
+// Its install scripts put `codex` in `~/.local/bin` by default, and in
+// `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin` on Windows.
 export const CODEX_CLI: AdapterCli = {
   command: 'codex',
   variable: 'CODEX_PATH',
   pinsVersion: false,
   // The app-server protocol the mapping is written against.
   oldest: '0.166.0',
+  installedAt: (env, platform) => {
+    if (platform !== 'win32') return [localBin(env, platform, 'codex')]
+    const local = getEnv(env, 'LOCALAPPDATA', platform)
+    return local ? [path.win32.join(local, 'Programs', 'OpenAI', 'Codex', 'bin', 'codex')] : []
+  },
   resolve: async (found, platform, files) => {
     const file = await startable(found, platform, files)
     if (!file) return null
@@ -191,8 +215,7 @@ export const AGY_CLI: AdapterCli = {
       const local = getEnv(env, 'LOCALAPPDATA', platform)
       return local ? [path.win32.join(local, 'agy', 'bin', 'agy')] : []
     }
-    const home = getEnv(env, 'HOME', platform) ?? os.homedir()
-    return [path.posix.join(home, '.local', 'bin', 'agy')]
+    return [localBin(env, platform, 'agy')]
   },
 }
 
@@ -212,8 +235,41 @@ export const OPENCODE_CLI: AdapterCli = {
   },
 }
 
+/**
+ * The user's own install of the command an npm package harness publishes, such as DeepSeek
+ * Harness's `dsh`: off Windows as found, which runs by its shebang. On Windows an `.exe`, or the
+ * file an npm or pnpm shim starts, a script running on the Node.js beside the shim as the shim
+ * would, else on the user's. `installedAt` is where its vendor's installer puts it off Windows,
+ * from the home folder.
+ */
+export function packageCli(command: string, installedAt: readonly string[] = []): AdapterCli {
+  return {
+    command,
+    pinsVersion: false,
+    resolve: async (found, platform, files, node) => {
+      const file = await startable(found, platform, files)
+      if (!file || platform !== 'win32' || isWindowsProgram(file)) {
+        return file ? { path: file, env: {} } : null
+      }
+      const beside = path.win32.join(path.win32.dirname(found), 'node.exe')
+      const runner = (await files.isFile(beside)) ? beside : node
+      return runner ? { path: file, env: {}, runner } : null
+    },
+    ...(installedAt.length > 0
+      ? {
+          installedAt: (env: Env, platform: Platform) => {
+            if (platform === 'win32') return []
+            const home = getEnv(env, 'HOME', platform) ?? os.homedir()
+            return installedAt.map((file) => path.posix.join(home, file))
+          },
+        }
+      : {}),
+  }
+}
+
 export type CliVersion = { version: string } | { error: string }
-export type CliProbe = (program: string, env: Env) => Promise<CliVersion>
+/** Asks `<program> <words> --version`; `words` name the script a runner such as Node.js runs. */
+export type CliProbe = (program: string, env: Env, words?: readonly string[]) => Promise<CliVersion>
 
 export interface CliVersionsOptions {
   platform: Platform
@@ -238,15 +294,17 @@ export class CliVersions {
     this.answers.clear()
   }
 
-  async probe(program: string, env: Env): Promise<CliVersion> {
-    const info = await (this.options.stat ?? ((file) => stat(file).catch(() => null)))(program)
-    if (!info) return { error: `${program} was not found.` }
-    const key = `${program}\0${info.size}\0${info.mtimeMs}`
+  async probe(program: string, env: Env, words: readonly string[] = []): Promise<CliVersion> {
+    // A script changes, not the runner that runs it.
+    const file = words.at(-1) ?? program
+    const info = await (this.options.stat ?? ((file) => stat(file).catch(() => null)))(file)
+    if (!info) return { error: t('agent.program.fileNotFound', { file }) }
+    const key = [program, ...words, info.size, info.mtimeMs].join('\0')
     let answer = this.answers.get(key)
     if (!answer) {
-      const asked: Promise<CliVersion> = this.ask(program, env).then(async (first) => {
+      const asked: Promise<CliVersion> = this.ask(program, words, env).then(async (first) => {
         if (!first.transient) return first.answer
-        const second = await this.ask(program, env)
+        const second = await this.ask(program, words, env)
         const kept = !second.transient || second.transient === first.transient
         if (!kept && this.answers.get(key) === asked) this.answers.delete(key)
         return second.answer
@@ -260,13 +318,14 @@ export class CliVersions {
   /** The answer, and how it failed when asking again might well answer otherwise. */
   private async ask(
     program: string,
+    words: readonly string[],
     env: Env,
   ): Promise<{ answer: CliVersion; transient: 'timeout' | 'start' | 'signal' | null }> {
     const timeoutMs = this.options.timeoutMs ?? 10_000
-    const name = path.basename(program).replace(/\.(?:exe|com)$/i, '')
+    const name = path.basename(words.at(-1) ?? program).replace(/\.(?:exe|com)$/i, '')
     const result = await (this.options.run ?? runProgram)({
       program,
-      args: ['--version'],
+      args: [...words, '--version'],
       cwd: os.homedir(),
       env,
       platform: this.options.platform,
@@ -282,7 +341,7 @@ export class CliVersions {
           : null
     if (failure) return { answer: { error: failure }, transient }
     const version = parseCliVersion(result.stdout)
-    const answer = version ? { version } : { error: `${name} --version printed no version.` }
+    const answer = version ? { version } : { error: t('agent.program.noVersion', { name }) }
     return { answer, transient: null }
   }
 }
@@ -291,11 +350,17 @@ export interface FoundCli {
   installed: InstalledCli
   /** What the launch passes besides the variable. */
   env: Record<string, string>
+  /** The program that runs the CLI, a script, such as Node.js. */
+  runner?: string
 }
 
 export interface FindCliContext {
   platform: Platform
   env: Env
+  /** The program picked in Settings, which stands in for the one on PATH. */
+  binaryOverride?: string | null
+  /** The user's Node.js, which runs a script the CLI resolves to. */
+  node?: { nodePath: string | null }
   isExecutable(file: string): Promise<boolean>
   files: CliFiles
   probe: CliProbe
@@ -311,10 +376,25 @@ function answered(
   return { ...found, version: answer?.version ?? null, problem: null }
 }
 
-/** The user's CLI as the adapter would run it, with its version or why it cannot run. */
+/** The programs of the CLI's command: each on PATH in order, then where its installer puts it. */
+async function* candidates(cli: AdapterCli, ctx: FindCliContext): AsyncGenerator<string> {
+  yield* findCommands(cli.command, ctx)
+  for (const file of cli.installedAt?.(ctx.env, ctx.platform) ?? []) {
+    const found = await findCommand(file, ctx)
+    if (found) yield found
+  }
+}
+
+/**
+ * The user's CLI as the adapter would run it, with its version or why it cannot run. The program
+ * the environment names or the one picked in Settings is the only one; otherwise the first program
+ * found that is `usable`, by default one whose version it says, else the first found, which says
+ * why none runs. Programs after the first usable one are never asked.
+ */
 export async function findInstalledCli(
   cli: AdapterCli,
   ctx: FindCliContext,
+  usable: (found: FoundCli) => boolean | Promise<boolean> = (found) => !found.installed.problem,
 ): Promise<FoundCli | null> {
   const named = cli.variable ? getEnv(ctx.env, cli.variable, ctx.platform)?.trim() : undefined
   if (cli.variable && named) {
@@ -322,24 +402,48 @@ export async function findInstalledCli(
     const answer = needsShell(named, ctx.platform) ? null : await ctx.probe(named, ctx.env)
     return { installed: answered({ path: named, variable: cli.variable }, answer), env: {} }
   }
-  let found = await findCommand(cli.command, ctx)
-  for (const file of found ? [] : (cli.installedAt?.(ctx.env, ctx.platform) ?? [])) {
-    found = await findCommand(file, ctx)
-    if (found) break
+  const chosen = ctx.binaryOverride
+  if (chosen) {
+    const found = await findCommand(chosen, ctx)
+    return found ? askCli(cli, found, ctx) : null
   }
-  if (!found) return null
-  const resolved = await cli.resolve(found, ctx.platform, ctx.files, ctx.env)
+  const seen = new Set<string>()
+  let first: FoundCli | null = null
+  for await (const found of candidates(cli, ctx)) {
+    const key = ctx.platform === 'win32' ? found.toLowerCase() : found
+    if (seen.has(key)) continue
+    seen.add(key)
+    const asked = await askCli(cli, found, ctx)
+    if (await usable(asked)) return asked
+    first ??= asked
+  }
+  return first
+}
+
+/** The program found as the adapter would run it, asked its version. */
+async function askCli(cli: AdapterCli, found: string, ctx: FindCliContext): Promise<FoundCli> {
+  const resolved = await cli.resolve(
+    found,
+    ctx.platform,
+    ctx.files,
+    ctx.node?.nodePath ?? null,
+    ctx.env,
+  )
   if (!resolved) {
     return {
       installed: { path: found, version: null, variable: null, problem: { kind: 'unsupported' } },
       env: {},
     }
   }
-  const answer = await ctx.probe(resolved.path, { ...ctx.env, ...resolved.env })
+  const { runner } = resolved
+  const env = { ...ctx.env, ...resolved.env }
+  const answer = runner
+    ? await ctx.probe(runner, env, [resolved.path])
+    : await ctx.probe(resolved.path, env)
   const installed = answered({ path: resolved.path, variable: null }, answer)
   // Huli: a terminal runs the command as found, such as npm's `.cmd` shim, as the user would.
   if (found !== resolved.path) installed.launcher = found
-  return { installed, env: resolved.env }
+  return { installed, env: resolved.env, ...(runner ? { runner } : {}) }
 }
 
 /**

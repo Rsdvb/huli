@@ -5,9 +5,15 @@ export const GEMINI: AgentDefinition = {
   limitsReason: 'vendor-disallows',
   name: 'Gemini CLI',
   registryId: 'gemini',
-  launch: { kind: 'package', package: '@google/gemini-cli', args: ['--acp'] },
+  launch: { kind: 'package', package: '@google/gemini-cli', command: 'gemini', args: ['--acp'] },
   requiresNode: '>=22',
-  install: { hint: 'detect.hint.node', url: 'https://nodejs.org/en/download' },
+  install: {
+    hint: 'detect.hint.node',
+    url: 'https://nodejs.org/en/download',
+    guide: 'https://geminicli.com/docs/get-started/installation/',
+  },
+  // The npm command its install page lists; its Homebrew formula is disabled on 2026-12-18.
+  installs: { npm: '@google/gemini-cli' },
   // Huli: `gemini`, and `--resume <id>`, which finds a session as ACP's `loadSession` does
   // (0.70.0's source, checked on 2026-11-21).
   terminal: { args: [], resume: (id) => ['--resume', id] },

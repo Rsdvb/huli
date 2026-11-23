@@ -55,6 +55,7 @@ export function FileLinkMenu({
   relative,
   onOpen,
   gone = false,
+  selectable = false,
 }: {
   trigger: ReactElement
   projectPath: string
@@ -65,12 +66,14 @@ export function FileLinkMenu({
   /** Opens it in the Files pane; without it the menu has no such item. */
   onOpen?: () => void
   gone?: boolean
+  /** The trigger's text selects with the text around it, as a chip in a reply's does. */
+  selectable?: boolean
 }) {
   const { t } = useTranslation('files')
   const local = !isWeb && hostOfPath(projectPath) === null && !gone
   return (
     <ContextMenu>
-      <ContextMenuTrigger render={trigger} />
+      <ContextMenuTrigger className={selectable ? 'select-auto' : undefined} render={trigger} />
       <ContextMenuContent className="min-w-56">
         {onOpen && (
           <ContextMenuItem onClick={onOpen}>
@@ -140,6 +143,7 @@ export function FileLink({ file }: { file: FileRef & { projectPath: string } }) 
       absolute={hostFilePath(file.projectPath, file.path)}
       relative={file.path}
       onOpen={open}
+      selectable
       trigger={
         <button
           type="button"
@@ -169,6 +173,7 @@ export function AgentFileLink({ file }: { file: AgentFileRef }) {
       absolute={hostPath(file.path)}
       relative={null}
       onOpen={open}
+      selectable
       trigger={
         <button
           type="button"
