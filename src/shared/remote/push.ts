@@ -305,6 +305,11 @@ export type PushEvent =
    * before they were added shows their title and body, and opens the session.
    */
   | { kind: 'limit-resumed' | 'stalled'; sessionId: string }
+  /**
+   * Huli: the agent's own note (the notify tool). A device from before it was added shows its
+   * title and body, and opens the session.
+   */
+  | { kind: 'note'; sessionId: string }
   /** An agent's routines paused near a plan limit; it opens the Routines page. */
   | { kind: 'routine-paused'; agentId: string }
   /**

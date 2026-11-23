@@ -304,6 +304,7 @@ import { canonicalizePath, isInside, pathKey, samePath } from './paths'
 import type { ProjectHooksAnswers } from './project-hooks'
 import type { ProjectMcpAnswers } from './project-mcp'
 import { REPORTS_PER_DAY, type ReportDraft } from './report-tool'
+import type { Note } from './notify-tool'
 import { isOutOfCredit } from './out-of-credit'
 import { chatgptLimitOf } from './chatgpt-limit'
 import {
@@ -521,7 +522,7 @@ export interface SessionEvents {
   /** `request`: what waits, for a permission, with the answers a notification may give itself. */
   attention(
     sessionId: string,
-    kind: 'permission' | 'turn-ended' | 'error' | 'limit-resumed' | 'stalled',
+    kind: 'permission' | 'turn-ended' | 'error' | 'limit-resumed' | 'stalled' | 'note',
     title: string,
     body: string,
     request?: AttentionRequest,
@@ -2283,6 +2284,18 @@ export class SessionManager {
     live.scope.planId = id
     this.emit(live, [{ op: 'entry.add', entry: { kind: 'plan', id, items } }])
     return true
+  }
+
+  /**
+   * Huli: the agent's own note to the user (the notify tool), raised as the session's attention so
+   * the notification settings and each phone's muted sessions decide where it shows. A note
+   * without a body names the session instead.
+   */
+  noteToUser(sessionId: string, note: Note): 'sent' | 'none' {
+    const live = this.live.get(sessionId)
+    if (!live) return 'none'
+    this.attention(sessionId, 'note', note.title, note.body || this.titleOf(live))
+    return 'sent'
   }
 
   /**

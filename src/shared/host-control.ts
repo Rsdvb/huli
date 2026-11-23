@@ -376,7 +376,15 @@ export type HostToMain =
       type: 'host:attention'
       sessionId: string
       // Huli: `limit-resumed`, a turn its plan limit stopped goes on; `stalled`, a turn looks stuck.
-      kind: 'permission' | 'turn-ended' | 'error' | 'routine-ended' | 'limit-resumed' | 'stalled'
+      // Huli: `note`, the agent's own notification (the notify tool).
+      kind:
+        | 'permission'
+        | 'turn-ended'
+        | 'error'
+        | 'routine-ended'
+        | 'limit-resumed'
+        | 'stalled'
+        | 'note'
       title: string
       body: string
       // A request the notification may allow once itself, without opening the session.

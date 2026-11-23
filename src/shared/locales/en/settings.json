@@ -3367,6 +3367,10 @@
         "name": "Agent theme changes",
         "description": "Agents read and change Kite's theme colors when you ask them to."
       },
+      "agentNotify": {
+        "name": "Agent notifications",
+        "description": "Agents send you a desktop notification and a phone push when you asked to be told, or when long work finishes. Your notification settings and muted sessions still apply."
+      },
       "chatBridge": {
         "name": "Chat apps",
         "description": "Drive agents from a Feishu, DingTalk, WeCom, QQ or Telegram bot. Off, every bot disconnects."

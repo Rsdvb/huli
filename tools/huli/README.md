@@ -2018,6 +2018,7 @@ feature already loaded leaves memory at the next launch).
 | 浏览器点选元素 (`pickElement`)         | the pick toggle, hint, layer and tray (now lazily loaded); main refuses `browser:pick` and ends pick mode                               |
 | 密钥卡片 (`secrets`)                   | `request_secrets` and its line in Kite's MCP instructions                                                                               |
 | Agent 改主题 (`agentTheme`)            | `read_theme`, `set_theme_colors` and their line                                                                                         |
+| Agent 主动通知 (`agentNotify`)         | `notify` and its line in Kite's MCP instructions                                                                                        |
 | 回退时还原文件 (`fileCheckpoints`)     | Kite's file checkpoints as each turn starts, the rewind dialog's files part, `sessions.restoreFiles`                                    |
 | 后台读网页（Moli） (`webReader`)       | `read_web_page` and its line; off by default, and turning it on downloads Moli (below)                                                  |
 | 稍后提醒与自动收起 (`sessionTidy`)     | the menus' 稍后提醒, 收起 and 永不收起, the 已推迟 and 已收起 groups, the settle rules; the host's timer and `sessions.snooze`/`settle` |

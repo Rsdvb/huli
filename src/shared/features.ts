@@ -128,6 +128,8 @@ export const FEATURES = [
   { id: 'zenView', entries: ['session.zenView', 'settings.zenView', 'phone.zenView'] },
   { id: 'secrets', entries: [], toolGroups: ['secrets'] },
   { id: 'agentTheme', entries: [], toolGroups: ['theme'] },
+  // An agent's own desktop notification and phone push, through the session's attention.
+  { id: 'agentNotify', entries: [], tools: ['notify'] },
   // Turning it on downloads Moli; Settings › Browser shows it and removes it again.
   { id: 'webReader', entries: [], tools: ['read_web_page'], offByDefault: true },
 ] as const satisfies readonly FeatureDef[]

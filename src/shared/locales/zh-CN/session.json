@@ -137,6 +137,7 @@
     "send_message": "发送消息",
     "set_plan": "更新计划",
     "report_problem": "起草问题报告",
+    "notify": "发送通知",
     "browser_navigate": "打开网页",
     "browser_navigate_back": "返回上一页",
     "browser_reload": "重新载入网页",

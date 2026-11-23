@@ -1076,6 +1076,7 @@ export class AgentHost {
       subagentCall: (process, id) => this.sessions.isSubagentCall(process, id),
       plan: { set: (sessionId, items) => this.sessions.planSet(sessionId, items) },
       report: { add: (sessionId, draft) => this.sessions.reportDrafted(sessionId, draft) },
+      notify: { notify: (sessionId, note) => this.sessions.noteToUser(sessionId, note) },
       memory: {
         service: this.memory,
         projectOf: (caller) => this.projects.find(caller.project)?.path ?? null,

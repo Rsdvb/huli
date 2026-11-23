@@ -3320,6 +3320,10 @@
         "name": "Agent 改主题",
         "description": "你让 Agent 改配色时，它能读取和修改纸鸢的主题颜色。"
       },
+      "agentNotify": {
+        "name": "Agent 主动通知",
+        "description": "你让 Agent 做完告诉你，或长任务完成时，它会发桌面通知和手机推送。通知设置和手机上静音的会话照样生效。"
+      },
       "chatBridge": {
         "name": "聊天软件遥控",
         "description": "用飞书、钉钉、企业微信、QQ 或 Telegram 的机器人遥控 Agent。关掉后机器人全部断开。"

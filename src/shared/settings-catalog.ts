@@ -261,6 +261,7 @@ export const FEATURE_GROUP: Readonly<Record<FeatureId, FeatureGroup>> = {
   devices: 'agents',
   secrets: 'agents',
   agentTheme: 'agents',
+  agentNotify: 'agents',
   webReader: 'agents',
   chatBridge: 'connections',
   portForwarding: 'connections',
