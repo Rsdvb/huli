@@ -1303,56 +1303,91 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
   notes it once a turn per app, and the floating label notes each time. Off, the agent hears it was
   not tried. An agent may ask for the foreground on any action, which the same switch allows. An
   action the driver delivered in the foreground by itself (Windows menus) is noted the same way.
-- **Administrator use, opt in** (允许以管理员权限操作指定程序, Windows, off by default, `access:
-'read'` so agents never turn it on). Turning it on installs the helper and Cua Driver once into
-  `%ProgramFiles%\Kite Computer Helper` at Windows' administrator prompt (`install` mode), which
-  only administrators can write to: in a per-user install the app's own folder is the user's to
-  write, so anything of theirs could swap the programs, or plant a DLL or an `.exe.config` beside
-  them, before the next approved prompt. The driver's SHA-256 is built into the helper
-  (`build.mjs` writes `Build.cs`); the install, each start of the broker and the broker's start of
-  the driver check it while the file is held open (`FileShare.Read`), and the broker runs only
-  from that folder, only when it is the same helper as the app's. The install records Kite's
-  program (`client.txt`). Remove takes the folder out through the prompt again. There is no
-  code-signing certificate, which the switch, the card and the broker's window say: Windows shows
-  an unknown publisher.
+- **Administrator use** (操作以管理员身份运行的程序, Windows, `computerUse.elevated`, `access:
+'read'` so agents never change it, a computer setting a paired device cannot change): 关闭
+  (`off`, the default, and what any older file reads as; the old `allowElevated` switch is
+  dropped), 仅在沙箱会话中 (`sandbox`) or 始终允许（高风险） (`always`). Widening it opens a dialog
+  that says an agent outside a sandbox runs as the user and could take over the prompt or the
+  helper's windows, that the prompt and those windows sit on the normal desktop, and that it is the
+  user's call; nothing changes until they confirm. Off, computer use is exactly as without the
+  helper: the same refusal and list notes, no helper call from Settings, and the guide unchanged.
+  `sandbox` lets a session through only while it runs in a container sandbox and every other live
+  session whose agent runs or starts does too, New session's prepared ones aside
+  (`computerElevatedRefusal` in `sessions.ts`, `sandboxGate` in `policy.ts`); the refusal names
+  the sessions outside one. It is checked on every call, again after the card, and a running
+  helper ends once it fails. A container's agent gets none of Kite's MCP tools today, so this
+  choice has no session to serve until computer use reaches one. Settings › 功能管理 lists it under
+  computer use with a link to its row.
+  - The helper is installed only when the user presses Install, never by an update: the warm
+    helper stages itself and the driver (hash checked, held open) in a temporary folder and starts
+    Windows' own `robocopy.exe` through the administrator prompt to copy them and `install.json`
+    (protocol, the files' SHA-256, Kite's program) into `%ProgramFiles%\Kite Computer Helper`, then
+    checks what landed against the hashes it held; anything else is `tampered`. Remove runs Windows'
+    `cmd.exe` `rd`. So no program from the user-writable app folder runs as administrator, and a
+    newer Kite of the same protocol (`Layout.Protocol`) keeps using the installed copy; only a new
+    protocol asks for a new install. Every start checks the installed files against the record and
+    that only administrators, SYSTEM and TrustedInstaller own or may change the folder, its parent
+    and the files.
+  - Before any prompt the warm helper refuses while a variable that makes .NET load code (`COR_*`,
+    `COMPlus_*`, `CORECLR_*`, `DOTNET_*` but the SDK's own) is set in its own environment, in
+    `HKCU\Environment`, in `HKCU\Volatile Environment` or any of its per-session subkeys, or in the
+    machine's, while `HKCU\Software\Microsoft\.NETFramework` holds a knob that loads code (`AltJit`,
+    `JitName`, `InstallRoot`, ...), or while the user set their own `SystemRoot` or `windir`
+    (`Guard.cs`). The prompt then starts Windows' `cmd.exe` (`/d`, no AutoRun), which is no .NET
+    program, so nothing written while the prompt is open loads into it; it clears the code-loading
+    names, sets `SystemRoot` and `windir` from `GetSystemWindowsDirectory` and starts the broker,
+    whose `Main` refuses to go on with any such name left or another Windows folder. `connect`
+    checks the pipe's server is that launcher's child, started after it, running the installed
+    helper as administrator.
   - An action or read of an elevated app shows a card naming it (only this computer's window can
-    answer). Programs that start other programs (consoles, Task Manager, Explorer, script hosts,
-    msiexec, mmc, regedit, control: `startsPrograms` in `policy.ts`, `Launchers` in
-    `Broker.cs`) are refused here and in the broker. On approve, the warm helper starts the
-    installed copy's `broker` through `ShellExecute` `runas`, after checking the install is
-    current and no .NET profiler variable (`COR_*`, `COMPlus_*`) is set in the process, user or
-    machine environment.
-  - The broker trusts nothing it was started with: it checks the program's image path and start
-    time, then shows its own window naming the program, its window and the Kite program asking;
-    a window of a process running as administrator, which no normal process can click. Its pipe's
-    DACL names Kite's user by SID (under Administrator protection the broker runs as the shadow
-    admin) with a medium no-read-up/no-write-up label. Its client must be the installed helper's
-    `connect` mode, a child of the agent host whose image is the recorded Kite program, as that
-    user, and its first line the session's token (only the SHA-256 is on the command line).
-    `connect`, which the agent host starts from Program Files, checks before handing the token
-    over that the pipe's server is the process the prompt started, running the installed helper,
-    as administrator (`GetNamedPipeServerProcessId`), which Node cannot ask.
-  - While it runs, the program sits in a job whose process limit lets it start nothing, so its own
-    File › Open dialog cannot launch a console as administrator; the limit is lifted when the
-    broker ends. The driver runs in a kill-on-close job, from the install folder, with its home and
-    temporary folders under it and a PATH of system folders without PowerShell.
-  - It relays only the read and input tools, with only Kite's arguments and `params` keys,
-    `delivery_mode: "background"` required on every action, scoped to the program's windows, and
-    passes on the message it parsed, re-serialized. It confirms every step in its own window but
-    plainly harmless ones (`Risk.cs`): a click only on an element of a focusing or selecting role
-    (Edit, ListItem, TabItem, ...) from the snapshot that gave its token, with one left click and a
-    label that commits nothing; keys but moving about, shortcuts, typed line breaks (the text is
-    shown), drags and menus are confirmed, with a crop of the window around the place. No answer in
-    two minutes is a no. The badge on the composer and the red floating label show the whole time;
-    the broker ends with the hold (turn end, idle, Stop), when its idle time passes with no request
-    pending, or when the program or the agent host exits. No UIAccess.
+    answer). Programs that start other programs or run what is typed into them (consoles and
+    terminals, Task Manager, Explorer, process tools, script hosts and interpreters, msiexec, mmc,
+    regedit, editors with a terminal or macros: `startsPrograms` in `policy.ts`, `Launchers` in
+    `Broker.cs`) are refused here and in the broker, by the image's own file name.
+  - The broker trusts nothing it was started with: it matches the program's image exactly as
+    Windows names it (no trailing dot or short name) and its start time, requires it to run as
+    administrator and to have no programs of its own running, then shows its own window naming
+    the program, its window and the process that asks, with its command line and parent; it says
+    that process claims to be Kite. Its pipe's DACL names Kite's user by SID with a medium
+    no-read-up/no-write-up label. Its client must be the installed helper's `connect` mode, a
+    child of the agent host whose image is the recorded Kite program, as that user, with the
+    session's token (only the SHA-256 is on the command line); any process can run Kite's program,
+    so this binds the broker to Kite only loosely and its own checks are what holds.
+  - While it runs, the program sits in a job whose process limit (set before it joins) lets it
+    start nothing directly; the limit is lifted when the broker ends. The driver runs from the
+    install folder in a kill-on-close job that lets it start nothing, with Windows' folders from
+    the system, its home and temporary folders under the install folder (administrators and SYSTEM
+    only) and a PATH of System32 alone.
+  - It relays only the read and input tools, with only Kite's arguments, each of its type, choice
+    and range, an element token or a point but not both, keys from a fixed set, `initialize` and
+    `_meta` held to what Kite's client sends, `delivery_mode: "background"` on every action, one
+    tool call at a time, scoped to the program's windows, re-serialized. It confirms every step in
+    its own window but plainly harmless ones (`Risk.cs`): a click only on an element of a focusing
+    or selecting role from the snapshot that gave its token, with one left click and a label that
+    commits nothing; typing only into the edit field the last step clicked, with no line break or
+    tab. Every question shows the whole window with a red box at the step (both ends of a drag),
+    typed text in full with control, direction and invisible characters made visible, and what
+    went through unasked since the last question. Pastes, clicks it cannot place and text longer
+    than 1,000 characters are refused. Its Allow button works only after the window has been in
+    front for a second with no other program's window over it. No answer in two minutes is a no.
+    The broker ends with the hold (turn end, idle, Stop), after three refused steps, when the
+    driver delivered in the foreground, after thirty minutes, or when the program or the agent host
+    exits. No UIAccess.
+  - Not fixed, as it needs a native launcher, a secure desktop or a per-machine install: the
+    `.NETFramework` knobs are checked only before the prompt (cmd.exe cannot clear registry
+    knobs); the prompt and the broker's windows sit on the user's desktop, where a process with a
+    borrowed UIAccess token can still click them; the install copies what the per-user app folder
+    holds at that moment; the broker's binding to Kite is a speed bump; and services the program
+    asks (WMI, Task Scheduler, installers) can still start programs outside its job.
 
 A test copy (`KITE_TEST_WINDOW=background`) keeps computer use's floating label and light off every
 display and registers no stop shortcut. To try computer use there, start a window of your own and
 drive it through the fake agent's `fake:/computer <tool> <json> ; ...` turns (see
 `tools/fake-agent/computer.ts`). `src/agent-host/computer/elevated.test.ts` builds a test helper
-(`build.mjs --test`: installs into a folder of its own, starts with no prompt and answers its own
-windows) and runs the install, the broker and its checks end to end without elevation.
+(`build.mjs --test`: installs into a folder of its own, starts with no prompt, answers its own
+windows and may read a private registry hive file in place of the user's) and runs the install, the
+environment checks, the broker and its checks end to end without elevation or touching the real
+registry.
 
 ### Kite in development
 
