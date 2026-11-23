@@ -2,7 +2,7 @@
 # 新建空项目. In light: the clone sheet with a refused address, then a small public repository
 # cloned into a folder the computer offers, with its progress. In dark: an empty project with a
 # README and a Node.js .gitignore. Each sheet ends by finishing, as a test cannot drag the
-# system's sheet away reliably.
+# system's sheet away reliably, and Return takes the keyboard down, as hideKeyboard may fail.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -24,10 +24,11 @@ appId: io.github.rsdvb.huli
 - tapOn: '添加项目'
 - waitForAnimationToEnd
 - takeScreenshot: p01-add-menu
-- tapOn: '从 Git 克隆…'
+# A sheet's row reads as its label and its detail together.
+- tapOn: '从 Git 克隆….*'
 - waitForAnimationToEnd
 - extendedWaitUntil:
-    visible: '主目录'
+    visible: '位置'
     timeout: 20000
 - takeScreenshot: p02-clone-sheet
 - tapOn:
@@ -37,13 +38,14 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: p03-clone-refused
 - eraseText: 20
 - inputText: 'https://github.com/octocat/Hello-World.git'
-- hideKeyboard
+- pressKey: Enter
 - waitForAnimationToEnd
 - takeScreenshot: p04-clone-ready
 - tapOn: '克隆'
 - takeScreenshot: p05-cloning
+# The project's page, once the clone is done: its 路径 row.
 - extendedWaitUntil:
-    visible: 'Hello-World'
+    visible: '路径.*'
     timeout: 120000
 - waitForAnimationToEnd
 - takeScreenshot: p06-cloned
@@ -67,21 +69,21 @@ appId: io.github.rsdvb.huli
 - tapOn: '添加项目'
 - waitForAnimationToEnd
 - takeScreenshot: p07-add-menu-dark
-- tapOn: '新建空项目…'
+- tapOn: '新建空项目….*'
 - waitForAnimationToEnd
 - extendedWaitUntil:
-    visible: '上次用过'
+    visible: '位置'
     timeout: 20000
 - tapOn:
     id: 'new-project-name'
 - inputText: 'kite-sim-demo'
-- hideKeyboard
+- pressKey: Enter
 - tapOn: 'Node.js'
 - waitForAnimationToEnd
 - takeScreenshot: p08-empty-ready-dark
 - tapOn: '创建'
 - extendedWaitUntil:
-    visible: 'kite-sim-demo'
+    visible: '路径.*'
     timeout: 30000
 - waitForAnimationToEnd
 - takeScreenshot: p09-created-dark
