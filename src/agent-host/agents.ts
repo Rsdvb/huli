@@ -6856,6 +6856,14 @@ export class AgentManager {
     const cliCommandName =
       slot.def.cli?.command ?? own?.command ?? (replaces ? program?.command : undefined)
     const unused = detection?.unused
+    // The version of a package that is the harness's program, before the program names its own:
+    // Kettu's install of it, or the user's own that runs in its place.
+    const programPackage =
+      launch.kind === 'package' && launch.command && !slot.def.cli
+        ? replaces
+          ? detection?.cli?.version
+          : (adapter?.current ?? adapter?.fallback)?.version
+        : undefined
     // Huli: what an earlier sign-in read, the account, its plan and balances, stays kept for when
     // it signs in again, but is not shown as this agent's while it is signed out.
     const signedOut = slot.signIn === 'required'
@@ -6881,8 +6889,9 @@ export class AgentManager {
       ...profilesOf(this.deps.profiles?.(agentId)),
       sandbox: this.sandboxSupport(agentId),
       state: slot.state,
-      // Kettu's own install names its release when the program reports no version of its own.
-      version: init?.version ?? h.binaryVersion ?? installed?.version ?? null,
+      // Kettu's own install names its release when the program reports no version of its own, and
+      // a package that is the program itself, as DeepSeek Harness's is, the version installed.
+      version: init?.version ?? h.binaryVersion ?? installed?.version ?? programPackage ?? null,
       // None runs while the user's own program runs in its place.
       package:
         launch.kind === 'package' && !replaces
