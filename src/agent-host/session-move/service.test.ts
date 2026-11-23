@@ -106,6 +106,7 @@ async function side(
       removeAdopted: async () => {},
       setMovedTo: (_id, to) => void marked.push(to),
       agentSessionIds: () => held,
+      archive: async () => {},
     },
     agents: {
       statuses: () => [status('claude-code'), status('codex')],
@@ -134,7 +135,7 @@ async function dispatch(moves: SessionMoves, method: string, raw: unknown): Prom
     case 'moves.inspect':
       return moves.inspect(params.sessionId)
     case 'moves.pack':
-      return moves.pack(params.sessionId, params.moveId, params.haves)
+      return moves.pack(params.sessionId, params.moveId, params.haves, params.conversationOnly)
     case 'moves.part':
       return moves.part(params.moveId, params.name, params.offset)
     case 'moves.finish':
@@ -170,6 +171,60 @@ function run(source: Side, target: Side): Promise<MoveProgress> {
       log: () => {},
     })
     mover.start(null, 'session-1', TARGET)
+  })
+}
+
+interface Local extends Side {
+  /** The computer's other project. */
+  other: string
+  archived: [string, boolean | undefined][]
+}
+
+/**
+ * Huli: one computer with two projects: the session's clone of `origin`, and `notes`, another
+ * repository, or with `sameRepository` a second clone of `origin`.
+ */
+async function sameComputer(
+  dir: string,
+  origin: string,
+  facts: (project: string) => Partial<MoveFacts>,
+  sameRepository = false,
+): Promise<Local> {
+  const base = await side(dir, 'desk', origin, facts)
+  const notes = path.join(base.home, 'notes')
+  if (sameRepository) git(base.home, 'clone', '-q', origin, 'notes')
+  else {
+    await mkdir(notes, { recursive: true })
+    git(notes, 'init', '-q', '-b', 'main')
+  }
+  const other = await realpath(notes)
+  const archived: Local['archived'] = []
+  const deps = (base.moves as unknown as { deps: ConstructorParameters<typeof SessionMoves>[0] })
+    .deps
+  const moves = new SessionMoves({
+    ...deps,
+    sessions: {
+      ...deps.sessions,
+      archive: async (id, subSessions) => void archived.push([id, subSessions]),
+    },
+    projects: { paths: () => [base.project, other], add: async () => {}, remove: () => {} },
+  })
+  return { ...base, moves, other, archived }
+}
+
+/** A move of `session-1` into `project` of the same computer, through main as the window asks. */
+function runLocal(local: Local, project: string): Promise<MoveProgress> {
+  return new Promise((resolve) => {
+    const mover = new SessionMover({
+      call: (_host: MoveHost, method, params) => dispatch(local.moves, method, params),
+      hostName: () => 'Desk',
+      online: () => true,
+      changed: (progress) => {
+        if (progress.state !== 'running') resolve(progress)
+      },
+      log: () => {},
+    })
+    mover.start(null, 'session-1', null, project)
   })
 }
 
@@ -279,6 +334,100 @@ describe('the hosts’ side of a move', { timeout: PLATFORM === 'win32' ? 120_00
     const placed = path.join(target.home, '.codex', 'sessions', '2026', '11', '20', name)
     const written = JSON.parse((await readFile(placed, 'utf8')).trim())
     expect(written.payload).toEqual({ id: ID, cwd: target.adopted[0]!.worktree!.path })
+  })
+
+  it('moves the conversation alone into another repository on the same computer', async () => {
+    const dir = await realpath(await tempFolder('kite-move-service-'))
+    const origin = await repo(dir)
+    const local = await sameComputer(dir, origin, () => ({}))
+    // The session here holds its id, so its copy in the other project takes a new one.
+    local.held.add(ID)
+    const own = path.join(local.home, '.claude', 'projects', claudeProjectFolder(local.project))
+    await mkdir(path.join(own, ID, 'subagents'), { recursive: true })
+    await writeFile(path.join(own, `${ID}.jsonl`), lines(local.project, path.sep))
+    await writeFile(
+      path.join(own, ID, 'subagents', 'agent-1.jsonl'),
+      lines(local.project, path.sep),
+    )
+
+    const progress = await runLocal(local, local.other)
+    expect(progress.error).toBeNull()
+    expect(progress.targetName).toBe('notes')
+    const adoption = local.adopted[0]!
+    expect(adoption.projectPath).toBe(local.other)
+    expect(adoption.worktree).toBeNull()
+    const resume = adoption.resume as { acpSessionId: string }
+    expect(resume.acpSessionId).not.toBe(ID)
+    // Claude Code's per-folder transcript lands under the other project's folder, rewritten.
+    const folder = path.join(local.home, '.claude', 'projects', claudeProjectFolder(local.other))
+    const written = (await readFile(path.join(folder, `${resume.acpSessionId}.jsonl`), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    expect(written.map((line) => [line.cwd, line.sessionId])).toEqual([
+      [local.other, resume.acpSessionId],
+      [local.other, resume.acpSessionId],
+    ])
+    expect(written[1].message.content[0].input.file_path).toBe(path.join(local.other, 'a.txt'))
+    const sub = await readFile(
+      path.join(folder, resume.acpSessionId, 'subagents', 'agent-1.jsonl'),
+      'utf8',
+    )
+    expect(JSON.parse(sub.split('\n')[0]!).cwd).toBe(local.other)
+    // The original stays as it was, marked and archived; no worktree and no code moved.
+    expect(await readFile(path.join(own, `${ID}.jsonl`), 'utf8')).toBe(
+      lines(local.project, path.sep),
+    )
+    expect(local.marked).toEqual([
+      expect.objectContaining({
+        hostId: null,
+        name: 'notes',
+        sessionId: 'moved-1',
+        projectPath: local.other,
+        sameComputer: true,
+      }),
+    ])
+    expect(local.archived).toEqual([['session-1', false]])
+    expect(await there(`${local.other}-worktrees`)).toBe(false)
+    expect(await readdir(path.join(local.home, 'moves'))).toEqual([])
+  })
+
+  it('moves a session within one computer as to another when the project is its repository', async () => {
+    const dir = await realpath(await tempFolder('kite-move-service-'))
+    const origin = await repo(dir)
+    const local = await sameComputer(dir, origin, () => ({}), true)
+    git(local.project, 'checkout', '-q', '-b', 'feat/here')
+    await writeFile(path.join(local.project, 'b.txt'), 'new\n')
+    const own = path.join(local.home, '.claude', 'projects', claudeProjectFolder(local.project))
+    await mkdir(own, { recursive: true })
+    await writeFile(path.join(own, `${ID}.jsonl`), lines(local.project, path.sep))
+    local.held.add(ID)
+
+    const progress = await runLocal(local, local.other)
+    expect(progress.error).toBeNull()
+    const cwd = local.adopted[0]!.worktree!.path
+    expect(path.dirname(cwd)).toBe(await realpath(`${local.other}-worktrees`))
+    expect(await there(path.join(cwd, 'b.txt'))).toBe(true)
+    // The source's working tree and its branch stay as they were.
+    expect(await there(path.join(local.project, 'b.txt'))).toBe(true)
+    expect(git(local.project, 'branch', '--show-current').trim()).toBe('feat/here')
+    expect(local.marked).toEqual([expect.objectContaining({ sameComputer: true })])
+  })
+
+  it('refuses a move within one computer that would leave work behind or change nothing', async () => {
+    const dir = await realpath(await tempFolder('kite-move-service-'))
+    const origin = await repo(dir)
+    const worktree = { base: 'main', baseOid: '1'.repeat(40) }
+    const busy = await sameComputer(dir, origin, () => ({ worktree }))
+    const refused = await runLocal(busy, busy.other)
+    expect(refused.state).toBe('failed')
+    expect(refused.reason).toBe('worktree')
+    expect(busy.adopted).toEqual([])
+
+    const here = await sameComputer(path.join(dir, 'again'), origin, () => ({}))
+    const same = await runLocal(here, here.project)
+    expect(same.reason).toBe('sameProject')
+    expect(here.marked).toEqual([])
   })
 
   it('takes back at the next move what an apply that never finished left', async () => {

@@ -2247,7 +2247,9 @@
       "signedOut": "{{agent}} is signed out on that computer. Sign in there first.",
       "sameHost": "The session is on that computer already.",
       "offline": "That computer is not connected now.",
-      "olderHost": "Kite on that computer is too old to take sessions. Update it first."
+      "olderHost": "Kite on that computer is too old to take sessions. Update it first.",
+      "sameProject": "The session is in this project already.",
+      "worktree": "The session works in a worktree of its repository, whose work a move into another repository would leave behind. Merge or clean up the worktree first."
     },
     "notes": {
       "ignoredFiles": "Files .gitignore leaves out, such as .env and node_modules, stay behind.",
@@ -2266,7 +2268,29 @@
     },
     "titleMany": "Move {{count}} sessions to another computer",
     "titleSeparator": ", ",
-    "oneOf": "{{title}}: {{why}}"
+    "oneOf": "{{title}}: {{why}}",
+    "local": {
+      "title": "Move to another project",
+      "titleMany": "Move {{count}} sessions to another project",
+      "into": "Into the project {{name}} on this computer.",
+      "project": "Project: {{name}} on this computer ({{path}})",
+      "code": "Code: the session’s files and changes stay in its old project",
+      "worktree": "A new worktree in {{name}}, leaving its own folder alone",
+      "resume": "Conversation: {{agent}} goes on from its own history in the new project",
+      "carry": "Conversation: {{agent}} goes on from Kite’s copy of it in the new project",
+      "here": "The old session is archived, marked with where it went; the old project’s files stay as they are.",
+      "moved": "This session moved to the project {{name}} and goes on there. The old project’s files are as they were.",
+      "done": "Moved to the project {{name}}. The old session is archived with where it went; the old project’s files stay as they are.",
+      "steps": {
+        "check": "Check the session and the project",
+        "project": "Prepare the project {{name}}",
+        "pack": "Pack what moves",
+        "transfer": "Copy it over",
+        "apply": "Put it back together in {{name}}",
+        "finish": "Finish"
+      },
+      "stay": "Continue in the old project"
+    }
   },
   "rewind": {
     "rewindAction": "Rewind to here",

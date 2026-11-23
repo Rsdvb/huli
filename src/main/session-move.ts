@@ -57,7 +57,21 @@ const KNOWN_REASONS: ReadonlySet<string> = new Set<MoveProblem>([
   'sameHost',
   'offline',
   'olderHost',
+  'sameProject',
+  'worktree',
 ])
+
+/** Huli: what only a move of the code needs, which the conversation alone does without. */
+const CODE_ONLY: ReadonlySet<MoveProblem> = new Set<MoveProblem>([
+  'noGit',
+  'noCommits',
+  'operation',
+  'noRemote',
+  'gitMissing',
+])
+
+/** Huli: a project's name from its path, as either platform writes it. */
+const nameOf = (folder: string): string => folder.split(/[\\/]/).filter(Boolean).pop() ?? folder
 
 function reasonOf(error: unknown): MoveProblem | null {
   if (error instanceof PortRequestError) {
@@ -96,32 +110,64 @@ export class SessionMover {
 
   constructor(private readonly deps: SessionMoverDeps) {}
 
-  /** What a move would do: both hosts' facts, and what stops it. */
-  async preview(source: MoveHost, sessionId: string, target: MoveHost): Promise<MovePreview> {
-    const name = this.deps.hostName(target)
+  /**
+   * What a move would do: both hosts' facts, and what stops it. Huli: `project`, one of the
+   * host's projects as it writes it, moves the session within its own computer.
+   */
+  async preview(
+    source: MoveHost,
+    sessionId: string,
+    target: MoveHost,
+    project: string | null = null,
+  ): Promise<MovePreview> {
     const fail = (problem: MoveProblem): never => {
       throw new MoveFailed(problem, problem, [problem])
     }
-    if (source === target) fail('sameHost')
+    const local = source === target
+    if (local && project === null) fail('sameHost')
     if (!this.deps.online(source) || !this.deps.online(target)) fail('offline')
     const facts = (await this.ask(source, 'moves.inspect', { sessionId })) as MoveSource
     const there = (await this.ask(target, 'moves.check', {
       agentId: facts.agentId,
       remotes: facts.git?.remotes ?? [],
       remote: facts.git?.remote ?? null,
+      ...(local && project !== null ? { project } : {}),
     })) as MoveTarget
     // Without Git at the source nothing is there to match or clone.
     const targetProblems = facts.git
       ? there.problems
       : there.problems.filter((p) => p !== 'noRemote')
-    const problems = [...new Set([...facts.problems, ...targetProblems])]
-    const notes = [...facts.notes]
+    let problems = [...new Set([...facts.problems, ...targetProblems])]
+    let notes = [...facts.notes]
     if (there.agent?.state === 'signInUnknown') notes.push('signInUnknown')
-    return { source: facts, target: there, problems, notes, targetName: name }
+    if (local) {
+      // The conversation alone needs no repository, and leaves no worktree behind with work in it.
+      if (there.conversationOnly) {
+        problems = problems.filter((p) => !CODE_ONLY.has(p))
+        notes = notes.filter((note) => note === 'carry' || note === 'signInUnknown')
+        if (facts.worktree) problems.push('worktree')
+      }
+      const into = there.project?.path ?? ''
+      const same = (a: string, b: string) =>
+        facts.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+      // A host older than moves within it ignores the project and matches one by its remote.
+      if (!same(into, project ?? '')) problems.push('olderHost')
+      else if (same(into, facts.projectPath)) problems.push('sameProject')
+    }
+    const targetName = local ? nameOf(there.project?.path ?? '') : this.deps.hostName(target)
+    return { source: facts, target: there, problems, notes, targetName }
   }
 
-  /** Starts the move; the windows hear its progress. Refused while the session moves already. */
-  start(source: MoveHost, sessionId: string, target: MoveHost): string {
+  /**
+   * Starts the move; the windows hear its progress. Refused while the session moves already.
+   * Huli: `project` moves it within its own computer, as for `preview`.
+   */
+  start(
+    source: MoveHost,
+    sessionId: string,
+    target: MoveHost,
+    project: string | null = null,
+  ): string {
     for (const move of this.moves.values()) {
       if (move.sessionId === sessionId && move.sourceHost === source && move.state === 'running') {
         throw new MoveFailed('busy', 'busy')
@@ -133,7 +179,8 @@ export class SessionMover {
       sessionId,
       sourceHost: source,
       targetHost: target,
-      targetName: this.deps.hostName(target),
+      targetName:
+        source === target && project !== null ? nameOf(project) : this.deps.hostName(target),
       steps: MOVE_STEPS.map((step) => ({ step, state: 'pending' })),
       state: 'running',
       transfer: null,
@@ -142,6 +189,7 @@ export class SessionMover {
       reason: null,
       undone: true,
       problems: [],
+      ...(source === target && project !== null ? { project } : {}),
     }
     this.moves.set(moveId, progress)
     while (this.moves.size > KEPT) this.moves.delete(this.moves.keys().next().value!)
@@ -174,6 +222,9 @@ export class SessionMover {
 
   private async run(progress: MoveProgress): Promise<void> {
     const { moveId, sessionId, sourceHost: source, targetHost: target } = progress
+    const local = source === target
+    // Huli: within one computer its host takes both sides, each under an id of its own.
+    const packId = local ? (this.deps.newId?.() ?? randomBytes(16).toString('hex')) : moveId
     let targetTouched = false
     let sourceTouched = false
     let current: MoveStep = 'check'
@@ -183,25 +234,33 @@ export class SessionMover {
     }
     try {
       begin('check')
-      const preview = await this.preview(source, sessionId, target).catch((error: unknown) => {
-        if (error instanceof MoveFailed) throw error
-        throw new MoveFailed(messageOf(error), reasonOf(error))
-      })
+      const preview = await this.preview(source, sessionId, target, progress.project ?? null).catch(
+        (error: unknown) => {
+          if (error instanceof MoveFailed) throw error
+          throw new MoveFailed(messageOf(error), reasonOf(error))
+        },
+      )
       if (preview.problems.length > 0) {
         throw new MoveFailed(preview.problems[0]!, preview.problems[0]!, preview.problems)
       }
       const agent = preview.target.agent
       const git = preview.source.git
       const remote = git?.remotes.find((item) => item.name === git.remote) ?? null
-      if (!agent || !git || !remote) throw new MoveFailed('noRemote', 'noRemote')
+      const only = local && preview.target.conversationOnly === true
+      if (!agent || (!only && (!git || !remote))) throw new MoveFailed('noRemote', 'noRemote')
       this.set(progress, 'check', 'done')
 
       begin('project')
       targetTouched = true
+      const into = preview.target.project
       const prepared = (await this.ask(target, 'moves.prepare', {
         moveId,
-        project: preview.target.project ? { path: preview.target.project.path } : { clone: true },
-        url: remote.url,
+        project: !into
+          ? { clone: true }
+          : only
+            ? { path: into.path, conversationOnly: true }
+            : { path: into.path },
+        url: only ? null : remote!.url,
       })) as MovePrepared
       this.set(progress, 'project', 'done')
 
@@ -209,8 +268,9 @@ export class SessionMover {
       sourceTouched = true
       const pack = (await this.ask(source, 'moves.pack', {
         sessionId,
-        moveId,
+        moveId: packId,
         haves: prepared.haves,
+        ...(only ? { conversationOnly: true } : {}),
       })) as MovePack
       this.set(progress, 'pack', 'done')
 
@@ -221,7 +281,7 @@ export class SessionMover {
         let offset = 0
         while (offset < file.size) {
           const part = (await this.ask(source, 'moves.part', {
-            moveId,
+            moveId: packId,
             name: file.name,
             offset,
           })) as { bytes: unknown }
@@ -250,14 +310,14 @@ export class SessionMover {
         agentId: agent.agentId,
         title: preview.source.title,
         createdAt: preview.source.createdAt,
-        worktree: preview.source.worktree,
+        worktree: only ? null : preview.source.worktree,
       })) as { sessionId: string; projectPath: string }
       progress.result = result
       this.set(progress, 'apply', 'done')
 
       begin('finish')
       await this.ask(source, 'moves.finish', {
-        moveId,
+        moveId: packId,
         sessionId,
         to: {
           hostId: target,
@@ -265,6 +325,7 @@ export class SessionMover {
           sessionId: result.sessionId,
           projectPath: result.projectPath,
           at: this.deps.now?.() ?? Date.now(),
+          ...(local ? { sameComputer: true } : {}),
         },
       })
       sourceTouched = false
@@ -294,7 +355,7 @@ export class SessionMover {
       }
       if (sourceTouched) {
         await this.deps
-          .call(source, 'moves.abort', { moveId })
+          .call(source, 'moves.abort', { moveId: packId })
           .catch((abortError: unknown) =>
             this.deps.log('warn', `The source kept a move's pack: ${messageOf(abortError)}`),
           )

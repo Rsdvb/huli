@@ -374,9 +374,10 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
                     session && <HostAway host={away} inline />
                   ) : summary.origin === 'subagent' ? (
                     <SubagentBar summary={summary} session={session} />
-                  ) : archived ? (
+                  ) : archived && !summary.movedTo?.sameComputer ? (
                     <ArchivedComposer sessionId={sessionId} />
                   ) : summary.movedTo ? (
+                    // Huli: one moved within its computer is archived too, and says where it went.
                     <MovedComposer summary={summary} />
                   ) : summary.worktree?.state === 'gone' ? (
                     // Its history stays readable; nothing more can run without the branch.

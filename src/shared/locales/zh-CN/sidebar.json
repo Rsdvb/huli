@@ -538,7 +538,6 @@
     "nowActivity": "「{{name}}」改回按最近活动排序。"
   },
   "rowDrag": {
-    "sameComputer": "同一台电脑上的项目之间还不能搬会话，只能搬到另一台电脑上的项目。",
     "noProjectTarget": "会话只能搬进项目，不能搬进「无项目」。",
     "missing": "这个项目的文件夹不见了。",
     "moved": "这个会话已经搬走了。",

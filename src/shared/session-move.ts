@@ -64,6 +64,10 @@ export type MoveProblem =
   | 'sameHost' // the target is the session's own host
   | 'offline' // the target or the source is not connected
   | 'olderHost' // the other host's Kite cannot move sessions yet
+  | 'sameProject' // Huli: within one computer, the project the session is in already
+  // Huli: within one computer, into another repository: its worktree of the source's repository
+  // would be left behind, with the work in it
+  | 'worktree'
 
 /** What the user is told before a move and that does not stop it. */
 export type MoveNote =
@@ -126,12 +130,19 @@ export interface MoveTarget {
   /** Where a clone would go, when no project matched and the source has a remote. */
   clonePath: string | null
   problems: MoveProblem[]
+  /**
+   * Huli: a project named for a move within one computer that is another repository (or the
+   * session has no Git): only the conversation moves, into the project's own folder, and the code
+   * stays where it is. `project` is that project then, its `remote` empty.
+   */
+  conversationOnly?: boolean
 }
 
 /** The source's pack: `moves.pack`. */
 export interface MovePack {
   files: MovePackFile[]
-  git: MoveGitPack
+  /** Huli: null for a move of the conversation alone (`MoveTarget.conversationOnly`). */
+  git: MoveGitPack | null
   conversation: MoveConversation
 }
 
@@ -180,7 +191,8 @@ export interface MovePrepared {
 export interface MoveApply {
   moveId: string
   files: MovePackFile[]
-  git: MoveGitPack
+  /** Huli: null for a move of the conversation alone, into the project's own folder. */
+  git: MoveGitPack | null
   conversation: MoveConversation
   /** The target's agent the session goes on with. */
   agentId: AgentId
@@ -220,6 +232,8 @@ export interface MoveProgress {
   undone: boolean
   /** Problems found when it rechecked before starting. */
   problems: MoveProblem[]
+  /** Huli: the project it goes to within one computer, as that host writes it. */
+  project?: string
 }
 
 /** What the window shows before a move: both hosts' facts, joined. */
@@ -245,6 +259,8 @@ export interface MovedTo {
   /** Its project there, as that host writes it. */
   projectPath: string
   at: number
+  /** Huli: it went to another project of the same computer, `name` being the project's. */
+  sameComputer?: true
 }
 
 /** A remote's URL without the user name and password some HTTPS URLs carry. */

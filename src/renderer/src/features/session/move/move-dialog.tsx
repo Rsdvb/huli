@@ -43,6 +43,7 @@ import { useHostsStore, useOtherHosts } from '@renderer/stores/hosts'
 import { hostOfSession, sessionTitle } from '@renderer/stores/sessions'
 import {
   closeMove,
+  localProject,
   openMoved,
   previewMove,
   runningMove,
@@ -109,11 +110,13 @@ function MoveForm({ summary }: { summary: SessionSummary }) {
   const [error, setError] = useState<string | null>(null)
   const progress = useMoveStore((s) => (moveId ? (s.moves[moveId] ?? null) : null))
   const sessions = [summary, ...more]
+  // Huli: dropped on another project of the session's own computer, which it moves within.
+  const project = localProject(summary, dropped)
 
   const choose = (host: MoveHost) => {
     setTarget(host)
     previewMove(summary, host)
-    others.ask(host)
+    others.ask(host, null)
   }
 
   // The computer of the project the sessions were dropped on is picked as the dialog opens.
@@ -122,30 +125,30 @@ function MoveForm({ summary }: { summary: SessionSummary }) {
   useEffect(() => {
     if (asked.current || !dropped) return
     asked.current = true
-    previewMove(summary, dropped.host)
-    askOthers(dropped.host)
-  }, [dropped, summary, askOthers])
+    previewMove(summary, dropped.host, project)
+    askOthers(dropped.host, project)
+  }, [dropped, summary, askOthers, project])
 
   // Several sessions move one after another; one that fails stops the rest.
   const next = sessions[moveIds.length]
   useEffect(() => {
     if (progress?.state !== 'done' || !next || target === undefined) return
     let gone = false
-    startMove(next, target).then(
+    startMove(next, target, project).then(
       (id) => !gone && setMoveIds((ids) => [...ids, id]),
       (e: unknown) => !gone && setError(errorMessage(e)),
     )
     return () => {
       gone = true
     }
-  }, [progress?.state, next, target])
+  }, [progress?.state, next, target, project])
 
   const start = async () => {
     if (target === undefined) return
     setStarting(true)
     setError(null)
     try {
-      setMoveIds([await startMove(summary, target)])
+      setMoveIds([await startMove(summary, target, project)])
     } catch (e) {
       setError(errorMessage(e))
     } finally {
@@ -164,7 +167,13 @@ function MoveForm({ summary }: { summary: SessionSummary }) {
     <>
       <DialogHeader>
         <DialogTitle>
-          {more.length > 0 ? t('move.titleMany', { count: sessions.length }) : t('move.title')}
+          {project !== null
+            ? more.length > 0
+              ? t('move.local.titleMany', { count: sessions.length })
+              : t('move.local.title')
+            : more.length > 0
+              ? t('move.titleMany', { count: sessions.length })
+              : t('move.title')}
         </DialogTitle>
         <DialogDescription className="truncate">
           {sessions.map((item) => sessionTitle(item)).join(t('move.titleSeparator'))}
@@ -177,7 +186,11 @@ function MoveForm({ summary }: { summary: SessionSummary }) {
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          {computers.length === 0 ? (
+          {project !== null ? (
+            <p className="text-control text-foreground">
+              {t('move.local.into', { name: dropped?.projectName ?? '' })}
+            </p>
+          ) : computers.length === 0 ? (
             <p className="text-control text-muted-foreground">{t('move.noComputers')}</p>
           ) : (
             <RadioGroup
@@ -225,7 +238,12 @@ function MoveForm({ summary }: { summary: SessionSummary }) {
             </p>
           )}
           {preview !== null && preview !== 'loading' && preview.ok && (
-            <MovePlan preview={preview.preview} host={target ?? null} dropped={dropped} />
+            <MovePlan
+              preview={preview.preview}
+              host={target ?? null}
+              dropped={dropped}
+              local={project !== null}
+            />
           )}
           {others.problems.length > 0 && (
             <ul className="flex flex-col gap-1.5" role="alert">
@@ -290,7 +308,7 @@ function useOtherPreviews(more: readonly SessionSummary[]) {
   const { t } = useTranslation('session')
   const [results, setResults] = useState<Record<string, MovePreviewResult | 'loading'>>({})
   const turn = useRef(0)
-  const [ask] = useState(() => (host: MoveHost) => {
+  const [ask] = useState(() => (host: MoveHost, project: string | null) => {
     const mine = ++turn.current
     setResults(Object.fromEntries(more.map((item) => [item.id, 'loading' as const])))
     for (const item of more) {
@@ -298,7 +316,7 @@ function useOtherPreviews(more: readonly SessionSummary[]) {
         if (mine === turn.current) setResults((all) => ({ ...all, [item.id]: result }))
       }
       window.kettu
-        .moves!.preview(hostOfSession(item), item.id, host)
+        .moves!.preview(hostOfSession(item), item.id, host, project)
         .then(done, (e: unknown) => done({ ok: false, reason: null, message: errorMessage(e) }))
     }
   })
@@ -363,10 +381,13 @@ function MovePlan({
   preview,
   host,
   dropped,
+  local,
 }: {
   preview: MovePreview
   host: MoveHost
   dropped: MoveDrop | null
+  /** Huli: within the session's own computer, into another of its projects. */
+  local: boolean
 }) {
   const { t } = useTranslation('session')
   const { source, target, targetName } = preview
@@ -374,12 +395,16 @@ function MovePlan({
   const git = source.git
   const remote = git?.remotes.find((item) => item.name === git.remote)
   const lines: string[] = []
-  if (target.project)
+  const only = local && target.conversationOnly === true
+  if (local && target.project) {
+    lines.push(t('move.local.project', { name: targetName, path: target.project.path }))
+  } else if (target.project)
     lines.push(t('move.plan.project', { name: targetName, path: target.project.path }))
   else if (target.clonePath && remote) {
     lines.push(t('move.plan.clone', { name: targetName, url: remote.url, path: target.clonePath }))
   }
-  if (git) {
+  if (only) lines.push(t('move.local.code'))
+  else if (git) {
     lines.push(
       git.changes > 0
         ? t('move.plan.branchChanges', {
@@ -388,14 +413,30 @@ function MovePlan({
           })
         : t('move.plan.branch', { branch: git.branch ?? git.head.slice(0, 8) }),
     )
-    lines.push(t(source.worktree || target.project ? 'move.plan.worktree' : 'move.plan.inClone'))
+    lines.push(
+      local
+        ? t('move.local.worktree', { name: targetName })
+        : t(source.worktree || target.project ? 'move.plan.worktree' : 'move.plan.inClone'),
+    )
   }
-  lines.push(t(source.conversation === 'carry' ? 'move.plan.carry' : 'move.plan.resume', { agent }))
-  lines.push(t('move.plan.here'))
+  if (local) {
+    lines.push(
+      t(source.conversation === 'carry' ? 'move.local.carry' : 'move.local.resume', { agent }),
+    )
+    lines.push(t('move.local.here'))
+  } else {
+    lines.push(
+      t(source.conversation === 'carry' ? 'move.plan.carry' : 'move.plan.resume', { agent }),
+    )
+    lines.push(t('move.plan.here'))
+  }
   // Huli: dropped on a project of that computer that is not the session's repository there.
   const into = target.project ? onHost(host, target.project.path) : null
   const elsewhere =
-    dropped && dropped.host === host && into?.toLowerCase() !== dropped.projectPath.toLowerCase()
+    !local &&
+    dropped &&
+    dropped.host === host &&
+    into?.toLowerCase() !== dropped.projectPath.toLowerCase()
       ? target.project
         ? t('move.plan.otherProject', { name: dropped.projectName, path: target.project.path })
         : t('move.plan.otherProjectClone', {
@@ -477,7 +518,9 @@ function MoveSteps({ progress }: { progress: MoveProgress | null }) {
               )}
             </span>
             <span className={state === 'pending' ? 'text-muted-foreground' : 'text-foreground'}>
-              {t(`move.steps.${step}`, { name })}
+              {progress.project !== undefined
+                ? t(`move.local.steps.${step}`, { name })
+                : t(`move.steps.${step}`, { name })}
             </span>
             {step === 'transfer' && state === 'running' && progress.transfer && (
               <span className="ml-auto text-hint text-muted-foreground tabular-nums">
@@ -488,7 +531,11 @@ function MoveSteps({ progress }: { progress: MoveProgress | null }) {
         ))}
       </ol>
       {progress.state === 'done' && (
-        <p className="text-control text-foreground">{t('move.done', { name })}</p>
+        <p className="text-control text-foreground">
+          {progress.project !== undefined
+            ? t('move.local.done', { name })
+            : t('move.done', { name })}
+        </p>
       )}
       {progress.state === 'failed' && (
         <div role="alert" className="flex flex-col gap-1">

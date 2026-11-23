@@ -135,7 +135,16 @@ function movedTo(value: unknown): MovedTo {
     // The target's own path, which this computer only shows and links.
     projectPath: text(o, 'projectPath', PATH_CHARS),
     at,
+    ...(flag(o, 'sameComputer') ? { sameComputer: true as const } : {}),
   }
+}
+
+/** Huli: an optional field that is true or absent. */
+function flag(o: Fields, key: string): boolean {
+  const value = o[key]
+  if (value === undefined) return false
+  if (value !== true) throw invalidParams(`${key} must be true or absent`)
+  return true
 }
 
 function packFiles(value: unknown): MovePackFile[] {
@@ -221,6 +230,7 @@ export function moveValidators(platform: Platform): Pick<Validators, MoveMethod>
         sessionId: session(o),
         moveId: moveId(o),
         haves: haves.map((oid: unknown) => matching({ oid }, 'oid', OID)),
+        ...(flag(o, 'conversationOnly') ? { conversationOnly: true as const } : {}),
       }
     },
     'moves.part': (params) => {
@@ -240,23 +250,34 @@ export function moveValidators(platform: Platform): Pick<Validators, MoveMethod>
       const o = fields(params)
       const agentId = text(o, 'agentId', NAME_CHARS)
       if (!isAgentId(agentId)) throw invalidParams(`Unknown agent ${agentId}`)
+      let project: string | undefined
+      if (o.project !== undefined) {
+        project = text(o, 'project', PATH_CHARS)
+        if (!isAbsolutePath(project, platform)) throw invalidParams('project must be absolute')
+      }
       return {
         agentId,
         remotes: remotes(o.remotes),
         remote: o.remote === null ? null : text(o, 'remote', NAME_CHARS),
+        ...(project !== undefined ? { project } : {}),
       }
     },
     'moves.prepare': (params) => {
       const o = fields(params)
       const project = fields(o.project, 'project')
       let chosen: HostParams<'moves.prepare'>['project']
-      if (Object.keys(project).length !== 1) throw invalidParams('project names one project')
-      if (project.clone === true) chosen = { clone: true }
+      const only = flag(project, 'conversationOnly')
+      if (Object.keys(project).length !== (only ? 2 : 1)) {
+        throw invalidParams('project names one project')
+      }
+      if (project.clone === true && !only) chosen = { clone: true }
       else {
         const folder = text(project, 'path', PATH_CHARS)
         if (!isAbsolutePath(folder, platform)) throw invalidParams('project.path must be absolute')
-        chosen = { path: folder }
+        chosen = only ? { path: folder, conversationOnly: true } : { path: folder }
       }
+      // Huli: the conversation alone needs no repository to match.
+      if (only && o.url === null) return { moveId: moveId(o), project: chosen, url: null }
       const url = text(o, 'url', URL_CHARS)
       if (remoteKey(url) === null) throw invalidParams('url names no repository')
       return { moveId: moveId(o), project: chosen, url }
@@ -287,7 +308,7 @@ export function moveValidators(platform: Platform): Pick<Validators, MoveMethod>
       return {
         moveId: moveId(o),
         files: packFiles(o.files),
-        git: gitPack(o.git),
+        git: o.git === null ? null : gitPack(o.git),
         conversation: conversation(o.conversation),
         agentId,
         title: o.title === null ? null : text(o, 'title', TITLE_CHARS),

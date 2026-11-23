@@ -1741,6 +1741,7 @@ function movedToOf(value: unknown): { movedTo?: MovedTo } {
       sessionId: value.sessionId,
       projectPath: value.projectPath,
       at: value.at,
+      ...(value.sameComputer === true ? { sameComputer: true as const } : {}),
     },
   }
 }
