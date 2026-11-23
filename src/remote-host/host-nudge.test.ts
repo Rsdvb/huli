@@ -70,7 +70,7 @@ async function setup() {
   }))!
   const lan = { up: false, tries: 0 }
   let now = 1_000_000
-  const retryDelay = vi.fn((_failures: number) => 3_600_000)
+  const retryDelay = vi.fn<(failures: number) => number>(() => 3_600_000)
   const client: HostClient = new HostClient({
     key: laptopKey,
     hosts,
