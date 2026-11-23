@@ -82,6 +82,27 @@ export function claudeMcpServers(
   return servers
 }
 
+/**
+ * How a sign-in the panel started stands, from the server as a read lists it: undefined while it
+ * still waits (it needs a sign-in, or connects), how it ended once connected or failed, and null
+ * for one that ended without a word, as a server turned off or no longer listed.
+ */
+export function signInEnd(
+  server: SessionMcpServer | undefined,
+): { ok: boolean; error: string | null } | null | undefined {
+  switch (server?.state) {
+    case 'needs-auth':
+    case 'pending':
+      return undefined
+    case 'connected':
+      return { ok: true, error: null }
+    case 'failed':
+      return { ok: false, error: server.error }
+    default:
+      return null
+  }
+}
+
 /** Whether a reload failed only because the session was at work. */
 export function reloadBusy(error: unknown): boolean {
   return (

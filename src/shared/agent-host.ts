@@ -2065,8 +2065,12 @@ export interface HostContract {
     result: SessionMcpView
   }
   // Huli: starts the agent's sign-in to a server that needs one. The window opens `url` in the
-  // browser, and `session.mcpChanged` with `login` says how it ended. This computer's windows alone.
-  'sessions.mcpLogin': { params: { sessionId: string; server: string }; result: { url: string } }
+  // browser (null when the agent found it needs none), and `session.mcpChanged` with `login` says
+  // how it ended. This computer's windows alone.
+  'sessions.mcpLogin': {
+    params: { sessionId: string; server: string }
+    result: { url: string | null }
+  }
   // Huli: the agent reloads its skills and plugins without starting again, in the session, or
   // without one in every session whose agent runs, so a newly installed one applies.
   'sessions.reloadPlugins': { params: { sessionId?: string }; result: PluginReload }

@@ -12111,7 +12111,7 @@ export class SessionManager {
     return view
   }
 
-  mcpLogin(sessionId: string, server: string): Promise<{ url: string }> {
+  mcpLogin(sessionId: string, server: string): Promise<{ url: string | null }> {
     return loginSessionMcp(this.mcpSession(sessionId), server)
   }
 

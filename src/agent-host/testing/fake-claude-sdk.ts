@@ -9,6 +9,7 @@ import type {
   ContextUsageAnswer,
   FlagSettings,
   InitializeAnswer,
+  McpAuthenticateAnswer,
   McpServerConfig,
   McpServerStatus,
   McpSetServersResult,
@@ -226,6 +227,16 @@ export class FakeQuery implements Query {
     this.record('toggleMcpServer', serverName, enabled)
   }
 
+  get mcpAuthenticate() {
+    const answer = this.sdk.mcpAuth
+    if (answer === undefined) return undefined
+    return async (serverName: string): Promise<McpAuthenticateAnswer> => {
+      this.record('mcpAuthenticate', serverName)
+      if (answer instanceof Error) throw answer
+      return answer
+    }
+  }
+
   async reloadPlugins(options?: { refuseIfBusy?: boolean }): Promise<ReloadPluginsAnswer> {
     this.record('reloadPlugins', options)
     if (this.sdk.reloadError) throw this.sdk.reloadError
@@ -301,6 +312,8 @@ export class FakeClaudeSdk implements ClaudeSdk {
   backgrounded = true
   /** What a query's `mcpServerStatus` answers. */
   mcpStatus: McpServerStatus[] = []
+  /** What a query's `mcpAuthenticate` answers, or throws; undefined for an SDK without it. */
+  mcpAuth: McpAuthenticateAnswer | Error | undefined = undefined
   /** What a query's `reloadPlugins` answers with as its commands. */
   reloadedCommands: { name: string; description: string }[] = []
   /** Thrown by `reloadPlugins` until cleared. */

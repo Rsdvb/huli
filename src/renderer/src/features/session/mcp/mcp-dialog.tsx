@@ -3,7 +3,7 @@
 // agent does them; Codex's apps beside them. Read when it opens, again when the session's agent
 // says its servers changed and after each action here; never on a timer. Mounted once asked for.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowDown01Icon,
   LinkSquare02Icon,
@@ -41,6 +41,7 @@ import {
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { toast } from '@renderer/components/ui/toast'
+import { useEntry } from '@renderer/lib/features'
 import { errorMessage, host } from '@renderer/lib/host'
 import { isWeb } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
@@ -72,8 +73,13 @@ const BADGES: Record<SessionMcpState, 'success' | 'info' | 'error' | 'warning' |
 
 export function SessionMcpDialog() {
   const summary = useMcpPanelStore((s) => s.summary)
+  const on = useEntry('sessionMenu.mcp')
+  // Turned off in Settings › Features while open: the host refuses its reads from now on.
+  useEffect(() => {
+    if (!on) closeMcpPanel()
+  }, [on])
   return (
-    <Dialog open={summary !== null} onOpenChange={(open) => !open && closeMcpPanel()}>
+    <Dialog open={on && summary !== null} onOpenChange={(open) => !open && closeMcpPanel()}>
       <DialogContent className="max-h-[min(720px,calc(100dvh-4rem))] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-xl">
         {summary && <McpPanel key={summary.id} summary={summary} />}
       </DialogContent>
@@ -85,6 +91,7 @@ function McpPanel({ summary }: { summary: SessionSummary }) {
   const { t } = useTranslation('session')
   const changes = useMcpPanelStore((s) => s.changes)
   const logins = useMcpPanelStore((s) => s.logins)
+  const focus = useMcpPanelStore((s) => s.focus)
   const [asked, setAsked] = useState(0)
   const [view, setView] = useState<SessionMcpView | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -121,6 +128,21 @@ function McpPanel({ summary }: { summary: SessionSummary }) {
 
   const read = () => setAsked((n) => n + 1)
 
+  // Claude Code says nothing when a sign-in in the browser ends: coming back to the window reads
+  // the servers again, which tells a sign-in that ended. Only while one waits.
+  useEffect(() => {
+    if (waiting === null) return
+    const back = () => {
+      if (document.visibilityState === 'visible') setAsked((n) => n + 1)
+    }
+    window.addEventListener('focus', back)
+    document.addEventListener('visibilitychange', back)
+    return () => {
+      window.removeEventListener('focus', back)
+      document.removeEventListener('visibilitychange', back)
+    }
+  }, [waiting])
+
   const run = async (
     key: string,
     work: () => Promise<void>,
@@ -154,9 +176,12 @@ function McpPanel({ summary }: { summary: SessionSummary }) {
     run(
       `login:${server}`,
       async () => {
+        const ended = useMcpPanelStore.getState().logins[server] ?? 0
         const { url } = await host('sessions.mcpLogin', { sessionId, server })
+        // Null: the agent needed no page after all, and says it ended as for any sign-in.
+        if (url === null) return
         openLinkIn(url, 'browser', null)
-        setSigning({ server, ended: useMcpPanelStore.getState().logins[server] ?? 0 })
+        setSigning({ server, ended })
       },
       (error) => t('mcp.login.failed', { name: server, error }),
     )
@@ -191,6 +216,7 @@ function McpPanel({ summary }: { summary: SessionSummary }) {
           agent={agent}
           busy={busy}
           waiting={waiting}
+          focus={focus}
           onRetry={read}
           onAct={(action, server) => void act(action, server)}
           onSignIn={(server) => void signIn(server)}
@@ -244,6 +270,7 @@ function Body({
   agent,
   busy,
   waiting,
+  focus,
   onRetry,
   onAct,
   onSignIn,
@@ -254,6 +281,7 @@ function Body({
   agent: string
   busy: string | null
   waiting: string | null
+  focus: string | null
   onRetry: () => void
   onAct: (action: SessionMcpAction, server: string | null) => void
   onSignIn: (server: string) => void
@@ -317,6 +345,7 @@ function Body({
               agent={agent}
               busy={busy}
               waiting={waiting === server.name}
+              focused={focus === server.name}
               onAct={onAct}
               onSignIn={onSignIn}
             />
@@ -334,6 +363,7 @@ function ServerRow({
   agent,
   busy,
   waiting,
+  focused,
   onAct,
   onSignIn,
 }: {
@@ -342,6 +372,8 @@ function ServerRow({
   agent: string
   busy: string | null
   waiting: boolean
+  /** A thread's notice opened the panel at this server. */
+  focused: boolean
   onAct: (action: SessionMcpAction, server: string | null) => void
   onSignIn: (server: string) => void
 }) {
@@ -358,9 +390,21 @@ function ServerRow({
       ? t('mcp.source.pluginNamed', { name: server.plugin })
       : t(`mcp.source.${server.source}`)
   const acting = busy?.endsWith(`:${name}`) ?? false
+  const row = useRef<HTMLLIElement>(null)
+
+  useEffect(() => {
+    if (focused) row.current?.scrollIntoView({ block: 'nearest' })
+  }, [focused])
 
   return (
-    <li className="flex flex-col gap-1 border-b border-border-soft py-2 last:border-b-0">
+    <li
+      ref={row}
+      data-focused={focused ? '' : undefined}
+      className={cn(
+        'flex flex-col gap-1 border-b border-border-soft py-2 last:border-b-0',
+        focused && '-mx-2 rounded-lg border-transparent bg-subtle px-2',
+      )}
+    >
       <div className="flex min-w-0 items-center gap-2">
         <span aria-hidden className={cn('size-2 shrink-0 rounded-full', DOTS[state])} />
         <span className="min-w-0 truncate font-mono text-control text-foreground" title={name}>

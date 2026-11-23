@@ -23,6 +23,8 @@ interface McpPanelStore {
   changes: number
   /** How many sign-ins of each server ended since the panel opened. */
   logins: Record<string, number>
+  /** The server a thread's notice opened the panel at, which it scrolls to and marks. */
+  focus: string | null
 }
 
 export const useMcpPanelStore = create<McpPanelStore>()(() => ({
@@ -30,10 +32,12 @@ export const useMcpPanelStore = create<McpPanelStore>()(() => ({
   loaded: false,
   changes: 0,
   logins: {},
+  focus: null,
 }))
 
-export function askMcpPanel(summary: SessionSummary): void {
-  useMcpPanelStore.setState({ summary, loaded: true, changes: 0, logins: {} })
+/** Opens the session's panel, at one of its servers when a notice names it. */
+export function askMcpPanel(summary: SessionSummary, focus: string | null = null): void {
+  useMcpPanelStore.setState({ summary, loaded: true, changes: 0, logins: {}, focus })
 }
 
 export function closeMcpPanel(): void {

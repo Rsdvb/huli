@@ -103,7 +103,7 @@ export async function actOnSessionMcp(
 export async function loginSessionMcp(
   session: McpSession,
   server: string,
-): Promise<{ url: string }> {
+): Promise<{ url: string | null }> {
   const { connection } = session
   if (!connection) throw notRunning(session)
   if (!connection.loginMcp) throw unsupported(session)

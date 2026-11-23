@@ -2333,7 +2333,7 @@
       "button": "登录",
       "again": "重新登录",
       "waiting": "登录中",
-      "inBrowser": "请在浏览器里完成登录，完成后这里会自动更新。",
+      "inBrowser": "请在浏览器里完成登录，回到纸鸢后这里会更新。",
       "elsewhere": "请在 Agent 自己的终端里登录，比如 Claude Code 的 /mcp。",
       "done": "已登录 {{name}}",
       "failed": "没能登录 {{name}}：{{error}}"
@@ -2362,6 +2362,9 @@
       "reconnect": "没能重新连接 {{name}}：{{error}}",
       "disable": "没能关闭 {{name}}：{{error}}",
       "enable": "没能打开 {{name}}：{{error}}"
+    },
+    "notice": {
+      "open": "查看 MCP 服务器"
     }
   }
 }
