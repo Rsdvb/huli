@@ -129,6 +129,7 @@ import { MenuOptions } from '@renderer/features/session/menu-options'
 import { useMenuOptions } from '@renderer/features/session/menu-options-model'
 import { undoToast } from './undo'
 import { binnedSessionsToast } from '@renderer/features/recycle-bin/undo'
+import { hostHasBin, useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { workAtStake, type WorkItem } from './running-work'
 import { RunningWorkList } from './running-work-list'
 import { dissolveRows } from './row-dust'
@@ -1341,6 +1342,10 @@ export function DeleteSessionDialog({
     ),
   )
   const several = targets.length > 1
+  // Huli: a host older than the recycle bin deletes for good, and the dialog says so.
+  const firstHost = targets[0] ? hostOfSession(targets[0]) : null
+  const binOn =
+    useHostHasBin(firstHost) && targets.every((target) => hostHasBin(hostOfSession(target)))
   const count = open ? targets.reduce((sum, s) => sum + descendantCount(s.id), 0) : 0
   const stake = useAtStake(
     targets.flatMap((s) => stakeFolder(s) ?? []),
@@ -1441,13 +1446,19 @@ export function DeleteSessionDialog({
           </div>
         )}
         <AlertDialogDescription className="text-small text-tertiary">
-          {count > 0
-            ? t('row.deleteBodyWithSub', { count })
-            : several
-              ? t('row.deleteBodyCount')
-              : t('row.deleteBody')}
+          {binOn
+            ? count > 0
+              ? t('row.deleteBodyWithSub', { count })
+              : several
+                ? t('row.deleteBodyCount')
+                : t('row.deleteBody')
+            : count > 0
+              ? t('row.deleteBodyWithSubForGood', { count })
+              : several
+                ? t('row.deleteBodyCountForGood')
+                : t('row.deleteBodyForGood')}
           {copies.removed &&
-            ` ${t('row.deleteRemovesAgentCopy', {
+            ` ${t(binOn ? 'row.deleteRemovesAgentCopy' : 'row.deleteRemovesAgentCopyNow', {
               agent: names(copies.removed),
               count: targets.length,
             })}`}

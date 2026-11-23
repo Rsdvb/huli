@@ -4,7 +4,7 @@
 // they change, so nothing here is kept on the phone. A session's project stays as it is, and a
 // deleted folder's sessions go back to 未分组.
 
-import { binnedOne } from './recycleBin'
+import { binnedOne, linkHasBin } from './recycleBin'
 import { useState, type ReactNode } from 'react'
 import { Alert } from 'react-native'
 import type { HostLink } from '@shared/remote/link'
@@ -109,21 +109,26 @@ export function useFolderActions(): FolderActions {
       const to = reach(link)
       if (!to) return
       haptic.warning()
-      Alert.alert(
-        `删除文件夹「${folder.name}」？`,
-        '文件夹会移到回收站，其中的会话回到未分组，不会被删除。从回收站恢复时，会话会回到这个文件夹里。',
-        [
-          { text: '取消', style: 'cancel' },
-          {
-            text: '删除文件夹',
-            style: 'destructive',
-            onPress: () =>
-              void to.request('folders.delete', { folderId: folder.id }).then(() => {
-                haptic.success()
-                binnedOne(to, 'folder', folder.id, folder.name)
-              }, fail('没能删除文件夹')),
-          },
-        ],
+      // Huli: a computer whose Kite is older than the recycle bin deletes for good, as this says.
+      void linkHasBin(to).then((binOn) =>
+        Alert.alert(
+          `删除文件夹「${folder.name}」？`,
+          binOn
+            ? '文件夹会移到回收站，其中的会话回到未分组，不会被删除。从回收站恢复时，会话会回到这个文件夹里。'
+            : '其中的会话会回到未分组，不会被删除。',
+          [
+            { text: '取消', style: 'cancel' },
+            {
+              text: '删除文件夹',
+              style: 'destructive',
+              onPress: () =>
+                void to.request('folders.delete', { folderId: folder.id }).then(() => {
+                  haptic.success()
+                  binnedOne(to, 'folder', folder.id, folder.name)
+                }, fail('没能删除文件夹')),
+            },
+          ],
+        ),
       )
     },
     togglePin: (folder, link) =>

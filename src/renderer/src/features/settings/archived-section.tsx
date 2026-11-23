@@ -10,7 +10,8 @@ import { DeleteSessionDialog } from '@renderer/features/sidebar/session-menu'
 import { errorMessage } from '@renderer/lib/host'
 import { mediumAgo } from '@renderer/lib/format'
 import { useNow } from '@renderer/lib/use-now'
-import { sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
+import { hostOfSession, sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
+import { hostHasBin } from '@renderer/features/recycle-bin/support'
 import { ItemLine, Thing } from './rows'
 import { ControlError, IconAction, SetButton } from './controls'
 
@@ -157,6 +158,9 @@ function FullRow({
         title={title}
         open={deleting}
         onOpenChange={setDeleting}
+        onDeleted={() => {
+          if (!hostHasBin(hostOfSession(summary))) toast(t('archived.deleted'))
+        }}
       />
     </div>
   )

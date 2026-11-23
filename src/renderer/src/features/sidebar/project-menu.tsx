@@ -161,11 +161,13 @@ export function ProjectMenuItems({
           <MenuGlyph icon={Archive01Icon} />
           {t('project.menu.showArchived')}
         </DropdownMenuItem>
-        {/* Huli: the recycle bin sits beside the archive, as a Settings page. */}
-        <DropdownMenuItem onClick={() => openSettings('recycle-bin')}>
-          <MenuGlyph icon={Delete02Icon} />
-          {t('project.menu.showBin')}
-        </DropdownMenuItem>
+        {/* Huli: Settings shows this computer's recycle bin, so only its projects lead there. */}
+        {local && (
+          <DropdownMenuItem onClick={() => openSettings('recycle-bin')}>
+            <MenuGlyph icon={Delete02Icon} />
+            {t('project.menu.showBin')}
+          </DropdownMenuItem>
+        )}
       </DropdownMenuGroup>
       <DropdownMenuGroup>
         <DropdownMenuSeparator />
@@ -275,11 +277,12 @@ export function NoProjectMenuItems({
           <MenuGlyph icon={Archive01Icon} />
           {t('project.menu.showArchived')}
         </DropdownMenuItem>
-        {/* Huli: the recycle bin sits beside the archive, as a Settings page. */}
-        <DropdownMenuItem onClick={() => openSettings('recycle-bin')}>
-          <MenuGlyph icon={Delete02Icon} />
-          {t('project.menu.showBin')}
-        </DropdownMenuItem>
+        {local && (
+          <DropdownMenuItem onClick={() => openSettings('recycle-bin')}>
+            <MenuGlyph icon={Delete02Icon} />
+            {t('project.menu.showBin')}
+          </DropdownMenuItem>
+        )}
       </DropdownMenuGroup>
     </>
   )

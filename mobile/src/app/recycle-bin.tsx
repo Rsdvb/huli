@@ -16,6 +16,7 @@ import {
 } from '@shared/recycle-bin'
 import { Sheet } from '../components/Sheet'
 import { call } from '../git'
+import { useLinkHasBin } from '../recycleBin'
 import { useHost } from '../host'
 import { errorText } from '../sessions'
 import { EmptyState } from '../ui/EmptyState'
@@ -133,9 +134,11 @@ export default function RecycleBin() {
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set())
   const [now, setNow] = useState(Date.now)
   const connected = host.state.kind === 'connected'
+  // Huli: a computer whose Kite is older than the bin has none to list.
+  const binOn = useLinkHasBin(host.link)
 
   const load = useCallback(async () => {
-    if (!host.link) return
+    if (!host.link || binOn !== true) return
     try {
       setList(await call(host.link, 'bin.list', undefined))
       setNow(Date.now())
@@ -143,7 +146,7 @@ export default function RecycleBin() {
     } catch (failure) {
       setError(errorText(failure))
     }
-  }, [host.link])
+  }, [host.link, binOn])
 
   useEffect(() => {
     if (connected) void load()
@@ -260,6 +263,15 @@ export default function RecycleBin() {
   const keepDays = list?.keepDays
   const placeholder = () => {
     if (!connected && !list) return <EmptyState icon="trash" title="连上电脑后才能看回收站" />
+    if (binOn === false) {
+      return (
+        <EmptyState
+          icon="trash"
+          title="这台电脑上的纸鸢还没有回收站"
+          message="它的纸鸢版本较旧，在那里删除的东西会直接永久删除。更新那台电脑上的纸鸢后就能用回收站。"
+        />
+      )
+    }
     if (error && !list) {
       return (
         <EmptyState

@@ -28,6 +28,7 @@ import {
 import { Field, FieldError, FieldLabel } from '@renderer/components/ui/field'
 import { Input } from '@renderer/components/ui/input'
 import { binnedToast, movedTitle } from '@renderer/features/recycle-bin/undo'
+import { useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { errorMessage } from '@renderer/lib/host'
 import {
   askFolderDialog,
@@ -142,13 +143,14 @@ function NameForm({
 
 function DeleteBody({ dialog }: { dialog: Extract<FolderDialog, { kind: 'delete' }> }) {
   const { t } = useTranslation(['sessionFolders', 'common'])
+  const binOn = useHostHasBin(dialog.hostId)
   return (
     <>
       <AlertDialogHeader>
         <AlertDialogTitle>{t('dialog.deleteTitle', { name: dialog.folder.name })}</AlertDialogTitle>
       </AlertDialogHeader>
       <AlertDialogDescription className="text-small text-tertiary">
-        {t('dialog.deleteBody')}
+        {binOn ? t('dialog.deleteBody') : t('dialog.deleteBodyForGood')}
       </AlertDialogDescription>
       <AlertDialogFooter className="pt-1">
         <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>

@@ -1,7 +1,7 @@
 // A project's page: where it is, the further folders its sessions also work in, how its sessions'
 // worktrees are named and prepared, and removing it from Huli, which leaves its folder where it is.
 
-import { binnedOne } from '../../recycleBin'
+import { binnedOne, useLinkHasBin } from '../../recycleBin'
 import { useEffect, useState } from 'react'
 import { Alert, StyleSheet, Switch, Text, View } from 'react-native'
 import { router, useLocalSearchParams, usePreventRemove } from 'expo-router'
@@ -46,6 +46,8 @@ const FORBIDDEN = '只有这台主机的主人能在这里改这些设置，除�
 export default function ProjectPage() {
   const { c } = useTokens()
   const host = useHost()
+  // Huli: a computer whose Kite is older than the recycle bin deletes for good, as it says.
+  const binOn = useLinkHasBin(host.link) === true
   const connected = useConnected()
   const { path = '' } = useLocalSearchParams<{ path?: string }>()
   const project = host.projects.find((p) => p.path === path) ?? null
@@ -149,9 +151,13 @@ export default function ProjectPage() {
   const remove = async () => {
     if (!project || !host.link) return
     const parts = [
-      sessions.length > 0
-        ? `它和它的 ${sessions.length} 个会话会移到回收站，可以在 设置 › 回收站 里恢复。`
-        : '它会移到回收站，可以在 设置 › 回收站 里恢复。',
+      binOn
+        ? sessions.length > 0
+          ? `它和它的 ${sessions.length} 个会话会移到回收站，可以在 设置 › 回收站 里恢复。`
+          : '它会移到回收站，可以在 设置 › 回收站 里恢复。'
+        : sessions.length > 0
+          ? `它的 ${sessions.length} 个会话会从纸鸢里去掉。`
+          : '它在纸鸢里没有会话。',
       running > 0 ? `正在运行的 ${running} 个会先停下。` : null,
       '文件夹和里面的文件会留在电脑上。',
     ]

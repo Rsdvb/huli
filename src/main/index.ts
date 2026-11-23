@@ -1198,6 +1198,7 @@ async function start(): Promise<void> {
       thumbnails: true,
       partThumbnails: true,
       artifactRecords: [...ARTIFACT_RECORDS],
+      recycleBin: true,
     }),
     restart: (which) => (which === 'agent' ? agentHost.restart() : terminalHost.restart()),
     sharing,

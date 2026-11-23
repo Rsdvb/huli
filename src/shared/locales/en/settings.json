@@ -874,13 +874,16 @@
     "removeSessions": {
       "name": "Remove all sessions from Kettu",
       "description": "Clears the list; the sessions go to the recycle bin. Agents keep their own transcripts.",
+      "descriptionForGood": "Clears the list. Agents keep their own transcripts.",
       "keywords": "delete clear",
       "button": "Remove all sessions…",
       "dialogTitle_one": "Remove the only session from Kettu?",
       "dialogTitle_other": "Remove all {{count}} sessions from Kettu?",
       "dialogDescription": "The sidebar starts empty, and the sessions go to the recycle bin, where you can restore them from Settings › Recycle bin. The agents keep their transcripts.",
+      "dialogDescriptionForGood": "The sidebar starts empty. The agents keep their transcripts, so you can import the sessions again from each project’s menu in the sidebar.",
       "confirm": "Remove all",
-      "removed": "Every session moved to the recycle bin"
+      "removed": "Every session moved to the recycle bin",
+      "removedForGood": "Every session is removed from Kettu"
     },
     "groups": {
       "network": "Network",
@@ -1941,6 +1944,8 @@
     "more_other": "Show {{count}} more",
     "loadError": "Couldn’t read the recycle bin",
     "retry": "Try again",
+    "unsupportedTitle": "This computer’s Kite has no recycle bin yet",
+    "unsupportedHint": "Its Kite is older, so what you delete there is deleted for good. Update Kite on that computer to use the recycle bin.",
     "keepNote_one": "Items are deleted for good {{count}} day after they go in.",
     "keepNote_other": "Items are deleted for good {{count}} days after they go in.",
     "keepNoteKept": "The recycle bin never empties by itself.",
@@ -2903,6 +2908,7 @@
         "button": "Delete…",
         "title": "Delete “{{title}}”?",
         "body": "It moves to the recycle bin, and agents are not handed it again. You can restore it from Settings › Recycle bin.",
+        "bodyForGood": "It is removed from Kettu’s memory, and agents are not handed it again.",
         "confirm": "Delete",
         "done": "Deleted"
       },

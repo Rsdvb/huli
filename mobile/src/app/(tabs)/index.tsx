@@ -9,7 +9,7 @@
 // opens beside it, in the session screen itself.
 
 import { binKey } from '@shared/recycle-bin'
-import { restoreFromBin } from '../../recycleBin'
+import { linkHasBin, restoreFromBin } from '../../recycleBin'
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Platform, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -1092,9 +1092,18 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
       return
     }
     haptic.warning()
+    const computers = [...new Set(list.map((p) => p.computer))]
+    void Promise.all(computers.map((c) => linkHasBin(linkOfComputer(c)))).then((answers) => {
+      const binOn = answers.every(Boolean)
+      askDelete(list, skipped, binOn)
+    })
+  }
+
+  // Huli: a computer whose Kite is older than the recycle bin deletes for good, as this says.
+  const askDelete = (list: Placed[], skipped: number, binOn: boolean) => {
     Alert.alert(
       `删除 ${list.length} 个会话？`,
-      `它们和子会话会移到回收站，可以在 设置 › 回收站 里恢复。${skipped > 0 ? `正在运行的 ${skipped} 个不会删除。` : ''}`,
+      `${binOn ? '它们和子会话会移到回收站，可以在 设置 › 回收站 里恢复。' : '它们的对话和子会话会从电脑上删除，无法恢复。'}${skipped > 0 ? `正在运行的 ${skipped} 个不会删除。` : ''}`,
       [
         { text: '取消', style: 'cancel' },
         {
@@ -1108,6 +1117,10 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
               list,
             ).then((done) => {
               if (done.length === 0) return
+              if (!binOn) {
+                showNotice({ text: `已删除 ${done.length} 个会话` })
+                return
+              }
               // Huli: they wait in the recycle bin; 撤销 puts them back on each computer.
               showNotice({
                 text: `已把 ${done.length} 个会话移到回收站`,

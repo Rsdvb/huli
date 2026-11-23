@@ -10,6 +10,7 @@ import type { ArtifactSummary } from '@shared/artifacts'
 import { artifactKind, daysLeft, KIND_ICON, KIND_TEXT } from '../artifacts'
 import { Sheet } from '../components/Sheet'
 import { useHost } from '../host'
+import { useLinkHasBin } from '../recycleBin'
 import { errorText } from '../sessions'
 import { EmptyState } from '../ui/EmptyState'
 import { haptic } from '../ui/haptics'
@@ -39,6 +40,7 @@ export default function DeletedArtifacts() {
   const [error, setError] = useState<string | null>(null)
   const [menu, setMenu] = useState<ArtifactSummary | null>(null)
   const connected = host.state.kind === 'connected'
+  const binOn = useLinkHasBin(host.link) === true
 
   const load = useCallback(async () => {
     if (!host.link) return
@@ -124,16 +126,24 @@ export default function DeletedArtifacts() {
           <View style={styles.pad}>
             <LargeTitle
               title="最近删除"
-              subtitle="删除的产物先进回收站，按电脑上设的天数保留。右滑恢复，左滑永久删除。"
+              subtitle={
+                binOn
+                  ? '删除的产物先进回收站，按电脑上设的天数保留。右滑恢复，左滑永久删除。'
+                  : '删除的产物在这里保留 30 天。右滑恢复，左滑永久删除。'
+              }
             />
-            <Press
-              onPress={() => router.push('/recycle-bin')}
-              accessibilityRole="link"
-              hitSlop={8}
-              style={styles.binLink}
-            >
-              <Text style={[typeScale.subhead, { color: c.tint }]}>在回收站里看全部删掉的东西</Text>
-            </Press>
+            {binOn ? (
+              <Press
+                onPress={() => router.push('/recycle-bin')}
+                accessibilityRole="link"
+                hitSlop={8}
+                style={styles.binLink}
+              >
+                <Text style={[typeScale.subhead, { color: c.tint }]}>
+                  在回收站里看全部删掉的东西
+                </Text>
+              </Press>
+            ) : null}
           </View>
         }
         ListEmptyComponent={<View style={styles.pad}>{empty()}</View>}

@@ -31,6 +31,7 @@ import { toast } from '@renderer/components/ui/toast'
 import { Glyph, MenuGlyph } from '@renderer/features/shell/glyph'
 import { errorMessage, host, taskHost } from '@renderer/lib/host'
 import { binnedToast, movedTitle } from '@renderer/features/recycle-bin/undo'
+import { useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { i18n } from '@renderer/lib/i18n'
 import { cn } from '@renderer/lib/utils'
 import { useTasksStore } from '@renderer/stores/tasks'
@@ -179,6 +180,7 @@ export function DeleteTaskDialog({
   onDeleted?: () => void
 }) {
   const { t } = useTranslation(['tasks', 'sidebar', 'common'])
+  const binOn = useHostHasBin(taskHost(task.id))
   const remove = async () => {
     onOpenChange(false)
     try {
@@ -199,7 +201,13 @@ export function DeleteTaskDialog({
           <AlertDialogTitle>{t('sidebar:row.deleteTitle', { title: task.title })}</AlertDialogTitle>
         </AlertDialogHeader>
         <AlertDialogDescription className="text-small text-tertiary">
-          {task.branch ? t('menu.deleteBodyBranch', { branch: task.branch }) : t('menu.deleteBody')}
+          {binOn
+            ? task.branch
+              ? t('menu.deleteBodyBranch', { branch: task.branch })
+              : t('menu.deleteBody')
+            : task.branch
+              ? t('menu.deleteBodyBranchForGood', { branch: task.branch })
+              : t('menu.deleteBodyForGood')}
         </AlertDialogDescription>
         <AlertDialogFooter className="pt-1">
           <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>

@@ -175,6 +175,11 @@ export interface HostInfo extends AppInfo {
    * fields name them; absent from hosts before any of them.
    */
   artifactRecords?: ArtifactRecord[]
+  /**
+   * Huli: deleting moves things to the recycle bin (`bin.*`); absent from hosts before it, which
+   * delete for good.
+   */
+  recycleBin?: boolean
 }
 
 /**

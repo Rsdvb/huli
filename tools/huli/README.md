@@ -2153,6 +2153,13 @@ more kind and whose days now follow the bin's.
   project matching never see them; the phone hears `session.removed`, `routine.removed`,
   `task.removed` and the rest as for a delete. A binned session's id stays in its folder, and both
   imports leave out a binned agent session, which an import by its id restores.
+- Older hosts: a host says it has the bin in its `HostInfo` (`recycleBin: true`, from the desktop
+  app and the daemon), which `binSupported` reads. Another computer whose Kite is older says
+  nothing, deletes for good, and gets the old words everywhere: the delete dialogs say it cannot be
+  undone, no 撤销 toast or notice follows, and the bin page (desktop and phone) names that host
+  as having no bin instead of asking for its items. While a host's info is unknown it counts as
+  older. This computer's desktop app always has it (`features/recycle-bin/support.ts`, the phone's
+  `linkHasBin` asking `host.info`).
 - Requests: `bin.list`, `bin.restore` (`keys`, optional `project`), `bin.purge`, `bin.empty`,
   validated in `validate.ts` (keys `kind:id`, at most `MAX_BIN_KEYS`), open to paired devices;
   `memory.remove` now answers its `binKey`.

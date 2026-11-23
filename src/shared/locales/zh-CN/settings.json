@@ -865,12 +865,15 @@
     "removeSessions": {
       "name": "从 Kettu 中移除所有会话",
       "description": "清空列表，会话都移到回收站。智能体自己的对话记录会保留。",
+      "descriptionForGood": "清空列表。智能体自己的对话记录会保留。",
       "keywords": "删除 清除 清空 delete clear",
       "button": "移除所有会话…",
       "dialogTitle_other": "从 Kettu 中移除全部 {{count}} 个会话？",
       "dialogDescription": "侧边栏将变为空白，会话都移到回收站，可以在 设置 › 回收站 里恢复。智能体会保留各自的对话记录。",
+      "dialogDescriptionForGood": "侧边栏将变为空白。智能体会保留各自的对话记录，之后可以在侧边栏中项目的菜单里重新导入这些会话。",
       "confirm": "全部移除",
-      "removed": "所有会话已移到回收站"
+      "removed": "所有会话已移到回收站",
+      "removedForGood": "已从 Kettu 中移除所有会话"
     },
     "groups": {
       "network": "网络",
@@ -1908,6 +1911,8 @@
     "more_other": "再显示 {{count}} 项",
     "loadError": "没能读到回收站",
     "retry": "重试",
+    "unsupportedTitle": "这台电脑上的纸鸢还没有回收站",
+    "unsupportedHint": "它的纸鸢版本较旧，在那里删除的东西会直接永久删除。更新那台电脑上的纸鸢后就能用回收站。",
     "keepNote_other": "放进回收站 {{count}} 天后会永久删除。",
     "keepNoteKept": "回收站不会自动清空。",
     "keepChange": "更改",
@@ -2850,6 +2855,7 @@
         "button": "删除…",
         "title": "删除“{{title}}”？",
         "body": "它会移到回收站，智能体之后不会再拿到它。可以在 设置 › 回收站 里恢复。",
+        "bodyForGood": "它会从 Kettu 的记忆里删掉，智能体之后不会再拿到它。",
         "confirm": "删除",
         "done": "已删除"
       },

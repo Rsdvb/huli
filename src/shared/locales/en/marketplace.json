@@ -516,6 +516,7 @@
       "menu": "Delete…",
       "title": "Delete {{name}}?",
       "body": "It moves to the recycle bin with its file and pins, where you can restore it from Settings › Recycle bin. Tasks already running through it carry on with their own copy.",
+      "bodyForGood": "Its file and its pins are removed. Tasks already running through it carry on with their own copy.",
       "confirm": "Delete"
     },
     "approval": {

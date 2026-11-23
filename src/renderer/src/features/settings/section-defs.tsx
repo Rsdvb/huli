@@ -78,6 +78,7 @@ import {
 } from './harness-section'
 import { ArchivedRow } from './archived-section'
 import { BinKeepDays, RecycleBinPage } from './recycle-bin-section'
+import { useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { CloudSwitchRow, OtherConnections } from './cloud-section'
 import { useCloudOffHere } from './use-cloud-off-here'
 import { DebugModeRow } from './debug-mode'
@@ -1136,6 +1137,8 @@ export function useAdvancedSection(): SectionDef {
   const debugOn = useDebugStore((s) => s.status.on)
   const data = group('data', t('advanced.groups.data'))
   const webhooksOn = useEntry('settings.webhookPort')
+  // Huli: a host older than the recycle bin clears its list for good.
+  const binOn = useHostHasBin(hostId)
   return {
     id: 'advanced',
     title: t('sections.advanced'),
@@ -1227,6 +1230,7 @@ export function useAdvancedSection(): SectionDef {
       {
         id: 'remove-sessions',
         setting: 'advanced.remove-sessions',
+        ...(binOn ? {} : { description: t('advanced.removeSessions.descriptionForGood') }),
         group: group('danger', t('advanced.groups.danger')),
         render: () => <RemoveAll />,
       },

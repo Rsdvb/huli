@@ -258,7 +258,10 @@
     "deleteTitle": "Delete {{name}}?",
     "deleteWithSessions_one": "It and its {{count}} run session move to the recycle bin, where you can restore them from Settings › Recycle bin.",
     "deleteWithSessions_other": "It and its {{count}} run sessions move to the recycle bin, where you can restore them from Settings › Recycle bin.",
+    "deleteWithSessionsForGood_one": "Its {{count}} run session is deleted with it.",
+    "deleteWithSessionsForGood_other": "Its {{count}} run sessions are deleted with it.",
     "deleteNoSessions": "It moves to the recycle bin, where you can restore it from Settings › Recycle bin.",
+    "deleteNoSessionsForGood": "It has no run sessions.",
     "deleteConfirm": "Delete",
     "deleteFailed": "The routine could not be deleted: {{error}}"
   },

@@ -1,6 +1,7 @@
 // Deleting a session, as the desktop's dialog asks it: what its folder has uncommitted, the work
 // deleting would stop and the sub-sessions that go with it, with 改为归档, which keeps them all.
 
+import { useLinkHasBin } from '../recycleBin'
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, Modal, ScrollView, StyleSheet, Text, View } from 'react-native'
 import type { SessionSummary } from '@shared/agent-host'
@@ -36,6 +37,8 @@ export function DeleteSessionDialog(props: {
 }) {
   const { c } = useTokens()
   const link = useMaybeLink()
+  // Huli: a computer whose Kite is older than the recycle bin deletes for good, as it says.
+  const binOn = useLinkHasBin(link) === true
   const connected = useConnected()
   const sessions = useSessions()
   const agent = useAgent(props.summary?.agentId)
@@ -85,11 +88,17 @@ export function DeleteSessionDialog(props: {
     } else if (stake.files > 0) stakeLine = `它的文件夹 ${name} 有 ${stake.files} 个未提交的文件。`
   }
   const body =
-    (children > 0
-      ? `会话和它的 ${children} 个子会话会移到回收站，可以在 设置 › 回收站 里恢复。`
-      : '会话会移到回收站，可以在 设置 › 回收站 里恢复。') +
+    (binOn
+      ? children > 0
+        ? `会话和它的 ${children} 个子会话会移到回收站，可以在 设置 › 回收站 里恢复。`
+        : '会话会移到回收站，可以在 设置 › 回收站 里恢复。'
+      : children > 0
+        ? `对话、历史记录及其 ${children} 个子会话将无法恢复。归档会保留它们。`
+        : '对话及其历史记录将无法恢复。归档会保留两者。') +
     (removes && agent
-      ? ` 从回收站彻底删除时，也会从 ${agent.harnessName} 自己的本地历史里删除。`
+      ? binOn
+        ? ` 从回收站彻底删除时，也会从 ${agent.harnessName} 自己的本地历史里删除。`
+        : ` 也会从 ${agent.harnessName} 自己的本地历史里删除，官方客户端和应用里不会再显示。`
       : '') +
     (shared ? ` ${shared} 自己保留的那份，纸鸢删不掉。` : '')
   const canArchive = summary.parentId === null && summary.archivedAt === null

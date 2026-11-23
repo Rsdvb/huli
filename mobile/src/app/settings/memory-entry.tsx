@@ -1,7 +1,7 @@
 // One memory entry: its title, summary and text, who wrote it and when, and editing, moving a
 // project's entry to global memory, and deleting it.
 
-import { binnedNotice } from '../../recycleBin'
+import { binnedNotice, useLinkHasBin } from '../../recycleBin'
 import { useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -29,6 +29,8 @@ import { ago } from '../../sessions'
 export default function MemoryEntryPage() {
   const { c } = useTokens()
   const host = useHost()
+  // Huli: a computer whose Kite is older than the recycle bin deletes for good, as it says.
+  const binOn = useLinkHasBin(host.link) === true
   const connected = useConnected()
   const params = useLocalSearchParams<{ scope?: string; id?: string }>()
   const scope = scopeOf(params.scope ?? 'global')
@@ -55,7 +57,9 @@ export default function MemoryEntryPage() {
   const remove = async (target: MemoryEntry) => {
     const ok = await confirm({
       title: `删除“${target.title}”？`,
-      message: '它会移到回收站，Agent 之后不会再拿到它。可以在 设置 › 回收站 里恢复。',
+      message: binOn
+        ? '它会移到回收站，Agent 之后不会再拿到它。可以在 设置 › 回收站 里恢复。'
+        : '它会从纸鸢的记忆里删掉，Agent 之后不会再拿到它。',
       confirm: '删除',
     })
     if (!ok || !host.link) return

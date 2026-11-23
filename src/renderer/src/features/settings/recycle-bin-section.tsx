@@ -44,6 +44,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
 import { toast } from '@renderer/components/ui/toast'
 import { onBinChanged } from '@renderer/features/recycle-bin/events'
+import { useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { basename, bytes, mediumAgo } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
 import { onHost } from '@renderer/lib/host-paths'
@@ -138,6 +139,17 @@ function useBinList(): {
 }
 
 export function RecycleBinPage() {
+  const { t } = useTranslation('settings')
+  const { hostId } = useHostScope()
+  if (!useHostHasBin(hostId)) {
+    return (
+      <EmptyCard title={t('recycleBin.unsupportedTitle')} hint={t('recycleBin.unsupportedHint')} />
+    )
+  }
+  return <BinList />
+}
+
+function BinList() {
   const { t } = useTranslation(['settings', 'sidebar', 'common'])
   const { request } = useHostScope()
   const { list, error, reload } = useBinList()

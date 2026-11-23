@@ -32,6 +32,7 @@ import {
 } from '@renderer/components/ui/alert-dialog'
 import { toast } from '@renderer/components/ui/toast'
 import { binnedToast, movedTitle } from '@renderer/features/recycle-bin/undo'
+import { useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { Markdown } from '@renderer/features/session/markdown'
 import { fullTime, mediumAgo } from '@renderer/lib/format'
 import { memoryErrorText } from '@renderer/lib/memory-errors'
@@ -292,6 +293,7 @@ function RemoveDialog({
 }) {
   const { t } = useTranslation(['settings', 'common'])
   const { hostId, request } = useHostScope()
+  const binOn = useHostHasBin(hostId)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const remove = async (): Promise<void> => {
@@ -322,7 +324,9 @@ function RemoveDialog({
           <AlertDialogTitle>
             {t('memory.entry.remove.title', { title: entry.title })}
           </AlertDialogTitle>
-          <AlertDialogDescription>{t('memory.entry.remove.body')}</AlertDialogDescription>
+          <AlertDialogDescription>
+            {binOn ? t('memory.entry.remove.body') : t('memory.entry.remove.bodyForGood')}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         {error && <p className="text-xs text-danger">{error}</p>}
         <AlertDialogFooter>

@@ -39,6 +39,16 @@ export function isBinKeepDays(value: unknown): value is BinKeepDays | null {
 
 export const BIN_DAY_MS = 24 * 60 * 60_000
 
+/**
+ * Whether a host moves what is deleted to the recycle bin, as its `HostInfo` says: true or false
+ * once it has said, null while its info is unknown. A host older than the bin says nothing of it
+ * and deletes for good, so nothing may promise a restore from there.
+ */
+export function binSupported(info: { recycleBin?: unknown } | null | undefined): boolean | null {
+  if (info === null || info === undefined) return null
+  return info.recycleBin === true
+}
+
 /** When an item deleted at `deletedAt` is deleted for good; null while the bin keeps it. */
 export function purgeAt(deletedAt: number, settings: RecycleBinSettings): number | null {
   return settings.keepDays === null ? null : deletedAt + settings.keepDays * BIN_DAY_MS

@@ -1,5 +1,6 @@
 // Huli: a delete's 「已移到回收站」 with Undo for five seconds, as archive's is: Undo puts what went
-// back from the bin, by the keys the client knows from what it deleted.
+// back from the bin, by the keys the client knows from what it deleted. A host older than the bin
+// deleted for good, so it gets neither.
 
 import { Delete02Icon } from '@hugeicons/core-free-icons'
 import type { SessionSummary } from '@shared/agent-host'
@@ -9,6 +10,7 @@ import { undoToast } from '@renderer/features/sidebar/undo'
 import { errorMessage, hostAt } from '@renderer/lib/host'
 import { i18n } from '@renderer/lib/i18n'
 import { hostOfSession, sessionTitle } from '@renderer/stores/sessions'
+import { hostHasBin } from './support'
 
 /** Puts `keys` back from the bin of the host `hostId`, a request at most as long as one may be. */
 async function restore(hostId: string | null, keys: readonly string[]): Promise<void> {
@@ -22,23 +24,25 @@ async function restore(hostId: string | null, keys: readonly string[]): Promise<
 
 /**
  * Shows `title` with Undo, which restores `keys` from the bin of the host `hostId` (null for this
- * computer).
+ * computer). False when that host has no bin, which deleted for good, and nothing was shown.
  */
 export function binnedToast(
   title: string,
   keys: readonly string[],
   hostId: string | null = null,
-): void {
-  if (keys.length === 0) return
+): boolean {
+  if (keys.length === 0 || !hostHasBin(hostId)) return false
   undoToast(
     title,
     () => void restore(hostId, keys).catch((error: unknown) => toast(errorMessage(error))),
     Delete02Icon,
   )
+  return true
 }
 
 /** The toast for sessions that went to the bin, on whichever hosts they were. */
-export function binnedSessionsToast(summaries: readonly SessionSummary[]): void {
+export function binnedSessionsToast(all: readonly SessionSummary[]): void {
+  const summaries = all.filter((summary) => hostHasBin(hostOfSession(summary)))
   if (summaries.length === 0) return
   const byHost = new Map<string | null, string[]>()
   for (const summary of summaries) {

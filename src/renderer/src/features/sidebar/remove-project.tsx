@@ -14,6 +14,7 @@ import {
 } from '@renderer/components/ui/alert-dialog'
 import { toast } from '@renderer/components/ui/toast'
 import { binnedToast, movedTitle } from '@renderer/features/recycle-bin/undo'
+import { useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { errorMessage } from '@renderer/lib/host'
 import { hostOfPath, hostPath } from '@renderer/lib/host-paths'
 import { useProjectsStore } from '@renderer/stores/projects'
@@ -34,6 +35,7 @@ export function RemoveProjectDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const { t } = useTranslation(['sidebar', 'common'])
+  const binOn = useHostHasBin(hostOfPath(project.path))
   // A sub-agent is part of its session, so it is not counted on its own.
   const [sessions, running] = useSessionsStore(
     useShallow((s) => {
@@ -65,9 +67,13 @@ export function RemoveProjectDialog({
         </AlertDialogHeader>
         <AlertDialogDescription className="text-small text-tertiary">
           {[
-            sessions > 0
-              ? t('project.remove.sessions', { count: sessions })
-              : t('project.remove.noSessions'),
+            binOn
+              ? sessions > 0
+                ? t('project.remove.sessions', { count: sessions })
+                : t('project.remove.noSessions')
+              : sessions > 0
+                ? t('project.remove.sessionsForGood', { count: sessions })
+                : t('project.remove.noSessionsForGood'),
             running > 0 && t('project.remove.running', { count: running }),
             !project.missing && t('project.remove.folderStays'),
           ]
