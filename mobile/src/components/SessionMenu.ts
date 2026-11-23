@@ -22,6 +22,7 @@ import { PRESET_LABEL, laterTimes } from '../tidy'
 import { TOOL_CALL_VIEWS } from '@shared/zen-view'
 import { setThreadView, threadViewOf, VIEW_LABEL } from '../threadView'
 import { momentText } from '../ui/session/format'
+import { muteHint } from '../push/muted'
 
 export interface SessionMenuContext {
   summary: SessionSummary
@@ -147,6 +148,7 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
       {
         key: 'mute',
         label: ctx.muted ? '取消静音' : '静音通知',
+        subtitle: muteHint(summary, ctx.muted),
         icon: ctx.muted ? G.unmute : G.mute,
         onPress: ctx.onMute,
       },

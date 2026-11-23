@@ -38,6 +38,7 @@ import { clearComputer, dropThread, readLists, writeLists } from './cache'
 import { currentAddress, deviceKey, linkTo } from './connection'
 import { dropDrafts } from './drafts'
 import { dropSeen } from './seen'
+import { liftMuted } from './push/muted'
 import { dropOutbox } from './outbox'
 import { watchWakeups, type WakeReason } from './reconnect'
 import { createStore, sameFields, sameItems, useSelector } from './select'
@@ -591,6 +592,8 @@ export function HostProvider(props: { children: ReactNode }) {
         syncedAt: Date.now(),
         syncFailed: false,
       }))
+      // Sessions this phone muted on its own before the computer kept mutes go to the computer.
+      void liftMuted(link, list).catch(() => {})
     } catch (error) {
       if (mine === generation.current) setHost({ syncFailed: true })
       throw error
