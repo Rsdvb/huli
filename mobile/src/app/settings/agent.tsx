@@ -21,6 +21,7 @@ import { AGENT_NAME_CHARS } from '@shared/settings'
 import type { AgentId } from '@shared/thread'
 import { admin } from '../../admin'
 import { RenameDialog } from '../../components/RenameDialog'
+import { PacedBar, paceWords } from '../../components/PaceTick'
 import { Sheet, type SheetItem } from '../../components/Sheet'
 import { useHost } from '../../host'
 import { platformOf } from '../../linkInfo'
@@ -880,11 +881,14 @@ function EnableGroup({ status }: { status: AgentStatus }) {
 function LimitRow({ limit }: { limit: PlanLimit }) {
   const { c } = useTokens()
   const used = Math.max(0, Math.min(100, limit.usedPercent ?? 0))
+  // Read when the row renders: a reading or a change of view renders it again, no clock is kept.
+  const now = Date.now()
+  const pace = paceWords(limit, now)
   return (
     <View
       style={styles.limit}
       accessible
-      accessibilityLabel={`${windowName(limit)}：已用 ${percent(limit)}`}
+      accessibilityLabel={`${windowName(limit)}：已用 ${percent(limit)}${pace ? `，${pace}` : ''}`}
     >
       <View style={styles.limitLine}>
         <Text style={[typeScale.body, styles.flex, { color: c.text }]} numberOfLines={1}>
@@ -892,9 +896,13 @@ function LimitRow({ limit }: { limit: PlanLimit }) {
         </Text>
         <Text style={[typeScale.callout, { color: c.textSecondary }]}>{percent(limit)}</Text>
       </View>
-      <View style={[styles.track, { backgroundColor: c.track }]}>
-        <View style={[styles.fill, { width: `${used}%`, backgroundColor: limitColor(limit, c) }]} />
-      </View>
+      <PacedBar limit={limit} now={now} height={6} color={c.textSecondary}>
+        <View style={[styles.track, { backgroundColor: c.track }]}>
+          <View
+            style={[styles.fill, { width: `${used}%`, backgroundColor: limitColor(limit, c) }]}
+          />
+        </View>
+      </PacedBar>
       {limit.resetsAt ? (
         <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
           {resetText(limit.resetsAt)}

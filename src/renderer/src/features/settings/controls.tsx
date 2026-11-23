@@ -207,6 +207,8 @@ export function Meter({
   level = 'ok',
   text,
   long,
+  pace = null,
+  paceText,
 }: {
   /** 0 to 100. */
   value: number
@@ -216,6 +218,10 @@ export function Meter({
   /** The percent as shown; the rounded value otherwise. */
   text?: string
   long?: boolean
+  /** Huli: where the even pace's tick stands, 0 to 100; null for none. */
+  pace?: number | null
+  /** Huli: what the tick means, shown on hover. */
+  paceText?: string
 }) {
   return (
     <span className="k-meter">
@@ -226,8 +232,11 @@ export function Meter({
         aria-valuemin={0}
         aria-valuemax={100}
         className={cn('k-meter__bar', long && 'k-meter__bar--long')}
+        data-paced={pace === null ? undefined : ''}
+        title={pace === null ? undefined : paceText}
       >
         <span className={LIMIT_FILL[level]} style={{ width: `${Math.min(100, value)}%` }} />
+        {pace !== null && <i className="kettu-pace" style={{ left: `${pace}%` }} />}
       </span>
       <span className={cn('k-num k-meter__value', level !== 'ok' && LIMIT_TEXT[level])}>
         {text ?? `${Math.round(value)}%`}

@@ -6576,6 +6576,25 @@ body:has(.ui-mdpc[data-open], .ui-ccc__menu[data-open='true']) .kettu-toasts {
   background: var(--meter);
 }
 
+/* Huli: where a plan bar would stand were the window's use spread evenly over it. The bar lets
+   the tick stand out above and below; its fill keeps its own rounded ends. */
+.kettu-pace {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--text-secondary);
+  pointer-events: none;
+}
+.kettu-limit__bar[data-paced],
+:is(.kettu-settings, .kettu-sd) .k-meter__bar[data-paced],
+.kettu-pace-host {
+  position: relative;
+  overflow: visible;
+}
+
 /* The Model Picker: room for the names next to the bars and keys, the agent's mark without a
    tile, one line under the switches, and effort as one track with a sliding thumb. */
 .kettu-model-picker .ui-mdpc__pop {

@@ -218,7 +218,9 @@
       "resets": "Resets {{time}}",
       "updated": "Updated {{ago}}",
       "planOf": "Plan · {{plan}}",
-      "title": "Plan limits"
+      "title": "Plan limits",
+      "paceUsed": "At an even pace, {{percent}}% would be used by now",
+      "paceLeft": "At an even pace, {{percent}}% would be left by now"
     },
     "cache": {
       "title": "Prompt cache",
