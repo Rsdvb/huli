@@ -228,7 +228,10 @@
       "planOf": "Plan · {{plan}}",
       "title": "Plan limits",
       "paceUsed": "At an even pace, {{percent}}% would be used by now",
-      "paceLeft": "At an even pace, {{percent}}% would be left by now"
+      "paceLeft": "At an even pace, {{percent}}% would be left by now",
+      "switchTo": "Click to show {{view}}",
+      "trayLeft": "{{percent}}% left",
+      "trayUsed": "{{percent}}% used"
     },
     "cache": {
       "title": "Prompt cache",

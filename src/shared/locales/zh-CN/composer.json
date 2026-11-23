@@ -225,7 +225,10 @@
       "planOf": "套餐 · {{plan}}",
       "title": "套餐限额",
       "paceUsed": "按均匀速度，此刻应已用 {{percent}}%",
-      "paceLeft": "按均匀速度，此刻应还剩 {{percent}}%"
+      "paceLeft": "按均匀速度，此刻应还剩 {{percent}}%",
+      "switchTo": "点一下改成显示{{view}}",
+      "trayLeft": "剩 {{percent}}%",
+      "trayUsed": "已用 {{percent}}%"
     },
     "cache": {
       "title": "提示词缓存",

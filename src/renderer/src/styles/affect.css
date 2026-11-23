@@ -2239,7 +2239,7 @@ li[data-row-exit='dust'] > * {
   background: var(--bg-surface);
 }
 .kp-emu__reset:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
 }
 /* Huli: the dev servers .claude/launch.json names, with Start. */
@@ -9118,4 +9118,18 @@ body:has(.ui-mdpc[data-open], .ui-ccc__menu[data-open='true']) .kettu-toasts {
   gap: 16px;
   font-size: 13px;
   color: var(--muted);
+}
+/* Huli: the plan limits' Used/Left switch in the context popover's heading. */
+.kettu-ctx__view {
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.kettu-ctx__view:hover {
+  opacity: 1;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.kettu-ctx__view:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
 }

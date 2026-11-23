@@ -69,6 +69,7 @@ import { cn } from '@renderer/lib/utils'
 import { showSending } from '@renderer/stores/threads'
 import { loadContext, refreshLimits, useUsageStore } from '@renderer/stores/usage'
 import { toggleSidePane } from '@renderer/stores/view'
+import { useSettingsStore } from '@renderer/stores/settings'
 import { REQUESTS_ICON } from '@renderer/features/requests/icon'
 import { readsModelRequests } from '@renderer/features/requests/support'
 import { useSessionView } from '@renderer/features/session/use-thread'
@@ -497,7 +498,9 @@ function TrayLimit({ limit }: { limit: PlanLimit }) {
     reset && isUsedUp(limit)
       ? t('common:planInline.out')
       : limit.usedPercent !== null
-        ? `${limitPercent(limit, view)}%`
+        ? t(view === 'left' ? 'usage.limits.trayLeft' : 'usage.limits.trayUsed', {
+            percent: limitPercent(limit, view),
+          })
         : null
   return (
     <span className="kettu-tray-limit" data-level={trayLevel(limit)}>
@@ -847,10 +850,30 @@ function PlanLimits({ limits, account }: { limits: PlanLimit[]; account: AgentAc
       <div className="kettu-ctx__plan-head">
         <span>
           {t('usage.limits.title')}
-          <span className="font-normal opacity-70">
-            {' · '}
-            {t(view === 'left' ? 'common:planView.left' : 'common:planView.used')}
-          </span>
+          {' · '}
+          {/* Huli: the Used/Left switch every plan limit follows, right where it shows. */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  className="kettu-ctx__view font-normal opacity-70"
+                  onClick={() =>
+                    void useSettingsStore
+                      .getState()
+                      .update({ usage: { limits: view === 'left' ? 'used' : 'left' } })
+                  }
+                />
+              }
+            >
+              {t(view === 'left' ? 'common:planView.left' : 'common:planView.used')}
+            </TooltipTrigger>
+            <TooltipContent>
+              {t('usage.limits.switchTo', {
+                view: t(view === 'left' ? 'common:planView.used' : 'common:planView.left'),
+              })}
+            </TooltipContent>
+          </Tooltip>
         </span>
         {plan && <span className="kettu-ctx__tier">{plan}</span>}
       </div>
