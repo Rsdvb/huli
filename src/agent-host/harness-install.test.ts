@@ -163,6 +163,42 @@ describe('a first install of a harness that fails', () => {
   })
 })
 
+describe("a first install of a vendor's own package", () => {
+  it('takes the newest version in its range, so no update is on offer once it is done', async () => {
+    const root = await tempFolder('kite-fresh-install-')
+    // Outside the Registry, as DeepSeek Harness: Kite bundles a version and npm has newer ones.
+    const vendor: AgentDefinition = {
+      ...GEMINI,
+      launch: {
+        ...GEMINI.launch,
+        fromVendor: true,
+        updates: '~1.0.0',
+      } as AgentDefinition['launch'],
+    }
+    const installed: string[] = []
+    const { agents, status } = await manager(root, vendor, hostSettings({}), {
+      bundled: parseBundled({ registry: { agents: [] }, kettu: { gemini: { version: '1.0.0' } } }),
+      // No check ran before, as on a computer's first start.
+      fetchLatest: async () => ({ adapterVersion: '1.0.5', cliVersion: null }),
+      install: async (options: InstallOptions) => {
+        installed.push(options.version)
+        return writeInstall(root, options.version)
+      },
+    })
+    await agents.detectAll()
+    expect(status()).toMatchObject({ state: 'available', package: { installed: false } })
+
+    await agents.install('gemini')
+    expect(installed).toEqual(['1.0.5'])
+    expect(status()).toMatchObject({
+      state: 'available',
+      task: null,
+      update: null,
+      package: { installed: true, version: '1.0.5' },
+    })
+  })
+})
+
 describe("the user's update check", () => {
   it('reads again the version of a program updated outside Kite', async () => {
     const root = await tempFolder('kite-outside-update-')
