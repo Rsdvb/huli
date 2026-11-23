@@ -378,6 +378,7 @@ function Session() {
   const terminalAllowed = useTerminalAllowed(link, hostState)
   const managerBanner = useEntryOn('phone.managerBanner')
   const devServers = useEntryOn('phone.devServers')
+  const mcpPage = useEntryOn('phone.mcp')
   // A system menu says nothing as it opens, so what it shows is read beforehand there.
   const agentOptions = useAgentOptions(
     link,
@@ -1118,12 +1119,16 @@ function Session() {
           ...(backgroundCount > 0 ? { detail: `${backgroundCount} 个运行中` } : {}),
           onPress: () => router.push({ pathname: '/background/[id]', params: { id } }),
         },
-        {
-          key: 'mcp',
-          label: 'MCP 服务器',
-          icon: G.plug,
-          onPress: () => router.push({ pathname: '/mcp/[id]', params: { id } }),
-        },
+        ...(mcpPage
+          ? [
+              {
+                key: 'mcp',
+                label: 'MCP 服务器',
+                icon: G.plug,
+                onPress: () => router.push({ pathname: '/mcp/[id]', params: { id } }),
+              },
+            ]
+          : []),
         ...(devServers
           ? [
               {

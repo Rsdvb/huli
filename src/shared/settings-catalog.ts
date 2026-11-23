@@ -262,6 +262,7 @@ export const FEATURE_GROUP: Readonly<Record<FeatureId, FeatureGroup>> = {
   sessionMentions: 'work',
   zenView: 'work',
   sandbox: 'agents',
+  mcpPanel: 'agents',
   devices: 'agents',
   secrets: 'agents',
   agentTheme: 'agents',
