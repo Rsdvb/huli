@@ -2472,7 +2472,8 @@
     "cannotToggle": "{{agent}} can't turn this MCP server off or on",
     "cannotReload": "{{agent}} can't reload its skills and plugins without starting again",
     "unsupported": "{{agent}} can't do this from Kite",
-    "loginPage": "{{agent}} gave no web page to sign in at"
+    "loginPage": "{{agent}} gave no web page to sign in at",
+    "noticeGone": "This notice is no longer in the session"
   },
   "review": {
     "subagent": "A subagent's changes are reviewed from the session it works for",

@@ -12,7 +12,11 @@ import type { Validators } from '../rpc'
 type Fields = Record<string, unknown>
 
 export type SessionMcpMethod =
-  'sessions.mcp' | 'sessions.mcpAct' | 'sessions.mcpLogin' | 'sessions.reloadPlugins'
+  | 'sessions.mcp'
+  | 'sessions.mcpAct'
+  | 'sessions.mcpLogin'
+  | 'sessions.reloadPlugins'
+  | 'sessions.dismissNotice'
 
 const ID_CHARS = 256
 // eslint-disable-next-line no-control-regex
@@ -26,9 +30,13 @@ function fields(value: unknown): Fields {
 }
 
 function sessionId(o: Fields): string {
-  const value = o.sessionId
+  return id(o, 'sessionId')
+}
+
+function id(o: Fields, key: 'sessionId' | 'entryId'): string {
+  const value = o[key]
   if (typeof value !== 'string' || value.length === 0 || value.length > ID_CHARS) {
-    throw invalidParams(`sessionId must be a string of 1 to ${ID_CHARS} characters`)
+    throw invalidParams(`${key} must be a string of 1 to ${ID_CHARS} characters`)
   }
   return value
 }
@@ -65,6 +73,10 @@ export const sessionMcpValidators: Pick<Validators, SessionMcpMethod> = {
   'sessions.mcpLogin': (params) => {
     const o = fields(params)
     return { sessionId: sessionId(o), server: serverName(o.server) }
+  },
+  'sessions.dismissNotice': (params) => {
+    const o = fields(params)
+    return { sessionId: sessionId(o), entryId: id(o, 'entryId') }
   },
   'sessions.reloadPlugins': (params) => {
     if (params === undefined || params === null) return {}

@@ -2071,6 +2071,9 @@ export interface HostContract {
     params: { sessionId: string; server: string }
     result: { url: string | null }
   }
+  // Huli: hides a thread's notice of an MCP server that failed or needs a sign-in; the server is
+  // told of again only once its state changes.
+  'sessions.dismissNotice': { params: { sessionId: string; entryId: string }; result: void }
   // Huli: the agent reloads its skills and plugins without starting again, in the session, or
   // without one in every session whose agent runs, so a newly installed one applies.
   'sessions.reloadPlugins': { params: { sessionId?: string }; result: PluginReload }
@@ -3087,6 +3090,7 @@ export const HOST_METHODS = [
   'sessions.mcp',
   'sessions.mcpAct',
   'sessions.mcpLogin',
+  'sessions.dismissNotice',
   'sessions.reloadPlugins',
   'sessions.toBackground',
   'sessions.cleanTasks',

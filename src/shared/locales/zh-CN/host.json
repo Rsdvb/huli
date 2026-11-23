@@ -2451,7 +2451,8 @@
     "cannotToggle": "{{agent}} 不能关闭或打开这个 MCP 服务器",
     "cannotReload": "{{agent}} 不重启就不能重新加载技能和插件",
     "unsupported": "{{agent}} 不支持在纸鸢里这样做",
-    "loginPage": "{{agent}} 没有给出可以登录的网页"
+    "loginPage": "{{agent}} 没有给出可以登录的网页",
+    "noticeGone": "这条提示已经不在会话里了"
   },
   "review": {
     "subagent": "子 Agent 的改动请在它所属的会话里审查",

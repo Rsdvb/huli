@@ -564,6 +564,13 @@ and where each agent keeps its own; the panel is the session's live view.
   init and `setMcpServers`, Codex's `mcpServer/startupStatus/updated`) carry `mcpServers`, the
   names as the agent gives them, which the panel lists by too. Under such a notice 查看 MCP 服务器
   opens the panel scrolled to the first and marks it; the phone's opens its MCP page at it.
+  A server is told of once in a state per session: the agent reports its servers each time it
+  starts (Claude Code after a refused key or a resume, Codex after its own restart), so the
+  thread decides (`mcpNoticeSaid` in `shared/thread.ts`): a notice is added only when the latest
+  notice naming the server does not tell of that state (`mcpState`), or it left that state since
+  (connected or turned off, recorded on that notice as `mcpRecovered`). Codex's error text no
+  longer makes a new notice. 关闭提示 (`sessions.dismissNotice`, either app) hides the notice
+  (`dismissed`); the server is told of again only once its state changes.
 - Nothing reads before the panel opens (its dialog is a lazy chunk); it reads again on Refresh,
   after an action, 250 ms after the last `session.mcpChanged`, and on the window's return while a
   sign-in waits; no timer otherwise.
@@ -577,7 +584,9 @@ and where each agent keeps its own; the panel is the session's live view.
   computer's loopback alone.
 - Tests: `claude/connection.test.ts` and `codex/connection.test.ts` (Huli: a session's MCP panel,
   Claude's sign-in among them), `session-mcp/validate.test.ts`, `rpc.test.ts` (a device's
-  sign-in refused), the notices' names in `claude/mapper-huli.test.ts` and `thread.test.ts`.
+  sign-in refused), the notices' names and their once per state across restarts in
+  `claude/mapper-huli.test.ts`, `codex/connection.test.ts` (warnings about Codex itself) and
+  `thread.test.ts`.
 
 ### Risk levels and auto-approve (风险等级、自动批准低风险操作)
 

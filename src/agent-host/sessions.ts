@@ -12115,6 +12115,16 @@ export class SessionManager {
     return loginSessionMcp(this.mcpSession(sessionId), server)
   }
 
+  /** Hides an MCP server's notice the user dismissed; the thread keeps it for what it records. */
+  async dismissNotice(sessionId: string, entryId: string): Promise<void> {
+    this.recordOf(sessionId)
+    const live = await this.revive(sessionId)
+    const entry = live.thread.byId[entryId]
+    if (entry?.kind !== 'notice' || !entry.mcpServers) throw notFound(t('sessionMcp.noticeGone'))
+    if (entry.dismissed) return
+    this.emit(live, [{ op: 'entry.update', id: entryId, changes: { dismissed: true } }])
+  }
+
   /** Reloads skills and plugins in the session, or in every session whose agent runs. */
   async reloadPlugins(sessionId?: string): Promise<PluginReload> {
     const ids =

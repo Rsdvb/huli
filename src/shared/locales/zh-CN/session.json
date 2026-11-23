@@ -2364,7 +2364,8 @@
       "enable": "没能打开 {{name}}：{{error}}"
     },
     "notice": {
-      "open": "查看 MCP 服务器"
+      "open": "查看 MCP 服务器",
+      "dismiss": "关闭提示"
     }
   }
 }

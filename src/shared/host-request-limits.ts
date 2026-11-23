@@ -175,6 +175,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'sessions.mcp': AGENT_MS,
   'sessions.mcpAct': AGENT_MS,
   'sessions.mcpLogin': AGENT_MS,
+  'sessions.dismissNotice': HOST_MS,
   'sessions.reloadPlugins': AGENT_MS,
   'sessions.toBackground': AGENT_MS,
   'sessions.cleanTasks': AGENT_MS,
