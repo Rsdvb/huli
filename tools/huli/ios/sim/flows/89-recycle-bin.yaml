@@ -40,8 +40,10 @@ appId: io.github.rsdvb.huli
 - extendedWaitUntil:
     visible: '.*已移到回收站'
     timeout: 10000
-- takeScreenshot: b02-binned-notice
-- tapOn: '撤销'
+# The notice stays 5 s; a screenshot first can outlast it, so 撤销 is tapped at once.
+- tapOn:
+    text: '撤销'
+    waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
     visible: '.*Fix the flaky login test.*'
     timeout: 10000
