@@ -230,6 +230,8 @@ import { ScratchFolders } from './scratch'
 import { createWorktreeGit } from './worktrees/git'
 import { WorktreeManager } from './worktrees/manager'
 import { ComputerDriver, probePermissions } from './computer/driver'
+import { ElevatedDriver } from './computer/elevated'
+import { ElevatedInstall } from './computer/elevated-install'
 import { ComputerHelper } from './computer/helper'
 import { networkStateFile, subscriptionsFile } from './node-proxy/files'
 import { NodeProxy, type NodeProxyDeps } from './node-proxy/service'
@@ -246,6 +248,7 @@ import { getEnv } from './find-command'
 import { moliRoot } from './web-reader/install'
 import { WebReaderService } from './web-reader/service'
 import { ComputerUse } from './computer/service'
+import { ComputerToolError } from './computer/tools'
 import { SessionFiles } from './session-files'
 import { SessionManager, type SessionTimings } from './sessions'
 import { EnvironmentService, type EnvironmentServiceDeps } from './shell-env'
@@ -562,6 +565,8 @@ export class AgentHost {
   private readonly artifactData: ArtifactData
   /** Agents using the desktop apps of this computer; null on a host without the driver. */
   private readonly computer: ComputerUse | null
+  /** Huli: the elevated helper's install in Program Files, on Windows. */
+  private readonly elevatedInstall: ElevatedInstall | null
   /** What the user allowed the artifacts' pages, and the questions asking for it. */
   private readonly consents: ArtifactConsents
   /** The page runtime's requests in flight, from main and from devices' remote hosts. */
@@ -964,16 +969,43 @@ export class AgentHost {
     const helper = computer?.helperPath
       ? new ComputerHelper({ path: computer.helperPath, log })
       : null
+    this.elevatedInstall =
+      platform === 'win32'
+        ? new ElevatedInstall({
+            helper,
+            client: process.execPath,
+            mode: () => this.settings.computerUse.elevated,
+          })
+        : null
     this.computer = computer
       ? new ComputerUse({
           platform,
           driver: new ComputerDriver({ path: computer.driverPath, log }),
           helper,
-          // Huli: no elevated helper yet; apps run as administrator stay refused.
-          elevate: null,
+          // Huli: only the copy the owner installed into Program Files runs as administrator.
+          elevate:
+            platform === 'win32' && helper
+              ? async (pid) => {
+                  const installed = await helper.layout(process.execPath)
+                  if (installed.state !== 'current' || !(await this.elevatedInstall?.ready())) {
+                    throw notInstalled()
+                  }
+                  const { sid } = await helper.whoami()
+                  if (!sid) throw new Error('Windows did not name this account.')
+                  return ElevatedDriver.start({
+                    target: pid,
+                    user: sid,
+                    helper,
+                    installDir: installed.installDir,
+                    lang: this.settings.locale === 'zh-CN' ? 'zh-CN' : 'en',
+                    log,
+                  })
+                }
+              : null,
           foreground: (sessionId, app) => this.sessions.computerForeground(sessionId, app),
           elevatedStopped: (sessionId, app) =>
             this.sessions.computerElevatedStopped(sessionId, app),
+          elevatedReady: async () => (await this.elevatedInstall?.ready()) ?? false,
           self: { pids: [computer.selfPid, process.pid], ids: computer.selfIds },
           settings: () => this.settings.computerUse,
           turnRefusal: (sessionId) => this.sessions.computerRefusal(sessionId),
@@ -4689,6 +4721,27 @@ export class AgentHost {
       'computer.stopElevated': ({ sessionId }) => {
         this.computer?.stopElevated(sessionId)
       },
+      // Huli: the elevated helper's install, through Windows' administrator prompt, for someone
+      // at this computer.
+      'computer.elevatedStatus': async (_params, { device }) => {
+        if (device) throw new HostError('forbidden', 'This works only on this computer.')
+        return { state: (await this.elevatedInstall?.status()) ?? ('unsupported' as const) }
+      },
+      // Installing only while the user allows administrator use; removing whatever the setting.
+      'computer.installElevated': async (_params, { device }) => {
+        if (device) throw new HostError('forbidden', 'This works only on this computer.')
+        if (!this.elevatedInstall) return { state: 'unsupported' as const, cancelled: false }
+        try {
+          return await this.elevatedInstall.install()
+        } catch (error) {
+          throw new HostError('forbidden', (error as Error).message)
+        }
+      },
+      'computer.uninstallElevated': async (_params, { device }) => {
+        if (device) throw new HostError('forbidden', 'This works only on this computer.')
+        if (!this.elevatedInstall) return { state: 'unsupported' as const, cancelled: false }
+        return this.elevatedInstall.uninstall()
+      },
       'computer.takeOver': ({ sessionId }) => {
         this.computer?.takeOver(sessionId)
       },
@@ -4792,4 +4845,17 @@ export class AgentHost {
       'devices.forget': ({ deviceId }) => this.deviceAccess.remove(deviceId),
     }
   }
+}
+
+/**
+ * Huli: the elevated helper is not installed in Program Files for this Kite, is of another
+ * protocol, or changed; only the user installs it, from Settings.
+ */
+function notInstalled(): ComputerToolError {
+  return new ComputerToolError(
+    'elevated',
+    'The administrator helper is not installed for this Kite, is out of date, or changed. Ask ' +
+      'the user to install it again under “Operate programs run as administrator” in Settings › ' +
+      'Computer use.',
+  )
 }

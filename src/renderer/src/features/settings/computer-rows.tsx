@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { BrowserIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import {
@@ -8,15 +8,192 @@ import {
   type ComputerApp,
   type ComputerPermission,
   type ComputerPermissionKind,
+  ELEVATED_MODES,
+  type ElevatedHelperChange,
+  type ElevatedHelperState,
+  type ElevatedMode,
 } from '@shared/computer-use'
 import { Icon } from '@renderer/components/affect/app-shell'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@renderer/components/ui/alert-dialog'
 import { Kbd, KbdGroup } from '@renderer/components/ui/kbd'
-import { errorMessage } from '@renderer/lib/host'
+import { Spinner } from '@renderer/components/ui/spinner'
+import { errorMessage, host } from '@renderer/lib/host'
 import { platform } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { useSettingsStore } from '@renderer/stores/settings'
-import { ControlError, Pill, SetButton, SettingSwitch } from './controls'
-import { ItemLine, Thing } from './rows'
+import { ControlError, Pill, SetButton, SettingSelect, SettingSwitch } from './controls'
+import { BlockLine, ItemLine, Thing } from './rows'
+
+/**
+ * Huli: whether agents may drive programs run as administrator: off (the default) or always.
+ * Turning it on waits on a dialog that says what an agent outside a sandbox could do with it, and
+ * nothing changes until the user confirms. The helper's install in Program Files is its own
+ * step, only when the user chooses Install while it is on; Remove stays here whatever the setting,
+ * since turning it off leaves the helper installed, so Settings asks the helper how the install
+ * stands whatever the setting.
+ */
+export function ElevatedChoice({ text }: { text: ReactNode }) {
+  const { t } = useTranslation('settings')
+  const mode = useSettingsStore((s) => s.settings.computerUse.elevated)
+  const [asking, setAsking] = useState<ElevatedMode | null>(null)
+  const [state, setState] = useState<ElevatedHelperState | null>(null)
+  const [busy, setBusy] = useState<'install' | 'remove' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  // Asked again after each change of the setting, so turning it off offers removal.
+  const [looked, setLooked] = useState(0)
+  useEffect(() => {
+    let gone = false
+    host('computer.elevatedStatus', undefined).then(
+      (answer) => !gone && setState(answer.state),
+      () => !gone && setState(null),
+    )
+    return () => {
+      gone = true
+    }
+  }, [looked])
+  const save = (next: ElevatedMode) => {
+    setError(null)
+    useSettingsStore
+      .getState()
+      .update({ computerUse: { elevated: next } })
+      .then(() => setLooked((n) => n + 1))
+      .catch((caught: unknown) => setError(errorMessage(caught)))
+  }
+  const choose = (next: ElevatedMode) => {
+    if (ELEVATED_MODES.indexOf(next) > ELEVATED_MODES.indexOf(mode)) setAsking(next)
+    else save(next)
+  }
+  const change = async (what: 'install' | 'remove') => {
+    setBusy(what)
+    setError(null)
+    try {
+      const answer: ElevatedHelperChange = await host(
+        what === 'install' ? 'computer.installElevated' : 'computer.uninstallElevated',
+        undefined,
+      )
+      setState(answer.state)
+      const done = what === 'install' ? answer.state === 'current' : answer.state === 'missing'
+      if (done) return
+      if (answer.cancelled) setError(t('computer.elevated.cancelled'))
+      else if (answer.state !== 'tampered') {
+        setError(t('computer.elevated.failed', { code: answer.exitCode ?? '?' }))
+      }
+    } catch (caught) {
+      setError(errorMessage(caught))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const installed = state === 'current' || state === 'outdated' || state === 'tampered'
+  const canInstall = mode !== 'off' && (state === 'missing' || state === 'outdated')
+  const note =
+    state === 'tampered'
+      ? t('computer.elevated.tampered')
+      : mode === 'off' && installed
+        ? t('computer.elevated.leftInstalled')
+        : state === 'outdated'
+          ? t('computer.elevated.outdated')
+          : state === 'missing' && mode !== 'off'
+            ? t('computer.elevated.install.note')
+            : null
+  return (
+    <>
+      <BlockLine text={text}>
+        <ControlError error={error} />
+        <SettingSelect
+          label={t('computer.elevated.name')}
+          value={mode}
+          disabled={busy !== null}
+          options={ELEVATED_MODES.map((value) => ({
+            value,
+            label: t(`computer.elevated.mode.${value}`),
+            hint: t(`computer.elevated.hint.${value}`),
+            danger: value === 'always',
+          }))}
+          onChange={choose}
+        />
+      </BlockLine>
+      {(note || installed || canInstall) && (
+        <div className="k-block-note flex flex-wrap items-center gap-2">
+          {note && <span className="min-w-0 flex-1">{note}</span>}
+          {busy ? (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Spinner className="size-3.5" />
+              {t('computer.elevated.waiting')}
+            </span>
+          ) : (
+            <>
+              {canInstall && (
+                <SetButton size="sm" onClick={() => void change('install')}>
+                  {state === 'missing'
+                    ? t('computer.elevated.install.action')
+                    : t('computer.elevated.reinstall')}
+                </SetButton>
+              )}
+              {installed && (
+                <SetButton size="sm" variant="ghost" onClick={() => void change('remove')}>
+                  {t('computer.elevated.remove')}
+                </SetButton>
+              )}
+            </>
+          )}
+        </div>
+      )}
+      <ElevatedConfirm
+        mode={asking}
+        onAnswer={(confirmed) => {
+          const next = asking
+          setAsking(null)
+          if (confirmed && next) save(next)
+        }}
+      />
+    </>
+  )
+}
+
+/**
+ * Asks before administrator use is turned on: an agent outside a sandbox runs as the user, so it can
+ * take over the administrator prompt; what the design cannot fix; and that it is the user's call.
+ */
+export function ElevatedConfirm({
+  mode,
+  onAnswer,
+}: {
+  mode: ElevatedMode | null
+  onAnswer: (confirmed: boolean) => void
+}) {
+  const { t } = useTranslation(['settings', 'common'])
+  return (
+    <AlertDialog open={mode !== null} onOpenChange={(next) => !next && onAnswer(false)}>
+      <AlertDialogContent className="sm:max-w-[460px]">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('computer.elevated.confirm.title')}</AlertDialogTitle>
+          <AlertDialogDescription className="space-y-2">
+            <span className="block">{t('computer.elevated.confirm.hijack')}</span>
+            <span className="block">{t('computer.elevated.confirm.always')}</span>
+            <span className="block">{t('computer.elevated.confirm.unfixed')}</span>
+            <span className="block">{t('computer.elevated.confirm.yours')}</span>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={() => onAnswer(true)}>
+            {t('computer.elevated.confirm.allowAlways')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
 
 /** The switch, on this computer's own settings whichever host the page shows. */
 export function ComputerSwitch({

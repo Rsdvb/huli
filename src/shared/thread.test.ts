@@ -428,8 +428,7 @@ describe('isThreadEntry', () => {
       appId: 'regedit2.exe',
       appName: 'Tool',
       decision: null,
-      ask: 'risky',
-      step: { kind: 'click', text: 'Delete' },
+      ask: 'elevated',
       after: null,
     },
     {
@@ -543,8 +542,7 @@ describe('isThreadEntry', () => {
     expect(isThreadEntry({ ...app, decision: 'project' })).toBe(false)
     expect(isThreadEntry({ ...app, after: 1 })).toBe(false)
     expect(isThreadEntry({ ...app, ask: 'root' })).toBe(false)
-    expect(isThreadEntry({ ...app, ask: 'risky', step: { kind: 'shell', text: null } })).toBe(false)
-    expect(isThreadEntry({ ...app, ask: 'risky', step: { kind: 'key', text: 5 } })).toBe(false)
+    expect(isThreadEntry({ ...app, ask: 'risky' })).toBe(false)
     const report = valid.find((entry) => entry.kind === 'problem_report')!
     expect(isThreadEntry({ ...report, details: undefined })).toBe(false)
     expect(isThreadEntry({ ...report, at: '1700000000000' })).toBe(false)

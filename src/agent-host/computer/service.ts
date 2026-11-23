@@ -17,6 +17,7 @@ import type {
   ComputerToolErrorCode,
   ComputerUseSettings,
   ComputerWindowRef,
+  ElevatedMode,
 } from '@shared/computer-use'
 import {
   COMPUTER_APP_WAIT_MS,
@@ -34,10 +35,9 @@ import {
   blockedApp,
   refusedMenuItem,
   refusedShortcut,
-  riskyStep,
+  startsPrograms,
   type BlockReason,
   type DriverApp,
-  type RiskyStep,
   type SelfApp,
 } from './policy'
 import { isBlankPng, placeholderPng } from './screenshot'
@@ -77,10 +77,9 @@ export interface ElevatedDriverLike extends DriverLike {
   onClosed: (() => void) | null
 }
 
-/** What a card asks beside a first use, and the step a risky one names. */
+/** What a card asks beside a first use. */
 export interface ComputerAsk {
   kind: ComputerAppAsk
-  step: RiskyStep | null
 }
 
 export interface ComputerUseDeps {
@@ -96,7 +95,7 @@ export interface ComputerUseDeps {
   sessionTitle(sessionId: string): string
   /**
    * Shows the first use of an app in the session's thread, or (Huli) `ask`: leave to drive it as
-   * administrator, or to take a risky step there. The answer comes to `answer`.
+   * administrator. The answer comes to `answer`.
    */
   asked(sessionId: string, requestId: number, app: ComputerApp, ask?: ComputerAsk): void
   /** The wait ended, with its answer, so the card shows it. */
@@ -137,6 +136,8 @@ export interface ComputerUseDeps {
   foreground?(sessionId: string, app: string): void
   /** Huli: the user ended the elevated helper: the thread says so. */
   elevatedStopped?(sessionId: string, app: string): void
+  /** Huli: whether the elevated helper is installed and current, without which it never runs. */
+  elevatedReady?(): Promise<boolean>
   log: LogFn
 }
 
@@ -194,8 +195,6 @@ interface WindowRead {
   shot: { width: number; height: number } | null
   /** Element frames in screen points, by their row in the window's latest snapshot. */
   frames: Map<number, Bounds>
-  /** Huli: element labels by their row, for naming a risky click. */
-  labels: Map<number, string>
 }
 
 /** The app a call touches, as the label on the composer shows it. */
@@ -411,7 +410,7 @@ export class ComputerUse {
     if (this.setups.size > 0) void this.check()
     this.syncWatch()
     const settings = this.deps.settings()
-    if (!settings.allowElevated) {
+    if (this.elevatedMode() === 'off') {
       for (const sessionId of [...this.elevatedRuns.keys()]) void this.endElevated(sessionId)
     }
     if (settings.enabled) return
@@ -523,11 +522,19 @@ export class ComputerUse {
       throw invalidToken()
     }
     // Huli: an app run as administrator is refused up front, or, as the user allowed, driven
-    // through the elevated helper, in the background only and with risky steps confirmed.
+    // through the elevated helper, in the background only and with risky steps confirmed. Off,
+    // this is exactly as without the helper.
     const settings = this.deps.settings()
     const elevated = call.tool !== 'computer_list_windows' && (await this.isElevated(call.pid))
-    const viaElevated = elevated && settings.allowElevated && !!this.deps.elevate
-    if (elevated && !viaElevated && call.acts) throw elevatedError(app, !!this.deps.elevate)
+    const viaElevated = elevated && (await this.elevatedOn())
+    if (elevated && !viaElevated && call.acts) throw elevatedError(app)
+    // Their own dialogs start programs, which would run as administrator too.
+    if (viaElevated && startsPrograms(app.id)) {
+      throw new ComputerToolError(
+        'blocked',
+        `${app.name} starts other programs, so computer use never drives it as administrator.`,
+      )
+    }
     const foreground = call.args.delivery_mode === 'foreground'
     if (viaElevated && foreground) {
       throw new ComputerToolError(
@@ -543,7 +550,6 @@ export class ComputerUse {
     const target: DriverLike = viaElevated
       ? await this.elevatedDriver(sessionId, app, call.pid)
       : driver
-    if (viaElevated && call.acts) await this.confirmRisky(sessionId, app, call)
     if (this.stopped.has(sessionId)) throw stoppedError()
     const using: Using = { name: app.name, path, action: call.acts ? 'act' : 'read' }
     this.take(sessionId, using, call)
@@ -993,11 +999,16 @@ export class ComputerUse {
     )
     const notes = ['Apps marked not available are never used.']
     if (rows.some((row) => row.elevated)) {
+      const on = await this.elevatedOn()
       notes.push(
-        this.deps.settings().allowElevated && this.deps.elevate
+        on
           ? 'Apps marked as administrator run with administrator rights, which computer use ' +
-              'lacks; using one asks the user to allow it and to confirm Windows’ administrator ' +
-              'prompt.'
+              'lacks; use one only when the task needs it. Your first call asks the user, who ' +
+              'then confirms Windows’ administrator prompt and the helper’s own window. It acts ' +
+              'in the background only, asks the user before risky steps (a step they ' +
+              'refuse comes back refused: ask them how to go on) and ends with the turn. Programs ' +
+              'that start other programs, such as consoles, Task Manager and Explorer, are never ' +
+              'available this way.'
           : 'Apps marked as administrator run with administrator rights, which computer use ' +
               'lacks, so Windows keeps it from clicking or typing there. Ask the user to run the ' +
               'app normally if you need it.',
@@ -1008,6 +1019,21 @@ export class ComputerUse {
         ? 'No apps are running.'
         : `Running apps:\n${lines.join('\n')}\n\n${notes.join(' ')}`
     return { content: [{ type: 'text', text }], structuredContent: { apps: rows } }
+  }
+
+  /** Huli: who may drive apps run as administrator here; off where there is no elevated helper. */
+  private elevatedMode(): ElevatedMode {
+    return this.deps.elevate ? this.deps.settings().elevated : 'off'
+  }
+
+  /**
+   * Huli: whether administrator use runs now: allowed, and the helper installed in Program Files,
+   * current. A setting written into the file by something other than Settings' dialog does nothing
+   * without the install, which only the user's administrator prompt makes.
+   */
+  private async elevatedOn(): Promise<boolean> {
+    if (this.elevatedMode() === 'off') return false
+    return this.deps.elevatedReady ? this.deps.elevatedReady() : true
   }
 
   /** Huli: whether a process runs above Kettu's integrity level, which Windows keeps it from driving. */
@@ -1046,9 +1072,7 @@ export class ComputerUse {
     const key = `${sessionId}\n${app.id}\nelevated`
     let asking = this.asking.get(key)
     if (!asking) {
-      asking = this.ask(sessionId, app, { kind: 'elevated', step: null }).finally(() =>
-        this.asking.delete(key),
-      )
+      asking = this.ask(sessionId, app, { kind: 'elevated' }).finally(() => this.asking.delete(key))
       this.asking.set(key, asking)
     }
     const answer = await asking
@@ -1087,8 +1111,8 @@ export class ComputerUse {
     }
     if (run?.driver?.running) return run.driver
     if (run?.starting) return run.starting
-    // The switch may have gone off while the card waited.
-    if (!this.deps.settings().allowElevated) throw elevatedError(app, true)
+    // The setting may have gone off while the card waited.
+    if (!(await this.elevatedOn())) throw elevatedError(app)
     const elevate = this.deps.elevate!
     const starting = elevate(pid).then((driver) => {
       if (driver) return driver
@@ -1146,33 +1170,6 @@ export class ComputerUse {
     if (hold.elevated === elevated) return
     hold.elevated = elevated
     this.emit(hold)
-  }
-
-  /** Huli: asks the user before a risky step in an app run as administrator. */
-  private async confirmRisky(
-    sessionId: string,
-    app: ComputerApp,
-    call: ComputerCall,
-  ): Promise<void> {
-    const step = riskyStep(call, this.labelOf(call))
-    if (!step) return
-    const answer = await this.ask(sessionId, app, { kind: 'risky', step })
-    if (answer === 'session' || answer === 'always') return
-    if (this.stopped.has(sessionId)) throw stoppedError()
-    throw new ComputerToolError(
-      'not_allowed',
-      answer === 'timeout'
-        ? 'The user did not confirm that step in time, so it was not taken.'
-        : 'The user did not allow that step, so it was not taken. Ask them how to go on.',
-    )
-  }
-
-  /** The label of the element a click's token names, from its window's latest read. */
-  private labelOf(call: ComputerCall): string | null {
-    if (!call.elementToken || call.pid === null || call.windowId === null) return null
-    const read = this.windows.get(windowKey(call.pid, call.windowId))
-    const row = Number(call.elementToken.slice(call.elementToken.indexOf(':') + 1))
-    return read?.labels.get(row) ?? null
   }
 
   /**
@@ -1298,7 +1295,6 @@ export class ComputerUse {
     const width = found.screenshot_width
     const height = found.screenshot_height
     const read: WindowRead = {
-      labels: diff && before ? new Map(before.labels) : new Map(),
       title: typeof found.window_title === 'string' ? found.window_title : (before?.title ?? null),
       bounds: boundsOf(found.window_bounds) ?? before?.bounds ?? null,
       shot:
@@ -1309,12 +1305,9 @@ export class ComputerUse {
     }
     if (Array.isArray(found.elements)) {
       for (const element of found.elements as unknown[]) {
-        const e = element as { element_index?: unknown; frame?: unknown; label?: unknown } | null
+        const e = element as { element_index?: unknown; frame?: unknown } | null
         const frame = frameOf(e?.frame)
         if (typeof e?.element_index === 'number' && frame) read.frames.set(e.element_index, frame)
-        if (typeof e?.element_index === 'number' && typeof e.label === 'string') {
-          read.labels.set(e.element_index, e.label)
-        }
       }
       delete found.elements
     }
@@ -1492,15 +1485,12 @@ function stillTheirs(app: string): CallToolResult {
   }
 }
 
-function elevatedError(app: ComputerApp, canAsk: boolean): ComputerToolError {
+function elevatedError(app: ComputerApp): ComputerToolError {
   return new ComputerToolError(
     'elevated',
     `${app.name} runs as administrator (管理员权限运行，普通权限无法操作): computer use runs ` +
       'without administrator rights, so Windows does not let it click or type there. ' +
-      (canAsk
-        ? 'Ask the user to run it normally, or, if they want you to drive it as administrator, to ' +
-          'turn on “Allow operating chosen programs as administrator” in Settings › Computer use.'
-        : 'Ask the user to run it normally, or to do this step themselves.'),
+      'Ask the user to run it normally, or to do this step themselves.',
   )
 }
 

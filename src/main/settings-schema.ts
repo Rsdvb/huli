@@ -38,7 +38,7 @@ import {
   USER_FONT_ROLES,
   ZOOM_LEVELS,
 } from '@shared/settings'
-import { isComputerApp, isStopShortcut } from '@shared/computer-use'
+import { ELEVATED_MODES, isComputerApp, isStopShortcut } from '@shared/computer-use'
 import { FEATURE_IDS } from '@shared/features'
 import {
   cleanChoice,
@@ -379,7 +379,7 @@ const SECTION_FIELDS = {
     pauseOnUse: isBoolean,
     stopShortcut: isStopShortcutValue,
     allowForeground: isBoolean,
-    allowElevated: isBoolean,
+    elevated: oneOf(...ELEVATED_MODES),
   },
   agentNetwork: {
     enabled: isBoolean,

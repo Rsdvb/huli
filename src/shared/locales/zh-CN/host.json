@@ -266,7 +266,6 @@
     "terminalRename": "想把你的终端「{{terminal}}」改名为「{{name}}」",
     "computerApp": "想使用 {{app}}",
     "computerElevated": "想以管理员权限使用 {{app}}",
-    "computerRisky": "请你确认在 {{app}} 里的一步操作",
     "computerSetup": "想使用你的电脑",
     "controlAsk": {
       "sign_in": "请你登录 {{target}}",

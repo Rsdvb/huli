@@ -465,7 +465,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     pauseOnUse: true,
     stopShortcut: '',
     allowForeground: true,
-    allowElevated: false,
+    elevated: 'off',
   },
   agentNetwork: DEFAULT_AGENT_NETWORK,
   // Personal fork: the self-hosted mode, in which nothing reaches Kettu's services; paired devices

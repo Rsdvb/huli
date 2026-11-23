@@ -74,7 +74,7 @@ All your coding agents, side by side in one window that looks good and feels rig
 - **Built-in browser**: agents open pages, click, type and take screenshots; take over at any time.
 - **Artifacts**: the pages, documents, slides and canvases agents make. Lay out a canvas's frames and mark them up for the agent, comment, edit them yourself, or export them to Word and PowerPoint.
 - **Publish to Kettu**: give an artifact its own page on kettu.page, private, behind an access code or public.
-- **Computer use**: once you turn it on, agents use the apps on your computer, and read the text of custom-drawn windows with the system's OCR.
+- **Computer use**: once you turn it on, agents use the apps on your computer, read the text of custom-drawn windows with the system's OCR, and, only where you allow it, operate a program you run as administrator.
 - **Routines**: run an agent on a schedule; every run is kept as a session.
 - **Marketplace**: discover, install and manage plugins, skills, MCP servers and workflows for your agents in one place.
 - **Search**: one command palette for sessions, artifacts, routines, projects, settings and actions.

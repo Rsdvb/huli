@@ -163,6 +163,44 @@ describe("the agents' lower priority", () => {
   })
 })
 
+// Huli: who may drive apps run as administrator.
+describe('administrator use of computer use', () => {
+  it('is off for a file from before it, and the old switch turns nothing on', async () => {
+    await save({ version: 1, computerUse: { enabled: true, allowElevated: true } })
+    const settings = (await SettingsStore.load(dir)).get()
+    expect(settings.computerUse.elevated).toBe('off')
+    expect(settings.computerUse).not.toHaveProperty('allowElevated')
+    expect(hostSettings(settings, 'en').computerUse.elevated).toBe('off')
+  })
+
+  it('keeps a stored choice and drops one it does not know', async () => {
+    await save({ version: 1, computerUse: { elevated: 'always' } })
+    expect((await SettingsStore.load(dir)).get().computerUse.elevated).toBe('always')
+    // `sandbox` was a choice of an unreleased build only.
+    for (const elevated of ['sandbox', 'on', true, 'ALWAYS', null]) {
+      await save({ version: 1, computerUse: { elevated } })
+      expect((await SettingsStore.load(dir)).get().computerUse.elevated).toBe('off')
+    }
+  })
+
+  it('takes only its two choices, and never from a paired device', () => {
+    for (const elevated of ['off', 'always']) {
+      expect(() => validateSettingsPatch({ computerUse: { elevated } })).not.toThrow()
+    }
+    for (const elevated of ['sandbox', 'on', true, 1, null, 'Always', ' always']) {
+      expect(() => validateSettingsPatch({ computerUse: { elevated } })).toThrow()
+    }
+    expect(() => validateSettingsPatch({ computerUse: { allowElevated: true } })).toThrow(
+      'Unknown setting',
+    )
+    // The computer's own setting: a device's change of it is refused as a client key.
+    expect(splitSettingsPatch({ computerUse: { elevated: 'always' } })).toEqual({
+      host: null,
+      client: { computerUse: { elevated: 'always' } },
+    })
+  })
+})
+
 // Huli: the sandbox default and its approvals rule.
 describe('the sandbox settings', () => {
   it('start off, keep known values and drop the rest', async () => {

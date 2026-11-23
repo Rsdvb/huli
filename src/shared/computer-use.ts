@@ -72,13 +72,13 @@ export type ComputerAppAnswer = ComputerAppDecision | 'timeout'
 
 /**
  * Huli: what else an app card asks besides a first use: to drive an app that runs as administrator
- * through an elevated helper, which starts with the system's administrator prompt, or to take one
- * risky step in such an app. Neither has an Always allow.
+ * through the elevated helper, which then starts with the system's administrator prompt and its own
+ * confirmation window. It has no Always allow; risky steps are confirmed in the helper's window.
  */
-export type ComputerAppAsk = 'elevated' | 'risky'
+export type ComputerAppAsk = 'elevated'
 
 export function isComputerAppAsk(value: unknown): value is ComputerAppAsk {
-  return value === 'elevated' || value === 'risky'
+  return value === 'elevated'
 }
 
 /** How long a call waits for the user to answer a first use of an app. */
@@ -89,6 +89,20 @@ export type ComputerSetupStep = 'enable' | 'accessibility' | 'screen-recording'
 
 export function isComputerSetupStep(value: unknown): value is ComputerSetupStep {
   return value === 'enable' || value === 'accessibility' || value === 'screen-recording'
+}
+
+/**
+ * Huli: the elevated helper's install in Program Files: none, current for this Kite, outdated
+ * (another protocol or Kite program), tampered (its files are not the ones it recorded, or others
+ * than administrators may change them), or unsupported off Windows.
+ */
+export type ElevatedHelperState = 'unsupported' | 'missing' | 'current' | 'outdated' | 'tampered'
+
+/** Huli: what an install or removal left, and whether the owner said no at the prompt. */
+export interface ElevatedHelperChange {
+  state: ElevatedHelperState
+  cancelled: boolean
+  exitCode?: number | null
 }
 
 /** How a setup card ended: all done, the user said not now, or not done in time. */
@@ -120,11 +134,16 @@ export interface ComputerUseSettings {
    */
   allowForeground: boolean
   /**
-   * Huli: Windows only. An agent may ask to drive an app that runs as administrator, which the
-   * user approves app by app and confirms with the system's administrator prompt.
+   * Huli: Windows only. Whether agents may ask to drive an app that runs as administrator, which
+   * the user then approves app by app and confirms at the system's administrator prompt: no
+   * (`off`) or any session (`always`). Off until the user confirms the risk in Settings.
    */
-  allowElevated: boolean
+  elevated: ElevatedMode
 }
+
+/** Huli: the choices of administrator use, narrowest first. */
+export const ELEVATED_MODES = ['off', 'always'] as const
+export type ElevatedMode = (typeof ELEVATED_MODES)[number]
 
 /** Stop from anywhere: Control, Option, Command and period on macOS; with Shift elsewhere. */
 export function defaultStopShortcut(platform: string): string {
@@ -137,7 +156,7 @@ export const DEFAULT_COMPUTER_USE: ComputerUseSettings = {
   pauseOnUse: true,
   stopShortcut: '',
   allowForeground: true,
-  allowElevated: false,
+  elevated: 'off',
 }
 
 const SHORTCUT_MODIFIERS = new Set(['Control', 'Alt', 'Shift', 'Command', 'Super'])

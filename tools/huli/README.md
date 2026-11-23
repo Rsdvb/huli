@@ -1358,15 +1358,142 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
   notes it once a turn per app, and the floating label notes each time. Off, the agent hears it was
   not tried. An agent may ask for the foreground on any action, which the same switch allows. An
   action the driver delivered in the foreground by itself (Windows menus) is noted the same way.
-- **Administrator use** is held back: driving a program run as administrator through an elevated
-  helper the owner approves at Windows' prompt is not in the app yet, pending a security rework of
-  where the elevated programs run from and who may start them. The service keeps the hook
-  (`elevate` in `ComputerUseDeps`, null in the host), the cards and the badge for it.
+- **Administrator use** (操作以管理员身份运行的程序, Windows, `computerUse.elevated`, `access:
+'read'` so agents never change it, a computer setting a paired device cannot change): 关闭
+  (`off`, the default, and what any older file reads as; the old `allowElevated` switch is
+  dropped) or 始终允许（高风险） (`always`). Turning it on opens a short dialog: an agent outside a
+  sandbox runs as the user and could imitate the prompt or the helper's windows; once on, any
+  session may ask, and the approved program's Open and Save dialogs can change any file as
+  administrator; what the design cannot fix (another program can raise an identical prompt for its
+  own command, or slip code into the helper while the prompt is open); and that it is the user's
+  call, with turning it off leaving the helper installed for Remove. Nothing changes until they
+  confirm. `always` counts as on only while the install in Program Files is current
+  (`ElevatedInstall.ready` in `elevated-install.ts`, kept while the installed files' sizes and
+  times stay the same, so the 33 MB driver is not hashed on every call), so a value written into
+  the settings file does nothing without an install only the user's prompt makes. Off, computer use
+  is exactly as without the helper: the same refusal and list notes and the guide unchanged; turned
+  off, a running helper ends. Settings asks the helper how the install stands whatever the setting
+  (it reads the system's Program Files folder, not an environment variable), so Remove stays
+  reachable. A
+  choice limited to sandboxed sessions was tried and dropped: a container's agent gets none of
+  Kite's MCP tools, so it had no session to serve. Settings › 功能管理 lists it under computer use
+  with a link to its row.
+  - The helper is installed only when the user presses Install while the setting is on (the host
+    refuses it otherwise), never by an update. The warm helper stages itself and the driver in a
+    temporary folder, holds the folder (no delete sharing) and the files (read-only, read sharing
+    alone) open and hashes the held handles; that only keeps them from changing in passing, as a
+    program of the user's can close another's handles. What holds is the record: the prompt starts
+    Windows' `cmd.exe`, which makes `%ProgramFiles%\Kite Computer Helper`, writes `install.txt`
+    itself (one ASCII line: the protocol, both files' SHA-256 and Kite's program as UTF-8 hex, all
+    fixed in the command line the owner approves) and then runs Windows' `robocopy.exe` to copy the
+    two files. The record is in a folder only administrators write, and the installed files are
+    checked against it at every look and start, whatever robocopy's exit code was: a copy that is
+    not the staged one, or one that failed on a file, reads `tampered` for as long as it is there.
+    Remove runs `cmd.exe` `rd`, whatever the setting and whatever .NET variables are set, as no
+    .NET program runs for it. So no program from the user-writable app folder runs as
+    administrator, and a newer Kite of the same protocol (`Layout.Protocol`) keeps using the
+    installed copy; only a new protocol asks for a new install. Every start also checks that only
+    administrators, SYSTEM and TrustedInstaller own or may change the folder, its parent and the
+    files.
+  - Every prompt goes through `ShellExecuteEx` with `SEE_MASK_CLASSKEY` on
+    `HKLM\SOFTWARE\Classes\exefile` (`Shell.cs`), so the user's `HKCU\Software\Classes` cannot put
+    a command of its own behind the prompt; a test build asks the same way with the open verb. The
+    install's prompt is cmd.exe too ("Windows Command Processor"), whose details show robocopy.exe
+    and `…\Kite Computer Helper\install.txt`, as the install note in Settings tells. To
+    check this on a test machine (never on the owner's own), remember the guard below refuses first
+    while `HKCU\Software\Classes\exefile\shell` exists, so a plain run tests only the guard:
+    either create the harmless override after the guard passed and before the prompt is asked, or
+    call `Shell.Start` directly from a scratch program compiled with the helper's sources, using
+    csc's `/main` option to pick its entry point, with a harmless override in place, and see that
+    the prompt still runs the program asked for. Also try the route the guard does not look at: a
+    user `.exe` mapped to a ProgID of its own (`HKCU\Software\Classes\.exe` set to `KiteVmTest`,
+    with `HKCU\Software\Classes\KiteVmTest\shell\runas\command` running something harmless);
+    pressing Install should still show the "Windows Command Processor" prompt with Kite's line under
+    Show more details, and run it.
+  - Before install and every start the warm helper refuses while a variable that makes .NET load
+    code (`COR_*`, `COMPlus_*`, `CORECLR_*`, `APPDOMAIN_MANAGER_ASM`/`_TYPE`, `DOTNET_*` but the
+    SDK's own) is set in its own environment, in `HKCU\Environment`, in `HKCU\Volatile Environment`
+    or any of its per-session subkeys, or in the machine's; while
+    `HKCU\Software\Microsoft\.NETFramework` holds a knob that loads code (`AltJit`, `JitName`,
+    `InstallRoot`, ...); while `HKCU\Software\Classes\exefile\shell` exists; or while the user
+    set their own `SystemRoot` or `windir` (`Guard.cs`). The prompt then starts Windows' `cmd.exe`
+    (`/d`, no AutoRun), which is no .NET program; it clears the fixed code-loading names it can name
+    and sets `SystemRoot` and `windir` from `GetSystemWindowsDirectory`, `PATH` to System32 and
+    `TEMP` to the install folder's, then starts the broker, whose `Main` checks its own environment
+    and the user's registry again and refuses to go on with any such name or another Windows folder.
+    What is written into the registry, or under a name cmd.exe cannot clear, while the prompt is
+    open still reaches the runtime before `Main`. `connect` checks the pipe's server is that
+    launcher's child, started after it, running the installed helper as administrator.
+  - An action or read of an elevated app shows a card naming it, which says the program's Open and
+    Save dialogs can change any file as administrator (only this computer's window can answer).
+    Programs that start other programs or run what is typed into them (consoles and terminals,
+    Task Manager, Explorer, process tools, script hosts and interpreters, msiexec, mmc, regedit,
+    editors with a terminal or macros: `startsPrograms` in `policy.ts`, `Launchers` in
+    `Broker.cs`) are refused here and in the broker, by the image's own file name.
+  - The broker trusts nothing it was started with: it matches the program's image exactly as
+    Windows names it (no trailing dot or short name) and its start time, requires it to run as
+    administrator and to have no programs of its own running, then shows its own window naming
+    the program, its window and the process that asks, with its command line and parent; it says
+    that process claims to be Kite. Its pipe's DACL names Kite's user by SID with a medium
+    no-read-up/no-write-up label. Its client must be the installed helper's `connect` mode, a
+    child of the agent host whose image is the recorded Kite program, as that user, with the
+    session's token (only the SHA-256 is on the command line); any process can run Kite's program,
+    so this binds the broker to Kite only loosely and its own checks are what holds.
+  - While it runs, the program sits in a job whose process limit (set before it joins) lets it
+    start nothing directly; the limit is lifted when the broker ends. The driver runs from the
+    install folder in a kill-on-close job that lets it start nothing, with Windows' folders from
+    the system, its home and temporary folders under the install folder (administrators and SYSTEM
+    only) and a PATH of System32 alone.
+  - It relays only the read and input tools, with only Kite's arguments, each of its type, choice
+    and range, an element token or a point but not both, keys from a fixed set, `initialize` and
+    `_meta` held to what Kite's client sends, `delivery_mode: "background"` on every action, one
+    tool call at a time (released only by that call's own answer), scoped to the program's windows,
+    re-serialized; a request whose id is no whole number within ±2^53 or short string of
+    printable ASCII, or that uses an id again, ends the session. (The JSON reader turns a lone
+    surrogate into U+FFFD, and what goes to the driver is written as strict UTF-8, which would
+    refuse one.) It confirms every step in its
+    own window but plainly harmless ones (`Risk.cs`): a click only on an element of a focusing or
+    selecting role from the snapshot that gave its token, with one left click and a label that
+    commits nothing; typing only into the edit field the last step clicked (no element token, or
+    that field's), with no line break or tab. Typed text with any other control character
+    (U+0000-U+001F, U+007F-U+009F), which a field takes as a command such as paste, is refused.
+    Every question shows the whole window with a red box
+    at the step (both ends of a drag), typed text in full with control, direction and invisible
+    characters made visible, and what went through unasked since the last question; in a window
+    that shows files (one holding the shell's folder view or folder tree, as Open, Save and Browse
+    for Folder dialogs do, or a popup menu of a program that has such a window) it says a step there
+    can change any file as administrator, and drags there are refused. Paste is refused on the
+    routes the broker can tell, not every route: its shortcuts, a menu item or a click on an element
+    named Paste in English, Chinese, Japanese, Korean, German, French, Spanish, Italian, Portuguese,
+    Russian, Dutch, Polish, Turkish or Swedish, and, while a context menu or the menu bar is open
+    (after a right-click, a click on a menu item, the menu key with or without Shift, Shift+F10,
+    Alt, F10 or Alt with a letter), a letter, Enter, typed text or a click by a point, so its items
+    are clicked by their element and their names are checked; besides the steps it tracked, it asks
+    the program's thread whether it is in a menu (`GetGUIThreadInfo`). The clipboard itself is
+    never shown.
+    Clicks it cannot place and text longer than
+    1,000 characters are refused too. Its Allow button works only after the window has been in
+    front for a second with no other program's window over it, the second starting again after a
+    window covered it. No answer in two minutes is a no. The broker ends with the hold (turn end,
+    idle, Stop), after three refused steps, when the driver delivered in the foreground, after
+    thirty minutes, or when the program or the agent host exits. No UIAccess.
+  - Not fixed, as it needs a broker that is no .NET program, a secure desktop or a per-machine
+    install: `.NETFramework` knobs and unlisted `COMPlus_` names written while the prompt is open
+    reach the runtime before the broker's `Main` sees them; any program of the user's can raise the
+    same Microsoft-signed cmd.exe prompt for its own commands; a process with a
+    borrowed UIAccess token can still click the broker's windows; the install copies what the
+    per-user app folder holds at that moment; the broker's binding to Kite is a speed bump; the
+    approved program's own dialogs can change files as administrator; and services the program asks
+    (WMI, Task Scheduler, installers) can still start programs outside its job.
 
 A test copy (`KITE_TEST_WINDOW=background`) keeps computer use's floating label and light off every
 display and registers no stop shortcut. To try computer use there, start a window of your own and
 drive it through the fake agent's `fake:/computer <tool> <json> ; ...` turns (see
-`tools/fake-agent/computer.ts`).
+`tools/fake-agent/computer.ts`). `src/agent-host/computer/elevated.test.ts` builds a test helper
+(`build.mjs --test`: installs into a folder of its own, starts with no prompt, answers its own
+windows and may read a private registry hive file in place of the user's) and runs the install, the
+environment checks, the broker and its checks end to end without elevation or touching the real
+registry.
 
 ### Kite in development
 

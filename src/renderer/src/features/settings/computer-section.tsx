@@ -7,7 +7,13 @@ import { errorMessage } from '@renderer/lib/host'
 import { isMac, isWindows, platform } from '@renderer/lib/platform'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { Pill } from './controls'
-import { AllowedAppRow, ComputerSwitch, PermissionRow, StopShortcut } from './computer-rows'
+import {
+  AllowedAppRow,
+  ComputerSwitch,
+  ElevatedChoice,
+  PermissionRow,
+  StopShortcut,
+} from './computer-rows'
 import type { GroupDef, RowDef, SectionDef } from './model'
 import { GroupNote } from './rows'
 
@@ -98,6 +104,17 @@ export function useComputerUseSection(): SectionDef {
         <ComputerSwitch label={t('computer.allowForeground.name')} setting="allowForeground" />
       ),
     },
+    ...(isWindows
+      ? [
+          {
+            id: 'elevated',
+            setting: 'computer-use.elevated',
+            group: main,
+            layout: 'block',
+            render: (text) => <ElevatedChoice text={text} />,
+          } satisfies RowDef,
+        ]
+      : []),
     {
       id: 'stop-shortcut',
       setting: 'computer-use.stop-shortcut',

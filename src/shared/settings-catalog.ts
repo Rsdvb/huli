@@ -3,6 +3,7 @@
 // Kettu's settings tools read the same entries, so a row added to the page is one agents see.
 
 import { isFullAccessMode } from './agents'
+import { ELEVATED_MODES } from './computer-use'
 import { FEATURE_IDS, featureOn, type FeatureId } from './features'
 import { takesAutoCompact } from './auto-compact'
 import { IDLE_RELEASE_MODES } from './idle-release'
@@ -978,6 +979,22 @@ const ENTRIES = {
     access: 'ask',
     warning: 'agentSettings.warning.computerForeground',
     ...flag('computerUse', 'allowForeground', (file) => file.computerUse.allowForeground),
+  },
+  // Huli: apps run as administrator. Agents read it and never change it: only the user widens
+  // it, after a dialog that says what an agent outside a sandbox could do with it.
+  'computer-use.elevated': {
+    section: 'computer-use',
+    row: 'elevated',
+    group: 'computer.groups.use',
+    name: 'computer.elevated.name',
+    description: 'computer.elevated.description',
+    keywords: 'computer.elevated.keywords',
+    part: 'desktop',
+    access: 'read',
+    on: (ctx) => ctx.desktop && ctx.platform === 'win32',
+    kind: 'choice',
+    options: choices(ELEVATED_MODES, (mode) => `computer.elevated.mode.${mode}`),
+    get: (file) => file.computerUse.elevated,
   },
   'computer-use.stop-shortcut': {
     section: 'computer-use',
@@ -2468,6 +2485,18 @@ const ENTRIES = {
     description: 'features.computerUse.description',
     keywords: 'features.keywords',
     part: 'desktop',
+    kind: 'action',
+  },
+  // Huli: administrator use lives on computer use's page; this row says how it stands and leads there.
+  'features.computer-elevated': {
+    section: 'features',
+    row: 'computer-elevated',
+    group: 'features.groups.agents',
+    name: 'features.computerElevated.name',
+    description: 'features.computerElevated.description',
+    keywords: 'computer.elevated.keywords',
+    part: 'desktop',
+    on: (ctx) => ctx.desktop && ctx.platform === 'win32',
     kind: 'action',
   },
 } as const satisfies Record<string, CatalogEntry>

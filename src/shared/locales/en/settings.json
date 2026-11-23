@@ -668,6 +668,39 @@
       "description": "An action an app ignores in the background, as many Electron apps and games do, is tried once with its window brought to the front, which then goes back. The thread and a label on screen say so.",
       "keywords": "foreground front focus electron background delivery computer use"
     },
+    "elevated": {
+      "name": "Operate programs run as administrator",
+      "description": "Lets agents ask to operate a program you run as administrator. Each time you allow it in the session, then confirm Windows’ prompt (for “Windows Command Processor”, which starts Kite’s helper) and the helper’s own window; risky steps ask again. Programs that start other programs, such as consoles, Task Manager and Explorer, are never operated this way.",
+      "keywords": "administrator admin elevated uac run as administrator computer use",
+      "mode": {
+        "off": "Off",
+        "always": "Always allow (high risk)"
+      },
+      "hint": {
+        "off": "None can be operated",
+        "always": "Any session may ask"
+      },
+      "install": {
+        "action": "Install helper",
+        "note": "The administrator helper goes into Program Files once. Windows then asks you to allow “Windows Command Processor”: approve that prompt only right after you pressed Install, and under Show more details it should name robocopy.exe and …\\Kite Computer Helper\\install.txt."
+      },
+      "outdated": "The installed helper is from an older version of Kite. Install it again to use it.",
+      "tampered": "The installed helper changed after it was installed, so Kite no longer uses it. Remove it, then install it again.",
+      "leftInstalled": "The administrator helper is still installed in Program Files.",
+      "waiting": "Waiting for Windows’ administrator prompt…",
+      "reinstall": "Install again",
+      "remove": "Remove helper",
+      "cancelled": "You said no at Windows’ prompt, so nothing changed.",
+      "failed": "That did not work (code {{code}}).",
+      "confirm": {
+        "title": "Let agents operate programs run as administrator?",
+        "hijack": "An agent on this computer that is not in a sandbox runs as you. It could imitate Windows’ administrator prompt or the helper’s confirmation window, so that what you approve is not what you think.",
+        "always": "Once it is on, any session may ask; each program still asks you in its session first. The approved program’s Open and Save dialogs can change any file as administrator.",
+        "unfixed": "Some of this cannot be fixed in Kite’s current design: another program can raise an identical Windows prompt for its own command, or slip code into the helper while the prompt is open.",
+        "yours": "It is your decision. Turning it off leaves the helper in Program Files, where you can remove it here.",
+        "allowAlways": "Always allow"
+      }
+    },
     "stopShortcut": {
       "name": "Stop from anywhere",
       "description": "Stops using the computer from any app, also while Kettu is in the background, where a label shows at the top of the screen.",
@@ -697,7 +730,7 @@
     },
     "windows": {
       "name": "Windows",
-      "description": "Needs no permission. Programs run as administrator cannot be used, and some actions in Electron apps need the window in front."
+      "description": "Needs no permission. Programs run as administrator cannot be used unless you allow it above, and some actions in Electron apps need the window in front."
     },
     "desktop": {
       "name": "Desktop",
@@ -3286,6 +3319,11 @@
       "description": "Agents operate apps on this computer. It has its own switch on the Computer use page.",
       "on": "On",
       "off": "Off",
+      "open": "Open"
+    },
+    "computerElevated": {
+      "name": "Programs run as administrator",
+      "description": "Part of computer use, chosen on its page.",
       "open": "Open"
     },
     "items": {

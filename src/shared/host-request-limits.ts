@@ -375,6 +375,10 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'memory.import': HOST_MS,
   'computer.stop': AGENT_MS,
   'computer.stopElevated': AGENT_MS,
+  'computer.elevatedStatus': AGENT_MS,
+  // The owner answers Windows' administrator prompt in that time.
+  'computer.installElevated': 11 * 60_000,
+  'computer.uninstallElevated': 11 * 60_000,
   'computer.takeOver': HOST_MS,
   'computer.handBack': HOST_MS,
   'computer.show': AGENT_MS,
