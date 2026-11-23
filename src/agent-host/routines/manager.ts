@@ -27,12 +27,11 @@ import {
   type RunStatus,
   type RunView,
 } from '@shared/routines'
-import { limitsForModel } from '@shared/plan-limits'
+import { limitsForModel, resetTimeText, windowParts } from '@shared/plan-limits'
 import type { AgentId, ConfigOption } from '@shared/thread'
 import { HostError } from '../errors'
 import { eventPrompt } from '../github-flow/decide'
-import { t } from '../i18n'
-import { resetTime, windowName } from '../limit-text'
+import { currentLocale, t } from '../i18n'
 import type { JsonFile, LogFn, RoutinesFile } from '../storage'
 import type { ThreadStore } from '../threads/store'
 import type { RoutineCallName, RoutineCalls, RoutineRunStats } from './calls'
@@ -1288,7 +1287,7 @@ export class RoutinesManager {
     name: K,
     params: RoutineCalls[K]['params'],
   ): Promise<RoutineCalls[K]['result']> {
-    if (!this.deps.threads) return Promise.reject(new Error('The thread database is not open'))
+    if (!this.deps.threads) return Promise.reject(new Error(t('threadDb.notOpen')))
     return this.deps.threads.routine(name, params)
   }
 }
@@ -1318,6 +1317,30 @@ function pauseView({ agentId, limit }: LimitPause): NonNullable<RoutineView['pau
     usedPercent: limit.state === 'reached' ? null : limit.usedPercent,
     resetsAt: limit.resetsAt,
   }
+}
+
+/**
+ * A plan-limit window's name inside a sentence: Kettu's for the windows it knows, else the agent's
+ * own, with a per-model week as "Fable weekly" so it does not read as two windows.
+ */
+export function windowName(limit: PlanLimit): string {
+  const parts = windowParts(limit)
+  if (!parts.kind) return limit.label
+  const say = (table: 'planWindow' | 'planWindowInText'): string => {
+    const key = `${table}.${parts.kind}`
+    return parts.count === null
+      ? (t as (key: string) => string)(key)
+      : (t as (key: string, params: { count: number }) => string)(key, { count: parts.count })
+  }
+  if (parts.scope) {
+    return t('planWindowInText.scoped', { scope: parts.scope, window: say('planWindowInText') })
+  }
+  return parts.provider ? `${parts.provider} · ${say('planWindow')}` : say('planWindow')
+}
+
+/** When a window resets, in the interface language. */
+export function resetTime(at: number, now: number): string {
+  return resetTimeText(at, now, currentLocale())
 }
 
 // Pi has no mode to set; its caption says it does not ask before it acts.

@@ -14,6 +14,7 @@ export const SCENARIOS = [
   'out-of-credit',
   'plan-limit',
   'refusal',
+  'limit-stop',
   'large-history',
   'slow-start',
   'all-updates',
@@ -26,6 +27,7 @@ export const SCENARIOS = [
   'svg',
   'shell',
   'usage',
+  'extra-usage',
   'status',
   'context',
   'recall',
@@ -108,6 +110,9 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
     description: 'The model declines to go on, as Claude ends a turn with stop_reason refusal',
     hint: '--plain: without a word of its own first',
   },
+  'limit-stop': {
+    description: 'Uses up the 5-hour window, then fails the turn as Claude Code does at a limit',
+  },
   'large-history': {
     description: 'Makes reopening this session replay 1,000 entries',
     hint: '--entries <n>',
@@ -145,6 +150,11 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   usage: {
     description: "The plan limits, as Claude Code's /usage reports them",
     hint: '--plain --unreadable',
+  },
+  'extra-usage': {
+    description:
+      'The 5-hour window used up while extra usage lets requests through, as Claude Code reports it',
+    hint: 'off: the window reset; refused: still used up and extra usage no longer covers it',
   },
   status: { description: "The plan limits, as Codex's /status reports them" },
   context: { description: "What fills the context, as Claude Code's /context reports it" },

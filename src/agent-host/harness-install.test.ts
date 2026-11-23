@@ -58,6 +58,7 @@ function hostSettings(agents: HostSettings['agents']): HostSettings {
     idleSessions: DEFAULT_SETTINGS.idleSessions,
     usage: { fromComputer: false },
     sessionTitles: true,
+    workflow: DEFAULT_SETTINGS.workflow,
     lightModel: { mode: 'small' },
     defaultAgent: null,
     computerUse: DEFAULT_SETTINGS.computerUse,

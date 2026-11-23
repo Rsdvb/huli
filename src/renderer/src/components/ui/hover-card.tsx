@@ -42,7 +42,7 @@ function HoverCardContent({
         side={side}
         sideOffset={sideOffset}
         collisionAvoidance={collisionAvoidance}
-        className="isolate z-50"
+        className="isolate z-(--layer-menu)"
       >
         <PreviewCardPrimitive.Popup
           data-slot="hover-card-content"

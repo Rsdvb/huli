@@ -19,12 +19,14 @@ import type { ToolKind } from '@shared/thread'
 import type { BranchPullRequest, GitEventDraft, GitServiceApi, GitServiceDeps } from './api'
 import { HostError } from '../errors'
 import { t } from '../i18n'
+import { logText } from '../localized-error'
 import { readBranches, readRemoteBranches, readRemotes } from './branches'
 import { createCoalescer } from './coalesce'
 import { readCommitContext } from './commit-context'
+import { readPullRequestContext } from './pull-request-context'
 import { readChanges, readCommitDetails, readFileDiff, readIncoming } from './details'
 import { canChangeRepository, computeGitEvents, listNewCommits } from './events'
-import { CommandError, createExec, describeFailure, FETCH_TIMEOUT_MS, type Exec } from './exec'
+import { CommandError, createExec, failureText, FETCH_TIMEOUT_MS, type Exec } from './exec'
 import {
   listBranchPullRequests,
   probeTools,
@@ -101,6 +103,8 @@ interface ProjectState {
   projectPath: string
   cache: RepoCache
   status: GitStatus | null
+  /** Tells apart edits that leave `status` the same; see `readStatus`. */
+  fingerprint: string
   seq: number
   refresher: { request(): Promise<Snapshot> }
   /** When the latest refresh started, which paces the ones that tool calls ask for. */
@@ -159,9 +163,7 @@ function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
+const messageOf = logText
 
 type KnownPullRequest = { state: PullRequestState; failing: boolean }
 
@@ -275,6 +277,7 @@ export function createGitService(
         projectPath,
         cache: createRepoCache(),
         status: null,
+        fingerprint: '',
         seq: 0,
         refresher: createCoalescer(() => track(runRefresh(created))),
         refreshedAt: Number.NEGATIVE_INFINITY,
@@ -337,15 +340,23 @@ export function createGitService(
   async function runRefresh(state: ProjectState): Promise<Snapshot> {
     state.refreshedAt = now()
     let next: GitStatus
+    let fingerprint = state.fingerprint
     try {
-      next = await readStatus({ projectPath: state.projectPath, exec, cache: state.cache, now })
+      const read = await readStatus({
+        projectPath: state.projectPath,
+        exec,
+        cache: state.cache,
+        now,
+      })
+      next = read.status
+      fingerprint = read.fingerprint
       logChange(state, 'status', 'warn', null)
     } catch (error) {
       if (disposed)
         return snapshotOf(state) ?? { status: emptyStatus(state.projectPath, now()), seq: 0 }
       next = failedStatus(state, error)
     }
-    return commitStatus(state, next)
+    return commitStatus(state, next, fingerprint)
   }
 
   function failedStatus(state: ProjectState, error: unknown): GitStatus {
@@ -356,12 +367,14 @@ export function createGitService(
     return { ...emptyStatus(state.projectPath, now()), stale: !missing }
   }
 
-  function commitStatus(state: ProjectState, next: GitStatus): Snapshot {
+  function commitStatus(state: ProjectState, next: GitStatus, fingerprint: string): Snapshot {
     const previous = state.status
+    const edited = fingerprint !== state.fingerprint
     state.status = next
+    state.fingerprint = fingerprint
     state.seq += 1
     const snapshot = { status: next, seq: state.seq }
-    if (previous === null || !sameStatus(previous, next)) changed.emit(next)
+    if (previous === null || edited || !sameStatus(previous, next)) changed.emit(next)
     if (isLive(state)) {
       ensureWatcher(state, next)
       triggerPullRequests(state, previous, next)
@@ -531,12 +544,12 @@ export function createGitService(
   function noteGhFailure(
     state: ProjectState,
     what: string,
-    outcome: { ok: false; reason: 'not-installed' | 'failed'; message: string },
+    outcome: { ok: false; reason: 'not-installed' | 'failed'; log: string },
   ): void {
     if (outcome.reason === 'not-installed' && currentTools?.gh.state === 'ready') {
       setTools({ ...currentTools, gh: { state: 'not-installed', version: null, account: null } })
     }
-    logChange(state, `gh ${what}`, 'warn', `gh ${what} failed: ${outcome.message}`)
+    logChange(state, `gh ${what}`, 'warn', `gh ${what} failed: ${outcome.log}`)
   }
 
   function applyCurrentPullRequest(
@@ -693,7 +706,7 @@ export function createGitService(
       throw new Error(
         result.failure === 'timeout'
           ? `git fetch timed out after ${FETCH_TIMEOUT_MS / 1000} s`
-          : result.stderr.trim() || describeFailure(result),
+          : result.stderr.trim() || failureText(result),
       )
     }
     return { status: (await requestRefresh(state)).status, log: logOf(result) }
@@ -1096,6 +1109,19 @@ export function createGitService(
       if (!status.repo) throw new Error(t('git.notRepository'))
       const files = await selectChanges(status, paths)
       return readCommitContext(exec, status.repo.root, files, status.head.oid === null)
+    },
+
+    async pullRequestContext(projectPath, base) {
+      const state = projectFor(projectPath)
+      const status = await knownStatus(state)
+      if (!status.repo || status.head.oid === null) throw new Error(t('git.notRepository'))
+      const baseRef =
+        base === status.defaultBranch && status.base !== null ? status.base.name : base
+      return readPullRequestContext(exec, status.repo.root, {
+        branch: status.head.branch ?? status.head.oid.slice(0, 7),
+        base,
+        baseRef,
+      })
     },
 
     async incoming(projectPath, from) {

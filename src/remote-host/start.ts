@@ -12,6 +12,8 @@ import type {
   SessionProgress,
 } from '@shared/host-control'
 import { isBrowserForward } from '@shared/browser'
+import { setLocale, t } from '@shared/hosts-text'
+import { isLocale } from '@shared/locale'
 import { writeLog } from '@shared/log/process-log'
 import type { ControlChannel, PortChannel } from '@shared/port-channel'
 import { isPortError } from '@shared/port-rpc'
@@ -170,7 +172,7 @@ export function startRemoteHost(
     const requestId = nextAdminCall++
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
-        const message = `The host did not answer "${method}" in time`
+        const message = t('remote.hostSilent', { method })
         answer({ error: { code: 'internal', message } })
       }, ADMIN_TIMEOUT_MS)
       const answer = (reply: AdminAnswer): void => {
@@ -492,12 +494,16 @@ export function startRemoteHost(
           log('warn', 'remote-host:init arrived twice; ignored')
           break
         }
+        if (isLocale(message.locale)) setLocale(message.locale)
         running = begin(message)
         running.catch((error: unknown) => {
           // Without its key or its devices the host cannot answer anyone; main restarts it.
           console.error('Remote host failed to start:', (error as Error)?.message ?? error)
           process.exit(1)
         })
+        break
+      case 'remote-host:locale':
+        if (isLocale(message.locale)) setLocale(message.locale)
         break
       case 'remote-host:serve': {
         const { privateKey, plainTextKey, direct } = message
@@ -654,7 +660,7 @@ export function startRemoteHost(
           answer({
             error: isPortError(error)
               ? { code: error.code, message: error.message }
-              : { code: 'internal', message: 'The host could not answer' },
+              : { code: 'internal', message: t('remote.hostCouldNotAnswer') },
           })
         } else answer({ result: message.result })
         break

@@ -26,8 +26,11 @@ import {
   type ContextBreakdown,
   type ImportableSession,
   type ConversationHit,
+  type LastTurn,
+  type LastTurnLimit,
   type OutlineEntry,
   type OutlineTitle,
+  type PlanLimit,
   type PlanProgress,
   type ReturnedMessage,
   type RunningWork,
@@ -44,9 +47,11 @@ import {
 import { LOCALES } from '@shared/locale'
 import { PROMPT_BYTES, promptShare } from '@shared/attachments'
 import { CONTEXT_REFRESH_MS, type ContextEstimates } from '@shared/context'
+import { canEditAt, promptLine, promptOccurrence, turnsFrom, usedAtEnd } from '@shared/rewind'
 import { firstLine, outlineText } from '@shared/outline'
+import { reachedLimit } from '@shared/session-groups'
 import { longEnough, queryWords } from '@shared/search-fold'
-import { turnWork, type TurnWork } from '@shared/turn-phase'
+import { turnPhase, turnWork, type TurnWork } from '@shared/turn-phase'
 import { originLabel, type BrowserOriginAnswer, type BrowserOriginDecision } from '@shared/browser'
 import type {
   ControlOutcome,
@@ -131,10 +136,12 @@ import {
   type PlanItem,
   type QuestionAnswer,
   type SessionSnapshot,
+  type QueuedComments,
   type SessionStatus,
   type SessionView,
   type StopReason,
   type Attachment,
+  type ContentRef,
   type BrowserOriginEntry,
   type ControlAskEntry,
   type ControlNoteEntry,
@@ -144,6 +151,7 @@ import {
   type MarketPublishOutcome,
   type SettingChangeItem,
   type SettingsChangeEntry,
+  type TaskDeliveryEntry,
   type SettingsChangeOutcome,
   type SecretRequestEntry,
   type SecretRequestOutcome,
@@ -158,6 +166,7 @@ import {
   type ProjectHooksEntry,
   type ProjectMcpDecision,
   type ProjectMcpEntry,
+  type QueuedPrompt,
   type SideChatEntry,
   type SideChatRoute,
   type SideChatSaw,
@@ -235,6 +244,7 @@ import {
   SideQuestionUnsupported,
   type AgentConnection,
   type ForkPoint,
+  type RewoundSession,
   type McpServer,
   type ModelTokens,
   type PermissionAnswer,
@@ -260,6 +270,7 @@ import type { McpTransports } from './marketplace/servers'
 import { questionsResult } from './question-answers'
 import { HostError, invalidParams, notFound } from './errors'
 import { currentLocale, t } from './i18n'
+import { logText } from './localized-error'
 import type { ProviderProfiles } from './provider-profiles'
 import { claudeProfileEnv, takesProfiles } from '@shared/provider-profiles'
 import { NEW_BOARD_STATUS, type BoardStatus, type SessionBoard } from '@shared/session-board'
@@ -382,6 +393,7 @@ import {
   sideRouteWith,
 } from './side-chat'
 import { SIDE_ENTRIES, type StoredSideChat } from './threads/side-chat'
+import { ToolActivity } from './session-activity'
 import { listedTitle, titleMessageText, writeBranchSlug, writeSessionTitle } from './session-titles'
 import {
   addTokenTotals,
@@ -416,6 +428,7 @@ import {
   type ThreadPage,
   type ThreadWrite,
 } from './threads/model'
+import { originOf, originText, restoredOrigins, type StoredOrigin } from './threads/origins'
 import { ThreadStoreError, type ThreadStore } from './threads/store'
 import { normalizeModel, priceFor, type UsageRow } from './usage/model'
 import { ManagerError, ManagerHub, type ManagerPort, type WorkerSpec } from './manager/hub'
@@ -639,11 +652,11 @@ export interface SessionManagerDeps {
   /** The artifacts service; without it every attach passes no MCP servers. */
   mcp?: SessionMcp
   /**
-   * The skills an attach of the agent's session passes, Kettu's own with them when `kettu`, the
-   * session reaching Kettu's server; without it none.
+   * The skills an attach of the session passes, Kettu's own with them when `kettu`, the session
+   * reaching Kettu's server, and a workflow step's own; without it none.
    */
   skills?: (
-    agentId: AgentId,
+    record: SessionRecord,
     kettu: boolean,
   ) => Promise<Pick<SessionOptions, 'skillRoots' | 'localPlugins'>>
   /** Kettu's memory; without it no session is handed any. */
@@ -662,6 +675,12 @@ export interface SessionManagerDeps {
   routine?: RoutineSessionHooksRef
   /** What a workflow step hears of its session; set once the task engine exists. */
   task?: TaskSessionHooksRef
+  /** The workflow suggestions that wait for the user's answer in a session, which it counts. */
+  cards?: {
+    waiting(sessionId: string): number
+    /** A turn started, so the suggestions that waited stop waiting on the session. */
+    turnStarted(sessionId: string): void
+  }
   timings?: Partial<SessionTimings>
   /** Huli: whether nothing listens on a port, for a worktree's block; the system's by default. */
   portFree?: (port: number) => Promise<boolean>
@@ -710,6 +729,8 @@ interface Turn {
   requested: boolean
   /** The agent started it between the host's turns, with no message, and says when it ends. */
   byAgent: boolean
+  /** Told once it has ended, as an edit from a message waits for the turn it stops. */
+  ends: (() => void)[]
 }
 
 /** What `sessions.prepare` asks for: the agent and where the session will work. */
@@ -802,6 +823,8 @@ interface Live {
   answered: Map<string, FromDevice | null>
   /** Each waiting new origin's entry, by `originKey`. */
   origins: Map<string, string>
+  /** Publish cards that outlived the turn that opened them, which no turn waits on. */
+  lateCards: Set<string>
   /** Who answered the latest new origins, by entry id: a device, or null for a window. */
   originsAnswered: Map<string, FromDevice | null>
   /** Each first use of an app that waits for the user: its entry, by the request's id. */
@@ -815,6 +838,10 @@ interface Live {
     entryId: string
     answer: { outcome: ControlOutcome; device: FromDevice | null } | null
   } | null
+  /** When each request that waits began to, by the id `waitingIds` gives it. */
+  waitingSince: Map<string, number>
+  /** The tool calls its thread runs now, for the summary's activity. */
+  activity: ToolActivity
   /** Who sent the latest turn: a window's or a device's port, and the device it serves. */
   sender: TurnSender | null
   failure: Failure | null
@@ -868,12 +895,20 @@ interface Live {
     entryId: string
     from?: FromSession
     device?: FromDevice
+    kettu?: true
     portId?: string
   } | null
   /** A first message that waits for its worktree's preparation, which sends it. */
   heldFirst: Live['first']
   /** Who queued each waiting prompt, by item id; apart from the queue, which every client sees. */
   queuedBy: Map<string, string>
+  /**
+   * What says each waiting prompt Kettu queued itself, such as a step's reminder, is still due when
+   * its turn comes, by item id.
+   */
+  kettuQueued: Map<string, () => boolean>
+  /** The last turn began with the user's own message, which owes no step report. */
+  userTurn: boolean
   /** The message that gave the session its first title, for a written title, and its tries. */
   titlePrompt: UserContent[] | null
   titleWriting: boolean
@@ -945,6 +980,14 @@ interface Live {
    * an agent not handed them as workspace roots; null until named, and again after a compaction.
    */
   foldersNamed: string | null
+  /** The entries an edit from a message took out, at their positions, while `record.rewound` holds. */
+  setAside: PositionedEntry[] | null
+  /** The set-aside entries changed since the last checkpoint, which writes them whole. */
+  setAsideDirty: boolean
+  /** The position the next checkpoint drops the stored thread from, as an edit cut it there. */
+  cutAt: number | null
+  /** The cut of the agent's own session for an edit, while it runs. */
+  rewinding: Promise<void> | null
 }
 
 const TITLE_LENGTH = 60
@@ -1115,11 +1158,30 @@ function waitingProgress(live: Live): { phase: ProgressPhase; step: string | nul
   return { phase: 'approval', step: progressText(entry.title) }
 }
 
+/** The window that stopped a turn, as its summary names it. */
+function lastTurnLimit(status: AgentStatus, limit: PlanLimit): LastTurnLimit {
+  return {
+    window: limit.window,
+    label: limit.label,
+    account: status.account?.label || status.name,
+    resetsAt: limit.resetsAt,
+  }
+}
+
 /** Whether a patch can change the latest plan, which the session's summary carries. */
 function changesPlan(thread: ThreadState, patch: Patch): boolean {
   if (patch.op === 'entry.add') return patch.entry.kind === 'plan'
   if (patch.op === 'entry.update') return thread.byId[patch.id]?.kind === 'plan'
-  return patch.op === 'thread.reset' || patch.op === 'entry.remove'
+  return (
+    patch.op === 'thread.reset' || patch.op === 'entry.remove' || patch.op === 'thread.truncate'
+  )
+}
+
+/** Notes when each of `ids` began to wait, and forgets the requests that no longer do. */
+function stampWaiting(live: Live, ids: readonly string[], now: number): void {
+  const current = new Set(ids)
+  for (const id of live.waitingSince.keys()) if (!current.has(id)) live.waitingSince.delete(id)
+  for (const id of ids) if (!live.waitingSince.has(id)) live.waitingSince.set(id, now)
 }
 
 /** The ids of what waits: each permission's request id, and the entry id of the others. */
@@ -1641,7 +1703,7 @@ export class SessionManager {
 
   private recordOf(sessionId: string): SessionRecord {
     const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
-    if (!record) throw notFound(`No session ${sessionId}`)
+    if (!record) throw notFound(t('session.notFound'))
     return record
   }
 
@@ -1802,7 +1864,9 @@ export class SessionManager {
     const record = live?.record ?? this.recordOf(sessionId)
     const session = live?.thread.session
     const status: SessionStatus = session?.status ?? 'closed'
-    const permissionCount = live ? waitingCount(live) : 0
+    // A suggestion waits in the cards file, so it counts whether the session is live or not.
+    const permissionCount =
+      (live ? waitingCount(live) : 0) + (this.deps.cards?.waiting(record.id) ?? 0)
     let attention: SessionAttention = 'none'
     if (permissionCount > 0) attention = 'permission'
     else if (status === 'failed' || (session?.error && status !== 'running' && !live?.errorSeen))
@@ -1864,6 +1928,12 @@ export class SessionManager {
       ...(record.manager ? { manager: this.manager.managerSummary(record) } : {}),
       ...(record.worker ? { worker: this.manager.workerSummary(record) } : {}),
       ...(record.movedTo ? { movedTo: { ...record.movedTo } } : {}),
+      activity:
+        live && (status === 'running' || status === 'awaiting_permission')
+          ? live.activity.current(live.thread)
+          : null,
+      phase: live && status === 'running' ? turnPhase(live.thread).phase : null,
+      lastTurn: record.lastTurn ?? null,
       ...(record.worktree
         ? { worktree: this.worktreeSummary(record.worktree, this.portsOf(record)) }
         : {}),
@@ -1975,10 +2045,12 @@ export class SessionManager {
   private updateBadge(): void {
     let count = 0
     const waiting: Record<string, string[]> = {}
+    const now = this.now()
     for (const live of this.live.values()) {
       count += waitingCount(live)
       const ids = waitingIds(live)
       if (ids.length > 0) waiting[live.id] = ids
+      stampWaiting(live, ids, now)
     }
     // One request can end as another starts, which leaves the count as it was.
     const json = JSON.stringify(waiting)
@@ -2088,6 +2160,7 @@ export class SessionManager {
 
   private emit(live: Live, patches: readonly Patch[]): void {
     let plan = false
+    let activity = false
     for (const patch of patches) {
       if (patch.op === 'thread.reset') {
         const keeper = new ReplayKeeper(live.thread)
@@ -2099,6 +2172,7 @@ export class SessionManager {
       }
       if (!this.apply(live, patch)) continue
       plan ||= changesPlan(live.thread, patch)
+      activity = live.activity.follow(live.thread, patch, this.now()) || activity
       if (keeper && patch.op === 'entry.add') {
         for (const entry of keeper.after(patch.entry)) this.apply(live, { op: 'entry.add', entry })
       }
@@ -2106,7 +2180,7 @@ export class SessionManager {
     this.scheduleFlush(live)
     this.scheduleCheckpoint(live)
     // A replay ends with a summary of its own, which carries the plan it brought back.
-    if (plan && !live.replaying) this.touch(live.id)
+    if ((plan || activity) && !live.replaying) this.touch(live.id)
     if (!live.replaying) this.watchWork(live)
   }
 
@@ -2205,9 +2279,9 @@ export class SessionManager {
     this.recordOf(sessionId)
     const live = await this.revive(sessionId)
     const entry = live.thread.byId[entryId]
-    if (entry?.kind !== 'problem_report') throw notFound(`No report waits in ${entryId}`)
+    if (entry?.kind !== 'problem_report') throw notFound(t('session.waiting.report.gone'))
     if (entry.outcome !== null) {
-      throw new HostError('not_found', `The report ${entryId} was already answered`, {
+      throw new HostError('not_found', t('session.waiting.report.answered'), {
         reason: ALREADY_ANSWERED,
         device: entry.device ?? null,
       })
@@ -2286,12 +2360,12 @@ export class SessionManager {
     const live = await this.revive(sessionId)
     const entry = live.thread.byId[entryId]
     if (!memory || entry?.kind !== 'memory' || entry.layer !== 'global') {
-      throw notFound(`No memory proposal waits in ${entryId}`)
+      throw notFound(t('session.waiting.memoryProposal.gone'))
     }
     const key = `${sessionId}\n${entryId}`
     const answering = this.memoryAnswers.get(key)
     if (entry.status !== 'proposed' || answering !== undefined) {
-      throw new HostError('not_found', `The memory proposal ${entryId} was already answered`, {
+      throw new HostError('not_found', t('session.waiting.memoryProposal.answered'), {
         reason: ALREADY_ANSWERED,
         device: answering !== undefined ? answering : (entry.device ?? null),
       })
@@ -2309,10 +2383,10 @@ export class SessionManager {
       const by: MemorySource = { agentId: live.record.agentId, sessionId }
       let memoryId = entry.memoryId
       if (entry.action === 'forget') {
-        if (memoryId === null) throw invalidParams(`${entryId} names no memory to forget`)
+        if (memoryId === null) throw invalidParams(t('session.waiting.memoryProposal.noForget'))
         await memory.remove(scope, memoryId, by)
       } else {
-        if (entry.draft === null) throw invalidParams(`${entryId} holds nothing to remember`)
+        if (entry.draft === null) throw invalidParams(t('session.waiting.memoryProposal.noDraft'))
         const id = entry.action === 'update' ? memoryId : null
         memoryId = (await memory.save(scope, id, entry.draft, by)).entry.id
       }
@@ -2330,10 +2404,10 @@ export class SessionManager {
     const live = await this.revive(sessionId)
     const entry = live.thread.byId[entryId]
     if (!memory || entry?.kind !== 'memory' || entry.status !== 'written' || entry.undo === null) {
-      throw notFound(`No memory write to take back in ${entryId}`)
+      throw notFound(t('session.waiting.memoryUndo.gone'))
     }
     const key = `${sessionId}\n${entryId}`
-    if (this.memoryAnswers.has(key)) throw notFound(`The write in ${entryId} is being taken back`)
+    if (this.memoryAnswers.has(key)) throw notFound(t('session.waiting.memoryUndo.busy'))
     this.memoryAnswers.set(key, null)
     let result: 'undone' | 'changed' | 'gone'
     try {
@@ -2348,13 +2422,13 @@ export class SessionManager {
       return
     }
     if (result === 'changed') {
-      throw new HostError('conflict', 'The memory changed after this write, so it stays as it is', {
+      throw new HostError('conflict', t('session.waiting.memoryUndo.changed'), {
         reason: 'memory_changed',
       })
     }
     // Its record is gone for good, so the thread offers Undo no more.
     this.emit(live, [{ op: 'entry.update', id: entryId, changes: { undo: null } }])
-    throw new HostError('not_found', 'This write can no longer be taken back', {
+    throw new HostError('not_found', t('session.waiting.memoryUndo.undone'), {
       reason: 'memory_gone',
     })
   }
@@ -2550,9 +2624,9 @@ export class SessionManager {
     const live = this.live.get(sessionId)
     const entry = live?.thread.byId[entryId]
     if (!live || entry?.kind !== 'surface_access')
-      throw notFound(`No terminal request in ${entryId}`)
+      throw notFound(t('session.waiting.terminal.gone'))
     if (entry.decision !== null || !this.surfaceWaits.has(entryId)) {
-      throw new HostError('not_found', `The terminal request ${entryId} was already answered`, {
+      throw new HostError('not_found', t('session.waiting.terminal.answered'), {
         reason: ALREADY_ANSWERED,
         device: entry.device ?? null,
       })
@@ -2620,9 +2694,9 @@ export class SessionManager {
     this.recordOf(sessionId)
     const live = this.live.get(sessionId)
     const entry = live?.thread.byId[entryId]
-    if (!live || entry?.kind !== 'device_access') throw notFound(`No device request in ${entryId}`)
+    if (!live || entry?.kind !== 'device_access') throw notFound(t('session.waiting.device.gone'))
     if (entry.decision !== null || !this.deviceWaits.has(entryId)) {
-      throw new HostError('not_found', `The device request ${entryId} was already answered`, {
+      throw new HostError('not_found', t('session.waiting.device.answered'), {
         reason: ALREADY_ANSWERED,
         device: entry.device ?? null,
       })
@@ -2678,7 +2752,7 @@ export class SessionManager {
   /**
    * An agent wants to publish to the Kettu Marketplace, or to unlist a listing: a card in the
    * thread that waits for the user as a device's first use does, and settles with their answer,
-   * `expired` after `waitMs`, or `ended` with the turn.
+   * `expired` after `waitMs`, or `ended` when the session closes. The turn's end leaves it waiting.
    */
   marketAsked(
     sessionId: string,
@@ -2744,9 +2818,9 @@ export class SessionManager {
     this.recordOf(sessionId)
     const live = this.live.get(sessionId)
     const entry = live?.thread.byId[entryId]
-    if (!live || entry?.kind !== 'market_publish') throw notFound(`No Marketplace card ${entryId}`)
+    if (!live || entry?.kind !== 'market_publish') throw notFound(t('session.waiting.market.gone'))
     const answered = (): HostError =>
-      new HostError('not_found', `The Marketplace card ${entryId} was already answered`, {
+      new HostError('not_found', t('session.waiting.market.answered'), {
         reason: ALREADY_ANSWERED,
         device: entry.device ?? null,
       })
@@ -2757,7 +2831,7 @@ export class SessionManager {
     )
       throw answered()
     if (given.decision === 'confirm' && entry.action === 'publish' && entry.publisher) {
-      if (!given.handle) throw invalidParams('A first publish needs a publisher name')
+      if (!given.handle) throw invalidParams(t('session.publisherName'))
       this.marketAnswering.add(entryId)
       try {
         await setPublisher(given.handle)
@@ -2795,6 +2869,7 @@ export class SessionManager {
     const live = this.live.get(sessionId)
     if (live) {
       live.origins.delete(`market:${entryId}`)
+      live.lateCards.delete(entryId)
       const entry = live.thread.byId[entryId]
       if (entry?.kind === 'market_publish' && entry.outcome === null) {
         const outcome: MarketPublishOutcome =
@@ -2883,6 +2958,46 @@ export class SessionManager {
     return entry.id
   }
 
+  /**
+   * A task this session's suggestion card started ended: what it delivered goes at the end of
+   * the conversation, which is read back from storage if it is not open, without its agent.
+   */
+  async taskDelivered(
+    sessionId: string,
+    delivery: Omit<TaskDeliveryEntry, 'kind' | 'id' | 'after'>,
+  ): Promise<void> {
+    if (!this.records.has(sessionId)) return
+    const live = await this.revive(sessionId)
+    const entry: TaskDeliveryEntry = {
+      kind: 'task_delivery',
+      id: this.nextId(live),
+      ...delivery,
+      after: agentEntryBefore(live.thread),
+    }
+    this.emit(live, [{ op: 'entry.add', entry }])
+    if (!this.inFront(live.id)) live.unread = true
+    this.touch(live.id)
+    this.updateBadge()
+  }
+
+  /** The delivery of a task in the conversation it started from, for Save and Publish. */
+  async taskDelivery(sessionId: string, taskId: string): Promise<TaskDeliveryEntry | null> {
+    if (!this.records.has(sessionId)) return null
+    const live = await this.revive(sessionId)
+    for (let i = live.thread.order.length - 1; i >= 0; i--) {
+      const entry = live.thread.byId[live.thread.order[i]!]
+      if (entry?.kind === 'task_delivery' && entry.taskId === taskId) return entry
+    }
+    return null
+  }
+
+  /** The user asked the session's agent to publish the workflow a task delivered. */
+  taskPublishAsked(sessionId: string, entryId: string): void {
+    const live = this.live.get(sessionId)
+    if (live?.thread.byId[entryId]?.kind !== 'task_delivery') return
+    this.emit(live, [{ op: 'entry.update', id: entryId, changes: { publishAsked: this.now() } }])
+  }
+
   /** A window's or a device's answer to a settings card; the first one counts. */
   answerSettings(
     sessionId: string,
@@ -2893,9 +3008,10 @@ export class SessionManager {
     this.recordOf(sessionId)
     const live = this.live.get(sessionId)
     const entry = live?.thread.byId[entryId]
-    if (!live || entry?.kind !== 'settings_change') throw notFound(`No settings card ${entryId}`)
+    if (!live || entry?.kind !== 'settings_change')
+      throw notFound(t('session.waiting.settings.gone'))
     if (entry.outcome !== null || !this.settingsWaits.has(entryId)) {
-      throw new HostError('not_found', `The settings card ${entryId} was already answered`, {
+      throw new HostError('not_found', t('session.waiting.settings.answered'), {
         reason: ALREADY_ANSWERED,
         device: entry.device ?? null,
       })
@@ -2914,9 +3030,9 @@ export class SessionManager {
   settingsChange(sessionId: string, entryId: string): SettingChangeItem[] {
     this.recordOf(sessionId)
     const entry = this.live.get(sessionId)?.thread.byId[entryId]
-    if (entry?.kind !== 'settings_change') throw notFound(`No settings change ${entryId}`)
+    if (entry?.kind !== 'settings_change') throw notFound(t('session.waiting.settings.noChange'))
     if (entry.outcome?.kind !== 'changed' || entry.outcome.undone || entry.outcome.stale) {
-      throw new HostError('conflict', 'This change cannot be undone')
+      throw new HostError('conflict', t('session.waiting.settings.noUndo'))
     }
     return entry.items
   }
@@ -3283,9 +3399,9 @@ export class SessionManager {
   ): void {
     this.recordOf(sessionId)
     const ask = this.live.get(sessionId)?.ask
-    if (!ask || ask.entryId !== entryId) throw notFound(`No step waits in ${entryId}`)
+    if (!ask || ask.entryId !== entryId) throw notFound(t('session.waiting.step.gone'))
     if (ask.answer) {
-      throw new HostError('not_found', `The step of ${entryId} was already answered`, {
+      throw new HostError('not_found', t('session.waiting.step.answered'), {
         reason: ALREADY_ANSWERED,
         device: ask.answer.device,
       })
@@ -3340,12 +3456,12 @@ export class SessionManager {
     const waiting = key === undefined ? undefined : this.originRequests.get(key)
     const first = waiting?.answer
     if (live && (first || live.originsAnswered.has(entryId))) {
-      throw new HostError('not_found', `The new site of ${entryId} was already answered`, {
+      throw new HostError('not_found', t('session.waiting.origin.answered'), {
         reason: ALREADY_ANSWERED,
         device: first ? first.device : (live.originsAnswered.get(entryId) ?? null),
       })
     }
-    if (!waiting) throw notFound(`No new site waits in ${entryId}`)
+    if (!waiting) throw notFound(t('session.waiting.origin.gone'))
     waiting.answer = { decision, device: device ?? null }
     return { owner: waiting.owner, requestId: waiting.requestId }
   }
@@ -3505,12 +3621,12 @@ export class SessionManager {
     const waiting = requestId === undefined ? undefined : this.appRequests.get(requestId)
     const first = waiting?.answer
     if (live && (first || live.appsAnswered.has(entryId))) {
-      throw new HostError('not_found', `The app of ${entryId} was already answered`, {
+      throw new HostError('not_found', t('session.waiting.app.answered'), {
         reason: ALREADY_ANSWERED,
         device: first ? first.device : (live.appsAnswered.get(entryId) ?? null),
       })
     }
-    if (!waiting || requestId === undefined) throw notFound(`No app waits in ${entryId}`)
+    if (!waiting || requestId === undefined) throw notFound(t('session.waiting.app.gone'))
     waiting.answer = { decision, device: device ?? null }
     return requestId
   }
@@ -3586,7 +3702,7 @@ export class SessionManager {
     const live = this.live.get(sessionId)
     const requestId = live && [...live.setups].find(([, id]) => id === entryId)?.[0]
     const waiting = requestId === undefined ? undefined : this.setupRequests.get(requestId)
-    if (!waiting || requestId === undefined) throw notFound(`No setup waits in ${entryId}`)
+    if (!waiting || requestId === undefined) throw notFound(t('session.waiting.setup.gone'))
     waiting.declinedBy = device ?? null
     return requestId
   }
@@ -3649,6 +3765,14 @@ export class SessionManager {
         // The store keeps no way to drop rows one by one, so the thread is written whole.
         live.rewrite = true
         break
+      case 'thread.truncate':
+        // The cut entries keep their positions in `setAside`; the next ones are numbered after them.
+        for (const id of [...live.positions.keys()]) {
+          if (id in live.thread.byId) continue
+          live.positions.delete(id)
+          live.dirty.delete(id)
+        }
+        break
     }
   }
 
@@ -3702,7 +3826,14 @@ export class SessionManager {
   // Checkpoints: each session's thread goes to the thread store, so it opens without its agent.
 
   private hasChanges(live: Live): boolean {
-    return live.rewrite || live.sessionDirty || live.dirty.size > 0 || live.blobs.size > 0
+    return (
+      live.rewrite ||
+      live.sessionDirty ||
+      live.dirty.size > 0 ||
+      live.blobs.size > 0 ||
+      live.cutAt !== null ||
+      live.setAsideDirty
+    )
   }
 
   private scheduleCheckpoint(live: Live): void {
@@ -3749,11 +3880,15 @@ export class SessionManager {
       ...(replace || live.sessionDirty ? { session: storedSession(live.thread.session) } : {}),
       ...(replace ? { replace: true } : {}),
       ...(blobs.length > 0 ? { blobs } : {}),
+      ...(!replace && live.cutAt !== null ? { cut: live.cutAt } : {}),
+      ...(replace || live.setAsideDirty ? { setAside: live.setAside ?? [] } : {}),
     }
     live.dirty = new Set()
     live.sessionDirty = false
     live.rewrite = false
     live.blobs = new Map()
+    live.cutAt = null
+    live.setAsideDirty = false
     const write = ++live.writes
     store.write(live.id, change).then(
       () => {
@@ -3771,7 +3906,15 @@ export class SessionManager {
    */
   private writeFailed(live: Live, change: ThreadWrite, write: number, error: unknown): void {
     const code = error instanceof ThreadStoreError ? error.code : null
-    if (change.replace || write !== live.writes || code === 'conflict' || code === 'corrupt') {
+    // A cut or the set-aside entries go again with the whole thread, which carries both.
+    const edit = change.cut !== undefined || change.setAside !== undefined
+    if (
+      change.replace ||
+      edit ||
+      write !== live.writes ||
+      code === 'conflict' ||
+      code === 'corrupt'
+    ) {
       live.rewrite = true
     } else {
       for (const { entry } of change.entries) live.dirty.add(entry.id)
@@ -4026,7 +4169,7 @@ export class SessionManager {
         const entry = live.thread.byId[entryId]
         return { entries: entry ? [entry] : [] }
       })
-      if (!entries[0]) throw notFound(`Session ${sessionId} has no entry ${entryId}`)
+      if (!entries[0]) throw notFound(t('session.noEntry'))
       return entries[0]
     }
     const record = this.recordOf(sessionId)
@@ -4050,7 +4193,7 @@ export class SessionManager {
       stored && this.isCurrent(record, stored.head)
         ? (splitLinks([stored.entry]) ?? [stored.entry]).find(({ id }) => id === entryId)
         : undefined
-    if (!entry) throw notFound(`Session ${sessionId} has no entry ${entryId}`)
+    if (!entry) throw notFound(t('session.noEntry'))
     return settled(entry)
   }
 
@@ -4065,7 +4208,14 @@ export class SessionManager {
     return this.withBytes(live, images, () => {
       // Patches go out first, so the patches after the entries are the ones they do not hold.
       this.flushPatches(live)
-      return { entries: waitingEntries(live) }
+      const entries = waitingEntries(live)
+      const askedAt: Record<string, number> = {}
+      for (const entry of entries) {
+        const key = entry.kind === 'tool' ? entry.permission?.requestId : entry.id
+        const at = key === undefined ? undefined : live.waitingSince.get(key)
+        if (at !== undefined) askedAt[entry.id] = at
+      }
+      return { entries, askedAt }
     })
   }
 
@@ -4097,7 +4247,7 @@ export class SessionManager {
 
   async modelRequestRaw(sessionId: string, raw: string, full: boolean): Promise<ModelRequestRaw> {
     const reader = this.deps.modelRequests
-    if (!reader) throw notFound(`Session ${sessionId} has no record of its requests to read`)
+    if (!reader) throw notFound(t('session.noRequestRecord'))
     return reader.raw(this.requestsTarget(sessionId), raw, full)
   }
 
@@ -4198,7 +4348,15 @@ export class SessionManager {
     for (const id of current.thread.order) {
       const entry = current.thread.byId[id]
       const pos = current.positions.get(id)
-      if (entry?.kind !== 'user' || entry.from || entry.approval || pos === undefined) continue
+      if (
+        entry?.kind !== 'user' ||
+        entry.from ||
+        entry.approval ||
+        entry.kettu ||
+        pos === undefined
+      ) {
+        continue
+      }
       rows.push({
         pos,
         entryId: id,
@@ -4293,7 +4451,7 @@ export class SessionManager {
       this.summaryFailedAt.set(sessionId, this.now())
       this.deps.diagnostics.log(
         'warn',
-        `${this.deps.agents.name(writer)}: could not title the outline of session ${sessionId}: ${(error as Error).message}`,
+        `${this.deps.agents.name(writer)}: could not title the outline of session ${sessionId}: ${logText(error)}`,
       )
       return { titles: [] }
     } finally {
@@ -4333,6 +4491,8 @@ export class SessionManager {
       // A queue from before a close or a restart waits until the user resumes it.
       queuePaused: (record.queue?.length ?? 0) > 0,
       limitPause: record.limitPause ?? null,
+      ...(record.rewound ? { rewound: { turns: record.rewound.turns } } : {}),
+      ...(record.noRewind ? { noRewind: true } : {}),
       ...(record.origin === 'subagent'
         ? {}
         : {
@@ -4382,11 +4542,14 @@ export class SessionManager {
       permissions: new Map(),
       answered: new Map(),
       origins: new Map(),
+      lateCards: new Set(),
       originsAnswered: new Map(),
       apps: new Map(),
       appsAnswered: new Map(),
       setups: new Map(),
       ask: null,
+      waitingSince: new Map(),
+      activity: new ToolActivity(),
       sender: null,
       failure: null,
       signInNotice: null,
@@ -4416,6 +4579,8 @@ export class SessionManager {
       first: null,
       heldFirst: null,
       queuedBy: new Map(),
+      kettuQueued: new Map(),
+      userTurn: false,
       titlePrompt: null,
       titleWriting: false,
       titleFailedAt: null,
@@ -4454,6 +4619,10 @@ export class SessionManager {
       archiveAfterTurn: null,
       sendNext: false,
       foldersNamed: null,
+      setAside: null,
+      setAsideDirty: false,
+      cutAt: null,
+      rewinding: null,
     }
     this.live.set(record.id, live)
     this.deps.agents.sessionsChanged(record.agentId)
@@ -4493,7 +4662,7 @@ export class SessionManager {
     const projectHooks = this.projectHooksGate(sessionId)
     const own = this.kettuServers(sessionId, record, runtime)
     const reached = own.length > 0
-    const skills = (await this.deps.skills?.(record.agentId, reached)) ?? {}
+    const skills = (await this.deps.skills?.(record, reached)) ?? {}
     const memory = await this.memoryFor(sessionId, record, reached)
     const append = runtime?.connection.systemPromptAppend
       ? kettuAhead(
@@ -4828,16 +4997,16 @@ export class SessionManager {
     this.recordOf(sessionId)
     const live = this.live.get(sessionId)
     const entry = live?.thread.byId[entryId]
-    if (!live || entry?.kind !== 'project_mcp') throw notFound(`No MCP servers wait in ${entryId}`)
+    if (!live || entry?.kind !== 'project_mcp') throw notFound(t('session.waiting.mcp.gone'))
     if (entry.decision !== null) {
-      throw new HostError('not_found', `The MCP servers of ${entryId} were already answered`, {
+      throw new HostError('not_found', t('session.waiting.mcp.answered'), {
         reason: ALREADY_ANSWERED,
         device: entry.device ?? null,
       })
     }
     const card = this.projectMcpCards.get(sessionId)
     const answers = this.deps.projectMcp
-    if (card?.entryId !== entryId || !answers) throw notFound(`No MCP servers wait in ${entryId}`)
+    if (card?.entryId !== entryId || !answers) throw notFound(t('session.waiting.mcp.gone'))
     answers.answer(
       card.folder,
       entry.servers.map((server) => server.name),
@@ -4899,16 +5068,16 @@ export class SessionManager {
     this.recordOf(sessionId)
     const live = this.live.get(sessionId)
     const entry = live?.thread.byId[entryId]
-    if (!live || entry?.kind !== 'project_hooks') throw notFound(`No hooks wait in ${entryId}`)
+    if (!live || entry?.kind !== 'project_hooks') throw notFound(t('session.waiting.hooks.gone'))
     if (entry.decision !== null) {
-      throw new HostError('not_found', `The hooks of ${entryId} were already answered`, {
+      throw new HostError('not_found', t('session.waiting.hooks.answered'), {
         reason: ALREADY_ANSWERED,
         device: entry.device ?? null,
       })
     }
     const card = this.projectHooksCards.get(sessionId)
     const answers = this.deps.projectHooks
-    if (card?.entryId !== entryId || !answers) throw notFound(`No hooks wait in ${entryId}`)
+    if (card?.entryId !== entryId || !answers) throw notFound(t('session.waiting.hooks.gone'))
     answers.answer(card.folder, card.digest, decision)
     for (const [id, other] of [...this.projectHooksCards]) {
       if (other.folder !== card.folder) continue
@@ -5094,6 +5263,9 @@ export class SessionManager {
         this.emit(live, [{ op: 'entry.update', id: entry.id, changes: { review } }])
         break
       }
+      case 'extra-usage':
+        this.deps.agents.setExtraUsage(agentId, effect.inUse)
+        break
       case 'title': {
         if (effect.title === null) {
           delete live.record.titleSource
@@ -5682,7 +5854,8 @@ export class SessionManager {
     portId?: string,
   ): Promise<SessionSummary> {
     const { agents, projects, scratch } = this.deps
-    if (!agents.has(params.agentId)) throw invalidParams(`Unknown agent ${params.agentId}`)
+    if (!agents.has(params.agentId))
+      throw invalidParams(t('agent.unknown', { agent: params.agentId }))
     agents.assertEnabled(params.agentId)
     const profileId = this.profileFor(params.agentId, params.profileId)
     // Huli: a session another session's agent starts, or a sub-session, is held as that one is.
@@ -5707,7 +5880,7 @@ export class SessionManager {
       if (adopted) return adopted
     }
     if (params.projectPath === null && params.parentId !== undefined) {
-      throw invalidParams('A sub-session belongs to the project of its parent')
+      throw invalidParams(t('session.subSessionProject'))
     }
     const projectPath =
       params.projectPath === null
@@ -5716,7 +5889,7 @@ export class SessionManager {
     if (params.parentId !== undefined) {
       const parent = this.recordOf(params.parentId)
       if (!samePath(parent.projectPath, projectPath, this.deps.platform)) {
-        throw invalidParams('A sub-session belongs to the project of its parent')
+        throw invalidParams(t('session.subSessionProject'))
       }
     }
     if (!scratch.contains(projectPath)) await projects.add(projectPath)
@@ -5726,9 +5899,8 @@ export class SessionManager {
       const inherited = this.recordOf(params.parentId).worktree
       if (inherited) worktree = { ...inherited }
     } else if (params.worktree !== undefined) {
-      const manager = this.deps.worktrees
-      if (!manager || scratch.contains(projectPath)) {
-        throw invalidParams('A worktree needs a project in a Git repository')
+      if (scratch.contains(projectPath)) {
+        throw invalidParams(t('session.worktreeNeedsRepo'))
       }
       const request: Parameters<WorktreeManager['create']>[1] = {
         base: params.worktree.base,
@@ -5737,12 +5909,9 @@ export class SessionManager {
       }
       // One at a time in a project, so runs started together with one prompt take distinct names.
       worktree = await this.oneWorktreeAtATime(projectPath, () =>
-        manager.create(projectPath, request),
+        this.createWorktree(projectPath, request, params, prompt ?? null),
       )
       newWorktree = true
-      if (prompt && !request.branch?.trim()) {
-        this.nameBranch(params.agentId, projectPath, worktree, prompt, request, params.options)
-      }
     }
     // Huli: a new worktree gets a block of ports of its own; a sub-session shares its parent's.
     const ports = newWorktree
@@ -5835,6 +6004,23 @@ export class SessionManager {
     return this.summary(live.id)
   }
 
+  /** Names the task's branch before it is saved or any step uses it. */
+  async createTaskWorktree(
+    projectPath: string,
+    request: Parameters<WorktreeManager['create']>[1],
+    first: { agentId: AgentId; options: Record<string, string | boolean> },
+  ): Promise<WorktreeRecord> {
+    const message: UserContent[] = [{ type: 'text', text: request.text }]
+    const worktree = await this.createWorktree(
+      projectPath,
+      { ...request, text: fallbackTitle(message) ?? '' },
+      first,
+      message,
+    )
+    await this.finishBranchName(projectPath, worktree)
+    return worktree
+  }
+
   /**
    * A workflow step's session: top-level with `origin: 'task'`, in its task's folder, in the agent's
    * start mode held as a started session's is, so never full access or a plan mode; Kettu answers
@@ -5843,7 +6029,8 @@ export class SessionManager {
    */
   async createStep(params: TaskStepStart): Promise<SessionSummary> {
     const { agents, projects } = this.deps
-    if (!agents.has(params.agentId)) throw invalidParams(`Unknown agent ${params.agentId}`)
+    if (!agents.has(params.agentId))
+      throw invalidParams(t('agent.unknown', { agent: params.agentId }))
     agents.assertEnabled(params.agentId)
     const projectPath = await projects.resolveDirectory(params.projectPath)
     const now = this.now()
@@ -5873,7 +6060,9 @@ export class SessionManager {
     live.used = true
     live.startedMode = { starter: null, wanted: null, ceiling: null }
     const content: UserContent[] = [{ type: 'text', text: params.prompt }]
-    live.first = { content, entryId: this.addPrompt(live, content, now) }
+    // The step's prompt is Kettu's, written from the workflow, not the user's.
+    const entryId = this.addPrompt(live, content, now, undefined, undefined, undefined, true)
+    live.first = { content, entryId, kettu: true }
     this.touch(live.id)
     this.deps.task?.current?.sessionCreated(live.id, params.task)
     if (worktree && params.prepare) this.prepareWorktree(projectPath, worktree)
@@ -5890,19 +6079,34 @@ export class SessionManager {
     return this.summary(live.id)
   }
 
-  /** Kettu's own message to a session, such as a step's reminder: sent now or queued. */
-  async sendFromKettu(sessionId: string, text: string): Promise<void> {
+  /**
+   * The user's answer on a card the session's thread shows, such as Do it here on a workflow's:
+   * the agent gets it, but it is no bubble of the user's, since the card already says it.
+   */
+  async sendCardAnswer(sessionId: string, text: string): Promise<void> {
+    const live = await this.revive(sessionId)
+    this.sendForUser(live, text, { approval: true })
+  }
+
+  /**
+   * Kettu's own message to a session, such as a step's reminder: sent now or queued. `due` is asked
+   * again when it would go out, and the message is dropped unsent once it says no.
+   */
+  async sendFromKettu(sessionId: string, text: string, due?: () => boolean): Promise<void> {
     const content: UserContent[] = [{ type: 'text', text }]
     const live = await this.revive(sessionId)
     const { status, queue, queuePaused } = live.thread.session
     if (canSend(status) && (queue.length === 0 || queuePaused)) {
-      this.sendPrompt(live, content)
+      if (due && !due()) return
+      this.sendPrompt(live, content, undefined, undefined, undefined, undefined, true)
       return
     }
     if (!canSend(status) && status !== 'running' && status !== 'awaiting_permission') {
       throw busyError(status)
     }
-    this.update(live, { queue: [...queue, { id: randomUUID(), content, at: this.now() }] })
+    const id = randomUUID()
+    if (due) live.kettuQueued.set(id, due)
+    this.update(live, { queue: [...queue, { id, content, at: this.now(), kettu: true }] })
     this.persist(live)
     this.touch(live.id)
   }
@@ -5914,7 +6118,8 @@ export class SessionManager {
    */
   async createRun(params: RoutineSessionStart): Promise<SessionSummary> {
     const { agents, projects, scratch } = this.deps
-    if (!agents.has(params.agentId)) throw invalidParams(`Unknown agent ${params.agentId}`)
+    if (!agents.has(params.agentId))
+      throw invalidParams(t('agent.unknown', { agent: params.agentId }))
     agents.assertEnabled(params.agentId)
     const projectPath = await projects.resolveDirectory(params.projectPath)
     if (!scratch.contains(projectPath)) await projects.add(projectPath)
@@ -6038,7 +6243,7 @@ export class SessionManager {
     portId: string,
   ): Promise<SessionSummary> {
     if (!this.deps.agents.has(asked.agentId)) {
-      throw invalidParams(`Unknown agent ${asked.agentId}`)
+      throw invalidParams(t('agent.unknown', { agent: asked.agentId }))
     }
     this.deps.agents.assertEnabled(asked.agentId)
     const { profileId: askedProfile, sandbox: askedSandbox, ...rest } = asked
@@ -6111,7 +6316,7 @@ export class SessionManager {
         params.projectPath !== null &&
         !samePath(params.projectPath, projectPath, this.deps.platform)
       ) {
-        throw invalidParams('A sub-session belongs to the project of its parent')
+        throw invalidParams(t('session.subSessionProject'))
       }
     } else {
       projectPath =
@@ -6490,6 +6695,7 @@ export class SessionManager {
           at: this.now(),
           ...(first.from ? { from: first.from } : {}),
           ...(first.device ? { device: first.device } : {}),
+          ...(first.kettu ? { kettu: first.kettu } : {}),
         },
         ...live.thread.session.queue,
       ],
@@ -6505,7 +6711,7 @@ export class SessionManager {
    */
   private holdFirst(live: Live): void {
     if (!live.saved || !live.first) return
-    const { content, from } = live.first
+    const { content, from, kettu } = live.first
     live.first = null
     this.emit(live, [
       {
@@ -6522,7 +6728,16 @@ export class SessionManager {
     ])
     const queue = live.thread.session.queue
     this.update(live, {
-      queue: [{ id: randomUUID(), content, at: this.now(), ...(from ? { from } : {}) }, ...queue],
+      queue: [
+        {
+          id: randomUUID(),
+          content,
+          at: this.now(),
+          ...(from ? { from } : {}),
+          ...(kettu ? { kettu } : {}),
+        },
+        ...queue,
+      ],
       queuePaused: true,
     })
     this.persist(live)
@@ -6905,6 +7120,8 @@ export class SessionManager {
       throw this.failStart(live, error, { action: useLoad ? 'load' : 'resume' })
     }
     const attach = await this.attachOptions(live.id, live.record, runtime)
+    // Read before the replay empties the thread, which a write in flight may still be storing.
+    const kept = useLoad ? await this.keptOrigins(live.id) : []
     this.attach(live, connection)
     try {
       if (useLoad) {
@@ -6913,10 +7130,10 @@ export class SessionManager {
         try {
           setup = await connection.loadSession(acpSessionId, projectPath, attach)
         } catch (error) {
-          this.finishReplay(live, false)
+          this.finishReplay(live, false, kept)
           throw error
         }
-        this.finishReplay(live, true)
+        this.finishReplay(live, true, kept)
         this.opened(live, setup.config)
         this.seedCache(live)
         await this.noteOutsideTail(live.record)
@@ -6975,12 +7192,14 @@ export class SessionManager {
   }
 
   /**
-   * After a replay, children it did not mention are marked missing. After a failed one,
-   * every child goes back to the index, to come back with the next attempt.
+   * After a replay, its messages get back the origins Kettu kept for them, and children it did not
+   * mention are marked missing. After a failed one, every child goes back to the index, to come
+   * back with the next attempt.
    */
-  private finishReplay(live: Live, ok: boolean): void {
+  private finishReplay(live: Live, ok: boolean, kept: readonly StoredOrigin[]): void {
     live.replaying = false
     live.partial = !ok
+    this.restoreOrigins(live, kept)
     this.restoreKept(live)
     for (const record of this.descendants(live.id, 'subagent')) {
       const child = this.live.get(record.id)
@@ -7139,8 +7358,9 @@ export class SessionManager {
         const now = this.now()
         this.update(live, { updatedAt: now })
         if (this.inFront(live.id)) live.record.lastViewedAt = now
-        this.persist(live)
         const stopped: { message: string } = { message: t('notice.stopped.title', { agent: name }) }
+        if (turn) live.record.lastTurn = this.failedTurn(live, stopped.message, now)
+        this.persist(live)
         const routineTurn =
           (turn
             ? this.reportRun(live, { stopReason: null, error: stopped, usage: null, turn })
@@ -7728,11 +7948,29 @@ export class SessionManager {
     const order: string[] = []
     const byId: Record<string, ThreadEntry> = {}
     let { entries } = stored
+    let aside = stored.setAside
+    const rewound = live.record.rewound
+    const cutAt = rewound ? entries.findIndex(({ entry }) => entry.id === rewound.entryId) : -1
+    if (cutAt >= 0) {
+      // The cut was not stored before the host stopped, so it is made again.
+      aside = [...entries.slice(cutAt), ...aside].sort((a, b) => a.pos - b.pos)
+      entries = entries.slice(0, cutAt)
+      live.cutAt = aside[0]!.pos
+      live.setAsideDirty = true
+    }
     const split = splitLinks(entries.map((item) => item.entry))
     if (split) {
       // New entries between stored ones: the thread is stored again whole, numbered afresh.
       entries = split.map((entry, pos) => ({ pos, entry }))
+      aside = aside.map(({ entry }, i) => ({ pos: entries.length + i, entry }))
       live.rewrite = true
+    }
+    if (rewound) live.setAside = aside
+    // Left by an edit whose next message went before they were dropped.
+    else if (aside.length > 0) live.setAsideDirty = true
+    for (const { pos, entry } of aside) {
+      live.nextPos = Math.max(live.nextPos, pos + 1)
+      live.counter = Math.max(live.counter, idNumber(entry.id))
     }
     for (const { pos, entry } of entries) {
       const shown = settled(entry)
@@ -7864,6 +8102,7 @@ export class SessionManager {
     if (connection.isClosed) throw new AgentRequestError('closed', 'The agent connection closed')
     this.attach(live, connection)
     this.attachedOn(live, version, resumed)
+    this.checkRewind(live, connection)
     this.opened(live, config)
     await this.takeOutside(live, connection)
     for (const child of this.descendants(live.id, 'subagent')) {
@@ -7910,13 +8149,19 @@ export class SessionManager {
     if (!turn) return
     this.finishTurn(live, turn, null)
     const now = this.now()
+    const item: QueuedPrompt = {
+      id: randomUUID(),
+      content: turn.content,
+      at: now,
+      ...originOf(turn.entryId === null ? undefined : live.thread.byId[turn.entryId]),
+    }
     this.update(live, {
       status: 'ready',
       turnStartedAt: null,
       turnStartUsed: null,
       updatedAt: now,
       error: { message: notice.title },
-      queue: [{ id: randomUUID(), content: turn.content, at: now }, ...live.thread.session.queue],
+      queue: [item, ...live.thread.session.queue],
       queuePaused: true,
     })
     this.persist(live)
@@ -8310,6 +8555,7 @@ export class SessionManager {
     this.sendPrompt(live, hydrated, undefined, portId, device)
   }
 
+  /** Sends a prompt; `kettu` when Kettu sends it itself, as a step's reminder. */
   private sendPrompt(
     live: Live,
     content: UserContent[],
@@ -8317,10 +8563,13 @@ export class SessionManager {
     portId?: string,
     device?: FromDevice,
     approval?: true,
+    kettu?: true,
   ): void {
     live.used = true
+    live.userTurn = kettu !== true && from === undefined
+    this.deps.options?.used(live.record.agentId, live.thread.session.config)
     const now = this.now()
-    const entryId = this.addPrompt(live, content, now, from, device, approval)
+    const entryId = this.addPrompt(live, content, now, from, device, approval, kettu)
     this.startTurn(live, content, now, entryId, portId)
   }
 
@@ -8333,6 +8582,8 @@ export class SessionManager {
     const record = this.recordOf(sessionId)
     if (this.stopped || record.origin === 'subagent' || this.isArchived(record)) return
     if (harnessOf(record.agentId) !== 'claude-code') return
+    // An edit waiting to be sent may carry on in another session of the agent's.
+    if (record.rewound) return
     // A worktree that is not there yet, or no longer, is the send's to make or refuse.
     if (record.worktree && this.worktreeSummary(record.worktree).state !== 'ready') return
     if (!this.attachable(this.live.get(sessionId))) return
@@ -8379,7 +8630,7 @@ export class SessionManager {
       throw new HostError('restricted', t('session.subagent.noPrompt'))
     }
     this.refuseIfCannotSend(sessionId)
-    if (!this.deps.agents.has(agentId)) throw invalidParams(`Unknown agent ${agentId}`)
+    if (!this.deps.agents.has(agentId)) throw invalidParams(t('agent.unknown', { agent: agentId }))
     this.deps.agents.assertEnabled(agentId)
     // Huli: the session keeps its sandbox with another agent, which must be able to hold it.
     const held = this.recordOf(sessionId).sandbox
@@ -8389,6 +8640,12 @@ export class SessionManager {
     const live = await this.revive(sessionId)
     const { status } = live.thread.session
     if (!canSend(status) || live.turn || waitingCount(live) > 0) throw busyError(status)
+    // The agent it had keeps its session cut where the edit went back to, should it come back.
+    if (live.record.agentId !== agentId && live.record.rewound) {
+      await this.applyRewind(live).catch((error: unknown) => {
+        throw agentError(error)
+      })
+    }
     if (live.record.agentId !== agentId || live.record.carry) {
       await this.handOver(live, agentId, params.options ?? {}, params.summarize === true)
     }
@@ -8409,6 +8666,8 @@ export class SessionManager {
     const from = record.agentId
     await this.closeAll(this.descendants(live.id, 'subagent'), true)
     await this.letGo(live)
+    delete record.carried
+    delete record.noRewind
     // A takeover whose turn never went keeps its line in the thread, now for this agent.
     const pending = record.carry
     const entryId = pending?.entryId ?? this.nextId(live)
@@ -8549,6 +8808,7 @@ export class SessionManager {
     connection: AgentConnection,
     carry: PendingCarry,
     wire: PromptBlock[],
+    entryId: string | null,
   ): Promise<PromptBlock[]> {
     const { record } = live
     const carried = this.carriedFor(live, carry)
@@ -8576,6 +8836,9 @@ export class SessionManager {
       ])
     }
     delete record.carry
+    // An edit from this message gives the conversation to the agent again with the next one.
+    if (entryId) record.carried = { entryId, carry }
+    else delete record.carried
     // The session it had is its current one now, no longer an earlier agent's to take back.
     record.earlier = record.earlier?.map((item) =>
       item.agentId === record.agentId && item.acpSessionId === record.acpSessionId
@@ -8640,6 +8903,48 @@ export class SessionManager {
     )
   }
 
+  /**
+   * Keeps who sent a message that is not the user's own from this computer, in the thread store
+   * beside the thread, since the agent's history never says and a rebuild would lose it.
+   */
+  private keepOrigin(live: Live, entry: ThreadEntry): void {
+    const origin = originOf(entry)
+    const store = this.deps.threads
+    if (!origin || !store || entry.kind !== 'user') return
+    store
+      .putOrigin(live.id, { text: originText(entry.content), origin })
+      .catch((error: unknown) => {
+        this.deps.diagnostics.log(
+          'warn',
+          `Could not keep who sent a message of session ${live.id}: ${(error as Error).message}`,
+        )
+      })
+  }
+
+  /** The origins kept for a session's messages, for a thread about to be rebuilt; none on failure. */
+  private async keptOrigins(sessionId: string): Promise<StoredOrigin[]> {
+    try {
+      return (await this.deps.threads?.origins(sessionId)) ?? []
+    } catch (error) {
+      this.deps.diagnostics.log(
+        'warn',
+        `Could not read who sent the messages of session ${sessionId}: ${(error as Error).message}`,
+      )
+      return []
+    }
+  }
+
+  /** Puts back who sent each message of a rebuilt thread that matches one Kettu kept. */
+  private restoreOrigins(live: Live, kept: readonly StoredOrigin[]): void {
+    if (kept.length === 0) return
+    const found = restoredOrigins(threadEntries(live.thread), kept)
+    if (found.size === 0) return
+    this.emit(
+      live,
+      [...found].map(([id, changes]): Patch => ({ op: 'entry.update', id, changes })),
+    )
+  }
+
   /** The user entry of a prompt, and the title it gives a session that has none; its entry id. */
   private addPrompt(
     live: Live,
@@ -8648,22 +8953,21 @@ export class SessionManager {
     from?: FromSession,
     device?: FromDevice,
     approval?: true,
+    kettu?: true,
   ): string {
     const entryId = this.nextId(live)
-    this.emit(live, [
-      {
-        op: 'entry.add',
-        entry: {
-          kind: 'user',
-          id: entryId,
-          content,
-          at: now,
-          ...(from ? { from } : {}),
-          ...(device ? { device } : {}),
-          ...(approval ? { approval } : {}),
-        },
-      },
-    ])
+    const entry: ThreadEntry = {
+      kind: 'user',
+      id: entryId,
+      content,
+      at: now,
+      ...(from ? { from } : {}),
+      ...(device ? { device } : {}),
+      ...(approval ? { approval } : {}),
+      ...(kettu ? { kettu } : {}),
+    }
+    this.emit(live, [{ op: 'entry.add', entry }])
+    this.keepOrigin(live, entry)
     if (live.thread.session.title === null) {
       const title = fallbackTitle(content)
       if (title) {
@@ -8685,7 +8989,7 @@ export class SessionManager {
       if (item.type === 'text') bytes += Buffer.byteLength(item.text, 'utf8')
       if (item.type !== 'ref' || item.ref.kind !== 'attachment') return item
       const store = this.deps.attachments
-      if (!store) throw invalidParams('This host takes no attachments')
+      if (!store) throw invalidParams(t('session.noAttachments'))
       const attachment = store.view(item.ref.attachment.id)
       bytes += promptShare(attachment)
       return { type: 'ref', ref: { kind: 'attachment', attachment } }
@@ -8749,7 +9053,7 @@ export class SessionManager {
         shown.push(item)
         continue
       }
-      if (!store) throw invalidParams('This host takes no attachments')
+      if (!store) throw invalidParams(t('session.noAttachments'))
       const record = store.get(item.ref.attachment.id)
       const sent = await sendAttachment(store, record, prompt)
       ids.push(record.id)
@@ -8850,7 +9154,7 @@ export class SessionManager {
   async blob(sessionId: string, hash: string): Promise<AttachmentBytes> {
     this.recordOf(sessionId)
     const stored = await this.storedBlob(sessionId, hash)
-    if (!stored) throw notFound(`Session ${sessionId} keeps no attachment ${hash}`)
+    if (!stored) throw notFound(t('session.noAttachment'))
     return { mimeType: stored.mime, bytes: toArrayBuffer(stored.data) }
   }
 
@@ -8886,6 +9190,7 @@ export class SessionManager {
     input: UserContent[],
     portId?: string,
     device?: FromDevice,
+    comments?: QueuedComments,
   ): Promise<{ itemId: string | null }> {
     this.assertRegistered(sessionId)
     if (this.recordOf(sessionId).origin === 'subagent') {
@@ -8904,7 +9209,13 @@ export class SessionManager {
     if (!canSend(status) && status !== 'running' && status !== 'awaiting_permission') {
       throw busyError(status)
     }
-    const item = { id: randomUUID(), content, at: this.now(), ...(device ? { device } : {}) }
+    const item = {
+      id: randomUUID(),
+      content,
+      at: this.now(),
+      ...(device ? { device } : {}),
+      ...(comments ? { comments } : {}),
+    }
     if (portId !== undefined) live.queuedBy.set(item.id, portId)
     this.update(live, { queue: [...queue, item] })
     this.persist(live)
@@ -8915,7 +9226,7 @@ export class SessionManager {
   async unqueue(sessionId: string, itemId: string): Promise<void> {
     const live = await this.revive(sessionId)
     const { queue } = live.thread.session
-    if (!queue.some((item) => item.id === itemId)) throw notFound(`No queued prompt ${itemId}`)
+    if (!queue.some((item) => item.id === itemId)) throw notFound(t('session.noQueued'))
     live.queuedBy.delete(itemId)
     const rest = queue.filter((item) => item.id !== itemId)
     this.update(live, { queue: rest, ...(rest.length === 0 ? { queuePaused: false } : {}) })
@@ -8935,7 +9246,7 @@ export class SessionManager {
   /** Steers a queued prompt; false when the turn was ending and the prompt stays first. */
   private async steerItem(live: Live, itemId: string): Promise<boolean> {
     const item = live.thread.session.queue.find((i) => i.id === itemId)
-    if (!item) throw notFound(`No queued prompt ${itemId}`)
+    if (!item) throw notFound(t('session.noQueued'))
     if (!this.deps.agents.status(live.record.agentId).capabilities.steering) {
       throw new HostError(
         'restricted',
@@ -8959,21 +9270,19 @@ export class SessionManager {
       if (canSend(live.thread.session.status)) this.drainQueue(live)
       return false
     }
-    this.emit(live, [
-      {
-        op: 'entry.add',
-        entry: {
-          kind: 'user',
-          id: this.nextId(live),
-          content: resolved.shown,
-          at: this.now(),
-          steered: true,
-          ...(item.from ? { from: item.from } : {}),
-          ...(item.device ? { device: item.device } : {}),
-          ...(item.approval ? { approval: item.approval } : {}),
-        },
-      },
-    ])
+    const steered: ThreadEntry = {
+      kind: 'user',
+      id: this.nextId(live),
+      content: resolved.shown,
+      at: this.now(),
+      steered: true,
+      ...(item.from ? { from: item.from } : {}),
+      ...(item.device ? { device: item.device } : {}),
+      ...(item.approval ? { approval: item.approval } : {}),
+      ...(item.kettu ? { kettu: item.kettu } : {}),
+    }
+    this.emit(live, [{ op: 'entry.add', entry: steered }])
+    this.keepOrigin(live, steered)
     this.commitAttachments(live, resolved)
     if (resolved.ids.length > 0) void this.deps.attachments?.release(resolved.ids)
     live.queuedBy.delete(itemId)
@@ -9016,7 +9325,7 @@ export class SessionManager {
     }
     const { queue } = live.thread.session
     const item = queue.find((i) => i.id === itemId)
-    if (!item) throw notFound(`No queued prompt ${itemId}`)
+    if (!item) throw notFound(t('session.noQueued'))
     if (!live.turn || live.turn.ended) throw new HostError('busy', t('session.noTurn'))
     this.update(live, { queue: [item, ...queue.filter((i) => i.id !== itemId)] })
     this.persist(live)
@@ -9053,12 +9362,30 @@ export class SessionManager {
       return
     }
     const { status, queue, queuePaused } = live.thread.session
-    const [next, ...rest] = queue
-    if (!next || (queuePaused && !chosen) || !canSend(status) || this.waitsForWorktree(live)) return
+    if (
+      queue.length === 0 ||
+      (queuePaused && !chosen) ||
+      !canSend(status) ||
+      this.waitsForWorktree(live)
+    ) {
+      return
+    }
+    // Kettu's own messages that are no longer due, such as a reminder for a step that reported
+    // meanwhile, are dropped as their turn comes.
+    const start = queue.findIndex((item) => live.kettuQueued.get(item.id)?.() !== false)
+    const dropped = start === -1 ? queue : queue.slice(0, start)
+    for (const item of dropped) live.kettuQueued.delete(item.id)
+    const [next, ...rest] = queue.slice(dropped.length)
+    if (!next) {
+      this.update(live, { queue: [], queuePaused: false })
+      this.persist(live)
+      return
+    }
     this.update(live, { queue: rest, ...(rest.length === 0 ? { queuePaused: false } : {}) })
     const queuedBy = live.queuedBy.get(next.id)
     live.queuedBy.delete(next.id)
-    this.sendPrompt(live, next.content, next.from, queuedBy, next.device, next.approval)
+    live.kettuQueued.delete(next.id)
+    this.sendPrompt(live, next.content, next.from, queuedBy, next.device, next.approval, next.kettu)
   }
 
   private pauseQueue(live: Live): void {
@@ -9101,6 +9428,7 @@ export class SessionManager {
       fallback: null,
       requested: false,
       byAgent,
+      ends: [],
     }
     live.turn = turn
     live.sender =
@@ -9120,6 +9448,10 @@ export class SessionManager {
           : null
       this.manager.turnStarted(live.id, typed)
     }
+    // A running turn has no ending, so a list never shows the last one's on it.
+    delete live.record.lastTurn
+    // The touch below sends the count without the suggestions the user talked past.
+    this.deps.cards?.turnStarted(live.id)
     this.update(live, {
       status: 'running',
       turnStartedAt: now,
@@ -9202,24 +9534,59 @@ export class SessionManager {
       }
       const writer =
         target.agentId === agentId ? runtime : await this.deps.agents.ensureReady(target.agentId)
-      // The reports folder holds every hidden session, made once for the first of them.
-      await mkdir(this.deps.reportsDir, { recursive: true })
-      const title = await writeSessionTitle(writer, {
-        dir: this.deps.reportsDir,
-        model: target.model,
-        message,
-        log: (line) => this.deps.diagnostics.log('warn', line),
-      })
+      const title = await this.askTitle(writer, target.model, message)
       this.applyWrittenTitle(live, title)
     } catch (error) {
       live.titleFailedAt = this.now()
       this.deps.diagnostics.log(
         'warn',
-        `${name}: could not title session ${live.id}: ${(error as Error).message}`,
+        `${name}: could not title session ${live.id}: ${logText(error)}`,
       )
     } finally {
       live.titleWriting = false
     }
+  }
+
+  /** Uses the same title writer for a requirement and falls back to its source session. */
+  async titleTask(sessionId: string, text: string): Promise<string | null> {
+    const live = this.live.get(sessionId)
+    const source = live?.record ?? this.records.get(sessionId)
+    const message: UserContent[] = [{ type: 'text', text }]
+    const firstLine = fallbackTitle(message)
+    function usableTitle(title: string | null): string | null {
+      return listedTitle(listedTitle(title, text), firstLine)
+    }
+    if (source && this.deps.settings().sessionTitles && firstLine) {
+      const target = lightTarget(
+        this.deps.settings().lightModel,
+        source.agentId,
+        live
+          ? (modelOf(live.thread.session.config) ?? source.model ?? null)
+          : (source.model ?? null),
+      )
+      try {
+        const writer = await this.deps.agents.ensureReady(target.agentId)
+        const title = usableTitle(await this.askTitle(writer, target.model, message))
+        if (title) return title
+      } catch (error) {
+        this.deps.diagnostics.log('warn', `Could not title a task: ${logText(error)}`)
+      }
+    }
+    return usableTitle(this.title(sessionId) ?? null)
+  }
+
+  private async askTitle(
+    writer: Parameters<typeof writeSessionTitle>[0],
+    model: LightTarget['model'],
+    message: UserContent[],
+  ): Promise<string> {
+    await mkdir(this.deps.reportsDir, { recursive: true })
+    return writeSessionTitle(writer, {
+      dir: this.deps.reportsDir,
+      model,
+      message,
+      log: (line) => this.deps.diagnostics.log('warn', line),
+    })
   }
 
   /** A title a hidden session wrote, under the user's and over the cut first line. */
@@ -9258,6 +9625,12 @@ export class SessionManager {
       throw new HostError('restricted', t('session.subagent.noFork'))
     }
     const source = await this.revive(sessionId)
+    // The fork copies the agent's session, which an edit not yet sent has not cut.
+    if (source.record.rewound) {
+      await this.applyRewind(source).catch((error: unknown) => {
+        throw agentError(error)
+      })
+    }
     const status = source.thread.session.status
     const turnRuns = status === 'running' || status === 'awaiting_permission'
     if (status !== 'closed' && !turnRuns && (status !== 'ready' || !source.connection)) {
@@ -9344,6 +9717,8 @@ export class SessionManager {
     else delete record.ports
     // A queued prompt, the attachments it holds, and the source's pin or archive stay with it.
     delete record.queue
+    delete record.rewound
+    delete record.carried
     delete record.pinnedAt
     delete record.archivedAt
     delete record.leftSubSessions
@@ -9577,6 +9952,16 @@ export class SessionManager {
   }
 
   private async runTurn(live: Live, turn: Turn): Promise<void> {
+    if (live.record.rewound) {
+      // An edit waits to be sent: the agent's session is cut there before the message goes.
+      try {
+        await this.applyRewind(live)
+      } catch (error) {
+        if (!turn.ended) this.failTurn(live, turn, error)
+        return
+      }
+      if (turn.ended) return
+    }
     let connection: AgentConnection
     try {
       connection = await this.connect(live)
@@ -9600,7 +9985,7 @@ export class SessionManager {
       }
       const carry = live.record.carry
       const carried = carry
-        ? await this.withCarried(live, connection, carry, resolved.wire)
+        ? await this.withCarried(live, connection, carry, resolved.wire, turn.entryId)
         : resolved.wire
       // A slash command must open the prompt to be one, so what goes ahead waits for the next.
       const command = opensWithCommand(resolved.wire)
@@ -9609,7 +9994,11 @@ export class SessionManager {
       // Huli: manager mode's block, the manager's or a worker's persona, after Kettu's own.
       const role = command ? null : this.roleAhead(live)
       let wire = carried
-      if (ahead) live.record.memorySentTo = live.record.acpSessionId
+      if (ahead) {
+        live.record.memorySentTo = live.record.acpSessionId
+        if (turn.entryId) live.record.memorySentAt = turn.entryId
+        else delete live.record.memorySentAt
+      }
       const parts = [ahead, role?.text ?? null].filter((part): part is string => part !== null)
       if (role) role.sent()
       if (parts.length > 0) {
@@ -9618,7 +10007,12 @@ export class SessionManager {
       }
       const named = opensWithCommand(resolved.wire) ? null : this.foldersNote(live, connection)
       if (named) wire = [{ type: 'text', text: `${named}\n\n` }, ...wire]
-      const sending = connection.prompt(live.record.acpSessionId, wire).finally(() => {
+      const entryId = turn.entryId
+      const sent = (ref: string): void => {
+        if (!entryId || live.thread.byId[entryId]?.kind !== 'user') return
+        this.emit(live, [{ op: 'entry.update', id: entryId, changes: { agentRef: ref } }])
+      }
+      const sending = connection.prompt(live.record.acpSessionId, wire, sent).finally(() => {
         if (live.unansweredCancel === turn) live.unansweredCancel = null
       })
       this.refreshContext(live)
@@ -9672,6 +10066,7 @@ export class SessionManager {
     refusal?: TurnRefusal,
   ): string | null {
     turn.ended = true
+    for (const ended of turn.ends.splice(0)) ended()
     if (turn.fallback) clearTimeout(turn.fallback)
     turn.fallback = null
     if (live.turn === turn) live.turn = null
@@ -9682,7 +10077,10 @@ export class SessionManager {
     this.deps.diagnostics.turnEnded(live.record.agentId, [live.id, live.record.acpSessionId])
     this.reportTurn(live, turn, stopReason)
     this.manager.turnEnded(live.id, stopReason)
+    // A turn ended by an error has no stop reason; its failure sets the ending.
+    if (stopReason) live.record.lastTurn = { reason: stopReason, endedAt: this.now() }
     this.closeOpenEntries(live)
+    live.activity.clear()
     this.clearPermissions(live, 'cancelled', true)
     this.stalls.turnEnded(live.id)
     // Retry on a stuck turn stopped it to go on again, once the turn has finished ending.
@@ -9711,6 +10109,7 @@ export class SessionManager {
     }
     if (!stopReason) return null
     const id = this.nextId(live)
+    const used = live.thread.session.usage?.used
     this.emit(live, [
       {
         op: 'entry.add',
@@ -9721,10 +10120,44 @@ export class SessionManager {
           durationMs: Math.max(0, this.now() - turn.startedAt),
           after: agentEntryBefore(live.thread),
           ...(refusal && stopReason === 'refusal' ? { refusal } : {}),
+          ...(used ? { used } : {}),
         },
       },
     ])
     return id
+  }
+
+  /**
+   * The ending of a turn that failed: `limit` when a used-up window of the agent's holds back the
+   * session's model, as a plan refusing the request leaves it.
+   */
+  private failedTurn(live: Live, message: string, now: number): LastTurn {
+    const error = firstLine(message)
+    const { agentId } = live.record
+    const status = this.deps.agents.has(agentId) ? this.deps.agents.status(agentId) : undefined
+    const model = live.thread.session.config.find((option) => option.category === 'model')
+    const limit = reachedLimit(status, model, now)
+    if (!limit || !status) return { reason: 'failed', endedAt: now, error }
+    return { reason: 'limit', endedAt: now, error, limit: lastTurnLimit(status, limit) }
+  }
+
+  /**
+   * A used-up window was noticed just after a session's turn failed: the window stopped it. Only
+   * a failed ending changes, and only while no turn has started since.
+   */
+  turnLimited(sessionId: string, status: AgentStatus, limit: PlanLimit): void {
+    const live = this.live.get(sessionId)
+    const record = live?.record ?? this.records.get(sessionId)
+    if (!record || record.lastTurn?.reason !== 'failed' || live?.turn) return
+    record.lastTurn = { ...record.lastTurn, reason: 'limit', limit: lastTurnLimit(status, limit) }
+    if (live) this.persist(live)
+    else this.saveIndex()
+    this.touch(sessionId)
+  }
+
+  /** A session's workflow suggestions changed, which its count of what waits includes. */
+  cardsChanged(sessionId: string): void {
+    this.touch(sessionId)
   }
 
   private endTurn(
@@ -9973,7 +10406,7 @@ export class SessionManager {
   /** Tells the task engine a step's turn ended; true for a step's session, which stays quiet. */
   private reportStep(live: Live): boolean {
     if (live.record.origin !== 'task') return false
-    this.deps.task?.current?.turnEnded(live.id)
+    this.deps.task?.current?.turnEnded(live.id, { byUser: live.userTurn })
     return true
   }
 
@@ -10051,6 +10484,7 @@ export class SessionManager {
     if (planLimit && !pauses && !turn.cancelRequested) this.manager.limitStopped(live.id)
     this.finishTurn(live, turn, null)
     const now = this.now()
+    live.record.lastTurn = this.failedTurn(live, mapped.message, now)
     if (authRequired) {
       this.signInNotice(live)
     } else {
@@ -10147,6 +10581,10 @@ export class SessionManager {
    * the host still holds; a retried message's were released when it first went.
    */
   private giveBack(live: Live, turn: Turn): void {
+    // Only what the user wrote goes back to a composer: never Kettu's own message, a card's answer
+    // or another session's message.
+    const sent = turn.entryId === null ? undefined : live.thread.byId[turn.entryId]
+    if (sent?.kind === 'user' && (sent.kettu || sent.approval || sent.from)) return
     const held = new Set(this.deps.attachments?.held(attachmentIds(turn.written)) ?? [])
     const content = turn.written.filter(
       (item) =>
@@ -10174,6 +10612,8 @@ export class SessionManager {
       content: turn.content,
       entryId: turn.entryId,
     })
+    live.record.lastTurn = this.failedTurn(live, failure.message, this.now())
+    this.touch(live.id)
     this.reportRun(live, { stopReason: null, error: failure, usage: null, turn })
     this.persist(live)
     this.checkpoint(live)
@@ -10838,6 +11278,332 @@ export class SessionManager {
     this.goOn(live, kind, message)
   }
 
+  // Edit from a message: the turns from it leave the thread at once and are set aside, kept on
+  // disk, until the next message cuts the agent's own session there and drops them, or Put back
+  // returns them.
+
+  /**
+   * Takes the turns from `entryId` on out of the thread and hands back the message for the
+   * composer, its attachments as new records; `draft` is what the composer held, for Put back.
+   * What runs stops first, as for an agent switch: the turn, its subagents and background work.
+   */
+  async rewind(
+    sessionId: string,
+    entryId: string,
+    draft: UserContent[],
+  ): Promise<{ content: UserContent[] }> {
+    this.assertRegistered(sessionId)
+    const record = this.recordOf(sessionId)
+    if (record.origin === 'subagent') {
+      throw new HostError('restricted', t('session.subagent.noPrompt'))
+    }
+    if (this.isArchived(record)) throw new HostError('restricted', t('rewind.archived'))
+    const live = await this.revive(sessionId)
+    if (live.prepared || live.first || live.heldFirst || live.rewinding) {
+      throw new HostError('busy', t('rewind.starting'))
+    }
+    const agent = this.deps.agents.name(live.record.agentId)
+    if (!this.deps.agents.status(live.record.agentId).capabilities.rewind) {
+      throw new HostError('restricted', t('rewind.unsupported', { agent }))
+    }
+    if (live.record.noRewind) throw new HostError('restricted', t('rewind.olderThread'))
+    const editable = (): boolean => {
+      const at = live.thread.order.indexOf(entryId)
+      return at >= 0 && canEditAt(live.thread, at)
+    }
+    if (!editable()) throw new HostError('restricted', t('rewind.notEligible'))
+    await this.stopForRewind(live)
+    const { status } = live.thread.session
+    if (status === 'starting' || status === 'auth_required') throw busyError(status)
+    if (!editable()) throw new HostError('restricted', t('rewind.notEligible'))
+    const entry = live.thread.byId[entryId] as Extract<ThreadEntry, { kind: 'user' }>
+    const content = await this.composerCopy(live, entry.content)
+    const at = live.thread.order.indexOf(entryId)
+    const aside = live.thread.order.slice(at).flatMap((id) => {
+      const item = live.thread.byId[id]
+      const pos = live.positions.get(id)
+      return item && pos !== undefined ? [{ pos, entry: item }] : []
+    })
+    const prior = live.record.rewound
+    const carried = live.record.carried
+    const carry =
+      carried && aside.some((item) => item.entry.id === carried.entryId)
+        ? carried.carry
+        : prior?.carry
+    const lastTurn = prior ? prior.lastTurn : live.record.lastTurn
+    live.record.rewound = {
+      entryId,
+      turns: turnsFrom(live.thread, at) + (prior?.turns ?? 0),
+      draft: prior?.draft ?? draft,
+      used: prior ? prior.used : (live.thread.session.usage?.used ?? null),
+      point: {
+        ref: entry.agentRef ?? null,
+        text: promptLine(entry.content),
+        occurrence: promptOccurrence(live.thread, at),
+      },
+      ...(carry ? { carry } : {}),
+      ...(lastTurn ? { lastTurn } : {}),
+    }
+    delete live.record.lastTurn
+    live.setAside = [...aside, ...(live.setAside ?? [])].sort((a, b) => a.pos - b.pos)
+    live.setAsideDirty = true
+    if (aside[0]) live.cutAt = Math.min(live.cutAt ?? aside[0].pos, aside[0].pos)
+    live.failure = null
+    this.emit(live, [{ op: 'thread.truncate', id: entryId }])
+    const used = usedAtEnd(live.thread)
+    const usage = live.thread.session.usage
+    this.update(live, {
+      rewound: { turns: live.record.rewound.turns },
+      ...(usage && used !== null ? { usage: { ...usage, used } } : {}),
+      context: undefined,
+      error: null,
+      updatedAt: this.now(),
+    })
+    this.persist(live)
+    this.touch(live.id)
+    this.checkpoint(live)
+    this.deps.diagnostics.event(live.record.agentId, 'session rewound', live.id)
+    return { content }
+  }
+
+  /** Stops what runs in a session an edit goes back in: its turn, subagents and its agent's session. */
+  private async stopForRewind(live: Live): Promise<void> {
+    this.pauseQueue(live)
+    const turn = live.turn
+    if (turn && !turn.ended) {
+      const ended = new Promise<void>((resolve) => turn.ends.push(resolve))
+      await this.cancel(live.id)
+      await ended
+    }
+    this.clearPermissions(live, 'cancelled')
+    await this.closeAll(this.descendants(live.id, 'subagent'), true)
+    await this.letGo(live)
+    if (live.thread.session.status === 'ready') this.update(live, { status: 'closed' })
+  }
+
+  /**
+   * The message an edit gives back, with each attachment as a record of its own: the thread's
+   * copy goes once the next message is sent. A file or folder is added again from where it is;
+   * one that is no longer there is left out.
+   */
+  private async composerCopy(live: Live, content: readonly UserContent[]): Promise<UserContent[]> {
+    const out: UserContent[] = []
+    let images = 0
+    for (const item of content) {
+      if (item.type === 'text') {
+        out.push(item)
+        continue
+      }
+      const copy = await this.attachmentCopy(live, item.ref, () => ++images).catch(
+        (error: unknown) => {
+          this.deps.diagnostics.log(
+            'warn',
+            `Could not give back an attachment of session ${live.id}: ${(error as Error).message}`,
+          )
+          return null
+        },
+      )
+      if (copy) out.push({ type: 'ref', ref: { kind: 'attachment', attachment: copy } })
+    }
+    return out
+  }
+
+  private async attachmentCopy(
+    live: Live,
+    ref: ContentRef,
+    nextImage: () => number,
+  ): Promise<Attachment | null> {
+    const store = this.deps.attachments
+    if (!store) return null
+    const bytes = async (hash: string | null): Promise<ArrayBuffer | null> => {
+      const stored = hash ? await this.storedBlob(live.id, hash) : null
+      return stored ? new Uint8Array(stored.data).slice().buffer : null
+    }
+    if (ref.kind === 'image') {
+      const data =
+        'data' in ref
+          ? new Uint8Array(Buffer.from(ref.data, 'base64')).buffer
+          : await bytes(ref.blob)
+      if (!data) return null
+      const name = t('content.image', { number: nextImage() })
+      return store.add({ bytes: data, mimeType: ref.mimeType, name }, null)
+    }
+    if (ref.kind !== 'attachment') return null
+    const { attachment } = ref
+    // Not sent, as a message held back before it went: its record is still the one it names.
+    if (!attachment.sent) return store.held([attachment.id]).length > 0 ? attachment : null
+    if (attachment.blob) {
+      const data = await bytes(attachment.blob)
+      if (data) {
+        const mimeType = attachment.mimeType ?? 'application/octet-stream'
+        return store.add({ bytes: data, mimeType, name: attachment.name }, attachment.thumb)
+      }
+    }
+    if (!attachment.uri) return null
+    const kind = attachment.type === 'folder' ? 'folder' : 'file'
+    return store.addPath(fileURLToPath(attachment.uri), kind, attachment.thumb)
+  }
+
+  /**
+   * Put back: the turns an edit set aside return where they were, with the context and the last
+   * turn's ending they had; what the composer held before is handed back.
+   */
+  async putBack(sessionId: string): Promise<{ draft: UserContent[] }> {
+    this.assertRegistered(sessionId)
+    const live = await this.revive(sessionId)
+    const rewound = live.record.rewound
+    const aside = live.setAside
+    if (!rewound || !aside) throw new HostError('restricted', t('rewind.nothing'))
+    if (live.rewinding || (live.turn && !live.turn.ended)) {
+      throw busyError(live.thread.session.status)
+    }
+    const from = aside[0]?.pos ?? live.nextPos
+    // Entries added since, as a notice, follow the returned ones as they followed the cut.
+    const later = live.thread.order.flatMap((id) => {
+      const entry = live.thread.byId[id]
+      const pos = live.positions.get(id)
+      return entry && pos !== undefined && pos > from ? [{ pos, entry }] : []
+    })
+    if (later[0]) this.emit(live, [{ op: 'thread.truncate', id: later[0].entry.id }])
+    const back = [...aside, ...later].sort((a, b) => a.pos - b.pos)
+    for (const { pos, entry } of back) live.positions.set(entry.id, pos)
+    this.emit(
+      live,
+      back.map(({ entry }): Patch => ({ op: 'entry.add', entry })),
+    )
+    live.cutAt = Math.min(live.cutAt ?? from, from)
+    live.setAside = null
+    live.setAsideDirty = true
+    delete live.record.rewound
+    if (rewound.lastTurn) live.record.lastTurn = rewound.lastTurn
+    const usage = live.thread.session.usage
+    this.update(live, {
+      rewound: null,
+      ...(usage && rewound.used !== null ? { usage: { ...usage, used: rewound.used } } : {}),
+      context: undefined,
+      updatedAt: this.now(),
+    })
+    this.persist(live)
+    this.touch(live.id)
+    this.checkpoint(live)
+    const held = new Set(this.deps.attachments?.held(attachmentIds(rewound.draft)) ?? [])
+    const draft = rewound.draft.filter(
+      (item) =>
+        item.type !== 'ref' || item.ref.kind !== 'attachment' || held.has(item.ref.attachment.id),
+    )
+    return { draft }
+  }
+
+  /** Cuts the agent's own session where an edit went back to, once, before anything else reaches it. */
+  private applyRewind(live: Live): Promise<void> {
+    if (!live.record.rewound) return Promise.resolve()
+    live.rewinding ??= this.cutAgentSession(live).finally(() => {
+      live.rewinding = null
+    })
+    return live.rewinding
+  }
+
+  /**
+   * The agent's session is cut before the edited message, the same one or a new one carrying on
+   * with what came before; only then are the set-aside entries dropped. A cut that fails leaves
+   * everything as it was, for Put back or another try.
+   */
+  private async cutAgentSession(live: Live): Promise<void> {
+    const { record } = live
+    const rewound = record.rewound
+    if (!rewound) return
+    const agent = this.deps.agents.name(record.agentId)
+    const from = record.acpSessionId
+    let cut: RewoundSession = { sessionId: from }
+    if (from !== '') {
+      const runtime = await this.deps.agents.ensureReady(record.agentId)
+      const { connection } = runtime
+      if (!runtime.init.capabilities.rewind || !connection.rewindSession) {
+        throw new HostError('restricted', t('rewind.unsupported', { agent }))
+      }
+      if (connection.rewindsOpen) await this.connect(live)
+      try {
+        cut = await connection.rewindSession(
+          from,
+          await this.cwdOf(live),
+          rewound.point,
+          record.customTitle ?? live.thread.session.title,
+        )
+      } catch (error) {
+        const mapped = agentError(error)
+        throw new HostError(
+          mapped.code,
+          t('rewind.failed', { reason: mapped.message }),
+          mapped.data,
+        )
+      }
+    }
+    if (live.record !== record || record.rewound !== rewound) return
+    const aside = new Set((live.setAside ?? []).map(({ entry }) => entry.id))
+    if (record.memorySentAt && aside.has(record.memorySentAt)) {
+      delete record.memorySentTo
+      delete record.memorySentAt
+    }
+    if (cut.sessionId !== from) {
+      await this.letGo(live)
+      record.acpSessionId = cut.sessionId
+      // The copy keeps what the session was started with, as its system prompt.
+      if (cut.sessionId === '') {
+        delete record.systemPromptSentTo
+        delete record.memorySentTo
+      } else {
+        if (record.systemPromptSentTo === from) record.systemPromptSentTo = cut.sessionId
+        if (record.memorySentTo === from) record.memorySentTo = cut.sessionId
+      }
+      const renamed = Object.entries(cut.refs ?? {})
+      const refs = new Map(renamed)
+      const patches = live.thread.order.flatMap((id): Patch[] => {
+        const entry = live.thread.byId[id]
+        const ref = entry?.kind === 'user' && entry.agentRef ? refs.get(entry.agentRef) : undefined
+        return ref ? [{ op: 'entry.update', id, changes: { agentRef: ref } }] : []
+      })
+      if (patches.length > 0) this.emit(live, patches)
+      this.update(live, {
+        acpSessionId: cut.sessionId || null,
+        ...(live.thread.session.status === 'ready' ? { status: 'closed' } : {}),
+      })
+    }
+    if (rewound.carry) record.carry = rewound.carry
+    delete record.rewound
+    live.setAside = null
+    live.setAsideDirty = true
+    this.update(live, { rewound: null })
+    this.save(live)
+    // A session cut to nothing gets its new one as the turn attaches, which writes it whole.
+    if (record.acpSessionId) this.checkpoint(live)
+    this.deps.diagnostics.event(record.agentId, 'session cut for an edit', live.id)
+  }
+
+  /** An agent that cannot cut every session it has says which, as for an older Codex thread. */
+  private checkRewind(live: Live, connection: AgentConnection): void {
+    const { record } = live
+    const id = record.acpSessionId
+    if (!connection.canRewind || record.noRewind || id === '' || record.origin === 'subagent') {
+      return
+    }
+    void this.cwdOf(live)
+      .then((cwd) => connection.canRewind!(id, cwd))
+      .then(
+        (can) => {
+          if (can || record.acpSessionId !== id || this.live.get(live.id) !== live) return
+          record.noRewind = true
+          this.persist(live)
+          this.update(live, { noRewind: true })
+        },
+        (error: unknown) => {
+          this.deps.diagnostics.log(
+            'warn',
+            `Could not ask whether session ${live.id} can be cut: ${(error as Error).message}`,
+          )
+        },
+      )
+  }
+
   async cancel(sessionId: string): Promise<void> {
     const live = this.live.get(sessionId)
     // Nothing runs in a session that is not live.
@@ -11129,6 +11895,12 @@ export class SessionManager {
     const live = await this.revive(sessionId)
     // Another request may have started one while the session came back.
     if (this.sideRuns.has(sessionId)) throw new HostError('busy', t('session.side.busy'))
+    // The side question sees the conversation as the thread shows it, cut where an edit went.
+    if (live.record.rewound) {
+      await this.applyRewind(live).catch((error: unknown) => {
+        throw agentError(error)
+      })
+    }
     const side = this.sideOf(live)!
     const answerAgent = borrowed ? agentId : side.answerAgent
     const answering = borrowed || own === 'none' ? answerAgent : record.agentId
@@ -11220,10 +11992,7 @@ export class SessionManager {
         return
       }
       ended({ status: 'failed', error: agentError(error).message })
-      this.deps.diagnostics.log(
-        'warn',
-        `The side question of ${live.id} failed: ${(error as Error).message}`,
-      )
+      this.deps.diagnostics.log('warn', `The side question of ${live.id} failed: ${logText(error)}`)
     }
   }
 
@@ -11815,9 +12584,11 @@ export class SessionManager {
         this.settleSurfaceAccess(live.id, entryId, 'timeout')
         continue
       }
-      // A publish put off this way is kept as a draft, as by Not now.
+      // A publish card waits its own time past the turn; put off when the session closes, it is
+      // kept as a draft, as by Not now.
       if (requestId.startsWith('market:')) {
-        this.settleMarket(live.id, entryId, { decision: 'ended' })
+        if (keepNonBlocking) live.lateCards.add(entryId)
+        else this.settleMarket(live.id, entryId, { decision: 'ended' })
         continue
       }
       // A settings card ends with its turn, changing nothing.
@@ -11868,7 +12639,8 @@ export class SessionManager {
 
   /** Once no request or new site waits for the user, the session goes back to its turn or rests. */
   private stopWaiting(live: Live): void {
-    const nonBlocking = [...live.permissions.values()].filter((p) => p.nonBlocking).length
+    const nonBlocking =
+      [...live.permissions.values()].filter((p) => p.nonBlocking).length + live.lateCards.size
     if (waitingCount(live) - nonBlocking > 0) return
     if (live.thread.session.status !== 'awaiting_permission') return
     this.update(live, { status: live.turn || live.childRunning ? 'running' : 'ready' })
@@ -11885,12 +12657,12 @@ export class SessionManager {
     const live = this.live.get(sessionId)
     const pending = live?.permissions.get(requestId)
     if (live && !pending && live.answered.has(requestId)) {
-      throw new HostError('not_found', `Request ${requestId} was already answered`, {
+      throw new HostError('not_found', t('session.waiting.permission.answered'), {
         reason: ALREADY_ANSWERED,
         device: live.answered.get(requestId) ?? null,
       })
     }
-    if (!live || !pending) throw notFound(`No pending permission request ${requestId}`)
+    if (!live || !pending) throw notFound(t('session.waiting.permission.gone'))
     let result: Exclude<NonNullable<ToolEntry['permissionResult']>, string>
     let given: PermissionAnswer
     const form = pending.elicitation?.kind === 'form' ? pending.elicitation : null
@@ -12004,12 +12776,12 @@ export class SessionManager {
     const status = live.thread.session.status
     if (!live.connection && status !== 'closed') throw busyError(status)
     const option = live.thread.session.config.find((o) => o.id === optionId)
-    if (!option) throw invalidParams(`No config option ${optionId}`)
+    if (!option) throw invalidParams(t('session.noConfigOption', { option: optionId }))
     if (this.manager.readOnly(sessionId) && !readOnlyMode(live.record.agentId, option, value)) {
       throw new HostError('restricted', t('manager.modeLocked'))
     }
     if (!isValueOf(option, value)) {
-      throw invalidParams(`${String(value)} is not a choice of ${option.name}`)
+      throw invalidParams(t('session.notAChoice', { value: String(value), option: option.name }))
     }
     if (option.idleOnly && (live.turn || (status !== 'ready' && status !== 'closed'))) {
       throw new HostError('busy', t('session.configBetweenTurns', { option: option.name }))
@@ -13515,37 +14287,39 @@ export class SessionManager {
     )
   }
 
-  /**
-   * Has the session's agent write a name for the new worktree's branch from the first message,
-   * while the worktree is prepared. Only while titles are written, and only for a first message
-   * that waits for preparation, since one that does not goes before a name could come.
-   */
-  private nameBranch(
-    agentId: AgentId,
+  /** Creates a worktree and starts writing its branch name while the caller gets it ready. */
+  private async createWorktree(
     projectPath: string,
-    worktree: WorktreeRecord,
-    message: UserContent[],
-    values: { type?: string; issue?: string },
-    picks: Record<string, string | boolean> = {},
-  ): void {
+    request: Parameters<WorktreeManager['create']>[1],
+    first: { agentId: AgentId; options?: Record<string, string | boolean> },
+    message: UserContent[] | null,
+  ): Promise<WorktreeRecord> {
     const manager = this.deps.worktrees
-    if (!manager || !this.deps.settings().sessionTitles) return
-    if (!manager.settings(projectPath).waitForSetup) return
-    if (titleMessageText(message).trim() === '') return
-    const target = lightTarget(
-      this.deps.settings().lightModel,
-      agentId,
-      this.startModel(agentId, picks),
-    )
-    const naming = new BranchNaming(this.writeBranchSlug(target, message))
-    const { type, issue } = values
-    this.branchNames.set(pathKey(worktree.path, this.deps.platform), {
-      naming,
-      values: {
-        ...(type === undefined ? {} : { type }),
-        ...(issue === undefined ? {} : { issue }),
-      },
-    })
+    if (!manager) throw invalidParams(t('session.worktreeNeedsRepo'))
+    const worktree = await manager.create(projectPath, request)
+    if (
+      message &&
+      !request.branch?.trim() &&
+      this.deps.settings().sessionTitles &&
+      manager.settings(projectPath).waitForSetup &&
+      titleMessageText(message).trim() !== ''
+    ) {
+      const target = lightTarget(
+        this.deps.settings().lightModel,
+        first.agentId,
+        this.startModel(first.agentId, first.options ?? {}),
+      )
+      const naming = new BranchNaming(this.writeBranchSlug(target, message))
+      const { type, issue } = request
+      this.branchNames.set(pathKey(worktree.path, this.deps.platform), {
+        naming,
+        values: {
+          ...(type === undefined ? {} : { type }),
+          ...(issue === undefined ? {} : { issue }),
+        },
+      })
+    }
+    return worktree
   }
 
   /** The slug the agent's hidden session writes for a branch, or null when it writes none. */
@@ -13565,7 +14339,7 @@ export class SessionManager {
     } catch (error) {
       this.deps.diagnostics.log(
         'warn',
-        `${this.deps.agents.name(target.agentId)}: could not name a branch: ${(error as Error).message}`,
+        `${this.deps.agents.name(target.agentId)}: could not name a branch: ${logText(error)}`,
       )
       return null
     }
@@ -13585,32 +14359,39 @@ export class SessionManager {
    * agent wrote or keeps its own: at once when no name is being written.
    */
   private afterBranchName(projectPath: string, path: string, release: () => void): void {
-    const key = pathKey(path, this.deps.platform)
-    const entry = this.branchNames.get(key)
-    if (!entry) {
+    const worktree = this.branchNames.has(pathKey(path, this.deps.platform))
+      ? this.worktreeUsers(path)[0]?.worktree
+      : undefined
+    if (!worktree) {
       release()
       return
     }
-    void entry.naming
-      .settle((slug) => this.renameBranch(projectPath, path, { ...entry.values, slug }))
-      .then(() => {
-        if (this.branchNames.get(key) === entry) this.branchNames.delete(key)
-        release()
-      })
+    void this.finishBranchName(projectPath, worktree).then(release)
+  }
+
+  private async finishBranchName(projectPath: string, worktree: WorktreeRecord): Promise<void> {
+    const key = pathKey(worktree.path, this.deps.platform)
+    const entry = this.branchNames.get(key)
+    if (!entry) return
+    await entry.naming.settle((slug) =>
+      this.renameBranch(projectPath, worktree, { ...entry.values, slug }),
+    )
+    if (this.branchNames.get(key) === entry) this.branchNames.delete(key)
   }
 
   /** Names the worktree's branch from the slug, for every session in it; never rejects. */
   private async renameBranch(
     projectPath: string,
-    path: string,
+    worktree: WorktreeRecord,
     values: { slug: string; type?: string; issue?: string },
   ): Promise<void> {
     const manager = this.deps.worktrees
-    const worktree = this.worktreeUsers(path)[0]?.worktree
-    if (!manager || !worktree || worktree.removed !== undefined) return
+    if (!manager || worktree.removed !== undefined) return
+    const { path } = worktree
     try {
       const branch = await manager.renameBranch(projectPath, { ...worktree }, values)
       if (branch === null) return
+      worktree.branch = branch
       this.markWorktree(path, (record) => {
         record.branch = branch
       })
@@ -13653,7 +14434,7 @@ export class SessionManager {
     const { worktree } = record
     const manager = this.deps.worktrees
     if (!worktree || worktree.path === '' || !manager) {
-      throw notFound('This session has no worktree')
+      throw notFound(t('session.noWorktree'))
     }
     const state = await manager.inspect(record.projectPath, worktree)
     const others = this.worktreeUsers(worktree.path)
@@ -13678,7 +14459,7 @@ export class SessionManager {
     const { worktree } = record
     const manager = this.deps.worktrees
     if (!worktree || worktree.path === '' || worktree.removed !== undefined || !manager) {
-      throw notFound('This session has no worktree to remove')
+      throw notFound(t('session.noWorktreeToRemove'))
     }
     const users = this.worktreeUsers(worktree.path)
     await this.closeAll(
@@ -13713,7 +14494,7 @@ export class SessionManager {
   retryWorktreeSetup(sessionId: string): void {
     const record = this.recordOf(sessionId)
     const { worktree } = record
-    if (!worktree || worktree.removed !== undefined) throw notFound('This session has no worktree')
+    if (!worktree || worktree.removed !== undefined) throw notFound(t('session.noWorktree'))
     if (this.deps.worktrees?.isPreparing(worktree.path)) return
     this.prepareWorktree(record.projectPath, worktree)
   }
@@ -13722,7 +14503,7 @@ export class SessionManager {
   skipWorktreeSetup(sessionId: string): void {
     const record = this.recordOf(sessionId)
     const { worktree } = record
-    if (!worktree || worktree.removed !== undefined) throw notFound('This session has no worktree')
+    if (!worktree || worktree.removed !== undefined) throw notFound(t('session.noWorktree'))
     this.deps.worktrees?.stop(worktree.path)
     this.afterBranchName(record.projectPath, worktree.path, () => {
       this.preparing.delete(pathKey(worktree.path, this.deps.platform))
@@ -14229,7 +15010,7 @@ export class SessionManager {
     kept: Partial<Pick<SessionRecord, KeptField>> = {},
   ): Promise<SessionSummary> {
     if (!this.deps.agents.has(params.agentId))
-      throw invalidParams(`Unknown agent ${params.agentId}`)
+      throw invalidParams(t('agent.unknown', { agent: params.agentId }))
     this.deps.agents.assertEnabled(params.agentId)
     // Huli: one an agent sharing its history runs here is that session.
     const existing = this.findShared(params.agentId, params.acpSessionId)
@@ -14247,6 +15028,8 @@ export class SessionManager {
     if (taken && !params.fork) {
       throw new HostError('busy', t('session.alreadyInSession'))
     }
+    // A fork reads the session itself and fails when it is gone.
+    if (!params.fork) await this.assertListed(params.agentId, projectPath, params.acpSessionId)
     const claude = harnessOf(params.agentId) === 'claude-code'
     const configDir = this.deps.agents.runningConfig(params.agentId)?.chosen ?? null
     let acpSessionId = params.acpSessionId
@@ -14362,6 +15145,36 @@ export class SessionManager {
       [...storedBlobs(entries)].map((hash) => this.storedBlob(live.id, hash).catch(() => null)),
     )
     return { entries, blobs: blobs.filter((blob) => blob !== null) }
+  }
+
+  /** Fails unless the agent lists the session for the folder, reading every page it gives. */
+  private async assertListed(
+    agentId: AgentId,
+    projectPath: string,
+    acpSessionId: string,
+  ): Promise<void> {
+    const runtime = await this.deps.agents.ensureReady(agentId)
+    if (!runtime.init.capabilities.listSessions) {
+      throw new HostError(
+        'agent_unavailable',
+        t('session.cannotList', { agent: this.deps.agents.name(agentId) }),
+      )
+    }
+    const asked = new Set<string | null>()
+    let cursor: string | null = null
+    try {
+      // A cursor the agent gives twice would never end.
+      while (!asked.has(cursor)) {
+        asked.add(cursor)
+        const page = await runtime.connection.listSessions(projectPath, cursor)
+        if (page.sessions.some((item) => item.sessionId === acpSessionId)) return
+        if (page.nextCursor === null) break
+        cursor = page.nextCursor
+      }
+    } catch (error) {
+      throw agentError(error)
+    }
+    throw notFound(t('session.notInAgent', { agent: this.deps.agents.name(agentId) }))
   }
 
   /**

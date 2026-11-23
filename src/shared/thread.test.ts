@@ -124,6 +124,22 @@ describe('applyPatches', () => {
     expect(applyPatches(before, [{ op: 'entry.remove', ids: ['gone'] }])).toBe(before)
   })
 
+  it('cuts the thread at an entry, which goes with all after it, and accepts new ones', () => {
+    const reply: ThreadEntry = { ...agent, id: 'm:2', markdown: 'Bye', streaming: false }
+    const before = state([user, agent, { ...user, id: 'e:2' }, reply])
+    const after = applyPatches(before, [
+      { op: 'thread.truncate', id: 'e:2' },
+      { op: 'entry.add', entry: { ...user, id: 'e:3' } },
+    ])
+    expect(after.order).toEqual(['e:1', 'm:1', 'e:3'])
+    expect(Object.keys(after.byId).sort()).toEqual(['e:1', 'e:3', 'm:1'])
+    expect(before.order).toEqual(['e:1', 'm:1', 'e:2', 'm:2'])
+    // A cut at an entry on an older page, which a partial state lacks, asks for a snapshot.
+    expect(() =>
+      applyPatches(state([agent]), [{ op: 'thread.truncate', id: 'e:1' }], { partial: true }),
+    ).toThrow(UnknownEntryError)
+  })
+
   it('throws for an unknown entry', () => {
     expect(() =>
       applyPatches(state(), [{ op: 'entry.appendText', id: 'nope', text: 'x' }]),
@@ -240,6 +256,15 @@ describe('applyPatchInPlace', () => {
     applyPatchInPlace(owned, patches[0])
     expect(agent.kind === 'agent' && agent.markdown).toBe('Hel')
     expect(owned.byId['m:1']).toMatchObject({ markdown: 'Hello' })
+  })
+
+  it('cuts the thread at an entry', () => {
+    const after = applyPatchInPlace(state(), { op: 'thread.truncate', id: 'm:1' })
+    expect(after.order).toEqual(['e:1'])
+    expect(after.byId).toEqual({ 'e:1': user })
+    expect(() => applyPatchInPlace(state(), { op: 'thread.truncate', id: 'nope' })).toThrow(
+      UnknownEntryError,
+    )
   })
 
   it('clears the thread on reset', () => {
@@ -446,6 +471,36 @@ describe('isThreadEntry', () => {
       device: { id: 'phone', name: 'Phone' },
       after: null,
     },
+    {
+      kind: 'task_delivery',
+      id: 'e:17',
+      taskId: 't-1',
+      title: 'Ship the release',
+      status: 'done',
+      steps: 3,
+      durationMs: 60_000,
+      deliverables: [
+        { kind: 'pull_request', url: 'https://github.com/o/r/pull/1' },
+        { kind: 'document', artifactId: 'art_1', version: 2, title: 'Design' },
+        { kind: 'file', title: 'App.dmg', detail: null, path: '/w/App.dmg' },
+        { kind: 'link', title: 'Build 42', detail: 'iOS', url: 'https://example.com/b/42' },
+      ],
+      written: { agentId: 'claude-code' },
+      publishAsked: 1_700_000_000_000,
+      after: null,
+    },
+    {
+      kind: 'task_delivery',
+      id: 'e:18',
+      taskId: 't-2',
+      title: 'Try an idea',
+      status: 'cancelled',
+      steps: 1,
+      durationMs: 5,
+      deliverables: [],
+      written: null,
+      after: 'm:1',
+    },
   ]
 
   it('accepts every kind of entry', () => {
@@ -468,6 +523,10 @@ describe('isThreadEntry', () => {
     ).toBe(false)
     expect(isThreadEntry({ ...valid[3], permission: { requestId: 'p' } })).toBe(false)
     expect(isThreadEntry({ ...valid[3], description: 1 })).toBe(false)
+    const delivery = valid.find((entry) => entry.kind === 'task_delivery')!
+    expect(isThreadEntry({ ...delivery, status: 'running' })).toBe(false)
+    expect(isThreadEntry({ ...delivery, deliverables: [{ kind: 'link', title: 'x' }] })).toBe(false)
+    expect(isThreadEntry({ ...delivery, written: { agentId: 1 } })).toBe(false)
     const artifact = valid.find((entry) => entry.kind === 'artifact')!
     expect(isThreadEntry({ ...artifact, action: 'read' })).toBe(false)
     expect(isThreadEntry({ ...artifact, writes: undefined })).toBe(false)

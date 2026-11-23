@@ -83,7 +83,7 @@ export function FailedTurnActions({
         report={{ hostId, sessionId, ...(agentId ? { agentId } : {}) }}
         origin="turn"
         error={error}
-        lead={
+        action={
           fallback && (
             <Tooltip>
               <TooltipTrigger render={<Button size="compact" disabled={busy} onClick={carryOn} />}>

@@ -45,9 +45,9 @@ import {
   forgetHarnessUpdate,
   retryHarnessUpdate,
   skipHarnessUpdates,
+  requestHarnessUpdates,
   stopHarnessBatch,
   stopHarnessUpdate,
-  updateHarnesses,
 } from './harness-updates'
 import { AppAction, CardButton, UpdateMark, UpdateNowDialog } from './update-parts'
 import { runAppAction } from './update-actions'
@@ -408,7 +408,7 @@ function AppCard({
 function HarnessCard({ item, label }: { item: HarnessItem; label: string }) {
   const { t } = useTranslation('updates')
   const text = harnessOfferText(item)
-  const update = () => updateHarnesses([item.offer.agentId])
+  const update = () => void requestHarnessUpdates([item.offer.agentId])
   return (
     <CardFrame
       label={label}
@@ -422,6 +422,7 @@ function HarnessCard({ item, label }: { item: HarnessItem; label: string }) {
       }
       hit={hitButton(t('harness.update'), update)}
       onClose={() => closeItems([item])}
+      closeLabel={t('harness.skipVersion')}
     />
   )
 }
@@ -456,8 +457,15 @@ function SeveralCard({
 }) {
   const { t } = useTranslation('updates')
   const current = useUpdatesStore((s) => s.status?.current)
+  const listAsked = useUpdatesStore((s) => s.listAsked)
   const [open, setOpen] = useState(false)
   const card = useRef<HTMLDivElement>(null)
+  const asked = useRef(listAsked)
+  useEffect(() => {
+    if (listAsked === asked.current) return
+    asked.current = listAsked
+    setOpen(true)
+  }, [listAsked])
   const harnesses = shown.flatMap((item) =>
     item.kind === 'harness' && !item.skipped ? [item.offer.agentId] : [],
   )
@@ -495,7 +503,7 @@ function SeveralCard({
           <Button
             size="sm"
             disabled={harnesses.length === 0}
-            onClick={() => updateHarnesses(harnesses)}
+            onClick={() => void requestHarnessUpdates(harnesses)}
             className="w-full rounded-lg"
           >
             {t('several.updateAll')}

@@ -23,7 +23,9 @@ import { useShallow } from 'zustand/react/shallow'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
 import type { ArtifactConsentRow } from '@shared/artifact-capabilities'
 import { originLabel } from '@shared/browser'
+import { USER_FONT_ROLES } from '@shared/settings'
 import type { AgentId, HarnessId } from '@shared/thread'
+import { programHere } from '@renderer/features/agents/harness-problem'
 import { useCloudOff } from '@renderer/lib/cloud'
 import { basename, mediumAgo } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
@@ -31,13 +33,7 @@ import { useHostContext, useHostHas } from '@renderer/lib/host-features'
 import { formatShortcut, isHosted, isMac, isWeb, isWindows, platform } from '@renderer/lib/platform'
 import { useAppInfo } from '@renderer/lib/use-app-info'
 import { useEntry } from '@renderer/lib/features'
-import {
-  agentName,
-  awaitsPackage,
-  harnessStatuses,
-  hasProgram,
-  usableAgents,
-} from '@renderer/stores/agents'
+import { agentName, awaitsPackage, harnessStatuses, usableAgents } from '@renderer/stores/agents'
 import { useAccountStore } from '@renderer/stores/account'
 import { useDebugStore } from '@renderer/stores/debug'
 import { artifactListShown, useArtifactsStore } from '@renderer/stores/artifacts'
@@ -55,11 +51,14 @@ import {
   openSettingsItem,
 } from '@renderer/stores/view'
 import { useAgentHistoryRow } from '@renderer/features/agent-history/settings-row'
+import { pageRow } from '@renderer/features/sidebar/sidebar-pages'
 import { AboutHero, AutomaticUpdates, NoUpdates, UpdateRow } from './about-section'
 import { useIdleSessionRows } from './idle-sessions'
 import { useAutoApproveRows } from './auto-approve'
 import { useSandboxRows } from './sandbox'
 import { ResumeAfterLimit, ResumeText, StallMinutesChoice } from './supervisor-rows'
+import { IslandSwitch } from './island-row'
+import { useIslandDescription } from './island-state'
 import { useWorkflowRows } from './workflow-settings'
 import {
   AgentListItem,
@@ -78,7 +77,7 @@ import { ArchivedRow } from './archived-section'
 import { CloudSwitchRow, OtherConnections } from './cloud-section'
 import { useCloudOffHere } from './use-cloud-off-here'
 import { DebugModeRow } from './debug-mode'
-import { FontFamily } from './font-family'
+import { FontFamily, UserFont } from './font-family'
 import { ConsentRow, ConsentsState } from './artifacts-section'
 import { EmptyCard, GroupNote } from './rows'
 import { BROUGHT_SHOWN, useBroughtSites } from './brought-sites'
@@ -168,6 +167,7 @@ import {
   Zoom,
 } from './sections'
 import { useAllowedSites } from './allowed-sites'
+import { SidebarCard } from './sidebar-pages'
 import { ThemeTiles } from './theme-section'
 import { ClearRecord, FromComputer, LogRow, SidebarEnd, SyncLogs } from './usage-section'
 import { StorageRow } from './storage-rows'
@@ -188,6 +188,7 @@ export function useGeneralSection(): SectionDef {
   const remoteOn = useSettingsStore((s) => s.settings.remote.enabled)
   const sessions = group('sessions', t('general.groups.sessions'), {
     note: remoteOn && <GroupNote>{t('general.background.lockedByRemote')}</GroupNote>,
+    noteFor: 'background',
   })
   const thread = group('thread', t('general.groups.thread'))
   const startup = group('startup', t('general.groups.startup'))
@@ -337,6 +338,11 @@ export function useGeneralSection(): SectionDef {
 export function useAppearanceSection(): SectionDef {
   const { t } = useTranslation('settings')
   const scale = group('scale', t('appearance.groups.scale'))
+  const fonts = group('fonts', t('appearance.groups.fonts'))
+  const sidebar = group('sidebar', t('appearance.groups.sidebar'), {
+    card: (rows) => <SidebarCard rows={rows} />,
+  })
+  const sidebarOrder = useHostScope().useSettingsStore((s) => s.settings.appearance.sidebarOrder)
   const zoomKeys = [formatShortcut('Mod+='), formatShortcut('Mod+-')] as const
   const zoomDescription = t('appearance.zoom.description', {
     zoomIn: zoomKeys[0],
@@ -378,12 +384,25 @@ export function useAppearanceSection(): SectionDef {
         layout: 'bare',
         render: (text) => <TextSize label={text} />,
       },
+      ...USER_FONT_ROLES.map((role) => ({
+        id: `font-${role}`,
+        setting: `appearance.font-${role}` as const,
+        group: fonts,
+        render: () => <UserFont role={role} label={t(`appearance.fonts.${role}.name`)} />,
+      })),
       {
         id: 'sidebar-hover',
         setting: 'appearance.sidebar-hover',
-        group: group('sidebar', t('appearance.groups.sidebar')),
+        group: sidebar,
         render: () => <SidebarHover label={t('appearance.sidebarHover.name')} />,
       },
+      // Drawn by the group's card, which puts them in the sidebar's order.
+      ...sidebarOrder.map((page) => ({
+        id: pageRow(page),
+        setting: `appearance.sidebar-${page}` as const,
+        group: sidebar,
+        render: () => null,
+      })),
       {
         id: 'reduce-motion',
         setting: 'appearance.reduce-motion',
@@ -400,6 +419,7 @@ export function useNotificationsSection(): SectionDef {
   const when = group('when', t('notifications.groups.when'))
   const how = group('how', t('notifications.groups.how'))
   const routinesOn = useEntry('settings.routineNotifications')
+  const islandDescription = useIslandDescription()
   const rows: RowDef[] = [
     {
       id: 'preview',
@@ -447,17 +467,32 @@ export function useNotificationsSection(): SectionDef {
         ]
       : []),
     {
-      id: 'limits',
-      setting: 'notifications.limits',
-      group: when,
-      render: () => <NotificationSwitch field="limits" label={t('notifications.limits.name')} />,
-    },
-    {
       id: 'error',
       setting: 'notifications.error',
       group: when,
       render: () => <NotificationSwitch field="error" label={t('notifications.error.name')} />,
     },
+    // Kettu's own update and the agents' plan limits are the desktop app's to say.
+    ...(isWeb
+      ? []
+      : [
+          {
+            id: 'updates',
+            setting: 'notifications.updates' as const,
+            group: when,
+            render: () => (
+              <NotificationSwitch field="updates" label={t('notifications.updates.name')} />
+            ),
+          },
+          {
+            id: 'plan-limits',
+            setting: 'notifications.plan-limits' as const,
+            group: when,
+            render: () => (
+              <NotificationSwitch field="planLimits" label={t('notifications.planLimits.name')} />
+            ),
+          },
+        ]),
     {
       id: 'sound',
       setting: 'notifications.sound',
@@ -465,6 +500,16 @@ export function useNotificationsSection(): SectionDef {
       render: () => <NotificationSwitch field="sound" label={t('notifications.sound.name')} />,
     },
   ]
+  // The notch island is the macOS app's own; a browser has none.
+  if (isMac && !isWeb) {
+    rows.push({
+      id: 'island',
+      setting: 'notifications.island',
+      group: how,
+      description: islandDescription,
+      render: () => <IslandSwitch label={t('notifications.island.name')} />,
+    })
+  }
   // Linux desktops differ in how they show a count, so the row is left out there.
   if (platform !== 'linux') {
     const name = isMac ? t('notifications.badge.nameDock') : t('notifications.badge.nameTaskbar')
@@ -740,8 +785,9 @@ export function useHarnessesSection(): SectionDef {
   const { useAgentsStore } = useHostScope()
   const harnesses = useAgentsStore(useShallow((s) => harnessStatuses(s.order, s.byId)))
   const environment = useAgentsStore((s) => s.environment)
-  // Installed: its program is on the machine, too old included, with any package Kettu adds for it.
-  const installed = harnesses.filter((h) => hasProgram(h) && !awaitsPackage(h) && !h.uninstalled)
+  // Installed: its program is on the machine, too old or waiting for Node.js included, with any
+  // package Kettu adds for it.
+  const installed = harnesses.filter((h) => programHere(h) && !awaitsPackage(h) && !h.uninstalled)
   const missing = harnesses.filter((h) => !installed.includes(h))
   const groups = {
     installed: {

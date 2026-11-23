@@ -1,7 +1,7 @@
 // What the branch popover's Pull and Push buttons offer for a repository's state, and how a
 // failed operation is said in the user's terms. Pure, so the rules are tested on their own.
 
-import type { CommitSummary, GitStatus, GitTools, PushTarget } from '@shared/git'
+import type { GitStatus, GitTools, PushTarget } from '@shared/git'
 import { hostPath } from '@renderer/lib/host-paths'
 
 export type OperationKind = 'fetch' | 'pull' | 'push' | 'publishBranch' | 'publishRepo'
@@ -46,23 +46,6 @@ export interface SyncPlan {
   pull: SyncButton
   push: SyncButton
   hint: SyncHint | null
-}
-
-/** How the line under the branch reads: done, on offer, something to do, or a failure. */
-export type NoteTone = 'ok' | 'info' | 'warning' | 'error'
-
-export const HINT_TONE: Record<SyncHint, NoteTone> = {
-  noBranch: 'info',
-  operation: 'warning',
-  publishRepo: 'info',
-  publishBranch: 'info',
-  diverged: 'warning',
-  upToDate: 'ok',
-  ghMissing: 'warning',
-  ghSignedOut: 'warning',
-  unknownRemote: 'warning',
-  localUpstream: 'warning',
-  otherName: 'warning',
 }
 
 export type SyncStep = 'conflicts' | 'merge' | 'rebase' | 'cherryPick' | 'revert'
@@ -243,29 +226,6 @@ export function lastLine(log: string): string {
 }
 
 /**
- * What a new pull request starts with: one commit gives its subject; several give the branch
- * name made readable, and their subjects, oldest first, as the description.
- */
-export function suggestPullRequest(
-  branch: string,
-  commits: readonly CommitSummary[],
-): { title: string; body: string } {
-  if (commits.length === 1) return { title: commits[0]!.subject, body: '' }
-  const name =
-    branch
-      .replace(/^[^/]+\//, '')
-      .replace(/[-_]+/g, ' ')
-      .trim() || branch
-  return {
-    title: name.charAt(0).toUpperCase() + name.slice(1),
-    body: [...commits]
-      .reverse()
-      .map((commit) => `- ${commit.subject}`)
-      .join('\n'),
-  }
-}
-
-/**
  * A repository path as the Files pane names it, relative to the project, or null when the file
  * lies outside the project folder (a project can be a folder inside its repository). Another
  * host answers with its own root, so the project's path is compared as that host writes it.
@@ -284,3 +244,12 @@ export function projectRelative(root: string, projectPath: string, path: string)
   const key = windows ? path.toLowerCase() : path
   return key.startsWith(prefix) ? path.slice(prefix.length) : null
 }
+
+export const PUSH_LABEL = {
+  push: 'sync.push',
+  publishBranch: 'tree.publish',
+  publishRepo: 'sync.publishRepo',
+} as const
+
+/** The operations that push a branch. */
+export const PUSHING = new Set<string>(['push', 'publishBranch', 'publishRepo'])

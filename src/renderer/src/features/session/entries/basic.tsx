@@ -48,7 +48,7 @@ import { OutOfCreditEnd } from './out-of-credit'
 import { splitLinks } from './text-links'
 import { UserActions } from './message-actions'
 import { ReplyRunChip } from './reply-run-chip'
-import { FromSessionCard, ReportLine } from './session-origin'
+import { FromSessionCard, KettuCard, ReportLine } from './session-origin'
 import { DigestCard } from '@renderer/features/manager/digest-card'
 import { TurnEndTag } from './turn-end-tag'
 import { RefChip, SentAttachments, UserContentView } from './user-content'
@@ -89,7 +89,7 @@ export const UserEntry = memo(function UserEntry({
     return <DigestCard from={entry.from} content={entry.content} className={animation} />
   }
   return (
-    <div className={cn('ks-user', entry.from && 'ks-user--agent', animation)}>
+    <div className={cn('ks-user', (entry.from || entry.kettu) && 'ks-user--agent', animation)}>
       {attachments.length > 0 && (
         <div className="flex w-full justify-end pb-1">
           <SentAttachments sessionId={sessionId} entryId={entryId} attachments={attachments} />
@@ -102,6 +102,10 @@ export const UserEntry = memo(function UserEntry({
           <FromSessionCard from={entry.from}>
             <UserContentView content={rest} sessionId={sessionId} entryId={entryId} />
           </FromSessionCard>
+        ) : entry.kettu ? (
+          <KettuCard>
+            <UserContentView content={rest} sessionId={sessionId} entryId={entryId} />
+          </KettuCard>
         ) : (
           <div className="ks-user__bubble" data-run-notice={runNotice ? '' : undefined}>
             {runNotice ? (
@@ -119,6 +123,8 @@ export const UserEntry = memo(function UserEntry({
       )}
       {first && routine && <RoutineSent routine={routine} />}
       <UserActions
+        sessionId={sessionId}
+        entryId={entryId}
         content={entry.content}
         at={entry.at}
         steered={entry.steered}
@@ -179,7 +185,12 @@ export const AgentEntry = memo(function AgentEntry({ sessionId, entryId }: Entry
   if (writing && !wrote) setWrote(true)
   if (!entry) return null
   return (
-    <div className={cn('ks-answer min-w-0', animation)} data-selectable="" data-agent-message="">
+    <div
+      className={cn('ks-answer min-w-0', animation)}
+      data-selectable=""
+      data-agent-message=""
+      data-entry-id={entryId}
+    >
       <AIAnswer
         sources={NO_SOURCES}
         answer=""

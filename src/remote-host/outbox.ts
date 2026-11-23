@@ -409,6 +409,7 @@ function stateKey(value: unknown): string | null {
     case 'git.reference':
       return idKey('git.reference', fields.url)
     case 'artifacts.version':
+    case 'artifacts.seen':
     case 'artifacts.activity':
     case 'artifacts.comments':
       return idKey(kind, fields.id)
@@ -422,6 +423,8 @@ function stateKey(value: unknown): string | null {
       return idKey('task', of('task').id)
     case 'task.removed':
       return idKey('task', fields.taskId)
+    case 'workflows.suggestion':
+      return idKey('workflows.suggestion', of('suggestion').id)
     default:
       return typeof kind === 'string' && WHOLE_STATES.has(kind) ? kind : null
   }

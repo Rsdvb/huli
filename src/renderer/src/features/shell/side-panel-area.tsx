@@ -13,6 +13,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from '@renderer/components/ui/resizable'
+import { useToastArea } from '@renderer/components/ui/toast'
 import { TerminalPanel } from '@renderer/features/terminal/terminal-panel'
 import { isSurfacePane } from '@renderer/stores/surface-tabs'
 import { hostOfPath } from '@renderer/lib/host-paths'
@@ -32,11 +33,13 @@ import { SHEET, SHEET_PANEL } from './sheet'
 import { SurfacesPane } from './surface-tabs'
 
 const FilesPanel = lazy(() => import('@renderer/features/files/files-panel'))
-const ArtifactPane = lazy(() => import('@renderer/features/artifacts/artifact-pane'))
+const ArtifactViewer = lazy(() => import('@renderer/features/artifacts/artifact-viewer'))
 const DevicesPane = lazy(() => import('@renderer/features/devices/devices-pane'))
 const ComputerPane = lazy(() => import('@renderer/features/computer/computer-pane'))
 const RequestsPane = lazy(() => import('@renderer/features/requests/requests-pane'))
 const WorkersPane = lazy(() => import('@renderer/features/manager/workers-pane'))
+// Huli: through the pick of a project's repositories, for one with further folders.
+const GitPane = lazy(() => import('@renderer/features/git/pane/git-repos'))
 const BrowserPane = lazy(() =>
   import('@renderer/features/browser/browser-pane').then((module) => ({
     default: module.BrowserPane,
@@ -56,6 +59,7 @@ const PANES = {
   devices: SURFACES,
   surfaces: SURFACES,
   files: { id: 'side-panel-files', ...PANE_SIZE },
+  git: { id: 'side-panel-git', ...PANE_SIZE },
   artifact: { id: 'side-panel-artifact', defaultSize: '560px', minSize: MIN_WIDTH },
   computer: { id: 'side-panel-computer', defaultSize: '540px', minSize: MIN_WIDTH },
   requests: { id: 'side-panel-requests', defaultSize: '560px', minSize: MIN_WIDTH },
@@ -129,6 +133,7 @@ export function SidePanelArea({
     if (
       !remote ||
       shown === 'files' ||
+      shown === 'git' ||
       shown === 'browser' ||
       shown === 'surfaces' ||
       shown === 'artifact' ||
@@ -152,10 +157,14 @@ export function SidePanelArea({
   })
   const groupRef = useGroupRef()
   const contentRef = usePanelRef()
+  const contentBox = useRef<HTMLDivElement>(null)
   const paneRef = usePanelRef()
   // The layout before the drag that folds the content, which Restore brings back.
   const settled = useRef<Layout | null>(null)
   const [folded, setFolded] = useState(false)
+  // Toasts centre over the content, clear of the pane's native page; once the pane covers the
+  // area they centre over all of it.
+  useToastArea('content', contentBox, !maximized && !folded)
   // Layout changes made here wait a frame, out of the library's own callback.
   const onLayoutChanged = (next: Layout, meta: LayoutChangedMeta) => {
     if (!contentRef.current?.isCollapsed()) {
@@ -240,6 +249,7 @@ export function SidePanelArea({
       <ResizablePanel
         id="content"
         panelRef={contentRef}
+        elementRef={contentBox}
         minSize={MIN_WIDTH}
         collapsible
         onResize={(size) => setFolded(size.inPixels === 0)}
@@ -280,6 +290,8 @@ export function SidePanelArea({
                 <Suspense fallback={<div className={cn('h-full', SHEET)} />}>
                   {held === 'files' ? (
                     <FilesPanel projectPath={projectPath} panel={panel} maximized={maximized} />
+                  ) : held === 'git' ? (
+                    <GitPane panel={panel} projectPath={projectPath} maximized={maximized} />
                   ) : held === 'browser' ? (
                     <BrowserPane panel={panel} projectPath={projectPath} maximized={maximized} />
                   ) : held === 'devices' ? (
@@ -287,15 +299,21 @@ export function SidePanelArea({
                   ) : held === 'surfaces' ? (
                     <SurfacesPane panel={panel} projectPath={projectPath} maximized={maximized} />
                   ) : held === 'computer' ? (
-                    <ComputerPane panel={panel} maximized={maximized} />
+                    <ComputerPane panel={panel} projectPath={projectPath} maximized={maximized} />
                   ) : held === 'requests' ? (
-                    <RequestsPane key={panel} panel={panel} maximized={maximized} />
+                    <RequestsPane
+                      key={panel}
+                      panel={panel}
+                      projectPath={projectPath}
+                      maximized={maximized}
+                    />
                   ) : held === 'workers' ? (
                     <WorkersPane key={panel} panel={panel} maximized={maximized} />
                   ) : (
                     artifactId && (
-                      <ArtifactPane
+                      <ArtifactViewer
                         key={artifactId}
+                        where="panel"
                         projectPath={projectPath}
                         panel={panel}
                         id={artifactId}

@@ -13,6 +13,7 @@ import {
   type ControlOverlayEvent,
   type ControlOverlayRequest,
   type ControlOverlayState,
+  type PillPlace,
 } from '@shared/control'
 import type { SettingsFile } from '@shared/settings'
 import type { ThemesState } from '@shared/themes'
@@ -24,6 +25,9 @@ const log = createLogger('browser')
 
 /** The pill's box before its page reports it. */
 const PILL_DEFAULT = { width: 360, height: 60 }
+
+/** How long a still may take to get on screen before the capture it is for goes on without it. */
+const STILL_SHOWN_MS = 400
 
 export interface PageOverlayDeps {
   window(): BrowserWindow | null
@@ -59,6 +63,10 @@ export class PageOverlay {
   private at: OverlayParent | null = null
   private state: ControlOverlayState | null = null
   private pill = PILL_DEFAULT
+  private pillAt: PillPlace | null = null
+  private stills = 0
+  /** The still its page draws now, and who waits to hear that it is on screen. */
+  private still: { id: number; shown: ((shown: boolean) => void) | null } | null = null
 
   constructor(private readonly deps: PageOverlayDeps) {}
 
@@ -78,6 +86,8 @@ export class PageOverlay {
       at.parent.addChildView(view)
     }
     const covered = this.state?.layout === 'full'
+    // A still is of the page it was taken of, while the overlay covers all of it.
+    if (moved || state.layout !== 'full') this.dropStill()
     this.at = at
     this.state = state
     this.place()
@@ -100,9 +110,43 @@ export class PageOverlay {
     }
   }
 
+  /** Whether it covers all of `contents`' page now, so what it draws hides the page. */
+  covers(contents: Electron.WebContents): boolean {
+    return this.ready && this.at?.contents === contents && this.state?.layout === 'full'
+  }
+
+  /**
+   * Draws a still of the page over all of it, and settles once it is on screen: true, or false
+   * when it did not get there in time or was taken off first.
+   */
+  showStill(image: string): Promise<boolean> {
+    this.dropStill()
+    const id = ++this.stills
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => shown(false), STILL_SHOWN_MS)
+      const shown = (on: boolean): void => {
+        clearTimeout(timer)
+        if (this.still?.id === id) this.still.shown = null
+        resolve(on)
+      }
+      this.still = { id, shown }
+      this.send({ type: 'still', id, image })
+    })
+  }
+
+  /** Takes the still off, so the page shows again. */
+  dropStill(): void {
+    const still = this.still
+    if (!still) return
+    this.still = null
+    still.shown?.(false)
+    this.send({ type: 'still', id: still.id, image: null })
+  }
+
   /** Takes the overlay off the page; it may be shown again. */
   hide(): void {
     if (!this.view || !this.at) return
+    this.dropStill()
     this.at.parent.removeChildView(this.view)
     this.at = null
     this.state = null
@@ -141,6 +185,8 @@ export class PageOverlay {
     this.view = null
     this.ready = false
     this.queued = []
+    this.still?.shown?.(false)
+    this.still = null
     if (!view.webContents.isDestroyed()) view.webContents.close()
   }
 
@@ -198,7 +244,12 @@ export class PageOverlay {
       }
       if (request.type === 'pill') {
         this.pill = { width: request.width, height: request.height }
+        this.pillAt = request.at ?? null
         this.place()
+        return
+      }
+      if (request.type === 'still-shown') {
+        if (this.still?.id === request.id) this.still.shown?.(true)
         return
       }
       const sessionId = this.at?.sessionId
@@ -218,7 +269,7 @@ export class PageOverlay {
     return Math.round(at.bounds.width / this.deps.zoom())
   }
 
-  /** Over the whole page, or over the pill alone at the page's bottom. */
+  /** Over the whole page, or over the pill alone, at the page's bottom unless the user moved it. */
   private place(): void {
     const view = this.view
     const at = this.at
@@ -232,12 +283,12 @@ export class PageOverlay {
     const zoom = this.deps.zoom()
     const width = Math.min(bounds.width, Math.ceil(this.pill.width * zoom))
     const height = Math.min(bounds.height, Math.ceil(this.pill.height * zoom))
+    const free = { x: bounds.width - width, y: bounds.height - height }
+    const rest = (OVERLAY_PILL_BOTTOM - OVERLAY_PILL_ROOM) * zoom
     view.setBorderRadius(0)
     view.setBounds({
-      x: Math.round(bounds.x + (bounds.width - width) / 2),
-      y: Math.round(
-        bounds.y + bounds.height - height - (OVERLAY_PILL_BOTTOM - OVERLAY_PILL_ROOM) * zoom,
-      ),
+      x: Math.round(bounds.x + free.x * (this.pillAt?.x ?? 0.5)),
+      y: Math.round(bounds.y + (this.pillAt ? free.y * this.pillAt.y : free.y - rest)),
       width,
       height,
     })

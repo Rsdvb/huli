@@ -7,6 +7,7 @@ import {
 import type { DeviceHostToMain, MainToDeviceHost } from '@shared/host-control'
 import type { PortDevice } from '@shared/remote/device'
 import deviceHostPath from '../device-host/index?modulePath'
+import { locale as currentLocale, t } from './i18n'
 import { createLogger } from './log'
 import { UtilityHost, type UtilityHostEvent, type UtilityHostState } from './utility-host'
 
@@ -40,6 +41,7 @@ export class DeviceHost {
         type: 'device-host:init',
         platform: process.platform,
         appVersion: app.getVersion(),
+        locale: currentLocale(),
         nodeRuntime: { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
         dataDir: app.getPath('userData'),
         resourcesPath: app.isPackaged ? process.resourcesPath : null,
@@ -53,7 +55,7 @@ export class DeviceHost {
       onReady: () => this.flushPending(),
       onExit: () => {
         for (const resolve of this.calls.values()) {
-          resolve({ error: { code: 'unavailable', message: 'The device host stopped' } })
+          resolve({ error: { code: 'unavailable', message: t('deviceHost.stopped') } })
         }
         this.calls.clear()
       },
@@ -94,6 +96,11 @@ export class DeviceHost {
     this.host.post({ type: 'device-host:allow-devices', allowed })
   }
 
+  /** Tells the process the interface language changed, for the text it writes. */
+  localeChanged(): void {
+    this.host.post({ type: 'device-host:locale', locale: currentLocale() })
+  }
+
   endSessions(sessionIds: string[]): void {
     this.host.post({ type: 'device-host:sessions-ended', sessionIds })
   }
@@ -126,7 +133,7 @@ export class DeviceHost {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.calls.delete(callId)
-        resolve({ error: { code: 'failed', message: 'The device did not answer in time' } })
+        resolve({ error: { code: 'failed', message: t('deviceHost.silent') } })
       }, DEVICE_CALL_TIMEOUT_MS)
       this.calls.set(callId, (answer) => {
         clearTimeout(timer)

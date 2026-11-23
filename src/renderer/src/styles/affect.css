@@ -477,7 +477,13 @@
 .ui-as-side__nav > .ui-as-side__group:first-child {
   gap: 2px;
 }
-.ui-as-side__nav > .ui-as-side__group:first-child > .ui-as-side__item:first-child {
+/* A menu row whose context menu is open keeps the hover fill, as the session rows do. */
+.ui-as.ui-as .ui-as-side__item[data-popup-open] {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* With every page hidden from the sidebar, New session stands alone and the projects follow it. */
+.ui-as-side__nav > .ui-as-side__group:first-child > .ui-as-side__item:first-child:not(:last-child) {
   margin-bottom: 4px;
 }
 .ui-as.ui-as .ui-as-side__label {
@@ -503,20 +509,64 @@
   ) {
   color: revert-layer;
 }
-/* A row always keeps the room of its tools at its end, so they show without moving the title or
-   the badges before them: two 24 px tools 2 px apart, 4 px from the edge and 2 px clear of what
-   comes before, less the row's own 6 px padding and 8 px gap. The row's status and host sit in
-   that room and are gone in the frame the tools show; they fade back in when the row is left.
-   Touch rows keep App Shell's layout. */
+/* 有子代理徽标时，空状态槽收起，让徽标贴近行尾。 */
+.ui-as-chat-row:has([data-subagent-badge]) .kettu-row-end:not(:has(> :not(:empty))) {
+  display: none;
+}
+/* 会话和任务行默认用满宽度。子代理徽标所在的行在工具出现时为它们留出空间，
+   其余行继续用遮罩和工具一起淡出行尾内容。触屏沿用 App Shell 的布局。 */
+@property --kettu-row-cover {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
 @media (hover: hover) {
-  .ui-as.ui-as .ui-as-chat-row:is(:hover, :has(:focus-visible), [data-menu]) .ui-as-chat-row__link {
+  .ui-as.ui-as
+    .ui-as-chat-row:not(:has([data-subagent-badge])):is(:hover, :has(:focus-visible), [data-menu])
+    .ui-as-chat-row__link,
+  .ui-as.ui-as
+    .ui-as-chat-folder-row:is(:hover, :has(:focus-visible), [data-menu])
+    > .ui-as-chat-folder {
     padding-right: 6px;
   }
-  .ui-as-chat-row:has(> .ui-as-chat-row__tools) .kettu-row-end {
+  .ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > *) .kettu-row-end {
     min-width: 42px;
   }
+  .ui-as-chat-row:has([data-subagent-badge]):is(:hover, :has(:focus-visible), [data-menu])
+    .kettu-row-end {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    transition: none;
+  }
+  .ui-as-chat-row:has(> .ui-as-chat-row__tools > *):not(:has([data-subagent-badge])) {
+    .kettu-row-body {
+      transition: --kettu-row-cover var(--duration-fast) ease;
+    }
+    &:is(:hover, :has(:focus-visible), [data-menu]) .kettu-row-body {
+      --kettu-row-cover: 1;
+      mask-image: linear-gradient(
+        to right,
+        black calc(100% - 66px),
+        color-mix(in srgb, black calc((1 - var(--kettu-row-cover)) * 100%), transparent)
+          calc(100% - 50px)
+      );
+    }
+  }
+  /* The tools go in the frame the row is left, so no tool shows over the title coming back. */
+  .ui-as-chat-row > .ui-as-chat-row__tools {
+    transition: none;
+  }
+  .ui-as-chat-row:is(:hover, :has(:focus-visible), [data-menu]) > .ui-as-chat-row__tools {
+    transition: opacity var(--duration-fast) ease;
+  }
 }
-.ui-as-chat-row:is(:hover, :has(:focus-visible), [data-menu]) .kettu-row-end {
+.ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > *):is(
+    :hover,
+    :has(:focus-visible),
+    [data-menu]
+  )
+  .kettu-row-end {
   opacity: 0;
   transition: none;
 }
@@ -774,6 +824,11 @@ li[data-row-exit='dust'] > * {
    beside its plan ("Claude …") or a window beside its figure ("5 …"); never past the window. */
 .kettu-plan-ring .ui-as-user-pop {
   min-width: min(320px, calc(100vw - 24px));
+}
+/* An account that reports only a balance shows its amount in place of the rings. */
+.kettu-plan-ring__button--amount {
+  width: auto;
+  padding: 0 6px;
 }
 .kettu-plan-pop {
   padding: 4px;
@@ -1051,7 +1106,8 @@ li[data-row-exit='dust'] > * {
   flex: none;
   align-items: center;
   gap: 2px;
-  height: 28px;
+  /* A failure in the head wraps onto more lines, which the head grows to hold. */
+  min-height: 28px;
 }
 .kp-head--cornered {
   padding-left: var(--corner-inset);
@@ -1096,11 +1152,11 @@ li[data-row-exit='dust'] > * {
 .kp-head__error {
   min-width: 0;
   max-width: 40%;
-  overflow: hidden;
+  padding: 7px 0;
   font-size: 12px;
+  line-height: 14px;
   color: var(--danger);
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .kp-body {
   position: relative;
@@ -1129,6 +1185,14 @@ li[data-row-exit='dust'] > * {
   width: 24px;
   height: 24px;
   border-radius: 7px;
+}
+/* A pane's glyph with the arrow that opens the side panel's list. */
+.kp-tool--switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  width: auto;
+  padding: 0 5px 0 6px;
 }
 .kp-tool:hover {
   background: color-mix(in srgb, var(--bg-hover) 75%, transparent);
@@ -1952,14 +2016,7 @@ li[data-row-exit='dust'] > * {
 }
 /* While a turn uses the terminal: who has it, at its foot. */
 .kp-tbox__pill {
-  position: absolute;
-  bottom: 14px;
-  left: 50%;
   z-index: 4;
-  display: flex;
-  width: max-content;
-  max-width: calc(100% - 24px);
-  translate: -50% 0;
 }
 .kp-ask {
   position: absolute;
@@ -2157,6 +2214,33 @@ li[data-row-exit='dust'] > * {
   object-fit: fill;
   pointer-events: none;
 }
+/* A page that keeps its own size shows whole and scaled, on the tray a window in the Computer
+   pane lies on; main draws the page over the box. */
+.kp-view[data-fitted] {
+  background:
+    repeating-linear-gradient(45deg, transparent 0 10px, var(--shell-line-soft) 10px 11px),
+    var(--shell-tray);
+  box-shadow: inset 0 0 0 var(--hairline) var(--border-strong);
+}
+.kp-view__page {
+  position: absolute;
+  top: 0;
+  border-radius: inherit;
+  background: var(--bg-app);
+  box-shadow: 0 0 0 var(--hairline) var(--border-default);
+}
+.kp-view__size {
+  position: absolute;
+  left: 50%;
+  margin-top: 10px;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  translate: -50% 0;
+}
 .kp-sitemark {
   flex: none;
   width: 14px;
@@ -2210,14 +2294,8 @@ li[data-row-exit='dust'] > * {
 }
 /* While a turn uses the device: who has it, at its bottom, above the hardware keys. */
 .kp-stage__pill {
-  position: absolute;
-  bottom: 46px;
-  left: 50%;
+  --ctl-dock-rest: 34px;
   z-index: 4;
-  display: flex;
-  width: max-content;
-  max-width: calc(100% - 24px);
-  translate: -50% 0;
 }
 .kp-device-screen {
   position: relative;
@@ -3485,6 +3563,56 @@ li[data-row-exit='dust'] > * {
   gap: 12px;
 }
 
+/* Settings › Appearance › Sidebar: the pages, each a shorter row dragged by its handle in front.
+   The list wraps its rows, so the hairline before each is drawn here. */
+:is(.kettu-settings, .kettu-sd) .k-sort-rows > * + * > .k-row,
+:is(.kettu-settings, .kettu-sd) .ui-sg-card > * + .k-sort-rows > :first-child > .k-row {
+  box-shadow: inset 0 0.5px 0 var(--line);
+}
+:is(.kettu-settings, .kettu-sd) .k-sort-row[data-dragging] {
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--elevation-float);
+}
+:is(.kettu-settings, .kettu-sd) .k-sort-row[data-dragging] > .k-row {
+  box-shadow: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-sort-line {
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 44px;
+  padding-block: 6px;
+  padding-left: 8px;
+}
+:is(.kettu-settings, .kettu-sd) .k-sort-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--muted);
+}
+:is(.kettu-settings, .kettu-sd) .k-sort-handle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-md);
+  color: var(--faint);
+  cursor: grab;
+  touch-action: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-sort-handle:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+:is(.kettu-settings, .kettu-sd) .k-sort-row[data-dragging] .k-sort-handle {
+  cursor: grabbing;
+}
+:is(.kettu-settings, .kettu-sd) .k-sort-restore {
+  justify-content: flex-start;
+  min-height: 48px;
+}
+
 /* A page's title, then its groups: a head, a card of rows, a note under it */
 :is(.kettu-settings, .kettu-sd) .k-page-sub {
   text-wrap: pretty;
@@ -3881,6 +4009,23 @@ li[data-row-exit='dust'] > * {
   gap: 8px;
   font-size: 12px;
   color: var(--muted);
+}
+:is(.kettu-settings, .kettu-sd) .k-list-meter {
+  display: grid;
+  grid-template-columns: 64px auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+:is(.kettu-settings, .kettu-sd) .k-list-meter__label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+:is(.kettu-settings, .kettu-sd) .k-list-meter .k-meter__value {
+  min-width: 34px;
 }
 :is(.kettu-settings, .kettu-sd) .k-meter__bar {
   width: 72px;
@@ -4459,6 +4604,53 @@ li[data-row-exit='dust'] > * {
   line-height: 16px;
   color: var(--danger);
   overflow-wrap: anywhere;
+}
+/* What an install brings: label and value lines */
+.kettu-sd .kettu-sd__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 16px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 0.5px var(--line-strong);
+  font-size: 13px;
+  line-height: 20px;
+}
+.kettu-sd .kettu-sd__fact {
+  display: contents;
+}
+.kettu-sd .kettu-sd__fact > dt {
+  color: var(--muted);
+}
+.kettu-sd .kettu-sd__fact > dd {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.kettu-sd .kettu-sd__fact > .k-skel {
+  align-self: center;
+}
+.kettu-sd .kettu-sd__needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+}
+.kettu-sd .kettu-sd__need {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.kettu-sd .kettu-sd__need > svg {
+  flex: none;
+  color: var(--danger);
+}
+.kettu-sd .kettu-sd__need[data-ok] > svg {
+  color: var(--success);
 }
 
 /* Appearance: the themes as cards in two columns, the chosen one ringed in ink */
@@ -5513,6 +5705,17 @@ li[data-row-exit='dust'] > * {
 .kettu-composer > .ui-ccc {
   max-width: none;
 }
+/* The model and permission menus open inside the main area, which sits under the toast layer, so
+   the toasts step aside while one is open. */
+body:has(.ui-mdpc[data-open], .ui-ccc__menu[data-open='true']) .kettu-toasts {
+  opacity: 0;
+  visibility: hidden;
+}
+.kettu-toasts {
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    visibility 0s;
+}
 /* A message started on an expired prompt cache: a pop over the composer's top edge, at the right,
    over the end of the thread so nothing moves. */
 .kettu-cache-notice {
@@ -6214,18 +6417,26 @@ li[data-row-exit='dust'] > * {
   color: var(--composer-muted);
 }
 /* The session's tokens and the last request's: a name and total, then the same three columns
-   under each, so input, output and cache hit line up between the two. */
+   under each, so input, output and cache hit line up between the two. The blocks share the
+   columns, which are as wide as their widest figure, so a figure never wraps. */
 .kettu-ctx__usage {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(max-content, 1fr));
+  gap: 8px 12px;
   padding: 9px 14px 10px;
   border-top: 0.5px solid var(--composer-line);
+}
+.kettu-ctx__block {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  row-gap: 0;
 }
 /* A total too long to sit beside its name drops under it, still at the right edge. */
 .kettu-ctx__block-head {
   display: flex;
   flex-wrap: wrap;
+  grid-column: 1 / -1;
   align-items: baseline;
   justify-content: space-between;
   gap: 0 12px;
@@ -6241,20 +6452,17 @@ li[data-row-exit='dust'] > * {
 }
 .kettu-ctx__figures {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0 12px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   margin: 1px 0 0;
   font-size: 12px;
   line-height: 18px;
   color: var(--composer-muted);
 }
-/* A figure too long for its column stacks under its name instead of being cut. */
 .kettu-ctx__figures > div {
   display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
   gap: 0 5px;
-  min-width: 0;
+  white-space: nowrap;
 }
 .kettu-ctx__figures > div:last-child {
   justify-content: flex-end;
@@ -6423,6 +6631,121 @@ li[data-row-exit='dust'] > * {
     transform 280ms var(--ui-mdpc-ease),
     width 280ms var(--ui-mdpc-ease);
 }
+/* The picker's rows without bars: the whole description on up to two lines, the Default tag after
+   the name and a pin at the end on hover, kept while pinned. No key hints in the last row. */
+.kettu-model-picker .ui-mdpc__desc {
+  display: -webkit-box;
+  white-space: normal;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.kettu-model-picker .ui-mdpc__keys {
+  display: none;
+}
+.kettu-model-tag {
+  flex: none;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  line-height: 16px;
+  font-weight: var(--weight-medium);
+  color: var(--text-tertiary);
+  box-shadow: inset 0 0 0 var(--hairline) var(--border-default);
+}
+.kettu-model-pin {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  color: var(--ui-mdpc-faint);
+  opacity: 0;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+.kettu-model-picker :is(.ui-mdpc__option, .ui-mdpc__fly-row):hover .kettu-model-pin,
+.kettu-model-pin[data-on] {
+  opacity: 1;
+}
+.kettu-model-pin:hover,
+.kettu-model-pin[data-on] {
+  color: var(--ui-mdpc-ink);
+}
+.kettu-model-pin[data-on] path {
+  fill: currentColor;
+}
+.kettu-model-picker .ui-mdpc__fly-row .ui-mdpc__title-name {
+  flex: 0 1 auto;
+  margin-right: auto;
+}
+.kettu-model-picker .ui-mdpc__fly-row .ui-mdpc__title-name:has(+ .kettu-model-tag) {
+  margin-right: 0;
+}
+.kettu-model-picker .ui-mdpc__fly-row .kettu-model-tag {
+  margin-right: auto;
+}
+/* More models by provider, when the agent's models come from several. */
+.kettu-model-picker .ui-mdpc__fly-group {
+  padding: 8px 8px 2px;
+  font-size: 10px;
+  font-weight: var(--weight-medium);
+  line-height: 16px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ui-mdpc-muted);
+}
+.kettu-model-picker .ui-mdpc__fly-group:first-child {
+  padding-top: 2px;
+}
+/* Switch agent on the right of the line on top, dimmed while a turn runs. */
+.kettu-model-picker .ui-mdpc__head:has(.kettu-model-switch) {
+  padding-right: 4px;
+}
+.kettu-model-switch {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: var(--weight-medium);
+  line-height: 16px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ui-mdpc-text);
+  transition:
+    background-color 90ms ease-out,
+    color 90ms ease-out;
+}
+.kettu-model-switch:not([aria-disabled]):hover {
+  background: var(--ui-mdpc-fill);
+  color: var(--ui-mdpc-ink);
+}
+.kettu-model-switch:focus-visible {
+  outline: 1.5px solid var(--focus-ring-color);
+  outline-offset: -1px;
+}
+.kettu-model-switch[aria-disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+/* Effort on the dial and the switches as rows, under the line across the menu. */
+.kettu-model-picker__dial {
+  padding: 2px 0 0 8px;
+}
+.kettu-model-picker .kettu-dial__halo {
+  stroke: var(--ui-mdpc-card);
+}
+.kettu-model-picker__switches {
+  padding: 0 0 4px;
+}
 .kettu-model-warn {
   flex: none;
   width: 6px;
@@ -6452,6 +6775,237 @@ li[data-row-exit='dust'] > * {
 .ui-shm-text.kettu-ultra-text {
   --ui-shm-text: var(--composer-ultra-text);
   --ui-shm-text-glow: var(--composer-ultra-shine);
+}
+/* The effort dial of the model menus: a scale of ticks on an arc that turns under a fixed mark. */
+.kettu-dial {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  align-items: center;
+  padding: 2px 4px 2px 8px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.kettu-dial[data-disabled] {
+  opacity: 0.5;
+}
+.kettu-dial__label {
+  color: var(--composer-text);
+  white-space: nowrap;
+}
+.kettu-dial__dial {
+  position: relative;
+  justify-self: end;
+  width: 100%;
+  max-width: 300px;
+  outline: none;
+  touch-action: none;
+  cursor: grab;
+  -webkit-mask-image: linear-gradient(90deg, transparent, black 9%, black 91%, transparent);
+  mask-image: linear-gradient(90deg, transparent, black 9%, black 91%, transparent);
+}
+.kettu-dial[data-drag] .kettu-dial__dial {
+  cursor: grabbing;
+}
+.kettu-dial[data-disabled] .kettu-dial__dial {
+  cursor: default;
+}
+.kettu-dial:has(.kettu-dial__dial:focus-visible) {
+  border-radius: var(--radius-segments);
+  outline: 1.5px solid var(--focus-ring-color);
+  outline-offset: -1px;
+}
+.kettu-dial__svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+.kettu-dial__face-top {
+  stop-color: var(--dial-face);
+}
+.kettu-dial__face-bottom {
+  stop-color: var(--dial-face);
+  stop-opacity: 0;
+}
+.kettu-dial__lens-in {
+  stop-color: var(--dial-lens);
+}
+.kettu-dial__lens-out {
+  stop-color: var(--dial-lens);
+  stop-opacity: 0;
+}
+.kettu-dial__rim {
+  fill: none;
+  stroke: var(--dial-rim);
+  stroke-width: 1;
+}
+.kettu-dial__tick {
+  stroke: var(--dial-tick);
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+.kettu-dial__tick--major {
+  stroke: var(--dial-tick-major);
+  stroke-width: 1.5;
+}
+.kettu-dial__tick[data-lit] {
+  stroke: var(--dial-lit);
+}
+.kettu-dial__tick--major[data-lit] {
+  stroke: var(--dial-lit-major);
+}
+/* The Default stop: a hollow circle that lights nothing. */
+.kettu-dial__tick--auto {
+  fill: none;
+  stroke: var(--dial-tick-major);
+  stroke-width: 1.5;
+}
+.kettu-dial__tick[data-flash] {
+  animation: kettu-dial-flash 260ms ease-out;
+}
+@keyframes kettu-dial-flash {
+  0% {
+    stroke: var(--control-on);
+  }
+}
+.kettu-dial__name {
+  font-family: var(--ui-face);
+  font-size: 11.5px;
+  font-weight: var(--weight-medium);
+  fill: var(--dial-name);
+  dominant-baseline: middle;
+  transition: fill 160ms ease;
+}
+.kettu-dial__name:is([data-on], [data-hover]) {
+  fill: var(--dial-name-on);
+}
+.kettu-dial__name[data-on] {
+  font-weight: 600;
+}
+.kettu-dial__name--auto {
+  font-style: italic;
+  font-weight: var(--weight-normal);
+}
+.kettu-dial__line {
+  stroke: var(--control-on);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.kettu-dial__halo {
+  stroke: var(--popover);
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+.kettu-dial__tri {
+  fill: var(--control-on);
+}
+.kettu-dial__mark {
+  transform-box: fill-box;
+  transform-origin: 50% 0;
+}
+.kettu-dial__mark[data-tick] {
+  animation: kettu-dial-tick 200ms var(--ease-standard);
+}
+@keyframes kettu-dial-tick {
+  35% {
+    transform: scaleY(1.25);
+  }
+}
+
+/* The agent's switches as rows lined up with the model rows: the icon in the marks' column, the
+   name over the whole line of what it does, and the switch at the end. While on, Fast mode's icon
+   is blue and Ultracode's violet. */
+.kettu-switch-rows {
+  display: flex;
+  flex-direction: column;
+}
+.kettu-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 8px;
+  border-radius: var(--radius-segment);
+  text-align: left;
+  transition: background-color 90ms ease-out;
+}
+.kettu-switch-row:not([data-disabled]):hover {
+  background: var(--composer-hover-fill);
+}
+.kettu-switch-row:focus-visible {
+  outline: 1.5px solid var(--focus-ring-color);
+  outline-offset: -1.5px;
+}
+.kettu-switch-row[data-disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+.kettu-switch-row__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  color: var(--icon-default);
+  transition: color 160ms ease;
+}
+.kettu-switch-row__text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.kettu-switch-row__name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--composer-ink);
+}
+.kettu-switch-row__line {
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+  color: var(--composer-muted);
+}
+.kettu-switch-row[data-kind='fast'][data-on] .kettu-switch-row__icon {
+  color: var(--switch-on);
+}
+.kettu-switch-row[data-kind='ultra'][data-on] .kettu-switch-row__icon {
+  color: var(--composer-ultra-text);
+}
+
+/* New session's agent menu: the dial and the switches under its models. */
+.kettu-am-settings {
+  display: flex;
+  flex-direction: column;
+}
+.kettu-am-dial {
+  padding: 4px 0 2px 8px;
+}
+.kettu-am-switches {
+  padding: 2px 0;
+}
+/* Lined up with the menu's own model rows, whose marks are 16 px. */
+.kettu-am-switches .kettu-switch-row {
+  font-size: var(--text-menu);
+}
+.kettu-am-switches .kettu-switch-row__icon {
+  width: 16px;
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.kettu-dial, .kettu-switch-rows),
+  :is(.kettu-dial, .kettu-switch-rows) :is(*, *::before, *::after) {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+:root[data-reduce-motion='always'] {
+  & :is(.kettu-dial, .kettu-switch-rows),
+  & :is(.kettu-dial, .kettu-switch-rows) :is(*, *::before, *::after) {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /* Queued messages tucked behind the composer: the next one in front, the next two peeking above,
@@ -7302,6 +7856,11 @@ li[data-row-exit='dust'] > * {
   --ui-tkc-ring: 0 0 0 0.5px var(--border-default);
   --ui-tkc-focus: var(--focus-ring-color);
 }
+/* The code face in every theme, since the user picks it in Settings. */
+.ui-tcc.ui-tcc,
+.ui-tcc-group.ui-tcc-group {
+  --ui-tcc-mono: var(--font-mono);
+}
 [data-installed-theme] .ui-tcc,
 [data-installed-theme] .ui-tcc-group {
   --ui-tcc-card: var(--shell-card);
@@ -7973,4 +8532,19 @@ li[data-row-exit='dust'] > * {
   border-top: var(--hairline) solid var(--border-subtle);
   font-size: 12px;
   color: var(--text-secondary);
+}
+/* Sidebar folders and host groups being dragged into another order. */
+.kettu-side-sortable {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+}
+.kettu-side-sortable[data-dragging],
+.kettu-side-hosts > .ui-as-side__group[data-dragging] {
+  border-radius: var(--radius-code);
+  background: var(--bg-surface);
+  box-shadow: var(--elevation-float);
+}
+.ui-as-side__group + .kettu-side-hosts {
+  margin-top: 10px;
 }

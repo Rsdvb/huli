@@ -22,7 +22,7 @@ export function firstWaiting(sessionId: string): string | null {
     if (waiting) return id
   }
   // A suggestion to start a task waits below the work, so the requests above go first.
-  return openSuggestion(sessionId, state)
+  return openSuggestion(state)
 }
 
 /** Esc, Enter, Mod+Enter, or a number key 1 to 9. */
