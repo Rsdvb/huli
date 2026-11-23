@@ -103,7 +103,7 @@ export const DOUBAO_CLI: AdapterCli = {
   command: 'doubao',
   pinsVersion: false,
   oldest: '2.37.2',
-  resolve: async (found, platform, files, env = process.env) => {
+  resolve: async (found, platform, files, _node, env = process.env) => {
     const program = await resolveProgram(found, platform, files, env)
     return program === null ? null : { path: program, env: {} }
   },

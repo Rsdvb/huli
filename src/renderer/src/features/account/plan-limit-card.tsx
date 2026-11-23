@@ -10,8 +10,15 @@ import { PlanPart } from '@renderer/features/session/composer/usage'
 import { inlineReset } from '@renderer/features/sidebar/plan-usage'
 import { ringStroke } from '@renderer/features/usage/plan-cards'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
-import { balanceLabel, monthDayTime, planAmount, planBalance } from '@renderer/lib/format'
-import { groupName, isUsedUp, LIMIT_TEXT, shownPercent } from '@renderer/lib/plan-limit'
+import {
+  balanceLabel,
+  monthDayTime,
+  planAmount,
+  planBalance,
+  windowLabel,
+  windowShort,
+} from '@renderer/lib/format'
+import { isUsedUp, LIMIT_TEXT, shownPercent } from '@renderer/lib/plan-limit'
 import type { CardResets } from '@renderer/lib/plan-readings'
 import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
@@ -158,21 +165,11 @@ function CardFace({ card, wide }: { card: PlanCard; wide: boolean }) {
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-px">
           {[...card.windows].reverse().map((w) => {
-            const name = w.model
-              ? t(
-                  w.window === 'five_hour'
-                    ? 'common:planWindow.fiveHourOf'
-                    : 'common:planWindow.weeklyOf',
-                  { model: w.model },
-                )
-              : t(`common:planWindow.${w.window}`)
+            const parts = { kind: w.window, count: null, scope: w.model }
+            const name = windowLabel(parts)
             // Model groups have windows of two lengths each, so their lines name the length and
-            // the group, without the "Models" every group of Antigravity's ends in.
-            const short = !w.model
-              ? t(`composer:usage.shortWindow.${w.window}`)
-              : groups
-                ? `${t(`composer:usage.shortWindow.${w.window}`)} ${groupName(w.model, t('tasks:and'))}`
-                : w.model
+            // the group; another model's line is named for the model alone.
+            const short = w.model && !groups ? w.model : windowShort(parts)
             const reset = inlineReset(w.limit, now)
             const out = reset !== null && isUsedUp(w.limit)
             const tone = w.level === 'ok' ? 'text-primary' : LIMIT_TEXT[w.level]

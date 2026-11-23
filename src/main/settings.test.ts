@@ -313,11 +313,19 @@ describe('adding the agents the first start found', () => {
     await store.flush()
   })
 
-  it('adds only harnesses that run the user program', async () => {
+  it('adds every harness whose own program was found, npm packages included', async () => {
     const store = await SettingsStore.load(dir)
-    const next = store.firstStart(['gemini', 'opencode'])
-    expect(next.agents.gemini).toBeUndefined()
+    const next = store.firstStart(['deepseek', 'gemini', 'opencode'])
+    expect(next.agents.deepseek).toEqual({ enabled: true })
+    expect(next.agents.gemini).toEqual({ enabled: true })
     expect(next.agents.opencode).toEqual({ enabled: true })
+    expect(next.general.defaultAgent).toBe('opencode')
+    await store.flush()
+  })
+
+  it('never adds the development agent, which needs no adding', async () => {
+    const store = await SettingsStore.load(dir)
+    expect(store.firstStart(['fake-agent']).agents['fake-agent']).toBeUndefined()
     await store.flush()
   })
 
@@ -659,6 +667,97 @@ describe('items from the Kettu Marketplace in a patch', () => {
   })
 })
 
+describe('edits to the servers and skills Kettu keeps', () => {
+  const server = (id: string, name = id, over: Record<string, unknown> = {}) => ({
+    id: `kettu:${id.padEnd(10, 'x')}`,
+    name,
+    title: name,
+    source: 'kettu',
+    version: '1.0.0',
+    spec: { type: 'stdio', command: 'npx', args: ['-y', `${name}@1.0.0`], env: [] },
+    agents: 'all',
+    on: true,
+    ...over,
+  })
+  const skill = (id: string, name = id) => ({
+    id: `kettu:${id.padEnd(10, 'x')}`,
+    name,
+    description: 'A skill.',
+    source: 'kettu',
+    origin: `@amigoer/${name}`,
+    version: '1.0.0',
+    agents: 'all',
+    on: true,
+  })
+  const names = (list: { name: string }[]) => list.map((item) => item.name)
+
+  it('adds each server to the list the host holds, not the one its sender read', async () => {
+    const store = await SettingsStore.load(dir)
+    store.update({ marketplace: { mcp: [server('first')] } })
+    // Two installs that began from a list holding only the first server.
+    store.update({ marketplace: { mcpEdit: { put: [server('second')] } } })
+    store.update({ marketplace: { mcpEdit: { put: [server('third')] } } })
+    expect(names(store.get().marketplace.mcp)).toEqual(['first', 'second', 'third'])
+  })
+
+  it('adds each skill to the list the host holds', async () => {
+    const store = await SettingsStore.load(dir)
+    store.update({ marketplace: { skillsEdit: { put: [skill('one')] } } })
+    store.update({ marketplace: { skillsEdit: { put: [skill('two')] } } })
+    expect(names(store.get().marketplace.skills)).toEqual(['one', 'two'])
+  })
+
+  it('replaces an entry in place by its id and removes by id', async () => {
+    const store = await SettingsStore.load(dir)
+    store.update({
+      marketplace: { mcp: [server('first'), server('second'), server('third')] },
+    })
+    store.update({
+      marketplace: { mcpEdit: { put: [server('second', 'second', { on: false })] } },
+    })
+    expect(store.get().marketplace.mcp.map((s) => [s.name, s.on])).toEqual([
+      ['first', true],
+      ['second', false],
+      ['third', true],
+    ])
+    store.update({ marketplace: { mcpEdit: { remove: [server('first').id, 'kettu:gone'] } } })
+    expect(names(store.get().marketplace.mcp)).toEqual(['second', 'third'])
+  })
+
+  it('refuses an edit that repeats another entry’s name and changes nothing', async () => {
+    const store = await SettingsStore.load(dir)
+    store.update({ marketplace: { mcp: [server('first', 'notes')] } })
+    expect(() =>
+      store.update({ marketplace: { mcpEdit: { put: [server('second', 'notes')] } } }),
+    ).toThrow(/repeats/)
+    expect(names(store.get().marketplace.mcp)).toEqual(['notes'])
+    store.update({ marketplace: { skillsEdit: { put: [skill('one', 'greeter')] } } })
+    expect(() =>
+      store.update({ marketplace: { skillsEdit: { put: [skill('two', 'greeter')] } } }),
+    ).toThrow(/repeats/)
+    expect(names(store.get().marketplace.skills)).toEqual(['greeter'])
+  })
+
+  it('still takes a whole list from a client that sends one', async () => {
+    const store = await SettingsStore.load(dir)
+    store.update({ marketplace: { mcp: [server('first'), server('second')] } })
+    store.update({ marketplace: { mcp: [server('third')] } })
+    expect(names(store.get().marketplace.mcp)).toEqual(['third'])
+  })
+
+  it('checks the entries and ids an edit carries', () => {
+    expect(() =>
+      validateSettingsPatch({ marketplace: { mcpEdit: { put: [{ ...server('a'), id: 'x' }] } } }),
+    ).toThrow()
+    expect(() =>
+      validateSettingsPatch({ marketplace: { mcpEdit: { put: [server('a'), server('a')] } } }),
+    ).toThrow(/repeats/)
+    expect(() => validateSettingsPatch({ marketplace: { mcpEdit: { remove: [3] } } })).toThrow()
+    expect(() => validateSettingsPatch({ marketplace: { mcpEdit: { drop: [] } } })).toThrow()
+    expect(() => validateSettingsPatch({ marketplace: { skillsEdit: 'all' } })).toThrow()
+  })
+})
+
 describe('the terminal font', () => {
   it('uses the theme’s code font until a face is named', async () => {
     const store = await SettingsStore.load(dir)
@@ -700,6 +799,21 @@ describe('the terminal font', () => {
     const { host, client } = splitSettingsPatch({ terminal: { fontFamily: 'Menlo' } })
     expect(host).toBeNull()
     expect(client).toEqual({ terminal: { fontFamily: 'Menlo' } })
+  })
+})
+
+// Huli: Kite's own plan limit alerts' switch became Kettu's `planLimits`.
+describe('the plan limit alerts switch', () => {
+  it('keeps the choice a file made under the old name', async () => {
+    await save({ version: 1, notifications: { limits: false } })
+    const store = await SettingsStore.load(dir)
+    expect(store.get().notifications.planLimits).toBe(false)
+    expect('limits' in store.get().notifications).toBe(false)
+  })
+
+  it('lets the new name win when a file has both', async () => {
+    await save({ version: 1, notifications: { limits: false, planLimits: true } })
+    expect((await SettingsStore.load(dir)).get().notifications.planLimits).toBe(true)
   })
 })
 
@@ -866,5 +980,158 @@ describe('the feature switches', () => {
       mergeSettings(contained, { features: { sandbox: false }, sandbox: { tier: 'off' } }).features
         .sandbox,
     ).toBe(false)
+  })
+})
+
+describe('the fonts the user picks', () => {
+  it('keeps the theme’s faces until one is named', async () => {
+    const store = await SettingsStore.load(dir)
+    expect(store.get().appearance.fonts).toEqual({})
+  })
+
+  it('keeps stored faces and drops a set that could break out of a font stack on load', async () => {
+    const fonts = { ui: 'Segoe UI', prose: 'Microsoft YaHei', code: 'Maple Mono NF CN' }
+    await save({ version: 1, appearance: { fonts } })
+    expect((await SettingsStore.load(dir)).get().appearance.fonts).toEqual(fonts)
+    for (const bad of [
+      { code: 'A", evil' },
+      { ui: '' },
+      { prose: "A'; x" },
+      { code: 7 },
+      { heading: 'Inter' },
+      ['Inter'],
+      'Inter',
+      null,
+    ]) {
+      await save({ version: 1, appearance: { fonts: bad } })
+      expect((await SettingsStore.load(dir)).get().appearance.fonts).toEqual({})
+    }
+  })
+
+  it('takes a set of face names in a change and refuses the rest', () => {
+    expect(validateSettingsPatch({ appearance: { fonts: { code: 'Maple Mono NF CN' } } })).toEqual({
+      appearance: { fonts: { code: 'Maple Mono NF CN' } },
+    })
+    expect(validateSettingsPatch({ appearance: { fonts: {} } })).toEqual({
+      appearance: { fonts: {} },
+    })
+    for (const bad of [
+      { code: 'A, B' },
+      { ui: 'url(x)' },
+      { prose: null },
+      { mono: 'Menlo' },
+      null,
+      'Menlo',
+    ]) {
+      expect(() => validateSettingsPatch({ appearance: { fonts: bad } })).toThrow()
+    }
+  })
+
+  it('replaces the whole set in a change', () => {
+    const both = mergeSettings(DEFAULT_SETTINGS, {
+      appearance: { fonts: { ui: 'Segoe UI', code: 'Menlo' } },
+    })
+    expect(both.appearance.fonts).toEqual({ ui: 'Segoe UI', code: 'Menlo' })
+    const one = mergeSettings(both, { appearance: { fonts: { code: 'Menlo' } } })
+    expect(one.appearance.fonts).toEqual({ code: 'Menlo' })
+  })
+
+  it('stays with the window that draws them, never on the host', () => {
+    const { host, client } = splitSettingsPatch({ appearance: { fonts: { code: 'Menlo' } } })
+    expect(host).toBeNull()
+    expect(client).toEqual({ appearance: { fonts: { code: 'Menlo' } } })
+  })
+})
+
+describe('the pages the sidebar lists', () => {
+  const ALL = ['overview', 'artifacts', 'routines', 'marketplace', 'usage']
+
+  it('shows every page in its default order until the user changes them', async () => {
+    const { appearance } = (await SettingsStore.load(dir)).get()
+    expect(appearance.sidebarOrder).toEqual(ALL)
+    expect(appearance.sidebarHidden).toEqual([])
+  })
+
+  it('keeps a stored order and hidden pages on load', async () => {
+    const order = ['usage', 'marketplace', 'overview', 'routines', 'artifacts']
+    await save({ version: 1, appearance: { sidebarOrder: order, sidebarHidden: ['usage'] } })
+    const { appearance } = (await SettingsStore.load(dir)).get()
+    expect(appearance.sidebarOrder).toEqual(order)
+    expect(appearance.sidebarHidden).toEqual(['usage'])
+  })
+
+  it('drops unknown and repeated pages and puts a missing one at its default place', async () => {
+    await save({
+      version: 1,
+      appearance: {
+        sidebarOrder: ['usage', 'later-page', 'overview', 'usage', 7, 'routines', 'marketplace'],
+        sidebarHidden: ['routines', 'later-page', 'routines', null],
+      },
+    })
+    const { appearance } = (await SettingsStore.load(dir)).get()
+    expect(appearance.sidebarOrder).toEqual([
+      'usage',
+      'overview',
+      'artifacts',
+      'routines',
+      'marketplace',
+    ])
+    expect(appearance.sidebarHidden).toEqual(['routines'])
+  })
+
+  it('places pages missing before every kept one at the start', async () => {
+    await save({ version: 1, appearance: { sidebarOrder: ['marketplace', 'usage'] } })
+    expect((await SettingsStore.load(dir)).get().appearance.sidebarOrder).toEqual(ALL)
+  })
+
+  it('goes back to the defaults for a value that is not a list', async () => {
+    for (const bad of ['usage', { usage: true }, null, 3]) {
+      await save({ version: 1, appearance: { sidebarOrder: bad, sidebarHidden: bad } })
+      const { appearance } = (await SettingsStore.load(dir)).get()
+      expect(appearance.sidebarOrder).toEqual(ALL)
+      expect(appearance.sidebarHidden).toEqual([])
+    }
+  })
+
+  it('takes an order of every page once and hidden pages in a change', () => {
+    const order = ['routines', 'overview', 'usage', 'artifacts', 'marketplace']
+    expect(
+      validateSettingsPatch({ appearance: { sidebarOrder: order, sidebarHidden: ['overview'] } }),
+    ).toEqual({ appearance: { sidebarOrder: order, sidebarHidden: ['overview'] } })
+    expect(validateSettingsPatch({ appearance: { sidebarHidden: ALL } })).toEqual({
+      appearance: { sidebarHidden: ALL },
+    })
+    expect(validateSettingsPatch({ appearance: { sidebarHidden: [] } })).toEqual({
+      appearance: { sidebarHidden: [] },
+    })
+  })
+
+  it('refuses an order that leaves out, repeats or adds a page', () => {
+    for (const bad of [
+      ['overview', 'artifacts', 'routines', 'marketplace'],
+      ['overview', 'artifacts', 'routines', 'marketplace', 'usage', 'usage'],
+      ['overview', 'artifacts', 'routines', 'marketplace', 'newSession'],
+      ['overview', 'artifacts', 'routines', 'marketplace', 'usage', 'later-page'],
+      'overview',
+      null,
+    ]) {
+      expect(() => validateSettingsPatch({ appearance: { sidebarOrder: bad } })).toThrow()
+    }
+  })
+
+  it('refuses hidden pages that repeat or name what the sidebar cannot hide', () => {
+    for (const bad of [['usage', 'usage'], ['newSession'], ['later-page'], [3], 'usage', null]) {
+      expect(() => validateSettingsPatch({ appearance: { sidebarHidden: bad } })).toThrow()
+    }
+  })
+
+  it('replaces each list whole in a change', () => {
+    const hidden = mergeSettings(DEFAULT_SETTINGS, {
+      appearance: { sidebarHidden: ['usage', 'overview'] },
+    })
+    expect(hidden.appearance.sidebarHidden).toEqual(['usage', 'overview'])
+    const shown = mergeSettings(hidden, { appearance: { sidebarHidden: ['overview'] } })
+    expect(shown.appearance.sidebarHidden).toEqual(['overview'])
+    expect(shown.appearance.sidebarOrder).toEqual(ALL)
   })
 })

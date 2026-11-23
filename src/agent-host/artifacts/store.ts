@@ -7,12 +7,14 @@ import { readFile } from 'node:fs/promises'
 import { isStrictDeclaration } from '@shared/artifact-capabilities'
 import type { CommentAnchor, CommentAuthor, CommentThread } from '@shared/artifact-comments'
 import { ARTIFACT_ENTRY, DISK_FILE_BYTES, isHtmlPath } from '@shared/artifact-files'
+import { CANVAS_FILE } from '@shared/canvas-doc'
 import { findAnchor, startTagAt } from '@shared/artifact-source'
 import {
   ARTIFACT_KEEP_DELETED_MS,
   CONTENT_MISSING,
   type ArtifactDoing,
   type ArtifactFocus,
+  type ArtifactPiece,
   type ArtifactSession,
   type ArtifactState,
   type VersionSummary,
@@ -20,7 +22,9 @@ import {
 import type { ArtifactTypeInfo } from '@shared/artifact-types'
 import type { CanvasEvent } from '@shared/artifact-canvas'
 import { withParamValues, type ParamValue } from '@shared/artifact-params'
+import { compareVersions, type ArtifactChanges } from '@shared/artifact-changes'
 import { HostError } from '../errors'
+import { t, tEnglish } from '../i18n'
 import type { LogFn } from '../storage'
 import { ThreadStoreError, type ThreadStore } from '../threads/store'
 import { contentPath, versionKey } from './content'
@@ -40,6 +44,8 @@ import type {
 import type { Declaration, RuntimeCallName, RuntimeCalls } from './runtime/calls'
 
 const PURGE_EVERY_MS = 24 * 60 * 60 * 1000
+/** Comparisons kept; versions never change, so each pair is worked out once while it is here. */
+const KEPT_CHANGES = 200
 
 export type ArtifactErrorCode = 'not_found' | 'deleted' | 'conflict'
 
@@ -54,6 +60,8 @@ export class ArtifactError extends HostError {
     readonly reason: ArtifactErrorCode,
     message: string,
     readonly state: ArtifactState | null,
+    /** The message in English, for agents and pages; `message` is in the user's language. */
+    readonly english: string = message,
   ) {
     super(reason === 'not_found' ? 'not_found' : 'conflict', message, state ?? undefined)
     this.name = 'ArtifactError'
@@ -79,6 +87,8 @@ export interface ArtifactStoreDeps {
   activity(portIds: Iterable<string>, activity: ArtifactActivity): void
   /** Its comments changed, for the ports watching the artifact. */
   comments?(portIds: Iterable<string>, id: string): void
+  /** The owner's seen version of it moved, for every port, since every device lists it. */
+  seen?(id: string, version: number): void
   /** The last port watching the artifact stopped. */
   unwatched?(id: string): void
   /** A canvas being worked on changed, for the ports watching the artifact. */
@@ -149,13 +159,21 @@ export class ArtifactStore {
   /** The sessions using each artifact, in the order they started, and whether each edits it. */
   private readonly users = new Map<
     string,
-    Map<string, { editing: boolean; last: { doing: ArtifactDoing; focus: ArtifactFocus } | null }>
+    Map<
+      string,
+      {
+        editing: boolean
+        last: { doing: ArtifactDoing; focus: ArtifactFocus } | null
+        held: ArtifactPiece[]
+      }
+    >
   >()
   private timer: ReturnType<typeof setInterval> | null = null
   /** The canvas page each port shows each artifact at. */
   private readonly views = new Map<string, Map<string, string | null>>()
   /** The canvas documents clients are working on, with their changes not yet in a version. */
   readonly canvases: LiveCanvases
+  private readonly compared = new Map<string, Promise<ArtifactChanges | null>>()
 
   constructor(private readonly deps: ArtifactStoreDeps) {
     this.canvases = new LiveCanvases(this, {
@@ -175,7 +193,7 @@ export class ArtifactStore {
     params: ArtifactCalls[K]['params'],
   ): Promise<ArtifactCalls[K]['result']> {
     const { threads } = this.deps
-    if (!threads) throw new HostError('internal', 'Artifacts need the thread database')
+    if (!threads) throw new HostError('internal', t('artifacts.needDatabase'))
     return this.refused(() => threads.artifact(name, params))
   }
 
@@ -189,7 +207,7 @@ export class ArtifactStore {
     params: RuntimeCalls[K]['params'],
   ): Promise<RuntimeCalls[K]['result']> {
     const { threads } = this.deps
-    if (!threads) throw new HostError('internal', 'Artifacts need the thread database')
+    if (!threads) throw new HostError('internal', t('artifacts.needDatabase'))
     return this.refused(() => threads.runtime(name, params))
   }
 
@@ -201,7 +219,7 @@ export class ArtifactStore {
         error instanceof ThreadStoreError &&
         (error.code === 'not_found' || error.code === 'deleted' || error.code === 'conflict')
       ) {
-        throw new ArtifactError(error.code, error.message, error.data ?? null)
+        throw new ArtifactError(error.code, error.message, error.data ?? null, error.english)
       }
       throw error
     }
@@ -292,6 +310,48 @@ export class ArtifactStore {
   }
 
   /**
+   * What changed from version `from` to `to` of the artifact, any two of its versions, as every
+   * client works it out: null when nothing did.
+   */
+  changes(
+    id: string,
+    from: number,
+    to: number,
+    { project }: Reach = {},
+  ): Promise<ArtifactChanges | null> {
+    // A session reaches only its project's artifacts, so its comparisons are its own.
+    const key = `${project ?? ''}\0${id}\0${from}\0${to}`
+    const known = this.compared.get(key)
+    if (known) return known
+    const reach = project ? { project } : {}
+    const run = Promise.all([
+      this.get(id, { ...reach, version: from }),
+      this.get(id, { ...reach, version: to }),
+    ]).then(([before, after]) => {
+      const found = new Map([
+        [from, before],
+        [to, after],
+      ])
+      const version = (of: FoundVersion) => ({
+        version: of.version.version,
+        files: of.files,
+        type: of.type?.name ?? null,
+      })
+      return compareVersions(version(before), version(after), async (n, path) => {
+        const of = found.get(n)!
+        const file = of.files.find((f) => f.path === path)
+        if (!file) throw new Error(`${id} version ${n} has no ${path}`)
+        return (await this.bytes(of, file)).toString('utf8')
+      })
+    })
+    this.compared.set(key, run)
+    if (this.compared.size > KEPT_CHANGES) this.compared.delete(this.compared.keys().next().value!)
+    // A failed comparison, such as of a version not there yet, is tried again next time.
+    run.catch(() => this.compared.delete(key))
+    return run
+  }
+
+  /**
    * The files of a version, the latest by default, for main and the remote host to serve; with the
    * artifact's title, the key its thumbnail is kept under, and whether its pages load from their
    * own origin alone, as the latest version's declaration says.
@@ -350,7 +410,8 @@ export class ArtifactStore {
     const at = this.now()
     const id = newArtifactId(at)
     const { version } = await this.call('create', { ...rest, id, at })
-    this.used(id, editor, true)
+    // A new artifact is all its turn's.
+    this.used(id, editor, true, undefined, [{ kind: 'whole' }])
     this.deps.changed()
     return { id, version }
   }
@@ -379,7 +440,14 @@ export class ArtifactStore {
       project: project ?? null,
       at: this.now(),
     })
-    this.used(input.id, editor, true, focus ? { doing: doing ?? 'write', focus } : undefined)
+    const pieces = editor ? await this.written(input.id, version) : []
+    this.used(
+      input.id,
+      editor,
+      true,
+      focus ? { doing: doing ?? 'write', focus } : undefined,
+      pieces,
+    )
     this.versioned(input.id, version)
     return { version }
   }
@@ -402,7 +470,8 @@ export class ArtifactStore {
       note: note ?? null,
       at: this.now(),
     })
-    this.used(input.id, editor, true)
+    const pieces = editor ? await this.written(input.id, version) : []
+    this.used(input.id, editor, true, undefined, pieces)
     this.versioned(input.id, version)
     return { version }
   }
@@ -412,6 +481,16 @@ export class ArtifactStore {
     const ports = this.watches.get(id)
     if (ports) this.deps.version(ports.keys(), id, version)
     this.canvases.versioned(id)
+  }
+
+  /**
+   * The owner has `version` open in a viewer, on any of their devices. Returns the version now
+   * recorded as seen, which only moves forward and never past the latest.
+   */
+  async see(id: string, version: number): Promise<number | null> {
+    const { seen, changed } = await this.call('see', { id, version })
+    if (changed && seen !== null) this.deps.seen?.(id, seen)
+    return seen
   }
 
   /** Changes the title, which is not versioned. */
@@ -575,23 +654,29 @@ export class ArtifactStore {
   }): Promise<{ version: number }> {
     const found = await this.get(input.id)
     if (found.artifact.deletedAt !== null) {
-      throw new ArtifactError('deleted', `${input.id} is in Recently deleted`, {
-        version: found.artifact.head,
-        deleted: true,
-      })
+      throw new ArtifactError(
+        'deleted',
+        t('artifacts.deleted', { id: input.id }),
+        { version: found.artifact.head, deleted: true },
+        tEnglish('artifacts.deleted', { id: input.id }),
+      )
     }
     // The latest version's file: the write lands there unless the file changed since the base.
     const file = found.files.find((f) => f.path === input.path)
     if (!file || !isHtmlPath(file.path)) {
-      throw new HostError('not_found', `${input.id} has no HTML file ${input.path}`)
+      throw new HostError(
+        'not_found',
+        t('artifacts.noHtmlFile', { id: input.id, path: input.path }),
+      )
     }
+    this.refuseHeldFile(found, input.path)
     let text: string
     try {
       text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
         await this.bytes(found, file),
       )
     } catch {
-      throw new HostError('invalid_params', `${input.path} is not UTF-8 text`)
+      throw new HostError('invalid_params', t('artifacts.notUtf8', { path: input.path }))
     }
     let edited: string
     try {
@@ -601,8 +686,9 @@ export class ArtifactStore {
       throw error
     }
     const data = Buffer.from(edited, 'utf8')
-    if (data.length > DISK_FILE_BYTES)
-      throw new HostError('invalid_params', 'The file is too large')
+    if (data.length > DISK_FILE_BYTES) {
+      throw new HostError('invalid_params', t('artifacts.fileTooLarge'))
+    }
     return this.write({
       id: input.id,
       baseVersion: input.baseVersion,
@@ -611,6 +697,15 @@ export class ArtifactStore {
       author: null,
       note: null,
     })
+  }
+
+  /** Refuses an edit of a page's file that a frame an agent's running turn wrote holds. */
+  private refuseHeldFile(found: FoundVersion, path: string): void {
+    this.refuseHeld(
+      found.artifact.id,
+      found.artifact.head,
+      (piece) => piece.kind === 'frame' && piece.file === path,
+    )
   }
 
   /** New values for a page's declared parameters, written into the page as the user's version. */
@@ -622,15 +717,21 @@ export class ArtifactStore {
   }): Promise<{ version: number }> {
     const found = await this.get(input.id)
     if (found.artifact.deletedAt !== null) {
-      throw new ArtifactError('deleted', `${input.id} is in Recently deleted`, {
-        version: found.artifact.head,
-        deleted: true,
-      })
+      throw new ArtifactError(
+        'deleted',
+        t('artifacts.deleted', { id: input.id }),
+        { version: found.artifact.head, deleted: true },
+        tEnglish('artifacts.deleted', { id: input.id }),
+      )
     }
     const file = found.files.find((f) => f.path === input.path)
     if (!file || !isHtmlPath(file.path)) {
-      throw new HostError('not_found', `${input.id} has no HTML file ${input.path}`)
+      throw new HostError(
+        'not_found',
+        t('artifacts.noHtmlFile', { id: input.id, path: input.path }),
+      )
     }
+    this.refuseHeldFile(found, input.path)
     let edited: string
     try {
       edited = withParamValues((await this.bytes(found, file)).toString('utf8'), input.values)
@@ -657,6 +758,7 @@ export class ArtifactStore {
           sessionId,
           editing: use.editing,
           ...(use.last ? { doing: use.last.doing, focus: use.last.focus } : {}),
+          held: use.held,
         }))
       : []
   }
@@ -676,6 +778,7 @@ export class ArtifactStore {
     turn: SessionTurn | undefined,
     editing: boolean,
     last?: { doing: ArtifactDoing; focus: ArtifactFocus },
+    pieces: readonly ArtifactPiece[] = [],
   ): void {
     if (!turn?.current()) return
     let sessions = this.users.get(id)
@@ -684,11 +787,74 @@ export class ArtifactStore {
       this.users.set(id, sessions)
     }
     const was = sessions.get(turn.session)
+    const held = withPieces(was?.held ?? [], pieces)
     // A session that read and then wrote is editing; one that only read stays reading.
-    const now = { editing: (was?.editing ?? false) || editing, last: last ?? was?.last ?? null }
-    if (was && was.editing === now.editing && was.last === now.last) return
+    const now = {
+      editing: (was?.editing ?? false) || editing,
+      last: last ?? was?.last ?? null,
+      held,
+    }
+    if (was && was.editing === now.editing && was.last === now.last && was.held === held) return
     sessions.set(turn.session, now)
     this.sendActivity(id)
+  }
+
+  /** The pieces a session's write of `version` wrote, by what changed from the version before. */
+  private async written(id: string, version: number): Promise<ArtifactPiece[]> {
+    if (version < 2) return [{ kind: 'whole' }]
+    try {
+      const changes = await this.changes(id, version - 1, version)
+      if (!changes) return []
+      switch (changes.kind) {
+        case 'frames':
+          return changes.frames.map(({ id: frame, file }) => ({ kind: 'frame', id: frame, file }))
+        case 'sections':
+          return changes.sections.map(({ slug }) => ({ kind: 'section', slug: slug ?? '' }))
+        case 'slides':
+          return changes.slides.map(({ number }) => ({ kind: 'slide', number }))
+        case 'files': {
+          // A canvas's or a typed artifact's other files are no piece of the user's to edit; a web
+          // page is one piece.
+          const found = await this.get(id, { version })
+          const canvas = found.files.some((f) => f.path === CANVAS_FILE)
+          return canvas || found.type ? [] : [{ kind: 'whole' }]
+        }
+      }
+    } catch (error) {
+      // What cannot be compared is held whole, so the user's edit cannot cross the agent's.
+      this.deps.log(
+        'warn',
+        `Could not tell what ${id} version ${version} changed: ${String(error)}`,
+      )
+      return [{ kind: 'whole' }]
+    }
+  }
+
+  /** The pieces of the artifact that agents' running turns wrote, by session. */
+  held(id: string): { sessionId: string; pieces: ArtifactPiece[] }[] {
+    return [...(this.users.get(id) ?? [])]
+      .filter(([, use]) => use.held.length > 0)
+      .map(([sessionId, use]) => ({ sessionId, pieces: use.held }))
+  }
+
+  /**
+   * Refuses a direct edit of the user's that changes a piece an agent's running turn wrote, as
+   * `holds` tells of each held piece; comments are never held.
+   */
+  refuseHeld(id: string, version: number, holds: (piece: ArtifactPiece) => boolean): void {
+    const held = this.held(id)
+      .map(({ sessionId, pieces }) => ({
+        sessionId,
+        pieces: pieces.filter((piece) => piece.kind === 'whole' || holds(piece)),
+      }))
+      .filter(({ pieces }) => pieces.length > 0)
+    if (held.length === 0) return
+    throw new ArtifactError(
+      'conflict',
+      t('artifacts.held'),
+      { version, deleted: false, held },
+      tEnglish('artifacts.held'),
+    )
   }
 
   /** The session's turn ended, or the session went: it uses nothing now. */
@@ -795,4 +961,29 @@ export class ArtifactStore {
     this.canvases.closed(id)
     this.deps.unwatched?.(id)
   }
+}
+
+function pieceKey(piece: ArtifactPiece): string {
+  switch (piece.kind) {
+    case 'frame':
+      return `frame:${piece.id}`
+    case 'section':
+      return `section:${piece.slug}`
+    case 'slide':
+      return `slide:${piece.number}`
+    case 'whole':
+      return 'whole'
+  }
+}
+
+/** `held` with `added` joined to it; `held` itself when it already had them all. */
+function withPieces(held: ArtifactPiece[], added: readonly ArtifactPiece[]): ArtifactPiece[] {
+  const keys = new Set(held.map(pieceKey))
+  const fresh = added.filter((piece) => {
+    const key = pieceKey(piece)
+    if (keys.has(key)) return false
+    keys.add(key)
+    return true
+  })
+  return fresh.length === 0 ? held : [...held, ...fresh]
 }

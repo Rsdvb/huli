@@ -1,8 +1,13 @@
 import type { AccountStatus } from './account'
 import type { AccountDevicesResult, RevokeTarget } from './huli-cloud'
 import type { AgentsApi, HostMethod } from './agent-host'
-import type { ArtifactImportKind, ArtifactImportResult, ThumbnailPage } from './artifacts'
-import type { SelectMessage } from './artifact-runtime/page-messages'
+import type {
+  ArtifactImportKind,
+  ArtifactImportResult,
+  ThumbnailPage,
+  ThumbnailPart,
+} from './artifacts'
+import type { PageErrorMessage, SelectMessage } from './artifact-runtime/page-messages'
 import type { ArtifactExportFormat } from './artifact-types'
 import type { GrantedAttachment } from './attachments'
 import type { BackupStatus, RestorePick } from './backup'
@@ -59,6 +64,7 @@ import type { TerminalMethod, TerminalsApi } from './terminal-host'
 import type { DeviceCaptureKind, DevicesApi } from './device-host'
 import type { PreparedReport, ReportFileView, ReportRequest, ReportSubmitResult } from './report'
 import type { CatalogInstallResult, CatalogState, ThemeInstallResult, ThemesState } from './themes'
+import type { IslandState } from './island'
 import type { AgentId, HarnessId } from './thread'
 import type { TrayTarget } from './tray'
 import type { UpdateStatus } from './updates'
@@ -151,8 +157,11 @@ export type AppCommand =
   | { kind: 'confirm-debug-restart' }
   | { kind: 'toggle-sidebar' }
   | { kind: 'open-session'; sessionId: string }
+  | { kind: 'open-task'; taskId: string }
   | { kind: 'open-routines' }
   | { kind: 'open-usage' }
+  /** The sidebar's update card, with its list when it has one. */
+  | { kind: 'open-updates' }
   | { kind: 'go-back' }
   | { kind: 'go-forward' }
   | { kind: 'show-history' }
@@ -192,6 +201,12 @@ export interface ArtifactStoppedEvent {
 export interface ArtifactSelectedEvent {
   origin: string // as `artifact:open` gave it, without the path
   message: SelectMessage
+}
+
+/** An uncaught error of a page's own script, from a frame of an origin the window opened. */
+export interface ArtifactPageErrorEvent {
+  origin: string // as `artifact:open` gave it, without the path
+  message: PageErrorMessage
 }
 
 /** One page of a canvas, by the protocol's numbers, at its own size, for `artifact:png`. */
@@ -309,6 +324,8 @@ export interface IpcInvokeContract {
   'media:reveal': { args: [url: string]; result: void }
   'media:open-external': { args: [url: string]; result: void }
   'notifications:test': { args: []; result: boolean }
+  'island:status': { args: []; result: IslandState }
+  'island:retry': { args: []; result: void }
   'update:get-status': { args: []; result: UpdateStatus }
   'update:check': { args: []; result: UpdateStatus }
   'update:download': { args: []; result: void }
@@ -330,7 +347,12 @@ export interface IpcInvokeContract {
     args: [id: string, version: number, layout: ThumbnailPage[] | null]
     result: string | null
   }
+  'artifact:part-thumbnail': {
+    args: [id: string, version: number, part: ThumbnailPart]
+    result: string | null
+  }
   'artifact:open-external': { args: [id: string, version: number]; result: void }
+  'artifact:reveal': { args: [id: string, version: number]; result: void }
   'artifact:export': { args: [id: string, version: number]; result: boolean }
   // A page's image as a base64 PNG, for a message to an agent; null when it cannot render.
   'artifact:page-image': {
@@ -590,9 +612,11 @@ export interface IpcEventContract {
   'artifact:blocked': ArtifactBlockedEvent
   'artifact:stopped': ArtifactStoppedEvent
   'artifact:selected': ArtifactSelectedEvent
+  'artifact:page-error': ArtifactPageErrorEvent
   'account:changed': AccountStatus
   'sharing:changed': SharingStatus
   'remote:changed': RemoteStatus
+  'island:changed': IslandState
   /** Sent only to the page that opened the code. */
   'remote:pairing': RemotePairingEvent
   /** Sent to every window: a device of the account asks to be added, or that request ended. */
@@ -713,8 +737,15 @@ export interface KettuApi {
      * its pages laid out, which main cannot find without parsing the HTML.
      */
     thumbnail(id: string, version: number, layout: ThumbnailPage[] | null): Promise<string | null>
+    /**
+     * The image of one frame, one slide, or a document in one theme, as a `data:` URL; null when
+     * it could not render, or the version has no such part.
+     */
+    partThumbnail(id: string, version: number, part: ThumbnailPart): Promise<string | null>
     /** Opens a copy of the version in the default browser, outside the app's isolation. */
     openExternal(id: string, version: number): Promise<void>
+    /** Selects a copy of the version in the system file manager, as `openExternal` would open it. */
+    reveal(id: string, version: number): Promise<void>
     /**
      * Asks where to save the version: its HTML file, or a folder for its files when it has
      * several; false when the user cancelled.
@@ -734,6 +765,8 @@ export interface KettuApi {
     onStopped(listener: (event: ArtifactStoppedEvent) => void): () => void
     /** A page's pick, from a frame of an origin this window opened. */
     onSelected(listener: (event: ArtifactSelectedEvent) => void): () => void
+    /** The errors of the pages' own scripts in frames of the origins this window opened. */
+    onPageError(listener: (event: ArtifactPageErrorEvent) => void): () => void
     /**
      * Renders a page of the version at its own size, apart from the window, and saves it as a PNG
      * where the user says; false when they cancelled. Only a desktop host renders one.
@@ -1028,6 +1061,13 @@ export interface KettuApi {
   notifications: {
     /** Shows a sample notification at once; false when the system does not support them. */
     test(): Promise<boolean>
+  }
+  /** The macOS notch island, as its switch in Settings › Notifications shows it. */
+  island: {
+    status(): Promise<IslandState>
+    /** Starts it again after it stopped on repeated crashes. */
+    retry(): Promise<void>
+    onChanged(listener: (state: IslandState) => void): () => void
   }
   updates: {
     getStatus(): Promise<UpdateStatus>

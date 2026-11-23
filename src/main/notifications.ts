@@ -2,6 +2,7 @@ import { BrowserWindow, Notification } from 'electron'
 import type { HostToMain } from '@shared/host-control'
 import type { DiscoveryRequestEvent } from '@shared/remote/discovery'
 import { ATTENTION_SETTING, attentionTarget, attentionText } from '@shared/attention'
+import type { HostAttention } from '@shared/remote/host-admin'
 import type { SettingsFile } from '@shared/settings'
 import { sendCommand } from './events'
 import { t } from './i18n'
@@ -12,18 +13,26 @@ const log = createLogger('notifications')
 
 type Attention = Extract<HostToMain, { type: 'host:attention' }>
 
+/** Another host whose attention this computer shows, named in its notification. */
+export interface AttentionHost {
+  id: string
+  name: string
+}
+
 // Held so a notification is not garbage collected before it is clicked; one per session, or per
-// agent for a pause, so a newer notice replaces the older one instead of stacking.
+// agent of a host for a pause, so a newer notice replaces the older one instead of stacking.
 const shown = new Map<string, Notification>()
 
 /**
- * An OS notification for what needs the user, shown only when no window is focused. A request
- * that can be allowed once offers that and Open; clicking it, or Open, opens its session.
+ * An OS notification for what needs the user, on this computer or on another host, shown only
+ * when no window is focused. A request that can be allowed once offers that and Open; clicking
+ * it, or Open, opens its session, as does Allow once when the answer cannot be sent.
  */
 export function notifyAttention(
-  message: Attention,
+  message: Attention | HostAttention,
   settings: SettingsFile,
-  allowOnce: (sessionId: string, requestId: string, optionId: string) => void,
+  allowOnce: (sessionId: string, requestId: string, optionId: string) => boolean,
+  host: AttentionHost | null = null,
 ): void {
   const target = attentionTarget(message)
   if (!target) {
@@ -35,11 +44,16 @@ export function notifyAttention(
   // Huli: an agent's test copy, never focused, would notify the owner of every turn.
   if (!Notification.isSupported() || testInBackground()) return
 
-  const { key, command } = target
+  const { command } = target
+  // Agent ids repeat across hosts, so a pause on one never replaces another's.
+  const key = host ? `${host.id}:${target.key}` : target.key
   const answer = message.kind === 'permission' ? validAnswer(message.allowOnce) : null
+  const title = host
+    ? t('notifications.onHost', { host: host.name, title: message.title })
+    : message.title
   shown.get(key)?.close()
   const notification = new Notification({
-    ...attentionText(message),
+    ...attentionText({ ...message, title }),
     silent: !settings.notifications.sound,
     ...(answer
       ? {
@@ -59,11 +73,12 @@ export function notifyAttention(
   })
   notification.on('action', (details) => {
     forget()
-    if (details.actionIndex === 0 && answer && message.kind === 'permission') {
+    const allowed =
+      details.actionIndex === 0 &&
+      answer !== null &&
+      message.kind === 'permission' &&
       allowOnce(message.sessionId, answer.requestId, answer.optionId)
-    } else {
-      sendCommand(command)
-    }
+    if (!allowed) sendCommand(command)
   })
   notification.on('close', forget)
   notification.on('failed', (_, error) => {
@@ -125,6 +140,55 @@ export function notifyDiscovery(
   })
   discovery = { requestId: event.requestId, notification }
   notification.show()
+}
+
+/**
+ * A notice of Kettu's own, such as its update, as an OS notification while no window is focused;
+ * a newer one of the same key replaces it, and its click does `open`.
+ */
+export function notifyNotice(
+  key: string,
+  words: { title: string; body: string },
+  settings: SettingsFile,
+  open: () => void,
+): void {
+  if (BrowserWindow.getFocusedWindow() || !Notification.isSupported()) return
+  shown.get(key)?.close()
+  const notification = new Notification({ ...words, silent: !settings.notifications.sound })
+  const forget = (): void => {
+    if (shown.get(key) === notification) shown.delete(key)
+  }
+  notification.on('click', () => {
+    forget()
+    open()
+  })
+  notification.on('close', forget)
+  notification.on('failed', (_, error) => {
+    forget()
+    log.warn(`Notification failed: ${error}`)
+  })
+  shown.set(key, notification)
+  notification.show()
+}
+
+/** How long a plan limit notice another host also says counts as the same one. */
+const REPEAT_MS = 30 * 60_000
+
+/**
+ * Every host signed in to an account says its plan limit notices, and two agents may share an
+ * account across hosts; this computer says each window's notice once.
+ */
+export class RepeatedNotices {
+  private readonly seen = new Map<string, number>()
+
+  repeated(message: HostAttention, now = Date.now()): boolean {
+    if (message.kind !== 'plan-limit' || typeof message.key !== 'string') return false
+    for (const [key, at] of this.seen) if (now - at >= REPEAT_MS) this.seen.delete(key)
+    const key = `${message.key}:${message.level}`
+    if (this.seen.has(key)) return true
+    this.seen.set(key, now)
+    return false
+  }
 }
 
 /** A sample from Settings › Notifications, shown even while a window is focused. */

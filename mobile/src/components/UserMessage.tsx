@@ -165,7 +165,7 @@ export const UserMessage = memo(function UserMessage(props: {
     rewindItems.push(
       {
         key: 'edit-from-here',
-        label: '从这里重来',
+        label: '从这里重新编辑',
         icon: 'pencil',
         onPress: () => rewind(entryId, 'edit'),
       },

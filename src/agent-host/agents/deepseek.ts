@@ -13,6 +13,7 @@ export const DEEPSEEK: AgentDefinition = {
   launch: {
     kind: 'package',
     package: '@deepseek-ai/dsh',
+    command: 'dsh',
     fromVendor: true,
     updates: '~0.2.2-rc.2',
   },
@@ -20,7 +21,9 @@ export const DEEPSEEK: AgentDefinition = {
   install: {
     hint: 'detect.hint.deepseek',
     url: 'https://github.com/deepseek-ai/deepseek-harness',
+    guide: 'https://github.com/deepseek-ai/deepseek-harness#run',
   },
+  // Its docs list `npx` and a desktop app, no global install, so only Kettu's copy is offered.
   configVariable: CONFIG_VARIABLES.deepseek,
   // Huli: dsh ships no terminal UI; `dsh --profile web` serves its own, in the browser it opens,
   // from the terminal. Its sessions resume there, not by an argument (0.2.2's README).

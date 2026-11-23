@@ -1,6 +1,6 @@
 // Huli: going back to one of the user's messages, as the desktop's dialog asks it: what leaves the
 // conversation, how the agent takes it, and the files that would be put back, each with its lines,
-// with 同时还原文件 to put them back too. Nothing changes until 从这里重来 or 回退 is pressed.
+// with 同时还原文件 to put them back too. Nothing changes until 从这里重新编辑 or 回退 is pressed.
 
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, Modal, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
@@ -16,7 +16,7 @@ import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
 
 export interface RewindDone {
   mode: RewindMode
-  /** The message's text, for the composer after 从这里重来. */
+  /** The message's text, for the composer after 从这里重新编辑. */
   text: string
   restored: number | null
   failed: number
@@ -164,7 +164,7 @@ export function RewindDialog(props: {
       <View style={[styles.backdrop, { backgroundColor: c.scrim }]}>
         <View style={[styles.card, { backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
           <Text style={[typeScale.headline, { color: c.text }]}>
-            {mode === 'edit' ? '从这里重来？' : '回退到这里？'}
+            {mode === 'edit' ? '从这里重新编辑？' : '回退到这里？'}
           </Text>
           <Text style={[typeScale.footnote, { color: c.textSecondary }]}>{body}</Text>
           {!connected ? (
@@ -271,7 +271,7 @@ export function RewindDialog(props: {
                 <ActivityIndicator color={c.onAccent} />
               ) : (
                 <Text style={[typeScale.body, { color: c.onAccent, fontWeight: '600' }]}>
-                  {mode === 'edit' ? '从这里重来' : '回退'}
+                  {mode === 'edit' ? '从这里重新编辑' : '回退'}
                 </Text>
               )}
             </Press>

@@ -177,18 +177,17 @@
     "failed": "Couldn’t read",
     "neverRead": "Couldn’t read the plan usage.",
     "lastRead": "Last read {{ago}}",
+    "nextReset": "Next reset: {{window}}, {{time}}",
+    "notStarted": "Not started",
     "backIn": "Back in {{time}}",
-    "weeklyOf": "7d · {{model}}",
-    "fiveHourOf": "5h · {{model}}",
-    "short": {
-      "minutes": "{{count}}m",
-      "hours": "{{count}}h",
-      "days": "{{count}}d"
-    },
     "windowUsed": "{{window}}: {{percent}}% used.",
     "windowLeft": "{{window}}: {{percent}}% left.",
     "prepaidBalance": "Prepaid balance",
     "extraUsage": "Extra usage",
+    "balance": "Balance",
+    "addOnCredits": "Add-on credits",
+    "rechargeBalance": "Recharge balance",
+    "bonusBalance": "Bonus balance",
     "units": {
       "credits": "credits",
       "premiumRequests": "premium requests"

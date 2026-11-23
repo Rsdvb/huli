@@ -132,6 +132,7 @@ describe("the agent manager's downloads", () => {
       idleSessions: DEFAULT_SETTINGS.idleSessions,
       usage: { fromComputer: false },
       sessionTitles: true,
+      workflow: DEFAULT_SETTINGS.workflow,
       lightModel: { mode: 'small' },
       defaultAgent: null,
       computerUse: DEFAULT_SETTINGS.computerUse,

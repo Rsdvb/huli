@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ import {
   type SessionView,
   type ThreadEntry,
   type ThreadState,
+  type ToolEntry,
 } from '@shared/thread'
 import type { LaunchSpec } from '../catalog'
 import { CLAUDE_CODE } from '../catalog'
@@ -27,6 +28,7 @@ import {
   type ProjectMcpGate,
 } from '../connection'
 import type { HostedContext, HostedSpawnOptions } from '../driver'
+import { planMarkdown } from '../plan-revision'
 import {
   newTurnScope,
   type MapperContext,
@@ -34,7 +36,7 @@ import {
   type MapperOutput,
 } from '../session-updates'
 import { FakeChild, FakeClaudeSdk, type FakeQuery } from '../testing/fake-claude-sdk'
-import { ClaudeConnection, historyCut, promptContent } from './connection'
+import { ClaudeConnection, promptContent } from './connection'
 import { claudeSdkDriver } from './driver'
 import { ANSWER_IN_REPLY, QUESTION_UNREADABLE, QUESTIONS_SKIPPED } from './permissions'
 import type { PostModelSwitchHookInput, SdkMessage, StoredMessage } from './sdk'
@@ -2586,6 +2588,31 @@ describe('permissions', () => {
     expect(config.find((option) => option.id === 'mode')?.value).toBe('plan')
   })
 
+  it('keeps a plan sent back as its first Markdown, for the next plan to compare with', async () => {
+    const plan = '# Plan\n\n1. Edit'
+    s.sdk.script = (query) => {
+      query.running()
+      query.emit(
+        assistant(query, 'msg_1', [
+          { type: 'tool_use', id: 'toolu_p1', name: 'ExitPlanMode', input: { plan } },
+        ]),
+      )
+      query.emit(
+        toolResult(
+          query,
+          'toolu_p1',
+          'The user wants you to keep planning and revise the plan. Their note: Keep the old API',
+          true,
+        ),
+      )
+      query.finish()
+    }
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
+    const entry = target.entries().find((e) => e.id === 't:toolu_p1')
+    expect(entry).toMatchObject({ kind: 'tool', status: 'failed' })
+    expect(planMarkdown(entry as ToolEntry)).toBe(plan)
+  })
+
   function elicit(request: Record<string, unknown>) {
     return s.sdk.last.options.onElicitation!(
       { serverName: 'linear', message: 'Sign in to Linear', ...request },
@@ -2952,6 +2979,64 @@ describe('sessions', () => {
     })
     await s.connection.deleteSession('a')
     expect(s.sdk.calls.find((call) => call.method === 'deleteSession')?.args[0]).toBe('a')
+  })
+
+  it('reports the uuid of each prompt, which the transcript keeps', async () => {
+    const s = await setup()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, new Target())
+    const refs: string[] = []
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'Hi' }], (ref) => refs.push(ref))
+    expect(refs).toEqual([s.sdk.last.inputs[0]!.uuid])
+  })
+
+  it('cuts a session for an edit with a fork that ends before the prompt', async () => {
+    const config = await mkdtemp(path.join(os.tmpdir(), 'kettu-claude-rewind-'))
+    dirs.push(config)
+    const s = await setup({ CLAUDE_CONFIG_DIR: config })
+    const folder = path.join(config, 'projects', '-repo')
+    await mkdir(folder, { recursive: true })
+    const lines = (records: unknown[]) => records.map((r) => JSON.stringify(r)).join('\n')
+    const said = (uuid: string, parentUuid: string | null, text: string) => ({
+      type: 'user',
+      uuid,
+      parentUuid,
+      message: { role: 'user', content: [{ type: 'text', text }] },
+    })
+    const done = (uuid: string, parentUuid: string) => ({
+      type: 'assistant',
+      uuid,
+      parentUuid,
+      message: { content: [{ type: 'text', text: 'Done.' }] },
+    })
+    await writeFile(
+      path.join(folder, 's1.jsonl'),
+      lines([said('u1', null, 'One'), done('a1', 'u1'), said('u2', 'a1', 'Two')]),
+    )
+    await writeFile(
+      path.join(folder, 'fork-of-s1.jsonl'),
+      lines([
+        { ...said('f1', null, 'One'), forkedFrom: { sessionId: 's1', messageUuid: 'u1' } },
+        { ...done('f2', 'f1'), forkedFrom: { sessionId: 's1', messageUuid: 'a1' } },
+      ]),
+    )
+    const point = { ref: 'u2', text: 'Two', occurrence: 1 }
+    expect(await s.connection.rewindSession!('s1', '/repo', point, 'Docs')).toEqual({
+      sessionId: 'fork-of-s1',
+      refs: { u1: 'f1', a1: 'f2' },
+    })
+    expect(s.sdk.calls.find((call) => call.method === 'forkSession')?.args).toEqual([
+      's1',
+      { dir: '/repo', upToMessageId: 'a1', title: 'Docs' },
+    ])
+    // Nothing came before the first prompt: the host starts a session of its own.
+    const first = { ref: 'u1', text: 'One', occurrence: 1 }
+    expect(await s.connection.rewindSession!('s1', '/repo', first, null)).toEqual({ sessionId: '' })
+    expect(s.sdk.calls.filter((call) => call.method === 'forkSession')).toHaveLength(1)
+    const missing = { ref: null, text: 'Three', occurrence: 1 }
+    await expect(s.connection.rewindSession!('s1', '/repo', missing, null)).rejects.toBeInstanceOf(
+      AgentRequestError,
+    )
   })
 
   it('copies a session under a new id without opening it', async () => {
@@ -4295,90 +4380,6 @@ describe('the native sandbox', () => {
     await expect(
       s.connection.newSession('/repo', { sandbox: { ...sandbox, network: 'agent' } }),
     ).rejects.toThrow()
-  })
-})
-
-describe('Huli: rewinds', () => {
-  const user = (uuid: string, text: string): StoredMessage => ({
-    type: 'user',
-    uuid,
-    session_id: 's',
-    parent_tool_use_id: null,
-    message: { role: 'user', content: text },
-  })
-  const reply = (uuid: string, id: string, content: unknown[] = []): StoredMessage => ({
-    type: 'assistant',
-    uuid,
-    session_id: 's',
-    parent_tool_use_id: null,
-    message: { id, content },
-  })
-  const toolResult = (uuid: string, toolId: string): StoredMessage => ({
-    type: 'user',
-    uuid,
-    session_id: 's',
-    parent_tool_use_id: null,
-    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId }] },
-  })
-  const history = [
-    user('u1', 'one'),
-    reply('a1', 'msg_1', [{ type: 'tool_use', id: 'toolu_1', name: 'Edit', input: {} }]),
-    toolResult('r1', 'toolu_1'),
-    reply('a2', 'msg_2', [{ type: 'text', text: 'Done.' }]),
-    user('u2', 'two'),
-    reply('a3', 'msg_3'),
-    user('u3', 'three'),
-    reply('a4', 'msg_4'),
-  ]
-
-  it('cuts after the latest kept item, else before the first removed one', () => {
-    expect(
-      historyCut(history, { removed: ['msg_3', 'msg_4'], kept: ['msg_2', 'toolu_1'] }),
-    ).toEqual({ prompt: 'u2', keep: 'a2' })
-    // A tool's result is no message of the user's.
-    expect(historyCut(history, { removed: ['msg_3'], kept: ['toolu_1'] })).toEqual({
-      prompt: 'u2',
-      keep: 'a2',
-    })
-    expect(historyCut(history, { removed: ['msg_4'], kept: ['msg_gone'] })).toEqual({
-      prompt: 'u3',
-      keep: 'a3',
-    })
-    expect(historyCut(history, { removed: ['msg_1'], kept: [] })).toEqual({
-      prompt: 'u1',
-      keep: null,
-    })
-    // Nothing of the cut turns reached the history.
-    expect(historyCut(history, { removed: ['msg_9'], kept: ['msg_4'] })).toEqual({
-      prompt: null,
-      keep: 'a4',
-    })
-    expect(historyCut(history, { removed: ['msg_9'], kept: ['msg_8'] })).toBeNull()
-  })
-
-  it('reopens at the cut, and the next prompt is chained there', async () => {
-    const s = await setup()
-    const target = new Target()
-    const { sessionId } = await s.connection.newSession('/repo')
-    s.connection.register(sessionId, target)
-    s.sdk.history.set(sessionId, history)
-    const done = await s.connection.revertTurns!(sessionId, {
-      removed: ['msg_3', 'msg_4'],
-      kept: ['msg_2', 'toolu_1', 'msg_1'],
-    })
-    expect(done).toEqual({ resumeAt: 'a2' })
-    const queries = s.sdk.queries.length
-    await s.connection.prompt(sessionId, [{ type: 'text', text: 'two, again' }])
-    expect(s.sdk.queries.length).toBe(queries + 1)
-    expect(s.sdk.last.options).toMatchObject({ resume: sessionId, resumeSessionAt: 'a2' })
-  })
-
-  it('resumes at the cut Kite kept for a session opened again', async () => {
-    const s = await setup()
-    await s.connection.resumeSession('old', '/repo', { resumeAt: 'a2' })
-    expect(s.sdk.last.options).toMatchObject({ resume: 'old', resumeSessionAt: 'a2' })
-    await s.connection.resumeSession('other', '/repo')
-    expect(s.sdk.last.options).not.toHaveProperty('resumeSessionAt')
   })
 })
 

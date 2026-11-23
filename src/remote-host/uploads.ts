@@ -8,6 +8,7 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, open, readFile, rm, statfs, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
+import { loggedPortError } from '@shared/hosts-text'
 import type { PortError } from '@shared/port-rpc'
 import {
   isDeviceStream,
@@ -118,6 +119,11 @@ export class UploadCounts {
   }
 }
 
+/** A device broke the protocol, which only a bug or an attacker does, so it is not translated. */
+function protocolError(message: string): PortError {
+  return { code: 'invalid_params', message }
+}
+
 /** Why an upload a request names cannot be used, as the request's error. */
 export class UploadError extends Error {
   constructor(readonly error: PortError) {
@@ -192,11 +198,14 @@ export class Uploads {
     if (this.closed) return true
     const { counts, deviceId } = this.options
     if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) {
-      this.refuse(stream, 'invalid_params', `Upload ${stream} has no size in bytes`)
+      this.refuse(stream, protocolError(`Upload ${stream} has no size in bytes`))
     } else if (size > this.maxBytes) {
-      this.refuse(stream, 'invalid_params', `An upload is at most ${this.maxBytes} bytes`)
+      this.refuse(
+        stream,
+        loggedPortError('invalid_params', 'remote.uploadTooLarge', { max: this.maxBytes }),
+      )
     } else if (!counts.take(deviceId)) {
-      this.refuse(stream, 'busy', `A device may have at most ${counts.max} uploads at once`)
+      this.refuse(stream, loggedPortError('busy', 'remote.uploadsBusy', { max: counts.max }))
     } else {
       this.start(stream, size)
     }
@@ -208,7 +217,10 @@ export class Uploads {
     // Bytes of an upload the host gave up may still be on their way.
     if (!upload || upload.complete) return
     if (upload.received + data.length > upload.size) {
-      return this.fail(upload, `Upload ${stream} carried more than its ${upload.size} bytes`)
+      return this.fail(
+        upload,
+        protocolError(`Upload ${stream} carried more than its ${upload.size} bytes`),
+      )
     }
     upload.received += data.length
     const { counts, deviceId } = this.options
@@ -228,7 +240,7 @@ export class Uploads {
     if (!upload || upload.complete) return
     if (upload.received !== upload.size) {
       const message = `Upload ${stream} ended after ${upload.received} of its ${upload.size} bytes`
-      return this.fail(upload, message)
+      return this.fail(upload, protocolError(message))
     }
     upload.complete = true
     this.queue(upload, async (handle) => {
@@ -264,7 +276,7 @@ export class Uploads {
         : new Uint8Array(data).buffer
     } catch (error) {
       if (error instanceof UploadError) throw error
-      throw new UploadError({ code: 'internal', message: `Upload ${stream} could not be read` })
+      throw new UploadError(loggedPortError('internal', 'remote.uploadUnreadable'))
     } finally {
       this.drop(upload, null)
     }
@@ -309,7 +321,7 @@ export class Uploads {
    * bytes on the way are lost, and the finished ones wait for the requests that name them.
    */
   dropUnfinished(): void {
-    const error = { code: 'invalid_params' as const, message: 'The connection ended' }
+    const error = loggedPortError('invalid_params', 'remote.connectionEnded')
     for (const upload of [...this.uploads.values()]) {
       if (!upload.complete) this.drop(upload, error)
     }
@@ -320,7 +332,7 @@ export class Uploads {
     this.closed = true
     this.behind?.()
     this.behind = null
-    const error = { code: 'invalid_params' as const, message: 'The connection ended' }
+    const error = loggedPortError('invalid_params', 'remote.connectionEnded')
     for (const upload of [...this.uploads.values()]) this.drop(upload, error)
     for (const file of this.handed) void rm(file, { force: true }).catch(() => {})
     this.handed.clear()
@@ -363,12 +375,11 @@ export class Uploads {
     upload.writing = this.roomFor(size, ahead)
       .then((room) => {
         if (room) return open(file, 'wx', 0o600)
-        const message = `The host has too little free disk space for upload ${stream} of ${size} bytes`
-        this.fail(upload, message, 'unavailable')
+        this.fail(upload, loggedPortError('unavailable', 'remote.uploadNoSpace', { size }))
         return null
       })
       .catch(() => {
-        this.fail(upload, `Upload ${stream} could not be written`, 'internal')
+        this.fail(upload, loggedPortError('internal', 'remote.uploadUnwritable'))
         return null
       })
     this.uploads.set(stream, upload)
@@ -394,7 +405,7 @@ export class Uploads {
       try {
         if (handle && this.uploads.get(upload.stream) === upload) await step(handle)
       } catch {
-        this.fail(upload, `Upload ${upload.stream} could not be written`, 'internal')
+        this.fail(upload, loggedPortError('internal', 'remote.uploadUnwritable'))
       } finally {
         settled?.()
       }
@@ -419,19 +430,18 @@ export class Uploads {
     upload.timer = null
     if (upload.claimed && upload.complete) return
     upload.timer = setTimeout(() => {
-      const waiting = upload.complete ? 'was not named by a request' : 'got no bytes'
-      this.fail(upload, `Upload ${upload.stream} ${waiting} for ${this.idleMs / 1000} s`)
+      const key = upload.complete ? 'remote.uploadUnclaimed' : 'remote.uploadStalled'
+      this.fail(upload, loggedPortError('invalid_params', key, { seconds: this.idleMs / 1000 }))
     }, this.idleMs)
   }
 
-  private refuse(stream: number, code: PortError['code'], message: string): void {
-    this.options.cancelled(stream, { code, message })
+  private refuse(stream: number, error: PortError): void {
+    this.options.cancelled(stream, error)
   }
 
   /** The host gives an upload up and tells the device why. */
-  private fail(upload: Upload, message: string, code: PortError['code'] = 'invalid_params'): void {
+  private fail(upload: Upload, error: PortError): void {
     if (this.uploads.get(upload.stream) !== upload) return
-    const error = { code, message }
     this.drop(upload, error)
     this.options.cancelled(upload.stream, error)
   }

@@ -12,15 +12,16 @@ import type { GitStatus } from '@shared/git'
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
-import { host } from '@renderer/lib/host'
 import { formatShortcut } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { Glyph } from '@renderer/features/shell/glyph'
-import { loadGitTools, receiveCurrentPr, receiveGitStatus, useGitStore } from '@renderer/stores/git'
+import { emitAppEvent } from '@renderer/app/events'
+import { refreshGitProject, useGitStore } from '@renderer/stores/git'
 import { useFurtherFolders } from '@renderer/stores/projects'
 import { BranchPopover } from './branch-popover'
 import { BranchSwitcher } from './branch-switcher'
 import { useDialogReturn } from './dialog-focus'
+import { openGitPane, type OpenGitPane } from './pane/open-pane'
 import { branchName, followPointer, popoverKeys } from './popover-keys'
 
 /** Middle truncation keeps both ends of a branch name, where the meaning usually is. */
@@ -35,12 +36,23 @@ function middleTruncate(text: string, max: number): string {
  * Huli: a branch link for each further folder of the project that is a repository of its own,
  * each named by its folder: its sync, changes, commit and pull request are that repository's.
  */
-export function FolderBranchLinks({ projectPath }: { projectPath: string }) {
+export function FolderBranchLinks({
+  projectPath,
+  sessionId,
+}: {
+  projectPath: string
+  sessionId: string
+}) {
   const folders = useFurtherFolders(projectPath)
   return folders
     .filter((folder) => !folder.missing)
     .map((folder) => (
-      <BranchTrayLink key={folder.path} projectPath={folder.path} repo={folder.name} />
+      <BranchTrayLink
+        key={folder.path}
+        projectPath={folder.path}
+        sessionId={sessionId}
+        repo={folder.name}
+      />
     ))
 }
 
@@ -49,7 +61,16 @@ export function FolderBranchLinks({ projectPath }: { projectPath: string }) {
  * changes, commits and the pull request), and Option-click opens the branch switcher. Huli: `repo`
  * names a further folder's repository on its link.
  */
-export function BranchTrayLink({ projectPath, repo }: { projectPath: string; repo?: string }) {
+export function BranchTrayLink({
+  projectPath,
+  sessionId,
+  repo,
+}: {
+  projectPath: string
+  /** The session whose composer a hand-off to the agent writes in. */
+  sessionId: string
+  repo?: string
+}) {
   const { t } = useTranslation('git')
   const status = useGitStore((s) => s.status[projectPath])
   const pr = useGitStore((s) => s.currentPr[projectPath] ?? null)
@@ -59,17 +80,9 @@ export function BranchTrayLink({ projectPath, repo }: { projectPath: string; rep
   useDialogReturn(projectPath, trigger)
   // A commit's card is a popup outside the popover's own, which the same Escape would close too.
   const cardEscape = useRef<Event | null>(null)
+  // After a hand-off the focus belongs to the composer, not to the chip the popover opened from.
+  const handedOff = useRef(false)
   if (!status?.repo) return null
-
-  const refresh = (): void => {
-    // Opening shows the repository as it is now, not as the last watch event left it.
-    void host('git.status', { projectPath }).then(receiveGitStatus, () => {})
-    void host('git.currentPullRequest', { projectPath }).then(
-      (current) => receiveCurrentPr(projectPath, current),
-      () => {},
-    )
-    if (!useGitStore.getState().tools) void loadGitTools()
-  }
 
   const onOpenChange = (next: boolean, details: PopoverPrimitive.Root.ChangeEventDetails): void => {
     if (!next && details.reason === 'escape-key' && details.event === cardEscape.current) {
@@ -83,7 +96,23 @@ export function BranchTrayLink({ projectPath, repo }: { projectPath: string; rep
       return
     }
     setOpen(next ? 'branch' : null)
-    if (next) refresh()
+    if (next) {
+      handedOff.current = false
+      // Opening shows the repository as it is now, not as the last watch event left it.
+      refreshGitProject(projectPath)
+    }
+  }
+
+  const openPane = (request: Omit<OpenGitPane, 'panel'>): void => {
+    handedOff.current = true
+    setOpen(null)
+    openGitPane(projectPath, { ...request, panel: sessionId })
+  }
+
+  const handOff = (text: string): void => {
+    handedOff.current = true
+    setOpen(null)
+    emitAppEvent({ kind: 'insert-into-composer', sessionId, text })
   }
 
   const onChipKeys = (event: KeyboardEvent<HTMLButtonElement>): void => {
@@ -120,6 +149,7 @@ export function BranchTrayLink({ projectPath, repo }: { projectPath: string; rep
         </Tooltip>
         <PopoverContent
           ref={popup}
+          finalFocus={() => !handedOff.current}
           side="top"
           align="start"
           sideOffset={8}
@@ -140,13 +170,15 @@ export function BranchTrayLink({ projectPath, repo }: { projectPath: string; rep
             popoverKeys(event, branchName(status))
           }}
           onPointerMove={followPointer}
-          className="kettu-pop kettu-branch-pop max-h-[min(47rem,var(--available-height))] w-89 overflow-y-auto"
+          className="kettu-pop kettu-branch-pop max-h-[min(47rem,var(--available-height))] w-99 overflow-hidden"
         >
           <BranchPopover
             status={status}
             pr={pr}
             onClose={() => setOpen(null)}
             onSwitch={() => setOpen('switch')}
+            onHandOff={handOff}
+            onOpenPane={openPane}
           />
         </PopoverContent>
       </Popover>

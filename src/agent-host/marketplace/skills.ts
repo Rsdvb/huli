@@ -38,7 +38,7 @@ import type { SessionOptions } from '../connection'
 import { HostError } from '../errors'
 import type { Env } from '../find-command'
 import { kettuSkills, type GuideFlags } from '../guide/guide'
-import { kettuSkillDirs, kettuSkillRoots, writeKettuSkills } from '../guide/skill-files'
+import { kettuSkillDirs, kettuSkillRoot, writeKettuSkills } from '../guide/skill-files'
 import { t } from '../i18n'
 import { JsonFile, type LogFn } from '../storage'
 import { kettuId } from '@shared/market-community'
@@ -46,6 +46,7 @@ import type { MarketListing } from '@shared/market-publish'
 import { codexOwnSkills } from './codex-plugins'
 import { modeOf, type DownloadedFile } from './community'
 import { frontmatter } from './frontmatter'
+import { logText } from '../localized-error'
 import {
   SKILL_FILE,
   SKILL_MD_BYTES,
@@ -337,6 +338,11 @@ export class MarketSkillsService {
   private readonly kettuPlugins = new Map<AgentId, string>()
   /** The Claude Code agents whose plugins are written. */
   private readonly written = new Set<AgentId>()
+  /**
+   * The folders of Kettu's own skills handed to agents since the host started: they may still read
+   * them, so a sync keeps them until the next start.
+   */
+  private readonly handedOwn = new Set<string>()
   private syncing: Promise<void> = Promise.resolve()
   private readonly now: () => number
 
@@ -392,7 +398,7 @@ export class MarketSkillsService {
   /** One repository of the catalog, read as `skills` reads each. */
   async repository(id: string, refresh = false): Promise<MarketSkillRepository> {
     const spec = this.specs.find((item) => repositoryId(item) === id)
-    if (!spec) throw new HostError('not_found', `${id} is not in the skills catalog`)
+    if (!spec) throw new HostError('not_found', t('marketSkills.notInCatalog', { id }))
     const state = await this.readRepository(spec, refresh, false)
     const kept = await this.load()
     return { repository: this.repositoryOf(spec, state), skills: this.catalogOf(spec, kept, state) }
@@ -452,7 +458,16 @@ export class MarketSkillsService {
   /** Kettu's own skill roots, for an agent that reaches Kettu's server. */
   private kettuRoots(): string[] {
     const flags = this.deps.ownSkills?.()
-    return flags ? kettuSkillRoots(this.kettuRoot, flags) : []
+    if (!flags) return []
+    const root = kettuSkillRoot(this.kettuRoot, flags)
+    this.handedOwn.add(path.basename(root))
+    return [root]
+  }
+
+  /** The folder of each of Kettu's own skills, for a plugin to link. */
+  private kettuDirs(flags: GuideFlags): [string, string][] {
+    this.handedOwn.add(path.basename(kettuSkillRoot(this.kettuRoot, flags)))
+    return [...kettuSkillDirs(this.kettuRoot, flags)]
   }
 
   /** Whether the agent takes the skill folders Kettu hands it. */
@@ -462,25 +477,86 @@ export class MarketSkillsService {
 
   /**
    * What an attach of the agent's session gets: skill folders for Codex, a plugin for Claude Code;
-   * with Kettu's own skills when `kettu`, the session reaching Kettu's server. Waits for a sync
-   * under way, so the first sessions after a start get what it writes.
+   * with Kettu's own skills when `kettu`, the session reaching Kettu's server, and the skills a
+   * workflow step names in `step`, which its session gets whatever agent does it. Waits for a
+   * sync under way, so the first sessions after a start get what it writes.
    */
   async sessionOptions(
     agentId: AgentId,
     kettu: boolean,
+    step: readonly string[] = [],
   ): Promise<Pick<SessionOptions, 'skillRoots' | 'localPlugins'>> {
     await this.syncing
     const harness = harnessOf(agentId)
+    const added = this.stepSkills(agentId, step)
     if (harness === 'codex') {
-      return { skillRoots: [...(kettu ? this.kettuRoots() : []), ...this.roots(agentId)] }
+      return {
+        skillRoots: [
+          ...(kettu ? this.kettuRoots() : []),
+          ...this.roots(agentId),
+          ...added.map((skill) => path.join(this.store, skillFolder(skill.id))),
+        ],
+      }
     }
     if (harness === 'claude-code') {
       // An agent added since the last sync, as one found on a first start is.
       if (!this.written.has(agentId)) await this.queued(() => this.writePlugins(agentId))
+      if (added.length > 0) {
+        const plugin = await this.stepPlugin(agentId, kettu, added)
+        if (plugin) return { localPlugins: [plugin] }
+      }
       const plugin = (kettu ? this.kettuPlugins : this.plugins).get(agentId)
       return plugin ? { localPlugins: [plugin] } : {}
     }
     return {}
+  }
+
+  /** The skills a step names that are on and on disk, and that the agent does not get anyway. */
+  private stepSkills(agentId: AgentId, names: readonly string[]): MarketSkill[] {
+    if (names.length === 0) return []
+    return this.deps
+      .settings()
+      .filter(
+        (skill) =>
+          skill.on &&
+          (names.includes(skill.name) || names.includes(skill.id)) &&
+          !skillFor(skill, agentId) &&
+          this.present.has(skillFolder(skill.id)),
+      )
+  }
+
+  /**
+   * Claude Code's plugin for a step's session: the agent's own skills, Kettu's first when `kettu`,
+   * and the step's. Its folder is named by what it adds, so the step's sessions share it.
+   */
+  private async stepPlugin(
+    agentId: AgentId,
+    kettu: boolean,
+    added: readonly MarketSkill[],
+  ): Promise<string | null> {
+    const ids = new Set(added.map((skill) => skill.id))
+    const key = createHash('sha256')
+      .update(JSON.stringify([kettu, [...ids].sort()]))
+      .digest('hex')
+      .slice(0, 12)
+    const folder = path.join(this.root, 'claude', `${skillFolder(agentId)}-step-${key}`)
+    const made = new Map<AgentId, string>()
+    await this.queued(async () => {
+      const market: [string, string][] = []
+      for (const skill of this.deps.settings()) {
+        const dir = skillFolder(skill.id)
+        if (!this.present.has(dir) || (!skillFor(skill, agentId) && !ids.has(skill.id))) continue
+        market.push([skill.name, path.join(this.store, dir, skill.name)])
+      }
+      const own = kettu ? this.deps.ownSkills?.() : undefined
+      const first = own ? this.kettuDirs(own) : []
+      try {
+        await this.writeClaudePlugin(made, agentId, folder, linkNames(first, market))
+      } catch (error) {
+        this.deps.log('warn', `Could not write a step's skills: ${(error as Error).message}`)
+      }
+    })
+    return made.get(agentId) ?? null
   }
 
   /** OpenCode's environment as its process starts, with the agent's skill folders. */
@@ -509,9 +585,10 @@ export class MarketSkillsService {
   }
 
   private async syncNow(): Promise<void> {
-    if (this.deps.ownSkills) {
+    const flags = this.deps.ownSkills?.()
+    if (flags) {
       try {
-        await writeKettuSkills(this.kettuRoot)
+        await writeKettuSkills(this.kettuRoot, flags, this.handedOwn)
       } catch (error) {
         this.deps.log('warn', `Could not write Kettu's own skills: ${(error as Error).message}`)
       }
@@ -570,7 +647,7 @@ export class MarketSkillsService {
     const folder = path.join(this.root, 'claude', skillFolder(agentId))
     await this.writeClaudePlugin(this.plugins, agentId, folder, linkNames([], market))
     const own = this.deps.ownSkills?.()
-    const first = own ? [...kettuSkillDirs(this.kettuRoot, own)] : []
+    const first = own ? this.kettuDirs(own) : []
     await this.writeClaudePlugin(
       this.kettuPlugins,
       agentId,
@@ -622,7 +699,9 @@ export class MarketSkillsService {
   private async addFromCatalog(id: string): Promise<MarketSkill> {
     const parsed = catalogSkillId(id)
     const spec = parsed && this.specs.find((item) => repositoryId(item) === parsed.repository)
-    if (!parsed || !spec) throw new HostError('invalid_params', `${id} is not in the catalog`)
+    if (!parsed || !spec) {
+      throw new HostError('invalid_params', t('marketSkills.notInCatalog', { id }))
+    }
     const state = await this.readRepository(spec, false, false)
     const copy = (await this.load()).repositories[parsed.repository]
     const listed = state.read ? copy?.skills.find((skill) => skill.name === parsed.name) : undefined
@@ -630,7 +709,7 @@ export class MarketSkillsService {
       const failure = this.failures.get(parsed.repository)
       throw new HostError(
         failure ? 'unavailable' : 'not_found',
-        failure ?? `The catalog has no skill ${parsed.name}`,
+        failure ?? t('marketSkills.noSuchSkill', { name: parsed.name }),
       )
     }
     const files = await readFolder(path.join(this.catalogDir(spec, copy.dir), listed.name))
@@ -651,15 +730,17 @@ export class MarketSkillsService {
   private async addFromGithub(url: string): Promise<MarketSkill> {
     const source = githubSource(url)
     if (!source) {
-      throw new HostError('invalid_params', 'Give a github.com repository, or a folder in one')
+      throw new HostError('invalid_params', t('marketSkills.needsGithub'))
     }
     const tarball = await this.download(tarballUrl(source))
     const dirs = skillDirs(tarball, source.path)
-    if (dirs.length === 0) throw new HostError('not_found', `There is no ${SKILL_FILE} in ${url}`)
+    if (dirs.length === 0) {
+      throw new HostError('not_found', t('marketSkills.noSkillFile', { file: SKILL_FILE, url }))
+    }
     if (dirs.length > 1) {
       throw new HostError(
         'invalid_params',
-        `${url} holds ${dirs.length} skills; give the folder of one of them`,
+        t('marketSkills.manySkills', { url, count: dirs.length }),
       )
     }
     const folder = dirs[0]!
@@ -700,10 +781,15 @@ export class MarketSkillsService {
 
   private async addFromFolder(folder: string): Promise<MarketSkill> {
     const info = await stat(folder).catch(() => null)
-    if (!info?.isDirectory()) throw new HostError('not_found', `${folder} is not a folder`)
+    if (!info?.isDirectory()) {
+      throw new HostError('not_found', t('marketSkills.notFolder', { folder }))
+    }
     const files = await readFolder(folder)
     if (!files.some((file) => file.path === SKILL_FILE)) {
-      throw new HostError('invalid_params', `${folder} has no ${SKILL_FILE}`)
+      throw new HostError(
+        'invalid_params',
+        t('marketSkills.folderNoSkillFile', { folder, file: SKILL_FILE }),
+      )
     }
     const skill = skillInfo(skillText(files), path.basename(folder))
     const id = `local:${randomUUID()}`
@@ -841,9 +927,8 @@ export class MarketSkillsService {
       this.failures.delete(id)
     } catch (error) {
       await rm(partial, { recursive: true, force: true })
-      const message = (error as Error).message
-      this.failures.set(id, message)
-      this.deps.log('warn', `The skills of ${id} are from before: ${message}`)
+      this.failures.set(id, (error as Error).message)
+      this.deps.log('warn', `The skills of ${id} are from before: ${logText(error)}`)
     }
   }
 
@@ -924,7 +1009,9 @@ export class MarketSkillsService {
 
 function skillText(files: SkillFiles): string {
   const file = files.find((item) => item.path === SKILL_FILE)
-  if (!file) throw new HostError('invalid_params', `The skill has no ${SKILL_FILE}`)
+  if (!file) {
+    throw new HostError('invalid_params', t('marketSkills.noFile', { file: SKILL_FILE }))
+  }
   return file.data.subarray(0, SKILL_MD_BYTES).toString('utf8')
 }
 
@@ -933,7 +1020,7 @@ async function writeFiles(dir: string, files: SkillFiles): Promise<void> {
   for (const file of files) {
     const target = path.resolve(root, ...file.path.split('/'))
     if (!target.startsWith(root + path.sep)) {
-      throw new HostError('invalid_params', `The skill names a file outside it: ${file.path}`)
+      throw new HostError('invalid_params', t('marketSkills.outside', { path: file.path }))
     }
     await mkdir(path.dirname(target), { recursive: true })
     // Scripts keep their run bit; nothing else of the archive's modes comes along.
@@ -950,10 +1037,7 @@ async function readFolder(root: string): Promise<SkillFiles> {
       const full = path.join(dir, entry.name)
       const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`
       if (entry.isSymbolicLink()) {
-        throw new HostError(
-          'invalid_params',
-          `The skill holds a link, which Kettu does not copy: ${relative}`,
-        )
+        throw new HostError('invalid_params', t('marketSkills.link', { path: relative }))
       }
       if (entry.isDirectory()) {
         await walk(full, relative)
@@ -965,13 +1049,13 @@ async function readFolder(root: string): Promise<SkillFiles> {
       if (files.length >= SKILL_LIMITS.files) {
         throw new HostError(
           'invalid_params',
-          `The skill holds more than ${SKILL_LIMITS.files} files`,
+          t('marketSkills.tooManyFiles', { count: SKILL_LIMITS.files }),
         )
       }
       if (bytes > SKILL_LIMITS.bytes) {
         throw new HostError(
           'invalid_params',
-          `The skill is larger than ${SKILL_LIMITS.bytes / (1024 * 1024)} MB`,
+          t('marketSkills.tooLarge', { mb: SKILL_LIMITS.bytes / (1024 * 1024) }),
         )
       }
       files.push({ path: relative, data: await readFile(full), mode: info.mode })

@@ -4,7 +4,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Channel } from '@shared/remote/channel'
 import {
   DISCOVER_PROLOGUE,
@@ -35,6 +35,10 @@ import { RemoteServer } from './server'
 import { memoryPorts, memoryTransports } from './testing/memory'
 
 const MAIN = 'https://relay.test'
+// A busy machine takes seconds over a handshake; a poll ends as soon as it holds.
+vi.setConfig({ testTimeout: 60_000 })
+const POLL = { timeout: 15_000 }
+
 const log = (): void => {}
 const cleanups: (() => Promise<void> | void)[] = []
 
@@ -112,7 +116,7 @@ async function setup(laptopToken = 'laptop-token') {
     timeoutMs: 5000,
   })
   cleanups.push(() => client.stop())
-  await expect.poll(() => relays.relay(MAIN).hosts.get(relayId)?.profile).toBeTruthy()
+  await expect.poll(() => relays.relay(MAIN).hosts.get(relayId)?.profile, POLL).toBeTruthy()
   return { relays, relay, relayId, hostKey, server, discovery, events, client, states }
 }
 
@@ -128,8 +132,8 @@ describe('pairing with a host of the account through the relay', () => {
     expect(await t.client.discover(publicKey)).toEqual({ state: 'ok', hosts: [] })
 
     t.client.pairDiscovered(1, t.relayId, null, 'MacBook Air')
-    await expect.poll(() => t.states.at(-1)?.state).toBe('compare')
-    await expect.poll(() => t.events.length).toBe(1)
+    await expect.poll(() => t.states.at(-1)?.state, POLL).toBe('compare')
+    await expect.poll(() => t.events.length, POLL).toBe(1)
     const asked = t.events[0]!.request
     const compared = t.states.at(-1)!
     if (asked.state !== 'confirm' || compared.state !== 'compare') throw new Error('Not asked')
@@ -139,7 +143,7 @@ describe('pairing with a host of the account through the relay', () => {
     t.client.matchPairing(1, true)
     expect(t.states.at(-1)).toEqual({ state: 'compare', code: asked.code, matched: true })
     t.discovery.answer(1, true, 'Laptop')
-    await expect.poll(() => t.states.at(-1)?.state).toBe('added')
+    await expect.poll(() => t.states.at(-1)?.state, POLL).toBe('added')
     const added = t.states.at(-1)!
     expect(added).toMatchObject({
       state: 'added',
@@ -152,11 +156,11 @@ describe('pairing with a host of the account through the relay', () => {
   it('ends when this computer says the codes differ, and the host hears it', async () => {
     const t = await setup()
     t.client.pairDiscovered(1, t.relayId, null, 'MacBook Air')
-    await expect.poll(() => t.states.at(-1)?.state).toBe('compare')
+    await expect.poll(() => t.states.at(-1)?.state, POLL).toBe('compare')
     t.client.matchPairing(1, false)
     expect(t.states.at(-1)).toEqual({ state: 'failed', reason: 'void' })
     await expect
-      .poll(() => t.events.at(-1)?.request)
+      .poll(() => t.events.at(-1)?.request, POLL)
       .toEqual({
         state: 'closed',
         reason: 'cancelled',
@@ -167,14 +171,16 @@ describe('pairing with a host of the account through the relay', () => {
     const t = await setup('stranger-token')
     expect(await t.client.discover(null)).toEqual({ state: 'ok', hosts: [] })
     t.client.pairDiscovered(1, t.relayId, null, 'MacBook Air')
-    await expect.poll(() => t.states.at(-1)).toEqual({ state: 'failed', reason: 'host_offline' })
+    await expect
+      .poll(() => t.states.at(-1), POLL)
+      .toEqual({ state: 'failed', reason: 'host_offline' })
   })
 
   it('takes the host off the list once it no longer lets devices find it', async () => {
     const t = await setup()
     t.discovery.setEnabled(false)
     t.relay.profileChanged()
-    await expect.poll(() => t.relays.relay(MAIN).hosts.get(t.relayId)?.profile).toBeNull()
+    await expect.poll(() => t.relays.relay(MAIN).hosts.get(t.relayId)?.profile, POLL).toBeNull()
     expect(await t.client.discover(null)).toEqual({ state: 'ok', hosts: [] })
   })
 })

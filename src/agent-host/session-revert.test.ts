@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { ThreadEntry } from '@shared/thread'
-import { FakeAppServer, FakeRpcError, turn } from './testing/fake-app-server'
+import { FakeAppServer, turn } from './testing/fake-app-server'
 import { startTestHost, type TestHost } from './testing/harness'
 import { inThreadWorker } from './testing/thread-worker'
 import type { ThreadWrite } from './threads/model'
@@ -119,96 +119,6 @@ const userIds = (window: Awaited<ReturnType<typeof twoTurns>>['window'], id: str
     .entries(id)
     .filter((entry) => entry.kind === 'user')
     .map((entry) => entry.id)
-
-it('rewinds to an earlier message in Codex’s own history', async () => {
-  const { server, window, id } = await twoTurns(['one', 'two', 'three'])
-  const threadId = window.thread(id).session.acpSessionId!
-  const turns = [...new Set(server.history.get(threadId)!.map((entry) => entry.turnId))]
-  const [, second] = userIds(window, id)
-
-  const preview = await window.request('sessions.rewindPreview', {
-    sessionId: id,
-    entryId: second!,
-  })
-  expect(preview).toMatchObject({ messages: 2, conversation: 'agent' })
-  expect(server.sent('thread/revert')).toEqual([])
-
-  const { content } = await window.request('sessions.rewind', {
-    sessionId: id,
-    entryId: second!,
-    draft: [],
-  })
-  expect(content).toEqual([{ type: 'text', text: 'two' }])
-  expect(server.sent('thread/revert')).toEqual([{ threadId, beforeTurnId: turns[1] }])
-  await vi.waitFor(() => expect(said(window.entries(id))).toEqual(['one', 're: one']))
-  // Only a message that started a turn is one to go back to.
-  const reply = window.entries(id).find((entry) => entry.kind === 'agent')!
-  await expect(
-    window.request('sessions.rewind', { sessionId: id, entryId: reply.id, draft: [] }),
-  ).rejects.toMatchObject({ code: 'invalid_params' })
-})
-
-it('starts over from the first message with a new session of the agent', async () => {
-  const { server, window, id } = await twoTurns()
-  const [first] = userIds(window, id)
-  const preview = await window.request('sessions.rewindPreview', {
-    sessionId: id,
-    entryId: first!,
-  })
-  expect(preview).toMatchObject({ messages: 2, conversation: 'empty' })
-  const started = server.sent('thread/start').length
-  await window.request('sessions.rewind', { sessionId: id, entryId: first!, draft: [] })
-  expect(server.sent('thread/revert')).toEqual([])
-  await vi.waitFor(() => expect(window.entries(id)).toEqual([]))
-  await window.request('sessions.prompt', {
-    sessionId: id,
-    content: [{ type: 'text', text: 'anew' }],
-  })
-  await window.untilEntry(id, (e) => e.kind === 'agent' && e.markdown === 're: anew')
-  expect(server.sent('thread/start').length).toBe(started + 1)
-})
-
-it('carries the conversation kept to a new session when the agent cannot cut its own', async () => {
-  const { server, window, id } = await twoTurns(['one', 'two', 'three'])
-  server.on('thread/revert', () => {
-    throw new FakeRpcError(-32600, 'thread/revert only supports paginated threads')
-  })
-  const [, second] = userIds(window, id)
-  const started = server.sent('thread/start').length
-  await window.request('sessions.rewind', { sessionId: id, entryId: second!, draft: [] })
-  await vi.waitFor(() => expect(said(window.entries(id))).toEqual(['one', 're: one']))
-  const marker = window.entries(id).at(-1)
-  expect(marker).toMatchObject({ kind: 'takeover', agentId: 'codex', rewound: true })
-  const prompts = server.sent('turn/start').length
-  await window.request('sessions.prompt', {
-    sessionId: id,
-    content: [{ type: 'text', text: 'four' }],
-  })
-  await vi.waitFor(() => expect(server.sent('turn/start').length).toBe(prompts + 1))
-  expect(server.sent('thread/start').length).toBe(started + 1)
-  // The new session hears of the turn kept, in its history or ahead of the prompt.
-  const heard = JSON.stringify([
-    ...server.sent('thread/inject_items'),
-    ...server.sent('turn/start'),
-  ])
-  expect(heard).toContain('re: one')
-  expect(heard).not.toContain('re: two')
-})
-
-it('refuses a rewind while a turn runs', async () => {
-  const { server, window, id } = await twoTurns()
-  server.on('turn/start', (_params, self) => ({ turn: turn(self.nextTurnId()) }))
-  const [first] = userIds(window, id)
-  await window.request('sessions.prompt', {
-    sessionId: id,
-    content: [{ type: 'text', text: 'slow' }],
-  })
-  await window.untilStatus(id, 'running')
-  await expect(
-    window.request('sessions.rewind', { sessionId: id, entryId: first!, draft: [] }),
-  ).rejects.toMatchObject({ code: 'busy' })
-  expect(server.sent('thread/revert')).toEqual([])
-})
 
 it('restores the files a message found, refuses a stale preview, and undoes the restore', async () => {
   const { server, window, id, project } = await twoTurns(['one'], async (text, folder) => {

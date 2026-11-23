@@ -10,7 +10,9 @@ import type {
   SyncSnippet,
 } from './agent-sync'
 import type { AgentResetCategory, AgentResetPreview, AgentResetResult } from './agent-reset'
+import type { CompactUnit } from './auto-compact'
 import type { DeviceAccessDecision } from './device-agent'
+import type { ArtifactChanges } from './artifact-changes'
 import type { ArtifactConsentAsk, ArtifactConsentRow, RuntimeAnswer } from './artifact-capabilities'
 import type { ArtifactContent, ArtifactSession, ArtifactSummary, VersionSummary } from './artifacts'
 import type { CommentAnchor, CommentThread } from './artifact-comments'
@@ -56,7 +58,7 @@ import type {
 } from './agent-history'
 import type { SessionFolder } from './session-folders'
 import type { BoardStatus, SessionBoard } from './session-board'
-import type { GroupRunStart, KeptRun, RunChanges, SessionGroupRef } from './session-groups'
+import type { GroupRunStart, KeptRun, RunChanges, SessionGroupRef } from './run-groups'
 import type { IssueInbox, SessionIssue, SessionPrFlow } from './github-flow'
 import type {
   CatalogServer,
@@ -149,12 +151,14 @@ import type {
 } from './routines'
 import type { AgentColor } from './settings'
 import type { SettingsSection } from './settings-catalog'
+import type { TurnPhase, TurnWork } from './turn-phase'
 import type {
   SessionTaskRef,
   WorkflowAddSource,
   WireWorkflowEntry,
   WorkflowSettings,
   WorkflowSettingsChange,
+  WorkflowSuggestion,
   StepPick,
   TaskStart,
   TaskSummary,
@@ -162,7 +166,6 @@ import type {
 } from './workflow'
 import type { ClockRequest, UsageScope, UsageStatus, UsageSummary, UsageTotal } from './usage'
 import type { ImageClear, ImageClearScope, StorageUsage } from './data-usage'
-import type { TurnWork } from './turn-phase'
 import type {
   MoveApply,
   MovedTo,
@@ -184,6 +187,7 @@ import type {
   PatchBatch,
   PlanItem,
   PromptCache,
+  QueuedComments,
   ProjectHooksDecision,
   ProjectMcpDecision,
   ProblemReportOutcome,
@@ -193,7 +197,9 @@ import type {
   SessionSnapshot,
   SessionStatus,
   SlashCommand,
+  StopReason,
   ThreadEntry,
+  ToolKind,
   UserContent,
 } from './thread'
 
@@ -224,6 +230,12 @@ export interface PlanLimit {
    * that counts the whole plan.
    */
   models?: string[]
+  /**
+   * Set while extra usage covers this used-up window: the plan refuses requests and extra usage
+   * lets them through. It ends with an event that says extra usage is not in use, when the window
+   * resets, or when a read shows it not used up.
+   */
+  extraUsage?: true
 }
 
 /**
@@ -299,6 +311,12 @@ export interface AgentProvider {
     /** Huli: kept from an earlier run of the host and not read again since. */
     stale?: true
   } | null
+}
+
+/** A provider an agent lists models from, as the agent names it, and how many it lists. */
+export interface ModelProvider {
+  id: string
+  models: number
 }
 
 export interface AgentProviderAction {
@@ -382,7 +400,7 @@ export interface AgentTask {
   kind: 'install' | 'update'
   state: 'running' | 'failed'
   command: string // what runs, quoted for the platform
-  method: AgentInstallMethod['id'] | null // the route a binary agent's install took; null otherwise
+  method: ProgramMethod | null // the route a binary agent's install or a program's update took
   progress: string[] // the latest output lines
   error: string | null // why it failed, in the user's terms
 }
@@ -394,15 +412,17 @@ export interface AgentTask {
  */
 export type VersionMoveReason = 'registry' | 'manifest' | 'broken' | 'bundled'
 
-/** The user's own Claude Code or Codex, the only CLI a start runs. */
+/** The user's own program a start runs, such as Claude Code's or Codex's CLI. */
 export interface AgentCli {
   command: string // looked up on PATH, such as claude
   installed: InstalledCli | null // null: none found
   // How it was installed, read from where it lives; null when Kettu cannot tell.
-  method: AgentInstallMethod['id'] | null
+  method: ProgramMethod | null
   // A newer version, from the daily check, and the command that updates it the way it was
   // installed; null when up to date, unchecked, or the way is unknown.
   update: { version: string; command: string } | null
+  // Whether its newer versions can be read, by how it was installed; absent on older hosts.
+  checkable?: boolean
 }
 
 export interface InstalledCli {
@@ -434,6 +454,28 @@ export interface SessionTerminalCommand {
   /** The same after a change to the session's folder, to paste into any terminal of its host. */
   copy: string
 }
+/**
+ * Why detection found that a harness cannot run. `needs-node` carries the harness's own minimum
+ * (null when it names none) and the version found (null when none was, or `unreadable` when
+ * `node --version` did not answer); `needs-uv` the same for uv; `too-old` the user's program's;
+ * `cannot-run` says why in the user's terms; `no-version` is no version for this computer.
+ */
+export type HarnessReason =
+  | { kind: 'not-installed' }
+  | { kind: 'needs-node'; minimum: string | null; installed: string | null; unreadable?: true }
+  | { kind: 'needs-npm' }
+  | { kind: 'needs-uv'; minimum: string | null; installed: string | null }
+  | { kind: 'too-old'; minimum: string; installed: string | null }
+  | { kind: 'cannot-run'; why: string }
+  | { kind: 'no-version' }
+
+/**
+ * Why the user's own program of a harness Kettu also installs does not run: its version is outside
+ * `range`, the npm range of versions Kettu runs; Kettu's compatibility manifest says it does not
+ * work; or it cannot be run or asked its version (`detail`, in the user's terms).
+ */
+export type UnusedProgramReason =
+  { kind: 'range'; range: string } | { kind: 'manifest' } | { kind: 'unusable'; detail: string }
 
 /** A way Kettu can install a harness's program, such as OpenCode, in the order it prefers them. */
 export interface AgentInstallMethod {
@@ -441,6 +483,69 @@ export interface AgentInstallMethod {
   label: string // what the page shows for the route: its command, or the archive's file name
   command: string // quoted for the platform, as the page shows it
   available: boolean // the tool it needs was found on the agent environment's PATH
+}
+
+/**
+ * How the user's own program was installed: a route Kettu installs by, or a global install of
+ * another package manager, which updates and removes it with its own commands.
+ */
+export type ProgramMethod = AgentInstallMethod['id'] | 'pnpm' | 'bun' | 'yarn'
+
+/**
+ * Where an install downloads from: the npm registry the user's npm configuration names for the
+ * package (null when it could not be read), a release file the ACP Registry lists at its vendor's
+ * address, the vendor's own address, Homebrew, WinGet, or PyPI through uv.
+ */
+export type InstallSource =
+  | { kind: 'npm'; registry: string | null }
+  | { kind: 'registry'; url: string }
+  | { kind: 'vendor'; url: string }
+  | { kind: 'brew' }
+  | { kind: 'winget' }
+  | { kind: 'pypi' }
+
+/** Something an install needs on the computer, and whether it is there. */
+export type InstallNeed =
+  // `minimum` is the harness's own, such as 22.19.0; `found` the version on PATH.
+  | { kind: 'node'; minimum: string | null; found: string | null; ok: boolean }
+  | { kind: 'npm'; ok: boolean }
+  | { kind: 'uv'; ok: boolean }
+
+/** What one way of installing a harness brings, which the install window shows before it runs. */
+export interface InstallDetails {
+  /** An npm or uvx package or a release archive, by name; a vendor's command, which its route holds. */
+  what: { kind: 'npm' | 'uvx' | 'archive'; name: string } | { kind: 'command' }
+  /** The version it installs; null where the vendor's route takes its newest. */
+  version: string | null
+  source: InstallSource
+  /** The folder it goes into; null where the route does not say, as for uv's cache or WinGet. */
+  folder: string | null
+  /** In bytes, when known; `packageOnly` when the package's dependencies are not counted. */
+  size: { bytes: number; packageOnly: boolean } | null
+  needs: InstallNeed[]
+}
+
+/** A way the install window offers to install a harness. */
+export interface InstallRoute {
+  /**
+   * `copy` is Kettu's own install of the harness's npm or uvx package, which `agents.install` takes
+   * without a method; the others are its methods.
+   */
+  id: 'copy' | AgentInstallMethod['id']
+  /** The command it runs, or the archive's address, quoted for the platform; null for `copy`. */
+  command: string | null
+  /** The tool it runs with was found on the agent environment's PATH. */
+  available: boolean
+  /** Nothing installs now: uv fetches a uvx package the first time a session starts. */
+  firstStart?: true
+  details: InstallDetails
+}
+
+/** The ways to install a harness, the recommended first. */
+export interface InstallOffer {
+  routes: InstallRoute[]
+  /** The vendor's install page; absent when it has none, and on older hosts. */
+  guide?: string
 }
 
 export interface AgentStatus {
@@ -496,6 +601,12 @@ export interface AgentStatus {
   providers?: AgentProvider[]
   providersError?: string | null
   /**
+   * The providers a harness that signs in to each one itself has models from, as it names them,
+   * with how many models each lists (Pi); null until it first listed them, absent for the others
+   * and on older hosts.
+   */
+  modelProviders?: ModelProvider[] | null
+  /**
    * A harness's balance at its vendor, read on its own: DeepSeek Harness's, on its account sign-in
    * or an API key. Null while there is none to show; absent for every other harness.
    */
@@ -529,6 +640,9 @@ export interface AgentStatus {
   resets?: PlanResets
   resetsError?: ResetsError
   detail: string | null // install hint or error message
+  // Why it cannot run while `state` is `not-installed`, `node-missing` or `node-outdated`; null
+  // otherwise, and absent on older hosts, which say it in `detail` alone.
+  reason?: HarnessReason | null
   installUrl: string | null
   installNotice?: string | null // the vendor installer's effects, shown before installation
   progress: string[] // latest npm output or stderr lines while installing or starting
@@ -542,6 +656,19 @@ export interface AgentStatus {
   terminal?: AgentTerminal
   binaryOverride: string | null // the program picked in Settings, if any
   binaryCommand: string | null // the command a binary agent's launch runs; null for the others
+  // The harness's program as its page names it, which one picked in Settings replaces; `onPath`
+  // when Kettu looks for the user's own on PATH first. Null for a harness that runs none of its
+  // own, and absent on older hosts.
+  program?: { command: string; onPath: boolean } | null
+  // The user's own program of a harness Kettu installs too, found but not run, and why: Kettu's
+  // own install runs instead, or Install is offered. Null when there is none, and absent on older
+  // hosts.
+  unusedProgram?: {
+    command: string
+    path: string
+    version: string | null
+    why: UnusedProgramReason
+  } | null
   // Where that program was found: on PATH, the one picked in Settings or Kettu's install; null
   // while none was, and for the others.
   binaryPath?: string | null
@@ -550,9 +677,10 @@ export interface AgentStatus {
   updateCheckedAt: number | null
   // How Kettu's own install of a harness follows the version it is given, from the ACP Registry or
   // Kettu's compatibility manifest (`follows`): whether it updates by itself, its last move, when
-  // and why (`withdrawn` when it went back to an older version), and whether the update on offer
-  // goes back to an older version, and why. Null for the other harnesses, and absent on older
-  // hosts; `follows` and the reasons are absent on older hosts too.
+  // and why (`withdrawn` when it went back to an older version), whether the update on offer
+  // goes back to an older version, and why, and whether it is an archive without a SHA-256 for
+  // this platform (`noChecksum`), which only installs by hand. Null for the other harnesses, and
+  // absent on older hosts; `follows`, the reasons and `noChecksum` are absent on older hosts too.
   automatic?: {
     on: boolean
     moved: {
@@ -565,6 +693,7 @@ export interface AgentStatus {
     back: boolean
     backReason?: VersionMoveReason
     follows?: 'registry' | 'kettu'
+    noChecksum?: true
   } | null
   // The user's own program is a version Kettu's compatibility manifest says does not work:
   // `broken` when it names it, else it is outside `supported`; `recommended` is the version Kettu
@@ -581,7 +710,7 @@ export interface AgentStatus {
   updateSkipped: boolean // the user dismissed this update in the sidebar's notice
   task: AgentTask | null
   installMethods: AgentInstallMethod[] // a binary agent's ways to install; empty for the others
-  cli: AgentCli | null // the user's Claude Code or Codex; null for the others
+  cli: AgentCli | null // the user's own program a harness runs; null for the others
   // The configuration folder a start uses and the one the running process uses (null while none
   // runs); null for an agent whose folder cannot be chosen. `created`: Kettu made it.
   configDir: { runs: string; active: string | null; created: boolean } | null
@@ -598,6 +727,7 @@ export interface AgentStatus {
     forkAtMessage: boolean // `session/fork` up to a message, through the adapters' fork point
     revertTurns: boolean // takes the latest turn out of a session's history, as Codex's `thread/revert`
     steering: boolean // `_session/steering` into a running turn
+    rewind?: boolean // cuts a session's conversation before a turn, for an edit from a message
     reports: boolean // plan limits from its own report (`/usage`, `/status`)
     context: boolean // what fills the context from its own report (`/context`)
     liveContext: boolean // what fills the context from its connection through a running turn
@@ -629,10 +759,19 @@ export interface AgentOptions {
   defaults?: Record<string, Record<string, string | boolean>>
   observedAt: number
   provisional?: boolean // from a loaded or resumed session, so not the agent's own defaults
+  // The models the user pinned to the top of its model menu, by value, in the order pinned.
+  pinned?: string[]
+  // The models its sessions last started on or switched to, by value, the latest first.
+  recent?: string[]
   // The permission mode its new sessions start in, from the host's settings: sent with the
   // options, never stored with them.
   startMode?: string
 }
+
+/** How many models an agent's model menu may have pinned, all of them in its main list. */
+export const MAX_PINNED_MODELS = 4
+/** How many of an agent's recently used models the host keeps. */
+export const MAX_RECENT_MODELS = 8
 
 /** An agent's page in Settings › Agents: what its status leaves out, read when the page opens. */
 export interface AgentDetails {
@@ -664,6 +803,39 @@ export interface ClaudeSettings {
 export type ClaudeSettingChange =
   | { setting: 'autoCompactWindow'; model: string | null; value: number | null }
   | { setting: 'promptCacheTtl'; value: PromptCacheTtl | null }
+
+/** One model's row of an agent's auto-compact setting. */
+export interface AutoCompactRow {
+  /** The model as the harness's file keys it. */
+  model: string
+  /** The name the agent lists it by; null for a model only the file names. */
+  name: string | null
+  /** The value in the setting's unit; null when the file holds none, so the harness picks. */
+  value: number | null
+  /** What the file holds when it is no number of the unit, shown as written. */
+  other: string | null
+}
+
+/** When an agent's harness compacts on its own, as its configuration holds it, in its own unit. */
+export interface AutoCompactSettings {
+  unit: CompactUnit
+  /** The range a value is written in: tokens, or a whole percent for `percent`. */
+  min: number
+  max: number
+  /** The value for every model without a row of its own; null when none is set. */
+  all: number | null
+  allOther: string | null
+  /** A row per model for a harness that sets one per model; null when it sets one for all. */
+  models: AutoCompactRow[] | null
+  /** The file the value is kept in; null when the harness writes its own configuration. */
+  file: string | null
+}
+
+/** One change; a null value removes the key, so the harness picks, and a null model means all. */
+export interface AutoCompactChange {
+  model: string | null
+  value: number | null
+}
 
 /** What a Codebuddy Code agent's page edits in its settings file, and what overrides it. */
 export interface CodebuddySettings {
@@ -761,7 +933,7 @@ export interface EnvironmentInfo {
   shell: string | null
   resolvedAt: number | null
   durationMs: number | null
-  warning: string | null // why it fell back, or a note such as the Windows restart hint
+  warning: string | null // why it fell back, or a note such as the Windows PATH hint
   nodeVersion: string | null
   npmPath: string | null
   /** Huli: which Node.js agents run on, and Kite's own; absent from a host without it. */
@@ -812,6 +984,9 @@ export interface Project {
   missing: boolean // the folder no longer exists
   lastOpenedAt: number
   pinnedAt?: number | null // absent on hosts that do not support project pins
+  // Its place in the host's order: null until the user moves a project there, absent on hosts
+  // that cannot reorder projects. `projects.list` already gives them in this order.
+  order?: number | null
   // Huli: which permission requests the host allows by itself in this project; null keeps the
   // settings' default, absent on hosts older than it.
   autoApprove?: AutoApprove | null
@@ -823,6 +998,11 @@ export interface Project {
   // Huli: further folders its sessions work in beside its own, such as a frontend and a backend
   // repository, in the order they were added; absent on hosts older than them.
   folders?: ProjectFolder[]
+}
+
+/** The sidebar's No project group, which holds the sessions started without a project. */
+export interface NoProject {
+  pinnedAt: number | null
 }
 
 /** Huli: a further folder of a project, which its sessions' agents may read and change too. */
@@ -944,7 +1124,9 @@ export interface SessionSummary {
   title: string | null
   status: SessionStatus
   attention: SessionAttention
-  permissionCount: number // pending permission requests in this session alone
+  // What waits for the user in this session alone: its requests, and on newer hosts its workflow
+  // suggestions that wait for an answer, until answered or the session's next turn starts
+  permissionCount: number
   createdAt: number
   updatedAt: number
   parentId: string | null
@@ -1003,6 +1185,37 @@ export interface SessionSummary {
   worker?: WorkerSummary | null
   // Huli: moved to another computer, where it goes on; absent while it was not
   movedTo?: MovedTo
+  // The tool its running turn calls now; null while none runs; absent from older hosts
+  activity?: SessionActivity | null
+  // What its running turn does now, as the thread's nine dots act it out; null between turns;
+  // absent from older hosts
+  phase?: TurnPhase['phase'] | null
+  // How its last turn ended; null while a turn runs and before any ended; absent from older hosts
+  lastTurn?: LastTurn | null
+}
+
+/**
+ * How a session's last turn ended. `failed` and `limit` are turns that ended with an error, the
+ * latter refused by a used-up plan limit window; the others are the agent's own stop reasons.
+ */
+export interface LastTurn {
+  reason: StopReason | 'failed' | 'limit'
+  /** When it ended, in ms since the epoch. */
+  endedAt: number
+  /** The error's first line, for `failed` and `limit`. */
+  error?: string
+  /** The window that stopped it, for `limit`. */
+  limit?: LastTurnLimit
+}
+
+export interface LastTurnLimit {
+  window: PlanLimit['window']
+  /** The window's name, such as "5-hour". */
+  label: string
+  /** The account as the agent names it, or the agent's name without one. */
+  account: string
+  /** When the window resets, in ms since the epoch; null when unknown. */
+  resetsAt: number | null
 }
 
 /**
@@ -1028,6 +1241,21 @@ export interface SideChatAgent {
 export interface LightAgent {
   agentId: AgentId
   name: string
+}
+
+/**
+ * The tool call a session's main thread runs now, as its summary carries it: the latest one to
+ * start of those still running. It changes when a call starts or ends, not with its output.
+ */
+export interface SessionActivity {
+  /** The call's entry in the thread. */
+  entryId: string
+  toolKind: ToolKind
+  title: string
+  /** Its key argument: a command's first line, a file's path, a search's words or an address. */
+  detail: string | null
+  /** When the call started, in ms since the epoch. */
+  startedAt: number
 }
 
 /** How far a session's latest plan got, as its summary carries it. */
@@ -1194,6 +1422,8 @@ export interface HostContract {
     params: { agentId: AgentId; method?: AgentInstallMethod['id'] }
     result: void
   }
+  // What each way of installing the harness brings, for the install window before it runs.
+  'agents.installOffer': { params: { agentId: AgentId }; result: InstallOffer }
   // Removes Kettu's copy for the harness, and its own program too when asked.
   'agents.uninstall': {
     params: { agentId: AgentId; removeProgram?: boolean }
@@ -1226,6 +1456,11 @@ export interface HostContract {
     params: { agentId: AgentId; change: ClaudeSettingChange }
     result: void
   }
+  // When the agent's harness compacts, read from its configuration in the harness's own unit;
+  // rejects with the reason when that cannot be read.
+  'agents.autoCompact': { params: { agentId: AgentId }; result: AutoCompactSettings }
+  // Writes one value there and nothing else.
+  'agents.setAutoCompact': { params: { agentId: AgentId; change: AutoCompactChange }; result: void }
   // A Codebuddy Code agent's site, read from its settings file, and what overrides it; rejects
   // with the reason when the file cannot be read.
   'agents.codebuddySettings': { params: { agentId: AgentId }; result: CodebuddySettings }
@@ -1244,6 +1479,8 @@ export interface HostContract {
     result: { sessions: ImportableSession[]; nextCursor: string | null }
   }
   'agents.options': { params: void; result: AgentOptions[] }
+  // Pins a model to the top of the agent's model menu, or unpins it; a fifth pin is refused.
+  'agents.pinModel': { params: { agentId: AgentId; model: string; pinned: boolean }; result: void }
   // The agents the lightweight tasks' model may be pinned to; older hosts lack it.
   'agents.lightAgents': { params: void; result: { agents: LightAgent[] } }
   // A draft of a problem report's description, written by the agent the report is about, else the
@@ -1439,7 +1676,11 @@ export interface HostContract {
   'projects.add': { params: { path: string }; result: Project }
   'projects.remove': { params: { path: string }; result: void }
   'projects.touch': { params: { path: string }; result: void }
-  'projects.pin': { params: { path: string; pinned: boolean }; result: void }
+  // A null path pins the No project group.
+  'projects.pin': { params: { path: string | null; pinned: boolean }; result: void }
+  // Puts a project just before another of the same host, or last with a null `before`.
+  'projects.move': { params: { path: string; before: string | null }; result: void }
+  'projects.noProject': { params: void; result: NoProject }
   // Huli: the project's own choice of the requests the host allows by itself; null keeps the
   // default. The windows' alone: a paired device cannot widen what is allowed without asking.
   'projects.setAutoApprove': {
@@ -1534,6 +1775,23 @@ export interface HostContract {
   }
   'workflows.settings': { params: void; result: WorkflowSettings }
   'workflows.setSettings': { params: WorkflowSettingsChange; result: WorkflowSettings }
+  // The cards the workflow tools leave in a session: a suggestion to run a requirement through a
+  // workflow, and a workflow an agent wrote for the user to keep.
+  'workflows.suggestions': { params: { sessionId: string }; result: WorkflowSuggestion[] }
+  // The file a card drew, for View file.
+  'workflows.suggestionFile': { params: { id: string }; result: { text: string } }
+  // Start (Retry after a failed item) answers once Start is under way; `workflows.suggestion`
+  // events follow its items. Decline is Do it here, reconsider is Use it instead.
+  'workflows.answerSuggestion': {
+    params: {
+      id: string
+      answer: 'start' | 'decline' | 'another' | 'reconsider' | 'save' | 'not_save'
+      // The first step's agent and its option values, as the session runs them.
+      agentId?: AgentId
+      options?: Record<string, string | boolean>
+    }
+    result: WorkflowSuggestion
+  }
   // Tasks: a requirement run through a workflow, one session per step.
   'tasks.list': { params: void; result: TaskSummary[] }
   'tasks.get': { params: { taskId: string }; result: TaskView }
@@ -1573,6 +1831,11 @@ export interface HostContract {
     }
     result: TaskView
   }
+  // Save as my workflow: the workflow an agent wrote for a task that ended done, into the library.
+  'tasks.saveWorkflow': { params: { taskId: string }; result: WireWorkflowEntry }
+  // Publish to the Marketplace: asks the agent of the conversation the task started from to make
+  // that workflow general and publish it, which waits for the user in its card.
+  'tasks.publishWorkflow': { params: { taskId: string }; result: void }
   // The window's prepared session for New session; `replace` opens a new one even when it holds one.
   'sessions.prepare': {
     params: {
@@ -1627,8 +1890,19 @@ export interface HostContract {
   // One entry whole, as a device whose page held its tool output as a digest opens it.
   'sessions.entry': { params: { sessionId: string; entryId: string }; result: ThreadEntry }
   // What waits for the user's answer in the session, in thread order: what its summary's
-  // `permissionCount` counts. Empty for a closed session, where nothing waits.
-  'sessions.requests': { params: { sessionId: string }; result: { entries: ThreadEntry[] } }
+  // `permissionCount` counts. No entries for a closed session, where none waits. `askedAt`: when
+  // each began to wait, by entry id, in ms since the epoch; absent from older hosts.
+  // `suggestions`: the workflow suggestions that wait for Start or Do it here, which the count
+  // includes, until answered or the session's next turn starts; `workflows.answerSuggestion`
+  // answers them, and one a turn passed too. Absent from older hosts.
+  'sessions.requests': {
+    params: { sessionId: string }
+    result: {
+      entries: ThreadEntry[]
+      askedAt?: Record<string, number>
+      suggestions?: WorkflowSuggestion[]
+    }
+  }
   'sessions.outline': { params: { sessionId: string }; result: { entries: OutlineEntry[] } }
   // The session's requests to its model, read from the agent's own record of the session: the
   // newest page, or the one before `before`. Null when Kettu cannot read this agent's record.
@@ -1712,6 +1986,15 @@ export interface HostContract {
   'sessions.sideClear': { params: { sessionId: string; undo?: boolean }; result: void }
   // The agents on this host that can answer side questions for a session whose own cannot.
   'sessions.sideAgents': { params: { sessionId: string }; result: { agents: SideChatAgent[] } }
+  // Takes the session back to before `entryId`, one of the user's messages: the turns from it on
+  // are set aside until the next send, and its content comes back for the composer. `draft` is
+  // what the composer held, which Put back gives back.
+  'sessions.rewind': {
+    params: { sessionId: string; entryId: string; draft: UserContent[] }
+    result: { content: UserContent[] }
+  }
+  // Brings back the turns an edit set aside, with the draft the composer held before it.
+  'sessions.putBack': { params: { sessionId: string }; result: { draft: UserContent[] } }
   // `entryId`: a reply's agent message, to fork the session up to its turn; see the session model.
   // A fork of a session in a worktree gets its own, from the source's branch, unless `same`.
   'sessions.fork': {
@@ -1726,12 +2009,6 @@ export interface HostContract {
   'sessions.rewindPreview': {
     params: { sessionId: string; entryId: string }
     result: RewindPreview
-  }
-  // Takes the session back to before `entryId`, one of the user's messages: the turns from it on
-  // leave, and its content comes back for the composer. `draft` is what the composer held.
-  'sessions.rewind': {
-    params: { sessionId: string; entryId: string; draft: UserContent[] }
-    result: { content: UserContent[] }
   }
   // Huli: puts the files of the session's folders back as they were when `entryId` was sent, while
   // they are as the preview's `token` found them, keeping a backup of them as they are.
@@ -1800,7 +2077,8 @@ export interface HostContract {
   'sessions.context': { params: { sessionId: string }; result: ContextBreakdown | null }
   'sessions.contextEstimates': { params: { sessionId: string }; result: ContextEstimates | null }
   'sessions.queue': {
-    params: { sessionId: string; content: UserContent[] }
+    /** `comments` for a message built from comments on passages, which its queue row shows. */
+    params: { sessionId: string; content: UserContent[]; comments?: QueuedComments }
     result: { itemId: string | null } // null when it was sent at once
   }
   /**
@@ -1928,6 +2206,12 @@ export interface HostContract {
   // A commit message for the files' working tree changes, paths as `git.commitChanges` takes them,
   // written by the project's preferred agent from the diffs and the repository's recent commits.
   'git.commitMessage': { params: { projectPath: string; paths: string[] }; result: string }
+  // A pull request's title and description for the branch against `base`, written by the
+  // project's preferred agent from the branch's commits and files.
+  'git.pullRequestDraft': {
+    params: { projectPath: string; base: string }
+    result: { title: string; body: string }
+  }
   'git.incoming': {
     params: { projectPath: string; from: 'upstream' | 'base' }
     result: LogCommit[]
@@ -2119,6 +2403,12 @@ export interface HostContract {
   }
   // Newest first.
   'artifacts.versions': { params: { id: string }; result: VersionSummary[] }
+  // What changed from version `from` to `to`, any two versions, worked out from their content as
+  // the shared comparison does; null when nothing did.
+  'artifacts.changes': {
+    params: { id: string; from: number; to: number }
+    result: { changes: ArtifactChanges | null }
+  }
   'artifacts.rename': { params: { id: string; title: string }; result: void }
   // Permanently only from Recently deleted.
   'artifacts.delete': { params: { id: string; permanently?: boolean }; result: void }
@@ -2153,6 +2443,10 @@ export interface HostContract {
   }
   // The canvas page this client shows the artifact at, for the others' faces and agents' reads.
   'artifacts.view': { params: { id: string; page: string | null }; result: void }
+  // A viewer of the owner's, in the main area or a side panel, has `version` open; a card in a
+  // thread is no viewer. The seen version moves forward to it, never past the latest, and every
+  // port hears `artifacts.seen`. The answer is the version now recorded.
+  'artifacts.seen': { params: { id: string; version: number }; result: { seen: number | null } }
   // New values for the parameters a page declares, written into its file as the user's version;
   // `conflict` when the file changed since `baseVersion`.
   'artifacts.setParams': {
@@ -2487,6 +2781,7 @@ export const HOST_METHODS = [
   'agents.removalPreview',
   'agents.removeFromComputer',
   'agents.install',
+  'agents.installOffer',
   'agents.uninstall',
   'agents.cancelTask',
   'agents.readOptions',
@@ -2496,12 +2791,15 @@ export const HOST_METHODS = [
   'agents.details',
   'agents.claudeSettings',
   'agents.setClaudeSetting',
+  'agents.autoCompact',
+  'agents.setAutoCompact',
   'agents.codebuddySettings',
   'agents.setCodebuddySite',
   'agents.refreshAccount',
   'agents.readSignIn',
   'agents.listSessions',
   'agents.options',
+  'agents.pinModel',
   'agents.lightAgents',
   'agents.draftReport',
   'mcp.status',
@@ -2567,6 +2865,8 @@ export const HOST_METHODS = [
   'projects.addFolder',
   'projects.removeFolder',
   'projects.suggestFolders',
+  'projects.move',
+  'projects.noProject',
   'projects.worktreeSettings',
   'projects.setWorktreeSettings',
   'paths.complete',
@@ -2608,10 +2908,11 @@ export const HOST_METHODS = [
   'sessions.sideClear',
   'sessions.sideAgents',
   'sessions.retry',
+  'sessions.rewind',
+  'sessions.putBack',
   'sessions.fork',
   'sessions.revert',
   'sessions.rewindPreview',
-  'sessions.rewind',
   'sessions.restoreFiles',
   'sessions.undoRewindFiles',
   'worktrees.inspect',
@@ -2675,6 +2976,9 @@ export const HOST_METHODS = [
   'workflows.pin',
   'workflows.settings',
   'workflows.setSettings',
+  'workflows.suggestions',
+  'workflows.suggestionFile',
+  'workflows.answerSuggestion',
   'tasks.list',
   'tasks.get',
   'tasks.sessions',
@@ -2687,6 +2991,8 @@ export const HOST_METHODS = [
   'tasks.note',
   'tasks.pin',
   'tasks.update',
+  'tasks.saveWorkflow',
+  'tasks.publishWorkflow',
   'permissions.respond',
   'git.status',
   'git.unwatch',
@@ -2698,6 +3004,7 @@ export const HOST_METHODS = [
   'git.commit',
   'git.changes',
   'git.commitMessage',
+  'git.pullRequestDraft',
   'git.incoming',
   'git.fileDiff',
   'git.branches',
@@ -2748,6 +3055,7 @@ export const HOST_METHODS = [
   'artifacts.file',
   'artifacts.content',
   'artifacts.versions',
+  'artifacts.changes',
   'artifacts.rename',
   'artifacts.delete',
   'artifacts.undelete',
@@ -2761,6 +3069,7 @@ export const HOST_METHODS = [
   'artifacts.markSent',
   'artifacts.editElement',
   'artifacts.view',
+  'artifacts.seen',
   'artifacts.setParams',
   'artifacts.canvas',
   'artifacts.canvasOps',
@@ -2869,7 +3178,8 @@ export type HostEvent =
   | { type: 'agents.removalProgress'; progress: AgentRemovalProgress }
   // A plan window crossed 90% or ran out, said once per account, window and reset period.
   | { type: 'agents.limitAlert'; alert: PlanAlert }
-  | { type: 'projects.changed'; projects: Project[] }
+  // `noProject` is absent from hosts that cannot pin No project.
+  | { type: 'projects.changed'; projects: Project[]; noProject?: NoProject }
   | { type: 'environment.changed'; info: EnvironmentInfo }
   | { type: 'git.changed'; status: GitStatus }
   | { type: 'git.pr'; projectPath: string; pr: PullRequest | null }
@@ -2895,6 +3205,8 @@ export type HostEvent =
   | { type: 'idleRelease.changed'; state: IdleReleaseState }
   | { type: 'artifacts.changed' } // the list changed; a page showing it reads again
   | { type: 'artifacts.version'; id: string; version: number }
+  // To every port: the owner's seen version of the artifact moved, as `artifacts.seen` recorded it.
+  | { type: 'artifacts.seen'; id: string; version: number }
   // `clients` are the other clients showing it, as `session.viewers` names them for the receiver.
   | {
       type: 'artifacts.activity'
@@ -2921,6 +3233,7 @@ export type HostEvent =
   | { type: 'task.changed'; task: TaskView }
   | { type: 'task.removed'; taskId: string }
   | { type: 'workflows.changed' } // the workflow library or its settings changed; a page showing it reads again
+  | { type: 'workflows.suggestion'; suggestion: WorkflowSuggestion } // a card's answer or Start's progress
   | { type: 'routine.run'; run: RoutineRun } // a run's status changed
   // To the port of the desktop app that sent the turn: a call for its main to run on the session's
   // page, answered by `browser.answer`.

@@ -16,7 +16,8 @@ import { relativePath, shownPath } from '@renderer/lib/format'
 import { hostPath } from '@renderer/lib/host-paths'
 import { cn } from '@renderer/lib/utils'
 import { openDiff, openFile } from '@renderer/stores/files'
-import { openGitDialog, useGitStore } from '@renderer/stores/git'
+import { openGitPane } from '@renderer/features/git/pane/open-pane'
+import { useGitStore } from '@renderer/stores/git'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { turnChanges } from '../turn-work'
 import { DiffBlock } from './diff-block'
@@ -116,7 +117,13 @@ export const ChangesCard = memo(function ChangesCard({
                 className="ks-btn ks-btn--solid"
                 aria-label={t('changes.commit')}
                 title={t('changes.commit')}
-                onClick={() => openGitDialog(projectPath, { kind: 'commit', paths: committable })}
+                onClick={() =>
+                  openGitPane(projectPath, {
+                    tab: 'changes',
+                    commit: { only: committable, andPush: false },
+                    panel: sessionId,
+                  })
+                }
               >
                 <Icon icon={GitPullRequestIcon} size={14} />
                 <span className="ks-btn__label">{t('changes.commit')}</span>

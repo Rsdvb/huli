@@ -17,6 +17,7 @@ import {
 } from '@shared/browser'
 import { isControlOutcome, type ControlOutcome } from '@shared/control'
 import { DEVICE_ID } from '@shared/remote/device'
+import { t } from '../i18n'
 
 const MAX_ID_CHARS = 256
 const MAX_PATH_CHARS = 32_767
@@ -254,7 +255,7 @@ export class RemoteBrowser {
     const { callId, sessionId, tool } = call
     const owner = this.hosts.get(sessionId)
     if ((owner !== undefined && owner !== hostId) || this.local.has(sessionId)) {
-      return { error: { code: 'no_page', message: 'Another host’s session has this page.' } }
+      return { error: { code: 'no_page', message: t('browserRemote.otherHost') } }
     }
     // Its paths name files on the agent's host, which this computer's page must never read here.
     if (tool === 'browser_upload_file') {
@@ -279,7 +280,7 @@ export class RemoteBrowser {
         return {
           error: {
             code: 'navigation_failed',
-            message: `Port ${forward.port} on the host could not be forwarded to the browser.`,
+            message: t('browserRemote.forwardFailed', { port: forward.port }),
           },
         }
       }

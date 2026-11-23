@@ -1,5 +1,6 @@
 // Huli: which of the user's messages a rewind can go back to, and where it cuts the thread.
 
+import { isOwnPrompt } from './rewind'
 import type { ThreadEntry, ThreadState } from './thread'
 
 type Thread = Pick<ThreadState, 'order' | 'byId'>
@@ -13,20 +14,12 @@ function startsTurn(entry: ThreadEntry | undefined): boolean {
 }
 
 /**
- * A message of the user's own that started a turn: not one steered into a running turn, nor one
- * another session's agent or a card's answer wrote.
- */
-export function canRewindFrom(entry: ThreadEntry | undefined): boolean {
-  return entry?.kind === 'user' && !entry.steered && entry.from === undefined && !entry.approval
-}
-
-/**
  * The first message a rewind from `entryId` takes out, which the host cuts the thread before:
  * the message itself to edit it, else the next one that started a turn; null when there is none.
  */
 export function rewindTarget(thread: Thread, entryId: string, mode: RewindMode): string | null {
   const at = thread.order.indexOf(entryId)
-  if (at < 0 || !canRewindFrom(thread.byId[entryId])) return null
+  if (at < 0 || !isOwnPrompt(thread.byId[entryId])) return null
   if (mode === 'edit') return entryId
   for (let i = at + 1; i < thread.order.length; i++) {
     const id = thread.order[i]!

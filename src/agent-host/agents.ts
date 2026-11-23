@@ -2,7 +2,7 @@
 // sign-in state and the AgentStatus every port sees. A harness's detection, installs and updates
 // are shared by its agents: its default agent and those added with folders of their own.
 
-import { mkdir, readFile, realpath, rm } from 'node:fs/promises'
+import { mkdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import type { SyncAgentContext } from './agent-sync/service'
 import os from 'node:os'
 import path from 'node:path'
@@ -19,13 +19,20 @@ import type {
   AgentTask,
   AgentTerminal,
   AgentUpdate,
+  AutoCompactChange,
+  AutoCompactSettings,
   ClaudeSettingChange,
   ClaudeSettings,
   CodebuddySettings,
   CodebuddySiteChange,
+  HarnessReason,
+  InstallOffer,
+  InstalledCli,
   McpStatus,
+  ModelProvider,
   PlanLimit,
   PlanResets,
+  ProgramMethod,
   ProviderBalance,
   ResetsError,
   ResetSpendCode,
@@ -71,13 +78,13 @@ import {
 } from './vendor-usage/antigravity'
 import { readAntigravityUsage } from './antigravity-usage'
 import { signsInWithKeyOnly } from '@shared/agents'
+import { takesAutoCompact } from '@shared/auto-compact'
 import type { AgentProcess, NodeRuntime } from '@shared/host-control'
 import { limitOutlived } from '@shared/plan-limits'
 import type { Platform } from '@shared/platform'
 import { agentColor, type AddedAgent, type HostSettings } from '@shared/settings'
 import {
   AUTO_AGENT_HARNESSES,
-  USER_PROGRAM_HARNESSES,
   harnessOf,
   type AgentId,
   type ConfigOption,
@@ -94,6 +101,7 @@ import {
   removeStaleInstalls,
   removeTree,
   listInstalled,
+  runNpm,
   runProgram,
   type InstalledAdapter,
   type InstallOptions,
@@ -134,7 +142,13 @@ import type { AgentCli } from './agent-removal/data'
 import { removalLog } from './agent-removal/run'
 import { removesCopies, type AgentCopies } from './agent-copies'
 import type { AgentTrees } from './agent-trees'
-import { decideUpdate, fetchLatest, type LatestOptions } from './agent-updates'
+import {
+  decideUpdate,
+  fetchBrewLatest,
+  fetchLatest,
+  type LatestFound,
+  type LatestOptions,
+} from './agent-updates'
 import {
   installArchive,
   listArchiveInstalls,
@@ -155,19 +169,25 @@ import { DshAccounts, type DshReadReason } from './dsh/account'
 import { clearApiKey as clearDshKey, writeApiKey as writeDshKey } from './dsh/credentials'
 import { readClaudeSettings, writeClaudeSetting, type ListedModel } from './claude/user-settings'
 import { readCodebuddySite, shellOverrides, writeCodebuddySite } from './codebuddy/user-settings'
+import { readAutoCompact, writeAutoCompact, type CompactPlace } from './auto-compact/settings'
+import type { CodexRequest } from './marketplace/codex-plugins'
 import {
+  globalInstallOf,
   installedFolder,
   installMethodOf,
   installPlans,
-  npmPrefixOf,
+  shellShimTarget,
+  uninstallPlan,
   updatePlan,
   type ArchiveEntry,
+  type GlobalInstall,
   type InstallPlan,
 } from './binary-install'
 import {
   detectAgent,
   displayCommand,
   EXTENSIONS_FOLDER,
+  programRange,
   type AgentDefinition,
   type AgentProtocol,
   type CommandWords,
@@ -201,6 +221,7 @@ import { HostError, invalidParams } from './errors'
 import { findCommand, getEnv, isExecutableFile, type Env } from './find-command'
 import {
   fetchManifest,
+  inNpmRange,
   isBroken,
   MANIFEST_KEYS,
   parseManifest,
@@ -225,7 +246,19 @@ import {
 } from './harness-versions'
 import { HostedRun, type HostedRunHooks } from './hosted-run'
 import { t } from './i18n'
-import { CliVersions, type CliProbe, type CliVersion } from './installed-cli'
+import {
+  installOffer,
+  installsOnStart,
+  npmConfigKeys,
+  parseNpmConfig,
+  type NpmConfig,
+} from './install-offer'
+import {
+  CliVersions,
+  shimTarget as cmdShimTarget,
+  type CliProbe,
+  type CliVersion,
+} from './installed-cli'
 import { routeFor } from './node-proxy/download'
 import { httpTransport, ownProxyVariables, type Transport } from './node-runtime/transport'
 import { OpenCodeClient } from './opencode/client'
@@ -254,7 +287,13 @@ import {
 } from './registry'
 import { hasContextReport, limitsReport, runReport, type LimitsReport } from './reports'
 import { TextRing } from './ring'
-import { allowedLimit, mergeReadLimits, planWindow } from './session-updates'
+import {
+  allowedLimit,
+  coverWithExtraUsage,
+  endExtraUsage,
+  mergeReadLimits,
+  planWindow,
+} from './session-updates'
 import type { EnvironmentService } from './shell-env'
 import type {
   AgentsFile,
@@ -429,7 +468,7 @@ export interface AgentManagerDeps extends DriverOverrides {
   /** Downloads and extracts a binary agent's release archive. */
   installArchive?(options: ArchiveInstallOptions): Promise<InstalledArchive>
   /** Asks npm for an adapter's newest version and the CLI it carries. */
-  fetchLatest?(options: LatestOptions): Promise<AgentUpdate>
+  fetchLatest?(options: LatestOptions): Promise<LatestFound>
   /** Reads the ACP Registry's listing, whose versions the harnesses Kettu installs follow. */
   fetchRegistry?(options: RegistryFetchOptions): Promise<RegistryAgents>
   /** Reads the body of Kettu's harness compatibility manifest from its download service. */
@@ -540,7 +579,9 @@ class Harness {
   /** The CLI version of the install a start runs, read at detection. */
   installedCli: string | null = null
   /** How the user's CLI was installed, told by where it lives. */
-  cliMethod: AgentInstallMethod['id'] | null = null
+  cliMethod: ProgramMethod | null = null
+  /** The package manager's global install it lies in, and the folder its commands name. */
+  cliGlobal: GlobalInstall | null = null
   /** A binary agent's version, from its own `--version`, until it starts and reports its own. */
   binaryVersion: string | null = null
   /** The program `binaryVersion` was read from, so an answer for another one is dropped. */
@@ -551,6 +592,8 @@ class Harness {
   binaryVersionFailure: string | null = null
   /** The program's install routes, found at detection. */
   installPlans: InstallPlan[] = []
+  /** The size of each version of Kettu's own package, without its dependencies, as npm gave it. */
+  sizes = new Map<string, number>()
   /** An install or update the user asked for, which runs beside the agents' own lifecycle. */
   task: Omit<AgentTask, 'progress'> | null = null
   taskRun: Promise<void> | null = null
@@ -585,6 +628,7 @@ class Slot {
   providersError: string | null = null
   providersRun: Promise<void> | null = null
   providersReadAt = 0
+  modelProviders: ModelProvider[] | null = null
   providerActionRun: Promise<void> | null = null
   /** DeepSeek Harness's balance at DeepSeek, on its account sign-in or an API key. */
   balance: ProviderUsage | null = null
@@ -704,6 +748,7 @@ function describeExit(info: ExitInfo): string {
 }
 
 function exitText(agent: string, info: ExitInfo): string {
+  if (info.closed) return t('agent.exit.closed', { agent })
   if (info.error) return t('agent.exit.error', { agent, error: info.error })
   if (info.signal) return t('agent.exit.signal', { agent, signal: info.signal })
   return t('agent.exit.code', { agent, code: String(info.code) })
@@ -783,6 +828,33 @@ function rememberedEntry(slot: Slot): AgentsFile['agents'][AgentId] | null {
 }
 
 /**
+ * The harness's program as its page names it, which one picked in Settings replaces: a binary
+ * harness's command, the user's CLI an SDK runs, an npm package's command, which is looked for on
+ * PATH, or the package Kettu runs, which is not.
+ */
+function programOf(def: AgentDefinition): AgentStatus['program'] {
+  const { launch } = def
+  if (def.cli) return { command: def.cli.command, onPath: true }
+  switch (launch.kind) {
+    case 'binary':
+      return { command: launch.command, onPath: true }
+    case 'package':
+      return launch.command
+        ? { command: launch.command, onPath: true }
+        : { command: launch.package, onPath: false }
+    case 'uvx':
+      return { command: launch.package, onPath: false }
+    case 'node-script':
+      return null
+  }
+}
+
+/** A state detection gives a harness that cannot run, for the reason it found. */
+function unavailable(state: AgentState): boolean {
+  return state === 'not-installed' || state === 'node-missing' || state === 'node-outdated'
+}
+
+/**
  * The version that runs: the handshake's, else the program's, else the installed package's, since
  * a package harness has no program to ask and Grok names none in its handshake.
  */
@@ -846,6 +918,27 @@ type Move = NonNullable<NonNullable<AgentStatus['automatic']>['moved']>
 const sameVersion = (a: string, b: string | null | undefined): boolean =>
   !!b && compareVersions(a, b) === 0
 
+// npm's and pnpm's shims are under 1 KB; a larger file is not one of them.
+const SHIM_LIMIT = 64 * 1024
+
+/**
+ * The package file a shim at `file` starts: a shell script off Windows, a `.cmd` on it. Null for
+ * any other file.
+ */
+async function shimTarget(file: string, platform: Platform): Promise<string | null> {
+  if (platform === 'win32' && !/\.(?:cmd|bat)$/i.test(file)) return null
+  const info = await stat(file).catch(() => null)
+  if (!info?.isFile() || info.size > SHIM_LIMIT) return null
+  const text = await readFile(file, 'utf8').catch(() => null)
+  if (text === null) return null
+  return platform === 'win32' ? cmdShimTarget(text, file) : shellShimTarget(text, file)
+}
+
+/** An archive the registry gives no SHA-256 for, which only the user's click installs. */
+function unhashed(target: TargetRelease): boolean {
+  return target.kind === 'archive' && !target.entry.sha256
+}
+
 /** Whether two updates name the same adapter and CLI versions. */
 function sameUpdate(a: AgentUpdate | null, b: AgentUpdate | null): boolean {
   return !!a && !!b && a.adapterVersion === b.adapterVersion && a.cliVersion === b.cliVersion
@@ -898,6 +991,8 @@ export class AgentManager {
   private readonly cliCommandKeys = new Map<Harness, string>()
   /** Huli: the sessions' own agents in containers, by session. */
   private readonly containerRuns = new Map<string, ContainerRuntime>()
+  /** npm's configuration for the install window, by the keys asked, until the next redetect. */
+  private readonly npmConfigs = new Map<string, Promise<NpmConfig | null>>()
   hooks: AgentSessionHooks = {
     liveSessions: () => 0,
     agentExited: () => {},
@@ -1007,9 +1102,13 @@ export class AgentManager {
     return this.slots.get(agentId)?.def.mcpServersByName ?? false
   }
 
+  toolGateway(agentId: AgentId): boolean {
+    return this.slots.get(agentId)?.def.toolGateway ?? false
+  }
+
   private slot(agentId: AgentId): Slot {
     const slot = this.slots.get(agentId)
-    if (!slot) throw invalidParams(`Unknown agent ${agentId}`)
+    if (!slot) throw invalidParams(t('agent.unknown', { agent: agentId }))
     return slot
   }
 
@@ -1045,14 +1144,15 @@ export class AgentManager {
       adaptersDir: this.deps.adaptersDir,
       sessionRouterPath: this.deps.sessionRouterPath ?? null,
       versions: this.versionChoice(h),
+      manifestRule: this.rule(h),
       isExecutable,
-      probeCli: (program, cliEnv) => this.askVersion(program, cliEnv),
+      probeCli: (program, cliEnv, words) => this.askVersion(program, cliEnv, words),
     })
     const adapter = detection.state === 'available' ? detection.adapter : null
     const running = adapter?.current ?? adapter?.fallback
     const log = (level: 'info' | 'warn' | 'error', message: string): void =>
       this.deps.diagnostics.log(level, message)
-    const [installedCli, plans, cliMethod] = await Promise.all([
+    const [installedCli, plans, route] = await Promise.all([
       running ? readCliVersion(h.def.id, running.dir, log) : null,
       h.def.installs
         ? installPlans(h.def.installs, {
@@ -1071,12 +1171,14 @@ export class AgentManager {
       ? {
           state: 'not-installed',
           detail: t('detect.uninstalled', { agent: h.def.name }),
+          reason: { kind: 'not-installed' },
         }
       : detection
     h.detection = effective
     h.installedCli = installedCli
     h.installPlans = plans
-    h.cliMethod = cliMethod
+    h.cliMethod = route.method
+    h.cliGlobal = route.global
     // A binary agent's own version is asked in the background, so detection never waits for it.
     // A routed program's launch command is the runtime the router runs on, not the program.
     const program =
@@ -1101,27 +1203,54 @@ export class AgentManager {
     if (program) h.binaryVersionAsked = this.askBinaryVersion(h, program, env)
   }
 
-  /** How the user's own CLI, or a binary harness's program, was installed. */
+  /**
+   * How the user's own CLI, or a binary harness's program, was installed, and the package
+   * manager's global install it lies in, if any.
+   */
   private async cliMethod(
     h: Harness,
     detection: Detection,
-  ): Promise<AgentInstallMethod['id'] | null> {
-    const installs = h.def.installs
+  ): Promise<{ method: ProgramMethod | null; global: GlobalInstall | null }> {
+    const none = { method: null, global: null }
+    const { platform } = this.deps
+    const installs = { ...h.def.installs }
+    installs.npm ??= this.programPackage(h) ?? undefined
     const found =
       detection.cli?.path ??
       (h.def.launch.kind === 'binary' && detection.state === 'available'
         ? detection.spec?.command
         : undefined)
-    if (!installs || !found) return null
+    if (!found) return none
+    const routeOf = (file: string) => {
+      const method = installMethodOf(installs, file, { platform, home: os.homedir() })
+      if (!method) return null
+      const global = installs.npm ? globalInstallOf(file, installs.npm, platform) : null
+      return { method, global: global?.manager === method ? global : null }
+    }
     const real = await realpath(found).catch(() => found)
-    return installMethodOf(installs, real, { platform: this.deps.platform, home: os.homedir() })
+    const direct = routeOf(real)
+    if (direct) return direct
+    // pnpm's global commands are shell scripts, and every package manager's are `.cmd` files on
+    // Windows, which start the package's file.
+    const target = await shimTarget(found, platform)
+    if (!target) return none
+    return routeOf(target) ?? routeOf(await realpath(target).catch(() => target)) ?? none
+  }
+
+  /**
+   * The npm package of the harness's own program, which npm, pnpm, bun or yarn may have installed
+   * globally: its vendor's npm route, or a package harness's own package.
+   */
+  private programPackage(h: Harness): string | null {
+    const { installs, launch } = h.def
+    return installs?.npm ?? (launch.kind === 'package' ? launch.package : null)
   }
 
   /** A program's `--version` answer: the test's probe, or the cache the CLIs are asked through. */
-  private askVersion(program: string, env: Env): Promise<CliVersion> {
+  private askVersion(program: string, env: Env, words?: readonly string[]): Promise<CliVersion> {
     return this.deps.probeCli
-      ? this.deps.probeCli(program, env)
-      : this.cliVersions.probe(program, env)
+      ? this.deps.probeCli(program, env, words)
+      : this.cliVersions.probe(program, env, words)
   }
 
   /**
@@ -1160,14 +1289,13 @@ export class AgentManager {
   }
 
   /**
-   * The harnesses whose user program the last detection found, in the order their agents are
-   * added; call after `detectAll`.
+   * The harnesses whose user program the last detection found, in catalog order; call after
+   * `detectAll`.
    */
   userPrograms(): HarnessId[] {
-    return USER_PROGRAM_HARNESSES.filter((id) => {
-      const h = this.harnesses.get(id)
-      return !!h?.detection && userProgramFound(h.def, h.detection, this.deps.adaptersDir)
-    })
+    return [...this.harnesses.values()]
+      .filter((h) => !!h.detection && userProgramFound(h.def, h.detection, this.deps.adaptersDir))
+      .map((h) => h.def.id)
   }
 
   async check(agentId?: AgentId): Promise<AgentStatus[]> {
@@ -1185,6 +1313,7 @@ export class AgentManager {
   /** Detects every harness again in the environment as it is now. */
   async redetect(): Promise<AgentStatus[]> {
     this.cliVersions.clear()
+    this.npmConfigs.clear()
     await Promise.all([...this.harnesses.values()].map((h) => this.detect(h)))
     return this.statuses()
   }
@@ -1327,8 +1456,17 @@ export class AgentManager {
         {
           agentId,
           state: detection?.state ?? 'not-installed',
+          reason: detection?.reason ?? { kind: 'not-installed' },
         },
       )
+    }
+    if (!detection.spec && !installsOnStart(h.def, detection.adapter)) {
+      // Kettu's own copy is gone, and a start no longer installs it unasked.
+      throw new HostError('agent_unavailable', t('agent.notInstalled', { agent: slot.name }), {
+        agentId,
+        state: 'not-installed',
+        reason: { kind: 'not-installed' } satisfies HarnessReason,
+      })
     }
     return this.start(slot, detection.spec)
   }
@@ -1478,7 +1616,7 @@ export class AgentManager {
     }
     this.registeredSlot(agentId)
     this.assertEnabled(agentId)
-    if (this.stopped) throw new Error(`${slot.name} was not started: the host is stopping.`)
+    if (this.stopped) throw new Error(t('agent.hostStopping', { agent: slot.name }))
     slot.state = 'starting'
     slot.detail = null
     slot.progress.clear()
@@ -1559,7 +1697,7 @@ export class AgentManager {
       const info = await launched.stop(this.tools())
       if (!launched.hasExited) this.letGo(slot, launched, info)
       throw error instanceof AgentRequestError
-        ? new Error(`${slot.name} failed to initialize: ${error.message}`)
+        ? new Error(t('agent.initializeFailed', { agent: slot.name, reason: error.message }))
         : error
     } finally {
       if (timer) clearTimeout(timer)
@@ -1794,12 +1932,12 @@ export class AgentManager {
   ): Promise<LaunchSpec> {
     const { h } = slot
     if (this.stopped) {
-      throw new InstallCancelled(`${h.def.name} was not installed: the host is stopping.`)
+      throw new InstallCancelled(t('agent.notInstalledStopping', { agent: h.def.name }))
     }
     const detection = h.detection
     const adapter = detection?.state === 'available' ? detection.adapter : null
     if (!detection || detection.state !== 'available' || !adapter) {
-      throw new Error(`${h.def.name} has no adapter to install.`)
+      throw new Error(t('agent.noAdapter', { agent: h.def.name }))
     }
     const { diagnostics, platform } = this.deps
     const harnessId = h.def.id
@@ -1816,7 +1954,7 @@ export class AgentManager {
     const started = Date.now()
     diagnostics.event(slot.id, 'install', `${adapter.package}@${version}`)
     try {
-      if (!adapter.npm) throw new Error('npm was not found on PATH.')
+      if (!adapter.npm) throw new Error(t('agent.noNpm'))
       await (this.deps.install ?? installAdapter)({
         root: this.deps.adaptersDir,
         agentId: harnessId,
@@ -1841,7 +1979,7 @@ export class AgentManager {
       if (!spec) {
         throw new Error(
           h.detection?.state === 'available'
-            ? `${adapter.package} ${version} is incomplete on disk.`
+            ? t('agent.incompleteInstall', { name: `${adapter.package} ${version}` })
             : h.detection?.detail,
         )
       }
@@ -1990,12 +2128,21 @@ export class AgentManager {
     this.deps.diagnostics.event(h.def.id, 'uninstall', 'removed what Kettu installed')
     if (!program) return { command: null, error: null }
     await this.deps.env.ready()
+    const { platform } = this.deps
+    const env = this.deps.env.agentEnv(h.def.id)
+    const found = program.lookUp
+      ? await findCommand(program.program, {
+          platform,
+          env,
+          isExecutable: (file) => isExecutableFile(file, platform),
+        })
+      : null
     const run = await runProgram({
-      program: program.program,
+      program: found ?? program.program,
       args: program.args,
       cwd: os.homedir(),
-      env: this.deps.env.agentEnv(h.def.id),
-      platform: this.deps.platform,
+      env,
+      platform,
       timeoutMs: this.timings.installMs,
     })
     return {
@@ -2023,7 +2170,7 @@ export class AgentManager {
   /** How to remove the user's own program, when its install route has a safe opposite. */
   private programUninstall(
     h: Harness,
-  ): { command: string; program: string; args: string[] } | null {
+  ): { command: string; program: string; args: string[]; lookUp?: boolean } | null {
     const { installs } = h.def
     if (h.def.launch.kind === 'uvx') {
       const args = ['cache', 'clean', h.def.launch.package]
@@ -2033,8 +2180,18 @@ export class AgentManager {
         args,
       }
     }
-    if (!installs) return null
     const method = h.cliMethod
+    const global = h.cliGlobal
+    const npmPackage = this.programPackage(h)
+    if (global && npmPackage && global.manager === method) {
+      const plan = uninstallPlan(global.manager, npmPackage, global.dir, this.deps.platform)
+      const npm = this.deps.env.nodeProbe().npmPath
+      if (!plan || (plan.tool === 'npm' && !npm)) return null
+      // pnpm, bun and yarn are looked up when it runs, since `pnpm.cmd` does not start by name.
+      const program = plan.tool === 'npm' ? npm! : plan.tool
+      return { command: plan.command, program, args: plan.args, lookUp: plan.tool !== 'npm' }
+    }
+    if (!installs) return null
     if (method === 'brew') {
       const name = installs.brewCask ?? installs.brew
       if (!name) return null
@@ -2042,16 +2199,6 @@ export class AgentManager {
       return {
         command: formatCommand({ command: 'brew', args }, this.deps.platform),
         program: 'brew',
-        args,
-      }
-    }
-    if (method === 'npm' && installs.npm) {
-      const npm = this.deps.env.nodeProbe().npmPath
-      if (!npm) return null
-      const args = ['uninstall', '-g', installs.npm]
-      return {
-        command: formatCommand({ command: 'npm', args }, this.deps.platform),
-        program: npm,
         args,
       }
     }
@@ -2077,7 +2224,7 @@ export class AgentManager {
     const agents = this.agentsOf(h)
     const { launch } = h.def
     if (launch.kind !== 'package') {
-      throw invalidParams(`${h.def.name} is not installed by Kettu`)
+      throw invalidParams(t('detect.notInstalledByKettu', { agent: h.def.name }))
     }
     if (h.installing || agents.some((slot) => slot.starting)) {
       throw new HostError('busy', t('agent.busyInstalling', { agent: h.def.name }))
@@ -2167,13 +2314,37 @@ export class AgentManager {
 
   /**
    * The rule for the user's own program: a harness that runs it as its program, whose versions the
-   * manifest names. A harness with a package of Kettu's, such as Claude Code's SDK beside the
-   * user's `claude`, has the package's versions there instead.
+   * manifest names, or one whose own program runs in place of Kettu's install of it. A harness with
+   * a package of Kettu's, such as Claude Code's SDK beside the user's `claude`, has the package's
+   * versions there instead.
    */
   private programRule(h: Harness): HarnessRule | null {
     const detection = h.detection
     const own = detection?.state === 'available' && !!detection.release
-    return h.def.launch.kind === 'binary' && !own ? this.rule(h) : null
+    if (h.def.launch.kind === 'binary') return own ? null : this.rule(h)
+    return this.replacesInstall(h) ? this.rule(h) : null
+  }
+
+  /** Whether the user's own program runs in place of what Kettu installs for the harness. */
+  private replacesInstall(h: Harness): boolean {
+    const detection = h.detection
+    const { kind } = h.def.launch
+    return (
+      (kind === 'package' || kind === 'uvx') &&
+      !h.def.cli &&
+      detection?.state === 'available' &&
+      !!detection.cli
+    )
+  }
+
+  /**
+   * The versions of the user's own program the harness runs, as an npm range, which an update of
+   * it stays within: a package harness's, while that program runs in place of Kettu's install.
+   * Null for any version.
+   */
+  private ownRange(h: Harness): string | null {
+    const { launch } = h.def
+    return launch.kind === 'package' && this.replacesInstall(h) ? programRange(launch) : null
   }
 
   /**
@@ -2313,16 +2484,15 @@ export class AgentManager {
   }
 
   /**
-   * The target on offer to a harness with a target and automatic updates off. An archive without a
-   * SHA-256 to check it against, a version that failed to start, or an SDK that is not known to
-   * run on the user's CLI is none.
+   * The target on offer to a harness with a target and automatic updates off, or to one with them
+   * on whose target is an archive without a SHA-256, which they do not install. A version that
+   * failed to start, or an SDK that is not known to run on the user's CLI, is none.
    */
   private targetUpdate(h: Harness): AgentUpdate | null {
-    if (this.automatic(h)) return null
     const running = this.ownVersion(h)
     const target = this.target(h)
     if (!running || !target || compareVersions(target.version, running) === 0) return null
-    if (target.kind === 'archive' && !target.entry.sha256) return null
+    if (this.automatic(h) && !unhashed(target)) return null
     if (h.failed && compareVersions(h.failed.version, target.version) === 0) return null
     if (this.cliFits(h, target.version) !== true) return null
     return { adapterVersion: target.version, cliVersion: null }
@@ -2351,22 +2521,62 @@ export class AgentManager {
     const { spec } = detection
     if (launch.kind === 'binary') return { program: spec.command, args: [] }
     if (launch.kind !== 'package' || launch.library || launch.perSession) return null
+    // The user's own program runs in place of the package: itself, through its runner if any.
+    if (detection.cli) {
+      return {
+        program: spec.command,
+        args: spec.args.slice(0, spec.args.length - (launch.args?.length ?? 0)),
+      }
+    }
     const entry = spec.args[0]
     return entry ? { program: spec.command, args: [entry] } : null
   }
 
   /**
-   * A newer version of the user's own program than the one it runs: from npm, or, for one too old
-   * to run, at least the oldest that runs, which its own update brings before any check.
+   * The user's own program of a binary harness that detection named no CLI for: one with an npm
+   * route but no `cli` of its own, such as Kilo Code's, whose updates Kettu reads from npm, or one
+   * Homebrew installed, whose updates Homebrew tells, or one with a `cli` whose program was picked
+   * in Settings, which runs as it is. It shows as the harness's CLI. Null while Kettu's own install
+   * runs, since that one updates through the registry, or while none was found. `reported` is the
+   * version the running agent named, for when the program was not asked.
+   */
+  private ownProgram(
+    h: Harness,
+    reported: string | null,
+  ): { command: string; installed: InstalledCli } | null {
+    const { launch, installs, cli } = h.def
+    if (launch.kind !== 'binary' || this.release(h)) return null
+    const checked = !!installs?.npm || this.programSource(h)?.kind === 'brew'
+    if (cli ? h.detection?.cli : !checked) return null
+    const mine = this.userProgram(h)
+    if (!mine) return null
+    const installed = {
+      path: mine.path,
+      version: mine.version ?? reported,
+      variable: null,
+      problem: null,
+    }
+    return { command: cli?.command ?? launch.command, installed }
+  }
+
+  /**
+   * A newer version of the user's own program than the one it runs: from npm or Homebrew, or, for
+   * one too old to run, at least the oldest that runs, which its own update brings before any
+   * check. One whose install route tells no newer versions is offered none of them, whatever an
+   * earlier check kept.
    */
   private cliUpdateVersion(h: Harness): string | null {
     const mine = this.userProgram(h)
     const problem = h.detection?.cli?.problem
-    // A newest version the manifest says does not work is not offered.
-    if (h.cliLatest && !usable(this.programRule(h), h.cliLatest)) return null
-    if (problem?.kind === 'too-old') return h.cliLatest ?? problem.minimum
-    if (!h.cliLatest || !mine?.version) return null
-    return compareVersions(h.cliLatest, mine.version) > 0 ? h.cliLatest : null
+    const latest = this.programSource(h) ? h.cliLatest : null
+    // A newest version the manifest says does not work is not offered, nor one the harness would
+    // not run, such as one an earlier check read before it kept to the range.
+    if (latest && !usable(this.programRule(h), latest)) return null
+    const range = this.ownRange(h)
+    if (latest && range && !inNpmRange(latest, range)) return null
+    if (problem?.kind === 'too-old') return latest ?? problem.minimum
+    if (!latest || !mine?.version) return null
+    return compareVersions(latest, mine.version) > 0 ? latest : null
   }
 
   /**
@@ -2434,13 +2644,14 @@ export class AgentManager {
   }
 
   /**
-   * Kettu's own package for it, the user's program, which npm publishes, or Kettu's install of a
-   * registry release is checked. A binary harness's archive counts only while it runs, since the
-   * user's own program keeps its own updates; before detection, it may.
+   * Kettu's own package for it, the user's program, which npm or Homebrew publishes, or Kettu's
+   * install of a registry release is checked. A binary harness's archive counts only while it
+   * runs, since the user's own program keeps its own updates; before detection, it may.
    */
   private checksUpdates(h: Harness): boolean {
-    const { launch } = h.def
-    if (launch.kind === 'package' || launch.kind === 'uvx' || h.def.installs?.npm) return true
+    const { launch, installs } = h.def
+    if (launch.kind === 'package' || launch.kind === 'uvx') return true
+    if (installs?.npm || installs?.brew || installs?.brewCask) return true
     return this.targeted(h) && (h.detection === null || !!this.release(h))
   }
 
@@ -2523,19 +2734,49 @@ export class AgentManager {
   }
 
   /**
-   * The harnesses npm's check asks about: a vendor's own package of Kettu's without a target whose
-   * npm was found, and those whose user's program is installed, whose versions npm publishes too.
-   * The others Kettu installs follow their target.
+   * The harnesses the daily check asks about: a vendor's own package of Kettu's without a target
+   * whose npm was found, and those whose user's program is installed in a way that tells its newer
+   * versions. The others Kettu installs follow their target.
    */
   private checkable(): Harness[] {
     const npm = this.deps.env.nodeProbe().npmPath
     return [...this.harnesses.values()].filter((h) => {
       const detection = h.detection
-      if (h.def.launch.kind === 'package' && !this.targeted(h)) {
-        return detection?.state === 'available' && !!detection.adapter?.npm
-      }
-      return !!npm && !!h.def.installs?.npm && !!this.userProgram(h)
+      const own = h.def.launch.kind === 'package' && !this.targeted(h)
+      if (own && detection?.state === 'available' && detection.adapter?.npm) return true
+      const source = this.programSource(h)
+      return source?.kind === 'brew' || (source?.kind === 'npm' && !!npm)
     })
+  }
+
+  /**
+   * Where the user's own program's newer versions are read, by how it was installed: Homebrew for
+   * a formula or cask; npm for a global install of npm, pnpm, bun or yarn, and for any other
+   * program its vendor also publishes on npm, as an install script's is, at the vendor's dist-tag
+   * when its install names one. Null for one whose install route tells none, such as WinGet's,
+   * which gets new versions after npm does.
+   */
+  private programSource(
+    h: Harness,
+  ):
+    | { kind: 'npm'; package: string; tag?: string }
+    | { kind: 'brew'; name: string; cask: boolean }
+    | null {
+    if (!this.userProgram(h)) return null
+    const installs = h.def.installs
+    if (h.cliMethod === 'brew') {
+      const name = installs?.brewCask ?? installs?.brew
+      return name ? { kind: 'brew', name, cask: !!installs?.brewCask } : null
+    }
+    // WinGet gets new versions after npm does, so npm's would offer an upgrade it cannot make.
+    if (h.cliMethod === 'winget') return null
+    const npmPackage = h.cliGlobal ? this.programPackage(h) : (installs?.npm ?? null)
+    if (!npmPackage) return null
+    return {
+      kind: 'npm',
+      package: npmPackage,
+      ...(installs?.npm === npmPackage && installs.npmTag ? { tag: installs.npmTag } : {}),
+    }
   }
 
   private checkDue(h: Harness): number {
@@ -2734,6 +2975,7 @@ export class AgentManager {
         cli: source,
       })
       h.targetCli = { version: target.version, cli: found.cliVersion }
+      if (found.unpackedSize) h.sizes.set(found.adapterVersion, found.unpackedSize)
     } catch (error) {
       const message = (error as Error).message
       this.deps.diagnostics.log(
@@ -2803,7 +3045,7 @@ export class AgentManager {
       diagnostics.log('info', `${h.def.name}: ${message}`)
     }
     // An update is checked against the hash the registry gives, which a first install may lack.
-    if (target.kind === 'archive' && !target.entry.sha256) {
+    if (unhashed(target)) {
       note(`${target.version} is not installed by itself: the registry gives no SHA-256 for it`)
       return
     }
@@ -2845,44 +3087,80 @@ export class AgentManager {
 
   private async checkHarness(h: Harness, signal: AbortSignal): Promise<string | null> {
     const { launch } = h.def
+    const { platform } = this.deps
     const detection = h.detection
     const npm =
       (detection?.state === 'available' ? detection.adapter?.npm : null) ??
       this.deps.env.nodeProbe().npmPath
-    if (!npm) return null
-    const options = {
-      npm,
-      env: this.deps.env.agentEnv(h.def.id),
-      platform: this.deps.platform,
+    const env = this.deps.env.agentEnv(h.def.id)
+    const source = this.programSource(h)
+    const brew =
+      source?.kind === 'brew'
+        ? await findCommand('brew', {
+            platform,
+            env,
+            isExecutable: (file) => isExecutableFile(file, platform),
+          })
+        : null
+    const ownPackage = launch.kind === 'package' && !this.targeted(h) && !!npm
+    if (!ownPackage && !(source?.kind === 'npm' && npm) && !brew) return null
+    const shared = {
+      env,
+      platform,
       cwd: os.homedir(),
       timeoutMs: this.timings.updateViewMs,
       signal,
     }
     const fetch = this.deps.fetchLatest ?? fetchLatest
-    const cliPackage = h.def.installs?.npm
+    const range = this.ownRange(h)
+    const readCli = async (): Promise<string | null> => {
+      if (source?.kind === 'npm' && npm) {
+        const words = {
+          npm,
+          package: source.package,
+          ...(range ? { range } : {}),
+          ...(source.tag ? { tag: source.tag } : {}),
+          cli: null,
+        }
+        return (await fetch({ ...shared, ...words })).adapterVersion
+      }
+      if (source?.kind === 'brew' && brew) {
+        return fetchBrewLatest({
+          ...shared,
+          brew,
+          name: source.name,
+          cask: source.cask,
+          ...(this.deps.runProgram ? { run: this.deps.runProgram } : {}),
+        })
+      }
+      return null
+    }
     try {
       const [latest, cli] = await Promise.all([
-        launch.kind === 'package' && !this.targeted(h)
+        launch.kind === 'package' && !this.targeted(h) && npm
           ? fetch({
-              ...options,
+              ...shared,
+              npm,
               package: launch.package,
               ...(launch.updates ? { range: launch.updates } : {}),
               cli: CLI_VERSION_SOURCES[h.def.id] ?? null,
             })
           : null,
-        cliPackage && this.userProgram(h)
-          ? fetch({ ...options, package: cliPackage, cli: null })
-          : null,
+        readCli(),
       ])
-      if (latest) h.latest = latest
-      if (cli) h.cliLatest = cli.adapterVersion
+      if (latest) {
+        const { unpackedSize, ...update } = latest
+        h.latest = update
+        if (unpackedSize) h.sizes.set(update.adapterVersion, unpackedSize)
+      }
+      if (cli) h.cliLatest = cli
       h.checkedAt = Date.now()
       h.attemptedAt = h.checkedAt
       const found = [
         latest
           ? `${latest.adapterVersion}${latest.cliVersion ? `, CLI ${latest.cliVersion}` : ''}`
           : '',
-        cli ? `${cliPackage} ${cli.adapterVersion}` : '',
+        cli && source ? `${source.kind === 'brew' ? source.name : source.package} ${cli}` : '',
       ]
       this.deps.diagnostics.event(h.def.id, 'update check', found.filter(Boolean).join('; '))
       this.emit(this.home(h))
@@ -2928,7 +3206,7 @@ export class AgentManager {
     await this.detectAll()
     if (this.targeted(h)) return this.updateToTarget(h)
     if (launch.kind !== 'package') {
-      throw invalidParams(`${h.def.name} is not installed by Kettu`)
+      throw invalidParams(t('detect.notInstalledByKettu', { agent: h.def.name }))
     }
     const update = this.updateOf(h)
     if (!update) throw invalidParams(t('agent.update.none', { agent: h.def.name }))
@@ -3067,6 +3345,13 @@ export class AgentManager {
         if (!(await isExecutableFile(program, platform))) {
           await removeTree(installed.dir)
           throw new Error(t('agent.binaryInstall.incomplete', { agent }))
+        }
+        // As on a first install, a file the registry gives no hash for keeps the one measured.
+        if (!entry.sha256) {
+          diagnostics.log(
+            'warn',
+            `${entry.url} has no SHA-256 in the registry; installed the file with ${installed.sha256}.`,
+          )
         }
         break
       }
@@ -3219,21 +3504,27 @@ export class AgentManager {
   private async cliUpdatePlan(
     h: Harness,
   ): Promise<{ command: string; run: { program: string; args: string[] } | null } | null> {
-    const installs = h.def.installs
     const mine = this.userProgram(h)
-    if (!installs || !mine || !h.cliMethod) return null
+    const method = h.cliMethod
+    if (!mine || !method) return null
+    const installs = { ...h.def.installs }
+    installs.npm ??= this.programPackage(h) ?? undefined
+    const global = h.cliGlobal
+    // A copy npm installed outside a global prefix, such as into a project, is not what
+    // `npm install -g` updates.
+    if (method === 'npm' && !global?.dir) return null
     const platform = this.deps.platform
-    const npmPrefix =
-      h.cliMethod === 'npm' && installs.npm
-        ? npmPrefixOf(await realpath(mine.path).catch(() => mine.path), installs.npm, platform)
-        : null
-    return updatePlan(installs, h.cliMethod, {
+    // Within a range, the version on offer, since the package's newest may lie outside it.
+    const version = this.ownRange(h) ? this.cliUpdateVersion(h) : null
+    return updatePlan(installs, method, {
       platform,
       env: this.deps.env.agentEnv(h.def.id),
       npm: this.deps.env.nodeProbe().npmPath,
       isExecutable: (file) => isExecutableFile(file, platform),
       program: mine.path,
-      npmPrefix,
+      npmPrefix: method === 'npm' ? (global?.dir ?? null) : null,
+      globalDir: method === 'pnpm' || method === 'yarn' ? (global?.dir ?? null) : null,
+      ...(version ? { version } : {}),
     })
   }
 
@@ -3263,7 +3554,9 @@ export class AgentManager {
 
   /**
    * Installs a harness that is missing: the user's own program by one of its routes, or a package
-   * harness's pinned adapter now, without starting it. Resolves when done or cancelled.
+   * harness's pinned adapter now, without starting it. A package harness's vendor route, when one
+   * is picked, installs the user's own program, which then runs in place of Kettu's. Resolves when
+   * done or cancelled.
    */
   async install(agentId: AgentId, method?: AgentInstallMethod['id']): Promise<void> {
     const { h } = this.slot(agentId)
@@ -3275,16 +3568,95 @@ export class AgentManager {
     }
     switch (h.def.launch.kind) {
       case 'package':
-        return this.installNow(h)
+        return method && h.def.installs && !h.def.cli
+          ? this.installProgram(h, method)
+          : this.installNow(h)
       case 'binary':
         return this.installProgram(h, method)
       case 'uvx':
       case 'node-script':
-        throw invalidParams(`${h.def.name} is not installed by Kettu`)
+        throw invalidParams(t('detect.notInstalledByKettu', { agent: h.def.name }))
     }
   }
 
-  /** The first-use install, shared with any start that waits for it. */
+  /**
+   * What each way of installing the harness brings, for the install window: Kettu's own copy of
+   * its npm or uvx package first, then its vendor's routes and the Registry's archive.
+   */
+  async installOffer(agentId: AgentId): Promise<InstallOffer> {
+    const { h } = this.slot(agentId)
+    await this.detectAll()
+    const { def } = h
+    const { launch } = def
+    const { platform } = this.deps
+    const node = this.deps.env.nodeProbe()
+    const env = this.deps.env.agentEnv(def.id)
+    // Claude Code's SDK installs on its first start, beside the user's own `claude`.
+    const ownPackage = (launch.kind === 'package' && !def.cli) || launch.kind === 'uvx'
+    const version = ownPackage ? (this.versionChoice(h)?.wanted ?? null) : null
+    const copy = version ? { version, bytes: h.sizes.get(version) ?? null } : null
+    const npmRoute = h.installPlans.some((plan) => plan.id === 'npm')
+    const packages = [
+      ...(copy && launch.kind === 'package' ? [launch.package] : []),
+      ...(npmRoute && def.installs?.npm ? [def.installs.npm] : []),
+    ]
+    const [npm, uvx] = await Promise.all([
+      packages.length > 0 ? this.npmConfig(h, node.npmPath, npmConfigKeys(packages), env) : null,
+      launch.kind === 'uvx'
+        ? findCommand('uvx', {
+            platform,
+            env,
+            isExecutable: (file) => isExecutableFile(file, platform),
+          })
+        : null,
+    ])
+    return installOffer({
+      def,
+      platform,
+      home: os.homedir(),
+      root: this.deps.adaptersDir,
+      plans: h.installPlans,
+      copy,
+      node,
+      uv: !!uvx,
+      npm,
+    })
+  }
+
+  /** `npm config get` of these keys, asked once until the next redetect; null when npm fails. */
+  private npmConfig(
+    h: Harness,
+    npm: string | null,
+    keys: string[],
+    env: Env,
+  ): Promise<NpmConfig | null> {
+    if (!npm) return Promise.resolve(null)
+    const key = `${h.def.id} ${keys.join(' ')}`
+    const known = this.npmConfigs.get(key)
+    if (known) return known
+    const read = (async () => {
+      const run = await runNpm({
+        npm,
+        args: ['config', 'get', ...keys],
+        cwd: os.homedir(),
+        env,
+        platform: this.deps.platform,
+        timeoutMs: this.timings.updateViewMs,
+      })
+      const failure = programFailure('npm', run, this.timings.updateViewMs)
+      if (!failure) return parseNpmConfig(run.stdout)
+      this.deps.diagnostics.log(
+        'warn',
+        `${h.def.name}: npm's configuration was not read: ${failure}`,
+      )
+      this.npmConfigs.delete(key)
+      return null
+    })()
+    this.npmConfigs.set(key, read)
+    return read
+  }
+
+  /** Installs Kettu's copy of a package harness when the user asks, which a start waits for. */
   private async installNow(h: Harness): Promise<void> {
     const home = this.home(h)
     const agentId = home.id
@@ -3347,8 +3719,8 @@ export class AgentManager {
   ): Promise<void> {
     const installs = h.def.installs
     const agent = h.def.name
-    if (!installs) throw invalidParams(`${agent} is not installed by Kettu`)
-    if (h.detection?.state === 'available') {
+    if (!installs) throw invalidParams(t('detect.notInstalledByKettu', { agent }))
+    if (this.programRuns(h)) {
       throw invalidParams(t('agent.alreadyInstalled', { agent }))
     }
     const plan = methodId
@@ -3357,7 +3729,7 @@ export class AgentManager {
     if (!plan) {
       throw invalidParams(
         methodId
-          ? `${agent} has no ${methodId} install on this platform`
+          ? t('agent.binaryInstall.methodMissing', { agent, method: methodId })
           : t('agent.binaryInstall.noMethod', { agent }),
       )
     }
@@ -3396,14 +3768,15 @@ export class AgentManager {
         await this.deps.env.reload()
         this.cliVersions.clear()
         await Promise.all([...this.harnesses.values()].map((other) => this.detect(other)))
-        if (h.detection?.state === 'available') return
+        if (this.programRuns(h)) return
         const folder = await installedFolder(plan, installs, {
           platform,
           home,
           npmPrefix: () => this.npmPrefix(plan.tool),
         })
-        const command =
-          h.def.cli?.command ?? (h.def.launch.kind === 'binary' ? h.def.launch.command : agent)
+        const { launch } = h.def
+        const own = launch.kind === 'binary' || launch.kind === 'package' ? launch.command : null
+        const command = h.def.cli?.command ?? own ?? agent
         throw new Error(
           folder
             ? t('agent.binaryInstall.notOnPath', { agent, command, folder })
@@ -3415,10 +3788,19 @@ export class AgentManager {
     )
   }
 
+  /**
+   * Whether detection found the harness's program to run: for a package harness, the user's own,
+   * since one without it is available only to install Kettu's.
+   */
+  private programRuns(h: Harness): boolean {
+    const detection = h.detection
+    return detection?.state === 'available' && (h.def.launch.kind !== 'package' || !!detection.cli)
+  }
+
   /** Downloads the registry's archive for the harness, then detects again so it turns available. */
   private async installArchive(h: Harness, plan: InstallPlan): Promise<void> {
     const archive = plan.archive
-    if (!archive) throw invalidParams(`${h.def.name} has no archive to download`)
+    if (!archive) throw invalidParams(t('agent.binaryInstall.noArchive', { agent: h.def.name }))
     this.assertNoInstall(h)
     const { platform, diagnostics } = this.deps
     const agent = h.def.name
@@ -3893,6 +4275,11 @@ export class AgentManager {
         }
       },
       account: (account) => this.setAccount(slot, account),
+      modelProviders: (providers) => {
+        if (JSON.stringify(providers) === JSON.stringify(slot.modelProviders)) return
+        slot.modelProviders = providers
+        this.emit(slot)
+      },
       signInShown: (method) => {
         slot.answeredSignIn = method
         slot.signInAnswered = true
@@ -4015,6 +4402,18 @@ export class AgentManager {
       changed = true
     }
     if (changed) this.emit(slot)
+  }
+
+  /** Extra usage starts or stops covering the plan's used-up windows, as an event says. */
+  setExtraUsage(agentId: AgentId, inUse: boolean): void {
+    const slot = this.slots.get(agentId)
+    if (!slot) return
+    const before = [...slot.limits.values()]
+    const now = Date.now()
+    const after = inUse ? coverWithExtraUsage(before, now) : endExtraUsage(before, now)
+    if (after.length === before.length && after.every((limit, i) => limit === before[i])) return
+    slot.limits = new Map(after.map((limit) => [limit.window, limit]))
+    this.emit(slot)
   }
 
   /**
@@ -4314,7 +4713,9 @@ export class AgentManager {
     const adapter = detection?.state === 'available' ? detection.adapter : null
     const version =
       slot.init?.version ??
-      (adapter ? (adapter.current?.version ?? adapter.version) : slot.h.binaryVersion)
+      (adapter
+        ? (adapter.current?.version ?? adapter.version)
+        : (detection?.cli?.version ?? slot.h.binaryVersion))
     if (!readerOpen(reader, version)) return
     // A signed-out Cursor is told by its CLI, before any sign-in of its own is looked for.
     if (
@@ -4899,6 +5300,8 @@ export class AgentManager {
     const force = options?.force === true
     if (!slot.def.reportsAccount) {
       if (force && slot.signIn === 'required') await this.checkSignIn(slot)
+      else if (slot.def.id === 'pi' && slot.modelProviders === null)
+        await this.readModelProviders(slot)
       return
     }
     await this.detectAll()
@@ -4912,6 +5315,20 @@ export class AgentManager {
       if (force && error instanceof HostError && error.code === 'auth_required') return
       throw error
     }
+  }
+
+  /**
+   * Pi names no account, only the providers its models come from, which it lists when a session
+   * starts: before any did, a hidden session reads them, once for all who ask meanwhile.
+   */
+  private async readModelProviders(slot: Slot): Promise<void> {
+    await this.detectAll()
+    if (!slot.runtime && (slot.h.detection?.state !== 'available' || !slot.h.detection.spec)) return
+    if (slot.providersRun) return slot.providersRun
+    slot.providersRun = this.readFirstOptions(slot.id).finally(() => {
+      slot.providersRun = null
+    })
+    return slot.providersRun
   }
 
   /**
@@ -5186,7 +5603,7 @@ export class AgentManager {
       slot.signIn = connected.length > 0 ? 'signed-in' : 'unknown'
       if (wasRequired && connected.length > 0) this.hooks.signedIn(slot.id)
     } catch {
-      slot.providersError = t('agent.providersUnreadable')
+      slot.providersError = t('agent.providersFailed')
       throw new HostError('agent_unavailable', slot.providersError)
     } finally {
       this.emit(slot)
@@ -5253,12 +5670,18 @@ export class AgentManager {
 
   async providerAction(input: AgentProviderAction): Promise<void> {
     const slot = this.registeredSlot(input.agentId)
-    if (slot.def.id !== 'opencode') throw invalidParams('This agent has no provider accounts')
-    if (slot.providerActionRun) throw new HostError('busy', 'A provider account is being changed')
+    if (slot.def.id !== 'opencode') throw invalidParams(t('agent.noProviders'))
+    if (slot.providerActionRun) throw new HostError('busy', t('agent.providerBusy'))
     const run = async (): Promise<void> => {
       await this.detectAll()
-      if (slot.h.detection?.state !== 'available' || !slot.h.detection.spec) {
-        throw new HostError('agent_unavailable', 'OpenCode is not installed')
+      const detection = slot.h.detection
+      if (detection?.state !== 'available' || !detection.spec) {
+        throw new HostError(
+          'agent_unavailable',
+          detection && detection.state !== 'available'
+            ? detection.detail
+            : t('agent.notAvailable', { agent: slot.def.name }),
+        )
       }
       await slot.providersRun
       await this.openCodeClient(slot).action(input)
@@ -5325,14 +5748,18 @@ export class AgentManager {
       const runtime = await this.ensureReady(agentId)
       if (abort.signal.aborted) throw stopped()
       const method = runtime.init.authMethods.find((m) => m.id === methodId)
-      if (!method) throw invalidParams(`${this.name(agentId)} has no sign-in method ${methodId}`)
+      if (!method) {
+        throw invalidParams(
+          t('agent.noSignInMethod', { agent: this.name(agentId), method: methodId }),
+        )
+      }
       if (method.type === 'env') {
         throw invalidParams(
           t('agent.keyInSettings', { method: method.name, agent: this.name(agentId) }),
         )
       }
       if (method.type !== 'agent') {
-        throw invalidParams(`${method.name} runs in a terminal; use its command instead`)
+        throw invalidParams(t('agent.signInInTerminal', { method: method.name }))
       }
       if (client.device && !handsOverPage(slot.def, methodId)) {
         throw new HostError('forbidden', t('agent.signInOnComputer', { agent: slot.name }))
@@ -5801,7 +6228,7 @@ export class AgentManager {
     } else if (slot.def.id === 'codebuddy') {
       await writeCodebuddyKey(this.settingsFile(slot), checked)
     } else {
-      throw invalidParams(t('agent.apiKey.none', { agent: slot.def.name }))
+      throw invalidParams(t('agent.noApiKey', { agent: slot.def.name }))
     }
     this.deps.diagnostics.event(agentId, 'api key', 'set')
     slot.apiKey = true
@@ -5816,7 +6243,7 @@ export class AgentManager {
     else if (slot.def.id === 'codex') await this.runCodexLogin(slot, ['logout'])
     else if (slot.def.id === 'deepseek') await clearDshKey(this.dshFolder(slot))
     else if (slot.def.id === 'codebuddy') await clearCodebuddyKey(this.settingsFile(slot))
-    else throw invalidParams(t('agent.apiKey.none', { agent: slot.def.name }))
+    else throw invalidParams(t('agent.noApiKey', { agent: slot.def.name }))
     this.deps.diagnostics.event(agentId, 'api key', 'cleared')
     slot.apiKey = false
     await this.credentialsChanged(slot)
@@ -5899,9 +6326,49 @@ export class AgentManager {
   private claudeSlot(agentId: AgentId): Slot {
     const slot = this.registeredSlot(agentId)
     if (slot.def.id !== 'claude-code') {
-      throw invalidParams(`${slot.def.name} has no settings Kettu edits`)
+      throw invalidParams(t('agent.noSettings', { agent: slot.def.name }))
     }
     return slot
+  }
+
+  // When an agent's harness compacts on its own.
+
+  /** The agent's auto-compact setting, from its harness's own configuration. */
+  async autoCompact(
+    agentId: AgentId,
+    config: readonly ConfigOption[] | undefined,
+    codex: () => Promise<CodexRequest>,
+  ): Promise<AutoCompactSettings> {
+    return readAutoCompact(await this.compactPlace(agentId, config, codex))
+  }
+
+  /** Writes one value there; a session opened later reads it. */
+  async setAutoCompact(
+    agentId: AgentId,
+    change: AutoCompactChange,
+    codex: () => Promise<CodexRequest>,
+  ): Promise<void> {
+    await writeAutoCompact(await this.compactPlace(agentId, undefined, codex), change)
+    this.deps.diagnostics.event(agentId, 'auto-compact', change.model === null ? 'all' : 'model')
+  }
+
+  private async compactPlace(
+    agentId: AgentId,
+    config: readonly ConfigOption[] | undefined,
+    codex: () => Promise<CodexRequest>,
+  ): Promise<CompactPlace> {
+    const slot = this.registeredSlot(agentId)
+    if (!takesAutoCompact(agentId)) {
+      throw invalidParams(t('agent.noAutoCompact', { agent: slot.def.name }))
+    }
+    await this.detectAll()
+    return {
+      harness: slot.def.id,
+      file: slot.def.id === 'codex' ? '' : await this.existingSettingsFile(slot),
+      version: this.status(agentId).version,
+      config,
+      codex,
+    }
   }
 
   // Codebuddy Code's site.
@@ -5929,7 +6396,7 @@ export class AgentManager {
   private codebuddySlot(agentId: AgentId): Slot {
     const slot = this.registeredSlot(agentId)
     if (slot.def.id !== 'codebuddy') {
-      throw invalidParams(`${slot.def.name} has no site Kettu edits`)
+      throw invalidParams(t('agent.noSite', { agent: slot.def.name }))
     }
     return slot
   }
@@ -5937,8 +6404,33 @@ export class AgentManager {
   /** The agent's dsh home, where its `.credentials.yaml` lives. */
   private dshFolder(slot: Slot): string {
     const folder = this.configFolder(slot.id)
-    if (!folder) throw new Error(`${slot.name} has no configuration folder`)
+    if (!folder) throw new Error(t('agent.noConfigFolder', { agent: slot.name }))
     return folder
+  }
+
+  /** The first of the agent's settings files that exists, else the one it reads first. */
+  private async existingSettingsFile(slot: Slot): Promise<string> {
+    const { platform } = this.deps
+    const env = this.deps.env.agentEnv(slot.id)
+    const candidates =
+      configLocations(
+        slot.def.id,
+        (name) => getEnv(env, name, platform),
+        os.homedir(),
+        platform,
+        this.chosenFolder(slot),
+      ).find((location) => location.id === 'settings')?.candidates ?? []
+    for (const file of candidates) {
+      if (
+        await stat(file).then(
+          (info) => info.isFile(),
+          () => false,
+        )
+      )
+        return file
+    }
+    if (!candidates[0]) throw new Error(t('agent.noSettingsFile', { agent: slot.name }))
+    return candidates[0]
   }
 
   /** The agent's settings file, where Claude Code reads the variables of its `env`. */
@@ -5952,7 +6444,7 @@ export class AgentManager {
       platform,
       this.chosenFolder(slot),
     ).find((location) => location.id === 'settings')?.candidates[0]
-    if (!file) throw new Error(`${slot.name} has no settings file`)
+    if (!file) throw new Error(t('agent.noSettingsFile', { agent: slot.name }))
     return file
   }
 
@@ -6173,11 +6665,16 @@ export class AgentManager {
       authMethods.splice(0, authMethods.length, ...(terminal ? [terminal] : []), ...kept)
     }
     if (slot.def.id === 'qwen' && this.has(agentId)) {
+      // Kettu's own copy runs as node and its script, which stays; only the launch words go.
+      const launched = slot.def.launch.kind === 'package' ? (slot.def.launch.args ?? []) : []
       authMethods.push({
         id: 'qwen-terminal-login',
-        name: t('agent.method.subscription'),
+        name: t('agent.signIn.subscription'),
         type: 'terminal',
-        command: formatCommand({ ...display, args: [] }, platform),
+        command: formatCommand(
+          { ...display, args: display.args.slice(0, display.args.length - launched.length) },
+          platform,
+        ),
       })
     }
     if (slot.def.id === 'grok' && this.has(agentId)) {
@@ -6185,7 +6682,7 @@ export class AgentManager {
       const launched = slot.def.launch.kind === 'package' ? (slot.def.launch.args ?? []) : []
       authMethods.push({
         id: 'grok-device-login',
-        name: t('agent.method.deviceCode'),
+        name: t('agent.signIn.deviceCode'),
         type: 'terminal',
         command: formatCommand(
           {
@@ -6204,7 +6701,7 @@ export class AgentManager {
       // Its own method only uses a sign-in made with its CLI, which runs in a terminal.
       authMethods.push({
         id: 'cursor-terminal-login',
-        name: t('agent.method.terminal'),
+        name: t('agent.signIn.terminal'),
         type: 'terminal',
         command: formatCommand(
           { ...display, args: [...display.args.filter((arg) => arg !== 'acp'), 'login'] },
@@ -6234,7 +6731,12 @@ export class AgentManager {
     const color = slot.added ? agentColor(this.deps.settings().addedAgents, slot.id) : null
     const cliVersion = this.cliUpdateVersion(h)
     const cliCommand = cliVersion ? (this.cliCommands.get(h) ?? null) : null
-    const cliCommandName = slot.def.cli?.command
+    const own = this.ownProgram(h, init?.version ?? null)
+    const replaces = this.replacesInstall(h)
+    const program = programOf(slot.def)
+    const cliCommandName =
+      slot.def.cli?.command ?? own?.command ?? (replaces ? program?.command : undefined)
+    const unused = detection?.unused
     // Huli: what an earlier sign-in read, the account, its plan and balances, stays kept for when
     // it signs in again, but is not shown as this agent's while it is signed out.
     const signedOut = slot.signIn === 'required'
@@ -6262,8 +6764,9 @@ export class AgentManager {
       state: slot.state,
       // Kettu's own install names its release when the program reports no version of its own.
       version: init?.version ?? h.binaryVersion ?? installed?.version ?? null,
+      // None runs while the user's own program runs in its place.
       package:
-        launch.kind === 'package'
+        launch.kind === 'package' && !replaces
           ? {
               name: launch.package,
               version:
@@ -6289,6 +6792,7 @@ export class AgentManager {
             providersError: slot.providersError,
           }
         : {}),
+      ...(slot.def.id === 'pi' ? { modelProviders: slot.modelProviders } : {}),
       ...(slot.def.id === 'deepseek' ? { balance: signedOut ? null : slot.balance } : {}),
       ...(slot.balances.length && !signedOut
         ? {
@@ -6318,19 +6822,26 @@ export class AgentManager {
       ...(slot.resets && !signedOut ? { resets: slot.resets } : {}),
       ...(slot.resetsError && !signedOut ? { resetsError: slot.resetsError } : {}),
       detail: slot.detail ?? h.adapterNote,
+      reason:
+        unavailable(slot.state) && detection?.state !== 'available' ? detection?.reason : null,
       installNotice: slot.def.install.notice ? t(slot.def.install.notice) : null,
-      installUrl:
-        slot.state === 'not-installed' ||
-        slot.state === 'node-missing' ||
-        slot.state === 'node-outdated'
-          ? slot.def.install.url
-          : null,
+      installUrl: unavailable(slot.state) ? slot.def.install.url : null,
       progress:
         slot.state === 'starting' || slot.state === 'installing' ? slot.progress.lastLines(5) : [],
       launchCommand: formatCommand(display, platform),
       ...this.terminalOf(slot, folderEnv),
       binaryOverride: harnessSettings?.binaryPath ?? null,
       binaryCommand: launch.kind === 'binary' ? launch.command : null,
+      program,
+      unusedProgram:
+        unused && program
+          ? {
+              command: program.command,
+              path: unused.installed.path,
+              version: unused.installed.version,
+              why: unused.why,
+            }
+          : null,
       binaryPath:
         launch.kind === 'binary' && detection?.state === 'available'
           ? (detection.spec?.command ?? null)
@@ -6357,9 +6868,10 @@ export class AgentManager {
       cli: cliCommandName
         ? {
             command: cliCommandName,
-            installed: detection?.cli ?? null,
+            installed: detection?.cli ?? own?.installed ?? null,
             method: h.cliMethod,
             update: cliVersion && cliCommand ? { version: cliVersion, command: cliCommand } : null,
+            checkable: this.programSource(h) !== null,
           }
         : null,
       configDir: config
@@ -6379,6 +6891,7 @@ export class AgentManager {
         forkAtMessage: capabilities?.forkAtMessage ?? false,
         revertTurns: capabilities?.revertTurns ?? false,
         steering: capabilities?.steering ?? false,
+        ...(capabilities?.rewind ? { rewind: true } : {}),
         reports: this.hasLimits(slot.id) && !consoleSignIn,
         context: this.hasContext(slot.id),
         liveContext: this.driver(slot).reads?.context === true,
@@ -6413,19 +6926,22 @@ export class AgentManager {
 
   /** How Kettu's own install follows its target, for its page; null for the other harnesses. */
   private automaticStatus(h: Harness): AgentStatus['automatic'] {
-    // The user's own program, found in place of Kettu's archive, keeps its own updates.
+    // The user's own program, found in place of Kettu's install, keeps its own updates.
     const theirs =
-      h.def.launch.kind === 'binary' && h.detection?.state === 'available' && !this.release(h)
+      (h.def.launch.kind === 'binary' && h.detection?.state === 'available' && !this.release(h)) ||
+      this.replacesInstall(h)
     if (!this.targeted(h) || theirs) return null
     const update = this.targetUpdate(h)
     const running = this.ownVersion(h)
     const back = !!update && !!running && compareVersions(update.adapterVersion, running) < 0
+    const target = update ? this.target(h) : null
     return {
       on: this.automatic(h),
       moved: h.moved,
       back,
       ...(back && running ? { backReason: this.moveReason(h, running) } : {}),
       follows: followsRegistry(h.def) ? 'registry' : 'kettu',
+      ...(target && unhashed(target) ? { noChecksum: true as const } : {}),
     }
   }
 
@@ -6637,7 +7153,8 @@ export class AgentManager {
    * looks up tools such as brew on PATH, which `status` does not wait for.
    */
   private async refreshCliCommand(h: Harness): Promise<void> {
-    const key = `${this.cliUpdateVersion(h)}\0${h.cliMethod}\0${this.userProgram(h)?.path}`
+    const mine = this.userProgram(h)
+    const key = [this.cliUpdateVersion(h), h.cliMethod, h.cliGlobal?.dir, mine?.path].join('\0')
     if (!this.cliUpdateVersion(h) || this.cliCommandKeys.get(h) === key) return
     this.cliCommandKeys.set(h, key)
     const plan = await this.cliUpdatePlan(h).catch(() => null)

@@ -40,12 +40,12 @@ import type { SecretField, SecretTarget } from './secret-request'
 import type { SettingScalar, SettingsSection } from './settings-catalog'
 import type { AgentThemeInstalled } from './theme-palette'
 import type { LimitPause, Stall } from './supervisor'
+import type { TaskDeliverable, Workflow } from './workflow'
 
 export {
   AUTO_AGENT_HARNESSES,
   HARNESS_IDS,
   MULTI_AGENT_HARNESSES,
-  USER_PROGRAM_HARNESSES,
   addedAgentId,
   harnessOf,
   isAgentId,
@@ -131,6 +131,15 @@ export interface SessionView {
   limitPause?: LimitPause | null
   /** Huli: ephemeral: its running turn has said nothing for a while and may be stuck. */
   stall?: Stall | null
+  /** Set while an edit from a message holds the turns from it aside, until the next send. */
+  rewound?: RewoundView | null
+  /** The agent said this conversation cannot be cut, as a Codex thread of the older format. */
+  noRewind?: boolean
+}
+
+export interface RewoundView {
+  /** The turns set aside, which Put back brings back. */
+  turns: number
 }
 
 /** A predicted next prompt: one line of plain text, `id` telling one prediction from the next. */
@@ -269,6 +278,32 @@ export interface QueuedPrompt {
   device?: FromDevice
   /** Set for a message Kettu sends as the answer a card already shows, such as a plan's approval. */
   approval?: true
+  /** Set for a message Kettu itself wrote to the agent, such as a workflow step's reminder. */
+  kettu?: true
+  /** Set for a message built from comments on passages, for its row in the queue. */
+  comments?: QueuedComments
+}
+
+/** How a message of comments reads in the queue: how many, and the text or else the first one. */
+export interface QueuedComments {
+  count: number
+  text: string
+}
+
+/** The most characters of a queued message's comment summary. */
+export const QUEUED_COMMENTS_TEXT = 500
+
+export function isQueuedComments(value: unknown): value is QueuedComments {
+  if (typeof value !== 'object' || value === null) return false
+  const { count, text } = value as Record<string, unknown>
+  return (
+    typeof count === 'number' &&
+    Number.isSafeInteger(count) &&
+    count > 0 &&
+    typeof text === 'string' &&
+    text.length > 0 &&
+    text.length <= QUEUED_COMMENTS_TEXT
+  )
 }
 
 /** The session that started or messaged another one through the session tools. */
@@ -423,6 +458,16 @@ export type ThreadEntry =
        * the agent got it, but it is no bubble and no message of the user's own.
        */
       approval?: true
+      /**
+       * Set for a message Kettu itself wrote to the agent, such as a workflow step's prompt or
+       * reminder: drawn as Kettu's, never as the user's own.
+       */
+      kettu?: true
+      /**
+       * The agent's own id for the prompt that started the turn, Claude Code's message uuid or
+       * Codex's turn id, which an edit from this message cuts the agent's session at.
+       */
+      agentRef?: string
     }
   | {
       kind: 'agent'
@@ -472,6 +517,7 @@ export type ThreadEntry =
       after?: string | null // the agent's entry before it, to put it back after a replay
       /** Huli: for a turn its model refused, why, as the agent reported it. */
       refusal?: TurnRefusal
+      used?: number // the context in tokens as the turn ended, which an edit after it goes back to
     }
   | TakeoverEntry // Kettu's own record of another agent taking the session over
   | GitEntry // Kettu's own observation of the repository, see the git design
@@ -489,6 +535,7 @@ export type ThreadEntry =
   | MemoryWriteEntry // Kettu's own record of an agent's write to Kettu's memory, and its answer
   | MarketPublishEntry // Kettu's own record of a publish to the Kettu Marketplace, and its outcome
   | SettingsChangeEntry // Kettu's own record of an agent's change to Kettu's settings, and its answer
+  | TaskDeliveryEntry // Kettu's own record of a task this session started ending, and what it delivered
   | SecretRequestEntry // Kite's own record of an agent asking for secrets, never their values
   | ThemeChangeEntry // Kite's own record of an agent's change to the theme colors, and its undo
 
@@ -865,11 +912,47 @@ export interface MarketPublishEntry {
   changes: MarketPublishChange[] | null
   /** The publisher name a first publish suggests; null once the account has one. */
   publisher: { suggested: string } | null
+  /** A workflow's flowchart, as its `workflow.yaml` reads; absent for the other kinds. */
+  workflow?: Workflow
+  /**
+   * The task whose workflow this generalizes, when its agent says so: whether the steps and arrows
+   * stayed, the agent's sentence on what it changed, and both files to compare.
+   */
+  fromTask?: {
+    taskId: string
+    title: string
+    sameFlow: boolean
+    changes: string | null
+    before: string
+    after: string
+  }
   /** When an unanswered card counts as put off, in the host's milliseconds. */
   expiresAt: number
   outcome: MarketPublishOutcome | null
   /** Set when a paired device gave the answer; the host's own windows give none. */
   device?: FromDevice
+  /** The agent's entry before it, to put it back after a replay. */
+  after: string | null
+}
+
+/**
+ * A task started from this session's suggestion card ended: what it delivered, as it stood then.
+ * It waits for no answer. `written` names the agent that wrote the task's workflow for it, which
+ * offers Save and Publish once the task is done; `publishAsked` is when the user last asked the
+ * session's agent to publish that workflow.
+ */
+export interface TaskDeliveryEntry {
+  kind: 'task_delivery'
+  id: string
+  taskId: string
+  title: string
+  status: 'done' | 'dropped' | 'cancelled'
+  /** The steps that ran, and how long the task took from its start. */
+  steps: number
+  durationMs: number
+  deliverables: TaskDeliverable[]
+  written: { agentId: AgentId } | null
+  publishAsked?: number
   /** The agent's entry before it, to put it back after a replay. */
   after: string | null
 }
@@ -1297,6 +1380,7 @@ export type Patch =
   | { op: 'session.update'; changes: Partial<SessionView> }
   | { op: 'thread.reset' } // before a session/load replay
   | { op: 'entry.remove'; ids: string[] } // a reverted turn's entries; ids it does not hold are skipped
+  | { op: 'thread.truncate'; id: string } // the entry and all after it leave, as an edit from it does
 
 export interface PatchBatch {
   sessionId: string
@@ -1591,6 +1675,17 @@ export function applyPatches(
         orderCopied = true
         break
       }
+      case 'thread.truncate': {
+        // One a partial state lacks is on an older page: a snapshot follows, as the cursor moves.
+        const at = patch.id in byId ? order.indexOf(patch.id) : -1
+        if (at < 0) throw new UnknownEntryError(patch.id)
+        const dropped = order.slice(at)
+        order = order.slice(0, at)
+        orderCopied = true
+        const next = writableById()
+        for (const id of dropped) delete next[id]
+        break
+      }
     }
   }
 
@@ -1633,6 +1728,12 @@ export function applyPatchInPlace(state: ThreadState, patch: Patch): ThreadState
       let kept = 0
       for (const id of state.order) if (!gone.has(id)) state.order[kept++] = id
       state.order.length = kept
+      return state
+    }
+    case 'thread.truncate': {
+      const at = patch.id in state.byId ? state.order.indexOf(patch.id) : -1
+      if (at < 0) throw new UnknownEntryError(patch.id)
+      for (const id of state.order.splice(at)) delete state.byId[id]
       return state
     }
   }
@@ -1779,6 +1880,10 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
   if (!isRecord(value) || typeof value.id !== 'string') return false
   switch (value.kind) {
     case 'user':
+      return (
+        isListOf(value.content, isUserContent) &&
+        (value.agentRef === undefined || typeof value.agentRef === 'string')
+      )
     case 'session_message':
       return isListOf(value.content, isUserContent)
     case 'agent':
@@ -1832,7 +1937,8 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
       return (
         typeof value.stopReason === 'string' &&
         typeof value.durationMs === 'number' &&
-        (value.after === undefined || value.after === null || typeof value.after === 'string')
+        (value.after === undefined || value.after === null || typeof value.after === 'string') &&
+        (value.used === undefined || typeof value.used === 'number')
       )
     case 'takeover':
       return (
@@ -1979,6 +2085,39 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
           value.outcome === 'timeout') &&
         (value.after === null || typeof value.after === 'string')
       )
+    case 'task_delivery':
+      return (
+        typeof value.taskId === 'string' &&
+        typeof value.title === 'string' &&
+        (value.status === 'done' || value.status === 'dropped' || value.status === 'cancelled') &&
+        typeof value.steps === 'number' &&
+        typeof value.durationMs === 'number' &&
+        isListOf(value.deliverables, isTaskDeliverable) &&
+        (value.written === null || (isRecord(value.written) && isAgentId(value.written.agentId))) &&
+        (value.publishAsked === undefined || typeof value.publishAsked === 'number') &&
+        (value.after === null || typeof value.after === 'string')
+      )
+    default:
+      return false
+  }
+}
+
+function isTaskDeliverable(value: unknown): value is TaskDeliverable {
+  if (!isRecord(value)) return false
+  const detail = value.detail === null || typeof value.detail === 'string'
+  switch (value.kind) {
+    case 'pull_request':
+      return typeof value.url === 'string'
+    case 'document':
+      return (
+        typeof value.artifactId === 'string' &&
+        typeof value.version === 'number' &&
+        typeof value.title === 'string'
+      )
+    case 'file':
+      return typeof value.title === 'string' && detail && typeof value.path === 'string'
+    case 'link':
+      return typeof value.title === 'string' && detail && typeof value.url === 'string'
     default:
       return false
   }

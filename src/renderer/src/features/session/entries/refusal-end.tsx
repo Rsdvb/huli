@@ -17,6 +17,7 @@ import { errorMessage, host } from '@renderer/lib/host'
 import { cn } from '@renderer/lib/utils'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { inLatestTurn } from '../turn-phase'
+import { useEditable, useEditFrom } from './edit-from-here'
 
 /** Words a model explains a refusal with, in English and Chinese. */
 const EXPLAINS =
@@ -32,7 +33,7 @@ interface Explained {
 function refusedTurn(
   state: ThreadState,
   endId: string,
-): { prompt: UserContent[] | null; text: string; said: Explained | null } {
+): { prompt: UserContent[] | null; text: string; said: Explained | null; userId: string | null } {
   let at = state.order.indexOf(endId)
   if (at === -1) at = state.order.length
   let said: Explained | null = null
@@ -48,10 +49,10 @@ function refusedTurn(
       const text = entry.content
         .flatMap((c) => (c.type === 'text' && c.text.trim() ? [c.text] : []))
         .join('\n\n')
-      return { prompt: entry.from ? null : entry.content, text, said }
+      return { prompt: entry.from ? null : entry.content, text, said, userId: entry.id }
     }
   }
-  return { prompt: null, text: '', said }
+  return { prompt: null, text: '', said, userId: null }
 }
 
 /**
@@ -98,11 +99,12 @@ export function RefusalEnd({
     useShallow((s) => {
       const state = s.replicas[sessionId]?.state
       if (!state) return null
-      const { prompt, text, said } = refusedTurn(state, entryId)
+      const { prompt, text, said, userId } = refusedTurn(state, entryId)
       const { status, origin } = state.session
       return {
         prompt,
         text,
+        userId,
         // The state's own values or primitives: an object made each read never compares equal.
         explained: said !== null,
         quote: said?.quote ?? null,
@@ -126,7 +128,16 @@ export function RefusalEnd({
       setSending(false)
     })
   }
-  const rephrase = () => {
+  // Edit message goes back to the message as Edit from here does, where the agent can cut its
+  // conversation there; elsewhere it puts the text in the composer to send again.
+  const userId = turn?.userId ?? ''
+  const editable = useEditable(sessionId, userId)
+  const edit = useEditFrom(sessionId, userId)
+  const rephrase = (button: Element) => {
+    if (editable) {
+      edit.start(button)
+      return
+    }
     if (!turn?.text) return
     emitAppEvent({ kind: 'insert-into-composer', sessionId, text: turn.text })
   }
@@ -158,13 +169,19 @@ export function RefusalEnd({
               </Button>
             )}
             {turn.text && (
-              <Button size="xs" variant="ghost" disabled={sending} onClick={rephrase}>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={sending}
+                onClick={(event) => rephrase(event.currentTarget)}
+              >
                 {t('refusal.rephrase')}
               </Button>
             )}
           </div>
         )}
       </AlertDescription>
+      {edit.popover}
     </Alert>
   )
 }

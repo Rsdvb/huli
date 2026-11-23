@@ -213,6 +213,25 @@ describe('createValidators', () => {
     rejects(() => posix['sessions.sideClear']({ sessionId: 's', undo: 'yes' }))
   })
 
+  it('takes an auto-compact change of a whole number or null, for all models or one', () => {
+    const change = { model: 'openai/gpt-6', value: 272000 }
+    expect(posix['agents.setAutoCompact']({ agentId: 'pi', change, x: 1 })).toEqual({
+      agentId: 'pi',
+      change,
+    })
+    const all = { model: null, value: null }
+    expect(posix['agents.setAutoCompact']({ agentId: 'codex', change: all })).toEqual({
+      agentId: 'codex',
+      change: all,
+    })
+    const bad = (change: unknown): void =>
+      rejects(() => posix['agents.setAutoCompact']({ agentId: 'codex', change }))
+    bad({ model: null, value: '272000' })
+    bad({ model: null, value: 0.85 })
+    bad({ model: '', value: 85 })
+    bad({ value: 85 })
+  })
+
   it('takes only the two Claude Code settings, each with a value of its own kind', () => {
     const window = { setting: 'autoCompactWindow', model: 'claude-sonnet-5-5', value: 200000 }
     expect(
@@ -690,6 +709,20 @@ describe('createValidators', () => {
     rejects(() => pin({ path: 'repo', pinned: true }))
     rejects(() => pin({ path: '/repo', pinned: 'true' }))
     rejects(() => pin({ path: '/repo' }))
+    expect(pin({ path: null, pinned: true })).toEqual({ path: null, pinned: true })
+    rejects(() => pin({ pinned: true }))
+    rejects(() => pin({ path: null, pinned: 1 }))
+  })
+
+  it('requires absolute project paths, or null for the end, to move a project', () => {
+    const move = posix['projects.move']
+    expect(move({ path: '/a', before: '/b' })).toEqual({ path: '/a', before: '/b' })
+    expect(move({ path: '/a', before: null })).toEqual({ path: '/a', before: null })
+    rejects(() => move({ path: 'a', before: null }))
+    rejects(() => move({ path: '/a', before: 'b' }))
+    rejects(() => move({ path: '/a' }))
+    rejects(() => move({ path: null, before: '/b' }))
+    rejects(() => windows['projects.move']({ path: '/a', before: null }))
   })
 
   it('keeps optional fields out when absent', () => {
@@ -746,10 +779,26 @@ describe('createValidators', () => {
     rejects(() => page({ sessionId: 's', before: 'a'.repeat(1025) }))
 
     const raw = posix['sessions.modelRequestRaw']
-    for (const handle of ['system', '0-120,300-512', 'msg_1719e27e3001dJjIgtp6QtBkpk,msg_b2']) {
+    const forked = 'msg_1f4cca296002HjLI6zKqIJOfL8_4'
+    for (const handle of [
+      'system',
+      '0-120,300-512',
+      'msg_1719e27e3001dJjIgtp6QtBkpk,msg_b2',
+      forked,
+      `msg_b2,${forked}`,
+    ]) {
       expect(raw({ sessionId: 's', raw: handle })).toEqual({ sessionId: 's', raw: handle })
     }
-    for (const handle of ['msg_', 'msg_a/../b', '0-1,msg_a', 'ses_a', '/api/session/x']) {
+    for (const handle of [
+      'msg_',
+      'msg_a/../b',
+      '0-1,msg_a',
+      'ses_a',
+      '/api/session/x',
+      'msg_a_4/../b',
+      'msg_a.4',
+      'msg_a_4,',
+    ]) {
       rejects(() => raw({ sessionId: 's', raw: handle }))
     }
   })
@@ -763,6 +812,20 @@ describe('createValidators', () => {
       agentId: 'codex',
       force: true,
     })
+  })
+
+  it('takes a model to pin only with a model value and a pinned flag', () => {
+    const pin = posix['agents.pinModel']
+    expect(pin({ agentId: 'opencode', model: 'deepseek/deepseek-v4-pro', pinned: true })).toEqual({
+      agentId: 'opencode',
+      model: 'deepseek/deepseek-v4-pro',
+      pinned: true,
+    })
+    rejects(() => pin({ agentId: 'opencode', model: '', pinned: true }))
+    rejects(() => pin({ agentId: 'opencode', model: 'x'.repeat(4097), pinned: true }))
+    rejects(() => pin({ agentId: 'opencode', model: 'opus', pinned: 'yes' }))
+    rejects(() => pin({ agentId: 'opencode', model: 'opus' }))
+    rejects(() => pin({ agentId: 'unknown-agent', model: 'opus', pinned: false }))
   })
 
   it('takes a reset credit to spend only with a credit id and a UUID v4 request id', () => {
@@ -1590,6 +1653,15 @@ describe('comment and direct edit requests', () => {
     rejects(() => posix['artifacts.markSent']({ id, threadIds: ['nope'], sessionId: 's' }))
   })
 
+  it('takes a seen version and the versions to compare as version numbers only', () => {
+    expect(posix['artifacts.seen']({ id, version: 4 })).toEqual({ id, version: 4 })
+    rejects(() => posix['artifacts.seen']({ id, version: 0 }))
+    rejects(() => posix['artifacts.seen']({ id, version: 1.5 }))
+    rejects(() => posix['artifacts.seen']({ id: 'art_x', version: 1 }))
+    expect(posix['artifacts.changes']({ id, from: 3, to: 1 })).toEqual({ id, from: 3, to: 1 })
+    rejects(() => posix['artifacts.changes']({ id, from: 2, to: 2 }))
+  })
+
   it('takes a usage summary by hour of the day only over zones that cover it', () => {
     const base = { dayStarts: [0, 900_000], from: 0, to: 900_000, scope: 'computer' }
     expect(posix['usage.summary'](base)).toEqual(base)
@@ -1703,6 +1775,21 @@ describe('computer use requests', () => {
       rejects(() => posix[method]({ projectPath: '/p', watcher: 7 }))
       rejects(() => posix[method]({ projectPath: '/p', watcher: 'x'.repeat(257) }))
     }
+  })
+
+  it('takes only a branch name as the base of a drafted pull request', () => {
+    expect(posix['git.pullRequestDraft']({ projectPath: '/p', base: 'main' })).toEqual({
+      projectPath: '/p',
+      base: 'main',
+    })
+    expect(posix['git.pullRequestDraft']({ projectPath: '/p', base: 'feat/a-b' }).base).toBe(
+      'feat/a-b',
+    )
+    rejects(() => posix['git.pullRequestDraft']({ projectPath: '/p' }))
+    rejects(() => posix['git.pullRequestDraft']({ projectPath: '/p', base: '' }))
+    rejects(() => posix['git.pullRequestDraft']({ projectPath: '/p', base: '--output=x' }))
+    rejects(() => posix['git.pullRequestDraft']({ projectPath: '/p', base: 'main dev' }))
+    rejects(() => posix['git.pullRequestDraft']({ projectPath: 'p', base: 'main' }))
   })
 
   it('takes what became of a drafted problem report', () => {
@@ -2010,26 +2097,13 @@ describe('worktree requests', () => {
     rejects(() => posix['sessions.revert']({ sessionId: 's', entryId: 'x'.repeat(1_025) }))
   })
 
-  it('rewinds to a message, and restores files only with a preview token', () => {
+  it('previews a rewind, and restores files only with a preview token', () => {
     const token = 'a'.repeat(64)
     expect(posix['sessions.rewindPreview']({ sessionId: 's', entryId: 'e:4', x: 1 })).toEqual({
       sessionId: 's',
       entryId: 'e:4',
     })
     rejects(() => posix['sessions.rewindPreview']({ sessionId: 's' }))
-    expect(posix['sessions.rewind']({ sessionId: 's', entryId: 'e:4' })).toEqual({
-      sessionId: 's',
-      entryId: 'e:4',
-      draft: [],
-    })
-    expect(
-      posix['sessions.rewind']({
-        sessionId: 's',
-        entryId: 'e:4',
-        draft: [{ type: 'text', text: 'held' }],
-      }),
-    ).toMatchObject({ draft: [{ type: 'text', text: 'held' }] })
-    rejects(() => posix['sessions.rewind']({ sessionId: 's', entryId: 4 }))
     expect(posix['sessions.restoreFiles']({ sessionId: 's', entryId: 'e:4', token })).toEqual({
       sessionId: 's',
       entryId: 'e:4',
@@ -2161,6 +2235,30 @@ describe('worktree requests', () => {
     }
     rejects(() => set({ ...settings, waitForSetup: 'yes' }))
     rejects(() => posix['projects.setWorktreeSettings']({ path: 'repo', settings }))
+  })
+
+  it("keeps a queued message's comment summary only when it reads", () => {
+    const content = [{ type: 'text', text: '> a\n\nb' }]
+    const comments = { count: 2, text: 'Looks good' }
+    expect(posix['sessions.queue']({ sessionId: 's', content, comments })).toEqual({
+      sessionId: 's',
+      content,
+      comments,
+    })
+    expect(posix['sessions.queue']({ sessionId: 's', content })).toEqual({
+      sessionId: 's',
+      content,
+    })
+    for (const bad of [
+      { count: 0, text: 'x' },
+      { count: 1.5, text: 'x' },
+      { count: 1, text: '' },
+      { count: 1, text: 'x'.repeat(501) },
+      { count: 1 },
+      'two',
+    ]) {
+      rejects(() => posix['sessions.queue']({ sessionId: 's', content, comments: bad }))
+    }
   })
 
   it("runs only a reply's code block that shows all it runs", () => {

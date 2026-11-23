@@ -26,6 +26,7 @@ import {
 import { CONTROL_WAIT_MS, ControlWait, SurfaceControls } from '@shared/control'
 import type { Platform } from '@shared/platform'
 import type { ComputerUseView } from '@shared/thread'
+import { t } from '../i18n'
 import type { LogFn } from '../storage'
 import type { ComputerHelperLike, OcrReport, ProcessLevel } from './helper'
 import {
@@ -446,7 +447,7 @@ export class ComputerUse {
     this.quietSince = Date.now() + PAUSE_SETTLE_MS
     const result = await driver.call('bring_to_front', { pid, window_id: id })
     if (result.isError && !cameForward(result, id)) {
-      throw new Error(firstText(result) || 'The app could not come to the front.')
+      throw new Error(firstText(result) || t('computer.cannotShow'))
     }
   }
 

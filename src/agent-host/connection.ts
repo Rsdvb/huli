@@ -4,6 +4,7 @@
 import type {
   AgentAccount,
   ContextBreakdown,
+  ModelProvider,
   PlanLimit,
   PromptCapabilities,
   ProviderBalance,
@@ -106,6 +107,8 @@ export interface SessionTarget {
 export interface ConnectionHooks {
   traffic(direction: 'in' | 'out', message: unknown): void
   account(account: AgentAccount): void
+  /** The providers an agent that signs in to each one itself lists models from (Pi). */
+  modelProviders?(providers: ModelProvider[]): void
   /**
    * The sign-in method an answer shows, for an agent that names it only that way, such as Google
    * Antigravity by its plan; null when the answer shows none.
@@ -179,6 +182,8 @@ export interface AgentInit {
     authStatus?: boolean
     /** Messages sent into a running turn. */
     steering: boolean
+    /** Cuts a session's conversation before a turn, for an edit from a message. */
+    rewind?: boolean
     /** MCP servers over HTTP, which the artifacts service needs. */
     mcpHttp: boolean
     /** MCP servers over the older SSE transport. */
@@ -283,6 +288,24 @@ export class LimitsReadFailed extends Error {
   }
 }
 
+/** Where an edit from a message cuts the agent's own session: before the prompt of the message. */
+export interface RewindPoint {
+  /** The agent's own id for the prompt, as `prompt` reported it; null for one sent before that. */
+  ref: string | null
+  /** The message's text, which an agent falls back to when it cannot find the id. */
+  text: string
+  /** 1-based, among the session's user messages up to it whose text holds the same. */
+  occurrence: number
+}
+
+/** The agent's session an edit from a message carries on in. */
+export interface RewoundSession {
+  /** The same one, a new one holding only what came before, or '' when nothing came before. */
+  sessionId: string
+  /** The ids of the prompts kept, by the ids they had, where the cut gave them new ones. */
+  refs?: Record<string, string>
+}
+
 /** The agent message a fork ends at. */
 export interface ForkPoint {
   messageId: string // the agent message's own id
@@ -300,11 +323,6 @@ export interface RevertPoint {
   removed: string[]
   /** The items before them, latest first; empty when the cut takes the whole history. */
   kept: string[]
-}
-
-/** Huli: a revert that holds only once the session opens at `resumeAt`, which Kite then keeps. */
-export interface RevertDone {
-  resumeAt: string
 }
 
 /**
@@ -477,11 +495,6 @@ export interface SessionOptions {
    * them; absent for none.
    */
   folders?: readonly string[]
-  /**
-   * Huli: where a rewind cut the session's history, for an agent whose revert leaves the history
-   * whole until the next prompt: a resume takes the history up to it.
-   */
-  resumeAt?: string
 }
 
 /** Kettu's memory as a session starts with it. */
@@ -569,7 +582,7 @@ export interface AgentConnection {
    * Takes the latest turns out of the session's history, where `point` cuts it, so the model no
    * longer sees them; what they changed on disk stays. Absent where the agent cannot.
    */
-  revertTurns?(sessionId: string, point: RevertPoint): Promise<void | RevertDone>
+  revertTurns?(sessionId: string, point: RevertPoint): Promise<void>
   closeSession(sessionId: string): Promise<void>
   deleteSession(sessionId: string): Promise<void>
   listSessions(
@@ -582,6 +595,24 @@ export interface AgentConnection {
   ): Promise<{ sessions: ListedEverywhere[]; nextCursor: string | null }>
   /** A copy of a session under a new id, written from the original without opening it. */
   copySession?(sessionId: string, cwd: string): Promise<string>
+  /**
+   * Whether the session's conversation can be cut, for an agent with `rewind` whose older sessions
+   * may not take it. Asked without opening the session.
+   */
+  canRewind?(sessionId: string, cwd: string): Promise<boolean>
+  /** `rewindSession` cuts only a session that is open. */
+  readonly rewindsOpen?: boolean
+  /**
+   * Cuts the conversation of a session before the prompt `point` names, for an agent with
+   * `rewind`: one that is not open, or with `rewindsOpen` one opened with its options first;
+   * `title` is the session's, for a new one the cut makes.
+   */
+  rewindSession?(
+    sessionId: string,
+    cwd: string,
+    point: RewindPoint,
+    title: string | null,
+  ): Promise<RewoundSession>
 
   /** Routes a session's updates to `target`, first replaying any that arrived early. */
   register(sessionId: string, target: SessionTarget): void
@@ -592,7 +623,12 @@ export interface AgentConnection {
   /** The session `id` runs under: its own if Kettu has it, else the one the agent named. */
   rootOf(id: string): string
 
-  prompt(sessionId: string, prompt: readonly PromptBlock[]): Promise<PromptResult>
+  /** `sent` hears the agent's own id for the prompt, for an agent with `rewind`. */
+  prompt(
+    sessionId: string,
+    prompt: readonly PromptBlock[],
+    sent?: (ref: string) => void,
+  ): Promise<PromptResult>
   /**
    * Prompts a session no thread shows, such as one made for a report, with `text`, and returns
    * the text of each agent message of the turn, in order. Its other updates are dropped.

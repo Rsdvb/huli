@@ -1,4 +1,4 @@
-import { memo, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 import {
   ArrowTurnBackwardIcon,
   ArrowTurnDownIcon,
@@ -8,8 +8,7 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import type { RewindMode } from '@shared/rewind-target'
-import { harnessOf, turnText, type StopReason, type UserContent } from '@shared/thread'
+import { turnText, type StopReason, type UserContent } from '@shared/thread'
 import { forkSession, putBackUndone } from '@renderer/app/actions'
 import { MessageActions } from '@renderer/components/affect/message-actions'
 import { ForkIcon } from '@renderer/components/fork-icon'
@@ -28,15 +27,16 @@ import { longAgo, mediumAgo } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
 import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
-import { AGENT_NAMES, agentsOn, useAgentsStore } from '@renderer/stores/agents'
+import { Glyph } from '@renderer/features/shell/glyph'
+import { agentsOn, useAgentsStore } from '@renderer/stores/agents'
 import { hostOfSession } from '@renderer/stores/sessions'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { useReplyHover } from '../reply-hover'
 import { useEntry, useEntryAnimation } from '../use-thread'
 import { ChangesCard } from './changes-card'
+import { useEditable, useEditFrom } from './edit-from-here'
 import { forkBlocked, forkEntry, latestTurnStart, revertBlocked } from './helpers'
 import { RefusalEnd } from './refusal-end'
-import { RewindDialog } from './rewind-dialog'
 import { TurnEndTag } from './turn-end-tag'
 
 function Ago({ at }: { at: number }) {
@@ -70,118 +70,20 @@ function userText(content: UserContent[]): string {
     .join('\n')
 }
 
-type TurnState = {
-  order: readonly string[]
-  byId: Readonly<Record<string, { kind: string; steered?: boolean } | undefined>>
-}
-
 /**
- * The message a thread's latest turn starts at, by its order: entries keep their kind, so it
- * changes only with the order, which a patch that adds or removes entries replaces.
+ * Under a message you sent, while the pointer is on it: the time, Edit from here where the message
+ * can be edited from, and Copy. A turn cancelled before any reply also offers Edit beside its end.
  */
-const latestStarts = new WeakMap<readonly string[], string | null>()
-
-/** The message the thread's latest turn starts at, read from the end. */
-function latestTurnStartOf(state: TurnState): string | null {
-  const known = latestStarts.get(state.order)
-  if (known !== undefined) return known
-  let found: string | null = null
-  for (let i = state.order.length - 1; i >= 0; i--) {
-    const entry = state.byId[state.order[i]!]
-    if (entry?.kind === 'user' && !entry.steered) {
-      found = state.order[i]!
-      break
-    }
-  }
-  latestStarts.set(state.order, found)
-  return found
-}
-
-/**
- * Huli: Edit from here and Rewind to here, on a message of the user's that started a turn, in a
- * session of the user's own.
- */
-function useRewindActions(sessionId: string, entryId: string, rewindable: boolean) {
-  const { t } = useTranslation('session')
-  const view = useThreadsStore(
-    useShallow((s) => {
-      const session = s.replicas[sessionId]?.state?.session
-      return session
-        ? {
-            agentId: session.agentId,
-            projectPath: session.projectPath,
-            origin: session.origin,
-            blocked: revertBlocked(session.status),
-          }
-        : null
-    }),
-  )
-  const latest = useThreadsStore((s) => {
-    const state = s.replicas[sessionId]?.state
-    return state ? latestTurnStartOf(state) === entryId : true
-  })
-  const agent = useAgentsStore((s) =>
-    view
-      ? (agentsOn(s, hostOfSession(view)).byId[view.agentId]?.name ??
-        AGENT_NAMES[harnessOf(view.agentId)])
-      : '',
-  )
-  const [open, setOpen] = useState<RewindMode | null>(null)
-  if (!view || view.origin !== 'user' || !rewindable || !entryId) {
-    return { actions: [], dialog: null }
-  }
-  const notReady = t('rewind.notReady')
-  const actions = [
-    {
-      key: 'edit',
-      tip: view.blocked ? notReady : t('rewind.editAction'),
-      label: t('rewind.editAction'),
-      icon: <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={1.9} className="size-4" />,
-      disabled: view.blocked,
-      onClick: () => setOpen('edit'),
-    },
-    ...(latest
-      ? []
-      : [
-          {
-            key: 'rewind',
-            tip: view.blocked ? notReady : t('rewind.rewindAction'),
-            label: t('rewind.rewindAction'),
-            icon: (
-              <HugeiconsIcon icon={ArrowTurnBackwardIcon} strokeWidth={1.9} className="size-4" />
-            ),
-            disabled: view.blocked,
-            onClick: () => setOpen('rewind'),
-          },
-        ]),
-  ]
-  const dialog =
-    open === null ? null : (
-      <RewindDialog
-        sessionId={sessionId}
-        entryId={entryId}
-        mode={open}
-        agent={agent}
-        onClose={() => setOpen(null)}
-      />
-    )
-  return { actions, dialog }
-}
-
-/** Under a message you sent, while the pointer is on it: the time, Copy, and the rewinds. */
 export function UserActions({
-  sessionId = '',
-  entryId = '',
-  rewindable = false,
+  sessionId,
+  entryId,
   content,
   at,
   steered,
   end,
 }: {
-  sessionId?: string
-  entryId?: string
-  /** Huli: a message of the user's own that started a turn, which a rewind can go back to. */
-  rewindable?: boolean
+  sessionId: string
+  entryId: string
   content: UserContent[]
   at?: number
   steered?: boolean
@@ -190,9 +92,26 @@ export function UserActions({
 }) {
   const { t } = useTranslation('session')
   const labels = useCopyLabels(t('userActions.copyMessage'))
-  const rewind = useRewindActions(sessionId, entryId, rewindable)
+  const editable = useEditable(sessionId, entryId)
+  const edit = useEditFrom(sessionId, entryId)
+  // Huli: Rewind to here keeps the message and its reply and sets aside the turns after it.
+  const rewindable = useEditable(sessionId, entryId, 'rewind')
+  const rewind = useEditFrom(sessionId, entryId, 'rewind')
+  const row = useRef<HTMLSpanElement>(null)
+  const cancelled = useRef<HTMLButtonElement>(null)
+  // Only the last turn's message stands for a cancelled turn still waiting to be written again.
+  const lastTurn = useThreadsStore((s) => {
+    const order = s.replicas[sessionId]?.state?.order
+    const byId = s.replicas[sessionId]?.state?.byId
+    if (!order || !byId) return false
+    for (let i = order.length - 1; i >= 0; i--) {
+      const entry = byId[order[i]!]
+      if (entry?.kind === 'user' && !entry.steered) return entry.id === entryId
+    }
+    return false
+  })
   const meta = (
-    <span className="ks-user__meta">
+    <span ref={row} className="ks-user__meta" data-open={edit.open || rewind.open ? '' : undefined}>
       {steered && (
         <span className="inline-flex shrink-0 items-center gap-1">
           <HugeiconsIcon
@@ -211,12 +130,42 @@ export function UserActions({
         actions={['copy']}
         label={t('userActions.label')}
         labels={labels}
-        extraActions={rewind.actions}
-        {...(rewind.actions.length > 0
-          ? { className: `ks-user__actions-${rewind.actions.length + 1}` }
-          : {})}
+        className={
+          editable && rewindable
+            ? 'ks-user__actions--rewind'
+            : editable || rewindable
+              ? 'ks-user__actions--edit'
+              : undefined
+        }
+        leadingActions={[
+          ...(editable
+            ? [
+                {
+                  key: 'edit',
+                  tip: t('userActions.edit'),
+                  label: t('userActions.edit'),
+                  icon: <Glyph icon={PencilEdit02Icon} />,
+                  onClick: () =>
+                    edit.start(row.current?.querySelector('.ui-mac__btn--edit') ?? null),
+                },
+              ]
+            : []),
+          ...(rewindable
+            ? [
+                {
+                  key: 'rewind',
+                  tip: t('rewind.rewindAction'),
+                  label: t('rewind.rewindAction'),
+                  icon: <Glyph icon={ArrowTurnBackwardIcon} />,
+                  onClick: () =>
+                    rewind.start(row.current?.querySelector('.ui-mac__btn--rewind') ?? null),
+                },
+              ]
+            : []),
+        ]}
       />
-      {rewind.dialog}
+      {edit.popover}
+      {rewind.popover}
     </span>
   )
   if (!end) return meta
@@ -224,6 +173,16 @@ export function UserActions({
     <span className="ks-user__foot">
       {meta}
       <TurnEndTag stopReason={end.stopReason} durationMs={end.durationMs} />
+      {editable && lastTurn && end.stopReason === 'cancelled' && (
+        <button
+          ref={cancelled}
+          type="button"
+          className="ks-user__edit"
+          onClick={() => edit.start(cancelled.current)}
+        >
+          {t('userActions.editShort')}
+        </button>
+      )}
     </span>
   )
 }

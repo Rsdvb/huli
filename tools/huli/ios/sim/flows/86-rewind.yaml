@@ -80,7 +80,7 @@ appId: io.github.rsdvb.huli
 - longPressOn:
     text: '.*notes.md beta.*'
 - waitForAnimationToEnd
-- tapOn: '从这里重来'
+- tapOn: '从这里重新编辑'
 - extendedWaitUntil:
     visible: '同时还原文件'
     timeout: 30000

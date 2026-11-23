@@ -15,6 +15,8 @@ export const LISTING_NAME_CHARS = 80
 export const LISTING_DESCRIPTION_CHARS = 120
 export const LISTING_ABOUT_CHARS = 4000
 export const LISTING_NOTES_CHARS = 4000
+/** How long a publish or unlisting card waits before what it asked is put off. */
+export const MARKET_WAIT_MS = 10 * 60_000
 
 /** A publisher's handle, and a listing's slug, which has the same shape. */
 export const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/
@@ -159,7 +161,10 @@ export interface ListingChange {
 /** A problem a check found, the service's or the host's, with the file it is in. */
 export interface MarketProblem {
   path?: string
+  /** In English, as agents read it. */
   message: string
+  /** The same in the user's language when that is not English; the interface shows it first. */
+  text?: string
 }
 
 /**
