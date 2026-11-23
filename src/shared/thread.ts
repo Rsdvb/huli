@@ -505,6 +505,9 @@ export type ThreadEntry =
       provider?: string // Huli: out_of_credit: the model provider that refused, when it is named
       // turn_failed: the agent's plan refused the turn because a usage window ran out.
       planLimit?: true
+      // Huli: the MCP servers the notice says failed or need a sign-in, as the agent names them,
+      // which the session's MCP panel opens at.
+      mcpServers?: string[]
       // The agent's entry before it, to put it back after a replay: set on the notices Kettu
       // adds itself, never on an agent's, which its replay sends again.
       after?: string | null
@@ -1867,6 +1870,8 @@ function isRecalledMemory(value: unknown): value is RecalledMemory {
 const isListOf = <T>(value: unknown, guard: (item: unknown) => item is T): value is T[] =>
   Array.isArray(value) && value.every(guard)
 
+const isString = (value: unknown): value is string => typeof value === 'string'
+
 /**
  * Whether a value has the shape of a thread entry: a known kind, an id, and the fields the
  * renderer reads without checking. Entries read back from disk pass through it.
@@ -1924,6 +1929,7 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
           value.cause === 'turn_failed') &&
         (value.model === undefined || typeof value.model === 'string') &&
         (value.planLimit === undefined || value.planLimit === true) &&
+        (value.mcpServers === undefined || isListOf(value.mcpServers, isString)) &&
         (value.after === undefined || value.after === null || typeof value.after === 'string')
       )
     case 'compaction':

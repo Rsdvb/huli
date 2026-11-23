@@ -461,9 +461,18 @@ describe('MCP servers', () => {
       init([{ name: 'github', status: 'failed' }], 'd'),
     )
     expect(notices(run)).toMatchObject([
-      { id: 'n:mcp:failed:a', severity: 'warning', title: 'MCP server github could not start' },
-      { id: 'n:mcp:auth:a', title: 'MCP server linear needs you to sign in' },
-      { id: 'n:mcp:failed:d', title: 'MCP server github could not start' },
+      {
+        id: 'n:mcp:failed:a',
+        severity: 'warning',
+        title: 'MCP server github could not start',
+        mcpServers: ['github'],
+      },
+      {
+        id: 'n:mcp:auth:a',
+        title: 'MCP server linear needs you to sign in',
+        mcpServers: ['linear'],
+      },
+      { id: 'n:mcp:failed:d', title: 'MCP server github could not start', mcpServers: ['github'] },
     ])
   })
 })

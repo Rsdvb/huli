@@ -262,6 +262,8 @@ interface CodexNotice {
   severity: 'info' | 'warning' | 'error'
   title: string
   description?: string
+  /** Huli: the MCP servers it is about, which the session's MCP panel opens at. */
+  mcpServers?: string[]
 }
 
 /** Huli: a warning about Codex itself as a notice, or null for one with nothing to say. */
@@ -1467,6 +1469,7 @@ export class CodexConnection implements AgentConnection {
         name: update.name,
       }),
       ...(update.error ? { description: update.error } : {}),
+      mcpServers: [update.name],
     })
   }
 

@@ -11,12 +11,14 @@ import {
   GitPullRequestIcon,
   InformationCircleIcon,
   Layers01Icon,
+  PlugSocketIcon,
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Trans, useTranslation } from 'react-i18next'
 import type { RoutineRef } from '@shared/routines'
 import { parseReplyRunNotice } from '@shared/terminal-agent'
 import { Alert, AlertDescription, AlertTitle } from '@renderer/components/ui/alert'
+import { Button } from '@renderer/components/ui/button'
 import {
   Collapsible,
   CollapsibleContent,
@@ -28,6 +30,7 @@ import { AIAnswer, type AnswerSource } from '@renderer/components/affect/ai-answ
 import { dayTime } from '@renderer/features/routines/model'
 import { PANEL, stopReasonText } from './helpers'
 import { RefusalEnd } from './refusal-end'
+import { useEntry as useFeatureEntry } from '@renderer/lib/features'
 import { cn } from '@renderer/lib/utils'
 import { useRoutinesStore } from '@renderer/stores/routines'
 import { sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
@@ -42,6 +45,7 @@ import { EntryIdContext, SessionIdContext } from '../media/grants'
 import { TurnDots } from '../turn-dots'
 import { writingId } from '../turn-phase'
 import { useEntry, useEntryAnimation } from '../use-thread'
+import { askMcpPanel } from '../mcp/mcp-panel'
 import { CutTurnEnd } from './cut-turn'
 import { FailedTurnActions } from './failed-turn'
 import { OutOfCreditEnd } from './out-of-credit'
@@ -344,9 +348,31 @@ export const NoticeEntry = memo(function NoticeEntry({ sessionId, entryId }: Ent
           planLimit={entry.planLimit === true}
         />
       )}
+      {entry.mcpServers?.[0] !== undefined && (
+        <McpNoticeAction sessionId={sessionId} server={entry.mcpServers[0]} />
+      )}
     </Alert>
   )
 })
+
+/** Huli: a notice of an MCP server that failed or needs a sign-in opens the panel at it. */
+function McpNoticeAction({ sessionId, server }: { sessionId: string; server: string }) {
+  const { t } = useTranslation('session')
+  const on = useFeatureEntry('notice.mcp')
+  if (!on) return null
+  const open = () => {
+    const summary = useSessionsStore.getState().byId[sessionId]
+    if (summary) askMcpPanel(summary, server)
+  }
+  return (
+    <div className="col-start-2 mt-2 flex">
+      <Button size="compact" variant="outline" onClick={open}>
+        <HugeiconsIcon icon={PlugSocketIcon} strokeWidth={1.9} data-icon="inline-start" />
+        {t('mcp.notice.open')}
+      </Button>
+    </div>
+  )
+}
 
 const COMPACTION_KEY = {
   in_progress: 'inProgress',

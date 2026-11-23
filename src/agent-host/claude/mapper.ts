@@ -2128,7 +2128,8 @@ function mcpNotice(
 ): Delivery {
   const title = t(key, { names: names.join(', '), count: names.length })
   const hint = t(`${key}Hint` as 'claude.notice.mcpFailedHint')
-  return noticeDelivery(sessionId, id, 'warning', title, error ? [error, hint].join('\n') : hint)
+  const description = error ? [error, hint].join('\n') : hint
+  return noticeDelivery(sessionId, id, 'warning', title, description, { mcpServers: [...names] })
 }
 
 /** Huli: a server Kite gave the query once it ran could not connect. */
@@ -2149,12 +2150,18 @@ function noticeDelivery(
   severity: 'info' | 'warning' | 'error',
   title: string,
   description?: string,
+  extra: { mcpServers?: string[] } = {},
 ): Delivery {
   return {
     sessionId,
     map: (ctx) => {
       const out = output()
-      const changes = { severity, title, ...(description !== undefined ? { description } : {}) }
+      const changes = {
+        severity,
+        title,
+        ...(description !== undefined ? { description } : {}),
+        ...extra,
+      }
       if (ctx.thread.byId[id]?.kind === 'notice') {
         out.patches.push({ op: 'entry.update', id, changes })
       } else {

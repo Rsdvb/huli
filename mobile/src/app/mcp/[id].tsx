@@ -3,7 +3,15 @@
 // after Reconnect and when the computer says the servers changed; never on a timer. Turning a
 // server off and signing in stay on the computer.
 
-import { memo, useCallback, useEffect, useState, type ReactElement } from 'react'
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentRef,
+  type ReactElement,
+} from 'react'
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
@@ -47,7 +55,8 @@ const SOURCE_TEXT: Record<SessionMcpSource, string> = {
 const CHANGE_SETTLE_MS = 250
 
 export default function McpScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  // `server`: a thread's notice opened the page at that server, which it scrolls to and marks.
+  const { id, server: focus } = useLocalSearchParams<{ id: string; server?: string }>()
   const { c } = useSessionTokens()
   const link = useLink()
   const state = useHostState()
@@ -59,6 +68,13 @@ export default function McpScreen() {
   const [refreshing, setRefreshing] = useState(false)
   const [acting, setActing] = useState<string | null>(null)
   const connected = state.kind === 'connected'
+  const scroll = useRef<ComponentRef<typeof ScrollView>>(null)
+  const scrolled = useRef(false)
+  const focusAt = useCallback((y: number) => {
+    if (scrolled.current) return
+    scrolled.current = true
+    scroll.current?.scrollTo({ y: Math.max(0, y - 12), animated: true })
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -121,6 +137,7 @@ export default function McpScreen() {
     const perServer = data.can.reconnect === 'server'
     body = (
       <ScrollView
+        ref={scroll}
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={c.textSecondary} />
@@ -154,6 +171,7 @@ export default function McpScreen() {
             key={server.name}
             server={server}
             canReconnect={perServer && server.state !== 'disabled'}
+            {...(server.name === focus ? { onFocusLayout: focusAt } : {})}
             busy={acting === server.name}
             disabled={acting !== null}
             onReconnect={reconnect}
@@ -196,6 +214,8 @@ const ServerRow = memo(function ServerRow(props: {
   canReconnect: boolean
   busy: boolean
   disabled: boolean
+  /** Only the server a notice opened the page at: where its row lies, to scroll to it. */
+  onFocusLayout?(y: number): void
   onReconnect(server: string): void
 }) {
   const { c, s } = useSessionTokens()
@@ -214,8 +234,16 @@ const ServerRow = memo(function ServerRow(props: {
     server.source === 'plugin' && server.plugin
       ? `插件 ${server.plugin}`
       : SOURCE_TEXT[server.source]
+  const { onFocusLayout } = props
   return (
-    <View style={[styles.row, { backgroundColor: s.code, borderColor: s.codeBorder }]}>
+    <View
+      style={[
+        styles.row,
+        { backgroundColor: s.code, borderColor: onFocusLayout ? c.accent : s.codeBorder },
+        onFocusLayout ? styles.focused : null,
+      ]}
+      {...(onFocusLayout ? { onLayout: (e) => onFocusLayout(e.nativeEvent.layout.y) } : {})}
+    >
       <View style={styles.head}>
         <View style={[styles.dot, { backgroundColor: tone.color }]} />
         <Text style={[styles.name, { color: c.text }]} numberOfLines={1}>
@@ -340,6 +368,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
+  focused: { borderWidth: 1.5 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   name: { flexShrink: 1, fontFamily: MONO, fontSize: 14.5, fontWeight: '500' },

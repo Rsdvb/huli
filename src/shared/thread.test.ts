@@ -574,6 +574,10 @@ describe('isThreadEntry', () => {
     expect(
       isThreadEntry({ kind: 'notice', id: 'n', severity: 'error', title: 'x', planLimit: false }),
     ).toBe(false)
+    const mcp = { kind: 'notice', id: 'n', severity: 'warning', title: 'x' }
+    expect(isThreadEntry({ ...mcp, mcpServers: ['linear', 'plugin:a:b'] })).toBe(true)
+    expect(isThreadEntry({ ...mcp, mcpServers: 'linear' })).toBe(false)
+    expect(isThreadEntry({ ...mcp, mcpServers: ['linear', 1] })).toBe(false)
   })
 })
 
