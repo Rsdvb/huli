@@ -70,7 +70,7 @@ appId: io.github.rsdvb.huli
     visible: '.*天后永久删除.*'
     timeout: 20000
 - takeScreenshot: b04-bin
-- tapOn: 'Fix the flaky login test'
+- tapOn: '.*Fix the flaky login test.*'
 - waitForAnimationToEnd
 - takeScreenshot: b05-row-sheet
 - tapOn: '恢复'
@@ -101,7 +101,7 @@ appId: io.github.rsdvb.huli
 - extendedWaitUntil:
     visible: '.*天后永久删除.*'
     timeout: 20000
-- tapOn: 'Fix the flaky login test'
+- tapOn: '.*Fix the flaky login test.*'
 - waitForAnimationToEnd
 - tapOn: '永久删除'
 - waitForAnimationToEnd
