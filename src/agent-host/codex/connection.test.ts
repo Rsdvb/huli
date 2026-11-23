@@ -503,6 +503,63 @@ describe('sessions', () => {
     expect(server.sent('config/read')).toHaveLength(2)
   })
 
+  it('runs a !command with Codex’s own shell in the turn it opens, asking first unless full access', async () => {
+    const { server, connection } = await connect()
+    server.on('thread/shellCommand', () => ({}))
+    const opened = await connection.newSession('/project')
+    await connection.setConfigOption(opened.sessionId, 'mode', 'agent-full-access')
+    const asked: PermissionRequest[] = []
+    let allow = true
+    const { target, entry } = threadTarget((request) => {
+      asked.push(request)
+      return { optionId: allow ? 'allow_once' : 'decline' }
+    })
+    connection.register(opened.sessionId, target)
+    const shell = (text: string) => connection.prompt(opened.sessionId, [{ type: 'text', text }])
+    const finish = (count: number) => {
+      server.notify('turn/started', { threadId: opened.sessionId, turn: turn(`turn-${count}`) })
+      server.notify('turn/completed', {
+        threadId: opened.sessionId,
+        turn: turn(`turn-${count}`, 'completed'),
+      })
+    }
+
+    let ran = shell('  !ls -la | head  ')
+    await until(() => server.sent('thread/shellCommand').length === 1)
+    expect(server.sent('thread/shellCommand')[0]).toEqual({
+      threadId: opened.sessionId,
+      command: 'ls -la | head',
+    })
+    expect(server.sent('turn/start')).toHaveLength(0)
+    expect(asked).toHaveLength(0)
+    finish(1)
+    expect(await ran).toMatchObject({ stopReason: 'end_turn' })
+
+    // In a mode that asks, the command runs once allowed, and its card goes.
+    await connection.setConfigOption(opened.sessionId, 'mode', 'workspace-write')
+    ran = shell('!git status')
+    await until(() => server.sent('thread/shellCommand').length === 2)
+    expect(asked[0]).toMatchObject({
+      options: [
+        { id: 'allow_once', kind: 'allow_once' },
+        { id: 'decline', kind: 'reject_once' },
+      ],
+      subject: { kind: 'command', command: 'git status', cwd: '/project' },
+    })
+    expect(entry(asked[0]!.toolEntryId)).toBeUndefined()
+    finish(2)
+    await ran
+
+    allow = false
+    expect(await shell('!rm -rf build')).toMatchObject({ stopReason: 'end_turn' })
+    expect(server.sent('thread/shellCommand')).toHaveLength(2)
+    expect(entry(asked[1]!.toolEntryId)).toBeDefined()
+
+    expect(await connection.steer(opened.sessionId, [{ type: 'text', text: '!ls' }])).toBe(
+      'promptRequired',
+    )
+  })
+
   it('names the provider when its quota runs out off a ChatGPT plan, as out of credit', async () => {
     const { server, connection } = await connect()
     server.on('account/read', () => ({ account: null, requiresOpenaiAuth: false }))

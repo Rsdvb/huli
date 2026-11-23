@@ -952,6 +952,12 @@
     "turnFailed": "这一轮失败了",
     "providerQuota": "{{provider}} 拒绝了这次请求：你在 {{provider}} 的额度或余额已用完。请到 {{provider}} 充值或检查账单后重试，或换一个其他服务商的模型。",
     "providerQuotaUnnamed": "Codex 的模型服务商拒绝了这次请求：账号的额度或余额已用完。请到服务商那里充值或检查账单后重试，或换一个模型。",
+    "shell": {
+      "reason": "你的 ! 命令会在会话的文件夹里、Codex 的沙箱之外运行，和离开沙箱的命令一样。",
+      "declined": "命令没有运行。",
+      "sandboxed": "这个会话在沙箱里运行，! 命令会跑到沙箱之外，所以没有运行。请改在终端里运行。",
+      "unsupported": "这个 Codex 不能运行 ! 命令。请更新 Codex，或在终端里运行这条命令。"
+    },
     "settings": {
       "notSwitch": "这个值只能是开或关",
       "badProfile": "这个 Codex 没有可以选的这个权限档案",

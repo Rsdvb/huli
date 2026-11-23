@@ -2,6 +2,7 @@
 // session is a Codex thread under the thread's own id; its settings live here and go with each
 // turn, since app-server keeps none between them that Kettu could read back.
 
+import { randomUUID } from 'node:crypto'
 import os from 'node:os'
 import type { AgentAccount, PlanLimit, ProviderBalance } from '@shared/agent-host'
 import type { ContextEstimates } from '@shared/context'
@@ -73,6 +74,7 @@ import {
 import {
   commandList,
   parseCommand,
+  parseShell,
   skillsMessage,
   statusMessage,
   usageMessage,
@@ -1912,6 +1914,8 @@ export class CodexConnection implements AgentConnection {
     }
     const command = parseCommand(prompt)
     if (command) return this.runCommand(record, command)
+    const shell = parseShell(prompt)
+    if (shell) return this.runShell(record, shell)
     return this.runTurn(record, async () => {
       await Promise.all([this.listModels(), this.readWorkspace()])
       const response = await this.call<{ turn: Turn }>(
@@ -2124,8 +2128,8 @@ export class CodexConnection implements AgentConnection {
     sessionId: string,
     prompt: readonly PromptBlock[],
   ): Promise<'injected' | 'promptRequired'> {
-    // A command waits for the turn to end and runs as a prompt of its own.
-    if (parseCommand(prompt)) return 'promptRequired'
+    // A command waits for the turn to end and runs as a prompt of its own; a `!command` too.
+    if (parseCommand(prompt) || parseShell(prompt)) return 'promptRequired'
     const record = this.threads.get(sessionId)
     const turnId = record?.running?.id ?? record?.prompting?.turnId ?? null
     if (!turnId) return 'promptRequired'
@@ -2242,6 +2246,72 @@ export class CodexConnection implements AgentConnection {
       skills: skills.status === 'fulfilled' ? skills.value : null,
       mcpServers: mcpServers.status === 'fulfilled' ? mcpServers.value : null,
     }
+  }
+
+  /**
+   * Huli: a `!command`, which Codex runs in the thread's folder with the user's shell, as its own
+   * client runs one, so the command and its output join the conversation the model sees. Codex
+   * runs it outside its sandbox, so Kite asks first, as for a command of the agent's that leaves
+   * the sandbox, unless the session runs in full access; and never in a sandbox Kite holds.
+   */
+  private async runShell(record: ThreadRecord, command: string): Promise<PromptResult> {
+    if (record.sandbox) return this.answer(record, async () => t('codex.shell.sandboxed'))
+    const mode = modeOf(record.settings.mode) ?? modeOf(DEFAULT_MODE)!
+    if (mode.approvalPolicy !== 'never') {
+      const allowed = await this.allowShell(record, command)
+      if (allowed === 'cancelled') return stopped('cancelled')
+      if (!allowed) return this.answer(record, async () => t('codex.shell.declined'))
+    }
+    try {
+      return await this.commandTurn(record, async () => {
+        await this.call('thread/shellCommand', { threadId: record.id, command })
+        return null
+      })
+    } catch (error) {
+      if (lacksMethod(error)) {
+        throw new AgentRequestError('agent_error', t('codex.shell.unsupported'), null, {
+          shellUnsupported: true,
+        })
+      }
+      throw error
+    }
+  }
+
+  /**
+   * Huli: asks for a `!command` as for an agent's command, in a card of its own that the host's
+   * approval rules answer as theirs; the card goes once allowed, as the command shows below.
+   */
+  private async allowShell(record: ThreadRecord, command: string): Promise<boolean | 'cancelled'> {
+    const target = this.targets.get(record.id)
+    if (!target) return false
+    const approval = commandApproval(
+      {
+        threadId: record.id,
+        turnId: '',
+        itemId: `shell-${randomUUID()}`,
+        command,
+        cwd: record.cwd,
+        reason: t('codex.shell.reason'),
+        availableDecisions: ['accept', 'decline'],
+      },
+      record.mapper,
+      target.context(),
+    )
+    let answer: PermissionAnswer
+    try {
+      answer = await target.requestPermission(approval.request, new AbortController().signal)
+    } catch {
+      return 'cancelled'
+    }
+    const picked = optionAnswer(answer)
+    if (picked === 'cancelled') return 'cancelled'
+    const { decision } = approval.respond(picked) as { decision: unknown }
+    if (decision !== 'accept') return false
+    target.apply({
+      patches: [{ op: 'entry.remove', ids: [approval.request.toolEntryId] }],
+      effects: [],
+    })
+    return true
   }
 
   private runCommand(record: ThreadRecord, { name, rest }: ParsedCommand): Promise<PromptResult> {

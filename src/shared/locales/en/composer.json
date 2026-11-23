@@ -85,6 +85,10 @@
     "confirmOther": "This session is still open in another Claude Code. Once you carry on here, don't send messages there at the same time.",
     "confirm": "Carry on here"
   },
+  "shell": {
+    "note": "Runs as a shell command in the session's folder; Codex adds its output to the conversation",
+    "noteAsks": "Runs as a shell command in the session's folder, once you allow it; Codex adds its output to the conversation"
+  },
   "modelCache": {
     "note": "Now on {{model}}: the prompt cache starts over, so the next turn costs more"
   },

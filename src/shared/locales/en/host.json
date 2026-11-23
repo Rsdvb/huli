@@ -965,6 +965,12 @@
     "turnFailed": "The turn failed",
     "providerQuota": "{{provider}} turned the request down: the account's quota or balance with {{provider}} has run out. Top up or check billing with {{provider}}, then try again, or pick a model of another provider.",
     "providerQuotaUnnamed": "Codex's model provider turned the request down: the account's quota or balance has run out. Top up or check billing with the provider, then try again, or pick another model.",
+    "shell": {
+      "reason": "Your ! command runs in the session's folder outside Codex's sandbox, as a command that leaves it would.",
+      "declined": "The command did not run.",
+      "sandboxed": "This session runs in a sandbox, and a ! command would run outside it, so it did not run. Run it in the terminal instead.",
+      "unsupported": "This Codex cannot run ! commands. Update Codex, or run the command in the terminal."
+    },
     "settings": {
       "notSwitch": "The value must be on or off",
       "badProfile": "This Codex has no permission profile of that name that may be picked",

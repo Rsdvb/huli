@@ -85,6 +85,10 @@
     "confirmOther": "这个会话还在另一个 Claude Code 里开着。在这里继续后，别同时在那边发消息。",
     "confirm": "在这里继续"
   },
+  "shell": {
+    "note": "作为 shell 命令在会话的文件夹里运行；Codex 会把输出加进对话",
+    "noteAsks": "作为 shell 命令在会话的文件夹里运行，你允许后才运行；Codex 会把输出加进对话"
+  },
   "modelCache": {
     "note": "已换成 {{model}}：提示词缓存会重新开始，下一轮会贵一些"
   },

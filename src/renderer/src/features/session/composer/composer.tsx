@@ -85,6 +85,7 @@ import { HeldStrip, OutsideConfirm } from './held-strip'
 import { outsideConfirmed } from './outside-confirmed'
 import { OutOfCreditStrip } from './out-of-credit-strip'
 import { CacheRestartStrip } from './cache-restart-strip'
+import { ShellStrip } from './shell-strip'
 import { CACHE_PER_MODEL, modelCacheRestarts } from './cache-restart'
 import { useAddMenu } from './add-menu'
 import { PromptBox } from './prompt-box'
@@ -342,6 +343,9 @@ export function Composer({
   // An agent that is gone takes no settings; the one picked to carry on shows its own.
   const config = pendingConfig ?? (mustSwitch ? [] : session.config)
   const mode = config.find((o): o is SelectOption => o.category === 'mode' && isSelect(o))
+  // Huli: a Codex message of text alone that starts with ! goes as a shell command Codex runs.
+  const codexShell = harnessOf(session.agentId) === 'codex' && !pending && attachments.length === 0
+  const shellTyped = useBoxText(box, (text) => /^\s*!\S/.test(text))
   const model = config.find((o): o is SelectOption => o.category === 'model' && isSelect(o))
   const effort = config.find((o) => o.category === 'thought_level' && isSelect(o))
   // A used-up window of another model does not hold this session back.
@@ -881,6 +885,11 @@ export function Composer({
                 <CommentList sessionId={sessionId} />
                 {/* Huli: the comments on diff lines and page elements, which also go with Send. */}
                 <NotesTray sessionId={sessionId} place="composer" />
+                <AnimatePresence initial={false}>
+                  {codexShell && shellTyped && (
+                    <ShellStrip key="shell" asks={mode?.value !== 'agent-full-access'} />
+                  )}
+                </AnimatePresence>
                 <AnimatePresence initial={false}>
                   {cacheRestartShown && (
                     <CacheRestartStrip
