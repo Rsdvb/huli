@@ -143,6 +143,8 @@ export function pageNotesText(notes: readonly PageNote[], firstImage = 1): strin
           viewHeight: viewport.height,
         }),
       shot: (index) => t('pick.message.shot', { index }),
+      source: t('pick.message.source'),
+      styles: t('pick.message.styles'),
     },
     firstImage,
   )

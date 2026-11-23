@@ -136,7 +136,8 @@
     "downloadFailed": "{{name}} 没有下载成功",
     "loadFailed": "此页面未能加载：{{error}}",
     "crashed": "此页面已崩溃",
-    "unresponsive": "此页面没有响应"
+    "unresponsive": "此页面没有响应",
+    "saved": "{{name}} 已存到会话的 .kite/downloads 文件夹"
   },
   "origin": {
     "decision": {
@@ -187,7 +188,9 @@
       "selector": "选择器",
       "text": "文字",
       "box": "位置：{{width}} × {{height}} 像素，在 ({{x}}, {{y}})，视口 {{viewWidth}} × {{viewHeight}}",
-      "shot": "截图：附上的第 {{index}} 张图"
+      "shot": "截图：附上的第 {{index}} 张图",
+      "source": "源码",
+      "styles": "样式"
     }
   },
   "ports": {
@@ -214,5 +217,56 @@
       "full": "{{host}} 转发的端口已经到上限，先停掉一个",
       "failed": "没能转发 {{host}} 的端口 {{port}}"
     }
+  },
+  "emulation": {
+    "chip": "正在模拟 {{what}}",
+    "hint": "Agent 的标签页正在模拟 {{what}}。点“重置”全部关闭。",
+    "reset": "重置",
+    "viewport": "{{width}}×{{height}}",
+    "scheme": {
+      "light": "浅色",
+      "dark": "深色"
+    },
+    "reducedMotion": "减弱动画",
+    "motion": "完整动画",
+    "location": "位置",
+    "offline": "离线",
+    "throttled": "限速网络",
+    "network": {
+      "slow-3g": "慢速 3G",
+      "fast-3g": "快速 3G",
+      "4g": "4G"
+    }
+  },
+  "download": {
+    "asks": "网页想把 {{name}}（{{size}}）下载到会话文件夹",
+    "asksUnknown": "网页正在把 {{name}}（超过 50 MB）下载到会话文件夹",
+    "allow": "允许",
+    "cancel": "取消"
+  },
+  "data": {
+    "button": "浏览器数据和已存登录",
+    "title": "浏览器数据",
+    "profile": {
+      "shared": "所有会话共用",
+      "worktree": "这个工作树专用 · {{name}}",
+      "session": "这个会话专用，退出纸鸢后清空"
+    },
+    "states": "已存登录",
+    "namePlaceholder": "起个名字，比如 admin",
+    "nameLabel": "要保存的登录名称",
+    "save": "保存",
+    "restore": "恢复",
+    "openSite": "先在这个标签页打开已登录的网站，才能保存它的登录。",
+    "none": "还没有已存登录。在这里保存一个，再到别的会话里恢复。",
+    "manage": "在设置中管理",
+    "saved": "已把登录存为“{{name}}”",
+    "restored_one": "已恢复“{{name}}”：{{count}} 个 Cookie。请刷新网站。",
+    "restored_other": "已恢复“{{name}}”：{{count}} 个 Cookie。请刷新网站。"
+  },
+  "presets": {
+    "title": ".claude/launch.json 里的开发服务器",
+    "start": "启动",
+    "button": "launch.json 里的开发服务器"
   }
 }

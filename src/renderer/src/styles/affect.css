@@ -2195,6 +2195,208 @@ li[data-row-exit='dust'] > * {
   text-decoration-color: var(--border-strong);
   text-underline-offset: 3px;
 }
+/* Huli: what the agent's tab emulates, under the address, with its reset. */
+.kp-emu {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px 3px 2px 9px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  box-shadow: 0 0 0 var(--hairline) var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-secondary);
+  animation: kp-rise 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.kp-emu__text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.kp-emu__text svg {
+  flex: none;
+  color: var(--pane-fox);
+}
+.kp-emu__reset {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 8px 0 6px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 500;
+  color: var(--text-primary);
+  transition: background-color 120ms ease;
+}
+.kp-emu__reset:hover {
+  background: var(--bg-surface);
+}
+.kp-emu__reset:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+/* Huli: the dev servers .claude/launch.json names, with Start. */
+.kp-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(100%, 300px);
+  margin-top: 14px;
+  font-size: 12.5px;
+  text-align: left;
+}
+[data-slot='popover-content'] .kp-presets {
+  width: 100%;
+  margin-top: 0;
+}
+.kp-presets__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+.kp-presets__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kp-presets__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.kp-presets__name {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--text-primary);
+}
+.kp-presets__where {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+.kp-presets__row .kp-btn {
+  gap: 4px;
+}
+/* Huli: the browser data popover: the profile, and the saved sign-ins. */
+.kp-data {
+  display: flex;
+  flex-direction: column;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.kp-data__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 12px 10px;
+  border-bottom: var(--hairline) solid var(--border-subtle);
+}
+.kp-data__title {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.kp-data__profile {
+  color: var(--text-tertiary);
+}
+.kp-data__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.kp-data__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+.kp-data__save {
+  display: flex;
+  gap: 6px;
+}
+.kp-data__input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 8px;
+  background: var(--bg-surface);
+  box-shadow: inset 0 0 0 var(--hairline) var(--border-default);
+  font: inherit;
+  color: var(--text-primary);
+  outline: 0;
+}
+.kp-data__input:focus-visible {
+  box-shadow:
+    inset 0 0 0 1px var(--border-default),
+    0 0 0 3px var(--bg-hover);
+}
+.kp-data__input:disabled {
+  opacity: 0.6;
+}
+.kp-data__input::placeholder {
+  color: var(--text-disabled);
+}
+.kp-data__note {
+  margin: 0;
+  color: var(--text-tertiary);
+}
+.kp-data__loading {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0;
+}
+.kp-data__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.kp-data__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.kp-data__name {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--text-primary);
+}
+.kp-data__sites {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.kp-data__manage {
+  padding: 9px 12px;
+  border-top: var(--hairline) solid var(--border-subtle);
+  font: inherit;
+  text-align: left;
+  color: var(--text-secondary);
+  transition: background-color 120ms ease;
+}
+.kp-data__manage:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
 /* The page itself is a view main draws over this frame, so the frame's ring and the glow of an
    agent driving it sit outside it. */
 .kp-view {
@@ -8362,6 +8564,15 @@ body:has(.ui-mdpc[data-open], .ui-ccc__menu[data-open='true']) .kettu-toasts {
   min-width: 0;
   overflow: hidden;
   font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kp-pick-editor__source {
+  display: block;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
   color: var(--text-tertiary);
   white-space: nowrap;
   text-overflow: ellipsis;

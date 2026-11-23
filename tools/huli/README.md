@@ -1087,6 +1087,57 @@ do. They join the session's comment tray beside the diff's and go with them as o
   (`NotesTray`) lists both kinds, under the page too, and Send to agent puts them in one message
   with the screenshots as its images.
 
+### Browser tools, second batch (浏览器工具第二批)
+
+Nine more `browser_*` tools for agents testing web apps, and what the user sees of them.
+
+- Arguments: `src/shared/browser-args.ts` parses them (with tests); the agent host checks a call
+  with it and forwards what the agent gave, and main (`BrowserCdp.call`) parses it again, since
+  another computer's host sends calls too.
+- `browser_emulate` (`src/main/browser/emulation.ts`, `views.ts`): a device's size, pixel ratio,
+  touch and mobile user agent (presets in `DEVICE_PRESETS`, or `viewport`), color scheme, reduced
+  motion, locale, time zone, location and network (slow 3G, fast 3G, 4G, offline) over CDP
+  `Emulation`/`Network`, per tab and applied again when a released tab's page is made anew. A
+  device's size becomes the tab's viewport, which `size()` lays out at. The pane's chip
+  (`emulation-chip.tsx`) shows it with Reset (`browser:reset-emulation`). Only a tab emulating a
+  location gets the geolocation permission (`policy.ts`), and turning it off leaves the override
+  at "position unavailable", so the computer's own position never reaches a page.
+- `browser_route` (`routes.ts`, tests): rules of a session (fixed response, delay or abort, by URL
+  pattern and method, at most 50), answered through CDP `Fetch`, which a tab enables only while its
+  session has rules and the agent used the tab. A document of a site that needs the user's allow
+  is never mocked. Mocked requests carry `mocked` in `browser_network_requests`.
+- `browser_hover`, `browser_drag` (HTML drag and drop through `Input.setInterceptDrags`, or the
+  mouse held down for pointer-based ones), `browser_click_at` (inside the viewport, with a reason
+  the thread's tool row shows).
+- Downloads and PDF (`downloads.ts`): a download of the agent's tab during its turn goes to
+  `<session folder>/.kite/downloads/` (a `.gitignore` of `*` keeps it out of git), above 50 MB only
+  after the pane's Allow (`download-bar.tsx`, `browser:answer-download`); the user's own keep the
+  save dialog. `browser_downloads` lists them; `browser_pdf` prints with `webContents.printToPDF`
+  (Electron's debugger has no `Page.printToPDF`). The host sends main the session's folder with
+  each call (`host:browser-call` `folder`); another computer's calls get neither tool.
+- `browser_trace` (`trace.ts`): CDP `Tracing` for a few seconds, read back as a stream, summed up
+  as long tasks, the longest scripts, style, layout and paint time, LCP and FCP (the page's own
+  reports when the trace has no navigation). No Lighthouse.
+- Cross-origin iframes (`cdp.ts`): from a tab's first snapshot, `Target.setAutoAttach` with
+  flatten; a frame target's nodes join the outline under their iframe with ids in a slot of their
+  own (`SLOT`), commands on them go to their target, and clicks go to the frame's own target at its
+  CSS pixels, since the page's input does not reach into it here.
+- Profiles and saved sign-ins (`views.ts`, `saved-states.ts` with tests, `state-tools.ts`): Settings
+  › 浏览器 › 每个会话的浏览器数据 (`browserProfiles.mode`): shared, each worktree
+  (`persist:kite-wt-<hash>`) or each session (in memory). A session takes its partition with its
+  first page. `browser_storage_state` and the pane's browser data popover (`browser-data.tsx`)
+  save the shown site's cookies and local storage under a name and restore them into another
+  session's partition; `state/browser-states.json` keeps them sealed with the system encryption
+  (as `market-keys.json`), never without it, and Settings lists them with Delete.
+- Pick (`pick.ts`, `source-location.ts`): a picked element also carries its key computed styles
+  and, from a dev build, its source: inspector attributes, React's `_debugSource` or, since React
+  19, `_debugStack` mapped through the script's source map (read from the page's own origin), or
+  Svelte and Vue's records. The note's message lists both.
+- `.claude/launch.json` (`src/shared/launch-configs.ts`, host `sessions.launchConfigs`): the
+  session folder's configurations as presets in the browser pane (`launch-presets.tsx`) and the
+  phone's 开发服务器 when opened from a session; Start runs the command with `sessions.runCommand`
+  and the pane opens the page, again on a failed load for a few tries.
+
 ### Ports of other computers (端口转发)
 
 A computer added over SSH (or any other host) runs dev servers on its own loopback, which this

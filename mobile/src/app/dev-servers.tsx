@@ -4,6 +4,7 @@
 import { memo, useCallback, useEffect, useState, type ReactElement } from 'react'
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { router, Stack, useLocalSearchParams } from 'expo-router'
+import { parseLaunchAnswer, type LaunchConfig } from '@shared/launch-configs'
 import { listDevServers, NEEDS_DIRECT, type DevServer } from '../devServers'
 import { errorText } from '../git'
 import { getHost, useHostState, useLink, useSession } from '../host'
@@ -26,6 +27,9 @@ export default function DevServersScreen() {
   const [unlisted, setUnlisted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  // Huli: the session's .claude/launch.json presets, which Start runs in its terminal.
+  const [presets, setPresets] = useState<LaunchConfig[]>([])
+  const [started, setStarted] = useState<string | null>(null)
   const connected = state.kind === 'connected'
 
   // Named by the sessions and projects of the moment; what changes later shows on the next pull.
@@ -37,6 +41,13 @@ export default function DevServersScreen() {
       const found = await listDevServers(link, projects, sessions, session ?? null)
       setUnlisted(found === null)
       setList(found ?? [])
+      if (session) {
+        // An older computer has no presets to give.
+        const answer = await link
+          .request('sessions.launchConfigs', { sessionId: session })
+          .catch(() => null)
+        setPresets(parseLaunchAnswer(answer))
+      }
     } catch (failed) {
       setError(errorText(failed, '没能读取电脑上的端口。'))
     }
@@ -57,6 +68,26 @@ export default function DevServersScreen() {
       params: { port: String(server.port), name: server.process ?? '' },
     })
   }, [])
+
+  // Runs the preset's command in a terminal of the session; the list shows its port once it
+  // listens, on the next pull.
+  const start = useCallback(
+    (preset: LaunchConfig) => {
+      if (!session) return
+      setStarted(preset.name)
+      link
+        .request('sessions.runCommand', {
+          sessionId: session,
+          command: preset.command,
+          notify: false,
+        })
+        .catch((failed: unknown) => {
+          setStarted(null)
+          setError(errorText(failed, '没能启动这个开发服务器。'))
+        })
+    },
+    [link, session],
+  )
 
   let body: ReactElement
   if (!list) {
@@ -81,6 +112,28 @@ export default function DevServersScreen() {
           <View style={[styles.notice, { backgroundColor: s.warningSoft }]}>
             <Icon icon={G.wifiOff} size={15} color={c.warning} />
             <Text style={[styles.noticeText, { color: c.text }]}>{NEEDS_DIRECT}</Text>
+          </View>
+        ) : null}
+        {presets.length > 0 ? (
+          <View style={styles.presets}>
+            <Text style={[styles.presetsTitle, { color: c.textSecondary }]}>
+              .claude/launch.json 里的预设
+            </Text>
+            {presets.map((preset) => {
+              const running = list.find(
+                (server) => preset.port !== null && server.port === preset.port,
+              )
+              return (
+                <PresetRow
+                  key={preset.name}
+                  preset={preset}
+                  running={running ?? null}
+                  started={started === preset.name}
+                  onOpen={open}
+                  onStart={start}
+                />
+              )
+            })}
           </View>
         ) : null}
         {list.length === 0 ? (
@@ -112,6 +165,41 @@ export default function DevServersScreen() {
     </View>
   )
 }
+
+const PresetRow = memo(function PresetRow(props: {
+  preset: LaunchConfig
+  running: DevServer | null
+  started: boolean
+  onOpen(server: DevServer): void
+  onStart(preset: LaunchConfig): void
+}) {
+  const { c, s } = useSessionTokens()
+  const { preset, running, started } = props
+  return (
+    <PressScale
+      onPress={() => (running ? props.onOpen(running) : props.onStart(preset))}
+      disabled={!running && started}
+      accessibilityRole="button"
+      accessibilityLabel={running ? `预览 ${preset.name}` : `启动 ${preset.name}`}
+      style={[styles.row, { backgroundColor: s.code, borderColor: s.codeBorder }]}
+    >
+      <Text style={[styles.port, { color: c.text }]}>{preset.port ?? '—'}</Text>
+      <View style={styles.what}>
+        <Text style={[styles.process, { color: c.text }]} numberOfLines={1}>
+          {preset.name}
+        </Text>
+        <Text style={[styles.where, { color: c.textSecondary }]} numberOfLines={1}>
+          {running ? '正在运行' : started ? '已在电脑的终端里启动，下拉刷新' : preset.command}
+        </Text>
+      </View>
+      {running ? (
+        <Icon icon={G.globe} size={17} color={c.textSecondary} />
+      ) : (
+        <Text style={[styles.tag, { color: c.accent, backgroundColor: s.accentSoft }]}>启动</Text>
+      )}
+    </PressScale>
+  )
+})
 
 const ServerRow = memo(function ServerRow(props: {
   server: DevServer
@@ -155,6 +243,8 @@ function folderName(folder: string): string {
 
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingBottom: 32, gap: 10 },
+  presets: { gap: 10 },
+  presetsTitle: { fontSize: 13, fontWeight: '500', marginTop: 4 },
   notice: {
     flexDirection: 'row',
     alignItems: 'center',

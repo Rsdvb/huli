@@ -136,7 +136,8 @@
     "downloadFailed": "{{name}} did not download",
     "loadFailed": "This page did not load: {{error}}",
     "crashed": "This page crashed",
-    "unresponsive": "This page stopped responding"
+    "unresponsive": "This page stopped responding",
+    "saved": "Saved {{name}} into the session’s .kite/downloads folder"
   },
   "origin": {
     "decision": {
@@ -187,7 +188,9 @@
       "selector": "Selector",
       "text": "Text",
       "box": "Box: {{width}} × {{height}} px at ({{x}}, {{y}}) in a {{viewWidth}} × {{viewHeight}} viewport",
-      "shot": "Screenshot: attached image {{index}}"
+      "shot": "Screenshot: attached image {{index}}",
+      "source": "Source",
+      "styles": "Styles"
     }
   },
   "ports": {
@@ -214,5 +217,56 @@
       "full": "{{host}} has as many forwarded ports as it keeps; stop one first",
       "failed": "Couldn't forward port {{port}} from {{host}}"
     }
+  },
+  "emulation": {
+    "chip": "Emulating {{what}}",
+    "hint": "The agent’s tab emulates {{what}}. Reset turns it all off.",
+    "reset": "Reset",
+    "viewport": "{{width}}×{{height}}",
+    "scheme": {
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "reducedMotion": "Reduced motion",
+    "motion": "Full motion",
+    "location": "Location",
+    "offline": "Offline",
+    "throttled": "Throttled network",
+    "network": {
+      "slow-3g": "Slow 3G",
+      "fast-3g": "Fast 3G",
+      "4g": "4G"
+    }
+  },
+  "download": {
+    "asks": "The page wants to download {{name}} ({{size}}) into the session’s folder",
+    "asksUnknown": "The page is downloading {{name}}, over 50 MB, into the session’s folder",
+    "allow": "Allow",
+    "cancel": "Cancel"
+  },
+  "data": {
+    "button": "Browser data and saved sign-ins",
+    "title": "Browser data",
+    "profile": {
+      "shared": "Shared by every session",
+      "worktree": "This worktree’s own · {{name}}",
+      "session": "This session’s own, until Kite quits"
+    },
+    "states": "Saved sign-ins",
+    "namePlaceholder": "Name, such as admin",
+    "nameLabel": "Name of the sign-in to save",
+    "save": "Save",
+    "restore": "Restore",
+    "openSite": "Open the signed-in site in this tab to save its sign-in.",
+    "none": "No saved sign-ins yet. Save one here, then restore it in another session.",
+    "manage": "Manage in Settings",
+    "saved": "Saved the sign-in as “{{name}}”",
+    "restored_one": "Restored “{{name}}”: {{count}} cookie. Reload the site.",
+    "restored_other": "Restored “{{name}}”: {{count}} cookies. Reload the site."
+  },
+  "presets": {
+    "title": "Dev servers in .claude/launch.json",
+    "start": "Start",
+    "button": "Dev servers from launch.json"
   }
 }

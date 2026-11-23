@@ -432,6 +432,7 @@ export class ArtifactService {
             }),
       pageOf: (sessionId) => deps.browserSession?.(sessionId) ?? sessionId,
       projectOf: (sessionId) => deps.sessionProject?.(sessionId) ?? '',
+      folderOf: (sessionId) => deps.sessionFolder?.(sessionId) ?? null,
       ...(deps.browserAccess ? { access: deps.browserAccess } : {}),
     })
     const devices = deps.devices

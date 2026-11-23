@@ -12,7 +12,12 @@ import type { ArtifactExportFormat } from './artifact-types'
 import type { GrantedAttachment } from './attachments'
 import type { BackupStatus, RestorePick } from './backup'
 import type { ChatBridgeView, ChatPlatform, ChatPlatformPatch } from './chat-bridge'
-import type { BrowserBounds, BrowserOriginDecision, BrowserState } from './browser'
+import type {
+  BrowserBounds,
+  BrowserOriginDecision,
+  BrowserState,
+  SavedStateSummary,
+} from './browser'
 import type { PickColor, PickEvent } from './page-notes'
 import type { ForwardResult, PortForward, PortListResult } from './port-forwards'
 import type { ControlAgent, ControlOutcome } from './control'
@@ -555,6 +560,25 @@ export interface IpcInvokeContract {
   'browser:allowed-sites': { args: []; result: AllowedSites[] }
   'browser:remove-allowed-site': { args: [projectPath: string, origin: string]; result: void }
   'browser:clear-data': { args: []; result: void }
+  /** Huli: the pane's reset of what the selected tab emulates. */
+  'browser:reset-emulation': { args: [sessionId: string]; result: void }
+  /** Huli: the pane's Allow or Cancel of a large download of the agent's page. */
+  'browser:answer-download': {
+    args: [sessionId: string, requestId: number, allow: boolean]
+    result: void
+  }
+  /** Huli: the session's worktree, whose browser data a worktree profile uses. */
+  'browser:worktree': { args: [sessionId: string, worktree: string | null]; result: void }
+  /** Huli: the saved sign-in states, newest first; never what they hold. */
+  'browser:saved-states': { args: []; result: SavedStateSummary[] }
+  /** Huli: saves the selected tab's site's sign-in state under a name. */
+  'browser:save-state': { args: [sessionId: string, name: string]; result: SavedStateSummary[] }
+  /** Huli: restores a saved state into the session's browser data. */
+  'browser:restore-state': {
+    args: [sessionId: string, name: string]
+    result: { cookies: number; storage: number }
+  }
+  'browser:delete-saved-state': { args: [name: string]; result: void }
   'browser:site-icons': { args: []; result: SiteIconMap }
   /** A link's site has no icon yet: main tries the icon at the site's own root. */
   'browser:load-site-icon': { args: [url: string]; result: void }
@@ -626,6 +650,8 @@ export interface IpcEventContract {
   /** Sent only to the page that pasted the link. */
   'hosts:pairing': HostPairingEvent
   'browser:state': BrowserState
+  /** Huli: the saved sign-in states changed. */
+  'browser:saved-states': SavedStateSummary[]
   /** Huli: pick mode picked an element, or ended in the page. */
   'browser:pick': PickEvent
   /** Huli: the ports forwarded from other hosts changed. */
@@ -1137,6 +1163,18 @@ export interface KettuApi {
     removeAllowedSite(projectPath: string, origin: string): Promise<void>
     /** Clears the profile's cookies, site storage and cache, and the sites' icons. */
     clearData(): Promise<void>
+    /** Huli: turns off what the selected tab emulates. */
+    resetEmulation(sessionId: string): Promise<void>
+    /** Huli: lets a large download of the agent's page go on, or cancels it. */
+    answerDownload(sessionId: string, requestId: number, allow: boolean): Promise<void>
+    /** Huli: the session's worktree, for a profile of its own. */
+    setWorktree(sessionId: string, worktree: string | null): Promise<void>
+    /** Huli: saved sign-in states. */
+    savedStates(): Promise<SavedStateSummary[]>
+    saveState(sessionId: string, name: string): Promise<SavedStateSummary[]>
+    restoreState(sessionId: string, name: string): Promise<{ cookies: number; storage: number }>
+    deleteSavedState(name: string): Promise<void>
+    onSavedStates(listener: (states: SavedStateSummary[]) => void): () => void
     /** The icons of the sites the pages opened, which links in replies show. */
     siteIcons(): Promise<SiteIconMap>
     /** Tries the icon at a link's own site when Kettu has none recorded for it yet. */

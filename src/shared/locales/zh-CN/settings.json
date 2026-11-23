@@ -584,7 +584,8 @@
       "links": "智能体给出的链接",
       "siteData": "站点数据",
       "allowedSites": "始终允许",
-      "webReader": "后台读网页"
+      "webReader": "后台读网页",
+      "savedStates": "已存登录"
     },
     "openLinksIn": {
       "name": "链接打开方式",
@@ -641,6 +642,24 @@
         "body": "纸鸢会从 GitHub 下载一次 Moli {{version}}：{{mb}} MB，核对内置的 SHA-256 后放进纸鸢自己的数据文件夹。Moli 是开源的无界面浏览器（Apache-2.0 或 MIT），只在 Agent 读网页时运行，读完就退出。下载后自动打开后台读网页。",
         "action": "下载 {{mb}} MB"
       }
+    },
+    "profiles": {
+      "name": "每个会话的浏览器数据",
+      "description": "选“每个工作树”或“每个会话”，同时测试同一个应用的几个会话就不会共用登录；“每个会话”的数据在退出纸鸢后清空。会话打开第一个网页时按这里的选择定下来。",
+      "keywords": "浏览器 配置 分区 工作树 会话 Cookie 隔离 登录",
+      "shared": "共用",
+      "worktree": "每个工作树",
+      "session": "每个会话"
+    },
+    "savedStates": {
+      "name": "已存登录",
+      "description": "从浏览器保存的登录状态，可以恢复到别的会话。",
+      "keywords": "已存 登录 状态 Cookie 存储 恢复",
+      "note": "在浏览器面板的“浏览器数据”按钮里保存，或由 Agent 保存。纸鸢加密保存，从不显示里面的内容。",
+      "empty": "还没有已存登录。可以在浏览器面板里保存。",
+      "sites": "{{sites}} · {{date}} 保存",
+      "delete": "删除",
+      "deleted": "已删除“{{name}}”"
     }
   },
   "computer": {

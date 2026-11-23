@@ -195,6 +195,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'sessions.contextEstimates': AGENT_MS,
   'sessions.queue': HOST_MS,
   'sessions.runCommand': AGENT_MS,
+  'sessions.launchConfigs': HOST_MS,
   'sessions.unqueue': HOST_MS,
   'sessions.steer': AGENT_MS,
   'sessions.sendNow': AGENT_MS,

@@ -268,6 +268,15 @@ export class RemoteBrowser {
         },
       }
     }
+    // Huli: downloads and PDFs go into the session's folder, which is on the agent's host.
+    if (tool === 'browser_pdf' || tool === 'browser_downloads') {
+      return {
+        error: {
+          code: 'unavailable',
+          message: `${tool} works only when the agent runs on the computer whose browser shows the page.`,
+        },
+      }
+    }
     this.hosts.set(sessionId, hostId)
     let args = call.args
     if (tool === 'browser_navigate' && call.forward && typeof args.url === 'string') {

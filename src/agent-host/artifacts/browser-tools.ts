@@ -1,4 +1,4 @@
-// The eighteen browser tools of the `kettu` MCP server: what agents are told, the schemas, the
+// The browser tools of the `kettu` MCP server: what agents are told, the schemas, the
 // checks, and the forwarding to main, which drives the calling session's page.
 
 import { isAbsolute } from 'node:path'
@@ -20,6 +20,22 @@ import {
   MAX_UPLOAD_FILES,
   ORIGIN_WAIT_MS,
 } from '@shared/browser'
+import {
+  BROWSER_ARGS,
+  BrowserArgsInvalid,
+  DEVICE_PRESETS,
+  EMULATION_ITEMS,
+  MAX_CLICK_REASON,
+  MAX_ROUTE_BODY,
+  MAX_ROUTE_DELAY_MS,
+  MAX_STATE_NAME,
+  MAX_TRACE_SECONDS,
+  NETWORK_PRESETS,
+  ROUTE_ABORTS,
+  ROUTE_ACTIONS,
+  STORAGE_ACTIONS,
+  isArgsTool,
+} from '@shared/browser-args'
 import {
   CONTROL_STEPS,
   CONTROL_WAIT_MS,
@@ -53,6 +69,8 @@ export type BrowserToolDeps = {
   pageOf(sessionId: string): string | null
   /** The project of the session whose page a call drives; '' when it has none to name. */
   projectOf(sessionId: string): string
+  /** Huli: the folder that session works in, its worktree's or its project's; null for none. */
+  folderOf?(sessionId: string): string | null
   /** How a tab the user opened is allowed; without it every such tab is refused. */
   access?: BrowserAccessDeps
 }
@@ -148,6 +166,7 @@ export const BROWSER_READ_TOOLS: readonly BrowserToolName[] = [
   'browser_console_messages',
   'browser_network_requests',
   'browser_network_request',
+  'browser_downloads',
 ]
 
 const TAB = object(
@@ -451,6 +470,10 @@ export const BROWSER_TOOLS: Tool[] = [
             type: { type: 'string' },
             size: { type: ['integer', 'null'] },
             error: { type: 'string', description: 'Why it failed, such as net::ERR_FAILED.' },
+            mocked: {
+              type: 'string',
+              description: 'What a browser_route rule did with it, such as "mocked by r1".',
+            },
           },
           ['id', 'method', 'url', 'status', 'type', 'size'],
         ),
@@ -626,6 +649,269 @@ export const BROWSER_TOOLS: Tool[] = [
     outputSchema: output(PAGE),
     annotations: { openWorldHint: true },
   },
+  // Huli: the second batch.
+  {
+    name: 'browser_hover',
+    title: 'Hover',
+    description:
+      'Moves the pointer over an element from the snapshot, to show a tooltip or a menu that ' +
+      'opens on hover, once it is visible and uncovered, waiting up to 5 s for that.',
+    inputSchema: object({ ref: REF, element: ELEMENT }, ['ref']),
+    outputSchema: output(PAGE),
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'browser_drag',
+    title: 'Drag',
+    description:
+      'Drags one element from the snapshot onto another, with the mouse held down, as a person ' +
+      'does: for drag and drop lists, boards and sliders.',
+    inputSchema: object(
+      {
+        start_ref: { ...REF, description: 'The element to drag.' },
+        start_element: ELEMENT,
+        end_ref: { ...REF, description: 'The element to drop it on.' },
+        end_element: ELEMENT,
+      },
+      ['start_ref', 'end_ref'],
+    ),
+    outputSchema: output(PAGE),
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'browser_click_at',
+    title: 'Click at a point',
+    description:
+      'Clicks at a point of the page, in CSS pixels from the top left of the visible page, for ' +
+      'what a snapshot gives no ref, such as a canvas or a map. Prefer browser_click with a ref. ' +
+      'The point must lie inside the visible page; the user sees the reason.',
+    inputSchema: object(
+      {
+        x: { type: 'number', minimum: 0, description: 'From the left edge of the visible page.' },
+        y: { type: 'number', minimum: 0, description: 'From the top edge of the visible page.' },
+        reason: {
+          type: 'string',
+          maxLength: MAX_CLICK_REASON,
+          description: 'What is at the point and why you click it, shown to the user.',
+        },
+        button: { type: 'string', enum: ['left', 'right', 'middle'], default: 'left' },
+        double: { type: 'boolean', default: false, description: 'Clicks twice.' },
+      },
+      ['x', 'y', 'reason'],
+    ),
+    outputSchema: output(PAGE),
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'browser_emulate',
+    title: 'Emulate',
+    description:
+      'Makes your current tab emulate a device (its size, pixel ratio, touch and mobile browser), ' +
+      'a dark or light color scheme, reduced motion, a locale, a time zone, a location, or a slow ' +
+      'or offline network. What you leave out stays as it is; off turns items back off. The ' +
+      'user sees a chip while anything is emulated and may reset it. Reload the page for a ' +
+      'locale or a device to apply to what it already loaded.',
+    inputSchema: object({
+      device: {
+        type: 'string',
+        enum: DEVICE_PRESETS.map((device) => device.id),
+        description: 'A device by name.',
+      },
+      viewport: object(
+        {
+          width: { type: 'integer', minimum: 200, maximum: 3840 },
+          height: { type: 'integer', minimum: 200, maximum: 3840 },
+          device_scale_factor: { type: 'number', minimum: 1, maximum: 4, default: 1 },
+          mobile: { type: 'boolean', default: false },
+          touch: { type: 'boolean', description: 'Touch events; as mobile by default.' },
+        },
+        ['width', 'height'],
+      ),
+      color_scheme: { type: 'string', enum: ['light', 'dark'] },
+      reduced_motion: { type: 'string', enum: ['reduce', 'no-preference'] },
+      locale: { type: 'string', maxLength: 35, description: 'A language tag, such as zh-CN.' },
+      timezone: {
+        type: 'string',
+        maxLength: 64,
+        description: 'An IANA time zone, such as America/New_York.',
+      },
+      geolocation: object(
+        {
+          latitude: { type: 'number', minimum: -90, maximum: 90 },
+          longitude: { type: 'number', minimum: -180, maximum: 180 },
+          accuracy: { type: 'number', minimum: 0, description: 'Metres; 50 by default.' },
+        },
+        ['latitude', 'longitude'],
+      ),
+      network: {
+        type: 'string',
+        enum: [...NETWORK_PRESETS],
+        description: 'Throttles the tab, or takes it offline.',
+      },
+      off: {
+        type: 'array',
+        minItems: 1,
+        items: { type: 'string', enum: [...EMULATION_ITEMS, 'all'] },
+        description: 'Items to turn off, or all.',
+      },
+    }),
+    outputSchema: output({
+      emulation: { type: 'object', description: 'What the tab emulates now.' },
+    }),
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'browser_route',
+    title: 'Mock network',
+    description:
+      'Mocks the network of your tabs: add a rule that answers requests whose address matches ' +
+      'url with a fixed response, delays them, or fails them; list, remove or clear the rules. ' +
+      'url is a whole address with * for any run of characters, or text the address must hold. ' +
+      'The first rule that matches answers, in the order added. Rules last until the session’s ' +
+      'browser closes; browser_network_requests marks the requests they answered. A page of a ' +
+      'site that needs the user’s allow is never mocked itself.',
+    inputSchema: object(
+      {
+        action: { type: 'string', enum: [...ROUTE_ACTIONS] },
+        url: {
+          type: 'string',
+          maxLength: 2_000,
+          description: 'For add: such as "http://localhost:3000/api/*" or "/api/users".',
+        },
+        method: { type: 'string', maxLength: 16, description: 'Only this method; any by default.' },
+        status: { type: 'integer', minimum: 100, maximum: 599, description: '200 by default.' },
+        headers: { type: 'object', additionalProperties: { type: 'string' } },
+        body: { type: 'string', maxLength: MAX_ROUTE_BODY },
+        content_type: { type: 'string', maxLength: 200, description: 'Such as application/json.' },
+        delay_ms: {
+          type: 'integer',
+          minimum: 0,
+          maximum: MAX_ROUTE_DELAY_MS,
+          description: 'Waits this long first; alone, the request then goes to the network.',
+        },
+        abort: { type: 'string', enum: Object.keys(ROUTE_ABORTS), description: 'Fails it so.' },
+        times: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 1_000,
+          description: 'Answers only this many requests.',
+        },
+        id: { type: 'string', maxLength: 20, description: 'For remove: the rule’s id.' },
+      },
+      ['action'],
+    ),
+    outputSchema: output({
+      rules: {
+        type: 'array',
+        items: object(
+          {
+            id: { type: 'string' },
+            url: { type: 'string' },
+            method: { type: ['string', 'null'] },
+            does: { type: 'string', description: 'What it answers, in words.' },
+            used: { type: 'integer', description: 'Requests it answered.' },
+          },
+          ['id', 'url', 'method', 'does', 'used'],
+        ),
+      },
+    }),
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'browser_downloads',
+    title: 'Downloads',
+    description:
+      'Lists the files your pages downloaded in this session, with where each was saved, its ' +
+      'size and whether it finished. They are saved under .kite/downloads in the session’s ' +
+      'folder, where you can read them; the user is asked first for one over 50 MB.',
+    inputSchema: object({}),
+    outputSchema: output({
+      downloads: {
+        type: 'array',
+        items: object(
+          {
+            name: { type: 'string' },
+            path: { type: ['string', 'null'] },
+            bytes: { type: 'integer' },
+            state: {
+              type: 'string',
+              enum: ['waiting', 'progressing', 'completed', 'cancelled', 'interrupted'],
+            },
+          },
+          ['name', 'path', 'bytes', 'state'],
+        ),
+      },
+    }),
+    annotations: { ...READ_ONLY },
+  },
+  {
+    name: 'browser_pdf',
+    title: 'Save as PDF',
+    description:
+      'Saves the page of your current tab as a PDF under .kite/downloads in the session’s ' +
+      'folder, and returns its path, which you can read.',
+    inputSchema: object({
+      landscape: { type: 'boolean', default: false },
+      print_background: { type: 'boolean', default: true },
+    }),
+    outputSchema: output({ path: { type: 'string' }, bytes: { type: 'integer' } }),
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'browser_trace',
+    title: 'Performance trace',
+    description:
+      'Records a performance trace of your current tab for a few seconds, reloading the page ' +
+      'first with reload, and returns a short summary: long tasks, the scripts that ran longest, ' +
+      'layout and style time, and the largest contentful paint.',
+    inputSchema: object({
+      seconds: {
+        type: 'number',
+        minimum: 1,
+        maximum: MAX_TRACE_SECONDS,
+        default: 3,
+        description: `How long to record, at most ${MAX_TRACE_SECONDS} s.`,
+      },
+      reload: { type: 'boolean', default: false, description: 'Traces a reload of the page.' },
+    }),
+    outputSchema: output({ summary: { type: 'object' } }),
+    annotations: { openWorldHint: false },
+  },
+  {
+    name: 'browser_storage_state',
+    title: 'Saved sign-in states',
+    description:
+      'Saves the signed-in state of your current tab’s site (its cookies and local storage) ' +
+      'under a name, restores a saved one into this session’s browser, or lists them. Kite keeps ' +
+      'them encrypted, and you never see their values. Sign in once, save, and restore it in ' +
+      'another session or worktree whose browser data is its own; open the site again after a ' +
+      'restore.',
+    inputSchema: object(
+      {
+        action: { type: 'string', enum: [...STORAGE_ACTIONS] },
+        name: {
+          type: 'string',
+          maxLength: MAX_STATE_NAME,
+          description: 'For save and restore, such as "admin".',
+        },
+      },
+      ['action'],
+    ),
+    outputSchema: output({
+      states: {
+        type: 'array',
+        items: object(
+          {
+            name: { type: 'string' },
+            sites: { type: 'array', items: { type: 'string' } },
+            saved_at: { type: 'string' },
+          },
+          ['name', 'sites', 'saved_at'],
+        ),
+      },
+    }),
+    annotations: { openWorldHint: false },
+  },
 ]
 
 const NAMES = new Set<string>(BROWSER_TOOL_NAMES)
@@ -662,7 +948,7 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     throw invalid('The arguments must be an object.')
   }
   const o = (value ?? {}) as Args
-  const allowed: Record<BrowserToolName, string[]> = {
+  const allowed: Record<string, string[]> = {
     browser_navigate: ['url'],
     browser_navigate_back: [],
     browser_reload: [],
@@ -681,6 +967,17 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     browser_ask_user: ['step', 'reason'],
     browser_tabs: ['action', 'index'],
     browser_upload_file: ['paths', 'ref', 'element'],
+  }
+  if (isArgsTool(name)) {
+    // Huli: the second batch's tools are checked by the parsers main runs again.
+    // Main parses them again from what the agent gave, so they go on as given.
+    try {
+      BROWSER_ARGS[name](o)
+      return { tool: name, args: o }
+    } catch (error) {
+      if (error instanceof BrowserArgsInvalid) throw invalid(error.message)
+      throw error
+    }
   }
   for (const key of Object.keys(o)) {
     if (!allowed[name].includes(key)) throw invalid(`Unknown argument ${key}.`)
@@ -942,6 +1239,12 @@ export function timeoutFor(tool: BrowserToolName, args: Args): number {
     const seconds = typeof args.time === 'number' ? args.time : MAX_WAIT_SECONDS
     return Math.round(seconds * 1000) + WAIT_EXTRA_MS
   }
+  // Huli: a trace records for its seconds, after a reload when asked, then reads the trace.
+  if (tool === 'browser_trace') {
+    const seconds = typeof args.seconds === 'number' ? args.seconds : 3
+    return Math.round(seconds * 1000) + NAVIGATION_TIMEOUT_MS
+  }
+  if (tool === 'browser_pdf' || tool === 'browser_storage_state') return NAVIGATION_TIMEOUT_MS
   return ACTION_TIMEOUT_MS
 }
 
@@ -989,12 +1292,15 @@ export class BrowserTools {
         message: 'This session no longer exists, so it has no browser.',
       })
     }
+    const projectPath = this.deps.projectOf(page)
+    const folder = this.deps.folderOf?.(page) ?? null
     const request: BrowserCallRequest = {
       callId: this.nextId++,
       sessionId: page,
       tool,
       args: asked.args,
-      projectPath: this.deps.projectOf(page),
+      projectPath,
+      ...(folder ? { folder, worktree: folder !== projectPath } : {}),
     }
     let answer = await this.forward(request, timeoutFor(tool, asked.args), caller.sessionId)
     const theirs =

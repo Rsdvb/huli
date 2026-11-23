@@ -150,6 +150,9 @@ export interface SettingsFile {
   // source: where updates come from; GitHub only never reaches Kettu's download service.
   updates: { automatic: 'download' | 'restart' | 'notify' | 'off'; source: 'auto' | 'github' }
   privacy: { hideAccount: boolean } // kept so older files still parse; loading turns it off
+  // Huli: whose cookies and storage each session's browser pages use: everyone's, the session's
+  // worktree's own, or the session's own for as long as the app runs.
+  browserProfiles: { mode: 'shared' | 'worktree' | 'session' }
   // Detailed records are on until this time (ms since the epoch); null when off.
   diagnostics: { verboseUntil: number | null }
   usage: {
@@ -447,6 +450,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   workflow: { maxWorkingSteps: DEFAULT_WORKING_STEPS },
   updates: { automatic: 'download', source: 'auto' },
   privacy: { hideAccount: false },
+  browserProfiles: { mode: 'shared' },
   diagnostics: { verboseUntil: null },
   usage: { fromComputer: false, sidebar: 'today', limits: 'used' },
   remote: {
@@ -557,6 +561,7 @@ export interface SettingsPatch {
   workflow?: Partial<SettingsFile['workflow']>
   updates?: Partial<SettingsFile['updates']>
   privacy?: Partial<SettingsFile['privacy']>
+  browserProfiles?: Partial<SettingsFile['browserProfiles']>
   diagnostics?: Partial<SettingsFile['diagnostics']>
   computerUse?: Partial<SettingsFile['computerUse']> // allowedApps is replaced whole
   agentNetwork?: Partial<SettingsFile['agentNetwork']> // agents is replaced whole

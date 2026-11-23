@@ -2524,6 +2524,7 @@ export function createValidators(platform: Platform): Validators {
     'sessions.steer': queueItem,
     'sessions.sendNow': queueItem,
     'sessions.resumeQueue': session,
+    'sessions.launchConfigs': session,
     'sessions.limitPause': (params) => {
       const o = fields(params)
       if (!(LIMIT_PAUSE_ACTIONS as readonly unknown[]).includes(o.action)) {
