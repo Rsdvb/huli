@@ -36,7 +36,8 @@ export interface Redactor {
 export interface RedactorOptions {
   /** The user's home folder, written as `~`. */
   home?: string
-  platform?: NodeJS.Platform
+  /** Huli: a system's name as Node's `process.platform` gives it; the phone passes its own. */
+  platform?: string
   /** Values to mask wherever they appear, such as tokens Kettu holds. */
   secrets?: () => Iterable<string>
   /**
@@ -84,7 +85,7 @@ export function createRedactor(options: RedactorOptions = {}): Redactor {
 }
 
 /** The home folder as it appears in text: plain, and with backslashes escaped as in JSON. */
-function homePatterns(home: string | undefined, platform: NodeJS.Platform): RegExp[] {
+function homePatterns(home: string | undefined, platform: string): RegExp[] {
   if (!home || home.length < 2) return []
   const trimmed = home.replace(/[\\/]+$/, '')
   const forms = new Set([trimmed, trimmed.replace(/\\/g, '\\\\')])

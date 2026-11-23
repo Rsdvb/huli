@@ -67,7 +67,8 @@
     "exportFilter": {
       "md": "Markdown",
       "zip": "Zip 压缩包",
-      "pdf": "PDF"
+      "pdf": "PDF",
+      "html": "网页"
     }
   },
   "backup": {

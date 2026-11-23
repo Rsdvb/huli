@@ -11,8 +11,11 @@ export const EXPORT_ASSET = 'kite-export-asset:'
 /** An exported picture's name: `image-001.png`. */
 export const EXPORT_IMAGE_NAME = /^image-\d{3,5}\.(?:png|jpg|gif|webp|avif|bmp|svg)$/
 
-export const EXPORT_FORMATS = ['md', 'zip', 'pdf'] as const
-/** Markdown with its pictures in a folder beside it, the same in a zip, or a PDF. */
+export const EXPORT_FORMATS = ['md', 'zip', 'pdf', 'html'] as const
+/**
+ * Markdown with its pictures in a folder beside it, the same in a zip, a PDF, or Huli: one web
+ * page that holds its pictures and styles, readable offline, its tool calls folded.
+ */
 export type ExportFormat = (typeof EXPORT_FORMATS)[number]
 
 /** What the page hands main to save: the Markdown and the pictures it links, by name. */
@@ -98,6 +101,8 @@ export type ExportKey =
   | 'linesMore'
   | 'image'
   | 'media'
+  | 'changes'
+  | 'changesTotal'
 
 export interface ExportText {
   t(key: ExportKey, values?: Record<string, string | number>): string
@@ -303,6 +308,8 @@ class Writer {
   private list: string[] = []
   readonly images: ExportImage[] = []
   private readonly named = new Map<string, string>()
+  /** Huli: the lines each file's finished edits added and removed, by its shown path, in order. */
+  readonly changes = new Map<string, { added: number; removed: number }>()
 
   constructor(
     private readonly text: ExportText,
@@ -327,6 +334,23 @@ class Writer {
   done(): string {
     this.flush()
     return `${this.blocks.join('\n\n')}\n`
+  }
+
+  /** Where the next block goes, for one that is written later but shows there. */
+  get mark(): number {
+    this.flush()
+    return this.blocks.length
+  }
+
+  /** A block at a place `mark` gave. */
+  blockAt(index: number, markdown: string): void {
+    if (markdown.trim()) this.blocks.splice(index, 0, markdown.trim())
+  }
+
+  /** Huli: a finished edit's lines, for the summary of the changes. */
+  changed(path: string, added: number, removed: number): void {
+    const was = this.changes.get(path) ?? { added: 0, removed: 0 }
+    this.changes.set(path, { added: was.added + added, removed: was.removed + removed })
   }
 
   /** A folded block: its summary in one line, and what it holds under it. */
@@ -500,6 +524,9 @@ function toolMarkdown(writer: Writer, entry: ToolEntry, session: ExportSession):
     if (part.type !== 'diff') continue
     const path = relativePath(part.path, session.root)
     const diff = unifiedDiff(path, part.oldText, part.newText)
+    if (entry.status === 'completed' && !statusText(writer, entry)) {
+      writer.changed(path, diff.added, diff.removed)
+    }
     writer.block(
       `\`${path.replace(/`/g, '')}\` (+${diff.added} −${diff.removed})\n\n${fenced(
         cut(diff.text, MAX_DIFF_LINES, (count) => `… ${writer.t('linesMore', { count })}`),
@@ -653,6 +680,31 @@ function entriesMarkdown(
   }
 }
 
+/**
+ * Huli: what the session's finished edits changed, a file a line, with the lines added and
+ * removed; empty for a session that changed nothing.
+ */
+function changesMarkdown(writer: Writer): string {
+  if (writer.changes.size === 0) return ''
+  let added = 0
+  let removed = 0
+  const lines = [...writer.changes].map(([path, counts]) => {
+    added += counts.added
+    removed += counts.removed
+    return `- \`${path.replace(/`/g, '')}\` (+${counts.added} −${counts.removed})`
+  })
+  const total = writer.t('changesTotal', { count: writer.changes.size, added, removed })
+  return [
+    `## ${writer.t('changes')}`,
+    '',
+    `*${escapeInline(total)}*`,
+    '',
+    ...lines,
+    '',
+    '---',
+  ].join('\n')
+}
+
 /** The session, and its sub-agents' sessions by id, as Markdown and the pictures it links. */
 export function sessionMarkdown(input: {
   session: ExportSession
@@ -674,6 +726,8 @@ export function sessionMarkdown(input: {
   ]
   for (const [name, value] of facts) writer.item(`**${name}:** ${value}`)
   writer.block('---')
+  const summaryAt = writer.mark
   entriesMarkdown(writer, session, 2, 0)
+  writer.blockAt(summaryAt, changesMarkdown(writer))
   return { markdown: writer.done(), images: writer.images }
 }

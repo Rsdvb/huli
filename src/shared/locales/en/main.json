@@ -67,7 +67,8 @@
     "exportFilter": {
       "md": "Markdown",
       "zip": "Zip archive",
-      "pdf": "PDF"
+      "pdf": "PDF",
+      "html": "Web page"
     }
   },
   "backup": {

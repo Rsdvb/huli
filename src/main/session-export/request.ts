@@ -28,7 +28,7 @@ export function parseExportRequest(raw: unknown): SessionExportRequest {
   if (extra !== undefined) throw new TypeError(`An export takes no "${extra}"`)
   const { format, title, markdown, images } = raw
   if (!EXPORT_FORMATS.includes(format as ExportFormat)) {
-    throw new TypeError('The format must be md, zip or pdf')
+    throw new TypeError('The format must be md, zip, pdf or html')
   }
   if (typeof title !== 'string' || title.length > MAX_TITLE_CHARS || title.includes('\0')) {
     throw new TypeError(`The title must be text of at most ${MAX_TITLE_CHARS} characters`)

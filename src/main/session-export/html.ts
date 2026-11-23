@@ -188,12 +188,33 @@ function safeImage(url: string): string | null {
   return EXPORT_IMAGE_NAME.test(name) ? name : null
 }
 
+/**
+ * How a page shows the export: printed, its folds as boxes and its pictures the files beside it,
+ * or Huli: as one web page, its folds closed and its pictures held in it, by name.
+ */
+export type PageMode = { kind: 'print' } | { kind: 'web'; images: Readonly<Record<string, string>> }
+
+const PRINT: PageMode = { kind: 'print' }
+
 class Renderer {
   private openFolds = 0
   /** Whether a formula was drawn, so the page needs KaTeX's styles. */
   math = false
 
-  constructor(private readonly text: string) {}
+  constructor(
+    private readonly text: string,
+    private readonly mode: PageMode = PRINT,
+  ) {}
+
+  /** A picture's source: one of the export's own files, or in a web page the data it holds. */
+  private imageSource(target: string): string | null {
+    const name = safeImage(target)
+    if (!name || this.mode.kind === 'print') return name
+    const data = this.mode.images[name]
+    return data && /^data:image\/(?:png|jpeg|gif|webp|avif|bmp);base64,[A-Za-z0-9+/=]+$/.test(data)
+      ? data
+      : null
+  }
 
   private slice(from: number, to: number): string {
     return this.text.slice(from, to)
@@ -247,7 +268,7 @@ class Renderer {
         const url = node.getChild('URL')
         const target = url ? this.slice(url.from, url.to).replace(/^<|>$/g, '') : ''
         if (node.name === 'Image') {
-          const source = safeImage(target)
+          const source = this.imageSource(target)
           return source
             ? `<img src="${escape(source)}" alt="${label.replace(/<[^>]*>/g, '')}">`
             : `<em>[${label}]</em>`
@@ -409,21 +430,24 @@ class Renderer {
     for (const line of source.split('\n')) {
       const trimmed = line.trim()
       if (!trimmed) continue
+      const web = this.mode.kind === 'web'
       if (/^<details(?:\s+open)?>$/i.test(trimmed)) {
         this.openFolds++
-        out += '<div class="fold">'
+        out += web ? '<details class="fold">' : '<div class="fold">'
         continue
       }
       const summary = /^<summary>(.*)<\/summary>$/i.exec(trimmed)
       if (summary) {
         const text = decodeEntities(summary[1]!.replace(/<[^>]*>/g, ''))
-        out += `<div class="fold-title">${escape(text)}</div>`
+        out += web
+          ? `<summary class="fold-title">${escape(text)}</summary>`
+          : `<div class="fold-title">${escape(text)}</div>`
         continue
       }
       if (/^<\/details>$/i.test(trimmed)) {
         if (this.openFolds > 0) {
           this.openFolds--
-          out += '</div>\n'
+          out += web ? '</details>\n' : '</div>\n'
         }
         continue
       }
@@ -434,13 +458,16 @@ class Renderer {
 
   render(): string {
     const body = this.blocks(markdown.parse(this.text).topNode)
-    return body + '</div>'.repeat(this.openFolds)
+    return body + (this.mode.kind === 'web' ? '</details>' : '</div>').repeat(this.openFolds)
   }
 }
 
 /** The Markdown's body as HTML, and whether it draws a formula. */
-export function renderMarkdown(text: string): { html: string; math: boolean } {
-  const renderer = new Renderer(fenceBracketMath(text, false))
+export function renderMarkdown(
+  text: string,
+  mode: PageMode = PRINT,
+): { html: string; math: boolean } {
+  const renderer = new Renderer(fenceBracketMath(text, false), mode)
   const html = renderer.render()
   return { html, math: renderer.math }
 }
@@ -495,24 +522,53 @@ p.raw { font: 9pt/1.45 "Cascadia Code", Consolas, monospace; color: #57606a; }
 div.math > .katex-display { margin: 0 0 8pt; }
 `
 
+// Huli: the web page's own rules over the print's: a column to read in, the folds that open, and
+// dark colors when the reader's system is dark.
+const WEB_STYLE = `
+html { color-scheme: light dark; }
+body { max-width: 860px; margin: 0 auto; padding: 32px 24px 64px; font-size: 15px; }
+code, pre { font-size: 13px; }
+details.fold > summary { cursor: pointer; margin-bottom: 0; list-style-position: inside; }
+details.fold[open] > summary { margin-bottom: 6px; }
+@media (prefers-color-scheme: dark) {
+  body { background: #0d1117; color: #e6edf3; }
+  h2, hr { border-color: #30363d; }
+  a { color: #58a6ff; }
+  code { background: #1f242c; }
+  pre, .fold { background: #161b22; border-color: #30363d; }
+  th { background: #161b22; }
+  th, td { border-color: #30363d; }
+  blockquote { border-color: #3d444d; color: #9198a1; }
+  .fold-title, .d-file, p.raw { color: #9198a1; }
+  .d-add { background: #12261e; color: #3fb950; }
+  .d-del { background: #2d1214; color: #f85149; }
+  .d-hunk { color: #a371f7; }
+  img { border-color: #30363d; }
+}
+`
+
 /**
- * A whole page to print: the body, its title, and a stylesheet in light colors, with KaTeX's
- * styles and fonts (`mathStyle`) when it draws a formula.
+ * A whole page: the body, its title, and a stylesheet in light colors, with KaTeX's styles and
+ * fonts (`mathStyle`) when it draws a formula. Huli: a web page holds its pictures and opens its
+ * folds by a click, and reads in the reader's own colors; it runs no script either way.
  */
 export function exportPage(
   title: string,
   markdownText: string,
   mathStyle: () => string = () => '',
+  mode: PageMode = PRINT,
 ): string {
-  const body = renderMarkdown(markdownText)
+  const body = renderMarkdown(markdownText, mode)
   const math = body.math ? `<style>${mathStyle()}</style>\n` : ''
+  const web = mode.kind === 'web'
+  const images = web ? 'data:' : 'file: data:'
   return `<!doctype html>
 <html lang="und">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline'; font-src data:">
+${web ? '<meta name="viewport" content="width=device-width, initial-scale=1">\n' : ''}<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${images}; style-src 'unsafe-inline'; font-src data:">
 <title>${escape(title)}</title>
-<style>${STYLE}</style>
+<style>${STYLE}${web ? WEB_STYLE : ''}</style>
 ${math}</head>
 <body>
 ${body.html}

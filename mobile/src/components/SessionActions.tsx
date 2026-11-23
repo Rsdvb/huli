@@ -8,6 +8,7 @@
 // light link (`linkFor`); what needs the active computer's full link, deleting and forking, is
 // left out of its menu.
 
+import { shareSessionMarkdown } from '../sessionExport'
 import { useState, type ReactNode } from 'react'
 import { Alert } from 'react-native'
 import { router } from 'expo-router'
@@ -78,6 +79,8 @@ export interface SessionActions {
   setNeverSettle(summary: SessionSummary, never: boolean): void
   copyResume(summary: SessionSummary): void
   copySessionId(summary: SessionSummary): void
+  /** Huli: 分享为 Markdown: the whole session as one Markdown file, in the share sheet. */
+  shareMarkdown(summary: SessionSummary): void
   /** Its resume command, or null for an agent without one. */
   resumeOf(summary: SessionSummary): string | null
   /** Asks with the desktop's dialog, then deletes; refused while a turn runs. */
@@ -353,6 +356,18 @@ export function useSessionActions(
       void copyText(s.acpSessionId ?? s.id).then(() =>
         showNotice({ text: '已复制会话 ID', tone: 'success' }),
       ),
+    shareMarkdown: (s: SessionSummary) => {
+      const link = linkOf(s)
+      if (!link) {
+        haptic.warning()
+        Alert.alert('没能分享', '现在连不上这个会话所在的电脑。')
+        return
+      }
+      showNotice({ text: '正在准备 Markdown…', tone: 'info' })
+      shareSessionMarkdown(link, s, agents.get(s.agentId)?.name ?? s.agentId).catch(
+        (error: unknown) => Alert.alert('没能分享', errorText(error)),
+      )
+    },
   }
 
   // A best-of-N run's changes go into the project on the computer, as the desktop's Keep this
@@ -536,6 +551,12 @@ export function useSessionActions(
         label: '复制会话 ID',
         icon: 'doc.on.doc',
         onPress: () => actions.copySessionId(s),
+      },
+      {
+        key: 'share-md',
+        label: '分享为 Markdown',
+        icon: 'square.and.arrow.up',
+        onPress: () => actions.shareMarkdown(s),
       },
     ]
     const end: MenuNode[] = [

@@ -137,7 +137,7 @@ import { MoveToFolderMenu } from '@renderer/features/session-folders/move-menu'
 import { RowOrderItems } from './group-order-menu'
 import { BoardStatusMenu } from '@renderer/features/task-board/status'
 import { ManagerMenu } from '@renderer/features/manager/manager-menu'
-import { askExport, canExport } from '@renderer/features/session/export/export'
+import { askExport, canExport, exportAs } from '@renderer/features/session/export/export'
 import { askMove, canMove } from '@renderer/features/session/move/move'
 import {
   askRemoveWorktree,
@@ -244,7 +244,7 @@ export function SessionMenuItems({
   /** The row's sub-agents, which the menu lists as its badge does; left out where it has none. */
   subagents?: readonly SessionSummary[]
 }) {
-  const { t } = useTranslation(['sidebar', 'common'])
+  const { t } = useTranslation(['sidebar', 'common', 'session'])
   // The agents of the session's host that can run one now; More options opens New session with
   // every agent.
   const hostId = hostOfSession(summary)
@@ -605,12 +605,27 @@ export function SessionMenuItems({
             {t('row.mini')}
           </DropdownMenuItem>
         )
+      // Huli: Export › Web page… and Markdown… at once, and the dialog for the rest.
       case 'export':
         return (
-          <DropdownMenuItem key={name} {...props} onClick={() => askExport(summary)}>
-            <MenuGlyph icon={FileExportIcon} />
-            {t('row.export')}
-          </DropdownMenuItem>
+          <DropdownMenuSub key={name}>
+            <DropdownMenuSubTrigger>
+              <MenuGlyph icon={FileExportIcon} />
+              {t('session:export.menu')}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem onClick={() => exportAs(summary, 'html')}>
+                {t('session:export.asHtml')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportAs(summary, 'md')}>
+                {t('session:export.asMarkdown')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => askExport(summary)}>
+                {t('session:export.more')}
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         )
       case 'move':
         return (

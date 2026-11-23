@@ -28,13 +28,13 @@ describe('the request from the page', () => {
 
   it('takes a format, a title, the Markdown and named pictures', () => {
     expect(parseExportRequest(request)).toEqual(request)
-    for (const format of ['zip', 'pdf']) {
+    for (const format of ['zip', 'pdf', 'html']) {
       expect(parseExportRequest({ ...request, format }).format).toBe(format)
     }
   })
 
   it('refuses another format, a path for a name, and keys it does not know', () => {
-    expect(() => parseExportRequest({ ...request, format: 'html' })).toThrow('format')
+    expect(() => parseExportRequest({ ...request, format: 'docx' })).toThrow('format')
     expect(() => parseExportRequest({ ...request, path: 'C:/Windows/x.md' })).toThrow('"path"')
     for (const name of ['../image-001.png', 'C:\\x.png', 'image-1.png', 'image-001.exe', 'a.png']) {
       expect(() => parseExportRequest({ ...request, images: [{ name, data: png }] })).toThrow(
@@ -239,6 +239,48 @@ describe('the page a PDF prints', () => {
   })
 })
 
+describe('Huli: the web page of an export', () => {
+  const dataUrl = 'data:image/png;base64,iVBORw0KGgo='
+  const web = { kind: 'web' as const, images: { 'image-001.png': dataUrl } }
+
+  it('holds its own pictures as data, and loads no file and no other picture', () => {
+    const page = exportPage(
+      'T',
+      '![a](image-001.png) ![b](image-002.png) ![c](https://example.com/x.png)\n',
+      () => '',
+      web,
+    )
+    expect(page).toContain(`<img src="${dataUrl}" alt="a">`)
+    expect(page).toContain('<em>[b]</em>')
+    expect(page).toContain('<em>[c]</em>')
+    expect(page).toContain("default-src 'none'; img-src data:;")
+    expect(page).not.toContain('file:')
+    expect(page).not.toMatch(/<script/i)
+  })
+
+  it('takes no picture data that is not a picture', () => {
+    const page = exportPage('T', '![a](image-001.png)\n', () => '', {
+      kind: 'web',
+      images: { 'image-001.png': 'data:text/html;base64,PHNjcmlwdD4=' },
+    })
+    expect(page).toContain('<em>[a]</em>')
+  })
+
+  it('folds as details that open by a click, their titles as text', () => {
+    const page = exportPage(
+      'T',
+      '<details>\n<summary>Input <b>and</b> output</summary>\n\nx\n\n</details>\n',
+      () => '',
+      web,
+    )
+    expect(page).toContain(
+      '<details class="fold"><summary class="fold-title">Input and output</summary>',
+    )
+    expect(page).toContain('</details>')
+    expect(page).toContain('prefers-color-scheme: dark')
+  })
+})
+
 const text: ExportText = {
   t: (key, values) => (values ? `${key} ${JSON.stringify(values)}` : key),
   time: (ms) => new Date(ms).toISOString(),
@@ -375,6 +417,36 @@ describe('the Markdown of a session', () => {
     expect(markdown).toContain('### Claude Code')
     expect(markdown).toContain('Child work')
     expect(markdown).toContain('Done.')
+    // Huli: the changes summary, after the facts and before the conversation.
+    const summary =
+      '## changes\n\n*changesTotal {"count":1,"added":1,"removed":1}*\n\n- `src/a.ts` (+1 −1)'
+    expect(markdown).toContain(summary)
+    expect(markdown.indexOf(summary)).toBeLessThan(markdown.indexOf('## you'))
+  })
+
+  it('Huli: sums each file once, and leaves out edits that failed or were denied', () => {
+    const edit = (id: string, path: string, status: ToolEntry['status']) =>
+      tool({
+        id,
+        title: 'Edit',
+        toolKind: 'edit',
+        status,
+        content: [{ type: 'diff', path, oldText: 'a\n', newText: 'b\nc\n' }],
+      })
+    const { markdown } = sessionMarkdown({
+      session: session([
+        edit('e1', '/home/ann/app/x.ts', 'completed'),
+        edit('e2', '/home/ann/app/x.ts', 'completed'),
+        edit('e3', '/home/ann/app/y.ts', 'failed'),
+      ]),
+      options: none,
+      text,
+      exportedAt: 0,
+    })
+    expect(markdown).toContain('- `x.ts` (+4 −2)')
+    expect(markdown).not.toContain('- `y.ts`')
+    const empty = sessionMarkdown({ session: session([]), options: none, text, exportedAt: 0 })
+    expect(empty.markdown).not.toContain('## changes')
   })
 
   it('leaves out thinking, tool details and sub-agents unless asked', () => {
