@@ -4,7 +4,6 @@
 
 import { Fragment } from 'react'
 import { QuillWrite01Icon } from '@hugeicons/core-free-icons'
-import { useShallow } from 'zustand/react/shallow'
 import type { ConfigOption } from '@shared/thread'
 import {
   DropdownMenuLabel,
@@ -18,18 +17,7 @@ import {
 import { toast } from '@renderer/components/ui/toast'
 import { MenuGlyph } from '@renderer/features/shell/glyph'
 import { errorMessage, host } from '@renderer/lib/host'
-import { useThreadsStore } from '@renderer/stores/threads'
-
-/** The session's menu options, from its open thread; none while it is not open. */
-export function useMenuOptions(sessionId: string): ConfigOption[] {
-  return useThreadsStore(
-    useShallow((s) =>
-      (s.replicas[sessionId]?.state?.session.config ?? []).filter(
-        (option) => option.place === 'menu' && option.type === 'select' && !!option.choices?.length,
-      ),
-    ),
-  )
-}
+import { useMenuOptions } from './menu-options-model'
 
 export function MenuOptions({ sessionId }: { sessionId: string }) {
   const options = useMenuOptions(sessionId)
