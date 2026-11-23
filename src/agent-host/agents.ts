@@ -3696,7 +3696,10 @@ export class AgentManager {
     })
   }
 
-  /** `npm config get` of these keys, asked once until the next redetect; null when npm fails. */
+  /**
+   * `npm config get` of these keys, with the global prefix as `npm prefix -g` says it, asked once
+   * until the next redetect; null when npm fails.
+   */
   private npmConfig(
     h: Harness,
     npm: string | null,
@@ -3708,16 +3711,23 @@ export class AgentManager {
     const known = this.npmConfigs.get(key)
     if (known) return known
     const read = (async () => {
-      const run = await runNpm({
-        npm,
-        args: ['config', 'get', ...keys],
-        cwd: os.homedir(),
-        env,
-        platform: this.deps.platform,
-        timeoutMs: this.timings.updateViewMs,
-      })
+      const [run, prefix] = await Promise.all([
+        runNpm({
+          npm,
+          args: ['config', 'get', ...keys],
+          cwd: os.homedir(),
+          env,
+          platform: this.deps.platform,
+          timeoutMs: this.timings.updateViewMs,
+        }),
+        this.npmPrefix(npm),
+      ])
       const failure = programFailure('npm', run, this.timings.updateViewMs)
-      if (!failure) return parseNpmConfig(run.stdout)
+      if (!failure) {
+        const config = parseNpmConfig(run.stdout, keys)
+        if (prefix) config.set('prefix', prefix)
+        return config
+      }
       this.deps.diagnostics.log(
         'warn',
         `${h.def.name}: npm's configuration was not read: ${failure}`,
