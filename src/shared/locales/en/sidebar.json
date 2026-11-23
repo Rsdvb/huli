@@ -589,7 +589,6 @@
     "nowActivity": "{{name}} is sorted by recent activity again."
   },
   "rowDrag": {
-    "sameComputer": "Sessions cannot move between projects on the same computer yet, only to a project on another computer.",
     "noProjectTarget": "A session can move only into a project, not into No project.",
     "missing": "The folder of this project is gone.",
     "moved": "This session has moved away already.",

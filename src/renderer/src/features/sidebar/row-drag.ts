@@ -536,7 +536,6 @@ function sessionProblem(summary: SessionSummary, group: RowGroup): string | null
   if (BUSY.has(summary.status) || runningMove(summary.id)) return problem('busy')
   const from = hostOfSession(summary)
   if (!online(from) || !online(group.hostId)) return problem('offline')
-  if (from === group.hostId) return i18n.t('sidebar:rowDrag.sameComputer')
   return null
 }
 
@@ -552,7 +551,7 @@ function moveProblem(ids: readonly string[], group: RowGroup): string | null {
   if (!canMove()) return i18n.t('sidebar:rowDrag.noWindow')
   if (group.kind === 'noProject') return i18n.t('sidebar:rowDrag.noProjectTarget')
   if (group.missing) return i18n.t('sidebar:rowDrag.missing')
-  for (const summary of summaries) {
+  for (const summary of summaries.filter((item) => homeOf(item) !== group.key)) {
     const why = sessionProblem(summary, group)
     if (!why) continue
     return summaries.length > 1
@@ -565,7 +564,10 @@ function moveProblem(ids: readonly string[], group: RowGroup): string | null {
 function openMove(ids: readonly string[], key: string): void {
   const group = groups.get(key)
   const { byId } = useSessionsStore.getState()
-  const summaries = ids.flatMap((id) => (byId[id] ? [byId[id]] : []))
+  // Ones already in the project stay out of the move.
+  const summaries = ids.flatMap((id) =>
+    byId[id] && group && homeOf(byId[id]) !== group.key ? [byId[id]] : [],
+  )
   const [first, ...more] = summaries
   if (!group?.path || !first) return
   clearSelection()

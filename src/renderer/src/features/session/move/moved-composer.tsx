@@ -23,6 +23,10 @@ export function MovedComposer({ summary }: { summary: SessionSummary }) {
     setBusy(true)
     setError(null)
     try {
+      // Huli: one moved within its computer was archived as it left; going on brings it back.
+      if (moved.sameComputer && summary.archivedAt) {
+        await host('sessions.unarchive', { sessionId: summary.id })
+      }
       await host('sessions.clearMoved', { sessionId: summary.id })
     } catch (e) {
       setError(errorMessage(e))
@@ -34,7 +38,11 @@ export function MovedComposer({ summary }: { summary: SessionSummary }) {
     <div className="flex flex-col gap-2">
       <div className="ks-bar">
         <Glyph icon={ComputerArrowUpIcon} className="ks-bar__icon size-4 shrink-0" />
-        <p>{t('move.moved', { name: moved.name })}</p>
+        <p>
+          {moved.sameComputer
+            ? t('move.local.moved', { name: moved.name })
+            : t('move.moved', { name: moved.name })}
+        </p>
         <div className="flex shrink-0 flex-wrap items-center gap-1.5">
           <Button
             variant="outline"
@@ -53,7 +61,7 @@ export function MovedComposer({ summary }: { summary: SessionSummary }) {
             </Button>
           )}
           <Button variant="ghost" className="ks-btn" disabled={busy} onClick={() => void stay()}>
-            {t('move.stay')}
+            {moved.sameComputer ? t('move.local.stay') : t('move.stay')}
           </Button>
         </div>
       </div>
