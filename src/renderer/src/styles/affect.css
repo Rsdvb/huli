@@ -181,11 +181,13 @@
   flex: none;
 }
 /* Huli: the list's scrollbar, which App Shell hides for good, shows while the pointer is over the
-   sidebar or the keyboard is in it, thin, draggable and in the theme's thumb color, and hides at
-   rest. Windows draws it with the scrollbar pseudo-elements (globals.css) in a gutter the list
+   sidebar or the keyboard is in the list, thin, draggable and in the theme's thumb color, and hides
+   at rest. Windows draws it with the scrollbar pseudo-elements (globals.css) in a gutter the list
    keeps whether it scrolls or not, so the rows never change width; the gutter reaches into the
    sidebar's right padding up to the resize handle, which starts 6px before the sidebar's edge and
-   would take the thumb's drags. macOS keeps its overlay scrollbar, as the system shows it. */
+   would take the thumb's drags. macOS keeps its overlay scrollbar, as the system shows it. The
+   :has() is on the list itself: on the sidebar, any focus change or added element would restyle
+   every row. */
 .kettu-frame .ui-as-side__nav.ui-as-side__nav {
   --side-scrollbar: 6px;
   --side-scrollbar-inset: 1px;
@@ -194,8 +196,14 @@
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
-.kettu-frame .ui-as-side:is(:hover, :has(:focus-visible)) .ui-as-side__nav.ui-as-side__nav,
+.kettu-frame .ui-as-side:hover .ui-as-side__nav.ui-as-side__nav,
+.kettu-frame .ui-as-side .ui-as-side__nav.ui-as-side__nav:has(:focus-visible),
 :root[data-platform='darwin'] .kettu-frame .ui-as-side__nav.ui-as-side__nav {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+/* scrollbar-color is inherited: the list's children take the page's own, so the pointer coming
+   and going restyles the list alone, not every row in it. */
+:where(.kettu-frame .ui-as-side__nav > *) {
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 :root[data-platform='win32'] .kettu-frame .ui-as-side__nav.ui-as-side__nav {
@@ -214,8 +222,12 @@
 }
 :root[data-platform='win32']
   .kettu-frame
-  .ui-as-side:is(:hover, :has(:focus-visible))
-  .ui-as-side__nav.ui-as-side__nav::-webkit-scrollbar-thumb {
+  .ui-as-side:hover
+  .ui-as-side__nav.ui-as-side__nav::-webkit-scrollbar-thumb,
+:root[data-platform='win32']
+  .kettu-frame
+  .ui-as-side
+  .ui-as-side__nav.ui-as-side__nav:has(:focus-visible)::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-thumb);
 }
 :root[data-platform='win32']
@@ -509,8 +521,10 @@
   ) {
   color: revert-layer;
 }
-/* 有子代理徽标时，空状态槽收起，让徽标贴近行尾。 */
-.ui-as-chat-row:has([data-subagent-badge]) .kettu-row-end:not(:has(> :not(:empty))) {
+/* 有子代理徽标时，空状态槽收起，让徽标贴近行尾。
+   The badge is the slot's sibling: a :has() on the row would restyle the page on every added
+   element. */
+.kettu-subagent-badge ~ .kettu-row-end:not(:has(> :not(:empty))) {
   display: none;
 }
 /* 会话和任务行默认用满宽度。子代理徽标所在的行在工具出现时为它们留出空间，
@@ -522,24 +536,27 @@
 }
 @media (hover: hover) {
   .ui-as.ui-as
-    .ui-as-chat-row:not(:has([data-subagent-badge])):is(:hover, :has(:focus-visible), [data-menu])
+    .ui-as-chat-row:not(:has(.kettu-subagent-badge)):is(:hover, :has(:focus-visible), [data-menu])
     .ui-as-chat-row__link,
   .ui-as.ui-as
     .ui-as-chat-folder-row:is(:hover, :has(:focus-visible), [data-menu])
     > .ui-as-chat-folder {
     padding-right: 6px;
   }
-  .ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > *) .kettu-row-end {
+  .ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > .ui-as-chat-row__tool) .kettu-row-end {
     min-width: 42px;
   }
-  .ui-as-chat-row:has([data-subagent-badge]):is(:hover, :has(:focus-visible), [data-menu])
-    .kettu-row-end {
+  .ui-as-chat-row:is(:hover, :has(:focus-visible), [data-menu])
+    .kettu-subagent-badge
+    ~ .kettu-row-end {
     position: absolute;
     opacity: 0;
     pointer-events: none;
     transition: none;
   }
-  .ui-as-chat-row:has(> .ui-as-chat-row__tools > *):not(:has([data-subagent-badge])) {
+  .ui-as-chat-row:has(> .ui-as-chat-row__tools > .ui-as-chat-row__tool):not(
+      :has(.kettu-subagent-badge)
+    ) {
     .kettu-row-body {
       transition: --kettu-row-cover var(--duration-fast) ease;
     }
@@ -561,7 +578,7 @@
     transition: opacity var(--duration-fast) ease;
   }
 }
-.ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > *):is(
+.ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > .ui-as-chat-row__tool):is(
     :hover,
     :has(:focus-visible),
     [data-menu]
@@ -578,7 +595,7 @@
 @media (hover: hover) {
   .ui-as-chat-row:has(.kettu-waiting-mark):not(:hover, :has(:focus-visible), [data-menu])
     .ui-as-chat-row__tools
-    > :not(.kettu-waiting-mark) {
+    > .ui-as-chat-row__tool:not(.kettu-waiting-mark) {
     opacity: 0;
     pointer-events: none;
   }
@@ -1549,7 +1566,13 @@ li[data-row-exit='dust'] > * {
     background-color 120ms ease,
     color 120ms ease;
 }
-.kp-stab__icon > :first-child {
+/* The icon itself, in a box of its own, so the hover rule below ends in a class: ending in
+   :first-child after a :has(), it restyled the whole page whenever an element was added. */
+.kp-stab__glyph {
+  display: grid;
+  place-items: center;
+}
+.kp-stab__icon > .kp-stab__glyph {
   transition:
     opacity var(--stab-out) var(--ease-out-quint),
     transform var(--stab-out) var(--ease-out-quint),
@@ -1566,7 +1589,7 @@ li[data-row-exit='dust'] > * {
     background-color 120ms ease,
     color 120ms ease;
 }
-.kp-stab:is(:hover, :has(:focus-visible)):not([data-editing]) .kp-stab__icon > :first-child {
+.kp-stab:is(:hover, :has(:focus-visible)):not([data-editing]) .kp-stab__icon > .kp-stab__glyph {
   opacity: 0;
   transform: scale(0.5);
   filter: blur(2px);
@@ -1601,7 +1624,7 @@ li[data-row-exit='dust'] > * {
   flex: 0 1 auto;
   min-width: 72px;
 }
-.kp-stabs[data-tight] .kp-stab:not([data-selected]):hover .kp-stab__icon > :first-child {
+.kp-stabs[data-tight] .kp-stab:not([data-selected]):hover .kp-stab__icon > .kp-stab__glyph {
   opacity: 1;
   transform: none;
   filter: none;
@@ -1689,7 +1712,7 @@ li[data-row-exit='dust'] > * {
     opacity: 0.5;
   }
   .kp-stab__x,
-  .kp-stab__icon > :first-child {
+  .kp-stab__icon > .kp-stab__glyph {
     transition: none !important;
   }
 }
@@ -1704,7 +1727,7 @@ li[data-row-exit='dust'] > * {
   .kp-stab:is([data-control='agent'], [data-control='asks'])::after {
   opacity: 0.5;
 }
-:root[data-reduce-motion='always'] :is(.kp-stab__x, .kp-stab__icon > :first-child) {
+:root[data-reduce-motion='always'] :is(.kp-stab__x, .kp-stab__icon > .kp-stab__glyph) {
   transition: none;
 }
 .kp-tablist__mark {
@@ -6149,8 +6172,8 @@ li[data-row-exit='dust'] > * {
   max-width: none;
 }
 /* The model and permission menus open inside the main area, which sits under the toast layer, so
-   the toasts step aside while one is open. */
-body:has(.ui-mdpc[data-open], .ui-ccc__menu[data-open='true']) .kettu-toasts {
+   the toasts step aside while one is open (components/ui/toast.tsx). */
+.kettu-toasts[data-aside] {
   opacity: 0;
   visibility: hidden;
 }
