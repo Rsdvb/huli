@@ -54,6 +54,7 @@ import { versionAtLeast } from '../versions'
 import { planMarkdown } from '../plan-revision'
 import { addEntry, mergeConfig, type MapperEffect, type MapperOutput } from '../session-updates'
 import { SIDE_INSTRUCTIONS, sideTurnText } from '../side-chat'
+import { errorStatus, isProviderQuota, providerName } from './provider-quota'
 import { mapAccount, mapPlanExtras, mapRateLimits } from './account'
 import { isAsyncQuestion, type AsyncQuestionItem } from './async-questions'
 import {
@@ -1630,7 +1631,16 @@ export class CodexConnection implements AgentConnection {
     if (!prompting || (prompting.turnId !== null && prompting.turnId !== turn.id)) return
     record.prompting = null
     if (turn.status === 'failed') {
-      prompting.reject(this.turnFailure(turn.error ?? running?.error ?? null))
+      const error = turn.error ?? running?.error ?? null
+      const text = [error?.message, error?.additionalDetails].filter(Boolean).join('\n')
+      // Huli: a provider's empty quota or balance names the provider, read from Codex's config.
+      if (error && isProviderQuota(this.account, error.codexErrorInfo, text)) {
+        void this.providerQuotaFailure(error, record.cwd).then((failure) =>
+          prompting.reject(failure),
+        )
+        return
+      }
+      prompting.reject(this.turnFailure(error))
       return
     }
     prompting.resolve({
@@ -1697,12 +1707,38 @@ export class CodexConnection implements AgentConnection {
     }
   }
 
+  /**
+   * Huli: a turn the provider refused for want of quota or balance, as an error that names the
+   * provider and says what to do, marked so the session offers Retry and another model rather
+   * than waiting for a plan to reset.
+   */
+  private async providerQuotaFailure(
+    error: TurnError,
+    cwd: string | null,
+  ): Promise<AgentRequestError> {
+    const config = await this.call<{ config: Record<string, unknown> }>('config/read', {
+      ...(cwd ? { cwd } : {}),
+    }).then(
+      (read) => read.config,
+      () => null,
+    )
+    const provider = providerName(config, this.account)
+    const details = error.additionalDetails ?? error.message
+    const message = provider
+      ? t('codex.providerQuota', { provider })
+      : t('codex.providerQuotaUnnamed')
+    const status = errorStatus(error.codexErrorInfo)
+    return new AgentRequestError('agent_error', `${message}\n\n${details}`, null, {
+      codexErrorInfo: error.codexErrorInfo,
+      ...(typeof status === 'number' ? { status } : {}),
+      message: error.message,
+      providerQuota: provider ?? true,
+    })
+  }
+
   private turnFailure(error: TurnError | null): AgentRequestError {
     const info = error?.codexErrorInfo ?? null
-    const status =
-      typeof info === 'object' && info !== null && !Array.isArray(info)
-        ? (Object.values(info)[0] as { httpStatusCode?: unknown } | undefined)?.httpStatusCode
-        : undefined
+    const status = errorStatus(info)
     const message = error?.message ?? t('codex.turnFailed')
     if (info === 'unauthorized' || status === 401) {
       return new AgentRequestError('auth_required', message)
