@@ -8,12 +8,15 @@ import type { AgentAccount, PlanLimit, ProviderBalance } from '@shared/agent-hos
 import type { ContextEstimates } from '@shared/context'
 import type { SessionMcpApp } from '@shared/session-mcp'
 import type { Platform } from '@shared/platform'
-import type {
-  BackgroundTaskView,
-  ConfigOption,
-  PermissionOption,
-  SideChatStep,
-  TokenTotals,
+import {
+  mcpNoticeRecovered,
+  mcpNoticeSaid,
+  type BackgroundTaskView,
+  type ConfigOption,
+  type McpNoticeState,
+  type PermissionOption,
+  type SideChatStep,
+  type TokenTotals,
 } from '@shared/thread'
 import {
   programFailure,
@@ -262,8 +265,9 @@ interface CodexNotice {
   severity: 'info' | 'warning' | 'error'
   title: string
   description?: string
-  /** Huli: the MCP servers it is about, which the session's MCP panel opens at. */
+  /** Huli: the MCP servers it is about, which the session's MCP panel opens at, and their state. */
   mcpServers?: string[]
+  mcpState?: McpNoticeState
 }
 
 /** Huli: a warning about Codex itself as a notice, or null for one with nothing to say. */
@@ -1453,23 +1457,56 @@ export class CodexConnection implements AgentConnection {
       if ((owner !== null && owner !== threadId) || seen.has(key)) continue
       seen.add(key)
       const ctx = target.context()
+      // A thread Codex reports a server of again, as after it started anew, tells of it once.
+      const { mcpServers, mcpState } = notice
+      if (mcpState && mcpServers?.every((name) => mcpNoticeSaid(ctx.thread, name, mcpState))) {
+        continue
+      }
       const out: MapperOutput = { patches: [], effects: [] }
       addEntry(ctx, out, { kind: 'notice', id: ctx.nextId(), ...notice })
       target.apply(out)
     }
   }
 
+  /**
+   * Huli: an MCP server started: its notices are forgotten, and each thread they were told in
+   * records that it recovered, so a later failure of it is told again.
+   */
+  private mcpReady(update: McpServerStartupNotification): void {
+    const prefix = `mcp:${update.name}:`
+    const forgotten: string[] = []
+    for (const [key, { threadId }] of this.notices) {
+      const bare = threadId === null ? key : key.slice(threadId.length + 1)
+      const concerns = !update.threadId || threadId === null || threadId === update.threadId
+      if (concerns && bare.startsWith(prefix)) forgotten.push(key)
+    }
+    for (const key of forgotten) {
+      this.notices.delete(key)
+      for (const seen of this.noticed.values()) seen.delete(key)
+    }
+    const ids = update.threadId ? [update.threadId] : [...this.targets.keys()]
+    for (const id of ids) {
+      const target = this.targets.get(id)
+      if (!target) continue
+      const recovered = mcpNoticeRecovered(target.context().thread, update.name)
+      if (recovered) target.apply({ patches: [recovered], effects: [] })
+    }
+  }
+
   /** Huli: an MCP server that could not start, for its thread or every one. */
   private mcpFailed(update: McpServerStartupNotification): void {
+    if (update.status === 'ready') this.mcpReady(update)
     if (update.status !== 'failed') return
-    const reauthenticate = update.failureReason === 'reauthenticationRequired'
-    this.codexNotice(update.threadId ?? null, `mcp:${update.name}:${update.error ?? ''}`, {
+    const state: McpNoticeState =
+      update.failureReason === 'reauthenticationRequired' ? 'needs-auth' : 'failed'
+    this.codexNotice(update.threadId ?? null, `mcp:${update.name}:${state}`, {
       severity: 'warning',
-      title: t(reauthenticate ? 'codex.notice.mcpNeedsAuth' : 'codex.notice.mcpFailed', {
+      title: t(state === 'needs-auth' ? 'codex.notice.mcpNeedsAuth' : 'codex.notice.mcpFailed', {
         name: update.name,
       }),
       ...(update.error ? { description: update.error } : {}),
       mcpServers: [update.name],
+      mcpState: state,
     })
   }
 

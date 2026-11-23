@@ -5,6 +5,8 @@ import {
   coalescePatches,
   entryMessageId,
   isThreadEntry,
+  mcpNoticeRecovered,
+  mcpNoticeSaid,
   outOfCreditTurn,
   prependEntries,
   retryableTurn,
@@ -578,6 +580,74 @@ describe('isThreadEntry', () => {
     expect(isThreadEntry({ ...mcp, mcpServers: ['linear', 'plugin:a:b'] })).toBe(true)
     expect(isThreadEntry({ ...mcp, mcpServers: 'linear' })).toBe(false)
     expect(isThreadEntry({ ...mcp, mcpServers: ['linear', 1] })).toBe(false)
+    expect(
+      isThreadEntry({
+        ...mcp,
+        mcpServers: ['linear'],
+        mcpState: 'needs-auth',
+        mcpRecovered: ['linear'],
+        dismissed: true,
+      }),
+    ).toBe(true)
+    expect(isThreadEntry({ ...mcp, mcpState: 'connected' })).toBe(false)
+    expect(isThreadEntry({ ...mcp, mcpRecovered: 'linear' })).toBe(false)
+    expect(isThreadEntry({ ...mcp, dismissed: false })).toBe(false)
+  })
+})
+
+describe("Huli: an MCP server's notices", () => {
+  const notice = (
+    id: string,
+    servers: string[],
+    mcpState: 'failed' | 'needs-auth' | undefined,
+    extra: Partial<Extract<ThreadEntry, { kind: 'notice' }>> = {},
+  ): ThreadEntry => ({
+    kind: 'notice',
+    id,
+    severity: 'warning',
+    title: 'x',
+    mcpServers: servers,
+    ...(mcpState ? { mcpState } : {}),
+    ...extra,
+  })
+
+  it('tells a server once in a state, by its latest notice, dismissed or not', () => {
+    const thread = state([
+      user,
+      notice('n1', ['github', 'linear'], 'failed'),
+      notice('n2', ['linear'], 'needs-auth', { dismissed: true }),
+    ])
+    expect(mcpNoticeSaid(thread, 'github', 'failed')).toBe(true)
+    expect(mcpNoticeSaid(thread, 'github', 'needs-auth')).toBe(false)
+    expect(mcpNoticeSaid(thread, 'linear', 'needs-auth')).toBe(true)
+    expect(mcpNoticeSaid(thread, 'linear', 'failed')).toBe(false)
+    expect(mcpNoticeSaid(thread, 'db', 'failed')).toBe(false)
+    // A notice from before the state was recorded tells of no state, so the next one is told.
+    expect(mcpNoticeSaid(state([notice('n0', ['github'], undefined)]), 'github', 'failed')).toBe(
+      false,
+    )
+  })
+
+  it('records a server that recovered on its latest notice, once, so a failure is told again', () => {
+    let thread = state([notice('n1', ['github', 'linear'], 'failed')])
+    const recovered = mcpNoticeRecovered(thread, 'github')
+    expect(recovered).toEqual({
+      op: 'entry.update',
+      id: 'n1',
+      changes: { mcpRecovered: ['github'] },
+    })
+    thread = applyPatches(thread, [recovered!])
+    expect(mcpNoticeSaid(thread, 'github', 'failed')).toBe(false)
+    expect(mcpNoticeSaid(thread, 'linear', 'failed')).toBe(true)
+    expect(mcpNoticeRecovered(thread, 'github')).toBeNull()
+    expect(mcpNoticeRecovered(thread, 'db')).toBeNull()
+    expect(mcpNoticeRecovered(state([notice('n0', ['github'], undefined)]), 'github')).toBeNull()
+    // The record survives a round trip through the stored thread, as a reopened session reads it.
+    const stored = JSON.parse(JSON.stringify(threadEntries(thread))) as unknown[]
+    expect(stored.every(isThreadEntry)).toBe(true)
+    const reopened = state(stored as ThreadEntry[])
+    expect(mcpNoticeSaid(reopened, 'github', 'failed')).toBe(false)
+    expect(mcpNoticeSaid(reopened, 'linear', 'failed')).toBe(true)
   })
 })
 

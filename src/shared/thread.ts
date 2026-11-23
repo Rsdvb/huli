@@ -506,8 +506,13 @@ export type ThreadEntry =
       // turn_failed: the agent's plan refused the turn because a usage window ran out.
       planLimit?: true
       // Huli: the MCP servers the notice says failed or need a sign-in, as the agent names them,
-      // which the session's MCP panel opens at.
+      // which the session's MCP panel opens at; the state it says they are in; and those of them
+      // that left it since, which a later notice may name again (see mcpNoticeSaid).
       mcpServers?: string[]
+      mcpState?: McpNoticeState
+      mcpRecovered?: string[]
+      // Huli: the user dismissed it; the thread no longer shows it.
+      dismissed?: true
       // The agent's entry before it, to put it back after a replay: set on the notices Kettu
       // adds itself, never on an agent's, which its replay sends again.
       after?: string | null
@@ -1524,6 +1529,53 @@ export function threadEntries(state: ThreadState): ThreadEntry[] {
 
 type Notice = Extract<ThreadEntry, { kind: 'notice' }>
 
+/** Huli: the states of an MCP server a notice tells of. */
+export type McpNoticeState = 'failed' | 'needs-auth'
+
+/** Huli: the latest notice that names the MCP server, if any. */
+function latestMcpNotice(
+  state: Pick<ThreadState, 'order' | 'byId'>,
+  server: string,
+): Notice | null {
+  for (let i = state.order.length - 1; i >= 0; i--) {
+    const entry = state.byId[state.order[i]!]
+    if (entry?.kind === 'notice' && entry.mcpServers?.includes(server)) return entry
+  }
+  return null
+}
+
+/**
+ * Huli: whether the thread already tells that the MCP server is in this state: its latest notice
+ * naming it says so, and it did not leave that state since. An agent reports its servers each
+ * time it starts, which a session may do many times; a notice is added only when this is false,
+ * so a server is told of once until its state changes, whether or not the user dismissed it.
+ */
+export function mcpNoticeSaid(
+  state: Pick<ThreadState, 'order' | 'byId'>,
+  server: string,
+  mcpState: McpNoticeState,
+): boolean {
+  const notice = latestMcpNotice(state, server)
+  return notice !== null && notice.mcpState === mcpState && !notice.mcpRecovered?.includes(server)
+}
+
+/**
+ * Huli: the change that records the MCP server left the state its latest notice tells of (it
+ * connected, or was turned off), so a later failure is told again; null when no notice holds.
+ */
+export function mcpNoticeRecovered(
+  state: Pick<ThreadState, 'order' | 'byId'>,
+  server: string,
+): Patch | null {
+  const notice = latestMcpNotice(state, server)
+  if (!notice?.mcpState || notice.mcpRecovered?.includes(server)) return null
+  return {
+    op: 'entry.update',
+    id: notice.id,
+    changes: { mcpRecovered: [...(notice.mcpRecovered ?? []), server] },
+  }
+}
+
 /** A turn that ended on a notice, with the message it was sent for. */
 export interface EndedTurn {
   notice: Notice
@@ -1930,6 +1982,11 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
         (value.model === undefined || typeof value.model === 'string') &&
         (value.planLimit === undefined || value.planLimit === true) &&
         (value.mcpServers === undefined || isListOf(value.mcpServers, isString)) &&
+        (value.mcpState === undefined ||
+          value.mcpState === 'failed' ||
+          value.mcpState === 'needs-auth') &&
+        (value.mcpRecovered === undefined || isListOf(value.mcpRecovered, isString)) &&
+        (value.dismissed === undefined || value.dismissed === true) &&
         (value.after === undefined || value.after === null || typeof value.after === 'string')
       )
     case 'compaction':
