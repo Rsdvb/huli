@@ -21,6 +21,7 @@ import {
   PencilEdit02Icon,
   PinIcon,
   PinOffIcon,
+  PlugSocketIcon,
   RefreshIcon,
   SidebarBottomIcon,
   SidebarRightIcon,
@@ -137,6 +138,7 @@ import { BoardStatusMenu } from '@renderer/features/task-board/status'
 import { ManagerMenu } from '@renderer/features/manager/manager-menu'
 import { askExport, canExport } from '@renderer/features/session/export/export'
 import { askMove, canMove } from '@renderer/features/session/move/move'
+import { askMcpPanel } from '@renderer/features/session/mcp/mcp-panel'
 import {
   askRemoveWorktree,
   canRemoveWorktree,
@@ -595,6 +597,13 @@ export function SessionMenuItems({
           <DropdownMenuItem key={name} {...props} onClick={() => askExport(summary)}>
             <MenuGlyph icon={FileExportIcon} />
             {t('row.export')}
+          </DropdownMenuItem>
+        )
+      case 'mcp':
+        return (
+          <DropdownMenuItem key={name} {...props} onClick={() => askMcpPanel(summary)}>
+            <MenuGlyph icon={PlugSocketIcon} />
+            {t('row.mcp')}
           </DropdownMenuItem>
         )
       case 'move':

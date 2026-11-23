@@ -2250,5 +2250,73 @@
     "hidden_other": "{{count}} 个步骤已隐藏",
     "show": "展开",
     "findShowsAll": "查找时显示全部步骤。"
+  },
+  "mcp": {
+    "title": "MCP 服务器",
+    "subtitle": "{{agent}} · {{title}}",
+    "refresh": "刷新",
+    "retry": "重试",
+    "readFailed": "没能读取 MCP 服务器：{{error}}",
+    "notRunning": "{{agent}} 现在没有为这个会话运行，它的 MCP 服务器会在下一条消息时启动。",
+    "notRunningStart": "{{agent}} 现在没有为这个会话运行。启动它，就能看到它连上的服务器。",
+    "start": "启动 {{agent}}",
+    "notReported": "{{agent}} 不报告 MCP 服务器的状态，下面是纸鸢交给它的服务器。",
+    "none": "{{agent}} 在这个会话里没有 MCP 服务器。",
+    "noneKnown": "Agent 启动后才能看到服务器。",
+    "tools_other": "{{count}} 个工具",
+    "toolsOf": "{{name}} 的工具",
+    "more": "{{name}} 的更多操作",
+    "reconnect": "重新连接",
+    "reconnectAll": "全部重新连接",
+    "disable": "在此会话中关闭",
+    "disableLasting": "关闭",
+    "disableLastingHint": "{{agent}} 会在这个项目里记住，直到你重新打开。",
+    "enable": "打开",
+    "state": {
+      "connected": "已连接",
+      "pending": "连接中",
+      "failed": "失败",
+      "needs-auth": "需要登录",
+      "disabled": "已关闭",
+      "unknown": "状态未知"
+    },
+    "source": {
+      "kite": "纸鸢",
+      "user": "用户",
+      "project": "项目",
+      "local": "项目（仅你）",
+      "plugin": "插件",
+      "pluginNamed": "插件 {{name}}",
+      "managed": "组织管理",
+      "cloud": "账号",
+      "other": "其他"
+    },
+    "login": {
+      "button": "登录",
+      "waiting": "登录中",
+      "inBrowser": "请在浏览器里完成登录，完成后这里会自动更新。",
+      "elsewhere": "请在 Agent 自己的终端里登录，比如 Claude Code 的 /mcp。",
+      "done": "已登录 {{name}}",
+      "failed": "没能登录 {{name}}：{{error}}"
+    },
+    "apps": {
+      "title": "ChatGPT 应用",
+      "manage": "在 ChatGPT 管理",
+      "none": "这个 ChatGPT 账号还没有连接应用。",
+      "off": "Codex 里已关闭"
+    },
+    "reload": {
+      "button": "重新加载技能和插件",
+      "hint": "新装的技能和插件不用重启就能在这个会话里生效",
+      "done": "已重新加载技能和插件",
+      "busy": "Agent 正在工作，等这一轮结束后再重新加载。",
+      "unsupported": "这个 Agent 不重启就不能重新加载",
+      "failed": "没能重新加载：{{error}}",
+      "noneRunning": "没有正在运行的会话需要重新加载",
+      "reloadedSome_other": "已在 {{count}} 个会话里重新加载",
+      "busySome_other": "{{count}} 个正在工作，等这一轮结束后再加载",
+      "unsupportedSome_other": "{{count}} 个不重启就不能重新加载",
+      "join": "；"
+    }
   }
 }
