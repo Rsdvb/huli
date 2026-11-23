@@ -2389,6 +2389,7 @@
     },
     "login": {
       "button": "Sign in",
+      "again": "Sign in again",
       "waiting": "Signing in",
       "inBrowser": "Finish signing in in your browser. This list updates when it's done.",
       "elsewhere": "Sign in to it in the agent's own terminal, such as /mcp in Claude Code.",

@@ -2293,6 +2293,7 @@
     },
     "login": {
       "button": "登录",
+      "again": "重新登录",
       "waiting": "登录中",
       "inBrowser": "请在浏览器里完成登录，完成后这里会自动更新。",
       "elsewhere": "请在 Agent 自己的终端里登录，比如 Claude Code 的 /mcp。",

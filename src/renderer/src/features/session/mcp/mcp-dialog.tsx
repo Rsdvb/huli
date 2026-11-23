@@ -396,7 +396,7 @@ function ServerRow({
             {waiting ? t('mcp.login.waiting') : t(`mcp.state.${state}`)}
           </Badge>
         )}
-        {canLogin && !waiting && (
+        {canLogin && (
           <Button
             variant="outline"
             size="xs"
@@ -404,7 +404,7 @@ function ServerRow({
             onClick={() => onSignIn(name)}
           >
             {busy === `login:${name}` && <Spinner />}
-            {t('mcp.login.button')}
+            {waiting ? t('mcp.login.again') : t('mcp.login.button')}
           </Button>
         )}
         {state === 'failed' && canReconnect && (
