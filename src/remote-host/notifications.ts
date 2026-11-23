@@ -93,7 +93,7 @@ function parseAnswer(value: unknown): { optionId: string; label: string } | null
  */
 export function parseAttention(value: unknown): Attention | null {
   if (typeof value !== 'object' || value === null) return null
-  const { kind, sessionId, agentId, window, title, body, request, front } = value as Record<
+  const { kind, sessionId, agentId, window, key, title, body, request, front } = value as Record<
     string,
     unknown
   >
@@ -111,9 +111,15 @@ export function parseAttention(value: unknown): Attention | null {
     if (!isId(agentId)) return null
     attention.agentId = agentId
   } else if (kind === 'plan-limit') {
-    if (!isId(agentId) || !isId(window)) return null
+    // The host's notice names the account and the window in its key, the window last.
+    const named = isId(window)
+      ? window
+      : typeof key === 'string'
+        ? key.slice(key.lastIndexOf(':') + 1)
+        : null
+    if (!isId(agentId) || !isId(named)) return null
     attention.agentId = agentId
-    attention.window = window
+    attention.window = named
   } else {
     if (!isId(sessionId)) return null
     attention.sessionId = sessionId

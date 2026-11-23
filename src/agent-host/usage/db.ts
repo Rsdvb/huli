@@ -15,6 +15,7 @@ import {
   type UsageSource,
   type UsageSummary,
 } from '@shared/usage'
+import { transaction } from '../sqlite'
 import { PRICES, type FileCursor, type UsageRow } from './model'
 import { keepsNewer } from './rows'
 
@@ -380,15 +381,10 @@ export class UsageDb {
 
   /** Brings an older file to `SCHEMA_VERSION` in one transaction. */
   private upgrade(db: DatabaseSync, from: number): void {
-    db.exec('BEGIN')
-    try {
+    transaction(db, () => {
       if (from === 1) db.exec(UPGRADE_1)
       db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
-      db.exec('COMMIT')
-    } catch (error) {
-      if (db.isTransaction) db.exec('ROLLBACK')
-      throw error
-    }
+    })
   }
 
   /** Moves the damaged file and its WAL aside, keeping them together, and starts empty. */
@@ -424,14 +420,7 @@ export class UsageDb {
   }
 
   private transaction(db: DatabaseSync, run: () => void): void {
-    db.exec('BEGIN')
-    try {
-      run()
-      db.exec('COMMIT')
-    } catch (error) {
-      if (db.isTransaction) db.exec('ROLLBACK')
-      throw error
-    }
+    transaction(db, run)
   }
 
   private bucket(sql: Statements, row: UsageRow, sign: 1 | -1): void {

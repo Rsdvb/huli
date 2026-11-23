@@ -6,6 +6,7 @@ import {
   MAX_PROJECT_FOLDERS,
   type AgentAccount,
   type AgentUpdate,
+  type LastTurn,
   type PlanLimit,
   type ProviderBalance,
   type VersionMoveReason,
@@ -38,6 +39,7 @@ import type { SessionTaskRef } from '@shared/workflow'
 import type { PortBlock } from '@shared/worktree-ports'
 import {
   isAgentId,
+  isQueuedComments,
   isUserContent,
   type AgentId,
   type PromptCache,
@@ -61,7 +63,7 @@ import {
   type Routine,
   type RoutineRef,
 } from '@shared/routines'
-import type { AgentInit } from './connection'
+import type { AgentInit, RewindPoint } from './connection'
 import { isAbsolutePath, pathKey } from './paths'
 import { isVersion } from './versions'
 
@@ -303,6 +305,7 @@ export interface ProjectRecord {
   addedAt: number
   lastOpenedAt: number
   pinnedAt?: number
+  order?: number // its place once the user moved a project on this host; earlier ones come first
   worktree?: Partial<ProjectWorktreeSettings> // only what differs from the defaults
   autoApprove?: AutoApprove // Huli: absent keeps the settings' default
   manager?: ProjectManagerSettings // Huli: its own manager-mode roster and choices
@@ -327,6 +330,7 @@ export interface WorktreeRecord {
 export interface ProjectsFile {
   version: 1
   projects: ProjectRecord[]
+  noProjectPinnedAt?: number // when the user pinned the No project group
 }
 
 /** How many opened pull requests a session keeps; the oldest go first. */
@@ -424,6 +428,33 @@ export interface SessionRecord {
   managerOff?: true
   /** Huli: moved to another computer, where it goes on; this one stays as it was left. */
   movedTo?: MovedTo
+  /** How its last turn ended; cleared when a turn starts. */
+  lastTurn?: LastTurn
+  /** An edit from a message set the turns from it aside; its agent's session is cut at the next send. */
+  rewound?: RewoundRecord
+  /** The latest takeover's carry and the prompt it went with, for an edit from that prompt. */
+  carried?: { entryId: string; carry: PendingCarry }
+  /** The prompt Kettu's guide and memory last went ahead of, by its entry id. */
+  memorySentAt?: string
+  /** Its agent said the conversation cannot be cut, as for an older Codex thread. */
+  noRewind?: true
+}
+
+/** An edit from a message, until the next send cuts the agent's own session or Put back undoes it. */
+export interface RewoundRecord {
+  /** The edited message, the first of the entries set aside. */
+  entryId: string
+  turns: number
+  /** What the composer held before, which Put back gives back. */
+  draft: UserContent[]
+  /** The context in tokens before, which Put back restores. */
+  used: number | null
+  /** Where the agent's own session is cut. */
+  point: RewindPoint
+  /** The takeover's carry the edited prompt took, which goes again with the next one. */
+  carry?: PendingCarry
+  /** How the last turn set aside ended, which Put back restores. */
+  lastTurn?: LastTurn
 }
 
 /** Huli: a session's pull request automation, as its record keeps it. */
@@ -772,6 +803,9 @@ export function parseProjectsFile(
       addedAt: item.addedAt,
       lastOpenedAt: item.lastOpenedAt,
       ...(isTime(item.pinnedAt) ? { pinnedAt: item.pinnedAt } : {}),
+      ...(Number.isSafeInteger(item.order) && (item.order as number) >= 0
+        ? { order: item.order as number }
+        : {}),
       ...projectWorktreeOf(item.worktree),
       ...(isAutoApprove(item.autoApprove) ? { autoApprove: item.autoApprove } : {}),
       ...projectManagerOf(item.manager),
@@ -779,7 +813,11 @@ export function parseProjectsFile(
       ...projectFoldersOf(item.folders, item.path, platform),
     })
   }
-  return { version: 1, projects }
+  return {
+    version: 1,
+    projects,
+    ...(isTime(data.noProjectPinnedAt) ? { noProjectPinnedAt: data.noProjectPinnedAt } : {}),
+  }
 }
 
 /** The longest further folder path stored; a longer one is dropped. */
@@ -829,9 +867,13 @@ function queueOf(value: unknown): { queue?: QueuedPrompt[] } {
   return queue.length > 0 ? { queue: queue.map(withFrom) } : {}
 }
 
-/** A queued prompt another session's agent sent keeps whose it is, for its label. */
+/**
+ * A queued prompt another session's agent sent keeps whose it is, for its label, and one built
+ * from comments keeps their summary, for its row.
+ */
 function withFrom(item: QueuedPrompt): QueuedPrompt {
-  const { from, ...rest } = item as QueuedPrompt & { from?: unknown }
+  const { from, comments, ...kept } = item as QueuedPrompt & { from?: unknown; comments?: unknown }
+  const rest = isQueuedComments(comments) ? { ...kept, comments } : kept
   return isRecord(from) && isString(from.sessionId) && isString(from.title)
     ? {
         ...rest,
@@ -855,6 +897,42 @@ function digestOf(value: unknown): { digest?: DigestItem[] } {
 function cacheOf(value: unknown): { cache?: PromptCache } {
   if (!isRecord(value) || !isTime(value.lastRequestAt) || !isNullable(isTime)(value.ttl)) return {}
   return { cache: { lastRequestAt: value.lastRequestAt, ttl: value.ttl } }
+}
+
+const LAST_TURN_REASONS: ReadonlySet<unknown> = new Set<LastTurn['reason']>([
+  'end_turn',
+  'max_tokens',
+  'max_turn_requests',
+  'refusal',
+  'cancelled',
+  'failed',
+  'limit',
+])
+
+function lastTurnOf(value: unknown): { lastTurn?: LastTurn } {
+  if (!isRecord(value) || !LAST_TURN_REASONS.has(value.reason) || !isTime(value.endedAt)) return {}
+  const limit = value.limit
+  return {
+    lastTurn: {
+      reason: value.reason as LastTurn['reason'],
+      endedAt: value.endedAt,
+      ...(isString(value.error) ? { error: value.error } : {}),
+      ...(isRecord(limit) &&
+      isString(limit.window) &&
+      isString(limit.label) &&
+      isString(limit.account) &&
+      isNullable(isTime)(limit.resetsAt)
+        ? {
+            limit: {
+              window: limit.window,
+              label: limit.label,
+              account: limit.account,
+              resetsAt: limit.resetsAt,
+            },
+          }
+        : {}),
+    },
+  }
 }
 
 function taskRefOf(value: unknown): { task?: SessionTaskRef } {
@@ -923,6 +1001,52 @@ function outsideOf(value: unknown): { outside?: OutsideValues } {
     ...(text(value.mode) ? { mode: value.mode } : {}),
   }
   return Object.keys(outside).length > 0 ? { outside } : {}
+}
+
+const isContentList = (value: unknown): value is UserContent[] =>
+  Array.isArray(value) && value.every(isUserContent)
+
+function rewoundOf(value: unknown): { rewound?: RewoundRecord } {
+  if (
+    !isRecord(value) ||
+    !isString(value.entryId) ||
+    value.entryId === '' ||
+    typeof value.turns !== 'number' ||
+    !Number.isInteger(value.turns) ||
+    value.turns < 1 ||
+    !isContentList(value.draft) ||
+    !(value.used === null || typeof value.used === 'number') ||
+    !isRecord(value.point) ||
+    !(value.point.ref === null || isString(value.point.ref)) ||
+    !isString(value.point.text) ||
+    typeof value.point.occurrence !== 'number' ||
+    !Number.isInteger(value.point.occurrence) ||
+    value.point.occurrence < 1
+  ) {
+    return {}
+  }
+  const { carry } = carryOf(value.carry)
+  return {
+    rewound: {
+      entryId: value.entryId,
+      turns: value.turns,
+      draft: value.draft,
+      used: value.used,
+      point: {
+        ref: value.point.ref,
+        text: value.point.text,
+        occurrence: value.point.occurrence,
+      },
+      ...(carry ? { carry } : {}),
+      ...lastTurnOf(value.lastTurn),
+    },
+  }
+}
+
+function carriedOf(value: unknown): { carried?: SessionRecord['carried'] } {
+  if (!isRecord(value) || !isString(value.entryId) || value.entryId === '') return {}
+  const { carry } = carryOf(value.carry)
+  return carry ? { carried: { entryId: value.entryId, carry } } : {}
 }
 
 function carryOf(value: unknown): { carry?: PendingCarry } {
@@ -1185,6 +1309,13 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...workerOf(item.worker),
       ...(item.managerOff === true ? { managerOff: true as const } : {}),
       ...movedToOf(item.movedTo),
+      ...lastTurnOf(item.lastTurn),
+      ...rewoundOf(item.rewound),
+      ...carriedOf(item.carried),
+      ...(isString(item.memorySentAt) && item.memorySentAt !== ''
+        ? { memorySentAt: item.memorySentAt }
+        : {}),
+      ...(item.noRewind === true ? { noRewind: true as const } : {}),
     })
   }
   return {
@@ -1291,6 +1422,7 @@ function limitOf(value: unknown): PlanLimit | null {
     observedAt: value.observedAt,
     ...(amount ? { amount } : {}),
     ...(models ? { models } : {}),
+    ...(value.extraUsage === true ? { extraUsage: true as const } : {}),
   }
 }
 

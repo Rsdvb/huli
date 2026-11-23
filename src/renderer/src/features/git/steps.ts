@@ -11,7 +11,8 @@ import {
   type GitOperationRequest,
 } from '@renderer/stores/git'
 import { failureNote, successNote, type NextStep, type ResultNote } from './results'
-import { pushesToDefault, pushTargetOf } from './sync'
+import { openGitPane } from './pane/open-pane'
+import { pushesToDefault, pushTargetOf, type OperationKind } from './sync'
 
 const LABEL = {
   pull: 'git:sync.pull',
@@ -82,6 +83,15 @@ export function pushNow(projectPath: string): void {
   if (request) void runStep(projectPath, request)
 }
 
+/**
+ * Pushes or publishes from the branch popover. What asks in a dialog closes the popover first; a
+ * plain push runs at once, with its progress on the button.
+ */
+export function pushFromPopover(status: GitStatus, kind: OperationKind, onClose: () => void): void {
+  if (kind !== 'push' || pushesToDefault(status, 'push')) onClose()
+  pushNow(status.projectPath)
+}
+
 function show(projectPath: string, result: ResultNote): void {
   const values = result.operation
     ? { ...result.values, operation: i18n.t(`git:failure.operation.${result.operation}`) }
@@ -104,7 +114,7 @@ function runNext(projectPath: string, next: NextStep): void {
       pushNow(projectPath)
       return
     case 'createPr':
-      openGitDialog(projectPath, { kind: 'createPr' })
+      openGitPane(projectPath, { tab: 'pr' })
       return
     case 'openPr': {
       const pr = useGitStore.getState().currentPr[projectPath]

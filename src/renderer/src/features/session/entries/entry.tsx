@@ -30,6 +30,7 @@ import { ComputerSetupEntry } from './computer-setup-entry'
 import { SessionStartedEntry } from './session-started-entry'
 import { SubagentCard } from './subagent-card'
 import { TakeoverEntry } from './takeover-entry'
+import { TaskDeliveryEntry } from './task-delivery-entry'
 import { ToolCard } from './tool-card'
 
 /** One thread entry, by its kind. */
@@ -110,6 +111,8 @@ export const Entry = memo(function Entry({
       return <ControlAskEntry {...props} agentName={agentName} />
     case 'control_note':
       return <ControlNoteEntry {...props} />
+    case 'task_delivery':
+      return <TaskDeliveryEntry {...props} />
     default:
       return null
   }

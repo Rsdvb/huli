@@ -60,6 +60,7 @@ export function startThreadService(
         id: request.id,
         message: 'The thread database is not open',
         code: 'unavailable',
+        text: { key: 'threadDb.notOpen' },
       })
       return
     }
@@ -73,6 +74,7 @@ export function startThreadService(
         message: (error as Error).message,
         code: known?.code ?? null,
         ...(known?.data ? { data: known.data } : {}),
+        ...(known?.text ? { text: known.text } : {}),
       })
     }
     if (db.recoveries !== recoveries) {
@@ -120,18 +122,32 @@ function run(
     case 'outline':
       return db.outline(request.sessionId)
     case 'search':
-      if (!reads) throw new ThreadDbError('The search index is not open', 'unavailable')
+      if (!reads)
+        throw new ThreadDbError('The search index is not open', 'unavailable', undefined, {
+          key: 'threadDb.searchNotOpen',
+        })
       return reads.find(request.words)
     case 'find':
-      if (!reads) throw new ThreadDbError('The search index is not open', 'unavailable')
+      if (!reads)
+        throw new ThreadDbError('The search index is not open', 'unavailable', undefined, {
+          key: 'threadDb.searchNotOpen',
+        })
       return reads.findIn(request.sessionId, request.words, request.limit)
     case 'snippets':
-      if (!reads) throw new ThreadDbError('The search index is not open', 'unavailable')
+      if (!reads)
+        throw new ThreadDbError('The search index is not open', 'unavailable', undefined, {
+          key: 'threadDb.searchNotOpen',
+        })
       return reads.snippets(request.words, request.picks)
     case 'outputs':
       return db.outputs(request.sessionId)
     case 'setOutlineTitles':
       return db.setOutlineTitles(request.sessionId, request.titles)
+    case 'origins':
+      return db.origins(request.sessionId)
+    case 'putOrigin':
+      db.putOrigin(request.sessionId, request.origin)
+      return null
     case 'routine':
       return db.routine(request.call)
     case 'task':
@@ -182,6 +198,8 @@ function artifact(db: ThreadDb, call: ArtifactCall): unknown {
       return db.replyThread(call.params)
     case 'resolve':
       return db.resolveThread(call.params)
+    case 'see':
+      return db.seeArtifact(call.params)
     case 'markSent':
       return db.markThreadsSent(call.params)
     case 'reanchor':

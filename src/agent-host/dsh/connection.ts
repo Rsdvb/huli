@@ -6,7 +6,7 @@
 
 import type { ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { Platform } from '@shared/platform'
@@ -97,6 +97,29 @@ const LISTING_WAIT_MS = 20_000
  * dsh once more, so an agent that starts again shows the last list while it reads the next.
  */
 const LISTINGS = new Map<string, { listed: ListedModel[]; home: string; due: number }>()
+/** The temporary folder of each listing process, and how old a leftover one is removed. */
+const LISTING_PREFIX = 'kettu-dsh-models-'
+const STALE_LISTING_MS = 24 * 60 * 60_000
+let staleRemoved = false
+
+/**
+ * Removes listing folders a day old or older, left by a host that quit while dsh still ran; once
+ * per run, since a listing removes its own.
+ */
+async function removeStaleListings(): Promise<void> {
+  if (staleRemoved) return
+  staleRemoved = true
+  const tmp = os.tmpdir()
+  const names = await readdir(tmp).catch(() => [])
+  const now = Date.now()
+  for (const name of names) {
+    if (!name.startsWith(LISTING_PREFIX)) continue
+    const folder = path.join(tmp, name)
+    const info = await stat(folder).catch(() => null)
+    if (!info?.isDirectory() || now - info.mtimeMs < STALE_LISTING_MS) continue
+    await rm(folder, { recursive: true, force: true }).catch(() => {})
+  }
+}
 const NOT_FOUND = /not found/i
 const AUTH_CODES = new Set([
   'AUTH',
@@ -449,6 +472,8 @@ export class DshConnection implements AgentConnection {
 
   async initialize(): Promise<AgentInit> {
     const entry = this.entry
+    // The user's own dsh runs without an entry, and said its version as it was detected.
+    this.version = this.context.cliVersion ?? null
     if (entry) {
       try {
         const manifest = JSON.parse(
@@ -543,24 +568,30 @@ export class DshConnection implements AgentConnection {
    */
   private async list(folder: string, home: string): Promise<void> {
     const { spec, env } = this.context
-    const own = await mkdtemp(path.join(os.tmpdir(), 'kettu-dsh-models-'))
+    void removeStaleListings()
+    const own = await mkdtemp(path.join(os.tmpdir(), LISTING_PREFIX))
     let listed: ListedModel[] | null
+    let exited: Promise<void> = Promise.resolve()
     try {
       const file = path.join(own, 'kettu.patch.yml')
       await writeFile(file, `${this.routes.yaml}${listingRows(own)}`, { mode: 0o600 })
-      listed = await readListing({
+      const listing = await readListing({
         cwd: own,
         signal: this.stopListing.signal,
-        spawn: () =>
+        spawn: (stop) =>
           this.context.spawn({
             command: spec.command,
             args: [...spec.args, '--profile', 'acp', '--patch', file],
             cwd: own,
             env: { ...env, ...spec.env },
+            signal: stop,
           }),
       }).catch(() => null)
+      listed = listing?.models ?? null
+      exited = listing?.exited ?? exited
     } finally {
-      await rm(own, { recursive: true, force: true }).catch(() => {})
+      // dsh still writes to the folder as it exits, so it goes once dsh has, in the background.
+      void exited.then(() => rm(own, { recursive: true, force: true })).catch(() => {})
     }
     this.settled = true
     this.listedDue = Date.now() + (listed ? LISTING_MAX_AGE_MS : LISTING_RETRY_MS)
@@ -676,7 +707,7 @@ export class DshConnection implements AgentConnection {
     // Kettu's own read of the options, which is also how it learns that a sign-in was made.
     if (options.hidden || this.listed === null || this.relisting) await this.listSoon()
     if (options.hidden && this.reported === 'none') {
-      throw new AgentRequestError('auth_required', 'DeepSeek Harness has no model to run on')
+      throw new AgentRequestError('auth_required', t('dsh.noModel'))
     }
     // dsh makes the id a folder name, so it stays short and plain.
     const sessionId = `kettu-${randomUUID().replace(/-/g, '')}`
@@ -942,7 +973,7 @@ export class DshConnection implements AgentConnection {
 
   async prompt(sessionId: string, prompt: readonly PromptBlock[]): Promise<PromptResult> {
     const session = this.requireSession(sessionId)
-    if (session.turn) throw new AgentRequestError('agent_error', 'A turn is already running')
+    if (session.turn) throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
     const proc = await this.ready(session)
     session.cancelling = false
     const result = new Promise<PromptResult>((resolve, reject) => {
@@ -1020,8 +1051,9 @@ export class DshConnection implements AgentConnection {
     value: string | boolean,
   ): Promise<ConfigOption[]> {
     const session = this.requireSession(sessionId)
-    if (typeof value !== 'string')
-      throw new AgentRequestError('agent_error', `${optionId} takes a choice`)
+    if (typeof value !== 'string') {
+      throw new AgentRequestError('agent_error', t('agentRun.takesChoice', { option: optionId }))
+    }
     switch (optionId) {
       case CONFIG.model:
       case CONFIG.effort: {
@@ -1035,9 +1067,12 @@ export class DshConnection implements AgentConnection {
             ? this.models.find((choice) => choice.value === value)
             : this.settle(session)
         if (!model || (optionId === CONFIG.effort && !model.efforts.includes(value))) {
-          throw new AgentRequestError('agent_error', `No ${optionId} ${value}`)
+          throw new AgentRequestError(
+            'agent_error',
+            t('agentRun.noChoice', { option: optionId, value }),
+          )
         }
-        if (session.turn) throw new AgentRequestError('agent_error', 'Change it between turns')
+        if (session.turn) throw new AgentRequestError('agent_error', t('agentRun.betweenTurns'))
         const changed =
           optionId === CONFIG.model ? session.model !== value : session.effort !== value
         if (optionId === CONFIG.model) session.model = value
@@ -1047,7 +1082,8 @@ export class DshConnection implements AgentConnection {
         break
       }
       case CONFIG.mode: {
-        if (!isMode(value)) throw new AgentRequestError('agent_error', `No mode ${value}`)
+        if (!isMode(value))
+          throw new AgentRequestError('agent_error', t('agentRun.noMode', { value }))
         const from = { preset: session.preset, plan: session.plan }
         if (value === 'plan') session.plan = true
         else {
@@ -1060,7 +1096,7 @@ export class DshConnection implements AgentConnection {
         break
       }
       default:
-        throw new AgentRequestError('agent_error', `No option ${optionId}`)
+        throw new AgentRequestError('agent_error', t('agentRun.noOption', { option: optionId }))
     }
     return this.options(session)
   }
@@ -1158,15 +1194,11 @@ export class DshConnection implements AgentConnection {
 
   private async handshake(session: Session, proc: Proc): Promise<void> {
     const model = this.settle(session)
-    if (!model)
-      throw new AgentRequestError('auth_required', 'DeepSeek Harness has no model to run on')
+    if (!model) throw new AgentRequestError('auth_required', t('dsh.noModel'))
     const provider = model.provider ?? this.signedIn ?? 'deepseek-official'
     const effort = session.effort === DEFAULT_LEVEL ? null : session.effort
     const timeout = new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error('DeepSeek Harness did not start')),
-        INITIALIZE_TIMEOUT_MS,
-      ).unref(),
+      setTimeout(() => reject(new Error(t('dsh.didNotStart'))), INITIALIZE_TIMEOUT_MS).unref(),
     )
     await Promise.race([
       proc.rpc.request('initialize', {
@@ -1593,7 +1625,9 @@ export class DshConnection implements AgentConnection {
   private requireSession(sessionId: string): Session {
     this.assertOpen()
     const session = this.sessions.get(sessionId)
-    if (!session) throw new AgentRequestError('agent_error', `No session ${sessionId}`, -32002)
+    if (!session) {
+      throw new AgentRequestError('agent_error', t('agentRun.noSession', { id: sessionId }), -32002)
+    }
     return session
   }
 

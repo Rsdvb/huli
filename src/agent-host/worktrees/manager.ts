@@ -210,7 +210,7 @@ export class WorktreeManager {
     }
     const stopped = (): PrepareState => ({
       state: 'setup-failed',
-      failure: { stage: 'setup', exitCode: null, message: 'stopped' },
+      failure: { stage: 'setup', exitCode: null, message: t('worktree.setupStopped') },
     })
     try {
       const copy = await this.deps.git.copyLocalFiles(projectPath, record.path, settings.copy)

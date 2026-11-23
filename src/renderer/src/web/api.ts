@@ -279,7 +279,12 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
         if (known && !known.thumbnails) return null
         return admin('artifacts.thumbnail', { id, version, layout }).catch(() => null)
       },
+      partThumbnail: async (id, version, part) => {
+        if (!useWebHostStore.getState().info?.partThumbnails) return null
+        return admin('artifacts.partThumbnail', { id, version, part }).catch(() => null)
+      },
       openExternal: () => unsupported('open an artifact outside the app'),
+      reveal: () => unsupported('show an artifact in the file manager'),
       export: async (id, version) => {
         const read = (await link.request('artifacts.read', { id, version })) as ArtifactContent
         if (read.files.length > 1 || read.files.some((f) => f.path === CANVAS_FILE)) {
@@ -295,6 +300,8 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
       onStopped: never,
       // A frame's picks come over the port the page hands it, never from the host.
       onSelected: never,
+      // A frame's errors come over its port too.
+      onPageError: never,
       png: async (id, version, page, size, name) => {
         const url = await admin('artifacts.png', { id, version, page, size })
         if (!url) throw new Error('The host could not render the page')
@@ -498,6 +505,12 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
           },
         )
       },
+    },
+    // A browser has no notch island: its switch shows only in the macOS app.
+    island: {
+      status: () => Promise.resolve({ state: 'off' }),
+      retry: () => Promise.resolve(),
+      onChanged: () => () => {},
     },
     updates: {
       getStatus: () => admin('updates.status'),

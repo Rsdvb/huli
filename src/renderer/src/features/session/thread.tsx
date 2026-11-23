@@ -33,6 +33,7 @@ import { JumpToLatest } from './jump-to-latest'
 import { MessageOutline } from './outline/message-outline'
 import { RevealTarget } from './outline/reveal-target'
 import { hoverReply } from './reply-hover'
+import { ReplyMarks } from './reply-marks'
 import { ReplyToSelection } from './reply-selection'
 import { SubSessionStart } from './subagent/sub-session-start'
 import { itemAtTop, leaveThread, readingPosition, type ReadingPosition } from './reading-position'
@@ -337,12 +338,15 @@ export const Thread = memo(function Thread({
   projectPath,
   agentName,
   working,
+  commenting,
 }: {
   sessionId: string
   projectPath: string
   agentName: string
   /** A turn is running. */
   working: boolean
+  /** The session has a composer, which takes comments on passages. */
+  commenting: boolean
 }) {
   const { t } = useTranslation('session')
   const allOrder = useThreadsStore((s) => s.replicas[sessionId]?.state?.order)
@@ -519,7 +523,7 @@ export const Thread = memo(function Thread({
         >
           <MessageScrollerContent
             ref={content}
-            className="ks-thread__column mx-auto w-full gap-0 px-8 pt-8 pb-4"
+            className="ks-thread__column relative mx-auto w-full gap-0 px-8 pt-8 pb-4"
             onPointerLeave={() => hoverReply(null)}
           >
             {shownFrom === 0 && !hasOlder && <SubSessionStart sessionId={sessionId} />}
@@ -601,14 +605,16 @@ export const Thread = memo(function Thread({
                 </MessageScrollerItem>
               )
             })}
+            <ReplyMarks sessionId={sessionId} viewport={viewport} content={content} jumps={jumps} />
           </MessageScrollerContent>
         </MessageScrollerViewport>
         <ReplyToSelection
-          key={sessionId}
+          key={`reply-${sessionId}`}
           sessionId={sessionId}
           agentName={agentName}
           content={content}
           viewport={viewport}
+          commenting={commenting}
         />
         <JumpToLatest sessionId={sessionId} working={working} />
         <OlderLoading sessionId={sessionId} />
@@ -624,7 +630,7 @@ export const Thread = memo(function Thread({
         <MessageOutline sessionId={sessionId} viewport={viewport} content={content} jumps={jumps} />
         <RevealTarget sessionId={sessionId} viewport={viewport} content={content} jumps={jumps} />
         <FindInSession
-          key={sessionId}
+          key={`find-${sessionId}`}
           sessionId={sessionId}
           viewport={viewport}
           content={content}

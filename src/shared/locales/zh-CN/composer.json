@@ -10,7 +10,9 @@
       "awaiting": "等待你的授权",
       "awaitingAnswer": "等待你的回答",
       "limitReached": "{{limit}}限额已用完 · {{time}} 重置",
+      "limitExtraUsage": "{{limit}}限额已用完 · 正在用额外用量",
       "ask": "回复…",
+      "taskRunning": "接着聊，不影响需求",
       "denied": "说说改用什么做法",
       "runningQueue": "排队一条消息 · Esc 停止",
       "runningTouch": "排队一条消息",
@@ -35,12 +37,17 @@
     "changesBetweenTurns": "仅在两轮对话之间可更改",
     "levelsHint": "强度越高，思考越久，消耗的套餐额度也越多。<shortcut>{{shortcut}}</shortcut> 可循环切换。",
     "moreModels": "更多模型",
+    "defaultTag": "默认",
+    "defaultUses": "使用 {{model}}",
+    "pin": "把 {{model}} 置顶到菜单",
+    "unpin": "取消置顶 {{model}}",
+    "pinsFull": "最多置顶 {{count}} 个模型，请先取消置顶一个",
     "searchModels": "搜索模型",
     "cyclesModes": "切换模式",
     "effort": "思考强度",
-    "followsAgent": "跟随智能体设置",
-    "followsAgentOn": "跟随智能体设置 · 开",
-    "followsAgentOff": "跟随智能体设置 · 关",
+    "followsAgent": "跟随 {{agent}}",
+    "followsAgentOn": "跟随 {{agent}} · 开",
+    "followsAgentOff": "跟随 {{agent}} · 关",
     "modelsFrom": "来自 {{source}}",
     "optionValue": "{{name}}：{{value}}",
     "permissionMode": "权限模式",
@@ -50,10 +57,6 @@
     "balance": "余额 {{amount}}",
     "effortHint": "强度越高，思考越久，消耗的套餐额度也越多 · {{shortcut}}",
     "modelSettings": "模型设置",
-    "speed": "速度",
-    "quality": "质量",
-    "cost": "成本",
-    "varies": "不定",
     "noModels": "没有可用的模型",
     "noModelMatch": "没有匹配的模型",
     "chooseModel": "选择模型",
@@ -144,10 +147,20 @@
     "shortWindow": {
       "five_hour": "5 小时",
       "seven_day": "每周",
-      "seven_day_opus": "每周 Opus",
-      "seven_day_sonnet": "每周 Sonnet",
+      "daily": "1 天",
       "monthly": "每月",
-      "annual": "每年"
+      "annual": "每年",
+      "minutes": "{{count}} 分钟",
+      "hours": "{{count}} 小时",
+      "days": "{{count}} 天",
+      "overage": "额外",
+      "auto": "自动",
+      "other_models": "其他模型",
+      "on_demand": "按需",
+      "budget": "预算",
+      "tool_calls": "工具调用",
+      "tokens": "Token",
+      "usage": "用量"
     },
     "context": {
       "parts": {
@@ -315,6 +328,11 @@
   "history": {
     "label": "历史"
   },
+  "rewound": {
+    "turns_other": "已回退 {{count}} 轮",
+    "putBack": "放回原处",
+    "putBackFailed": "没能放回原处：{{error}}"
+  },
   "slash": {
     "loading": "正在列出命令…",
     "chooseProject": "选择一个项目后才能列出命令"
@@ -350,5 +368,13 @@
     "thisComputer_mac": "这台 Mac",
     "unknownHost": "另一台电脑",
     "noProject": "不属于项目"
+  },
+  "comments": {
+    "label": "和消息一起发出的评论",
+    "header_other": "{{count}} 条评论 · 会和下面的话一起发出",
+    "removeAll": "全部移除",
+    "remove": "移除第 {{number}} 条评论",
+    "edit": "修改第 {{number}} 条评论",
+    "show": "在对话里显示第 {{number}} 段"
   }
 }

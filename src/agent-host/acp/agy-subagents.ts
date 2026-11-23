@@ -22,7 +22,7 @@ import {
   type SubagentState,
 } from '../session-updates'
 import { mapSessionUpdate } from './mapper'
-import { fromAgy, type AgyNames } from './agy-tools'
+import { fromAgy, throughGateway, type AgyNames } from './agy-tools'
 
 type Json = Record<string, unknown>
 
@@ -244,7 +244,7 @@ export function stepsOutput(
     if (!ctx.thread.byId[entry.id]) addEntry(ctx, out, entry)
   }
   const call = (update: acp.ToolCall | acp.ToolCallUpdate): void => {
-    const shaped = fromAgy(update, context.names)
+    const shaped = fromAgy(throughGateway(update), context.names)
     const mapped = mapSessionUpdate(
       {
         sessionUpdate: 'tool_call_update',

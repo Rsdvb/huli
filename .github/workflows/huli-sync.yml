@@ -1,8 +1,10 @@
 name: Huli sync
 
 # Once a day: merge Kettu's main into Huli's, check that Huli still type-checks and that Huli
-# Cloud's tests pass, push, then start a build. A conflict stops here and opens an issue instead.
-# Kettu's own workflows stay disabled in this repository, new ones included.
+# Cloud's tests pass, push, then start a build. A conflict or a failed check stops here and opens
+# the sync-failure issue instead, or updates it while it is open; a sync that merges, or finds
+# nothing to merge, closes it. Kettu's own workflows stay disabled in this repository, new ones
+# included.
 on:
   schedule:
     - cron: '23 19 * * *' # 03:23 in Beijing
@@ -57,9 +59,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files="$(sed 's/^/- `/; s/$/`/' "$RUNNER_TEMP/conflicts.txt")"
-          gh issue create --title "合并官方 Kettu 更新有冲突（$(date -u +%F)）" \
-            --body "$(printf '自动合并 KettuAI/Kettu 的 main 时有冲突，需要手动处理：\n\n%s\n' "$files")"
+          body="$RUNNER_TEMP/issue.md"
+          {
+            echo '自动合并 KettuAI/Kettu 的 main 时有冲突，没有推送，需要手动合并。'
+            echo
+            echo "- 时间：$(date -u '+%F %H:%M') UTC"
+            echo "- 上游：$(git rev-parse --short upstream/main)，main 落后 $(git rev-list --count HEAD..upstream/main) 个提交"
+            echo "- 日志：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo "有冲突的文件（$(wc -l < "$RUNNER_TEMP/conflicts.txt") 个）："
+            echo
+            echo '<!-- what -->'
+            sed 's/^/- `/; s/$/`/' "$RUNNER_TEMP/conflicts.txt"
+            echo '<!-- /what -->'
+            echo
+            echo '手动合并：在 huli-repo 里 `git fetch upstream`，从 main 开一个分支 `git merge upstream/main`，按 tools/huli/README.md 的规矩解决冲突、跑完检查再合进 main。合进 main 后，下一次同步会自动关掉这个议题。'
+          } > "$body"
+          bash tools/huli/sync-issue.sh report "$body"
           exit 1
 
       - uses: pnpm/action-setup@v6
@@ -93,12 +109,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue create --title "合并官方 Kettu 更新后检查没通过（$(date -u +%F)）" \
-            --body "$(printf '合并 KettuAI/Kettu 的 main 后，类型检查、Huli Cloud 测试或手机端检查失败，所以没有推送。\n\n日志：%s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")"
+          body="$RUNNER_TEMP/issue.md"
+          {
+            echo '合并 KettuAI/Kettu 的 main 没有冲突，但合并后的检查没通过，所以没有推送。'
+            echo
+            echo "- 时间：$(date -u '+%F %H:%M') UTC"
+            echo "- 上游：$(git rev-parse --short upstream/main)"
+            echo "- 日志：$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo '<!-- what -->'
+            echo '没通过的是类型检查、Huli Cloud 测试或手机端检查之一，见日志。'
+            echo '<!-- /what -->'
+          } > "$body"
+          bash tools/huli/sync-issue.sh report "$body"
 
       - name: Push
         if: steps.merge.outputs.changed == 'true'
         run: git push origin HEAD:main
+
+      # Up to date counts too: a merge made by hand ends the failure the issue reports.
+      - name: Close the failure issue
+        if: success() && steps.merge.outputs.conflict != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash tools/huli/sync-issue.sh close \
+            "同步恢复正常：main 已包含上游 $(git rev-parse --short upstream/main)（$(date -u +%F)）。"
 
       - name: Keep Kettu's own workflows disabled
         if: steps.merge.outputs.changed == 'true'

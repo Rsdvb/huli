@@ -8,11 +8,19 @@ export const QODER: AgentDefinition = {
   launch: {
     kind: 'package',
     package: '@qoder-ai/qodercli',
+    command: 'qodercli',
     args: ['--acp'],
   },
   // The package declares Node.js 20 or later, unlike the registry entry, which names none.
   requiresNode: '>=20',
-  install: { hint: 'detect.hint.node', url: 'https://nodejs.org/en/download' },
+  install: {
+    hint: 'detect.hint.node',
+    url: 'https://nodejs.org/en/download',
+    guide: 'https://docs.qoder.com/cli/installation',
+  },
+  // Its script installs a native build and leaves the command and folder to the program, so only npm
+  // is listed.
+  installs: { npm: '@qoder-ai/qodercli' },
   // Huli: `qodercli`, its own UI, as its CLI reference starts it; no source ties the ids it
   // resumes to its ACP sessions', so none resumes there.
   terminal: { args: [] },

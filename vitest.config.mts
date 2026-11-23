@@ -1,11 +1,14 @@
 import { resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
-import { pageRuntime } from './tools/build/page-runtime'
+import { pageRuntime } from './tools/build/page-runtime.ts'
 
 export default defineConfig({
   plugins: [pageRuntime(resolve('src/shared/artifact-runtime/runtime.ts'))],
   resolve: {
-    alias: [{ find: '@shared', replacement: resolve('src/shared') }],
+    alias: [
+      { find: '@shared', replacement: resolve('src/shared') },
+      { find: '@renderer', replacement: resolve('src/renderer/src') },
+    ],
   },
   test: {
     environment: 'node',

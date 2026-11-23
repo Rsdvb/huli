@@ -121,7 +121,13 @@ describe('the line that starts an agent’s own CLI', () => {
     const noUi: AgentDefinition = { ...GEMINI, terminal: undefined }
     expect(terminalProgram(noUi, withSpec('/usr/bin/node', ['/x.js', '--acp']))).toBeNull()
     expect(terminalProgram(CLAUDE_CODE, null)).toBeNull()
-    expect(terminalProgram(CLAUDE_CODE, { state: 'not-installed', detail: 'missing' })).toBeNull()
+    expect(
+      terminalProgram(CLAUDE_CODE, {
+        state: 'not-installed',
+        detail: 'missing',
+        reason: { kind: 'not-installed' },
+      }),
+    ).toBeNull()
     const old = withCli('/bin/claude', { problem: { kind: 'too-old', minimum: '9.0.0' } })
     expect(terminalProgram(CLAUDE_CODE, old)).toBeNull()
     // Claude Code runs its SDK in the host; only the user's CLI starts in a terminal.
