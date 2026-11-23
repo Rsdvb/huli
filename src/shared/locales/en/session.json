@@ -57,6 +57,7 @@
     "body": "It stopped this reply on its own, and the API gives no reason. Try the message again, rephrase it, or pick another model in the composer below.",
     "saidBody": "It stopped this reply on its own, and the API gives no reason beyond what it said. Rephrase the message, try it again, or pick another model in the composer below.",
     "again": "Try again",
+    "otherModel": "Try another model",
     "rephrase": "Edit message"
   },
   "stopReason": {
