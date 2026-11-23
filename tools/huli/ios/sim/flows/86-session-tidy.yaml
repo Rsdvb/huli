@@ -1,0 +1,71 @@
+# 会话整理, @ a session and 简洁视图 on the phone: a session snoozed from its long-press menu goes
+# to 已推迟 with Undo; a second session's composer lists the first under @; its title menu's
+# 工具调用 shows the three views.
+# Ends: the title menu's 工具调用 page
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/basic-turn'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- tapOn: '返回'
+- waitForAnimationToEnd
+- longPressOn:
+    text: '.*Fix the flaky login test.*'
+- waitForAnimationToEnd
+- tapOn: '稍后提醒'
+- waitForAnimationToEnd
+- takeScreenshot: t01-snooze-menu
+- tapOn: '明天早上'
+- waitForAnimationToEnd
+- takeScreenshot: t02-snoozed
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 6000
+    optional: true
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/basic-turn'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '@Fix'
+- waitForAnimationToEnd
+- takeScreenshot: t03-mention-list
+- hideKeyboard
+- tapOn:
+    text: '.*Fix the flaky login test.*'
+    index: 0
+    optional: true
+- waitForAnimationToEnd
+- tapOn:
+    text: '工具调用'
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: t04-zen-menu
