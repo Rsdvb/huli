@@ -3,6 +3,11 @@
 # cloned into a folder the computer offers, with its progress. In dark: an empty project with a
 # README and a Node.js .gitignore. Each sheet ends by finishing, as a test cannot drag the
 # system's sheet away reliably, and Return takes the keyboard down, as hideKeyboard may fail.
+# The projects list can still move as the page settles, with the earlier flows' and the clone's
+# projects above 添加项目 (once a tap meant for it opened another project's page), so 添加项目 is
+# found by its whole accessibility label, brought to the middle once the list is still, and the
+# menu must be open before a row of it is tapped; a tap that opened a project instead goes back
+# and tries once more.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -19,10 +24,35 @@ appId: io.github.rsdvb.huli
     centerElement: true
 - tapOn: '项目'
 - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
 - scrollUntilVisible:
     element: '添加项目'
+    centerElement: true
+- waitForAnimationToEnd
 - tapOn: '添加项目'
 - waitForAnimationToEnd
+- runFlow:
+    when:
+      notVisible: '从 Git 克隆….*'
+    commands:
+      - runFlow:
+          when:
+            visible: '路径.*'
+          commands:
+            - tapOn: '返回'
+            - waitForAnimationToEnd
+      - scrollUntilVisible:
+          element: '添加项目'
+          centerElement: true
+      - waitForAnimationToEnd
+      - tapOn: '添加项目'
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: '从 Git 克隆….*'
+    timeout: 10000
 - takeScreenshot: p01-add-menu
 # A sheet's row reads as its label and its detail together.
 - tapOn: '从 Git 克隆….*'
@@ -66,10 +96,35 @@ appId: io.github.rsdvb.huli
     centerElement: true
 - tapOn: '项目'
 - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
 - scrollUntilVisible:
     element: '添加项目'
+    centerElement: true
+- waitForAnimationToEnd
 - tapOn: '添加项目'
 - waitForAnimationToEnd
+- runFlow:
+    when:
+      notVisible: '新建空项目….*'
+    commands:
+      - runFlow:
+          when:
+            visible: '路径.*'
+          commands:
+            - tapOn: '返回'
+            - waitForAnimationToEnd
+      - scrollUntilVisible:
+          element: '添加项目'
+          centerElement: true
+      - waitForAnimationToEnd
+      - tapOn: '添加项目'
+      - waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: '新建空项目….*'
+    timeout: 10000
 - takeScreenshot: p07-add-menu-dark
 - tapOn: '新建空项目….*'
 - waitForAnimationToEnd

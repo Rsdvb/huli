@@ -1316,12 +1316,15 @@ kind of agent.
   `sessions:move-start`, `sessions:moves`, event `sessions:move-progress`.
 - Steps: check both sides (`moves.inspect`, `moves.check`: the target's agent of the session's
   harness installed, on and signed in; its project whose remote is the same repository, matched by
-  `remoteKey`, else a clone into `~/.huli/projects/<repo>` with its own Git sign-in), prepare the
-  project (`moves.prepare`, which sends back the target's branch tips), pack on the source
-  (`moves.pack`), carry the pack in 8 MiB parts (`moves.part` → `moves.receive`, SHA-256 checked),
-  apply on the target (`moves.apply`), then mark the source (`moves.finish`) and commit
-  (`moves.commit`). A failure at any step has the target undo all it did (`moves.undo`) and the
-  source drop its pack (`moves.abort`); the session stays where it was, working.
+  `remoteKey`, else a clone into `~/.huli/projects/<repo>` with its own Git sign-in, only of an
+  address Clone from Git takes (`cloneUrlProblem`: HTTPS, SSH or `user@host:path`, checked by
+  `isClonable`, the `moves.prepare` guard and `cloneRepo`) and with its git flags from
+  `src/agent-host/git/clone.ts`), prepare the project (`moves.prepare`, which sends back the
+  target's branch tips), pack on the source (`moves.pack`), carry the pack in 8 MiB parts
+  (`moves.part` → `moves.receive`, SHA-256 checked), apply on the target (`moves.apply`), then mark
+  the source (`moves.finish`) and commit (`moves.commit`). A failure at any step has the target
+  undo all it did (`moves.undo`) and the source drop its pack (`moves.abort`); the session stays
+  where it was, working.
 - Git (`src/agent-host/session-move/git.ts`): the uncommitted changes become two commits made aside
   through copies of the index (staged, then the whole working tree with `git add -A`, so ignored
   files stay behind), bundled with the branch's commits the target lacks under temporary
@@ -2548,6 +2551,12 @@ on an iOS simulator, an Android emulator or phone (and, where noted, an iPhone).
   receiver and plain extras; 4 KB at most), and the agent's words go after `--`.
 - Answers are capped at 48 KB of text with a `structuredContent` copy. Tests: the arguments, the
   command lines, the session folder's bounds (`tools.test.ts`, `agent.test.ts`).
+- agent-device's own files go to `<data>/agent-device`: its config and plugins
+  (`AGENT_DEVICE_HOME`) and its daemon, the daemon's log and the sessions' request logs
+  (`AGENT_DEVICE_STATE_DIR`). Two stay in the user's home: the CLI's failure logs, hard-coded to
+  `os.homedir()/.agent-device/logs` (only `HOME` or `USERPROFILE` moves them, which adb, the
+  emulator and Xcode read too), and the device claims, shared on purpose with other agent-device
+  users.
 
 ## Merging Kettu
 

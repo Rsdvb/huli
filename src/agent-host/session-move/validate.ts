@@ -6,6 +6,7 @@
 import type { HostParams } from '@shared/agent-host'
 import { isAgentId } from '@shared/agents'
 import type { Platform } from '@shared/platform'
+import { cloneUrlProblem } from '@shared/project-create'
 import {
   MOVE_FILE_NAME,
   MOVE_ID,
@@ -280,6 +281,9 @@ export function moveValidators(platform: Platform): Pick<Validators, MoveMethod>
       if (only && o.url === null) return { moveId: moveId(o), project: chosen, url: null }
       const url = text(o, 'url', URL_CHARS)
       if (remoteKey(url) === null) throw invalidParams('url names no repository')
+      // A project of this computer's is only matched by it; a clone runs git on it.
+      const problem = 'clone' in chosen ? cloneUrlProblem(url) : null
+      if (problem !== null) throw invalidParams(`url cannot be cloned (${problem})`)
       return { moveId: moveId(o), project: chosen, url }
     },
     'moves.receive': (params) => {

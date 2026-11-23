@@ -7,6 +7,7 @@
 
 import type { AgentId, HarnessId } from './thread'
 import type { Platform } from './platform'
+import { cloneUrlProblem } from './project-create'
 
 /** A move's id, which names its staging folder on each host. */
 export const MOVE_ID = /^[0-9a-f]{32}$/
@@ -308,16 +309,14 @@ export function remoteKey(url: string): string | null {
   return `${host.toLowerCase()}/${cleaned.toLowerCase()}`
 }
 
-/** Whether a remote can be cloned on another computer: not a folder of the source's own. */
+/**
+ * Whether a remote can be cloned on another computer: an address Clone from Git takes, so only
+ * HTTPS, SSH and `user@host:path`, never a folder of the source's own or a transport helper.
+ */
 export function isClonable(url: string): boolean {
-  // Nothing git could read as an option or a transport helper such as `ext::`.
-  if (/\s/.test(url) || url.startsWith('-') || url.includes('::')) return false
+  if (cloneUrlProblem(url) !== null) return false
   const key = remoteKey(url)
-  if (key === null || key.startsWith('file:')) return false
-  return (
-    /^(?:https?|ssh|git):\/\/[^/]/i.test(url) ||
-    /^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9.-]{2,}:(?!\/)[^:]/.test(url)
-  )
+  return key !== null && !key.startsWith('file:')
 }
 
 /** The repository's name as a remote URL ends, for the folder a clone goes in. */

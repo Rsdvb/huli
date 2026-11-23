@@ -32,6 +32,7 @@ import {
   type ProjectPlaces,
 } from '@shared/project-create'
 import { HostError, invalidParams } from './errors'
+import { cloneArgs, CLONE_ENV, noHooksPath } from './git/clone'
 import { CHILD_ENV, GIT_TIMEOUT_MS, stopTree, type Exec } from './git/exec'
 import { t } from './i18n'
 import { canonicalizePath, isInside, pathKey, samePath } from './paths'
@@ -308,23 +309,12 @@ export class ProjectCreate {
     clone: Clone,
     asker: Asker,
   ): Promise<void> {
-    const hooks = api(this.deps.platform).join(this.deps.dataDir, 'no-hooks')
-    const args = [
-      '-c',
-      'protocol.ext.allow=never',
-      '-c',
-      `core.hooksPath=${hooks}`,
-      'clone',
-      '--progress',
-      '--no-recurse-submodules',
-      '--',
-      params.url,
-      target.path,
-    ]
+    const hooks = noHooksPath(this.deps.dataDir, this.deps.platform)
+    const args = cloneArgs(params.url, target.path, hooks, ['--progress'])
     const env: NodeJS.ProcessEnv = {
       ...base,
       ...CHILD_ENV,
-      GIT_ALLOW_PROTOCOL: 'https:ssh',
+      ...CLONE_ENV,
       // The computer's own credential helper may show its sign-in to the user at it; a paired
       // device's user is not there to answer one.
       GCM_INTERACTIVE: asker.device ? 'never' : 'auto',

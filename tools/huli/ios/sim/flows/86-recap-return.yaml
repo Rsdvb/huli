@@ -6,7 +6,10 @@
 # nothing on return; back after the threshold, the bar counts only what came while away, and
 # closed, it goes. Of a run of tool calls every seventh is a command (30 calls hold 4). Maestro
 # waits for the running turn's motion to settle after a tap, which would leave the session only
-# once the work is done, so the taps that lead to leaving keep that wait short.
+# once the work is done, so the taps that lead to leaving keep that wait short. Some 50 seconds in
+# the background is long enough for iOS to end the app: a launch then starts it afresh on home,
+# with the launch arguments given again (a release build reads its developer mode from them), and
+# the session is opened from the list, which shows the bar as it would have on return.
 # Ends: both appearances
 appId: io.github.rsdvb.huli
 ---
@@ -108,6 +111,26 @@ appId: io.github.rsdvb.huli
     optional: true
 - launchApp:
     stopApp: false
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliRecapAwayMs: '45000'
+# Back in the session, or on home when iOS ended the app meanwhile: its tab bar's 新会话 shows
+# only there, never over a session.
+- extendedWaitUntil:
+    visible:
+      text: '(.*跳到离开处|新会话)'
+    timeout: 30000
+- runFlow:
+    when:
+      visible: '新会话'
+      notVisible:
+        text: '.*跳到离开处'
+    commands:
+      - tapOn: '会话'
+      - tapOn:
+          text: '.*Fix the flaky login test.*'
+          waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
     visible:
       text: '.*跳到离开处'
@@ -144,6 +167,26 @@ appId: io.github.rsdvb.huli
     optional: true
 - launchApp:
     stopApp: false
+    arguments:
+      huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliRecapAwayMs: '45000'
+# Back in the session, or on home when iOS ended the app meanwhile: its tab bar's 新会话 shows
+# only there, never over a session.
+- extendedWaitUntil:
+    visible:
+      text: '(.*跳到离开处|新会话)'
+    timeout: 30000
+- runFlow:
+    when:
+      visible: '新会话'
+      notVisible:
+        text: '.*跳到离开处'
+    commands:
+      - tapOn: '会话'
+      - tapOn:
+          text: '.*Fix the flaky login test.*'
+          waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
     visible:
       text: '.*跳到离开处'

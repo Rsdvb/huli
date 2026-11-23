@@ -51,6 +51,7 @@ import {
 import { KETTU_HOME_FOLDER } from '@shared/storage'
 import type { ThreadEntry } from '@shared/thread'
 import { HostError } from '../errors'
+import { noHooksPath } from '../git/clone'
 import type { Exec } from '../git/exec'
 import { findCodexRollout } from '../model-requests/codex'
 import { canonicalizePath, folderName, isInside, samePath } from '../paths'
@@ -216,6 +217,11 @@ export class SessionMoves {
 
   private get cloneRoot(): string {
     return path.join(this.deps.homeDir, KETTU_HOME_FOLDER, 'projects')
+  }
+
+  /** The hooks path a clone names: in the staging folder, under no name a move ever makes. */
+  private get noHooks(): string {
+    return noHooksPath(this.deps.folder, this.deps.platform)
   }
 
   // The source's side.
@@ -631,7 +637,7 @@ export class SessionMoves {
         if (target?.kind !== 'new') throw new HostError('conflict', 'No free folder to clone into')
         await mkdir(this.cloneRoot, { recursive: true })
         await this.took(move, { kind: 'clone', folder: target.folder })
-        await cloneRepo(this.deps.exec, url, target.folder)
+        await cloneRepo(this.deps.exec, url, target.folder, this.noHooks)
         folder = await canonicalizePath(target.folder, this.deps.platform, realpath)
         cloned = true
         remote = 'origin'
