@@ -6,8 +6,15 @@
 // not the caller's. The runtime loads a profiler named there (COR_*), or another JIT or runtime
 // (COMPlus_*), before Main runs, and reads the same knobs from HKCU\Software\Microsoft\.NETFramework.
 // The serve process checks all of them before it asks Windows; the broker starts through cmd.exe,
-// which is no .NET program, clears the code-loading names and sets SystemRoot and windir to the real
-// Windows folder; and the broker's Main refuses to go on with any such name still there.
+// which is no .NET program, clears the fixed code-loading names it can name and sets SystemRoot,
+// windir and PATH from the system; and the broker's Main checks its own environment and the user's
+// registry again and refuses to go on with any such name. What is written into the registry, or
+// under a name cmd.exe cannot clear, while the prompt is open still reaches the runtime before Main:
+// only a broker that is no .NET program would close that.
+//
+// The administrator prompt's own verb is looked up under the file's class, which the user's
+// HKCU\Software\Classes can override; Kite passes HKLM's class itself (Shell.cs) and refuses while
+// such an override exists.
 
 using System;
 using System.Collections;
@@ -56,12 +63,20 @@ namespace Kite.ComputerHelper
             "COMPLUS_JITNAME", "COMPLUS_GCNAME", "COMPLUS_INSTALLROOT", "COMPLUS_VERSION",
             "COMPLUS_DEFAULTVERSION", "CORECLR_ENABLE_PROFILING", "CORECLR_PROFILER",
             "CORECLR_PROFILER_PATH", "CORECLR_PROFILER_PATH_32", "CORECLR_PROFILER_PATH_64",
+            "APPDOMAIN_MANAGER_ASM", "APPDOMAIN_MANAGER_TYPE",
+        };
+
+        /// <summary>The .NET Framework's own AppDomainManager, loaded into the first domain before Main.</summary>
+        static readonly HashSet<string> Managers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "APPDOMAIN_MANAGER_ASM", "APPDOMAIN_MANAGER_TYPE",
         };
 
         /// <summary>Whether a variable of this name makes a .NET runtime load code or change itself.</summary>
         public static bool LoadsCode(string name)
         {
             if (string.IsNullOrEmpty(name)) return false;
+            if (Managers.Contains(name)) return true;
             foreach (string prefix in Prefixes)
             {
                 if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
@@ -81,6 +96,16 @@ namespace Kite.ComputerHelper
                 string name = (string)entry.Key;
                 if (LoadsCode(name)) return Found(name, "Kite's own environment");
             }
+            return Registry();
+        }
+
+        /// <summary>
+        /// The registry's part of Unsafe: the user's environment with its volatile part, the user's
+        /// runtime knobs and executable class overrides, and the machine's environment. The broker
+        /// asks it again once it runs.
+        /// </summary>
+        public static string Registry()
+        {
             using (RegistryKey user = UserRoot())
             {
                 if (user != null)
@@ -105,9 +130,19 @@ namespace Kite.ComputerHelper
                         found = RuntimeKnobs(user, path, @"HKCU\" + path);
                         if (found != null) return found;
                     }
+                    foreach (string path in new[] { @"Software\Classes\exefile", @"Software\Classes\.exe" })
+                    {
+                        using (RegistryKey key = user.OpenSubKey(path))
+                        {
+                            if (key != null)
+                            {
+                                return "HKCU\\" + path + " exists, which could change what Windows' administrator prompt runs. Remove it first.";
+                            }
+                        }
+                    }
                 }
             }
-            using (RegistryKey machine = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"))
+            using (RegistryKey machine = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"))
             {
                 if (machine != null)
                 {
@@ -224,7 +259,7 @@ namespace Kite.ComputerHelper
                     return RegistryKey.FromHandle(new SafeRegistryHandle(handle, true));
                 }
             }
-            return Registry.CurrentUser.OpenSubKey("", false);
+            return Microsoft.Win32.Registry.CurrentUser.OpenSubKey("", false);
         }
     }
 }

@@ -203,7 +203,7 @@ namespace Kite.ComputerHelper
         {
             // A name the launcher did not clear, or another Windows folder, means the runtime may
             // have loaded code already; whatever it is, the broker does nothing more.
-            string environment = Guard.BrokerEnvironment();
+            string environment = Guard.BrokerEnvironment() ?? Guard.Registry();
             if (environment != null) return Fail(17, environment);
             BrokerOptions options;
             try
@@ -327,9 +327,12 @@ namespace Kite.ComputerHelper
             readonly Dictionary<long, Snapshot> latest = new Dictionary<long, Snapshot>();
             /// <summary>What went through unconfirmed since the owner was last asked.</summary>
             readonly List<string> since = new List<string>();
-            /// <summary>The window whose edit field the last step clicked, or 0.</summary>
-            long focusedEdit;
+            /// <summary>Where the last steps left the program: the edit field clicked, a menu open.</summary>
+            Focus focus = new Focus();
             int denied;
+            /// <summary>Every request id Kite used; a client that uses one again is no client of Kite's.</summary>
+            readonly HashSet<string> usedIds = new HashSet<string>(StringComparer.Ordinal);
+            const int MaxIds = 100000;
             /// <summary>The tool call the driver has not answered yet, by its key; the next waits for it.</summary>
             string callInFlight;
             TaskCompletionSource<bool> callDone;
@@ -641,6 +644,16 @@ namespace Kite.ComputerHelper
                     bool tool;
                     string name;
                     string refusal = Allowed(line, out message, out id, out tool, out name);
+                    if (id != null)
+                    {
+                        // Kite's client numbers its requests afresh; an id again would let one answer
+                        // stand for another request's, which pending, ordering and stops rely on.
+                        if (!usedIds.Add(Key(id)) || usedIds.Count > MaxIds)
+                        {
+                            End("a request used an id again");
+                            return;
+                        }
+                    }
                     if (refusal == null && tool)
                     {
                         if (!await CallAnswered()) return;
@@ -653,7 +666,7 @@ namespace Kite.ComputerHelper
                             if (id != null && pending.Count >= MaxPending) refusal = "too many requests are waiting";
                             else if (id != null)
                             {
-                                pending[Key(id)] = name ?? "";
+                                pending[Key(id)] = tool ? "tool:" + name : "method";
                                 if (tool)
                                 {
                                     callInFlight = Key(id);
@@ -736,11 +749,24 @@ namespace Kite.ComputerHelper
                         string key = Key(id);
                         lock (pendingLock)
                         {
-                            if (pending.TryGetValue(key, out tool)) pending.Remove(key);
-                            if (key == callInFlight)
+                            string what;
+                            if (pending.TryGetValue(key, out what))
                             {
-                                callInFlight = null;
-                                callDone.TrySetResult(true);
+                                pending.Remove(key);
+                                // The call in flight is released by its own answer alone: same id, a tool call.
+                                if (what.StartsWith("tool:", StringComparison.Ordinal))
+                                {
+                                    tool = what.Substring(5);
+                                    if (key == callInFlight)
+                                    {
+                                        callInFlight = null;
+                                        callDone.TrySetResult(true);
+                                    }
+                                }
+                                else
+                                {
+                                    tool = "";
+                                }
                             }
                         }
                         if (tool == "get_window_state") Remember(message);
@@ -866,20 +892,25 @@ namespace Kite.ComputerHelper
                     assessment = Risk.Assess(name, arguments,
                         id => { Snapshot s; return snapshots.TryGetValue(id, out s) ? s : null; },
                         window => { Snapshot s; return latest.TryGetValue(window, out s) ? s : null; },
-                        focusedEdit);
+                        focus);
                 }
                 Step step = assessment.Step;
                 if (step == null)
                 {
                     if (Acting.Contains(name))
                     {
-                        focusedEdit = assessment.FocusedEdit;
+                        focus = assessment.Next;
                         if (assessment.Done != null) since.Add(assessment.Done);
                     }
                     return null;
                 }
-                focusedEdit = 0;
                 if (step.Refusal != null) return step.Refusal;
+                // A window that shows files (an Open or Save dialog, a folder view) turns a drag into
+                // a move or copy of files as administrator, which the picture cannot show.
+                bool files = Native.HostsShellView(step.WindowId);
+                if (files && step.Kind == "drag")
+                    return "a drag in a window that shows files can move or copy files as administrator, so the elevated helper never drags there";
+                focus = new Focus { MenuOpen = step.OpensMenu };
                 // A window whose program does not answer would hold the capture forever; it goes without.
                 System.Drawing.Bitmap picture = null;
                 var capture = Task.Run(() => Confirm.Picture(step.WindowId, step));
@@ -894,10 +925,11 @@ namespace Kite.ComputerHelper
                 bool allowed;
                 using (picture)
                 {
-                    allowed = Confirm.Step(options.TargetImage, step, picture, since);
+                    allowed = Confirm.Step(options.TargetImage, step, picture, since, files);
                 }
                 since.Clear();
                 if (allowed) return null;
+                focus = new Focus();
                 denied++;
                 return "the user did not allow this step";
             }

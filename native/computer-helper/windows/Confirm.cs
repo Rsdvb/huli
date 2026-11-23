@@ -140,12 +140,18 @@ namespace Kite.ComputerHelper
         }
 
         /// <summary>A risky step: may it be taken? `since` lists what went through unconfirmed before it.</summary>
-        public static bool Step(string targetImage, Step step, Bitmap picture, IList<string> since)
+        public static bool Step(string targetImage, Step step, Bitmap picture, IList<string> since, bool files)
         {
             string what = Describe(step);
             string body = T(
                 "纸鸢想以管理员权限在这个程序里执行一步：" + Line(Path.GetFileName(targetImage)),
                 "Kite wants to take a step as administrator in this program: " + Line(Path.GetFileName(targetImage)));
+            if (files)
+            {
+                body += T(
+                    "\r\n\r\n这个窗口显示文件（打开、保存对话框之类）：在这里允许的步骤能以管理员权限改动任何文件。",
+                    "\r\n\r\nThis window shows files (an Open or Save dialog, say): a step allowed here can change any file as administrator.");
+            }
             var details = new StringBuilder(what);
             if (since.Count > 0)
             {
@@ -165,7 +171,7 @@ namespace Kite.ComputerHelper
             var question = new Dictionary<string, object>
             {
                 { "kind", "step" }, { "step", step.Kind }, { "text", step.Text }, { "role", step.Role },
-                { "picture", picture != null }, { "places", step.Places.Count }, { "since", new List<string>(since) },
+                { "picture", picture != null }, { "places", step.Places.Count }, { "since", new List<string>(since) }, { "files", files },
                 { "details", details.ToString() },
             };
             return Ask(T("纸鸢 · 确认这一步", "Kite · Confirm this step"), body, details.ToString(), picture, question, T("执行", "Do it"), T("不执行", "Don't"));
@@ -303,6 +309,8 @@ namespace Kite.ComputerHelper
                     if (now && !inFront) front.Restart();
                     inFront = now;
                     int cover = now ? Native.CoveringProcess(form.Handle) : 0;
+                    // A window that covered this one may have shown other words: the second starts again.
+                    if (cover != 0) front.Restart();
                     bool ready = now && cover == 0 && front.ElapsedMilliseconds >= ArmMs;
                     if (allow.Enabled != ready) allow.Enabled = ready;
                     string text = !now ? T("点一下这个窗口，一秒后才能选“" + yes + "”。", "Click this window; “" + yes + "” works a second after it is in front.")

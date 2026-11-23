@@ -5,10 +5,14 @@
 //   only focuses or selects, with one plain left click and a label that commits nothing. Every other
 //   click is confirmed with the window and a red box at its place; one with no place to show, such
 //   as a point with no read of the window to map it, is refused.
-// - Typing is harmless only into the edit field the last step clicked, with no line break or tab;
-//   anything else typed is confirmed and shown in full, and text too long to show is refused.
-// - Keys but moving about are confirmed; pasting is refused, since the owner cannot see what it
-//   types. Drags (both ends shown) and menus are confirmed.
+// - Typing is harmless only into the edit field the last step clicked (no element token, or that
+//   field's), with no line break or tab; anything else typed is confirmed and shown in full, and
+//   text too long to show is refused.
+// - Keys but moving about are confirmed. Pasting is refused by every route the broker can tell,
+//   since the owner cannot see what it puts in, a list of files included: its shortcuts, a menu item
+//   or a click on an element named Paste in the languages below, and a key or typed text while a
+//   context menu is open, which picks an item by its letter; such a menu's items are clicked, so
+//   their names are checked. Drags (both ends shown) and menus are confirmed.
 // - Reading and scrolling are not confirmed. Whatever went through unconfirmed is listed in the
 //   next confirmation, so it shows what the step commits.
 
@@ -46,6 +50,17 @@ namespace Kite.ComputerHelper
         public double X, Y, Width, Height;
     }
 
+    /// <summary>Where the last steps left the program, as the next step's rules need it.</summary>
+    sealed class Focus
+    {
+        /// <summary>The window whose edit field the last step clicked, or 0.</summary>
+        public long Edit;
+        /// <summary>That field's element token.</summary>
+        public string EditToken;
+        /// <summary>The last step opened a context menu, which a letter or Enter would pick from.</summary>
+        public bool MenuOpen;
+    }
+
     /// <summary>A step the owner confirms, or one the broker refuses: what it does, in words, and where.</summary>
     sealed class Step
     {
@@ -57,18 +72,20 @@ namespace Kite.ComputerHelper
         public readonly List<Place> Places = new List<Place>();
         /// <summary>Why the broker refuses the step without asking; null when it asks.</summary>
         public string Refusal;
+        /// <summary>Allowed, the step opens a context menu (a right-click, the menu key, Shift+F10).</summary>
+        public bool OpensMenu;
         public bool HasPlace { get { return Places.Count > 0; } }
     }
 
-    /// <summary>What a harmless step did, for the next confirmation's list, and the edit field it focused.</summary>
+    /// <summary>What a harmless step did, for the next confirmation's list, and where it left the program.</summary>
     sealed class Assessment
     {
         /// <summary>Null when the step goes on without asking.</summary>
         public Step Step;
         /// <summary>A line for the list of what went through unconfirmed.</summary>
         public string Done;
-        /// <summary>Set when the step was a click into an edit field of this window.</summary>
-        public long FocusedEdit;
+        /// <summary>Where a step that goes on without asking leaves the program.</summary>
+        public Focus Next = new Focus();
     }
 
     static class Risk
@@ -122,6 +139,17 @@ namespace Kite.ComputerHelper
             "削除", "実行", "適用", "保存", "開始", "はい", "続行", "삭제", "실행", "적용", "저장", "확인", "예",
         };
 
+        static readonly Regex PasteWords = new Regex(
+            @"\b(paste|einfügen|coller|pegar|incolla)\b|粘贴|粘貼|贴上|貼上|黏贴|黏貼|貼り付け|ペースト|붙여넣기",
+            RegexOptions.IgnoreCase);
+
+        /// <summary>Whether a menu item's or element's name reads as Paste.</summary>
+        public static bool Pastes(string label)
+        {
+            if (string.IsNullOrWhiteSpace(label)) return false;
+            return PasteWords.IsMatch(Regex.Replace(label, @"\(&\w\)|&", ""));
+        }
+
         public static bool Commits(string label)
         {
             if (string.IsNullOrWhiteSpace(label)) return false;
@@ -134,20 +162,20 @@ namespace Kite.ComputerHelper
         /// refusal. `snapshot` finds the snapshot an element token names; `latest` the latest read of
         /// a window; `focusedEdit` the window whose edit field the last step clicked, or 0.
         /// </summary>
-        public static Assessment Assess(string tool, Dictionary<string, object> args, Func<string, Snapshot> snapshot, Func<long, Snapshot> latest, long focusedEdit)
+        public static Assessment Assess(string tool, Dictionary<string, object> args, Func<string, Snapshot> snapshot, Func<long, Snapshot> latest, Focus focus)
         {
             long windowId = WindowOf(args);
             switch (tool)
             {
                 case "list_windows":
                 case "get_window_state":
-                    return new Assessment { FocusedEdit = focusedEdit };
+                    return new Assessment { Next = focus };
                 case "scroll":
                     return new Assessment
                     {
                         Done = Confirm.Say("滚动 " + Text(args, "direction") + " " + Count(args, "amount", 3),
                             "Scrolled " + Text(args, "direction") + " " + Count(args, "amount", 3)),
-                        FocusedEdit = focusedEdit,
+                        Next = focus,
                     };
                 case "click":
                     return Click(args, windowId, snapshot, latest);
@@ -156,9 +184,14 @@ namespace Kite.ComputerHelper
                     string text = Text(args, "text") ?? "";
                     if (text.Length > MaxText)
                         return Refuse("type", "the text is longer than " + MaxText + " characters, more than the owner's window can show in full", windowId);
+                    if (focus.MenuOpen) return Refuse("type", MenuOpen, windowId);
                     bool plain = text.IndexOfAny(new[] { '\n', '\r', '\t' }) < 0;
-                    if (plain && focusedEdit != 0 && focusedEdit == windowId)
-                        return new Assessment { Done = Confirm.Say("输入「" + Confirm.Visible(text) + "」", "Typed “" + Confirm.Visible(text) + "”"), FocusedEdit = focusedEdit };
+                    // Into the field just clicked, and nowhere else: a token naming another element
+                    // could focus a button whose mnemonic a letter presses.
+                    string token = Text(args, "element_token");
+                    bool same = token == null || token == focus.EditToken;
+                    if (plain && same && focus.Edit != 0 && focus.Edit == windowId)
+                        return new Assessment { Done = Confirm.Say("输入「" + Confirm.Visible(text) + "」", "Typed “" + Confirm.Visible(text) + "”"), Next = focus };
                     return Ask(new Step { Kind = "type", Text = text, WindowId = windowId });
                 }
                 case "press_key":
@@ -166,17 +199,27 @@ namespace Kite.ComputerHelper
                     string key = Text(args, "key") ?? "";
                     var modifiers = List(args, "modifiers");
                     if (Pastes(modifiers, key)) return Refuse("key", Paste, windowId);
+                    bool menu = OpensMenu(modifiers, key);
+                    if (focus.MenuOpen && !menu && !(modifiers.Count == 0 && MovingKeys.Contains(key)))
+                        return Refuse("key", MenuOpen, windowId);
                     if (modifiers.Count == 0 && MovingKeys.Contains(key))
-                        return new Assessment { Done = Confirm.Say("按 " + key, "Pressed " + key) };
+                    {
+                        // Escape closes an open menu; the other moving keys only move within it.
+                        bool open = focus.MenuOpen && !string.Equals(key, "escape", StringComparison.OrdinalIgnoreCase) && !string.Equals(key, "esc", StringComparison.OrdinalIgnoreCase);
+                        return new Assessment { Done = Confirm.Say("按 " + key, "Pressed " + key), Next = new Focus { MenuOpen = open } };
+                    }
                     var keys = new List<string>(modifiers) { key };
-                    return Ask(new Step { Kind = "key", Text = string.Join("+", keys), WindowId = windowId });
+                    return Ask(new Step { Kind = "key", Text = string.Join("+", keys), WindowId = windowId, OpensMenu = menu });
                 }
                 case "hotkey":
                 {
                     var keys = List(args, "keys");
                     string last = keys.Count == 0 ? "" : keys[keys.Count - 1];
-                    if (Pastes(keys.Take(Math.Max(0, keys.Count - 1)).ToList(), last)) return Refuse("key", Paste, windowId);
-                    return Ask(new Step { Kind = "key", Text = string.Join("+", keys), WindowId = windowId });
+                    var held = keys.Take(Math.Max(0, keys.Count - 1)).ToList();
+                    if (Pastes(held, last)) return Refuse("key", Paste, windowId);
+                    bool menu = OpensMenu(held, last);
+                    if (focus.MenuOpen && !menu) return Refuse("key", MenuOpen, windowId);
+                    return Ask(new Step { Kind = "key", Text = string.Join("+", keys), WindowId = windowId, OpensMenu = menu });
                 }
                 case "drag":
                 {
@@ -192,6 +235,7 @@ namespace Kite.ComputerHelper
                 case "invoke_menu":
                 {
                     var path = List(args, "path");
+                    if (path.Any(Pastes)) return Refuse("menu", Paste, windowId);
                     return Ask(new Step { Kind = "menu", Text = string.Join(" > ", path), WindowId = windowId });
                 }
                 default:
@@ -199,7 +243,15 @@ namespace Kite.ComputerHelper
             }
         }
 
-        const string Paste = "pasting types what is on the clipboard, which the owner cannot see, so the elevated helper never pastes";
+        const string Paste = "pasting puts in what is on the clipboard, text or files, which the owner cannot see, so the elevated helper never pastes";
+        const string MenuOpen = "a context menu is open, where a key picks an item by its letter; click the item, or press Escape";
+
+        /// <summary>The menu key or Shift+F10, which open a context menu.</summary>
+        static bool OpensMenu(List<string> modifiers, string key)
+        {
+            if (modifiers.Count == 0 && (string.Equals(key, "menu", StringComparison.OrdinalIgnoreCase) || string.Equals(key, "apps", StringComparison.OrdinalIgnoreCase))) return true;
+            return modifiers.Count == 1 && string.Equals(modifiers[0], "shift", StringComparison.OrdinalIgnoreCase) && string.Equals(key, "f10", StringComparison.OrdinalIgnoreCase);
+        }
         const string NoPlace = "the step has no place in a read of the window to show the owner, so read the window first";
 
         static Assessment Ask(Step step)
@@ -235,22 +287,24 @@ namespace Kite.ComputerHelper
                 Element element = null;
                 if (read != null && long.TryParse(token.Substring(colon + 1), NumberStyles.None, CultureInfo.InvariantCulture, out row)) read.Elements.TryGetValue(row, out element);
                 if (element == null) return Refuse(kind, NoPlace, windowId);
+                if (Pastes(element.Label)) return Refuse(kind, Paste, windowId);
                 if (plain && BenignRoles.Contains(element.Role ?? "") && !string.IsNullOrWhiteSpace(element.Label) && !Commits(element.Label))
                 {
+                    bool edit = string.Equals(element.Role, "Edit", StringComparison.OrdinalIgnoreCase);
                     return new Assessment
                     {
                         Done = Confirm.Say("点击「" + Confirm.Line(element.Label) + "」(" + element.Role + ")", "Clicked “" + Confirm.Line(element.Label) + "” (" + element.Role + ")"),
-                        FocusedEdit = string.Equals(element.Role, "Edit", StringComparison.OrdinalIgnoreCase) ? windowId : 0,
+                        Next = edit ? new Focus { Edit = windowId, EditToken = token } : new Focus(),
                     };
                 }
                 if (!element.HasFrame) return Refuse(kind, NoPlace, windowId);
-                var step = new Step { Kind = kind, Text = element.Label, Role = element.Role, WindowId = windowId };
+                var step = new Step { Kind = kind, Text = element.Label, Role = element.Role, WindowId = windowId, OpensMenu = kind == "right-click" };
                 step.Places.Add(new Place { X = element.X, Y = element.Y, Width = element.Width, Height = element.Height });
                 return Ask(step);
             }
             Place place;
             if (!Map(latest(windowId), Number(args, "x"), Number(args, "y"), out place)) return Refuse(kind, NoPlace, windowId);
-            var bare = new Step { Kind = kind, WindowId = windowId };
+            var bare = new Step { Kind = kind, WindowId = windowId, OpensMenu = kind == "right-click" };
             bare.Places.Add(place);
             return Ask(bare);
         }

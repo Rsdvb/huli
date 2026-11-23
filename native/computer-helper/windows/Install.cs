@@ -6,9 +6,10 @@
 //
 // No program from the app's folder runs as administrator for that: the copy is Windows' own
 // robocopy.exe, from a staging folder this process fills, and the removal Windows' own cmd.exe. The
-// staging folder is the user's, so what landed is checked afterwards, against the hashes this process
-// took while it held the files open; the install's record (install.json) keeps those hashes and the
-// protocol version, and every start checks the installed files against it and the folder's rights.
+// staging folder is the user's, so this process holds it and the staged files open, so they cannot be
+// changed, until robocopy is done, and checks what landed against the hashes of the held files. The
+// install's record (install.json, staged and held the same way) keeps those hashes and the protocol
+// version, and every start checks the installed files against it and the folder's rights.
 // A newer Kite keeps using the installed copy while its protocol is the same, so an update asks for
 // no new install.
 
@@ -16,11 +17,13 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Web.Script.Serialization;
+using Microsoft.Win32.SafeHandles;
 
 namespace Kite.ComputerHelper
 {
@@ -139,6 +142,8 @@ namespace Kite.ComputerHelper
                 state["state"] = "outdated";
                 return state;
             }
+            // What a host keeps to remember an install whose check failed, until it is installed again.
+            state["helperSha256"] = record.HelperSha256;
             state["state"] = Check(dir, record) ?? (client == null || SamePath(record.Client, client) ? "current" : "outdated");
             return state;
         }
@@ -256,34 +261,99 @@ namespace Kite.ComputerHelper
     }
 
     /// <summary>
-    /// Fills the staging folder robocopy copies from: this helper and the driver beside it, as held
-    /// open and hashed here, and the record of their hashes.
+    /// The staging folder robocopy copies from: this helper, the driver beside it and the record of
+    /// their hashes. While it lives, the folder is held open with no delete sharing, so no one can
+    /// rename or replace it, and each staged file read-only with read sharing alone, so no one can
+    /// write, rename or delete it; the hashes are of those held handles.
     /// </summary>
-    static class Staging
+    sealed class Staged : IDisposable
     {
-        public static string Fill(string client, out Record record)
+        public readonly string Dir;
+        public readonly Record Record;
+        readonly List<FileStream> held = new List<FileStream>();
+        SafeFileHandle folder;
+
+        Staged(string dir, Record record)
+        {
+            Dir = dir;
+            Record = record;
+        }
+
+        const uint FILE_LIST_DIRECTORY = 0x0001;
+        const uint FILE_SHARE_READ = 0x1;
+        const uint FILE_SHARE_WRITE = 0x2;
+        const uint OPEN_EXISTING = 3;
+        const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+        const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+
+        public static Staged Fill(string client)
         {
             string own = Layout.OwnPath();
             string sourceDriver = Path.Combine(Path.GetDirectoryName(own), Layout.DriverFile);
             string dir = Path.Combine(Path.GetTempPath(), "kite-helper-" + Guid.NewGuid().ToString("N"));
-            using (FileStream helper = Layout.Hold(own))
-            using (FileStream driver = Layout.Hold(sourceDriver))
+            Directory.CreateDirectory(dir);
+            var staged = new Staged(dir, null);
+            try
             {
-                string driverSha = Layout.Sha256(driver);
-                if (driverSha != Build.DriverSha256) throw new InvalidOperationException("cua-driver.exe is not the one this helper was built with.");
-                record = new Record { Protocol = Layout.Protocol, HelperSha256 = Layout.Sha256(helper), DriverSha256 = driverSha, Client = Path.GetFullPath(client) };
-                Directory.CreateDirectory(dir);
-                Copy(helper, Path.Combine(dir, Layout.HelperFile));
-                Copy(driver, Path.Combine(dir, Layout.DriverFile));
+                staged.folder = CreateFileW(dir, FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING,
+                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
+                if (staged.folder.IsInvalid) throw Native.LastError("Holding the staging folder");
+                if (!Layout.PlainDirectory(dir) || Directory.GetFileSystemEntries(dir).Length > 0) throw new InvalidOperationException("The staging folder is not a new, empty folder.");
+                Record record;
+                using (FileStream helper = Layout.Hold(own))
+                using (FileStream driver = Layout.Hold(sourceDriver))
+                {
+                    string driverSha = Layout.Sha256(driver);
+                    if (driverSha != Build.DriverSha256) throw new InvalidOperationException("cua-driver.exe is not the one this helper was built with.");
+                    record = new Record { Protocol = Layout.Protocol, HelperSha256 = Layout.Sha256(helper), DriverSha256 = driverSha, Client = Path.GetFullPath(client) };
+                    Copy(helper, Path.Combine(dir, Layout.HelperFile));
+                    Copy(driver, Path.Combine(dir, Layout.DriverFile));
+                }
+                byte[] text = new UTF8Encoding(false).GetBytes(new JavaScriptSerializer().Serialize(new Dictionary<string, object>
+                {
+                    { "protocol", record.Protocol }, { "helperSha256", record.HelperSha256 },
+                    { "driverSha256", record.DriverSha256 }, { "client", record.Client },
+                }));
+                using (var target = new FileStream(Path.Combine(dir, Layout.RecordFile), FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    target.Write(text, 0, text.Length);
+                    target.Flush(true);
+                }
+                string recordSha;
+                using (var sha = SHA256.Create()) recordSha = Hex(sha.ComputeHash(text));
+                // Held from here until robocopy is done, and checked as held: what was swapped in the
+                // moment between writing and holding is caught here.
+                staged.Keep(Layout.HelperFile, record.HelperSha256);
+                staged.Keep(Layout.DriverFile, record.DriverSha256);
+                staged.Keep(Layout.RecordFile, recordSha);
+                var done = new Staged(dir, record) { folder = staged.folder };
+                done.held.AddRange(staged.held);
+                staged.held.Clear();
+                staged.folder = null;
+                return done;
             }
-            var json = new JavaScriptSerializer();
-            string text = json.Serialize(new Dictionary<string, object>
+            catch
             {
-                { "protocol", record.Protocol }, { "helperSha256", record.HelperSha256 },
-                { "driverSha256", record.DriverSha256 }, { "client", record.Client },
-            });
-            File.WriteAllText(Path.Combine(dir, Layout.RecordFile), text, new UTF8Encoding(false));
-            return dir;
+                staged.Dispose();
+                throw;
+            }
+        }
+
+        void Keep(string name, string expected)
+        {
+            var stream = new FileStream(Path.Combine(Dir, name), FileMode.Open, FileAccess.Read, FileShare.Read);
+            held.Add(stream);
+            if (Layout.Sha256(stream) != expected) throw new InvalidOperationException("The staged copy changed before it could be held.");
+        }
+
+        static string Hex(byte[] hash)
+        {
+            var hex = new StringBuilder(hash.Length * 2);
+            foreach (byte b in hash) hex.Append(b.ToString("x2"));
+            return hex.ToString();
         }
 
         static void Copy(FileStream from, string to)
@@ -296,12 +366,17 @@ namespace Kite.ComputerHelper
             }
         }
 
-        public static void Remove(string dir)
+        /// <summary>Lets go of the files and the folder, then removes them.</summary>
+        public void Dispose()
         {
+            foreach (FileStream stream in held) stream.Dispose();
+            held.Clear();
+            if (folder != null) folder.Dispose();
+            folder = null;
             try
             {
-                foreach (string file in Directory.GetFiles(dir)) File.Delete(file);
-                Directory.Delete(dir, false);
+                foreach (string file in Directory.GetFiles(Dir)) File.Delete(file);
+                Directory.Delete(Dir, false);
             }
             catch (Exception)
             {
@@ -309,17 +384,17 @@ namespace Kite.ComputerHelper
             }
         }
 
-        /// <summary>Whether what robocopy put in place is exactly what was staged, as hashed before.</summary>
-        public static bool Landed(string installDir, Record expected)
+        /// <summary>Whether what robocopy put in place is exactly what was staged, as hashed while held.</summary>
+        public bool Landed(string installDir)
         {
             Record found = Layout.ReadRecord(installDir);
-            if (found == null || found.Protocol != expected.Protocol || found.HelperSha256 != expected.HelperSha256 ||
-                found.DriverSha256 != expected.DriverSha256 || !string.Equals(found.Client, expected.Client, StringComparison.Ordinal))
+            if (found == null || found.Protocol != Record.Protocol || found.HelperSha256 != Record.HelperSha256 ||
+                found.DriverSha256 != Record.DriverSha256 || !string.Equals(found.Client, Record.Client, StringComparison.Ordinal))
                 return false;
             try
             {
-                return Layout.Sha256(Path.Combine(installDir, Layout.HelperFile)) == expected.HelperSha256 &&
-                    Layout.Sha256(Path.Combine(installDir, Layout.DriverFile)) == expected.DriverSha256;
+                return Layout.Sha256(Path.Combine(installDir, Layout.HelperFile)) == Record.HelperSha256 &&
+                    Layout.Sha256(Path.Combine(installDir, Layout.DriverFile)) == Record.DriverSha256;
             }
             catch (IOException)
             {

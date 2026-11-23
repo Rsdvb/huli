@@ -18,7 +18,6 @@ namespace Kite.ComputerHelper
     {
         const int MaxLine = 64 * 1024 * 1024;
         const int MaxPids = 1024;
-        const int ErrorCancelled = 1223;
 
         static readonly object WriteLock = new object();
         static StreamWriter output;
@@ -65,7 +64,7 @@ namespace Kite.ComputerHelper
                 else if (op == "install") result = Install(request);
                 else if (op == "uninstall") result = Uninstall(request);
                 else if (op == "elevate") result = Elevate(request);
-                else if (Build.Test && (op == "guard" || op == "protected")) result = TestOp(op, request);
+                else if (Build.Test && (op == "guard" || op == "protected" || op == "stage" || op == "unstage")) result = TestOp(op, request);
                 else throw new ArgumentException("Unknown op " + op + ".");
                 Write(json, new Dictionary<string, object> { { "id", id }, { "ok", true }, { "result", result } });
             }
@@ -140,9 +139,10 @@ namespace Kite.ComputerHelper
 
         /// <summary>
         /// Copies the helper and the driver into the install folder at the owner's request, through
-        /// the administrator prompt for Windows' own robocopy.exe, and checks what landed there
-        /// against the hashes taken here: its state after (tampered when something else landed), the
-        /// copy's exit code, or cancelled when the owner said no.
+        /// the administrator prompt for Windows' own robocopy.exe, while the staged files stay held
+        /// so nothing can change them, and checks what landed against their hashes: its state after
+        /// (tampered when something else landed), the copy's exit code, or cancelled when the owner
+        /// said no.
         /// </summary>
         static object Install(Dictionary<string, object> request)
         {
@@ -153,24 +153,22 @@ namespace Kite.ComputerHelper
             string unsafeReason = Guard.Unsafe();
             if (unsafeReason != null) throw new InvalidOperationException(unsafeReason);
             if (Directory.Exists(dir) && !Layout.PlainDirectory(dir)) throw new InvalidOperationException("The install folder is a link.");
-            Record record;
-            string staging = Staging.Fill(client, out record);
-            try
+            using (Staged staged = Staged.Fill(client))
             {
                 var args = new StringBuilder();
-                args.Append(Quote(staging)).Append(' ').Append(Quote(dir));
+                args.Append(Quote(staged.Dir)).Append(' ').Append(Quote(dir));
                 args.Append(' ').Append(Layout.HelperFile).Append(' ').Append(Layout.DriverFile).Append(' ').Append(Layout.RecordFile);
                 // Contents and times only, so the copies take the install folder's rights; no links
                 // followed into folders, no retries, nothing printed.
                 args.Append(" /COPY:DT /DCOPY:T /XJ /IS /IT /R:0 /W:0 /NP /NJH /NJS /NFL /NDL");
-                Process process;
+                Launched process;
                 try
                 {
-                    process = Start(Path.Combine(Guard.SystemDir(), "robocopy.exe"), args.ToString());
+                    process = Shell.Start(Path.Combine(Guard.SystemDir(), "robocopy.exe"), args.ToString());
                 }
                 catch (Win32Exception error)
                 {
-                    if (error.NativeErrorCode == ErrorCancelled) return Cancelled(dir, client);
+                    if (error.NativeErrorCode == Shell.ErrorCancelled) return Cancelled(dir, client);
                     throw;
                 }
                 using (process)
@@ -179,34 +177,31 @@ namespace Kite.ComputerHelper
                     var state = Layout.State(dir, client);
                     // Robocopy's codes below 8 are successes.
                     state["exitCode"] = process.ExitCode < 8 ? 0 : process.ExitCode;
-                    if (process.ExitCode < 8 && !Staging.Landed(dir, record)) state["state"] = "tampered";
+                    if (process.ExitCode < 8 && !staged.Landed(dir)) state["state"] = "tampered";
                     return state;
                 }
             }
-            finally
-            {
-                Staging.Remove(staging);
-            }
         }
 
-        /// <summary>Removes the install folder through the administrator prompt for Windows' own cmd.exe.</summary>
+        /// <summary>
+        /// Removes the install folder through the administrator prompt for Windows' own cmd.exe. No
+        /// .NET program runs for it, so no .NET setting stops it: removal always stays possible.
+        /// </summary>
         static object Uninstall(Dictionary<string, object> request)
         {
             string other = Json.OptionalText(request, "installDir");
             string dir = Layout.InstallDir(other);
-            string unsafeReason = Guard.Unsafe();
-            if (unsafeReason != null) throw new InvalidOperationException(unsafeReason);
             if (!Directory.Exists(dir)) return Layout.State(dir, null);
             if (!Layout.PlainDirectory(dir)) throw new InvalidOperationException("The install folder is a link.");
-            Process process;
+            Launched process;
             try
             {
                 // rd takes links inside away without following them.
-                process = Start(CmdPath(), "/d /e:on /v:off /s /c \"rd /s /q " + CmdQuote(dir) + "\"");
+                process = Shell.Start(CmdPath(), "/d /e:on /v:off /s /c \"rd /s /q " + CmdQuote(dir) + "\"");
             }
             catch (Win32Exception error)
             {
-                if (error.NativeErrorCode == ErrorCancelled) return Cancelled(dir, null);
+                if (error.NativeErrorCode == Shell.ErrorCancelled) return Cancelled(dir, null);
                 throw;
             }
             using (process)
@@ -234,16 +229,16 @@ namespace Kite.ComputerHelper
         }
 
         /// <summary>Launchers the prompt started, held so their ids stay theirs while connect checks the broker's parent.</summary>
-        static readonly List<KeyValuePair<DateTime, Process>> Launched = new List<KeyValuePair<DateTime, Process>>();
+        static readonly List<KeyValuePair<DateTime, Launched>> Launchers = new List<KeyValuePair<DateTime, Launched>>();
 
         /// <summary>
         /// Starts the installed broker through the administrator prompt, for one approved program:
         /// only the installed copy, only while its files are the recorded ones and only
         /// administrators may change them, held open while it starts, and only when no .NET setting
-        /// would load code into it. The prompt starts Windows' own cmd.exe, which is no .NET program,
-        /// so nothing set while the prompt is open loads into it; it clears the code-loading names,
-        /// sets SystemRoot and windir from the system and starts the broker. The answer's pid is that
-        /// launcher's, the broker's parent.
+        /// would load code into it. The prompt starts Windows' own cmd.exe, which is no .NET program;
+        /// it clears the code-loading names it can name, sets SystemRoot, windir, PATH and TEMP from
+        /// the system and the install folder and starts the broker, which checks again. The answer's
+        /// pid is that launcher's, the broker's parent.
         /// </summary>
         static object Elevate(Dictionary<string, object> request)
         {
@@ -263,7 +258,7 @@ namespace Kite.ComputerHelper
             if (unsafeReason != null) throw new InvalidOperationException(unsafeReason);
             string installed = Path.Combine(dir, Layout.HelperFile);
             Record record = Layout.ReadRecord(dir);
-            string line = LauncherArguments(installed, options.ToArguments());
+            string line = LauncherArguments(installed, options.ToArguments(), Path.Combine(dir, Layout.HomeFolder, "Temp"));
             using (FileStream held = Layout.Hold(installed))
             using (FileStream driver = Layout.Hold(Path.Combine(dir, Layout.DriverFile)))
             {
@@ -271,13 +266,13 @@ namespace Kite.ComputerHelper
                     throw new InvalidOperationException("The installed administrator helper changed.");
                 try
                 {
-                    Process launcher = Start(CmdPath(), line);
+                    Launched launcher = Shell.Start(CmdPath(), line);
                     Keep(launcher);
-                    return new Dictionary<string, object> { { "pid", launcher == null ? (int?)null : launcher.Id } };
+                    return new Dictionary<string, object> { { "pid", launcher.Id } };
                 }
                 catch (Win32Exception error)
                 {
-                    if (error.NativeErrorCode == ErrorCancelled) return new Dictionary<string, object> { { "cancelled", true } };
+                    if (error.NativeErrorCode == Shell.ErrorCancelled) return new Dictionary<string, object> { { "cancelled", true } };
                     throw;
                 }
             }
@@ -285,9 +280,9 @@ namespace Kite.ComputerHelper
 
         /// <summary>
         /// cmd.exe's line: no AutoRun (/d), no delayed expansion, the code-loading names cleared,
-        /// SystemRoot and windir from the system, then the broker.
+        /// SystemRoot, windir and PATH from the system and TEMP in the install folder, then the broker.
         /// </summary>
-        static string LauncherArguments(string broker, string arguments)
+        static string LauncherArguments(string broker, string arguments, string temp)
         {
             string windows = Guard.WindowsDir();
             CheckCmdText(arguments);
@@ -295,6 +290,9 @@ namespace Kite.ComputerHelper
             foreach (string name in Guard.Cleared) line.Append("set \"").Append(name).Append("=\" & ");
             line.Append("set \"SystemRoot=").Append(CmdText(windows)).Append("\" & ");
             line.Append("set \"windir=").Append(CmdText(windows)).Append("\" & ");
+            line.Append("set \"PATH=").Append(CmdText(Guard.SystemDir())).Append("\" & ");
+            line.Append("set \"TEMP=").Append(CmdText(temp)).Append("\" & ");
+            line.Append("set \"TMP=").Append(CmdText(temp)).Append("\" & ");
             line.Append(CmdQuote(broker)).Append(' ').Append(arguments);
             return "/d /e:on /v:off /s /c \"" + line + "\"";
         }
@@ -334,48 +332,41 @@ namespace Kite.ComputerHelper
             return "\"" + path + "\"";
         }
 
-        static void Keep(Process launcher)
+        static void Keep(Launched launcher)
         {
-            if (launcher == null) return;
-            lock (Launched)
+            lock (Launchers)
             {
                 DateTime now = DateTime.UtcNow;
-                for (int i = Launched.Count - 1; i >= 0; i--)
+                for (int i = Launchers.Count - 1; i >= 0; i--)
                 {
-                    if ((now - Launched[i].Key).TotalMinutes < 5) continue;
-                    Launched[i].Value.Dispose();
-                    Launched.RemoveAt(i);
+                    if ((now - Launchers[i].Key).TotalMinutes < 5) continue;
+                    Launchers[i].Value.Dispose();
+                    Launchers.RemoveAt(i);
                 }
-                Launched.Add(new KeyValuePair<DateTime, Process>(now, launcher));
+                Launchers.Add(new KeyValuePair<DateTime, Launched>(now, launcher));
             }
         }
 
-        /// <summary>Through the administrator prompt; a test build starts it as it is, with no prompt.</summary>
-        static Process Start(string program, string arguments)
-        {
-            var start = new ProcessStartInfo { FileName = program, Arguments = arguments };
-            if (Build.Test)
-            {
-                start.UseShellExecute = false;
-                start.CreateNoWindow = true;
-                // Its output must not reach this process's stdout, which carries the answers.
-                start.RedirectStandardOutput = true;
-                start.RedirectStandardError = true;
-                Process started = Process.Start(start);
-                started.StandardOutput.ReadToEndAsync();
-                started.StandardError.ReadToEndAsync();
-                return started;
-            }
-            start.UseShellExecute = true;
-            start.Verb = "runas";
-            start.WindowStyle = ProcessWindowStyle.Hidden;
-            return Process.Start(start);
-        }
+        static Staged testStaged;
 
-        /// <summary>A test build's own ops: the environment check, and whether a folder is admin-only.</summary>
+        /// <summary>
+        /// A test build's own ops: the environment check, whether a folder is admin-only, and a staged
+        /// copy held as the install holds it until robocopy is done.
+        /// </summary>
         static object TestOp(string op, Dictionary<string, object> request)
         {
             if (op == "guard") return new Dictionary<string, object> { { "unsafe", Guard.Unsafe() } };
+            if (op == "stage")
+            {
+                testStaged = Staged.Fill(Json.Text(request, "client"));
+                return new Dictionary<string, object> { { "dir", testStaged.Dir } };
+            }
+            if (op == "unstage")
+            {
+                if (testStaged != null) testStaged.Dispose();
+                testStaged = null;
+                return new Dictionary<string, object>();
+            }
             return new Dictionary<string, object> { { "protected", Layout.Protected(Json.Text(request, "path")) } };
         }
     }

@@ -321,6 +321,42 @@ namespace Kite.ComputerHelper
             return 0;
         }
 
+        delegate bool EnumChildProc(IntPtr window, IntPtr data);
+
+        [DllImport("user32.dll")]
+        static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr data);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern int GetClassNameW(IntPtr window, StringBuilder name, int size);
+
+        /// <summary>
+        /// Whether a window holds the shell's view of a folder (SHELLDLL_DefView), as Open and Save
+        /// dialogs and folder windows do, where a drag or a paste moves or copies files.
+        /// </summary>
+        public static bool HostsShellView(long windowId)
+        {
+            if (windowId <= 0) return false;
+            var handle = new IntPtr(windowId);
+            if (!IsWindow(handle)) return false;
+            bool found = IsShellView(handle);
+            if (!found)
+            {
+                EnumChildWindows(handle, (child, data) =>
+                {
+                    if (!IsShellView(child)) return true;
+                    found = true;
+                    return false;
+                }, IntPtr.Zero);
+            }
+            return found;
+        }
+
+        static bool IsShellView(IntPtr window)
+        {
+            var name = new StringBuilder(64);
+            return GetClassNameW(window, name, name.Capacity) > 0 && name.ToString() == "SHELLDLL_DefView";
+        }
+
         /// <summary>The process that owns a top-level window, or 0 when it is no window.</summary>
         public static int WindowOwner(long windowId)
         {

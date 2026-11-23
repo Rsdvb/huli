@@ -12,6 +12,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -59,6 +60,8 @@ static class FakeDriver {
             { "frame", new Dictionary<string, object> { { "x", 10 }, { "y", 10 }, { "w", 40 }, { "h", 20 } } } },
           new Dictionary<string, object> { { "element_index", 1 }, { "role", "Edit" }, { "label", "Name" },
             { "frame", new Dictionary<string, object> { { "x", 10 }, { "y", 40 }, { "w", 80 }, { "h", 20 } } } },
+          new Dictionary<string, object> { { "element_index", 2 }, { "role", "MenuItem" }, { "label", "粘贴(&P)" },
+            { "frame", new Dictionary<string, object> { { "x", 10 }, { "y", 70 }, { "w", 80 }, { "h", 20 } } } },
         };
         result = new Dictionary<string, object> {
           { "content", new object[] { new Dictionary<string, object> { { "type", "text" }, { "text", "read" } } } },
@@ -445,7 +448,17 @@ describe.skipIf(!runs)('the elevated helper', () => {
       }
       await expect(helper.elevate(await request(helper, program)), name).rejects.toThrow(name)
       await expect(helper.install(process.execPath), name).rejects.toThrow(name)
-      await expect(helper.uninstall(), name).rejects.toThrow(name)
+    }
+    // Removal runs no .NET program, so no such setting stops it.
+    const removable = path.join(work, 'removable')
+    expect(await helperFor('allow', removable).install(process.execPath)).toMatchObject({
+      state: 'current',
+    })
+    process.env.DOTNET_EnableEventPipe = '1'
+    try {
+      expect(await helperFor('allow', removable).uninstall()).toMatchObject({ state: 'missing' })
+    } finally {
+      delete process.env.DOTNET_EnableEventPipe
     }
     // The SDK's own variables reach no .NET Framework program.
     process.env.DOTNET_CLI_TELEMETRY_OPTOUT = '1'
@@ -466,6 +479,11 @@ describe.skipIf(!runs)('the elevated helper', () => {
       [['Software\\Microsoft\\.NETFramework\\AltJit=*'], 'NETFramework'],
       [['Environment\\windir=C:\\Users\\x'], 'windir'],
       [['Volatile Environment\\1\\SystemRoot=C:\\Users\\x'], 'SystemRoot'],
+      [['Environment\\APPDOMAIN_MANAGER_ASM=x'], 'APPDOMAIN_MANAGER_ASM'],
+      [['Volatile Environment\\APPDOMAIN_MANAGER_TYPE=x'], 'APPDOMAIN_MANAGER_TYPE'],
+      // Overrides of what Windows' administrator prompt runs for a program.
+      [['Software\\Classes\\exefile\\shell\\runas\\command\\=cmd.exe /c x'], 'Classes\\exefile'],
+      [['Software\\Classes\\.exe\\x=1'], 'Classes\\.exe'],
     ]
     for (const [values, found] of cases) {
       process.env.KITE_HELPER_TEST_HIVE = hive(...values)
@@ -486,7 +504,39 @@ describe.skipIf(!runs)('the elevated helper', () => {
     expect(run({ windir: 'C:\\Users\\Public' })).toBe(17)
     // With a clean environment it goes on, to its own arguments.
     expect(run({})).toBe(2)
+    // It reads the user's registry again itself, as written while the prompt was open.
+    expect(run({ KITE_HELPER_TEST_HIVE: hive('Volatile Environment\\1\\COR_PROFILER={0}') })).toBe(
+      17,
+    )
+    expect(run({ KITE_HELPER_TEST_HIVE: hive('Software\\Classes\\exefile\\x=1') })).toBe(17)
   })
+
+  it('holds the staged copy so nothing can change it until the copy is done', async () => {
+    // One serve for both requests: its held files go with it.
+    const child = spawn(path.join(app, HELPER), ['serve'], { stdio: ['pipe', 'pipe', 'ignore'] })
+    children.push(child)
+    const lines: string[] = []
+    child.stdout!.setEncoding('utf8')
+    child.stdout!.on('data', (chunk: string) => lines.push(...chunk.split('\n').filter(Boolean)))
+    const send = async (id: number, op: string, fields: Record<string, unknown> = {}) => {
+      const mine = (line: string) => line.startsWith(`{"id":${id},`)
+      child.stdin!.write(`${JSON.stringify({ id, op, ...fields })}\n`)
+      for (let i = 0; i < 200 && !lines.some(mine); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      return (JSON.parse(lines.find(mine)!) as { result: { dir?: string } }).result
+    }
+    const dir = (await send(1, 'stage', { client: process.execPath })).dir!
+    const helper = path.join(dir, HELPER)
+    expect(readFileSync(helper).length).toBeGreaterThan(0)
+    expect(() => writeFileSync(helper, 'x')).toThrow()
+    expect(() => writeFileSync(path.join(dir, 'install.json'), '{}')).toThrow()
+    expect(() => rmSync(path.join(dir, 'cua-driver.exe'))).toThrow()
+    expect(() => renameSync(dir, `${dir}-moved`)).toThrow()
+    await send(2, 'unstage')
+    expect(existsSync(dir)).toBe(false)
+    child.stdin!.end()
+  }, 30_000)
 
   it('serves only the program that was approved, by its start time and image', async () => {
     const program = await target()
@@ -659,6 +709,25 @@ describe.skipIf(!runs)('the elevated helper', () => {
     child.kill()
   }, 30_000)
 
+  it('ends when a request uses an id again, so no answer stands for another', async () => {
+    const program = await target()
+    const helper = helperFor('allow')
+    const secrets = newSecrets()
+    const launcher = await helper.elevate({ ...(await request(helper, program)), ...secrets })
+    const exe = path.join(installDir, HELPER)
+    const { child, pid } = await connect(
+      exe,
+      ['--pipe', secrets.pipe, '--launcher', String(launcher), '--install-dir', installDir],
+      secrets.token,
+    )
+    children.push(child)
+    child.stdin.write(
+      `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"list_windows","arguments":{"pid":${program.pid}}}}\n`,
+    )
+    child.stdin.write('{"jsonrpc":"2.0","id":5,"method":"ping"}\n')
+    expect(await exited(pid, 5_000)).toBe(true)
+  }, 30_000)
+
   it('asks the owner before every step but harmless ones, listing what went through unasked', async () => {
     const program = await target()
     const driver = await start('allow', program)
@@ -726,6 +795,38 @@ describe.skipIf(!runs)('the elevated helper', () => {
       ['hotkey', { ...background, keys: ['ctrl', 'v'] }, 'never pastes'],
       ['press_key', { ...background, key: 'insert', modifiers: ['shift'] }, 'never pastes'],
       ['type_text', { ...background, text: 'x'.repeat(1001) }, 'longer than 1000'],
+      // Paste by a menu or a click on an element named so, in any of the covered languages.
+      [
+        'invoke_menu',
+        {
+          pid: program.pid,
+          window_id: program.window,
+          path: ['Edit', 'Paste'],
+          delivery_mode: 'background',
+        },
+        'never pastes',
+      ],
+      [
+        'invoke_menu',
+        {
+          pid: program.pid,
+          window_id: program.window,
+          path: ['编辑', '粘贴(&P)'],
+          delivery_mode: 'background',
+        },
+        'never pastes',
+      ],
+      [
+        'invoke_menu',
+        {
+          pid: program.pid,
+          window_id: program.window,
+          path: ['Bearbeiten', 'Einfügen'],
+          delivery_mode: 'background',
+        },
+        'never pastes',
+      ],
+      ['click', { ...background, element_token: 's00000001:2' }, 'never pastes'],
     ]
     const count = questions().length
     for (const [tool, args, why] of refused) {
@@ -734,8 +835,44 @@ describe.skipIf(!runs)('the elevated helper', () => {
       expect(text(result), tool).toContain(why)
     }
     expect(questions()).toHaveLength(count)
+
+    // Typing goes unasked only into the field just clicked: not with another element's token.
+    await driver!.call('click', { ...background, element_token: 's00000001:1' })
+    const quiet = questions().length
+    await driver!.call('type_text', { ...background, text: 'a', element_token: 's00000001:1' })
+    expect(questions()).toHaveLength(quiet)
+    await driver!.call('type_text', { ...background, text: 'y', element_token: 's00000001:0' })
+    expect(questions().at(-1)).toMatchObject({ step: 'type' })
+
+    // An open context menu takes a letter or Enter as its item: they are refused until a click or Escape.
+    for (const opener of [
+      ['click', { ...background, element_token: 's00000001:1', button: 'right' }],
+      ['press_key', { ...background, key: 'f10', modifiers: ['shift'] }],
+      ['press_key', { ...background, key: 'menu' }],
+    ] as [string, Record<string, unknown>][]) {
+      expect((await driver!.call(...opener)).isError, opener[0]).toBeFalsy()
+      for (const [tool, args] of [
+        ['press_key', { ...background, key: 'p' }],
+        ['press_key', { ...background, key: 'return' }],
+        ['type_text', { ...background, text: 'p' }],
+      ] as [string, Record<string, unknown>][]) {
+        expect(text(await driver!.call(tool, args)), `${opener[0]} then ${tool}`).toContain(
+          'context menu is open',
+        )
+      }
+      expect((await driver!.call('press_key', { ...background, key: 'down' })).isError).toBeFalsy()
+      expect(text(await driver!.call('press_key', { ...background, key: 'p' }))).toContain(
+        'context menu is open',
+      )
+      expect(
+        (await driver!.call('press_key', { ...background, key: 'escape' })).isError,
+      ).toBeFalsy()
+      expect(text(await driver!.call('press_key', { ...background, key: 'p' }))).not.toContain(
+        'context menu is open',
+      )
+    }
     await driver!.stop()
-  }, 60_000)
+  }, 90_000)
 
   it('ends once the owner said no to three steps', async () => {
     const program = await target()
