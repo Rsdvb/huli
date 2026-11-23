@@ -334,7 +334,7 @@ function failure(stderr: string, selector: string | null): string {
   if (selector && /SyntaxError|DOMException/.test(stderr)) {
     return `The selector \`${selector}\` is not valid CSS.`
   }
-  if (/blocked private network address/.test(stderr)) {
+  if (/blocked (private network )?address/.test(stderr)) {
     return 'The page sent the read to an address on this computer or the local network, which read_web_page does not reach.'
   }
   const lines = stderr

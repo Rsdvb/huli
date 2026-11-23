@@ -1682,7 +1682,8 @@ remote host already bundles.
 Settings › 功能管理 lists Kite's big optional features, each with a switch and one line. A feature
 turned off has its entry points hidden, in the window and on paired phones, and its code neither
 loaded nor run; agents are not offered its MCP tools and the agent host refuses its methods. Every
-feature is on by default, and each takes effect at once, both ways, without a restart (code a
+feature is on by default but 后台读网页, which downloads a program and so waits for the user's own
+yes (`offByDefault`), and each takes effect at once, both ways, without a restart (code a
 feature already loaded leaves memory at the next launch).
 
 | Feature (id)                      | Off, it stops                                                                                                            |
@@ -1701,6 +1702,7 @@ feature already loaded leaves memory at the next launch).
 | 浏览器点选元素 (`pickElement`)    | the pick toggle, hint, layer and tray (now lazily loaded); main refuses `browser:pick` and ends pick mode                |
 | 密钥卡片 (`secrets`)              | `request_secrets` and its line in Kite's MCP instructions                                                                |
 | Agent 改主题 (`agentTheme`)       | `read_theme`, `set_theme_colors` and their line                                                                          |
+| 后台读网页（Moli） (`webReader`)  | `read_web_page` and its line; off by default, and turning it on downloads Moli (below)                                   |
 
 Computer use (电脑操控) already has its own switch (`computerUse.enabled`), so the page links to it
 rather than repeating it. These stay on for good, as Kite's core: sessions, the terminal, the
@@ -1747,6 +1749,89 @@ host private 154 MB against 153 MB (no difference). At rest the features already
 since most loaded lazily; what the switches save shows once one is used: the device host, which
 starts once Settings › 移动设备 or the devices pane opens and polls for simulators every 5 s, holds
 about 60 MB and never starts with 移动设备 off.
+
+### Background web reading (后台读网页)
+
+Agents' own web fetch tools read the HTML a server sends, so a page that renders with JavaScript
+comes back as an empty shell. `read_web_page`, a tool of Kite's MCP server, reads such a page in
+the background with [Moli](https://github.com/lexmount/moli), a headless browser for agents in Rust
+(Apache-2.0 OR MIT; its archive also carries Chromium's BSD-3-Clause and Selenium's notice), and
+returns it as text. Kite's visible browser stays the way to check the user's own app or a page that
+needs a sign-in; agents are told to use their own web tools first.
+
+- Fetched on demand, never bundled: `src/agent-host/web-reader/release.ts` pins v1.1.27's archive
+  for each system (Windows, macOS, Linux; x64 and arm64; none on musl) with its size and SHA-256 as
+  GitHub lists them. Nothing is downloaded until the user turns 后台读网页 on, from Settings ›
+  功能管理 or Settings › 浏览器 › 后台读网页 (both ask first in a dialog that names the 42 MB and
+  where it comes from), or an agent proposes the switch with `change_settings`, which always asks
+  in the user's card (the switch's line names the size too). `install.ts` streams the archive from
+  github.com the way Kite's own downloads go (Advanced › Proxy, else the environment's proxy, else
+  directly; never an agent's node) into `<userData>/runtimes/moli/.partial-*/`, refuses one whose
+  SHA-256 or size differs from the pinned ones (deleted, nothing installed), extracts it with the
+  system's tar, requires `moli --version` to say 1.1.27 and renames it into
+  `runtimes/moli/1.1.27/` with its `kite-moli.json` (about 104 MB on disk on Windows x64).
+  Progress reaches the windows in `webReader.changed`; `webReader.remove` (删除 Moli，释放 X MB)
+  deletes it and the page turns the switch off. The `webReader.*` methods are the windows' alone.
+- Nothing runs at rest: the status is read from the record when Settings first asks, and each read
+  is one `moli fetch` process that ends with it (about 0.1 s to start and read a local page), at
+  most two at a time. A warm `moli serve` was not needed.
+- The tool: `url` (http or https only, no credentials in it), `format` (`markdown`; `text`, the
+  visible text; `semantic`, Moli's semantic tree without its node ids), `selector` (only the
+  matching elements, handed to the page as a JSON string on stdin), `max_chars` (40,000 by
+  default, 1,000 to 200,000; Moli's output is read up to 4 bytes a character and the process is
+  ended past it), `wait_for_js` (true: `--wait domstable`; false: `--wait load`),
+  `wait_for_selector` and `timeout_seconds` (10 by default, 3 to 60; a page still changing then is
+  returned as it is). The answer says what it is and holds the page between
+  `<untrusted-web-page boundary="<random>">` markers, labelled as untrusted data from the web, not
+  instructions; an HTTP error status is said with the page the server sent.
+- Network: Moli's environment loses every proxy variable and `MOLI_*`, and the flags name the
+  agent's own way out, read from the agent's environment as its commands get it: its Agent network
+  node's listener, else Kite's proxy, else directly. The local network's ranges (10/8, 172.16/12,
+  192.168/16, 169.254/16, 100.64/10, 0/8, fd00::/8, fe80::/10) and this computer (127/8, ::1) are
+  blocked with `--block-cidrs` for every request the page makes, its redirects included, by the
+  address a name resolves to. Not Moli's `--block-private-networks`: it also blocks
+  198.18.0.0/15, which a Clash, sing-box or Karing TUN answers every name with in fake-ip mode, so
+  every read through one failed (seen on the owner's computer).
+- What it may read (`policy.ts`): Moli runs on the computer outside any sandbox, with the user's
+  network position, where Kite's MCP server, mihomo's API and other local services listen. So the
+  tool refuses this computer and the local network, as addresses (also `127.1`, a decimal or a
+  mapped IPv6 one) and as names (`localhost`, a name without a dot, `.local`, `.lan`, `.internal`,
+  `.home.arpa`, `.ts.net`), but for the session's own worktree ports (KITE_PORT), where its dev
+  servers run; those reads may reach the loopback, still not the local network. Another local page
+  goes to Kite's browser (`browser_navigate`), as the refusal says. A container session is refused
+  (Moli would go around the container's network limits; such a session gets no MCP servers
+  anyway), and so is a sandbox whose commands are off the network (`none`); with `agent` the read
+  must go through the agent's node and reaches no local port.
+- Agents: the tool is in the `browser` group, listed only while the switch is on (a change replaces
+  the prepared sessions), never allowed without asking, and the MCP instructions get one line
+  (the `webReader` guide flag): read_web_page for a page the agent's own fetch fails on.
+- Measured on the owner's computer (2026-11-23, Windows 11, Moli 1.1.27 against Kite's built-in
+  browser in a test copy driven by the fake agent; 10 local test pages and 5 public documentation
+  pages: MDN Array.map, react.dev useState, Python asyncio-task, Node.js fs, Electron
+  WebContentsView). Both read all 15. Moli's default (`domstable`): local pages 0.47–0.50 s, 1.4
+  and 1.7 s for the two that render late, peak working set 30–42 MB; public pages 3.3–5.5 s and
+  10.2 s on react.dev, peak 55–103 MB but 474 MB on react.dev, whose scripts keep running to the
+  limit. With `wait_for_js: false`: 0.09–0.13 s locally (missing what renders after the load) and
+  1.9–2.9 s for the public pages, with the same text but on MDN (26.7k against 35k characters).
+  Kite's browser (navigate and snapshot): 0.63–1.47 s locally and 1.7–5.5 s for the public pages;
+  its page's renderer held 135–148 MB (28–41 MB private) locally and 161–248 MB (54–142 MB private)
+  for the public pages, kept while the tab is open; its snapshot stops at 2,000 lines (79k
+  characters of Node's fs page, of which Moli read 465k). Moli leaves out what is inside an iframe
+  and, in Markdown, the kinds of a form's fields (`semantic` keeps them). So it is not faster than
+  the visible browser for documentation; what it brings is a read in the background that needs no
+  tab, no site card and no visible pane, in plain Markdown, at a lower memory cost that ends with
+  the read.
+
+Huli's own files: `src/shared/web-reader.ts`, `src/agent-host/web-reader/` (`release.ts`,
+`install.ts`, `policy.ts`, `fetch.ts`, `tools.ts`, `service.ts`, `web-reader.test.ts`),
+`src/renderer/src/stores/web-reader.ts` and `features/settings/web-reader-rows.tsx`. Hooks:
+`features.ts` (`webReader`, `offByDefault`), `settings-catalog.ts` (`browser.web-reader`,
+`FEATURE_GROUP`), `agent-host.ts`, `host-request-limits.ts`, `remote/allow-list.ts`,
+`agent-host/validate.ts`, `host.ts`, `sessions.ts` (`webReadPlace`), `artifacts/service.ts`,
+`guide/guide.ts` and `topics.ts`, `bootstrap.ts`, `section-defs.tsx`, `features-section.tsx`, and
+the `webReader` keys of `locales/*/{settings,host}.json`. Tests: a download refused on a SHA-256 or
+size mismatch, the arguments and addresses, the command line and environment, the cut and the
+untrusted wrapping, and the feature gate (`web-reader.test.ts`, `service.test.ts`).
 
 ## Merging Kettu
 

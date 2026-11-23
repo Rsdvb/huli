@@ -254,10 +254,15 @@ describe('where read_web_page may read', () => {
 describe("Moli's command line and environment", () => {
   const egress = { proxy: 'http://127.0.0.1:41513', noProxy: 'localhost,corp.example,<local>,x:8' }
 
-  it('blocks private addresses for every request a public page makes, and names the proxy', () => {
+  it('blocks this computer and the local network for every request a public page makes', () => {
     const args = fetchArgs(request({ url: 'https://example.com/' }), egress, false)
-    expect(args).toContain('--block-private-networks')
-    expect(args).not.toContain('--block-cidrs')
+    const cidrs = args[args.indexOf('--block-cidrs') + 1]!.split(',')
+    expect(cidrs).toEqual(
+      expect.arrayContaining(['127.0.0.0/8', '::1/128', '10.0.0.0/8', '192.168.0.0/16']),
+    )
+    // A TUN's fake-ip answers (198.18.0.0/15, sing-box's fc00::/18) must still get through.
+    expect(cidrs.some((cidr) => cidr.startsWith('198.18') || cidr.startsWith('fc00'))).toBe(false)
+    expect(args).not.toContain('--block-private-networks')
     expect(args[args.indexOf('--http-proxy') + 1]).toBe('http://127.0.0.1:41513')
     const noProxy = args[args.indexOf('--http-no-proxy') + 1]!.split(',')
     expect(noProxy).toEqual(expect.arrayContaining(['192.168.0.0/16', 'corp.example']))
@@ -271,10 +276,9 @@ describe("Moli's command line and environment", () => {
 
   it("lets a read of the session's own dev server reach the loopback only", () => {
     const args = fetchArgs(request({ url: 'http://localhost:20010/' }), egress, true)
-    expect(args).not.toContain('--block-private-networks')
     const cidrs = args[args.indexOf('--block-cidrs') + 1]!.split(',')
-    expect(cidrs).toEqual(expect.arrayContaining(['10.0.0.0/8', '192.168.0.0/16', 'fc00::/7']))
-    expect(cidrs.some((cidr) => cidr.startsWith('127.'))).toBe(false)
+    expect(cidrs).toEqual(expect.arrayContaining(['10.0.0.0/8', '192.168.0.0/16', 'fd00::/8']))
+    expect(cidrs.some((cidr) => cidr.startsWith('127.') || cidr === '::1/128')).toBe(false)
   })
 
   it('hands a selector to the page only as a JSON string, on stdin', () => {

@@ -32,7 +32,7 @@ export type WebReadFormat = (typeof WEB_READ_FORMATS)[number]
 export const WEB_READ_CHARS = { default: 40_000, min: 1_000, max: 200_000 } as const
 
 /** How long a read may wait for the page, in seconds. */
-export const WEB_READ_SECONDS = { default: 25, min: 3, max: 60 } as const
+export const WEB_READ_SECONDS = { default: 10, min: 3, max: 60 } as const
 
 /** Whole megabytes, rounded up, as the page shows sizes. */
 export function megabytes(bytes: number): number {

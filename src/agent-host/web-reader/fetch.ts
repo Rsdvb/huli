@@ -1,8 +1,8 @@
 // Huli: one read of a page with `moli fetch`, a process of its own that ends with the read, so
 // nothing of Moli runs between reads. Its traffic goes the agent's way out (its Agent network
 // node, else Kite's proxy), named on the command line with every proxy variable removed from its
-// environment; private addresses are blocked for every request the page makes, but the loopback
-// for a read of the session's own dev server. Huli's own; see tools/huli/README.md (Background web
+// environment; the local network's addresses are blocked for every request the page makes, and
+// this computer's too but for a read of the session's own dev server. Huli's own; see tools/huli/README.md (Background web
 // reading).
 
 import { spawn } from 'node:child_process'
@@ -18,17 +18,24 @@ export interface ReadEgress {
   noProxy: string | null
 }
 
-/** The private ranges a page may not reach, but the loopback. */
-const LAN_CIDRS = [
+/**
+ * The local network's ranges, which no read reaches, by the address a name resolves to too. Not
+ * Moli's `--block-private-networks`: it also blocks 198.18.0.0/15 and fc00::/8, which proxy
+ * clients' TUNs (Clash, sing-box, Karing) answer every name with in fake-ip mode, so every read of
+ * an agent on the system's network would fail behind one.
+ */
+export const LAN_CIDRS = [
   '0.0.0.0/8',
   '10.0.0.0/8',
   '100.64.0.0/10',
   '169.254.0.0/16',
   '172.16.0.0/12',
   '192.168.0.0/16',
-  'fc00::/7',
+  'fd00::/8',
   'fe80::/10',
 ]
+/** This computer, which only a read of the session's own dev server reaches. */
+const LOOPBACK_CIDRS = ['127.0.0.0/8', '::1/128']
 
 const PROXY_NAMES = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY']
 /** A page's whole response is held in memory, so one larger than this is refused. */
@@ -84,8 +91,7 @@ export function fetchArgs(request: ReadRequest, egress: ReadEgress, local: boole
   args.push('--timeout-ms', String(request.timeoutSeconds * 1000))
   args.push('--fail-with-body')
   args.push('--http-max-response-size', String(MAX_RESPONSE_BYTES))
-  if (local) args.push('--block-cidrs', LAN_CIDRS.join(','))
-  else args.push('--block-private-networks')
+  args.push('--block-cidrs', (local ? LAN_CIDRS : [...LAN_CIDRS, ...LOOPBACK_CIDRS]).join(','))
   if (egress.proxy) {
     args.push('--http-proxy', egress.proxy)
     args.push('--http-no-proxy', noProxyList(egress))
