@@ -1,0 +1,62 @@
+# Huli: a review's findings on the phone's diff (审查改动): the seeded repository (seed-review.mjs)
+# has an uncommitted change to src/clock.ts. A new session in it asks for a review from its changes
+# screen; the fake agent answers Kite's review prompt with findings on the changed lines, which the
+# diff screen shows in a card over the diff, the rows they sit on marked, and 让 Agent 修 sends one
+# back. run.sh seeds the daemon for it when FLOWS names it; in a run of every flow, without the
+# seed, it stops at New session.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- runFlow:
+    when:
+      visible: '审查演示.*'
+    commands:
+      - tapOn: '审查演示.*'
+      - tapOn:
+          text: '(想让|给) .*'
+      - inputText: '/basic-turn'
+      - tapOn: '发送'
+      - extendedWaitUntil:
+          visible:
+            text: '给 .* 发消息 回复.*'
+          timeout: 120000
+      - tapOn: '.*个文件有改动'
+      - extendedWaitUntil:
+          visible: '审查改动'
+          timeout: 30000
+      - tapOn: '审查改动'
+      - extendedWaitUntil:
+          visible: '已开始审查.*'
+          timeout: 30000
+      - takeScreenshot: r01-changes
+      # The fake agent answers in about a second; the diff reads the review as it opens.
+      - tapOn: 'clock.ts'
+      - extendedWaitUntil:
+          visible: '让 Agent 修'
+          timeout: 20000
+          optional: true
+      - runFlow:
+          when:
+            notVisible: '让 Agent 修'
+          commands:
+            - back
+            - tapOn: 'clock.ts'
+            - extendedWaitUntil:
+                visible: '让 Agent 修'
+                timeout: 20000
+      - takeScreenshot: r02-diff
+      - tapOn: '让 Agent 修'
+      - extendedWaitUntil:
+          visible: '再发一次'
+          timeout: 20000
+      - takeScreenshot: r03-sent

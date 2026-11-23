@@ -2,11 +2,18 @@
 // it), read from the computer and read again when the folder changes, or a tool's edit handed over
 // from the conversation. With the session known, its lines take comments for the agent.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import { DiffNotesBar, notedRows, useLinePick, type NotePlace } from '../components/DiffNotes'
 import { DiffView } from '../components/DiffView'
+import {
+  FindingsCard,
+  flaggedRows,
+  placedFindings,
+  useSessionReview,
+  useSeverityColors,
+} from '../components/ReviewFindings'
 import { diffTexts, handedDiff, type Diff } from '../diff'
 import { call, sessionFolder, useChanges } from '../git'
 import { hostErrorText } from '../hostErrors'
@@ -23,7 +30,9 @@ import { StateView } from '../ui/session/StateView'
 import { Counts } from '../ui/session/TurnChanges'
 
 type Shown =
-  { kind: 'diff'; diff: Diff } | { kind: 'note'; text: string } | { kind: 'error'; text: string }
+  | { kind: 'diff'; diff: Diff; newText?: string }
+  | { kind: 'note'; text: string }
+  | { kind: 'error'; text: string }
 
 // Lets the screen draw its spinner before a large diff takes the JS thread.
 const nextFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
@@ -81,7 +90,13 @@ export default function DiffScreen() {
         if (file.binary) return setShown({ kind: 'note', text: '二进制文件，没法显示逐行改动。' })
         if (file.tooLarge) return setShown({ kind: 'note', text: '文件太大，请在电脑上查看。' })
         await nextFrame()
-        if (live) setShown({ kind: 'diff', diff: diffTexts(file.oldText, file.newText) })
+        if (live) {
+          setShown({
+            kind: 'diff',
+            diff: diffTexts(file.oldText, file.newText),
+            newText: file.newText ?? '',
+          })
+        }
       } catch (error) {
         if (live) setShown({ kind: 'error', text: hostErrorText(error, '读不到这个文件的改动。') })
       }
@@ -119,6 +134,20 @@ export default function DiffScreen() {
     [diff, commentable, notes, place],
   )
   const [barHeight, setBarHeight] = useState(0)
+  // Huli: the session's review's findings on this file, for a file's own numbered lines.
+  const [review, setReview] = useSessionReview(link, commentable ? params.id! : null, updatedAt)
+  const colors = useSeverityColors()
+  const newText = shown?.kind === 'diff' ? shown.newText : undefined
+  const placed = useMemo(
+    () =>
+      diff && newText !== undefined && !handed
+        ? placedFindings(review, place.path, newText, diff)
+        : [],
+    [diff, newText, handed, review, place.path],
+  )
+  const flags = useMemo(() => flaggedRows(placed, colors), [placed, colors])
+  const [focus, setFocus] = useState<{ row: number; at: number } | null>(null)
+  const showRow = useCallback((row: number) => setFocus({ row, at: Date.now() }), [])
 
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
@@ -182,9 +211,21 @@ export default function DiffScreen() {
               </Text>
             </View>
           )}
+          {review && placed.length > 0 && params.id ? (
+            <FindingsCard
+              link={link}
+              sessionId={params.id}
+              review={review}
+              placed={placed}
+              onReview={setReview}
+              onShowRow={showRow}
+            />
+          ) : null}
           <View style={[styles.sheet, { borderTopColor: c.border }]}>
             <DiffView
               diff={shown.diff}
+              flags={flags}
+              focus={focus}
               {...(commentable
                 ? {
                     picked: pick.picked,

@@ -4,7 +4,7 @@
 // the branch's commits. A file opens to its diff, a document in the system's viewer; the branch
 // opens the branch picker.
 
-import { useMemo, type ReactElement } from 'react'
+import { useMemo, useState, type ReactElement } from 'react'
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { ChangedFile } from '@shared/git'
@@ -27,7 +27,15 @@ import {
 } from '../../components/git/GitParts'
 import { useGitSteps } from '../../components/git/useGitSteps'
 import { WorktreeCard } from '../../components/git/WorktreeCard'
-import { sessionFolder, useChanges, useCurrentPr, useGitRunning, useGitTools } from '../../git'
+import {
+  call,
+  sessionFolder,
+  useChanges,
+  useCurrentPr,
+  useGitRunning,
+  useGitTools,
+} from '../../git'
+import { hostErrorText } from '../../hostErrors'
 import { opensInViewer } from '../../preview/kinds'
 import { previewFile } from '../../preview/preview'
 import { SHARE_LABEL } from '../../preview/PreviewSheet'
@@ -60,6 +68,21 @@ export default function ChangesScreen() {
   const current = useCurrentPr(link, status?.repo ? status : null)
   const running = useGitRunning(folder)
   const steps = useGitSteps(link, folder, status, current.pr !== null)
+  // Huli: a review of these changes by the session's agent, whose findings show on each diff.
+  const [reviewing, setReviewing] = useState(false)
+  const [reviewNote, setReviewNote] = useState<{ text: string; failed: boolean } | null>(null)
+  const startReview = async () => {
+    setReviewing(true)
+    setReviewNote(null)
+    try {
+      await call(link, 'sessions.reviewStart', { sessionId: id })
+      setReviewNote({ text: '已开始审查，发现的问题会标在各文件改动的行上。', failed: false })
+    } catch (failure) {
+      setReviewNote({ text: hostErrorText(failure, '没能开始审查。'), failed: true })
+    } finally {
+      setReviewing(false)
+    }
+  }
 
   const totals = useMemo(() => {
     let insertions = 0
@@ -228,6 +251,13 @@ export default function ChangesScreen() {
               {files.length > 0 ? (
                 <>
                   <PillButton
+                    label="审查改动"
+                    icon={G.eye}
+                    disabled={!connected}
+                    busy={reviewing}
+                    onPress={() => void startReview()}
+                  />
+                  <PillButton
                     label="全部丢弃"
                     icon={GI.discard}
                     danger
@@ -247,6 +277,13 @@ export default function ChangesScreen() {
               ) : null}
             </View>
             {error ? <Text style={[styles.total, { color: c.danger }]}>{error}</Text> : null}
+            {reviewNote ? (
+              <Text
+                style={[styles.total, { color: reviewNote.failed ? c.danger : c.textSecondary }]}
+              >
+                {reviewNote.text}
+              </Text>
+            ) : null}
           </View>
         }
         ListEmptyComponent={
