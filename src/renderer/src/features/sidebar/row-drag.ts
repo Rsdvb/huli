@@ -103,8 +103,8 @@ function rereadProjects(hostId: string | null): void {
 }
 
 /**
- * Keeps `ids` as the group's order, or goes back to activity with null. `announce` tells, once, that
- * a group went from activity to the user's order, with Undo; `undo` is what Undo restores.
+ * Keeps `ids` as the group's order, or goes back to activity with null. `announce` says which way
+ * the group just turned, with Undo, which puts back the order it had.
  */
 async function saveOrder(
   group: RowGroup,
@@ -253,7 +253,10 @@ function dragged(sessionId: string): string[] {
   return picked ? [...picked] : [sessionId]
 }
 
-/** The row's group, measured, when the dragged sessions are rows of it that can be reordered. */
+/**
+ * The row's group, measured, when the dragged sessions are rows of it that can be reordered. Rows
+ * slid by `translate` keep their place in the layout, so the measures hold the whole drag.
+ */
 function measure(row: Element, ids: readonly string[]): Sorting | null {
   const li = row.closest('li')
   const list = li?.parentElement
@@ -268,7 +271,6 @@ function measure(row: Element, ids: readonly string[]): Sorting | null {
     const box = (el as HTMLElement).getBoundingClientRect()
     return [{ id, el: el as HTMLElement, top: box.top - origin, height: box.height, shift: 0 }]
   })
-  // Rows slid by `translate` keep their place in the layout, so these hold the whole drag.
   const source = items.find((item) => item.el === li)
   if (!source || items.length < 2) return null
   return { group, list, items, source, moving: new Set(ids), target: null }
@@ -490,8 +492,8 @@ function drop(sorting: Sorting, target: number): void {
   const { group, items, source, moving } = sorting
   const others = items.filter((item) => item !== source)
   // The first row staying put at or after the place, else the last one before it.
-  const after = others.slice(target).find((item) => !moving.has(item.id))
-  const before = others
+  const below = others.slice(target).find((item) => !moving.has(item.id))
+  const above = others
     .slice(0, target)
     .reverse()
     .find((item) => !moving.has(item.id))
@@ -499,7 +501,7 @@ function drop(sorting: Sorting, target: number): void {
   const next = withRowsMoved(
     group.rows,
     order,
-    after ? { before: after.id } : before ? { after: before.id } : { before: null },
+    below ? { before: below.id } : above ? { after: above.id } : { before: null },
   )
   if (next.every((id, index) => id === group.rows[index])) return
   clearSelection()
