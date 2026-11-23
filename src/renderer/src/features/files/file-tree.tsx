@@ -17,6 +17,7 @@ import {
   type DragMoveEvent,
   type DragStartEvent,
 } from '@dnd-kit/react'
+import { DragFeedback, lightPlugins } from '@renderer/components/drag-feedback'
 import {
   ArrowRight01Icon,
   AtIcon,
@@ -554,10 +555,12 @@ export function FileTree({
   return (
     <DragDropProvider
       sensors={sensors}
+      plugins={lightPlugins}
       onDragStart={onDragStart}
       onDragMove={onDragMove}
       onDragEnd={onDragEnd}
     >
+      <DragFeedback />
       <ContextMenu
         disabled={edit !== null}
         // A field to type a name in waits for the menu to close, which holds the focus till then.

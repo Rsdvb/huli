@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { AlertDialog as AlertDialogPrimitive } from '@base-ui/react/alert-dialog'
 import { DragDropProvider, type DragEndEvent } from '@dnd-kit/react'
+import { DragFeedback, lightPlugins } from '@renderer/components/drag-feedback'
 import { isSortable, useSortable } from '@dnd-kit/react/sortable'
 import {
   ArrowDown01Icon,
@@ -586,7 +587,8 @@ export function SurfaceTabs({ panel, projectPath }: { panel: string; projectPath
 
   return (
     <>
-      <DragDropProvider sensors={tabSensors} onDragEnd={dragEnded}>
+      <DragDropProvider sensors={tabSensors} plugins={lightPlugins} onDragEnd={dragEnded}>
+        <DragFeedback />
         <div
           ref={(element) => {
             stripRef.current = element

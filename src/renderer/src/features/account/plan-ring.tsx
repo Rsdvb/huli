@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { DragDropProvider, PointerSensor, type DragEndEvent } from '@dnd-kit/react'
+import { DragFeedback, lightPlugins } from '@renderer/components/drag-feedback'
 import { isSortable } from '@dnd-kit/react/sortable'
 import { ArrowRight01Icon, PieChartIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
@@ -382,9 +383,11 @@ function PlanPopover({ currentKey, close }: { currentKey: string | null; close: 
       <div className="kettu-plan-pop__well scroll-fade-y">
         <DragDropProvider
           sensors={PLAN_CARD_SENSORS}
+          plugins={lightPlugins}
           onDragStart={() => setDraggedCards(shown)}
           onDragEnd={finishDrag}
         >
+          <DragFeedback />
           <div className="grid grid-cols-2 gap-1">
             {shown.map((card, index) => (
               <PlanLimitCard
