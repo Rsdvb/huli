@@ -58,6 +58,7 @@ describe("a Claude Code agent's settings file", () => {
       defaultWindow: null,
       compact: [{ model: sonnet.id, name: sonnet.name, window: null }],
       promptCacheTtl: null,
+      outputStyle: null,
     })
   })
 

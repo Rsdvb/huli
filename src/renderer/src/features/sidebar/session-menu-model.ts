@@ -14,6 +14,7 @@ export type SessionMenuItem =
   | 'settle'
   | 'neverSettle'
   | 'toolCalls'
+  | 'menuOptions'
   | 'autoResume'
   | 'board'
   | 'manager'
@@ -102,6 +103,8 @@ export interface SessionMenuContext {
   prFlow?: boolean
   /** Its row's badge lists sub-agents, which the menu lists too. */
   subagents?: boolean
+  /** Huli: its agent offers options of the menu's, such as Claude Code's output style. */
+  menuOptions?: boolean
 }
 
 /**
@@ -126,6 +129,7 @@ export function sessionMenuGroups(
     movable = false,
     prFlow = false,
     subagents = false,
+    menuOptions = false,
   }: SessionMenuContext,
 ): SessionMenuItem[][] {
   const running = isRunning(summary)
@@ -181,8 +185,9 @@ export function sessionMenuGroups(
       ? [
           state,
           ['rename', ...(topLevel ? (['pin'] as const) : []), ...forks],
-          // Huli: how much of the agent's work the thread shows (简洁视图).
-          entryShown('session.zenView') ? ['toolCalls'] : [],
+          // Huli: how much of the agent's work the thread shows (简洁视图), and the agent's own
+          // options of the menu, such as Claude Code's output style.
+          [...(entryShown('session.zenView') ? (['toolCalls'] as const) : []), 'menuOptions'],
           tidy,
           own,
           flow,
@@ -218,6 +223,7 @@ export function sessionMenuGroups(
     ...(rename ? [] : (['rename'] as const)),
     ...(exportable ? [] : (['export'] as const)),
     ...(movable ? [] : (['move'] as const)),
+    ...(menuOptions ? [] : (['menuOptions'] as const)),
   ])
   return groups
     .map((group) => group.filter((item) => !missing.has(item)))

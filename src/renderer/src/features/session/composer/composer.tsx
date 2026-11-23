@@ -355,8 +355,10 @@ export function Composer({
   const suggestion =
     idle && quota?.kind === 'out' && fallback && !keptQuota ? { quota, fallback } : null
   const switches = config.filter((o) => o.type === 'boolean')
+  // Huli: an option of the session's menu, such as Claude Code's output style, stays out of here.
   const others = config.filter(
-    (o): o is SelectOption => isSelect(o) && o !== mode && o !== model && o !== effort,
+    (o): o is SelectOption =>
+      isSelect(o) && o !== mode && o !== model && o !== effort && o.place !== 'menu',
   )
   const leftOthers = others.filter((o) => o.category === 'other')
   const rightOthers = others.filter((o) => o.category !== 'other')

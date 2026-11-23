@@ -35,7 +35,7 @@ import {
   type MapperEffect,
   type MapperOutput,
 } from '../session-updates'
-import { FakeChild, FakeClaudeSdk, type FakeQuery } from '../testing/fake-claude-sdk'
+import { FAKE_INIT, FakeChild, FakeClaudeSdk, type FakeQuery } from '../testing/fake-claude-sdk'
 import { ClaudeConnection, promptContent } from './connection'
 import { claudeSdkDriver } from './driver'
 import { ANSWER_IN_REPLY, QUESTION_UNREADABLE, QUESTIONS_SKIPPED } from './permissions'
@@ -394,6 +394,50 @@ describe('the Claude Agent SDK driver', () => {
     run = { fallbackModel: null, budgetUsd: 4, budgetAllSessions: true }
     await connection.newSession('/repo', {})
     expect(limits()).toEqual({ fallbackModel: undefined, maxBudgetUsd: 4 })
+  })
+
+  it("offers Claude Code's output styles in the menu and starts in the settings' one", async () => {
+    let run: ClaudeRunSettings | null = null
+    const { sdk, connection } = await setup({}, {}, { claudeRun: () => run })
+    sdk.init = {
+      ...FAKE_INIT,
+      output_style: 'default',
+      available_output_styles: ['default', 'Explanatory', 'Pirate'],
+    }
+    const { sessionId, config } = await connection.newSession('/repo', {})
+    expect(sdk.last.options.settings?.outputStyle).toBeUndefined()
+    expect(config.find((option) => option.id === '__outputStyle')).toMatchObject({
+      category: 'other',
+      type: 'select',
+      value: 'default',
+      place: 'menu',
+      choices: [
+        { value: 'default', name: 'Default' },
+        { value: 'Explanatory', name: 'Explanatory' },
+        { value: 'Pirate', name: 'Pirate', group: 'Your own' },
+      ],
+    })
+    const changed = await connection.setConfigOption(sessionId, '__outputStyle', 'Pirate')
+    expect(changed.find((option) => option.id === '__outputStyle')?.value).toBe('Pirate')
+    expect(sdk.last.calls).toContainEqual({
+      method: 'applyFlagSettings',
+      args: [{ outputStyle: 'Pirate' }],
+    })
+    await expect(
+      connection.setConfigOption(sessionId, '__outputStyle', 'Nobody'),
+    ).rejects.toBeInstanceOf(AgentRequestError)
+
+    run = { fallbackModel: null, budgetUsd: null, budgetAllSessions: false, outputStyle: 'Pirate' }
+    await connection.newSession('/repo', {})
+    expect(sdk.last.options.settings?.outputStyle).toBe('Pirate')
+    await connection.newSession('/repo', { hidden: 'titles' })
+    expect(sdk.last.options.settings?.outputStyle).toBeUndefined()
+  })
+
+  it('offers no output style when Claude Code lists none', async () => {
+    const { connection } = await setup()
+    const { config } = await connection.newSession('/repo', {})
+    expect(config.some((option) => option.id === '__outputStyle')).toBe(false)
   })
 
   it('passes no fallback model that is the main model, which the SDK rejects', async () => {

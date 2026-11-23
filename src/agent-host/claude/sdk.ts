@@ -415,6 +415,9 @@ export interface InitializeAnswer {
   models: ModelInfo[]
   account?: AccountInfo
   fast_mode_state?: string
+  /** Huli: the output style in use, and every one Claude Code can switch to, built-in and custom. */
+  output_style?: string
+  available_output_styles?: string[]
   /** The version of the Claude Code process that runs the session's turns. */
   claude_code_version?: string
 }

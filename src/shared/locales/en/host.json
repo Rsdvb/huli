@@ -922,7 +922,32 @@
       "effort": "Effort",
       "effortDescription": "Available effort levels for this model",
       "fast": "Fast mode",
-      "fastDescription": "Faster responses on supported models"
+      "fastDescription": "Faster responses on supported models",
+      "outputStyle": "Output style",
+      "outputStyleDescription": "How Claude Code writes its replies"
+    },
+    "outputStyle": {
+      "custom": "Your own",
+      "default": {
+        "name": "Default",
+        "description": "Claude Code as it always writes"
+      },
+      "Proactive": {
+        "name": "Proactive",
+        "description": "Executes at once, interrupts little, prefers action to planning"
+      },
+      "Concise": {
+        "name": "Concise",
+        "description": "Terse: leads with results, skips preamble and narration"
+      },
+      "Explanatory": {
+        "name": "Explanatory",
+        "description": "Explains its implementation choices and the codebase's patterns"
+      },
+      "Learning": {
+        "name": "Learning",
+        "description": "Pauses to have you write small pieces of code, for practice"
+      }
     },
     "background": {
       "unsupported": "This Claude Code cannot move a task to the background; update it first"

@@ -910,7 +910,32 @@
       "effort": "推理强度",
       "effortDescription": "这个模型能用的推理强度",
       "fast": "快速模式",
-      "fastDescription": "支持的模型回复更快"
+      "fastDescription": "支持的模型回复更快",
+      "outputStyle": "输出风格",
+      "outputStyleDescription": "Claude Code 写回复的方式"
+    },
+    "outputStyle": {
+      "custom": "自己的",
+      "default": {
+        "name": "默认",
+        "description": "Claude Code 平常的写法"
+      },
+      "Proactive": {
+        "name": "主动",
+        "description": "直接动手，少打断，先做再说"
+      },
+      "Concise": {
+        "name": "简洁",
+        "description": "简短，先给结果，不写开场白和过程叙述"
+      },
+      "Explanatory": {
+        "name": "讲解",
+        "description": "讲清楚为什么这样实现、代码库里的惯用做法"
+      },
+      "Learning": {
+        "name": "学习",
+        "description": "停下来让你亲手写一小段代码，边做边学"
+      }
     },
     "background": {
       "unsupported": "这个版本的 Claude Code 不能把任务转到后台，请先更新"

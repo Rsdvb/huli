@@ -120,6 +120,7 @@ import {
 import { confirmArchive } from './archive-confirm-model'
 import { NeverSettleItem, SettleItem, SnoozeMenu } from './tidy-menu'
 import { ZenMenu } from '@renderer/features/session/zen-menu'
+import { MenuOptions, useMenuOptions } from '@renderer/features/session/menu-options'
 import { undoToast } from './undo'
 import { workAtStake, type WorkItem } from './running-work'
 import { RunningWorkList } from './running-work-list'
@@ -273,6 +274,7 @@ export function SessionMenuItems({
   const prTarget = prFlowTarget(summary, currentPr)
   const showFinished = useViewStore((s) => s.showFinishedSubagents)
   const listed = subagents ? listedSubagents(subagents, showFinished) : []
+  const menuOptions = useMenuOptions(summary.id)
 
   const item = (name: SessionMenuItem) => {
     const accelerator = ACCELERATORS[name]
@@ -370,6 +372,8 @@ export function SessionMenuItems({
         return <NeverSettleItem key={name} summary={summary} />
       case 'toolCalls':
         return <ZenMenu key={name} sessionId={summary.id} />
+      case 'menuOptions':
+        return <MenuOptions key={name} sessionId={summary.id} />
       case 'board':
         return <BoardStatusMenu key={name} summary={summary} />
       case 'manager':
@@ -688,6 +692,7 @@ export function SessionMenuItems({
     movable: canMove() && !summary.scratch && summary.origin !== 'subagent',
     prFlow: prTarget !== null,
     subagents: listed.length > 0,
+    menuOptions: menuOptions.length > 0,
   }
   return sessionMenuGroups(summary, context).map((group, index) => (
     <DropdownMenuGroup key={group[0]}>

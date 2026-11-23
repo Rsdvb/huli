@@ -988,6 +988,12 @@
         "1h": "1 小时"
       },
       "runs": {
+        "outputStyle": {
+          "name": "输出风格",
+          "description": "新会话的回复怎么写。单个会话可在它的「更多」菜单里改。自己的风格是 Claude Code 配置文件夹里 output-styles 下的 Markdown 文件。",
+          "follow": "跟随 Claude Code 的设置（{{style}}）",
+          "missing": "{{style}}（没找到）"
+        },
         "fallback": {
           "name": "备用模型",
           "description": "主模型过载或不可用时改用这个模型，你发下一条消息时再试主模型。从下一个会话起生效。",

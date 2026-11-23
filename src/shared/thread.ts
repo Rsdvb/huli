@@ -382,6 +382,8 @@ export interface ConfigOption {
   defaultValue?: boolean | null
   /** Show the option's name beside the model while it is enabled. */
   indicator?: boolean
+  /** Huli: offered in the session's menu rather than beside the composer, as an output style is. */
+  place?: 'menu'
 }
 
 export function booleanConfigValue(option: ConfigOption): boolean | undefined {

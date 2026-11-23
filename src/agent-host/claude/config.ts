@@ -5,6 +5,7 @@ import { canonicalClaudeModel } from '@shared/agents'
 import type { ConfigOption } from '@shared/thread'
 import { effortLevelName } from '../effort'
 import { t } from '../i18n'
+import { isBuiltInStyle, styleDescription, styleName } from './output-styles'
 import type { ModelInfo, PermissionMode } from './sdk'
 
 export const OPTION_IDS = {
@@ -13,6 +14,7 @@ export const OPTION_IDS = {
   effort: 'effort',
   fast: 'fast',
   ultracode: '__ultracode',
+  outputStyle: '__outputStyle',
 } as const
 
 export const DEFAULT_MODEL = 'default'
@@ -53,6 +55,38 @@ export interface SessionChoices {
   effort: string
   fast: boolean
   ultracode: boolean | 'default'
+  /** Huli: the output style in use; null while Claude Code has named none. */
+  outputStyle?: string | null
+}
+
+/**
+ * Huli: Claude Code's output styles as an option of the session's menu, the one in use among the
+ * ones it lists; null when it lists none.
+ */
+export function outputStyleOption(
+  styles: readonly string[],
+  value: string | null | undefined,
+): ConfigOption | null {
+  if (styles.length === 0 || !value) return null
+  const listed = styles.includes(value) ? styles : [...styles, value]
+  return {
+    id: OPTION_IDS.outputStyle,
+    name: t('claude.option.outputStyle'),
+    description: t('claude.option.outputStyleDescription'),
+    category: 'other',
+    type: 'select',
+    value,
+    choices: listed.map((name) => {
+      const description = styleDescription(name)
+      return {
+        value: name,
+        name: styleName(name),
+        ...(description ? { description } : {}),
+        ...(isBuiltInStyle(name) ? {} : { group: t('claude.outputStyle.custom') }),
+      }
+    }),
+    place: 'menu',
+  }
 }
 
 /** Kettu's ultracode switch; `default` inherits the value Claude Code resolves. */

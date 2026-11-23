@@ -799,6 +799,20 @@ export interface ClaudeSettings {
   compact: ClaudeCompactRow[]
   /** The file's `promptCacheTtl`; null when it has none. */
   promptCacheTtl: PromptCacheTtl | null
+  /** Huli: the file's `outputStyle`; null when it has none. Absent from an older host. */
+  outputStyle?: string | null
+  /** Huli: Claude Code's output styles, built-in and the user's own. Absent from an older host. */
+  outputStyles?: OutputStyleInfo[]
+}
+
+/** Huli: one of Claude Code's output styles, as its configuration folder lists it. */
+export interface OutputStyleInfo {
+  /** As Claude Code's settings take it. */
+  name: string
+  /** As menus show it: a built-in style's in the host's language. */
+  label: string
+  description: string | null
+  builtIn: boolean
 }
 
 /** One change to those settings; a null value removes the key, and a null model means all. */
