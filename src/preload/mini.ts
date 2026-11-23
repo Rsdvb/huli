@@ -6,7 +6,7 @@ import { contextBridge } from 'electron'
 import type { HostEvent } from '@shared/agent-host'
 import { hostRequestLimit } from '@shared/host-request-limits'
 import { isLocale, type Locale } from '@shared/locale'
-import { MINI_HOST_METHODS, type MiniWindowApi } from '@shared/mini-window'
+import { MINI_HOST_METHODS, type MiniTarget, type MiniWindowApi } from '@shared/mini-window'
 import { hostTransport, invoke, send, subscribe } from './ipc'
 import { PortClient } from './port-client'
 
@@ -23,6 +23,14 @@ function systemLocale(): Locale {
   const value = process.argv.find((arg) => arg.startsWith(prefix))?.slice(prefix.length)
   return isLocale(value) ? value : 'en'
 }
+
+// The session main last named, which a page that subscribes after main said it still hears.
+let target: MiniTarget | null = null
+const targets = new Set<(target: MiniTarget) => void>()
+subscribe('mini:target')((next) => {
+  target = next
+  for (const listener of targets) listener(next)
+})
 
 const api: MiniWindowApi = {
   platform: process.platform,
@@ -42,7 +50,13 @@ const api: MiniWindowApi = {
     onConnection: (listener) => agents.onConnection(listener),
   } as MiniWindowApi['agents'],
   mini: {
-    onTarget: subscribe('mini:target'),
+    onTarget: (listener) => {
+      targets.add(listener)
+      if (target) listener(target)
+      return () => {
+        targets.delete(listener)
+      }
+    },
     showSession: () => send('mini:show-session'),
     close: () => send('mini:close'),
   },
