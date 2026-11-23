@@ -534,27 +534,50 @@ and where each agent keeps its own; the panel is the session's live view.
   Kite's own servers (the names its last attach handed the agent, under the `dynamic` scope) turn
   off for the session alone: `setMcpServers` without them, and its later queries start without
   them too. The user's own go through `toggleMcpServer`, which Claude Code keeps in the folder's
-  entry of its `.claude.json` (`disabledMcpServers`), so the menu says it lasts. Sign-in stays in
-  Claude Code's own `/mcp`: the SDK's `mcpAuthenticate` is not in its published types.
+  entry of its `.claude.json` (`disabledMcpServers`), so the menu says it lasts. 登录 runs the
+  query's `mcpAuthenticate(server)`, which the SDKs Kite installs have though their published types
+  do not (Kite's own type in `claude/sdk.ts`); a query without it shows no 登录 and the row points
+  to `/mcp` as before. Claude Code answers with `authUrl` (http(s) only, opened through the
+  window's link path), takes the browser's return on a loopback port of its own, stores the token
+  and connects the server again by itself; `requiresUserAction: false` opens nothing. Neither the
+  page, which carries the sign-in's state and challenge, nor the answer is traced or logged; a
+  failure's text is masked like any error. Claude Code reports no end of a sign-in, so the panel
+  reads the servers again when the window comes back (`focus`, `visibilitychange`) while one
+  waits, and the read that finds the server connected or failed sends the `mcp` effect with
+  `login`, as Codex's completion does.
 - Codex: `mcpServerStatus/list` with the thread, `config/read`'s `origins` for each server's layer
   (user, project, managed), `pluginId` for a plugin's; Reconnect is one `config/mcpServer/reload`
   for every server (concurrent ones share it). 登录 runs `mcpServer/oauth/login` with the thread;
   its `authorizationUrl` must be http(s) and opens through the window's own link path, and
   `mcpServer/oauthLogin/completed` reloads the servers and tells the panel how it ended. No token
   passes through Kite. Its apps are `app/list`'s linked ones (`isAccessible`), at most five pages,
-  listed read-only with 在 ChatGPT 管理; Codex has no per-thread switch for a server, so none shows.
+  listed read-only with 在 ChatGPT 设置里管理, which opens `https://chatgpt.com/`: OpenAI documents
+  only the menu path (Settings › Plugins, help.openai.com articles 11487775 and 20001494) and
+  `app/list` only each app's own page, so no deep link is guessed. Codex has no per-thread switch
+  for a server, so none shows.
 - Other agents (ACP, OpenCode, Pi, Cline, DeepSeek Harness) report no servers: the panel lists
   those Kite handed the session, their state unknown.
 - Reload: 重新加载技能和插件 in the panel, and 重新加载 in the Marketplace's toolbar for every
   session whose agent runs (`sessions.reloadPlugins` without a session), so a skill or plugin
   installed meanwhile applies without a restart.
+- Notices: the thread's notices that a server failed or needs a sign-in (Claude Code's from its
+  init and `setMcpServers`, Codex's `mcpServer/startupStatus/updated`) carry `mcpServers`, the
+  names as the agent gives them, which the panel lists by too. Under such a notice 查看 MCP 服务器
+  opens the panel scrolled to the first and marks it; the phone's opens its MCP page at it.
 - Nothing reads before the panel opens (its dialog is a lazy chunk); it reads again on Refresh,
-  after an action and 250 ms after the last `session.mcpChanged`; no timer otherwise.
+  after an action, 250 ms after the last `session.mcpChanged`, and on the window's return while a
+  sign-in waits; no timer otherwise.
+- Feature switch 会话的 MCP 服务器 (`mcpPanel`): off hides the More menu's entry, the phone's,
+  and the notices' 查看 MCP 服务器, closes an open panel, and the host refuses `sessions.mcp`,
+  `sessions.mcpAct` and `sessions.mcpLogin`; the Marketplace's 重新加载 stays.
 - Phone: MCP 服务器 in the session's ⋯ menu (`mobile/src/app/mcp/[id].tsx`): states, sources,
   errors and tools, with Reconnect; read on open, on a pull and on `session.mcpChanged`. Turning
-  a server off and signing in stay on the computer, and `sessions.mcpLogin` is refused to devices.
-- Tests: `claude/connection.test.ts` and `codex/connection.test.ts` (Huli: a session's MCP panel),
-  `session-mcp/validate.test.ts`.
+  a server off and signing in stay on the computer: `sessions.mcpLogin` is refused to devices,
+  the web client among them, whatever the agent, since the sign-in's return reaches this
+  computer's loopback alone.
+- Tests: `claude/connection.test.ts` and `codex/connection.test.ts` (Huli: a session's MCP panel,
+  Claude's sign-in among them), `session-mcp/validate.test.ts`, `rpc.test.ts` (a device's
+  sign-in refused), the notices' names in `claude/mapper-huli.test.ts` and `thread.test.ts`.
 
 ### Risk levels and auto-approve (风险等级、自动批准低风险操作)
 
@@ -2269,6 +2292,7 @@ feature already loaded leaves memory at the next launch).
 | 稍后提醒与自动收起 (`sessionTidy`)     | the menus' 稍后提醒, 收起 and 永不收起, the 已推迟 and 已收起 groups, the settle rules; the host's timer and `sessions.snooze`/`settle` |
 | 在输入框里引用会话 (`sessionMentions`) | sessions in the composer's `@` list and a row dropped on the box, on both apps                                                          |
 | 简洁视图 (`zenView`)                   | the More menu's 工具调用, its Settings row and the phone's; every thread shows all                                                      |
+| 会话的 MCP 服务器 (`mcpPanel`)         | the More menu's and the phone's MCP 服务器, the notices' link to it; `sessions.mcp`, `sessions.mcpAct`, `sessions.mcpLogin`             |
 
 Computer use (电脑操控) already has its own switch (`computerUse.enabled`), so the page links to it
 rather than repeating it. These stay on for good, as Kite's core: sessions, the terminal, the
