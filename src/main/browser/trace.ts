@@ -36,6 +36,8 @@ export interface TraceSummary {
   top_scripts: { url: string; ms: number }[]
   /** The largest contentful paint from the trace's navigation, or the page's own last report. */
   lcp: { ms: number; element: string | null; from: 'trace' | 'page' } | null
+  /** The first contentful paint, likewise. */
+  fcp_ms: number | null
 }
 
 const round = (ms: number): number => Math.round(ms * 10) / 10
@@ -64,6 +66,7 @@ export function traceEvents(json: unknown): TraceEvent[] {
 export function summarizeTrace(
   events: readonly TraceEvent[],
   pageLcp: { ms: number; element: string | null } | null = null,
+  pageFcp: number | null = null,
 ): TraceSummary {
   const pagePids = new Set<number>()
   for (const event of events) {
@@ -89,16 +92,26 @@ export function summarizeTrace(
   const scripts = new Map<string, number>()
   let navigationStart: number | null = null
   let lcp: { ts: number; element: string | null } | null = null
+  let fcp: number | null = null
   for (const event of events) {
     const ts = event.ts
     if (typeof ts !== 'number' || event.ph === 'M') continue
     first = Math.min(first, ts)
     last = Math.max(last, ts + (event.dur ?? 0))
     const ms = (event.dur ?? 0) / 1000
-    if (event.name === 'navigationStart' && data(event).isLoadingMainFrame === true) {
+    // Older traces say whether a navigation loads the main frame; newer ones name its URL.
+    const nav = data(event)
+    if (
+      event.name === 'navigationStart' &&
+      nav.isLoadingMainFrame !== false &&
+      typeof nav.documentLoaderURL === 'string' &&
+      /^https?:/.test(nav.documentLoaderURL)
+    ) {
       navigationStart = ts
       lcp = null
+      fcp = null
     }
+    if (event.name === 'firstContentfulPaint' && navigationStart !== null && fcp === null) fcp = ts
     if (event.name === 'largestContentfulPaint::Candidate') {
       const node = data(event)
       if (navigationStart !== null && (lcp === null || ts >= lcp.ts)) {
@@ -129,9 +142,11 @@ export function summarizeTrace(
       case 'EventDispatch': {
         // The outermost script of a task counts once; its calls nest inside it.
         if (event.name === 'EvaluateScript' || event.name === 'FunctionCall') {
-          totals.scripting += ms
           const at = data(event)
           const url = typeof at.url === 'string' && at.url !== '' ? at.url : '(inline or eval)'
+          // Electron's own setup of a sandboxed page is not the page's.
+          if (url.startsWith('node:')) break
+          totals.scripting += ms
           scripts.set(url, (scripts.get(url) ?? 0) + ms)
         }
         break
@@ -159,6 +174,7 @@ export function summarizeTrace(
       paint_ms: round(totals.paint),
     },
     top_scripts: [...scripts]
+      .filter(([, ms]) => ms >= 0.5)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([url, ms]) => ({ url, ms: round(ms) })),
@@ -168,6 +184,12 @@ export function summarizeTrace(
         : pageLcp
           ? { ms: round(pageLcp.ms), element: pageLcp.element, from: 'page' }
           : null,
+    fcp_ms:
+      fcp !== null && navigationStart !== null
+        ? round((fcp - navigationStart) / 1000)
+        : pageFcp === null
+          ? null
+          : round(pageFcp),
   }
 }
 
@@ -189,7 +211,8 @@ export function traceText(summary: TraceSummary): string {
   lines.push(
     lcp
       ? `Largest contentful paint: ${lcp.ms} ms${lcp.element ? ` (${lcp.element})` : ''}${lcp.from === 'page' ? ', as the page last reported it' : ''}.`
-      : 'No largest contentful paint; trace with reload to measure the page loading.',
+      : 'No largest contentful paint was reported; trace with reload to measure the page loading, while the page shows in the pane.',
   )
+  if (summary.fcp_ms !== null) lines.push(`First contentful paint: ${summary.fcp_ms} ms.`)
   return lines.join('\n')
 }

@@ -818,8 +818,8 @@ export class BrowserCdp {
     const injecting = method.startsWith('Input.')
     const tab = this.tabOf(sessionId)
     const state = tab === null ? undefined : this.pages.get(tab)
-    const pointed = method === 'Input.dispatchMouseEvent' || method === 'Input.dispatchDragEvent'
-    if (pointed && tab !== null && this.deps.pointScale) {
+    // A drag event's point is in the page's own CSS pixels, which Chromium scales itself.
+    if (method === 'Input.dispatchMouseEvent' && tab !== null && this.deps.pointScale) {
       // The debugger takes the point in the view's pixels, and a page of a fixed size draws
       // scaled there. Nothing runs between reading the scale and sending the event.
       const scale = await this.deps.pointScale(tab)
@@ -2506,15 +2506,17 @@ export class BrowserCdp {
 
   private async pdf(sessionId: string, args: Record<string, unknown>): Promise<BrowserCallResult> {
     const { landscape, background } = pdfArgs(args)
+    await this.gate(sessionId)
     const contents = this.contentsOf(sessionId)
-    const printed = await this.send<{ data?: string }>(sessionId, 'Page.printToPDF', {
-      landscape,
-      printBackground: background,
-      preferCSSPageSize: true,
-    })
-    if (typeof printed.data !== 'string')
-      throw new ToolFailure('invalid', 'The page printed nothing.')
-    const data = Buffer.from(printed.data, 'base64')
+    // Electron prints through its own printing, which the debugger's Page.printToPDF lacks.
+    const data = await contents
+      .printToPDF({ landscape, printBackground: background, preferCSSPageSize: true })
+      .catch((error: unknown) => {
+        throw new ToolFailure(
+          'invalid',
+          `The page could not be printed: ${(error as Error).message}`,
+        )
+      })
     const path = await this.deps.saveFile?.(
       sessionId,
       pdfName(contents.getTitle(), contents.getURL()),
@@ -2589,17 +2591,21 @@ export class BrowserCdp {
     } catch {
       throw new ToolFailure('invalid', 'The trace could not be read.')
     }
-    const summary = summarizeTrace(events, await this.pageLcp(sessionId))
+    const paints = await this.pagePaints(sessionId)
+    const summary = summarizeTrace(events, paints.lcp, paints.fcp)
     return { text: traceText(summary), value: { summary } }
   }
 
-  /** The page's own largest contentful paint, as it reports it; null when it has none. */
-  private async pageLcp(sessionId: string): Promise<{ ms: number; element: string | null } | null> {
+  /** The page's own paints, as it reports them: its largest and its first contentful paint. */
+  private async pagePaints(
+    sessionId: string,
+  ): Promise<{ lcp: { ms: number; element: string | null } | null; fcp: number | null }> {
     const answer = await this.send<{ result?: { value?: unknown } }>(
       sessionId,
       'Runtime.evaluate',
       {
         expression: `new Promise((resolve) => {
+        const fcp = performance.getEntriesByName('first-contentful-paint')[0]
         let last = null
         try {
           const observer = new PerformanceObserver((list) => {
@@ -2609,19 +2615,29 @@ export class BrowserCdp {
           observer.observe({ type: 'largest-contentful-paint', buffered: true })
           setTimeout(() => {
             observer.disconnect()
-            resolve(last ? { ms: last.startTime, element: last.element ? last.element.localName : null } : null)
-          }, 50)
+            resolve({
+              fcp: fcp ? fcp.startTime : null,
+              lcp: last ? { ms: last.startTime, element: last.element ? last.element.localName : null } : null,
+            })
+          }, 100)
         } catch (error) {
-          resolve(null)
+          resolve({ fcp: fcp ? fcp.startTime : null, lcp: null })
         }
       })`,
         awaitPromise: true,
         returnByValue: true,
       },
     ).catch(() => null)
-    const value = answer?.result?.value as { ms?: unknown; element?: unknown } | null | undefined
-    if (!value || typeof value.ms !== 'number') return null
-    return { ms: value.ms, element: typeof value.element === 'string' ? value.element : null }
+    const value = answer?.result?.value as
+      { fcp?: unknown; lcp?: { ms?: unknown; element?: unknown } | null } | undefined
+    const lcp =
+      value?.lcp && typeof value.lcp.ms === 'number'
+        ? {
+            ms: value.lcp.ms,
+            element: typeof value.lcp.element === 'string' ? value.lcp.element : null,
+          }
+        : null
+    return { lcp, fcp: typeof value?.fcp === 'number' ? value.fcp : null }
   }
 
   private async storageState(

@@ -649,7 +649,7 @@
     },
     "profiles": {
       "name": "Browser data for each session",
-      "description": "Which cookies and storage a session’s browser uses. A worktree’s own or a session’s own keeps parallel sessions testing the same app from sharing a sign-in; a session’s own is gone when Kite quits. A session takes the choice with its first page.",
+      "description": "Each worktree or each session keeps parallel sessions testing one app from sharing a sign-in; a session’s own is gone when Kite quits. A session takes the choice with its first page.",
       "keywords": "browser profile partition worktree session cookies isolate login",
       "shared": "Shared",
       "worktree": "Each worktree",

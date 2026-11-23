@@ -467,6 +467,9 @@ export type HostToMain =
       projectPath: string
       /** A tab of the user's they just allowed the agent. */
       allowTab?: string
+      /** Huli: the folder the session works in, and whether it is a worktree. */
+      folder?: string
+      worktree?: boolean
     }
   // The last running turn that used the session's page ended: the page is nobody's now.
   | { type: 'host:browser-turn-ended'; sessionId: string }

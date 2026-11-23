@@ -3401,6 +3401,7 @@ export class AgentHost {
         args: request.args,
         projectPath: request.projectPath,
         ...(request.allowTab ? { allowTab: request.allowTab } : {}),
+        ...(request.folder ? { folder: request.folder, worktree: request.worktree === true } : {}),
       })
     })
   }
