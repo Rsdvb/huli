@@ -77,9 +77,9 @@ describe("Moli's download", () => {
         platform: 'linux',
         asset: pinned(ARCHIVE),
         transport: serving(Buffer.from('an archive of the pinned releasf')),
-        extract: async (...args) => {
+        extract: async (archive, dest) => {
           extracted = true
-          await fakeExtract(...args)
+          await fakeExtract(archive, dest)
         },
         version: () => Promise.resolve(MOLI_VERSION),
       }),
