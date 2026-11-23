@@ -115,6 +115,7 @@ export default function Layout() {
                 <Stack.Screen name="mcp/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="dev-preview" options={{ headerShown: false }} />
                 <Stack.Screen name="archived" options={{ headerShown: false }} />
+                <Stack.Screen name="recycle-bin" options={{ headerShown: false }} />
                 <Stack.Screen name="artifacts-deleted" options={{ headerShown: false }} />
                 <Stack.Screen name="artifact/[id]" options={{ headerShown: false }} />
                 <Stack.Screen name="routine/[id]" options={{ headerShown: false }} />

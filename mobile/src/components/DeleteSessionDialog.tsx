@@ -86,10 +86,10 @@ export function DeleteSessionDialog(props: {
   }
   const body =
     (children > 0
-      ? `对话、历史记录及其 ${children} 个子会话将无法恢复。归档会保留它们。`
-      : '对话及其历史记录将无法恢复。归档会保留两者。') +
+      ? `会话和它的 ${children} 个子会话会移到回收站，可以在 设置 › 回收站 里恢复。`
+      : '会话会移到回收站，可以在 设置 › 回收站 里恢复。') +
     (removes && agent
-      ? ` 也会从 ${agent.harnessName} 自己的本地历史里删除，官方客户端和应用里不会再显示。`
+      ? ` 从回收站彻底删除时，也会从 ${agent.harnessName} 自己的本地历史里删除。`
       : '') +
     (shared ? ` ${shared} 自己保留的那份，纸鸢删不掉。` : '')
   const canArchive = summary.parentId === null && summary.archivedAt === null

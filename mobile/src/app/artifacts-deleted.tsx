@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Animated, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { router } from 'expo-router'
 import type { HostEvent } from '@shared/agent-host'
 import type { ArtifactSummary } from '@shared/artifacts'
 import { artifactKind, daysLeft, KIND_ICON, KIND_TEXT } from '../artifacts'
@@ -22,6 +23,11 @@ import { usePullRefresh } from '../ui/PullRefresh'
 import { SkeletonRows } from '../ui/Skeleton'
 import { SwipeRow } from '../ui/SwipeRow'
 import { radius, space, type as typeScale, useTokens } from '../ui/tokens'
+
+function leftText(deletedAt: number, purgeAt: number | null | undefined): string {
+  const left = daysLeft(deletedAt, Date.now(), purgeAt)
+  return left === null ? '不会自动删除' : `${left} 天后永久删除`
+}
 
 export default function DeletedArtifacts() {
   const { c } = useTokens()
@@ -100,9 +106,7 @@ export default function DeletedArtifacts() {
       )
     }
     if (!items) return <SkeletonRows count={4} />
-    return (
-      <EmptyState icon="trash" title="最近删除里是空的" message="删除的产物会在这里保留 30 天。" />
-    )
+    return <EmptyState icon="trash" title="最近删除里是空的" message="删除的产物会先放在这里。" />
   }
 
   return (
@@ -120,8 +124,16 @@ export default function DeletedArtifacts() {
           <View style={styles.pad}>
             <LargeTitle
               title="最近删除"
-              subtitle="删除的产物在这里保留 30 天。右滑恢复，左滑永久删除。"
+              subtitle="删除的产物先进回收站，按电脑上设的天数保留。右滑恢复，左滑永久删除。"
             />
+            <Press
+              onPress={() => router.push('/recycle-bin')}
+              accessibilityRole="link"
+              hitSlop={8}
+              style={styles.binLink}
+            >
+              <Text style={[typeScale.subhead, { color: c.tint }]}>在回收站里看全部删掉的东西</Text>
+            </Press>
           </View>
         }
         ListEmptyComponent={<View style={styles.pad}>{empty()}</View>}
@@ -155,7 +167,7 @@ export default function DeletedArtifacts() {
                     {item.title || '未命名'}
                   </Text>
                   <Text style={[typeScale.footnote, { color: c.textTertiary }]} numberOfLines={1}>
-                    {KIND_TEXT[kind]} · {daysLeft(item.deletedAt ?? Date.now())} 天后永久删除
+                    {KIND_TEXT[kind]} · {leftText(item.deletedAt ?? Date.now(), item.purgeAt)}
                   </Text>
                 </View>
               </Press>
@@ -194,6 +206,7 @@ export default function DeletedArtifacts() {
 
 const styles = StyleSheet.create({
   pad: { paddingHorizontal: space.xl },
+  binLink: { alignSelf: 'flex-start', marginTop: space.sm, marginBottom: space.md },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

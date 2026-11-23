@@ -2,6 +2,8 @@
 // examples (the desktop's, from src/renderer/src/features/routines/examples.ts), and the list,
 // kept current by the computer's events.
 
+import { binKey } from '@shared/recycle-bin'
+import { showNotice } from './ui/NoticeBar'
 import { useCallback, useEffect, useState } from 'react'
 import { Alert } from 'react-native'
 import type { HostEvent, RoutineList } from '@shared/agent-host'
@@ -202,7 +204,9 @@ export function confirmDeleteRoutine(
   haptic.warning()
   Alert.alert(
     `删除「${routine.name}」？`,
-    routine.sessions > 0 ? `它的 ${routine.sessions} 个运行会话会一并删除。` : '它还没有运行会话。',
+    routine.sessions > 0
+      ? `它和它的 ${routine.sessions} 个运行会话会移到回收站，可以在 设置 › 回收站 里恢复。`
+      : '它会移到回收站，可以在 设置 › 回收站 里恢复。',
     [
       { text: '取消', style: 'cancel' },
       {
@@ -213,6 +217,17 @@ export function confirmDeleteRoutine(
             () => {
               haptic.success()
               done?.()
+              showNotice({
+                text: `“${routine.name}”已移到回收站`,
+                ms: 5000,
+                action: {
+                  label: '撤销',
+                  onPress: () =>
+                    void request('bin.restore', { keys: [binKey('routine', routine.id)] }).catch(
+                      (failure: unknown) => Alert.alert('没能恢复', errorText(failure)),
+                    ),
+                },
+              })
             },
             (failure: unknown) => Alert.alert('没能删除', errorText(failure)),
           )

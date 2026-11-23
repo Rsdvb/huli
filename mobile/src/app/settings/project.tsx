@@ -1,6 +1,7 @@
 // A project's page: where it is, the further folders its sessions also work in, how its sessions'
 // worktrees are named and prepared, and removing it from Huli, which leaves its folder where it is.
 
+import { binnedOne } from '../../recycleBin'
 import { useEffect, useState } from 'react'
 import { Alert, StyleSheet, Switch, Text, View } from 'react-native'
 import { router, useLocalSearchParams, usePreventRemove } from 'expo-router'
@@ -149,8 +150,8 @@ export default function ProjectPage() {
     if (!project || !host.link) return
     const parts = [
       sessions.length > 0
-        ? `它的 ${sessions.length} 个会话会从纸鸢里去掉。`
-        : '它在纸鸢里没有会话。',
+        ? `它和它的 ${sessions.length} 个会话会移到回收站，可以在 设置 › 回收站 里恢复。`
+        : '它会移到回收站，可以在 设置 › 回收站 里恢复。',
       running > 0 ? `正在运行的 ${running} 个会先停下。` : null,
       '文件夹和里面的文件会留在电脑上。',
     ]
@@ -166,6 +167,8 @@ export default function ProjectPage() {
       '没能移除项目',
     )
     if (done) {
+      // Huli: it waits in the recycle bin with its sessions; 撤销 puts them back.
+      binnedOne(host.link, 'project', path, project.name)
       void host.refresh().catch(() => {})
       // The project is gone; its unsaved settings with it.
       setLeaving(true)
