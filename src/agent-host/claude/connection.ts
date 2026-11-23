@@ -28,6 +28,7 @@ import {
   SideQuestionUnsupported,
   type AgentConnection,
   type AgentInit,
+  type AgentMcp,
   type FolderHooks,
   type ForkPoint,
   type ListedSession,
@@ -105,6 +106,7 @@ import {
 import { findClaudeTranscript } from '../prompt-cache'
 import { folderHooks } from './project-hooks'
 import { declaredServers } from './project-mcp'
+import { claudeMcpServers, reloadBusy } from './mcp-panel'
 import { mapAccount, mapAuthStatus, mapContextUsage, mapUsageLimits } from './reports'
 import { forkedUuids, rewindCut, RewindPointMissing, transcriptRecords } from './rewind'
 import { TerminalCommands } from './terminal-commands'
@@ -557,6 +559,8 @@ export class ClaudeConnection implements AgentConnection {
   private readonly asking = new Map<string, number>()
   /** The entry of each accepted `url` request, by elicitation id, until its server reports done. */
   private readonly openPages = new Map<string, { targetId: string; entryId: string }>()
+  /** Huli: Kite's servers each session turned off in its MCP panel, which its queries go without. */
+  private readonly mcpOff = new Map<string, Set<string>>()
   private envQueue: Promise<unknown> = Promise.resolve()
   private account: string | null = null
   private readonly terminalCommands: TerminalCommands
@@ -1115,7 +1119,10 @@ export class ClaudeConnection implements AgentConnection {
     // agent's own settings reaches the profile's provider. The key follows over the control
     // channel once the query has started, before any request.
     if (provider) flags.env = provider.plain
-    const servers = bare ? [] : (options.mcpServers ?? [])
+    const off = this.mcpOff.get(sessionId)
+    const servers = bare
+      ? []
+      : (options.mcpServers ?? []).filter((server) => !off?.has(server.name))
     // The SDK writes this option onto Claude Code's command line, which other users can read, so a
     // server that holds a key comes only through the control channel once the query has started.
     const mcpServers = claudeServers(servers.filter((server) => !server.secret))
@@ -2032,6 +2039,115 @@ export class ClaudeConnection implements AgentConnection {
     }
     this.context.hooks.traffic('out', { method: 'backgroundTasks', sessionId, toolCallId })
     return query.backgroundTasks(toolCallId)
+  }
+
+  // Huli: the session's MCP panel.
+
+  async readMcp(sessionId: string, kite: readonly string[]): Promise<AgentMcp | null> {
+    const session = this.sessions.get(sessionId)
+    const query = session?.query
+    if (!session || !query || session.stale) return null
+    const can = {
+      reconnect: query.reconnectMcpServer ? ('server' as const) : null,
+      toggle: !!query.toggleMcpServer,
+      login: false,
+      reload: !!query.reloadPlugins,
+    }
+    if (!query.mcpServerStatus) return { servers: [], apps: null, can }
+    this.context.hooks.traffic('out', { method: 'mcpServerStatus', sessionId })
+    const statuses = await query.mcpServerStatus()
+    const off = this.mcpOff.get(sessionId) ?? new Set<string>()
+    return { servers: claudeMcpServers(statuses, new Set(kite), off), apps: null, can }
+  }
+
+  async reconnectMcp(sessionId: string, server: string | null): Promise<void> {
+    const query = this.runningQuery(sessionId)
+    if (!query.reconnectMcpServer || server === null) {
+      throw new AgentRequestError(
+        'agent_error',
+        t('sessionMcp.cannotReconnect', { agent: 'Claude Code' }),
+      )
+    }
+    this.context.hooks.traffic('out', { method: 'reconnectMcpServer', sessionId, server })
+    await query.reconnectMcpServer(server)
+  }
+
+  /**
+   * Kite's own servers go from the query and come back over the control channel, for the session
+   * alone; the user's own Claude Code turns off itself, and keeps that for the folder.
+   */
+  async toggleMcp(
+    sessionId: string,
+    server: string,
+    enabled: boolean,
+    kite: readonly string[],
+  ): Promise<void> {
+    const session = this.sessions.get(sessionId)
+    const query = this.runningQuery(sessionId)
+    const handed = session?.options.mcpServers ?? []
+    if (kite.includes(server) && handed.some((s) => s.name === server)) {
+      const off = new Set(this.mcpOff.get(sessionId))
+      if (enabled) off.delete(server)
+      else off.add(server)
+      if (off.size > 0) this.mcpOff.set(sessionId, off)
+      else this.mcpOff.delete(sessionId)
+      const kept = handed.filter((s) => !off.has(s.name))
+      this.context.hooks.traffic('out', {
+        method: 'setMcpServers',
+        sessionId,
+        names: kept.map((s) => s.name),
+      })
+      const result = await query.setMcpServers(claudeServers(kept))
+      const error = enabled ? result.errors[server] : undefined
+      if (error) this.context.hooks.log('warn', `MCP server ${server} did not connect: ${error}`)
+      return
+    }
+    if (!query.toggleMcpServer) {
+      throw new AgentRequestError(
+        'agent_error',
+        t('sessionMcp.cannotToggle', { agent: 'Claude Code' }),
+      )
+    }
+    this.context.hooks.traffic('out', { method: 'toggleMcpServer', sessionId, server, enabled })
+    await query.toggleMcpServer(server, enabled)
+  }
+
+  async reloadPlugins(sessionId: string): Promise<'reloaded' | 'busy'> {
+    const session = this.sessions.get(sessionId)
+    const query = this.runningQuery(sessionId)
+    if (!session || !query.reloadPlugins) {
+      throw new AgentRequestError(
+        'agent_error',
+        t('sessionMcp.cannotReload', { agent: 'Claude Code' }),
+      )
+    }
+    // A reload changes the tools under a running turn; older CLIs serve it even then.
+    if (session.turn || session.busy) return 'busy'
+    this.context.hooks.traffic('out', { method: 'reloadPlugins', sessionId })
+    let answer
+    try {
+      answer = await query.reloadPlugins({ refuseIfBusy: true })
+    } catch (error) {
+      if (reloadBusy(error)) return 'busy'
+      throw error
+    }
+    if (query.reloadSkills) {
+      this.context.hooks.traffic('out', { method: 'reloadSkills', sessionId })
+      await query.reloadSkills()
+    }
+    if (Array.isArray(answer.commands) && this.sessions.get(sessionId) === session) {
+      session.commands = answer.commands
+      if (!session.quiet) this.publishCommands(session)
+    }
+    return 'reloaded'
+  }
+
+  private runningQuery(sessionId: string): Query {
+    const query = this.sessions.get(sessionId)?.query
+    if (!query) {
+      throw new AgentRequestError('agent_error', t('agentRun.notRunning', { agent: 'Claude Code' }))
+    }
+    return query
   }
 
   async cleanTasks(sessionId: string): Promise<void> {

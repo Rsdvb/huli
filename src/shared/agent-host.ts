@@ -134,6 +134,7 @@ import type { PathCompletion } from './remote/host-admin'
 import type { ReportOrigin } from './report'
 import type { AutoApprove } from './risk'
 import type { SessionProcesses } from './task-processes'
+import type { PluginReload, SessionMcpAction, SessionMcpView } from './session-mcp'
 import type { AgentSandboxSupport, ContainerStatus, SandboxChoice } from './sandbox'
 import type { WebReaderStatus } from './web-reader'
 import type {
@@ -1979,6 +1980,21 @@ export interface HostContract {
   // Huli: the session's background processes for its board, read now: their CPU, memory and
   // ports, and the tasks of an agent whose tasks no event lists.
   'sessions.processes': { params: { sessionId: string }; result: SessionProcesses }
+  // Huli: the MCP servers the session's agent has, read when its panel opens and when
+  // `session.mcpChanged` says they changed; nothing reads them before.
+  'sessions.mcp': { params: { sessionId: string }; result: SessionMcpView }
+  // Huli: reconnects a server (every one, where the agent reconnects them together, with `server`
+  // null), or turns one off for this session alone and on again; answers with the servers then.
+  'sessions.mcpAct': {
+    params: { sessionId: string; action: SessionMcpAction; server: string | null }
+    result: SessionMcpView
+  }
+  // Huli: starts the agent's sign-in to a server that needs one. The window opens `url` in the
+  // browser, and `session.mcpChanged` with `login` says how it ended. This computer's windows alone.
+  'sessions.mcpLogin': { params: { sessionId: string; server: string }; result: { url: string } }
+  // Huli: the agent reloads its skills and plugins without starting again, in the session, or
+  // without one in every session whose agent runs, so a newly installed one applies.
+  'sessions.reloadPlugins': { params: { sessionId?: string }; result: PluginReload }
   // Huli: moves a command or subagent that holds up its tool call to the background, so the turn
   // goes on; without `toolCallId`, every one of the session's. False when none matched.
   'sessions.toBackground': {
@@ -2949,6 +2965,10 @@ export const HOST_METHODS = [
   'sessions.stopTask',
   'sessions.taskOutput',
   'sessions.processes',
+  'sessions.mcp',
+  'sessions.mcpAct',
+  'sessions.mcpLogin',
+  'sessions.reloadPlugins',
   'sessions.toBackground',
   'sessions.cleanTasks',
   'sessions.sideAsk',
@@ -3221,6 +3241,13 @@ export type HostEvent =
   // To a port that watches the session: the others that have it in front, never the port's own
   // computer or device.
   | { type: 'session.viewers'; sessionId: string; viewers: SessionViewer[] }
+  // Huli: to the ports watching the session: its agent's MCP servers changed, so an open panel
+  // reads them again; `login` ends a sign-in the panel started.
+  | {
+      type: 'session.mcpChanged'
+      sessionId: string
+      login?: { server: string; ok: boolean; error: string | null }
+    }
   | { type: 'agent.status'; status: AgentStatus }
   | { type: 'agent.removed'; agentId: AgentId }
   | { type: 'agent.options'; options: AgentOptions }

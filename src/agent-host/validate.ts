@@ -149,6 +149,7 @@ import { nodeRuntimeValidators } from './node-runtime/validate'
 import { MAX_SECRET_FIELDS, MAX_SECRET_VALUE, SECRET_NAME } from '@shared/secret-request'
 import { folderValidators } from './session-folders'
 import { moveValidators } from './session-move/validate'
+import { sessionMcpValidators } from './session-mcp/validate'
 import { MAX_WORKTREE_COPY_PATHS } from './storage'
 import { checkIncludeEntry } from './worktrees/copy'
 import { branchFromTemplate, checkWorktreeBranch } from './worktrees/names'
@@ -3548,5 +3549,6 @@ export function createValidators(platform: Platform): Validators {
     ...networkValidators,
     ...nodeRuntimeValidators,
     ...moveValidators(platform),
+    ...sessionMcpValidators,
   }
 }

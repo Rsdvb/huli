@@ -261,6 +261,8 @@ export class FakeAppServer {
       })),
     }))
     this.on('mcpServerStatus/list', () => ({ data: this.mcpServers, nextCursor: null }))
+    this.on('config/read', () => ({ config: {}, origins: {} }))
+    this.on('app/list', () => ({ data: [], nextCursor: null }))
     this.on('account/rateLimits/read', () => ({
       rateLimits: {
         limitId: 'codex',

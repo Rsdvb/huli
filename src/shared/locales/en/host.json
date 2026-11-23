@@ -2389,5 +2389,12 @@
     "extractFailed": "The Moli archive could not be extracted: {{reason}}",
     "doesNotRun": "Moli was extracted, but it does not run on this computer.",
     "inUse": "An agent is reading a page with Moli. Try again once it is done."
+  },
+  "sessionMcp": {
+    "cannotReconnect": "{{agent}} can't reconnect this MCP server",
+    "cannotToggle": "{{agent}} can't turn this MCP server off or on",
+    "cannotReload": "{{agent}} can't reload its skills and plugins without starting again",
+    "unsupported": "{{agent}} can't do this from Kite",
+    "loginPage": "{{agent}} gave no web page to sign in at"
   }
 }

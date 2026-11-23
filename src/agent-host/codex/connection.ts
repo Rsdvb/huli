@@ -5,6 +5,7 @@
 import os from 'node:os'
 import type { AgentAccount, PlanLimit, ProviderBalance } from '@shared/agent-host'
 import type { ContextEstimates } from '@shared/context'
+import type { SessionMcpApp } from '@shared/session-mcp'
 import type { Platform } from '@shared/platform'
 import type {
   BackgroundTaskView,
@@ -24,6 +25,7 @@ import {
   AgentRequestError,
   optionAnswer,
   type AgentConnection,
+  type AgentMcp,
   type AgentProcesses,
   type AgentInit,
   type AuthMethodInfo,
@@ -53,6 +55,8 @@ import { t } from '../i18n'
 import { versionAtLeast } from '../versions'
 import { planMarkdown } from '../plan-revision'
 import { addEntry, mergeConfig, type MapperEffect, type MapperOutput } from '../session-updates'
+import { isWebUrl } from '../elicitation'
+import { shownError } from '../session-mcp/text'
 import { SIDE_INSTRUCTIONS, sideTurnText } from '../side-chat'
 import { mapAccount, mapPlanExtras, mapRateLimits } from './account'
 import { isAsyncQuestion, type AsyncQuestionItem } from './async-questions'
@@ -90,6 +94,7 @@ import {
 } from './config'
 import { estimateMcpServers, estimateSkills } from './context'
 import { childThreads, childTurnEffect, ThreadMapper } from './mapper'
+import { codexApps, codexMcpServers, codexServerName } from './mcp-panel'
 import {
   errorDetail,
   inlineCode,
@@ -99,12 +104,16 @@ import {
   type StartupResult,
 } from './mcp-status'
 import type {
+  AppsListResponse,
   CollaborationMode,
+  ConfigReadResponse,
   GetAccountRateLimitsResponse,
   GetAccountResponse,
   InitializeResponse,
   JsonValue,
   ListMcpServerStatusResponse,
+  McpServerOauthLoginCompletedNotification,
+  McpServerOauthLoginResponse,
   McpServerStartupNotification,
   McpServerStatus,
   Model,
@@ -146,6 +155,10 @@ export interface CodexLaunch {
 }
 
 const RESOURCE_NOT_FOUND = -32002
+/** Huli: pages of `app/list` the MCP panel reads at most. */
+const APP_PAGES = 5
+/** Huli: MCP sign-ins remembered at once; one never finished goes after this many newer. */
+const MAX_LOGINS = 32
 const INVALID_REQUEST = -32600
 const METHOD_NOT_FOUND = -32601
 /** Huli: the first Codex whose app-server was checked to take a denied action back. */
@@ -217,7 +230,6 @@ const QUIET = new Set([
   'thread/environment/connected',
   'thread/environment/disconnected',
   'command/exec/outputDelta',
-  'mcpServer/oauthLogin/completed',
   'mcpServer/event/stream/notification',
   'account/gatewayOAuth/changed',
   'account/login/completed',
@@ -596,6 +608,9 @@ export class CodexConnection implements AgentConnection {
   private skillRoots: string | null = null
   private account: AgentAccount | null = null
   private readonly startup = new McpStartup()
+  /** Huli: the MCP sign-ins a session's panel started, by Codex's login id, until they end. */
+  private readonly logins = new Map<string, { threadId: string; name: string }>()
+  private mcpReloading: Promise<void> | null = null
   /** Huli: warnings about Codex itself, by key, with the thread each concerns, null for all. */
   private readonly notices = new Map<string, { threadId: string | null; notice: CodexNotice }>()
   /** Huli: the warnings each session has shown. */
@@ -1486,6 +1501,10 @@ export class CodexConnection implements AgentConnection {
       case 'mcpServer/startupStatus/updated':
         this.startup.record(params as McpServerStartupNotification)
         this.mcpFailed(params as McpServerStartupNotification)
+        this.mcpChanged((params as McpServerStartupNotification).threadId ?? null)
+        return
+      case 'mcpServer/oauthLogin/completed':
+        void this.mcpLoginEnded(params as McpServerOauthLoginCompletedNotification)
         return
       case 'error':
         this.turnError(p)
@@ -2155,6 +2174,149 @@ export class CodexConnection implements AgentConnection {
       cwd === null ? {} : { cwds: [cwd] },
     )
     return response.data.flatMap((entry) => entry.skills)
+  }
+
+  // Huli: the session's MCP panel.
+
+  async readMcp(threadId: string, kite: readonly string[]): Promise<AgentMcp | null> {
+    const record = this.threads.get(threadId)
+    const { servers, live } = await this.mcpServers(threadId)
+    if (!live) return null
+    const [origins, apps] = await Promise.all([
+      this.mcpOrigins(record?.cwd ?? null),
+      this.apps(threadId),
+    ])
+    return {
+      servers: codexMcpServers(servers, new Set(kite.map(codexServerName)), origins, (name) =>
+        this.startup.failure(name, threadId),
+      ),
+      apps,
+      can: { reconnect: 'all', toggle: false, login: true, reload: true },
+    }
+  }
+
+  /** The layer each key of the configuration comes from, as the thread's folder sees it. */
+  private async mcpOrigins(cwd: string | null): Promise<ConfigReadResponse['origins']> {
+    try {
+      const read = await this.call<ConfigReadResponse>('config/read', {
+        includeLayers: false,
+        ...(cwd ? { cwd } : {}),
+      })
+      return read.origins ?? {}
+    } catch (error) {
+      if (this.isClosed) throw error
+      this.hooks.log('warn', `Could not read Codex's configuration: ${(error as Error).message}`)
+      return {}
+    }
+  }
+
+  /** The ChatGPT account's linked apps, at most a few pages of them; null where Codex has none. */
+  private async apps(threadId: string): Promise<SessionMcpApp[] | null> {
+    const apps: AppsListResponse['data'] = []
+    let cursor: string | null = null
+    try {
+      for (let page = 0; page < APP_PAGES; page++) {
+        const answer: AppsListResponse = await this.call<AppsListResponse>('app/list', {
+          threadId,
+          ...(cursor ? { cursor } : {}),
+        })
+        apps.push(...(answer.data ?? []))
+        cursor = answer.nextCursor ?? null
+        if (cursor === null) break
+      }
+    } catch (error) {
+      if (this.isClosed) throw error
+      // An older Codex, a feature gate or an API key's sign-in: no apps to list.
+      return null
+    }
+    return codexApps(apps)
+  }
+
+  async reconnectMcp(threadId: string): Promise<void> {
+    if (!this.threads.has(threadId)) {
+      throw new AgentRequestError('agent_error', t('agentRun.notRunning', { agent: 'Codex' }))
+    }
+    // Codex reloads every server's configuration at once; a connected one that did not change
+    // keeps its connection.
+    await this.reloadMcp()
+  }
+
+  /** `config/mcpServer/reload`, once for any number of sessions that ask together. */
+  private reloadMcp(): Promise<void> {
+    this.mcpReloading ??= this.call<unknown>('config/mcpServer/reload')
+      .then(() => undefined)
+      .finally(() => {
+        this.mcpReloading = null
+      })
+    return this.mcpReloading
+  }
+
+  async loginMcp(threadId: string, server: string): Promise<{ url: string }> {
+    const answer = await this.call<McpServerOauthLoginResponse>('mcpServer/oauth/login', {
+      name: server,
+      threadId,
+    })
+    if (typeof answer?.authorizationUrl !== 'string' || !isWebUrl(answer.authorizationUrl)) {
+      throw new AgentRequestError('agent_error', t('sessionMcp.loginPage', { agent: 'Codex' }))
+    }
+    if (typeof answer.loginId === 'string') {
+      this.logins.set(answer.loginId, { threadId, name: server })
+      if (this.logins.size > MAX_LOGINS) this.logins.delete(this.logins.keys().next().value!)
+    }
+    return { url: answer.authorizationUrl }
+  }
+
+  /**
+   * A sign-in ended: one that worked connects again with its new token, and the thread that
+   * started it, or every thread for an older Codex without login ids, hears how it went.
+   */
+  private async mcpLoginEnded(done: McpServerOauthLoginCompletedNotification): Promise<void> {
+    const started = typeof done.loginId === 'string' ? this.logins.get(done.loginId) : undefined
+    if (typeof done.loginId === 'string') this.logins.delete(done.loginId)
+    const threadId = started?.threadId ?? done.threadId ?? null
+    if (done.success) {
+      try {
+        await this.reloadMcp()
+      } catch (error) {
+        if (this.isClosed) return
+        this.hooks.log('warn', `Could not reload Codex's MCP servers: ${(error as Error).message}`)
+      }
+    }
+    const login = {
+      server: started?.name ?? done.name,
+      ok: done.success === true,
+      error: done.success ? null : shownError(done.error ?? null),
+    }
+    this.mcpChanged(threadId, login)
+  }
+
+  /** Tells the thread's panel, or every thread's with null, that its servers changed. */
+  private mcpChanged(
+    threadId: string | null,
+    login?: { server: string; ok: boolean; error: string | null },
+  ): void {
+    const effect: MapperEffect = login ? { kind: 'mcp', login } : { kind: 'mcp' }
+    const ids = threadId === null ? [...this.targets.keys()] : [threadId]
+    for (const id of ids) {
+      if (this.parents.has(id)) continue
+      this.targets.get(id)?.apply({ patches: [], effects: [effect] })
+    }
+  }
+
+  async reloadPlugins(threadId: string): Promise<'reloaded' | 'busy'> {
+    const record = this.threads.get(threadId)
+    if (!record) {
+      throw new AgentRequestError('agent_error', t('agentRun.notRunning', { agent: 'Codex' }))
+    }
+    if (record.running || record.prompting) return 'busy'
+    await this.call<SkillsListResponse>('skills/list', {
+      forceReload: true,
+      ...(record.cwd !== null ? { cwds: [record.cwd] } : {}),
+    })
+    await this.reloadMcp()
+    record.commands = null
+    await this.publishCommands(threadId)
+    return 'reloaded'
   }
 
   async readContextEstimates(sessionId: string, cwd: string): Promise<ContextEstimates> {

@@ -1522,6 +1522,12 @@ export class AgentHost {
         seen: (sessionId) => options.send({ type: 'host:seen', sessionId }),
         busy: (counts) => options.send({ type: 'host:busy-changed', ...counts }),
         completed: () => void this.star.turnCompleted(),
+        mcpChanged: (sessionId, login, portIds) =>
+          this.hub.send(portIds, {
+            type: 'session.mcpChanged',
+            sessionId,
+            ...(login ? { login } : {}),
+          }),
       },
     })
     this.agentHistory = new AgentHistory({
@@ -4161,6 +4167,11 @@ export class AgentHost {
       'sessions.stopTask': ({ sessionId, taskId }) => sessions.stopTask(sessionId, taskId),
       'sessions.taskOutput': ({ sessionId, taskId }) => sessions.taskOutput(sessionId, taskId),
       'sessions.processes': ({ sessionId }) => sessions.processes(sessionId),
+      'sessions.mcp': ({ sessionId }) => sessions.mcp(sessionId),
+      'sessions.mcpAct': ({ sessionId, action, server }) =>
+        sessions.mcpAct(sessionId, action, server),
+      'sessions.mcpLogin': ({ sessionId, server }) => sessions.mcpLogin(sessionId, server),
+      'sessions.reloadPlugins': ({ sessionId }) => sessions.reloadPlugins(sessionId),
       'sessions.toBackground': ({ sessionId, toolCallId }) =>
         sessions.toBackground(sessionId, toolCallId),
       'sessions.cleanTasks': ({ sessionId }) => sessions.cleanTasks(sessionId),

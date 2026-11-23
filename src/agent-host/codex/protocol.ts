@@ -524,6 +524,49 @@ export interface McpServerStatus {
   /** Set when the server gave no tool list. */
   toolsError: string | null
   authStatus: 'unknown' | 'unsupported' | 'notLoggedIn' | 'bearerToken' | 'oAuth'
+  /** Huli: the plugin that brought it, by id; null or absent for a configured one. */
+  pluginId?: string | null
+}
+
+/** Huli: `mcpServer/oauth/login`'s answer: the page to sign in at. */
+export interface McpServerOauthLoginResponse {
+  authorizationUrl: string
+  /** Older servers leave it out. */
+  loginId?: string | null
+}
+
+/** Huli: `mcpServer/oauthLogin/completed`. */
+export interface McpServerOauthLoginCompletedNotification {
+  name: string
+  success: boolean
+  error?: string | null
+  loginId?: string | null
+  threadId?: string | null
+}
+
+/** Huli: where a key of the configuration `config/read` answers with was set. */
+export interface ConfigLayerMetadata {
+  name: { type: string }
+}
+
+/** Huli: `config/read`'s answer, of what Kite reads: which layer set each key. */
+export interface ConfigReadResponse {
+  origins: Record<string, ConfigLayerMetadata>
+}
+
+/** Huli: one of `app/list`'s apps, the ChatGPT account's connectors. */
+export interface AppInfo {
+  id: string
+  name: string
+  description?: string | null
+  installUrl?: string | null
+  isAccessible?: boolean
+  isEnabled?: boolean
+}
+
+export interface AppsListResponse {
+  data: AppInfo[]
+  nextCursor?: string | null
 }
 
 export interface ListMcpServerStatusResponse {
