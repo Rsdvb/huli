@@ -2153,6 +2153,46 @@ the `webReader` keys of `locales/*/{settings,host}.json`. Tests: a download refu
 size mismatch, the arguments and addresses, the command line and environment, the cut and the
 untrusted wrapping, and the feature gate (`web-reader.test.ts`, `service.test.ts`).
 
+### Device recordings and diagnostics (录屏、截图对比、诊断)
+
+Beyond Kettu's `device_*` tools, agents get agent-device's (0.21.41) recording, screenshot diff,
+network and memory commands, and a few readings of the platforms' own tools, for an app under test
+on an iOS simulator, an Android emulator or phone (and, where noted, an iPhone).
+
+- `device_record_start` / `device_record_stop`: `record start` into
+  `<session folder>/.kite/device/recordings/<name or time>.mp4` (the app's scope once the session
+  launched an app, the whole screen before). The device host stops it itself after 3 minutes
+  (`MAX_DEVICE_RECORDING_MS`, a timer that exists only while recording), when the session ends,
+  when the device is closed, moved or shut down, and when the host quits (waiting 3 s). The stop
+  links the video as a `resource_link` with a `file:` URI, which `toolMedia` in `named.ts` shows
+  under the call as it shows a diff's files.
+- `device_screenshot_compare`: `screenshot --normalize-status-bar` (simulators and Android) into
+  `.kite/device/shots/`, then agent-device's own `diff screenshot` against a baseline .png the
+  agent names in the session folder (saved from this shot when it does not exist yet; `update`
+  replaces it) or the session's previous shot. It answers the share of differing pixels and the
+  regions, with the diff image from `.kite/device/diffs/` inline up to 4 MB. No pixel code of
+  Kite's own: agent-device's diff scales a shot of another size and runs on Windows too.
+- `device_logs` reads the file `logs path --json` names, from its end, and adds the crash reports
+  of the app the session launched, since its launch: Android's crash buffer (`adb logcat -b crash
+-d -v epoch -t 2000`, grouped by pid, kept when they name the package), an iOS simulator's
+  `.ips` files in `~/Library/Logs/DiagnosticReports` (its bundle id, and its process path naming
+  the simulator's UDID). An iPhone's crash reports are not read.
+- `device_network` is agent-device's `network dump` (requests parsed from the app's log, so only
+  an app that logs them shows any; the first call starts the capture). `device_perf` is
+  `perf memory sample` plus a CPU reading of Kite's own over one second: on Android two reads of
+  `/proc/<pid>/stat` and `/proc/uptime` in one `adb shell` built from the pid alone, on a simulator
+  `ps -o time=` of the app's process on the Mac. No CPU for an iPhone. `device_push` is `push`
+  (simulators and Android; iPhones refuse), `device_reset_app` is `settings clear-app-state` (and
+  `reset-keychain clear` for a simulator), `device_set_permission` takes `reset` and `all`.
+- What may be written: only under `.kite/device` in the folder the session works in, made with a
+  `.gitignore` of `*`, and the baselines the agent names there. `captures.ts` resolves every path
+  through the folder's real path and refuses one a link leads out of. The agent host checks every
+  argument first (`tools.ts`): names and baselines are plain relative names, payloads are checked
+  for the device's platform (an APNs payload with `aps`, or an Android broadcast's action,
+  receiver and plain extras; 4 KB at most), and the agent's words go after `--`.
+- Answers are capped at 48 KB of text with a `structuredContent` copy. Tests: the arguments, the
+  command lines, the session folder's bounds (`tools.test.ts`, `agent.test.ts`).
+
 ## Merging Kettu
 
 What every merge of Kettu's main follows, whether the nightly `huli-sync.yml` makes it or, after a
