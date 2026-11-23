@@ -1027,8 +1027,15 @@ export class AgentActions {
     allowFailure = false,
   ): Promise<Output> {
     const base = await this.env()
+    const home = path.join(this.dataDir, 'agent-device')
+    // AGENT_DEVICE_HOME holds only agent-device's config and plugins; its daemon, the daemon's log
+    // and the sessions' request logs go where AGENT_DEVICE_STATE_DIR says. Two things stay in the
+    // user's home: the CLI's own failure logs, hard-coded to os.homedir()/.agent-device/logs, which
+    // only HOME or USERPROFILE would move, and adb, the emulator and Xcode read those too; and the
+    // device claims, shared on purpose so that other agent-device users see Kite's.
     const extra: Env = {
-      AGENT_DEVICE_HOME: path.join(this.dataDir, 'agent-device'),
+      AGENT_DEVICE_HOME: home,
+      AGENT_DEVICE_STATE_DIR: home,
       AGENT_DEVICE_NO_UPDATE_NOTIFIER: '1',
     }
     // agent-device looks for adb on PATH; an SDK Kettu found elsewhere, as Homebrew's, joins it.
