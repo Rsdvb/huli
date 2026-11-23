@@ -10,13 +10,20 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import { NOT_VISITED, recapStep, type Recap, type RecapEvent, type RecapVisit } from '@shared/recap'
+import {
+  laterMark,
+  NOT_VISITED,
+  recapStep,
+  type Recap,
+  type RecapEvent,
+  type RecapVisit,
+} from '@shared/recap'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { useJumpToMessage } from '../outline/use-jump'
 import type { ThreadJumps } from '../thread'
 import type { Item } from '../thread-items'
-import { markSeen, seenMark } from './seen'
+import { flushSeen, markSeen, seenMark } from './seen'
 
 // How long the item a jump went to stays marked.
 const FOUND_MS = 1800
@@ -104,7 +111,13 @@ export const RecapLine = memo(function RecapLine({
     (event: RecapEvent) => {
       const replica = useThreadsStore.getState().replicas[sessionId]
       if (!replica?.state) return
-      const was = (visit.current ??= { ...NOT_VISITED, mark: seenMark(sessionId) })
+      const stored = (visit.current ??= { ...NOT_VISITED, mark: seenMark(sessionId) })
+      // Huli: coming into view, the user saw it as far as the later of this mark and its host's,
+      // which another device may have moved meanwhile.
+      const was =
+        event === 'view' && !stored.inView
+          ? { ...stored, mark: laterMark(stored.mark, seenMark(sessionId)) }
+          : stored
       const next = recapStep(was, event, replica.state, {
         now: Date.now(),
         older: replica.older !== null,
@@ -124,7 +137,10 @@ export const RecapLine = memo(function RecapLine({
   const leaving = useRef(false)
   useLayoutEffect(() => {
     const change = (): void => step(document.visibilityState === 'visible' ? 'view' : 'leave')
-    const close = (): void => step('leave')
+    const close = (): void => {
+      step('leave')
+      flushSeen()
+    }
     // StrictMode's remount, straight after its unmount, never left.
     if (leaving.current) leaving.current = false
     else change()

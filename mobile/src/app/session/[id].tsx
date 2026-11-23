@@ -103,7 +103,7 @@ import { PlanUsageSheet } from '../../components/PlanUsageSheet'
 import { RewindDialog, type RewindDone } from '../../components/RewindDialog'
 import { rewindTarget } from '@shared/rewind-target'
 import { WorktreeLine } from '../../components/git/WorktreeCard'
-import { toggleMuted, useSessionActions } from '../../components/SessionActions'
+import { useSessionActions } from '../../components/SessionActions'
 import { CHIPS_HEIGHT, hasChips, SessionChips } from '../../components/SessionChips'
 import { NotesStrip, useHasDraftNotes } from '../../components/DiffNotes'
 import { sessionMenuPages } from '../../components/SessionMenu'
@@ -134,7 +134,7 @@ import {
   useLinkDown,
   type HostData,
 } from '../../host'
-import { useMuted } from '../../push/muted'
+import { sessionMuted, useMuted } from '../../push/muted'
 import { folder, sessionTitle } from '../../sessions'
 import { hostErrorText } from '../../hostErrors'
 import { sessionTerminals, useTerminalAllowed } from '../../terminals'
@@ -374,7 +374,8 @@ function Session() {
     artifacts: null,
     terminals: null,
   })
-  const muted = useMuted(id)
+  // Muted on its computer, or on the phone's own list for a computer that keeps no mutes.
+  const muted = useMuted(id) || sessionMuted(id, summary)
   const terminalAllowed = useTerminalAllowed(link, hostState)
   const managerBanner = useEntryOn('phone.managerBanner')
   const devServers = useEntryOn('phone.devServers')
@@ -1057,7 +1058,7 @@ function Session() {
         actions,
         canFork,
         muted,
-        onMute: () => toggleMuted(id, !muted),
+        onMute: () => actions.toggleMute(summary, !muted),
         onFork: (worktree) => fork(null, worktree),
         onNewSubSession: newChild,
         onShowParent: () => summary.parentId && openSession(summary.parentId),

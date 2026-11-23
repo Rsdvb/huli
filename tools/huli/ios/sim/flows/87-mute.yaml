@@ -1,0 +1,62 @@
+# A session's mute kept by the computer: the row's long-press menu offers 静音通知 with the line
+# of what it keeps quiet (a system menu, whose subtitles only the screenshots show, as Maestro
+# reads the titles alone), muting it there makes the session's title menu offer 取消静音 (the
+# computer's flag, which the desktop's menu reads too), and unmuting there brings 静音通知 back.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/basic-turn'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- tapOn: '返回'
+- waitForAnimationToEnd
+- longPressOn:
+    text: '.*Fix the flaky login test.*'
+- waitForAnimationToEnd
+- takeScreenshot: m01-row-menu
+- assertVisible: '静音通知'
+- tapOn:
+    text: '静音通知.*'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- tapOn:
+    text: '.*Fix the flaky login test.*'
+- waitForAnimationToEnd
+- tapOn:
+    text: 'Fix the flaky login test, .*'
+- waitForAnimationToEnd
+- takeScreenshot: m02-title-menu-muted
+- assertVisible:
+    text: '取消静音.*'
+- tapOn:
+    text: '取消静音.*'
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 2500
+    optional: true
+- tapOn:
+    text: 'Fix the flaky login test, .*'
+- waitForAnimationToEnd
+- takeScreenshot: m03-title-menu-unmuted
+- assertVisible:
+    text: '静音通知.*'

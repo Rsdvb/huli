@@ -11,7 +11,7 @@ import type { HostLink } from '@shared/remote/link'
 import type { ThreadEntry } from '@shared/thread'
 import type { TurnPhaseName } from '@shared/turn-phase'
 import { HuliLive } from '../../modules/huli-live'
-import { isMuted } from '../push/muted'
+import { sessionMuted } from '../push/muted'
 import { needsYou, sessionTitle } from '../sessions'
 import { computerFollows, followedActivities, liveSnapshot, setProgressSource } from './activities'
 
@@ -316,9 +316,9 @@ async function reconcile(input: LocalInput): Promise<void> {
   }
   const trackedId = tracked?.sessionId
   const rank = (s: SessionSummary): number => (busyAs(s) === 'waiting' ? 0 : 1)
-  // A session muted on this phone still counts, but never takes the Lock Screen.
+  // A muted session still counts, but never takes the Lock Screen.
   const focus = busy
-    .filter((s) => !declined.has(turnOf(s)) && !isMuted(s.id))
+    .filter((s) => !declined.has(turnOf(s)) && !sessionMuted(s.id, s))
     .sort(
       (a, b) =>
         rank(a) - rank(b) ||

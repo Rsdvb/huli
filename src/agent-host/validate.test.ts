@@ -1342,6 +1342,33 @@ describe('routine requests', () => {
     }
   })
 
+  // Huli: a session's mute and how far a device saw it, from a window or a paired phone.
+  it('takes a mute only as a flag, and a seen mark only as a time and an entry or null', () => {
+    expect(posix['sessions.setMuted']({ sessionId: 's', muted: true })).toEqual({
+      sessionId: 's',
+      muted: true,
+    })
+    for (const muted of ['yes', 1, null, undefined]) {
+      rejects(() => posix['sessions.setMuted']({ sessionId: 's', muted }))
+    }
+    rejects(() => posix['sessions.setMuted']({ muted: true }))
+    expect(posix['sessions.setSeen']({ sessionId: 's', at: 5_000, entry: 'e3', extra: 1 })).toEqual(
+      { sessionId: 's', at: 5_000, entry: 'e3' },
+    )
+    expect(posix['sessions.setSeen']({ sessionId: 's', at: 5_000, entry: null })).toEqual({
+      sessionId: 's',
+      at: 5_000,
+      entry: null,
+    })
+    for (const at of [-1, 1.5, '5000', Number.NaN, Infinity, null, undefined]) {
+      rejects(() => posix['sessions.setSeen']({ sessionId: 's', at, entry: 'e3' }))
+    }
+    for (const entry of ['', 3, undefined, 'e'.repeat(513), {}]) {
+      rejects(() => posix['sessions.setSeen']({ sessionId: 's', at: 5_000, entry }))
+    }
+    rejects(() => posix['sessions.setSeen']({ at: 5_000, entry: 'e3' }))
+  })
+
   // Huli: the task board's columns, from a window or a paired phone.
   it("moves a session on the task board only to one of the board's columns", () => {
     for (const status of ['todo', 'in_progress', 'review', 'done']) {

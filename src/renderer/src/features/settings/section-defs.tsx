@@ -32,7 +32,7 @@ import { errorMessage } from '@renderer/lib/host'
 import { useHostContext, useHostHas } from '@renderer/lib/host-features'
 import { formatShortcut, isHosted, isMac, isWeb, isWindows, platform } from '@renderer/lib/platform'
 import { useAppInfo } from '@renderer/lib/use-app-info'
-import { useEntry } from '@renderer/lib/features'
+import { useEntry, useFeature } from '@renderer/lib/features'
 import { agentName, awaitsPackage, harnessStatuses, usableAgents } from '@renderer/stores/agents'
 import { useAccountStore } from '@renderer/stores/account'
 import { useDebugStore } from '@renderer/stores/debug'
@@ -460,6 +460,7 @@ export function useNotificationsSection(): SectionDef {
   const when = group('when', t('notifications.groups.when'))
   const how = group('how', t('notifications.groups.how'))
   const routinesOn = useEntry('settings.routineNotifications')
+  const agentNotesOn = useFeature('agentNotify')
   const islandDescription = useIslandDescription()
   const rows: RowDef[] = [
     {
@@ -495,6 +496,19 @@ export function useNotificationsSection(): SectionDef {
         <NotificationSwitch field="turnEnded" label={t('notifications.turnEnded.name')} />
       ),
     },
+    // Huli: what an agent's notify tool sends, apart from its finished turns.
+    ...(agentNotesOn
+      ? [
+          {
+            id: 'agent-notes',
+            setting: 'notifications.agent-notes',
+            group: when,
+            render: () => (
+              <NotificationSwitch field="agentNotes" label={t('notifications.agentNotes.name')} />
+            ),
+          } satisfies RowDef,
+        ]
+      : []),
     ...(routinesOn
       ? [
           {

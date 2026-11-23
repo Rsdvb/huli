@@ -360,6 +360,7 @@ const SECTION_FIELDS = {
   notifications: {
     permission: isBoolean,
     turnEnded: isBoolean,
+    agentNotes: isBoolean,
     error: isBoolean,
     routines: isBoolean,
     updates: isBoolean,

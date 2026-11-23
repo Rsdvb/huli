@@ -4471,6 +4471,8 @@ export class AgentHost {
       'sessions.settle': ({ sessionId, settled }) => sessions.settle(sessionId, settled),
       'sessions.setNeverSettle': ({ sessionId, never }) =>
         sessions.setNeverSettle(sessionId, never),
+      'sessions.setMuted': ({ sessionId, muted }) => sessions.setMuted(sessionId, muted),
+      'sessions.setSeen': ({ sessionId, at, entry }) => sessions.setSeen(sessionId, { at, entry }),
       'sessions.archive': ({ sessionId, subSessions }) =>
         sessions.archive(sessionId, subSessions ?? true),
       'sessions.unarchive': ({ sessionId }) => sessions.unarchive(sessionId),

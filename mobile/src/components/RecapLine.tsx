@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, Platform, Pressable, Settings, StyleSheet, Text, View } from 'react-native'
 import {
+  laterMark,
   NOT_VISITED,
   RECAP_AWAY_MS,
   recapStep,
@@ -15,7 +16,8 @@ import {
 } from '@shared/recap'
 import type { ThreadState } from '@shared/thread'
 import { devMode } from '../dev/devMode'
-import { markSeen, seenMark } from '../seen'
+import { getHost, useMaybeLink } from '../host'
+import { flushSeen, markSeen, reportSeen, seenMark } from '../seen'
 import { useSelector, type Store } from '../select'
 import type { ThreadView } from '../thread'
 import { Glass } from '../ui/Glass'
@@ -85,9 +87,10 @@ export function useRecap(
   const [recap, setRecap] = useState<Recap | null>(null)
   // Null until this phone's mark for the session is read.
   const visit = useRef<RecapVisit | null>(null)
-  const latest = useRef({ view, focused })
+  const link = useMaybeLink()
+  const latest = useRef({ view, focused, link })
   useEffect(() => {
-    latest.current = { view, focused }
+    latest.current = { view, focused, link }
   })
   const sentAtRecap = useRef<string | null>(null)
   // Back from the background: when, and the read count then, as the next read holds what happened
@@ -96,9 +99,17 @@ export function useRecap(
 
   const step = useCallback(
     (event: RecapEvent, at = Date.now()) => {
-      const was = visit.current
+      const stored = visit.current
       const now = latest.current.view.store.get()
-      if (!computer || !was || !now) return
+      if (!computer || !stored || !now) return
+      // Huli: the computer's mark, the latest of its devices'; undefined from one keeping none.
+      const known = getHost().sessions.get(sessionId)?.seen
+      // Coming into view, the user saw the session as far as the later of this phone's mark and
+      // that one, which another device may have moved meanwhile.
+      const was =
+        event === 'view' && !stored.inView
+          ? { ...stored, mark: laterMark(stored.mark, known) }
+          : stored
       const next = recapStep(was, event, now, {
         now: at,
         older: latest.current.view.hasOlder,
@@ -106,7 +117,11 @@ export function useRecap(
       })
       if (next === was) return
       visit.current = next
-      if (next.mark && next.mark !== was.mark) markSeen(computer, sessionId, next.mark)
+      if (next.mark && next.mark !== was.mark) {
+        markSeen(computer, sessionId, next.mark)
+        const { link: up } = latest.current
+        if (up) reportSeen(computer, up, sessionId, next.mark, known)
+      }
       if (next.shown !== was.shown) {
         sentAtRecap.current = lastSent(now)
         setRecap(next.shown)
@@ -144,6 +159,7 @@ export function useRecap(
         away = true
         awaiting.current = null
         step('leave')
+        if (computer) flushSeen(computer)
       } else if (state === 'active' && away) {
         away = false
         // The session was let go in the background and is read afresh now.
@@ -155,7 +171,7 @@ export function useRecap(
       awaiting.current = null
       step('leave')
     }
-  }, [focused, step])
+  }, [focused, step, computer])
 
   useEffect(() => {
     const back = awaiting.current

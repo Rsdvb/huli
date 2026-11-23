@@ -429,6 +429,11 @@
       "name": "本轮对话已完成",
       "description": "智能体已完成，正在等你的下一条消息。"
     },
+    "agentNotes": {
+      "name": "Agent 主动通知",
+      "description": "智能体主动告诉你一件事：你让它到时提醒的，或是一项长任务做完了。",
+      "keywords": "主动通知 提醒 notify agent"
+    },
     "routines": {
       "name": "定时任务运行",
       "description": "一次运行结束，或因接近套餐限制而暂停。",

@@ -18,7 +18,7 @@ import { runPhase } from '@shared/run-groups'
 import type { HostLink } from '@shared/remote/link'
 import { call, sessionFolder } from '../git'
 import { entryShownOnPhone, useAgents, useMaybeLink } from '../host'
-import { isMuted, setMuted } from '../push/muted'
+import { muteHint, muteSession, sessionMuted } from '../push/muted'
 import { errorText, sessionTitle } from '../sessions'
 import {
   canRetry,
@@ -77,6 +77,8 @@ export interface SessionActions {
   wake(summary: SessionSummary): void
   /** Huli: 永不收起: the settings' rules never settle it. */
   setNeverSettle(summary: SessionSummary, never: boolean): void
+  /** Mutes or unmutes its notifications, on its computer when that keeps mutes. */
+  toggleMute(summary: SessionSummary, on: boolean): void
   copyResume(summary: SessionSummary): void
   copySessionId(summary: SessionSummary): void
   /** Huli: 分享为 Markdown: the whole session as one Markdown file, in the share sheet. */
@@ -225,6 +227,18 @@ export function useSessionActions(
   const setNeverSettle = (s: SessionSummary, never: boolean) =>
     run(s, '没能设置', (link) =>
       link.request('sessions.setNeverSettle', { sessionId: s.id, never }),
+    )
+
+  const toggleMute = (s: SessionSummary, on: boolean) =>
+    muteSession(linkOf(s), s, on).then(
+      () => haptic.success(),
+      () => {
+        haptic.warning()
+        showNotice({
+          text: on ? '没能静音通知，请再试一次。' : '没能取消静音，请再试一次。',
+          tone: 'warning',
+        })
+      },
     )
 
   /** 稍后提醒's submenu: the quick times, the plan's reset, more times, and 取消推迟. */
@@ -397,7 +411,8 @@ export function useSessionActions(
     const running = isRunning(s)
     const topLevel = s.parentId === null
     const here = onActive(s)
-    const muted = isMuted(s.id)
+    const muted = sessionMuted(s.id, s)
+    const hint = muteHint(s, muted)
     const prs = sessionPullRequests(s)
     const resume = resumeOf(s)
     if (place === 'archive') {
@@ -475,8 +490,9 @@ export function useSessionActions(
       {
         key: 'mute',
         label: muted ? '取消静音' : '静音通知',
+        ...(hint ? { subtitle: hint } : {}),
         icon: muted ? 'bell' : 'bell.slash',
-        onPress: () => toggleMuted(s.id, !muted),
+        onPress: () => toggleMute(s, !muted),
       },
     ]
     const board = entryShownOnPhone('phone.boardMenu') ? boardStatusOf(s) : null
@@ -632,6 +648,7 @@ export function useSessionActions(
     settle,
     wake,
     setNeverSettle,
+    toggleMute,
     archive,
     rename,
     resumeOf,
@@ -641,20 +658,6 @@ export function useSessionActions(
 }
 
 /** Asks, then forks a whole session on the active computer and opens the new one. */
-/** Mutes or unmutes a session's notifications, saying so when the phone could not keep it. */
-export function toggleMuted(sessionId: string, on: boolean): void {
-  setMuted(sessionId, on).then(
-    () => haptic.success(),
-    () => {
-      haptic.warning()
-      showNotice({
-        text: on ? '没能静音通知，请再试一次。' : '没能取消静音，请再试一次。',
-        tone: 'warning',
-      })
-    },
-  )
-}
-
 export function forkSession(link: HostLink | null, summary: SessionSummary): void {
   if (!link) return
   Alert.alert('分叉这个会话？', '新会话会带上目前的整个对话，原来的会话不受影响。', [

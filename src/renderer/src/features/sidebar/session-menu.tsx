@@ -19,6 +19,8 @@ import {
   GitMergeIcon,
   Layout2ColumnIcon,
   LinkSquare02Icon,
+  Notification03Icon,
+  NotificationOff03Icon,
   PencilEdit02Icon,
   PinIcon,
   PinOffIcon,
@@ -43,6 +45,7 @@ import {
   descendantCount,
   forkSession,
   markSessionUnread,
+  muteSession,
   pinSession,
   renameSession,
   unarchiveSession,
@@ -354,6 +357,29 @@ export function SessionMenuItems({
             <MenuGlyph icon={ViewIcon} />
             {unread ? t('row.markRead') : t('row.markUnread')}
             {shortcut}
+          </DropdownMenuItem>
+        )
+      case 'mute':
+        return (
+          <DropdownMenuItem
+            key={name}
+            {...props}
+            className="h-auto items-start py-1.5"
+            onClick={() =>
+              void muteSession(id, !summary.muted).catch((e: unknown) => toast(errorMessage(e)))
+            }
+          >
+            <Glyph
+              icon={summary.muted ? Notification03Icon : NotificationOff03Icon}
+              size={15}
+              className="mt-0.5 text-icon"
+            />
+            <span className="flex min-w-0 flex-col">
+              <span>{summary.muted ? t('row.unmute') : t('row.mute')}</span>
+              <span className="max-w-60 text-small text-pretty whitespace-normal text-tertiary">
+                {summary.muted ? t('row.unmuteHint') : t('row.muteHint')}
+              </span>
+            </span>
           </DropdownMenuItem>
         )
       case 'autoResume':

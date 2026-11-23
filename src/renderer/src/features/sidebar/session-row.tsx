@@ -3,6 +3,7 @@ import {
   ArrowDown01Icon,
   ArrowRight01Icon,
   MoreHorizontalIcon,
+  NotificationOff03Icon,
   PinIcon,
   PinOffIcon,
 } from '@hugeicons/core-free-icons'
@@ -322,6 +323,17 @@ export const SessionRow = memo(function SessionRow({
         <PrBadge summary={summary} onEnter={() => setCardOpen(false)} />
         {summary.board && boardMark && onBoard(summary) && (
           <BoardRowMark status={summary.board.status} onEnter={() => setCardOpen(false)} />
+        )}
+        {/* Huli: 静音通知. */}
+        {summary.muted && (
+          <span
+            role="img"
+            aria-label={t('row.muted')}
+            title={t('row.muted')}
+            className="grid shrink-0 place-items-center text-(--faint)"
+          >
+            <Glyph icon={NotificationOff03Icon} size={12} />
+          </span>
         )}
         {hasChildren && !expanded && (
           <span

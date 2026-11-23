@@ -297,6 +297,7 @@ import type { ProviderProfiles } from './provider-profiles'
 import { claudeProfileEnv, takesProfiles } from '@shared/provider-profiles'
 import { NEW_BOARD_STATUS, type BoardStatus, type SessionBoard } from '@shared/session-board'
 import type { SnoozeUntil } from '@shared/session-tidy'
+import { laterMark, type SeenMark } from '@shared/recap'
 import type { MovedTo, MoveProblem } from '@shared/session-move'
 import { DEFAULT_PORT_BASE, isPortBase, portEnv, type PortBlock } from '@shared/worktree-ports'
 import {
@@ -2016,6 +2017,8 @@ export class SessionManager {
       ...(record.worker ? { worker: this.manager.workerSummary(record) } : {}),
       ...(record.movedTo ? { movedTo: { ...record.movedTo } } : {}),
       ...(this.tidyOn() ? tidySummary(record.tidy) : {}),
+      muted: record.muted === true,
+      seen: record.seen ? { ...record.seen } : null,
       activity:
         live && (status === 'running' || status === 'awaiting_permission')
           ? live.activity.current(live.thread)
@@ -14829,9 +14832,37 @@ export class SessionManager {
 
   /** Tells of what needs the user, and brings back a snoozed or settled session it is in. */
   private attention(...args: Parameters<SessionEvents['attention']>): void {
-    this.deps.events.attention(...args)
     const [sessionId, kind] = args
+    // Huli: a muted session's finished turns and notes tell no window, device or chat bridge.
+    if ((kind === 'turn-ended' || kind === 'note') && this.isMuted(sessionId)) return
+    this.deps.events.attention(...args)
     if (kind === 'permission' || kind === 'error') this.tidyActivity(sessionId, false)
+  }
+
+  private isMuted(sessionId: string): boolean {
+    const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
+    return record?.muted === true
+  }
+
+  /** Huli: mutes or unmutes the session's finished turns and its agent's notes. */
+  setMuted(sessionId: string, muted: boolean): void {
+    const record = this.recordOf(sessionId)
+    if (muted === (record.muted === true)) return
+    if (muted) record.muted = true
+    else delete record.muted
+    this.saveRecord(sessionId)
+  }
+
+  /**
+   * Huli: how far a device saw the session, kept when later than the mark the host has, so the
+   * host holds the latest of every device's. A time ahead of the host's clock counts as now.
+   */
+  setSeen(sessionId: string, mark: SeenMark): void {
+    const record = this.recordOf(sessionId)
+    const given = { at: Math.min(mark.at, this.now()), entry: mark.entry }
+    if (laterMark(record.seen, given) !== given) return
+    record.seen = given
+    this.saveRecord(sessionId)
   }
 
   /**

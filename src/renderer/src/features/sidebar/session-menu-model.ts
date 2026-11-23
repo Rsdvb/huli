@@ -9,6 +9,7 @@ export type SessionMenuItem =
   | 'open'
   | 'pin'
   | 'unread'
+  | 'mute'
   | 'rename'
   | 'snooze'
   | 'settle'
@@ -117,7 +118,10 @@ export interface SessionMenuContext {
  * not hold.
  */
 export function sessionMenuGroups(
-  summary: Pick<SessionSummary, 'status' | 'parentId' | 'origin' | 'pr' | 'prs' | 'archivedAt'>,
+  summary: Pick<
+    SessionSummary,
+    'status' | 'parentId' | 'origin' | 'pr' | 'prs' | 'archivedAt' | 'muted'
+  >,
   {
     canFork,
     shown = false,
@@ -185,11 +189,13 @@ export function sessionMenuGroups(
     : status === 'failed' || status === 'auth_required'
       ? ['retry']
       : []
+  // Huli: 静音通知, where its host keeps a session's mute.
+  const mute: SessionMenuItem[] = summary.muted === undefined ? [] : ['mute']
   const groups: SessionMenuItem[][] =
     place === 'more'
       ? [
           state,
-          ['rename', ...(topLevel ? (['pin'] as const) : []), ...forks],
+          ['rename', ...(topLevel ? (['pin'] as const) : []), ...mute, ...forks],
           // Huli: how much of the agent's work the thread shows (简洁视图), the agent's own
           // options of the menu (such as Claude Code's output style), and its MCP servers.
           [
@@ -206,7 +212,7 @@ export function sessionMenuGroups(
         ]
       : [
           state,
-          topLevel ? ['pin', 'unread', 'rename'] : ['unread', 'rename'],
+          topLevel ? ['pin', 'unread', ...mute, 'rename'] : ['unread', ...mute, 'rename'],
           tidy,
           own,
           flow,
