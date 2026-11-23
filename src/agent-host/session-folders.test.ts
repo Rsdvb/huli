@@ -55,6 +55,7 @@ describe('SessionFolders', () => {
       collapsed: false,
       createdAt: 1_000,
       sessionIds: ['a', 'b'],
+      manual: false,
     })
     expect(events.at(-1)).toEqual([work])
     await folders.flush()
@@ -107,6 +108,37 @@ describe('SessionFolders', () => {
     ])
   })
 
+  it("keeps the user's order of a folder's sessions, new ones first, until it goes back", async () => {
+    const sessions = new Set(['a', 'b', 'c', 'd'])
+    const events: SessionFolder[][] = []
+    const { folders } = store(sessions, events)
+    await folders.load()
+    const folder = folders.create('F', ['a', 'b', 'c'])
+    expect(folders.list()[0]).toMatchObject({ sessionIds: ['a', 'b', 'c'], manual: false })
+
+    // Ones it does not hold are skipped; ones the list left out stay first.
+    folders.order(folder.id, ['c', 'zzz', 'a'])
+    expect(folders.list()[0]).toMatchObject({ sessionIds: ['b', 'c', 'a'], manual: true })
+    const heard = events.length
+    folders.order(folder.id, ['c', 'a'])
+    expect(events.length).toBe(heard)
+    // A session moved in later comes first, as a new one does.
+    folders.move(['d'], folder.id)
+    expect(folders.list()[0]!.sessionIds).toEqual(['d', 'b', 'c', 'a'])
+    await folders.flush()
+    expect(await saved()).toMatchObject({ folders: [{ manual: true }] })
+
+    const again = store(sessions).folders
+    await again.load()
+    expect(again.list()[0]).toMatchObject({ sessionIds: ['d', 'b', 'c', 'a'], manual: true })
+    // Back to activity keeps the order it has, for the next time it is ordered.
+    again.order(folder.id, null)
+    expect(again.list()[0]).toMatchObject({ sessionIds: ['d', 'b', 'c', 'a'], manual: false })
+    await again.flush()
+    expect(((await saved()) as { folders: object[] }).folders[0]).not.toHaveProperty('manual')
+    expect(() => again.order('nope', ['a'])).toThrow(/No folder/)
+  })
+
   it('drops sessions that went away from what it lists', async () => {
     const sessions = new Set(['a', 'b'])
     const { folders } = store(sessions)
@@ -143,8 +175,24 @@ describe('SessionFolders', () => {
     const { folders } = store(new Set(['a', 'b', 'c']))
     await folders.load()
     expect(folders.list()).toEqual([
-      { id: 'x', name: 'X', pinned: false, collapsed: false, createdAt: 0, sessionIds: ['a', 'b'] },
-      { id: 'z', name: 'Z', pinned: false, collapsed: true, createdAt: 0, sessionIds: ['c'] },
+      {
+        id: 'x',
+        name: 'X',
+        pinned: false,
+        collapsed: false,
+        createdAt: 0,
+        sessionIds: ['a', 'b'],
+        manual: false,
+      },
+      {
+        id: 'z',
+        name: 'Z',
+        pinned: false,
+        collapsed: true,
+        createdAt: 0,
+        sessionIds: ['c'],
+        manual: false,
+      },
     ])
 
     await writeFile(file, '{ not json')
@@ -195,6 +243,13 @@ describe('folder validators', () => {
       sessionIds: ['s'],
       folderId: null,
     })
+    expect(
+      folderValidators['folders.order']({ folderId: 'f', sessionIds: ['b', 'a', 'b'] }),
+    ).toEqual({ folderId: 'f', sessionIds: ['b', 'a'] })
+    expect(folderValidators['folders.order']({ folderId: 'f', sessionIds: null, x: 1 })).toEqual({
+      folderId: 'f',
+      sessionIds: null,
+    })
     expect(folderValidators['folders.list'](undefined)).toBeUndefined()
   })
 
@@ -212,5 +267,16 @@ describe('folder validators', () => {
     expect(() => folderValidators['folders.move']({ sessionIds: ['s'] })).toThrow(/folderId/)
     expect(() => folderValidators['folders.move']({ sessionIds: [1], folderId: null })).toThrow()
     expect(() => folderValidators['folders.move'](null)).toThrow(/object/)
+    expect(() => folderValidators['folders.order']({ folderId: 'f' })).toThrow(/sessionIds/)
+    expect(() => folderValidators['folders.order']({ sessionIds: [] })).toThrow(/folderId/)
+    expect(() =>
+      folderValidators['folders.order']({ folderId: 'f', sessionIds: ['x'.repeat(257)] }),
+    ).toThrow()
+    expect(() =>
+      folderValidators['folders.order']({
+        folderId: 'f',
+        sessionIds: Array.from({ length: 10_001 }, (_, i) => `s${i}`),
+      }),
+    ).toThrow(/at most/)
   })
 })

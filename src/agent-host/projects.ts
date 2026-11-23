@@ -48,6 +48,10 @@ function refused(problem: MountProblem | null): problem is RefusedFolder {
   return (REFUSED_FOLDERS as readonly string[]).includes(problem ?? '')
 }
 
+function sameIds(a: readonly string[] | undefined, b: readonly string[]): boolean {
+  return a !== undefined && a.length === b.length && a.every((id, index) => id === b[index])
+}
+
 async function isDirectory(value: string): Promise<boolean> {
   try {
     return (await stat(value)).isDirectory()
@@ -59,6 +63,7 @@ async function isDirectory(value: string): Promise<boolean> {
 export class Projects {
   private records: ProjectRecord[] = []
   private noProjectPinnedAt: number | undefined
+  private noProjectSessionOrder: string[] | undefined
   private missing = new Map<string, boolean>()
   private listeners = new Set<(projects: Project[], noProject: NoProject) => void>()
   private readonly now: () => number
@@ -75,6 +80,7 @@ export class Projects {
     const file = await this.deps.file.load()
     this.records = file.projects
     this.noProjectPinnedAt = file.noProjectPinnedAt
+    this.noProjectSessionOrder = file.noProjectSessionOrder
     await this.refreshMissing(false)
   }
 
@@ -98,6 +104,7 @@ export class Projects {
         missing: this.missing.get(this.key(folder)) ?? false,
       })),
       ...(record.manager ? { manager: record.manager } : {}),
+      sessionOrder: record.sessionOrder ? [...record.sessionOrder] : null,
     }))
   }
 
@@ -114,7 +121,10 @@ export class Projects {
 
   /** The No project group, which holds the sessions started without a project. */
   noProject(): NoProject {
-    return { pinnedAt: this.noProjectPinnedAt ?? null }
+    return {
+      pinnedAt: this.noProjectPinnedAt ?? null,
+      sessionOrder: this.noProjectSessionOrder ? [...this.noProjectSessionOrder] : null,
+    }
   }
 
   paths(): string[] {
@@ -335,6 +345,20 @@ export class Projects {
     this.changed()
   }
 
+  /**
+   * Huli: the user's order of the project's sidebar rows, or of No project's with a null record;
+   * null goes back to latest activity. The ids come validated, each once.
+   */
+  orderSessions(record: ProjectRecord | null, ids: readonly string[] | null): void {
+    const before = record ? record.sessionOrder : this.noProjectSessionOrder
+    if (ids === null ? before === undefined : sameIds(before, ids)) return
+    const next = ids === null ? undefined : [...ids]
+    if (!record) this.noProjectSessionOrder = next
+    else if (next) record.sessionOrder = next
+    else delete record.sessionOrder
+    this.changed()
+  }
+
   pinNoProject(pinned: boolean): void {
     if (pinned === (this.noProjectPinnedAt !== undefined)) return
     this.noProjectPinnedAt = pinned ? this.now() : undefined
@@ -370,6 +394,9 @@ export class Projects {
       ...(this.noProjectPinnedAt === undefined
         ? {}
         : { noProjectPinnedAt: this.noProjectPinnedAt }),
+      ...(this.noProjectSessionOrder === undefined
+        ? {}
+        : { noProjectSessionOrder: [...this.noProjectSessionOrder] }),
     })
     this.notify()
   }

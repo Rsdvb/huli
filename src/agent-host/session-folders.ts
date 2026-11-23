@@ -47,6 +47,7 @@ function folderRecord(item: unknown): SessionFolder | null {
     collapsed: o.collapsed === true,
     createdAt: typeof o.createdAt === 'number' && Number.isFinite(o.createdAt) ? o.createdAt : 0,
     sessionIds: [...new Set(ids)],
+    ...(o.manual === true ? { manual: true } : {}),
   }
 }
 
@@ -106,11 +107,15 @@ export class SessionFolders {
     return this.deps.file.flush()
   }
 
-  /** Every folder in the user's order, holding only the sessions still on the host. */
+  /**
+   * Every folder in the user's order, holding only the sessions still on the host; `manual` is
+   * always there, so a client tells this host from one that cannot keep a folder's order.
+   */
   list(): SessionFolder[] {
     return this.folders.map((folder) => ({
       ...folder,
       sessionIds: folder.sessionIds.filter((id) => this.deps.isSession(id)),
+      manual: folder.manual === true,
     }))
   }
 
@@ -129,7 +134,7 @@ export class SessionFolders {
     this.folders.push(folder)
     this.place(sessionIds, folder)
     this.commit()
-    return { ...folder, sessionIds: [...folder.sessionIds] }
+    return { ...folder, sessionIds: [...folder.sessionIds], manual: false }
   }
 
   rename(folderId: string, name: string): void {
@@ -180,6 +185,29 @@ export class SessionFolders {
   move(sessionIds: readonly string[], folderId: string | null): void {
     const folder = folderId === null ? null : this.find(folderId)
     this.place(sessionIds, folder)
+    this.commit()
+  }
+
+  /**
+   * The folder's sessions in the order named, kept as the user's from now on; ones it holds that
+   * are not named stay first, as sessions moved in later are, and named ones it does not hold are
+   * skipped. Null goes back to latest activity and keeps the order the folder has.
+   */
+  order(folderId: string, sessionIds: readonly string[] | null): void {
+    const folder = this.find(folderId)
+    if (sessionIds === null) {
+      if (!folder.manual) return
+      delete folder.manual
+      this.commit()
+      return
+    }
+    const held = new Set(folder.sessionIds)
+    const named = sessionIds.filter((id) => held.has(id))
+    const naming = new Set(named)
+    const next = [...folder.sessionIds.filter((id) => !naming.has(id)), ...named]
+    if (folder.manual && next.every((id, index) => id === folder.sessionIds[index])) return
+    folder.sessionIds = next
+    folder.manual = true
     this.commit()
   }
 
@@ -286,6 +314,13 @@ export const folderValidators: Pick<Validators, FolderMethod> = {
     return {
       sessionIds: ids(o, 'sessionIds', FOLDER_MOVE_SESSIONS),
       folderId: o.folderId === null ? null : id(o, 'folderId'),
+    }
+  },
+  'folders.order': (params) => {
+    const o = record(params)
+    return {
+      folderId: id(o, 'folderId'),
+      sessionIds: o.sessionIds === null ? null : ids(o, 'sessionIds', FOLDER_MOVE_SESSIONS),
     }
   },
 }

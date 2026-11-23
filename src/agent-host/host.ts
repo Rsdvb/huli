@@ -3990,6 +3990,8 @@ export class AgentHost {
         path === null ? projects.pinNoProject(pinned) : projects.pin(projects.match(path), pinned),
       'projects.move': ({ path, before }) =>
         projects.move(projects.match(path), before === null ? null : projects.match(before)),
+      'projects.orderSessions': ({ path, ids }) =>
+        projects.orderSessions(path === null ? null : projects.match(path), ids),
       'projects.noProject': () => projects.noProject(),
       'projects.setSandbox': ({ path, sandbox }) =>
         projects.setSandbox(projects.match(path), sandbox),
@@ -4698,6 +4700,8 @@ export class AgentHost {
       'folders.delete': ({ folderId }) => this.sessionFolders.delete(folderId),
       'folders.reorder': ({ folderIds }) => this.sessionFolders.reorder(folderIds),
       'folders.move': ({ sessionIds, folderId }) => this.sessionFolders.move(sessionIds, folderId),
+      'folders.order': ({ folderId, sessionIds }) =>
+        this.sessionFolders.order(folderId, sessionIds),
       'browser.answerOrigin': ({ sessionId, entryId, decision }, { device }) => {
         const { owner, requestId } = sessions.answerOrigin(
           sessionId,

@@ -22,6 +22,7 @@ import {
   type Migration,
   type SessionRecord,
 } from './storage'
+import { MAX_ORDERED_ROWS, ORDER_ID_CHARS } from '@shared/session-order'
 import { parseAgentOptionsFile } from './agent-options'
 import { Projects } from './projects'
 
@@ -950,6 +951,7 @@ describe('the host files', () => {
         sandbox: null,
         folders: [],
         order: null,
+        sessionOrder: null,
       },
     ])
     first.pin(first.match('/repo'), true)
@@ -1093,17 +1095,17 @@ describe('the host files', () => {
 
     const first = registry(3)
     await first.load()
-    expect(first.noProject()).toEqual({ pinnedAt: null })
+    expect(first.noProject()).toEqual({ pinnedAt: null, sessionOrder: null })
     const heard: unknown[] = []
     first.onChange((_, noProject) => heard.push(noProject))
     first.pinNoProject(true)
     first.pinNoProject(true)
-    expect(heard).toEqual([{ pinnedAt: 3 }])
+    expect(heard).toEqual([{ pinnedAt: 3, sessionOrder: null }])
     await first.flush()
 
     const next = registry(4)
     await next.load()
-    expect(next.noProject()).toEqual({ pinnedAt: 3 })
+    expect(next.noProject()).toEqual({ pinnedAt: 3, sessionOrder: null })
     expect(next.list()[0]).toMatchObject({ path: '/repo', pinnedAt: null })
     next.pinNoProject(false)
     await next.flush()
@@ -1111,6 +1113,79 @@ describe('the host files', () => {
     expect(parseProjectsFile({ projects: [], noProjectPinnedAt: 'soon' })).toEqual({
       version: 1,
       projects: [],
+    })
+  })
+
+  it("keeps the user's order of a project's rows and of No project's across loads", async () => {
+    const project = { path: '/repo', name: 'repo', addedAt: 1, lastOpenedAt: 2 }
+    const other = { path: '/other', name: 'other', addedAt: 1, lastOpenedAt: 1 }
+    const file = projectsFile(dir, log)
+    file.save({ version: 1, projects: [project, other] })
+    await file.flush()
+    const registry = () =>
+      new Projects({
+        file: projectsFile(dir, log),
+        platform: 'linux',
+        now: () => 5,
+        isDirectory: async () => true,
+      })
+
+    const first = registry()
+    await first.load()
+    // Until the user drags a row, every group goes by activity.
+    expect(first.list().map((p) => p.sessionOrder)).toEqual([null, null])
+    expect(first.noProject().sessionOrder).toBeNull()
+    let heard = 0
+    first.onChange(() => heard++)
+    first.orderSessions(first.match('/repo'), ['s2', 's1', 'g1'])
+    first.orderSessions(first.match('/repo'), ['s2', 's1', 'g1'])
+    first.orderSessions(null, ['n1'])
+    first.orderSessions(first.match('/other'), null)
+    expect(heard).toBe(2)
+    expect(first.list().find((p) => p.path === '/repo')?.sessionOrder).toEqual(['s2', 's1', 'g1'])
+    expect(first.list().find((p) => p.path === '/other')?.sessionOrder).toBeNull()
+    await first.flush()
+
+    const next = registry()
+    await next.load()
+    expect(next.list().find((p) => p.path === '/repo')?.sessionOrder).toEqual(['s2', 's1', 'g1'])
+    expect(next.noProject()).toEqual({ pinnedAt: null, sessionOrder: ['n1'] })
+    // A copy goes out, so a listener cannot change what the host keeps.
+    next
+      .list()
+      .find((p) => p.path === '/repo')!
+      .sessionOrder!.push('x')
+    expect(next.list().find((p) => p.path === '/repo')?.sessionOrder).toHaveLength(3)
+    expect(() => next.orderSessions(next.match('/elsewhere'), ['a'])).toThrow(/No project/)
+
+    // Back to activity, the order leaves the file and the file reads as before it.
+    next.orderSessions(next.match('/repo'), null)
+    next.orderSessions(null, null)
+    await next.flush()
+    expect(await projectsFile(dir, log).load()).toEqual({ version: 1, projects: [project, other] })
+
+    // A stored order keeps only ids, each once, and no more than the most it may hold.
+    const long = Array.from({ length: MAX_ORDERED_ROWS + 5 }, (_, i) => `s${i}`)
+    expect(
+      parseProjectsFile({
+        projects: [
+          {
+            ...project,
+            sessionOrder: ['a', 'a', '', 7, null, 'x'.repeat(ORDER_ID_CHARS + 1), 'b'],
+          },
+          { ...other, sessionOrder: 'a,b' },
+        ],
+        noProjectSessionOrder: long,
+      }),
+    ).toEqual({
+      version: 1,
+      projects: [{ ...project, sessionOrder: ['a', 'b'] }, other],
+      noProjectSessionOrder: long.slice(0, MAX_ORDERED_ROWS),
+    })
+    // An older file without orders reads with every group by activity.
+    expect(parseProjectsFile({ projects: [project], noProjectSessionOrder: {} })).toEqual({
+      version: 1,
+      projects: [project],
     })
   })
 
