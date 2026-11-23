@@ -14,7 +14,7 @@
 //
 // The administrator prompt's own verb is looked up under the file's class, which the user's
 // HKCU\Software\Classes can override; Kite passes HKLM's class itself (Shell.cs) and refuses while
-// such an override exists.
+// the user has verbs of their own for programs (HKCU\Software\Classes\exefile\shell).
 
 using System;
 using System.Collections;
@@ -130,14 +130,12 @@ namespace Kite.ComputerHelper
                         found = RuntimeKnobs(user, path, @"HKCU\" + path);
                         if (found != null) return found;
                     }
-                    foreach (string path in new[] { @"Software\Classes\exefile", @"Software\Classes\.exe" })
+                    // Kite passes HKLM's class, so this is a second line: verbs of the user's own.
+                    using (RegistryKey key = user.OpenSubKey(@"Software\Classes\exefile\shell"))
                     {
-                        using (RegistryKey key = user.OpenSubKey(path))
+                        if (key != null)
                         {
-                            if (key != null)
-                            {
-                                return "HKCU\\" + path + " exists, which could change what Windows' administrator prompt runs. Remove it first.";
-                            }
+                            return @"HKCU\Software\Classes\exefile\shell exists, which could change what Windows' administrator prompt runs. Remove it first.";
                         }
                     }
                 }

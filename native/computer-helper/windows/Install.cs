@@ -6,10 +6,13 @@
 //
 // No program from the app's folder runs as administrator for that: the copy is Windows' own
 // robocopy.exe, from a staging folder this process fills, and the removal Windows' own cmd.exe. The
-// staging folder is the user's, so this process holds it and the staged files open, so they cannot be
-// changed, until robocopy is done, and checks what landed against the hashes of the held files. The
-// install's record (install.json, staged and held the same way) keeps those hashes and the protocol
-// version, and every start checks the installed files against it and the folder's rights.
+// staging folder is the user's, so this process holds it and the staged files open until robocopy
+// is done, which keeps other programs from changing them in passing. The boundary is the record:
+// the elevated command line itself writes install.txt (the protocol, the hashes of the held files
+// and Kite's program), so what an install should hold is fixed in the very command the owner
+// approved, in a folder only administrators write. Every look and every start checks the installed
+// files against it and the folder's rights, so a copy that is not the staged one reads tampered for
+// as long as it is there.
 // A newer Kite keeps using the installed copy while its protocol is the same, so an update asks for
 // no new install.
 
@@ -22,7 +25,6 @@ using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
-using System.Web.Script.Serialization;
 using Microsoft.Win32.SafeHandles;
 
 namespace Kite.ComputerHelper
@@ -32,8 +34,12 @@ namespace Kite.ComputerHelper
         public const string FolderName = "Kite Computer Helper";
         public const string HelperFile = "kite-computer-helper.exe";
         public const string DriverFile = "cua-driver.exe";
-        /// <summary>The install's record: protocol, the files' SHA-256 and the Kite program.</summary>
-        public const string RecordFile = "install.json";
+        /// <summary>
+        /// The install's record, which the elevated command line writes: one line of the protocol, the
+        /// helper's and the driver's SHA-256 and Kite's program as UTF-8 in hex, so cmd.exe's echo
+        /// writes it as it is, with nothing to escape and no code page to mind.
+        /// </summary>
+        public const string RecordFile = "install.txt";
         /// <summary>The driver's own home and temporary folders, which only administrators reach.</summary>
         public const string HomeFolder = "home";
         /// <summary>
@@ -104,20 +110,31 @@ namespace Kite.ComputerHelper
             if (!File.Exists(path)) return null;
             try
             {
-                var o = Json.Create().DeserializeObject(File.ReadAllText(path, Encoding.UTF8)) as Dictionary<string, object>;
-                if (o == null) return null;
-                return new Record
-                {
-                    Protocol = (int)Json.Integer(o, "protocol"),
-                    HelperSha256 = Json.Text(o, "helperSha256"),
-                    DriverSha256 = Json.Text(o, "driverSha256"),
-                    Client = Json.Text(o, "client"),
-                };
+                string[] parts = File.ReadAllText(path, Encoding.ASCII).Trim().Split(' ');
+                int protocol;
+                if (parts.Length != 4 || !int.TryParse(parts[0], out protocol) || !Hash.IsMatch(parts[1]) || !Hash.IsMatch(parts[2]) ||
+                    parts[3].Length % 2 != 0 || !HexText.IsMatch(parts[3]))
+                    return null;
+                var client = new byte[parts[3].Length / 2];
+                for (int i = 0; i < client.Length; i++) client[i] = Convert.ToByte(parts[3].Substring(i * 2, 2), 16);
+                return new Record { Protocol = protocol, HelperSha256 = parts[1], DriverSha256 = parts[2], Client = new UTF8Encoding(false, true).GetString(client) };
             }
             catch (Exception)
             {
                 return null;
             }
+        }
+
+        static readonly System.Text.RegularExpressions.Regex Hash = new System.Text.RegularExpressions.Regex(@"\A[0-9a-f]{64}\z");
+        static readonly System.Text.RegularExpressions.Regex HexText = new System.Text.RegularExpressions.Regex(@"\A[0-9a-f]{2,4000}\z");
+
+        /// <summary>The record's line as the elevated command writes it.</summary>
+        public static string RecordLine(Record record)
+        {
+            var hex = new StringBuilder();
+            foreach (byte b in new UTF8Encoding(false).GetBytes(record.Client)) hex.Append(b.ToString("x2"));
+            if (hex.Length > 4000) throw new ArgumentException("Kite's program has too long a path to record.");
+            return record.Protocol + " " + record.HelperSha256 + " " + record.DriverSha256 + " " + hex;
         }
 
         /// <summary>
@@ -142,8 +159,6 @@ namespace Kite.ComputerHelper
                 state["state"] = "outdated";
                 return state;
             }
-            // What a host keeps to remember an install whose check failed, until it is installed again.
-            state["helperSha256"] = record.HelperSha256;
             state["state"] = Check(dir, record) ?? (client == null || SamePath(record.Client, client) ? "current" : "outdated");
             return state;
         }
@@ -261,10 +276,11 @@ namespace Kite.ComputerHelper
     }
 
     /// <summary>
-    /// The staging folder robocopy copies from: this helper, the driver beside it and the record of
-    /// their hashes. While it lives, the folder is held open with no delete sharing, so no one can
-    /// rename or replace it, and each staged file read-only with read sharing alone, so no one can
-    /// write, rename or delete it; the hashes are of those held handles.
+    /// The staging folder robocopy copies from: this helper and the driver beside it. While it lives,
+    /// the folder is held open with no delete sharing and each staged file read-only with read
+    /// sharing alone, and the hashes are of those held handles. A program of the user's can still
+    /// close this process's handles, so this only keeps the copy from changing in passing; the record
+    /// the elevated command writes is what holds.
     /// </summary>
     sealed class Staged : IDisposable
     {
@@ -312,23 +328,10 @@ namespace Kite.ComputerHelper
                     Copy(helper, Path.Combine(dir, Layout.HelperFile));
                     Copy(driver, Path.Combine(dir, Layout.DriverFile));
                 }
-                byte[] text = new UTF8Encoding(false).GetBytes(new JavaScriptSerializer().Serialize(new Dictionary<string, object>
-                {
-                    { "protocol", record.Protocol }, { "helperSha256", record.HelperSha256 },
-                    { "driverSha256", record.DriverSha256 }, { "client", record.Client },
-                }));
-                using (var target = new FileStream(Path.Combine(dir, Layout.RecordFile), FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                {
-                    target.Write(text, 0, text.Length);
-                    target.Flush(true);
-                }
-                string recordSha;
-                using (var sha = SHA256.Create()) recordSha = Hex(sha.ComputeHash(text));
                 // Held from here until robocopy is done, and checked as held: what was swapped in the
                 // moment between writing and holding is caught here.
                 staged.Keep(Layout.HelperFile, record.HelperSha256);
                 staged.Keep(Layout.DriverFile, record.DriverSha256);
-                staged.Keep(Layout.RecordFile, recordSha);
                 var done = new Staged(dir, record) { folder = staged.folder };
                 done.held.AddRange(staged.held);
                 staged.held.Clear();
@@ -384,7 +387,7 @@ namespace Kite.ComputerHelper
             }
         }
 
-        /// <summary>Whether what robocopy put in place is exactly what was staged, as hashed while held.</summary>
+        /// <summary>Whether the install holds exactly what was staged and recorded, as hashed while held.</summary>
         public bool Landed(string installDir)
         {
             Record found = Layout.ReadRecord(installDir);

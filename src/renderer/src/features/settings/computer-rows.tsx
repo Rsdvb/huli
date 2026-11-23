@@ -38,8 +38,8 @@ import { BlockLine, ItemLine, Thing } from './rows'
  * Turning it on waits on a dialog that says what an agent outside a sandbox could do with it, and
  * nothing changes until the user confirms. The helper's install in Program Files is its own
  * step, only when the user chooses Install while it is on; Remove stays here whatever the setting,
- * since turning it off leaves the helper installed. With the setting off and nothing installed,
- * the host only looks at the installed program's place and starts no helper.
+ * since turning it off leaves the helper installed, so Settings asks the helper how the install
+ * stands whatever the setting.
  */
 export function ElevatedChoice({ text }: { text: ReactNode }) {
   const { t } = useTranslation('settings')

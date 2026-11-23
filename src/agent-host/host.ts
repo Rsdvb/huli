@@ -969,12 +969,6 @@ export class AgentHost {
         ? new ElevatedInstall({
             helper,
             client: process.execPath,
-            markFile: path.join(options.userDataPath, 'computer-helper.json'),
-            installedHelper: path.join(
-              process.env.ProgramW6432 ?? process.env.ProgramFiles ?? 'C:\\Program Files',
-              'Kite Computer Helper',
-              'kite-computer-helper.exe',
-            ),
             mode: () => this.settings.computerUse.elevated,
           })
         : null

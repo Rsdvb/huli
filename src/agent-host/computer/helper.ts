@@ -50,16 +50,14 @@ export interface ProcessInfo {
 }
 
 /**
- * The elevated helper's install folder and how it stands: missing; current (its files the ones its
- * record names, only administrators able to change them, of this helper's protocol and for this
- * Kite program); outdated (another protocol or Kite program); or tampered (other files, or looser
- * rights).
+ * The elevated helper's install folder (the system's Program Files) and how it stands: missing;
+ * current (its files the ones the record its elevated command wrote names, only administrators able
+ * to change them, of this helper's protocol and for this Kite program); outdated (another protocol
+ * or Kite program, or not the install just asked for); or tampered (other files, or looser rights).
  */
 export interface InstallState {
   installDir: string
   state: 'missing' | 'current' | 'outdated' | 'tampered'
-  /** The installed record's helper hash, which a host keeps for an install it found tampered. */
-  helperSha256?: string
   exitCode?: number
 }
 

@@ -139,10 +139,10 @@ namespace Kite.ComputerHelper
 
         /// <summary>
         /// Copies the helper and the driver into the install folder at the owner's request, through
-        /// the administrator prompt for Windows' own robocopy.exe, while the staged files stay held
-        /// so nothing can change them, and checks what landed against their hashes: its state after
-        /// (tampered when something else landed), the copy's exit code, or cancelled when the owner
-        /// said no.
+        /// the administrator prompt for Windows' own cmd.exe, which writes the record of their hashes
+        /// and runs robocopy, while the staged files stay held: its state after (tampered when the
+        /// installed files are not the recorded ones), the copy's exit code, or cancelled when the
+        /// owner said no.
         /// </summary>
         static object Install(Dictionary<string, object> request)
         {
@@ -155,16 +155,22 @@ namespace Kite.ComputerHelper
             if (Directory.Exists(dir) && !Layout.PlainDirectory(dir)) throw new InvalidOperationException("The install folder is a link.");
             using (Staged staged = Staged.Fill(client))
             {
-                var args = new StringBuilder();
-                args.Append(Quote(staged.Dir)).Append(' ').Append(Quote(dir));
-                args.Append(' ').Append(Layout.HelperFile).Append(' ').Append(Layout.DriverFile).Append(' ').Append(Layout.RecordFile);
+                // One elevated command: make the folder, write the record of what should land, then
+                // copy. The record's hashes are fixed in this line, which is what the owner approves.
+                string robocopy = Path.Combine(Guard.SystemDir(), "robocopy.exe");
+                string record = Path.Combine(dir, Layout.RecordFile);
+                var line = new StringBuilder();
+                line.Append("mkdir ").Append(CmdQuote(dir)).Append(" 2>nul & ");
+                line.Append('>').Append(CmdQuote(record)).Append(" echo ").Append(Layout.RecordLine(staged.Record)).Append("& ");
+                line.Append(CmdQuote(robocopy)).Append(' ').Append(CmdQuote(staged.Dir)).Append(' ').Append(CmdQuote(dir));
+                line.Append(' ').Append(Layout.HelperFile).Append(' ').Append(Layout.DriverFile);
                 // Contents and times only, so the copies take the install folder's rights; no links
                 // followed into folders, no retries, nothing printed.
-                args.Append(" /COPY:DT /DCOPY:T /XJ /IS /IT /R:0 /W:0 /NP /NJH /NJS /NFL /NDL");
+                line.Append(" /COPY:DT /DCOPY:T /XJ /IS /IT /R:0 /W:0 /NP /NJH /NJS /NFL /NDL");
                 Launched process;
                 try
                 {
-                    process = Shell.Start(Path.Combine(Guard.SystemDir(), "robocopy.exe"), args.ToString());
+                    process = Shell.Start(CmdPath(), "/d /e:on /v:off /s /c \"" + line + "\"");
                 }
                 catch (Win32Exception error)
                 {
@@ -174,10 +180,12 @@ namespace Kite.ComputerHelper
                 using (process)
                 {
                     if (!process.WaitForExit(10 * 60 * 1000)) throw new TimeoutException("The administrator helper's install took too long.");
+                    // The exit code is robocopy's, the last command's; codes below 8 are successes.
+                    int code = process.ExitCode;
                     var state = Layout.State(dir, client);
-                    // Robocopy's codes below 8 are successes.
-                    state["exitCode"] = process.ExitCode < 8 ? 0 : process.ExitCode;
-                    if (process.ExitCode < 8 && !staged.Landed(dir)) state["state"] = "tampered";
+                    state["exitCode"] = code < 8 ? 0 : code;
+                    // Checked whatever robocopy said: a copy that failed on one file is not this install.
+                    if (!staged.Landed(dir) && (string)state["state"] == "current") state["state"] = "outdated";
                     return state;
                 }
             }

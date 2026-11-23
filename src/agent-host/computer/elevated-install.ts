@@ -2,45 +2,53 @@
 // the install (only while the user allows administrator use) and the removal (always), and whether
 // administrator use may run at all, which needs an install that is current.
 //
-// An install whose copies did not land as staged is remembered as tampered in a file of the host's
-// own (the installed record's helper hash), so it stays refused until it is removed or installed
-// again, rather than reading current at the next look.
+// How it stands comes from the helper alone, which reads the system's own Program Files folder and
+// checks the installed files against the record the elevated command wrote, both in a folder only
+// administrators write: a copy that did not land as staged reads tampered there for as long as it
+// is there. Hashing the 33 MB driver on every call would be slow, so readiness is kept while the
+// installed files' sizes and times stay the same.
 
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import type { ElevatedHelperChange, ElevatedHelperState, ElevatedMode } from '@shared/computer-use'
 import type { ComputerHelperLike, InstallState } from './helper'
+
+/** The installed files whose sizes and times a kept state stands on. */
+const WATCHED = ['kite-computer-helper.exe', 'cua-driver.exe', 'install.txt']
 
 export interface ElevatedInstallDeps {
   helper: Pick<ComputerHelperLike, 'layout' | 'install' | 'uninstall'> | null
   /** Kite's program, which the install records. */
   client: string
-  /** The host's file that remembers a tampered install. */
-  markFile: string
-  /** The installed helper's path, looked at before the helper is asked while the setting is off. */
-  installedHelper: string
   mode(): ElevatedMode
 }
 
+interface Kept {
+  installDir: string
+  state: InstallState['state']
+  stamp: string
+}
+
 export class ElevatedInstall {
+  private kept: Kept | null = null
+
   constructor(private readonly deps: ElevatedInstallDeps) {}
 
-  /**
-   * How the install stands. With the setting off and nothing installed, the helper is not started
-   * at all: only the installed program's place is looked at.
-   */
+  /** How the install stands, asked of the helper afresh. */
   async status(): Promise<ElevatedHelperState> {
     const helper = this.deps.helper
     if (!helper) return 'unsupported'
-    if (this.deps.mode() === 'off' && !(await exists(this.deps.installedHelper))) return 'missing'
-    return this.marked(await helper.layout(this.deps.client))
+    return this.look(helper)
   }
 
-  /** Whether administrator use may run now: on, and installed, current and not remembered as tampered. */
+  /** Whether administrator use may run now: on, and the install current. */
   async ready(): Promise<boolean> {
-    if (this.deps.mode() === 'off' || !this.deps.helper) return false
+    const helper = this.deps.helper
+    if (this.deps.mode() === 'off' || !helper) return false
     try {
-      return (await this.status()) === 'current'
+      const kept = this.kept
+      if (kept && (await stamp(kept.installDir)) === kept.stamp) return kept.state === 'current'
+      return (await this.look(helper)) === 'current'
     } catch {
       return false
     }
@@ -52,54 +60,44 @@ export class ElevatedInstall {
     if (this.deps.mode() === 'off') {
       throw new Error('Turn on administrator use in Settings before installing its helper.')
     }
+    this.kept = null
     const result = await helper.install(this.deps.client)
     if (!result) return { state: await this.status(), cancelled: true }
-    if (result.state === 'tampered' && result.helperSha256) await this.mark(result.helperSha256)
-    else if (result.state === 'current') await this.unmark()
-    return { state: await this.marked(result), cancelled: false, exitCode: result.exitCode ?? null }
+    return { state: result.state, cancelled: false, exitCode: result.exitCode ?? null }
   }
 
   /** Removal stays possible whatever the setting says. */
   async uninstall(): Promise<ElevatedHelperChange> {
     const helper = this.deps.helper
     if (!helper) return { state: 'unsupported', cancelled: false }
+    this.kept = null
     const result = await helper.uninstall()
     if (!result) return { state: await this.status(), cancelled: true }
-    if (result.state === 'missing') await this.unmark()
     return { state: result.state, cancelled: false, exitCode: result.exitCode ?? null }
   }
 
-  /** A current install the host remembers as tampered stays tampered. */
-  private async marked(state: InstallState): Promise<ElevatedHelperState> {
-    if (state.state !== 'current') return state.state
-    const held = await this.read()
-    return held !== null && held === state.helperSha256 ? 'tampered' : 'current'
-  }
-
-  private async read(): Promise<string | null> {
-    try {
-      const data = JSON.parse(await readFile(this.deps.markFile, 'utf8')) as { tampered?: unknown }
-      return typeof data.tampered === 'string' ? data.tampered : null
-    } catch {
-      return null
+  private async look(helper: Pick<ComputerHelperLike, 'layout'>): Promise<InstallState['state']> {
+    const answer = await helper.layout(this.deps.client)
+    this.kept = {
+      installDir: answer.installDir,
+      state: answer.state,
+      stamp: await stamp(answer.installDir),
     }
-  }
-
-  private async mark(helperSha256: string): Promise<void> {
-    await mkdir(path.dirname(this.deps.markFile), { recursive: true })
-    await writeFile(this.deps.markFile, JSON.stringify({ tampered: helperSha256 }))
-  }
-
-  private async unmark(): Promise<void> {
-    await rm(this.deps.markFile, { force: true })
+    return answer.state
   }
 }
 
-async function exists(file: string): Promise<boolean> {
-  try {
-    await stat(file)
-    return true
-  } catch {
-    return false
-  }
+/** The installed files' sizes and times, as one text; missing files count as such. */
+async function stamp(installDir: string): Promise<string> {
+  const parts = await Promise.all(
+    WATCHED.map(async (name) => {
+      try {
+        const info = await stat(path.join(installDir, name))
+        return `${info.size}:${info.mtimeMs}`
+      } catch {
+        return '-'
+      }
+    }),
+  )
+  return parts.join('|')
 }
