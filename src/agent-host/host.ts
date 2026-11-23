@@ -974,9 +974,9 @@ export class AgentHost {
       changed: () => {
         this.hub.broadcast({ type: 'artifacts.changed' })
         this.options.send({ type: 'host:artifacts-changed' })
-        this.recycleBin?.added()
       },
       keepDeletedMs: () => this.binKeepMs(),
+      binChanged: () => this.recycleBin?.added(),
       version: (portIds, id, version) =>
         this.hub.send(portIds, { type: 'artifacts.version', id, version }),
       // Each port hears of the other clients showing the artifact, named as it knows them.
@@ -4537,13 +4537,7 @@ export class AgentHost {
       'sessions.removeEmpty': ({ keep }) => sessions.removeEmptyOnce(keep),
       // Huli: the recycle bin (回收站).
       'bin.list': () => this.recycleBin.list(),
-      'bin.restore': async ({ keys, project }) => {
-        const result = await this.recycleBin.restore(keys, project)
-        if (result.restored.length > 0) {
-          this.options.send({ type: 'host:media-revoke', sessionId: null })
-        }
-        return result
-      },
+      'bin.restore': ({ keys, project }) => this.recycleBin.restore(keys, project),
       'bin.purge': ({ keys }) => this.recycleBin.purge(keys),
       'bin.empty': () => this.recycleBin.empty(),
       'sessions.takeReturned': ({ sessionId }, { portId }) =>

@@ -102,6 +102,8 @@ export interface ArtifactStoreDeps {
    * keeps it until the user deletes it. 30 days without it.
    */
   keepDeletedMs?(): number | null
+  /** Huli: Recently deleted gained or lost an artifact, for the recycle bin that lists it. */
+  binChanged?(): void
 }
 
 /**
@@ -258,7 +260,10 @@ export class ArtifactStore {
       if (artifacts > 0 || files > 0) {
         this.deps.log('info', `Purged ${artifacts} artifacts and ${files} content files`)
       }
-      if (artifacts > 0) this.deps.changed()
+      if (artifacts > 0) {
+        this.deps.changed()
+        this.deps.binChanged?.()
+      }
     } catch (error) {
       this.deps.log('warn', `The artifact purge failed: ${(error as Error).message}`)
     }
@@ -525,7 +530,10 @@ export class ArtifactStore {
       project: project ?? null,
       at: this.now(),
     })
-    if (changed) this.deps.changed()
+    if (changed) {
+      this.deps.changed()
+      this.deps.binChanged?.()
+    }
     const keep = this.keepDeleted()
     return { deletedAt, purgeAt: keep === null ? null : deletedAt + keep }
   }
@@ -533,13 +541,16 @@ export class ArtifactStore {
   /** Brings the artifact back from Recently deleted; the user's alone. */
   async undelete(id: string): Promise<void> {
     const { changed } = await this.call('undelete', { id })
-    if (changed) this.deps.changed()
+    if (!changed) return
+    this.deps.changed()
+    this.deps.binChanged?.()
   }
 
   /** Removes an artifact in Recently deleted for good; the user's alone. */
   async erase(id: string): Promise<void> {
     await this.call('erase', { id })
     this.deps.changed()
+    this.deps.binChanged?.()
   }
 
   // Comments.
