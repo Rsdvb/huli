@@ -376,7 +376,7 @@ export function SessionMenuItems({
             />
             <span className="flex min-w-0 flex-col">
               <span>{summary.muted ? t('row.unmute') : t('row.mute')}</span>
-              <span className="text-small text-pretty text-tertiary">
+              <span className="max-w-60 text-small text-pretty whitespace-normal text-tertiary">
                 {summary.muted ? t('row.unmuteHint') : t('row.muteHint')}
               </span>
             </span>
