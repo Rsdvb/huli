@@ -1167,6 +1167,37 @@ kind of agent.
   rewriting, validation, Claude Code and Codex placement, crash undo) and
   `src/main/session-move.test.ts` (two whole agent hosts on temp folders, with rollbacks).
 
+### Clone or create a project (从 Git 克隆、新建空项目)
+
+The sidebar's Add project button is a menu: 打开文件夹… (as before), 从 Git 克隆… and 新建空项目…;
+New session's project menu offers the same two for this computer, and the phone's Settings › 项目
+› 添加项目 all three. The agent host does the work (`src/agent-host/project-create.ts`, shared
+checks in `src/shared/project-create.ts`):
+
+- `projects.places`: the folders a new project may go in: the one last chosen
+  (`newProjectParent` in `state/projects.json`), the home folder and the folders the latest 40
+  projects are in, each resolved and there now, at most 12. A paired device (the phone, a browser,
+  another desktop) may name only one of these; this computer's window names any folder its system
+  dialog picks (`dialog:choose-new-project-parent`).
+- The target is `<parent>/<name>`: the parent resolved with `realpath`, the name one folder that
+  no platform refuses (no separator, `..`, reserved device name or trailing dot), and an existing
+  target refused unless it is an empty folder that is no link or junction. A failed or cancelled
+  run removes what it made, or empties the folder it found empty.
+- `projects.clone` accepts only `https://`, `ssh://` and `user@host:path` (no `file://`, `::`
+  helpers such as `ext::` and `fd::`, local paths, leading `-`, passwords in the address), checked
+  in the request's validator and again in the service. git clones with `--progress`,
+  `--no-recurse-submodules`, `--` before the address, `protocol.ext.allow=never`,
+  `core.hooksPath` set to a folder that is never made (no hook runs during the clone) and
+  `GIT_ALLOW_PROTOCOL=https:ssh`, in the agents' environment, so Advanced › Proxy applies as to
+  the rest of Kite's git. Sign-in is the computer's own credential helper; Git Credential Manager
+  may show its window only for a request from this computer's window, never a device's. git's message reaches the user without
+  any URL sign-in (`withoutUrlCredentials`); the log notes only the exit code. Progress goes to
+  the asking port as `projects.cloneProgress` (at most four a second, read from git's
+  `--progress` lines as they come), `projects.cancelClone` ends git's process tree, a clone ends
+  after 30 minutes, and four may run at once.
+- `projects.create` makes the folder, runs `git init` and writes a `README.md` and a
+  `.gitignore` from one of five presets if asked.
+
 ### Recap, one-tap compact and image markup (离开期间摘要、一键压缩、图片标注)
 
 Three small things Claude Code, Cursor and Moshi have, on the desktop and the phone alike.
