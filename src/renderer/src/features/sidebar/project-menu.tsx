@@ -34,6 +34,7 @@ import { Glyph, MenuGlyph } from '@renderer/features/shell/glyph'
 import { openWorktreeSettings } from '@renderer/features/worktrees/worktree-settings-model'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { fileManagerName, formatShortcut, isWeb } from '@renderer/lib/platform'
+import { shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 import { agentsOn, isInstalled, usableAgents, useAgentsStore } from '@renderer/stores/agents'
 import { useGitStore } from '@renderer/stores/git'
 import { useTerminalAllowed } from '@renderer/stores/hosts'
@@ -100,7 +101,9 @@ export function ProjectMenuItems({
         <DropdownMenuItem disabled={gone} onClick={() => newSession(project.path)}>
           <MenuGlyph icon={PencilEdit02Icon} />
           {t('project.menu.newSession')}
-          <DropdownMenuShortcut>{formatShortcut('Mod+N')}</DropdownMenuShortcut>
+          <DropdownMenuShortcut>
+            {formatShortcut(shortcutKeysOf('newSession'))}
+          </DropdownMenuShortcut>
         </DropdownMenuItem>
         {pinItem}
       </DropdownMenuGroup>
@@ -253,7 +256,9 @@ export function NoProjectMenuItems({
         <DropdownMenuItem onClick={() => newSession(null, true)}>
           <MenuGlyph icon={PencilEdit02Icon} />
           {t('project.menu.newSession')}
-          <DropdownMenuShortcut>{formatShortcut('Mod+N')}</DropdownMenuShortcut>
+          <DropdownMenuShortcut>
+            {formatShortcut(shortcutKeysOf('newSession'))}
+          </DropdownMenuShortcut>
         </DropdownMenuItem>
         {pinItem}
       </DropdownMenuGroup>

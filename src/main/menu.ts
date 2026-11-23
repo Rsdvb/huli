@@ -1,4 +1,10 @@
 import { app, Menu, type MenuItemConstructorOptions } from 'electron'
+import {
+  acceleratorOf,
+  shortcutBindings,
+  type ShortcutBindings,
+  type ShortcutId,
+} from '@shared/shortcuts'
 import type { AppCommand } from '@shared/ipc'
 import type { ZoomStep } from '@shared/settings'
 import { isDebugRun } from './debug-mode'
@@ -12,6 +18,13 @@ export interface MenuDeps {
   browserFocused(): boolean
   zoom(step: ZoomStep): void
   reportProblem(): void
+  /** Huli: the shortcuts as the user bound them, which the menu bar's items carry. */
+  shortcuts(): ShortcutBindings
+}
+
+/** Huli: a menu item's accelerator, the user's binding or the default. */
+function keysOf(deps: MenuDeps, id: ShortcutId): string {
+  return acceleratorOf(shortcutBindings(deps.shortcuts())[id], true) ?? ''
 }
 
 // A second Cmd+Q within this long quits; the first only shows a hint.
@@ -84,7 +97,7 @@ export function installMenu(deps: MenuDeps): void {
         { type: 'separator' },
         {
           label: t('menu.settings'),
-          accelerator: 'Cmd+,',
+          accelerator: keysOf(deps, 'settings'),
           click: () => sendCommand({ kind: 'open-settings' }),
         },
         { type: 'separator' },
@@ -106,12 +119,12 @@ export function installMenu(deps: MenuDeps): void {
       submenu: [
         {
           label: t('menu.openProject'),
-          accelerator: 'Cmd+O',
+          accelerator: keysOf(deps, 'openProject'),
           click: () => sendCommand({ kind: 'open-project' }),
         },
         {
           label: t('menu.newSession'),
-          accelerator: 'Cmd+N',
+          accelerator: keysOf(deps, 'newSession'),
           click: () => sendCommand({ kind: 'new-session' }),
         },
         { type: 'separator' },
@@ -153,7 +166,7 @@ export function installMenu(deps: MenuDeps): void {
       submenu: [
         {
           label: t('menu.toggleSidebar'),
-          accelerator: 'Cmd+B',
+          accelerator: keysOf(deps, 'toggleSidebar'),
           click: () => toCurrentWindow({ kind: 'toggle-sidebar' }),
         },
         { type: 'separator' },

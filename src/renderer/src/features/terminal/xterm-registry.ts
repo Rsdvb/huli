@@ -1,4 +1,5 @@
 import type { ITheme, Terminal } from '@xterm/xterm'
+import { pressesShortcut } from '@renderer/lib/shortcut-keys'
 import type { FitAddon } from '@xterm/addon-fit'
 import { TERMINAL_FLOW } from '@shared/terminal-host'
 import { emitAppEvent } from '@renderer/app/events'
@@ -419,13 +420,10 @@ function keyHandler(instance: Instance, event: KeyboardEvent): boolean {
     return false
   }
   if (event.type !== 'keydown') return true
-  if (event.ctrlKey && !event.metaKey && event.code === 'Backquote') return false
-  if (
-    event.key.toLowerCase() === 'l' &&
-    isMod(event) &&
-    !event.shiftKey &&
-    instance.term.hasSelection()
-  ) {
+  // Huli: the terminal's keys as the user bound them.
+  if (pressesShortcut(event, 'toggleTerminal') || pressesShortcut(event, 'newTerminal'))
+    return false
+  if (pressesShortcut(event, 'focusComposer') && instance.term.hasSelection()) {
     event.preventDefault()
     askAboutSelection(instance)
     return false

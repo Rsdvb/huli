@@ -29,6 +29,7 @@ import { TurnDots } from '@renderer/features/session/turn-dots'
 import { PaneIcon } from '@renderer/features/shell/panel-button'
 import { errorMessage, host } from '@renderer/lib/host'
 import { formatShortcut, isMod } from '@renderer/lib/platform'
+import { shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 import { cn } from '@renderer/lib/utils'
 import { agentName } from '@renderer/stores/agents'
 import { useSettingsStore } from '@renderer/stores/settings'
@@ -266,7 +267,9 @@ export default function SideChatRail({ sessionId, agentId, hostId, overlay }: Pr
               send: sendKey === 'enter' ? 'Enter' : formatShortcut('Mod+Enter'),
             })}
           </span>
-          <span>{t('sideChat.hint.close', { keys: formatShortcut('Mod+J') })}</span>
+          <span>
+            {t('sideChat.hint.close', { keys: formatShortcut(shortcutKeysOf('sideChat')) })}
+          </span>
         </div>
       </div>
     </aside>

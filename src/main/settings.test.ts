@@ -1176,3 +1176,29 @@ describe('the pages the sidebar lists', () => {
     expect(shown.appearance.sidebarOrder).toEqual(ALL)
   })
 })
+
+describe("Huli: the keyboard's settings from the renderer", () => {
+  it('takes rebound shortcuts and a global screenshot hotkey', () => {
+    const patch = {
+      keyboard: { shortcuts: { searchSessions: 'Mod+Shift+K' }, screenshot: 'Mod+Shift+S' },
+    }
+    expect(validateSettingsPatch(patch)).toEqual(patch)
+    expect(validateSettingsPatch({ keyboard: { screenshot: null } })).toEqual({
+      keyboard: { screenshot: null },
+    })
+  })
+
+  it.each([
+    ['an unknown shortcut', { shortcuts: { deleteEverything: 'Mod+Shift+D' } }],
+    ['keys another shortcut has', { shortcuts: { searchSessions: 'Mod+N' } }],
+    ['two rebound to the same keys', { shortcuts: { addFiles: 'Mod+I', addMenu: 'Mod+I' } }],
+    ['keys the app keeps', { shortcuts: { searchSessions: 'Mod+C' } }],
+    ['a key without a modifier', { shortcuts: { searchSessions: 'K' } }],
+    ['keys that are no keys', { shortcuts: { searchSessions: 'Mod+Banana' } }],
+    ['keys that are no text', { shortcuts: { searchSessions: 7 } }],
+    ['a screenshot hotkey with one modifier', { screenshot: 'Mod+S' }],
+    ['a screenshot hotkey that is no text', { screenshot: true }],
+  ])('refuses %s', (_, keyboard) => {
+    expect(() => validateSettingsPatch({ keyboard })).toThrow()
+  })
+})

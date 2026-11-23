@@ -23,7 +23,8 @@
     "backup": "Backup",
     "chat-bridge": "Chat apps",
     "manager": "Manager mode",
-    "features": "Features"
+    "features": "Features",
+    "shortcuts": "Keyboard shortcuts"
   },
   "page": {
     "title": "Settings",
@@ -1819,7 +1820,8 @@
     "backup": "A copy of Kettu’s own data each day, kept on this computer, to restore after a loss.",
     "chat-bridge": "See sessions, answer requests and write to the agents from Feishu, DingTalk, WeCom, QQ or Telegram.",
     "manager": "One agent splits your task and dispatches it to workers on other agents, which change the files, while you talk only to it.",
-    "features": "Turn off what you don't use: its entry points hide, and its code no longer loads or runs."
+    "features": "Turn off what you don't use: its entry points hide, and its code no longer loads or runs.",
+    "shortcuts": "Change the keys of Kite's shortcuts on this computer. Keys follow the keyboard's physical keys, whatever the input method."
   },
   "archived": {
     "description": "{{project}} · archived {{when}}",
@@ -3422,5 +3424,36 @@
     "noMonospaceMatch": "No monospace font matches.",
     "loading": "Reading the installed fonts…",
     "unavailable": "This browser cannot list fonts. Type a name to use it."
+  },
+  "shortcuts": {
+    "keywords": "keyboard shortcuts keys hotkey bind rebind accelerator",
+    "groups": {
+      "global": "Anywhere on the computer",
+      "fixed": "Fixed keys"
+    },
+    "change": "Change",
+    "changeLabel": "Change the keys of {{name}}",
+    "reset": "Reset",
+    "recording": "Press the new keys… (Esc cancels)",
+    "recordLabel": "Press the new keys for {{name}}",
+    "problem": {
+      "invalid": "These keys cannot be a shortcut.",
+      "modifier": "Hold {{keys}} with the key.",
+      "twoModifiers": "Hold two of Ctrl, Alt, Shift or ⌘ with the key, or use a function key.",
+      "reserved": "Kite or the system keeps these keys.",
+      "taken": "Already used by “{{name}}”."
+    },
+    "screenshot": {
+      "name": "Screenshot to session",
+      "description": "Takes a region of the screen and attaches it to the focused session's message box, or a new session's. Works while Kite is in the background.",
+      "keywords": "screenshot capture screen region global hotkey",
+      "off": "Off",
+      "set": "Set keys",
+      "turnOff": "Turn off"
+    },
+    "fixed": {
+      "name": "Keys that stay as they are",
+      "description": "Back and forward, the panes, closing and zoom keep their keys."
+    }
   }
 }

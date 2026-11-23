@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { ConversationHit, SessionSummary } from '@shared/agent-host'
@@ -320,7 +321,9 @@ function useActionEntries(): SearchEntry[] {
   const routinesOn = useEntry('search.routines')
   return useMemo(() => {
     const english = i18n.getFixedT('en', 'sidebar')
-    const keys = new Map(shortcutList('enter').map((shortcut) => [shortcut.action, shortcut.keys]))
+    const keys = new Map(
+      shortcutList('enter', shortcutKeysOf).map((shortcut) => [shortcut.action, shortcut.keys]),
+    )
     // Huli: no palette action asks to star upstream's repository.
     const listed = (action: SearchAction): boolean =>
       action !== 'starKettu' &&

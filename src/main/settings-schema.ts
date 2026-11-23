@@ -71,6 +71,7 @@ import { SANDBOX_NETWORKS, SANDBOX_TIERS } from '@shared/sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
 import { SETTLE_DAYS } from '@shared/session-tidy'
 import { isWebhookPort, WEBHOOK_PORT_MAX, WEBHOOK_PORT_MIN } from '@shared/routines'
+import { bindingsProblem, screenshotKeysProblem } from '@shared/shortcuts'
 import { TOOL_CALL_VIEWS } from '@shared/zen-view'
 import { THEME_ID } from '@shared/themes'
 import { WORKING_STEP_LIMITS } from '@shared/workflow'
@@ -254,6 +255,15 @@ const isWebhookPortValue: Check = (value, path) =>
   isWebhookPort(value)
     ? null
     : `"${path}" must be a whole number from ${WEBHOOK_PORT_MIN} to ${WEBHOOK_PORT_MAX}`
+const IS_MAC = process.platform === 'darwin'
+const isShortcutBindingsValue: Check = (value, path) => {
+  const problem = bindingsProblem(value, IS_MAC)
+  return problem ? `"${path}" ${problem}` : null
+}
+const isScreenshotKeysValue: Check = (value, path) =>
+  value === null || (typeof value === 'string' && screenshotKeysProblem(value, IS_MAC) === null)
+    ? null
+    : `"${path}" must be null or keys with two modifiers`
 const isUserFonts: Check = (value, path) => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return `"${path}" must be an object`
@@ -378,6 +388,7 @@ const SECTION_FIELDS = {
     merged: isBoolean,
   },
   webhooks: { port: isWebhookPortValue },
+  keyboard: { shortcuts: isShortcutBindingsValue, screenshot: isScreenshotKeysValue },
   workflow: { maxWorkingSteps: oneOf(...WORKING_STEP_LIMITS) },
   computerUse: {
     enabled: isBoolean,

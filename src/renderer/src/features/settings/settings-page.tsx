@@ -80,6 +80,7 @@ import {
 import { useComputerUseSection } from './computer-section'
 import { useAgentNetworkSection } from './agent-network-section'
 import { useBackupSection } from './backup-section'
+import { useShortcutsSection } from './shortcuts-section'
 import { useChatBridgeSection } from './chat-bridge-section'
 import { useFeaturesSection } from './features-section'
 import { useManagerSection } from './manager-section'
@@ -183,6 +184,7 @@ export function SettingsContent({ titleId }: { titleId?: string }) {
   const client = [
     useGeneralSection(),
     useAppearanceSection(),
+    useShortcutsSection(),
     useNotificationsSection(),
     ...(cloudOff ? [] : [account]),
     useHostsSection(),

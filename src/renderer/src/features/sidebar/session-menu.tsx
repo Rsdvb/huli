@@ -76,6 +76,7 @@ import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath, hostPath } from '@renderer/lib/host-paths'
 import { currentLocale, i18n } from '@renderer/lib/i18n'
 import { fileManagerName, formatShortcut, isMac, isWeb } from '@renderer/lib/platform'
+import { shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 import { cn } from '@renderer/lib/utils'
 import { agentsOn, isInstalled, usableAgents, useAgentsStore } from '@renderer/stores/agents'
 import { useGitStore } from '@renderer/stores/git'
@@ -275,7 +276,9 @@ export function SessionMenuItems({
   const listed = subagents ? listedSubagents(subagents, showFinished) : []
 
   const item = (name: SessionMenuItem) => {
-    const accelerator = ACCELERATORS[name]
+    // Huli: the terminal's item carries the terminal's keys as the user bound them.
+    const accelerator =
+      name === 'openTerminal' ? shortcutKeysOf('toggleTerminal') : ACCELERATORS[name]
     const shortcut = accelerator && (
       <DropdownMenuShortcut>{shortcutLabel(accelerator)}</DropdownMenuShortcut>
     )

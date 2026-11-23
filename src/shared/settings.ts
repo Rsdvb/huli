@@ -16,6 +16,7 @@ import type { AgentId, HarnessId } from './thread'
 import { DEFAULT_PORT_BASE } from './worktree-ports'
 import { DEFAULT_WORKING_STEPS, type WorkingStepLimit } from './workflow'
 import { DEFAULT_WEBHOOK_PORT } from './routines'
+import type { ShortcutBindings } from './shortcuts'
 
 /** Whether a host's first start has run, so it runs once. */
 export interface InitialSetup {
@@ -181,6 +182,9 @@ export interface SettingsFile {
   onboarding: OnboardingState
   // Huli: the daily backup of this computer's data folder; see tools/huli/README.md.
   backup: BackupSettings
+  // Huli: this computer's keys: the shortcuts the user rebound, each one left out at its default,
+  // and the global screenshot hotkey (off while null); see shared/shortcuts.ts.
+  keyboard: { shortcuts: ShortcutBindings; screenshot: string | null }
   // Huli: which permission requests the host allows once by itself, for a project that keeps the
   // default; a project may choose its own. Agents never change it.
   permissions: { autoApprove: AutoApprove }
@@ -477,6 +481,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   cloud: { enabled: false },
   onboarding: { done: false, step: 'welcome' },
   backup: { enabled: true, time: '03:00', keep: 7, folder: null },
+  keyboard: { shortcuts: {}, screenshot: null },
   permissions: { autoApprove: 'off' },
   manager: DEFAULT_MANAGER_SETTINGS,
   sandbox: { ...DEFAULT_SANDBOX_SETTINGS },
@@ -581,6 +586,8 @@ export interface SettingsPatch {
   manager?: ManagerSettings // replaced whole
   sandbox?: Partial<SandboxSettings>
   features?: Partial<FeatureSettings>
+  // Huli: the shortcuts replaced whole.
+  keyboard?: Partial<SettingsFile['keyboard']>
   // Huli: the folder can only be cleared here, back to the default; one is picked in main's dialog.
   backup?: {
     enabled?: boolean

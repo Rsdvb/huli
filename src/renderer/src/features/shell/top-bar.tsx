@@ -8,7 +8,8 @@ import { DebugMarker } from '@renderer/features/shell/debug-mode'
 import { HistoryDialog } from '@renderer/features/shell/history-dialog'
 import { TITLE_BUTTON } from '@renderer/features/shell/title-button'
 import { useNotices } from '@renderer/features/sidebar/notices'
-import { formatShortcut, hasBand } from '@renderer/lib/platform'
+import { hasBand } from '@renderer/lib/platform'
+import { useShortcutLabel } from '@renderer/lib/shortcut-keys'
 import { cn } from '@renderer/lib/utils'
 import { toggleSidebar, useViewStore } from '@renderer/stores/view'
 import { useCornered } from './corner'
@@ -145,6 +146,7 @@ export function NoDrag({
 
 export function SidebarToggle({ className }: { className?: string }) {
   const { t } = useTranslation('shell')
+  const keys = useShortcutLabel('toggleSidebar')
   const collapsed = useViewStore((s) => s.sidebarCollapsed)
   const drawer = useViewStore((s) => s.sidebarDrawer)
   // A narrow window's sidebar is a drawer, shown only while it is open.
@@ -199,7 +201,7 @@ export function SidebarToggle({ className }: { className?: string }) {
       {/* As Back's and Forward's beside it: the keys as plain text after the label. */}
       <TooltipContent className={cn('px-2.25 py-1.5', notices && 'flex-col items-start gap-0.5')}>
         <span>
-          {label} <span className="opacity-60">{formatShortcut('Mod+B')}</span>
+          {label} <span className="opacity-60">{keys}</span>
         </span>
         {notices?.labels.map((notice) => (
           <span key={notice} className="opacity-60">

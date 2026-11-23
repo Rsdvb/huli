@@ -8617,3 +8617,34 @@ body:has(.ui-mdpc[data-open], .ui-ccc__menu[data-open='true']) .kettu-toasts {
   border-radius: var(--radius-code);
   background: color-mix(in srgb, var(--focus) 6%, transparent);
 }
+
+/* Huli: Settings › Keyboard shortcuts: a shortcut's key caps, the recorder that takes new keys,
+   and the list of the keys that stay as they are. */
+:is(.kettu-settings, .kettu-sd) .k-keys {
+  display: inline-flex;
+  gap: 3px;
+}
+:is(.kettu-settings, .kettu-sd) .k-key-recorder {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--hover);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  font-size: 12.5px;
+  color: var(--ink);
+  outline: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-fixed-keys {
+  display: grid;
+  width: 100%;
+  margin-top: 6px;
+}
+:is(.kettu-settings, .kettu-sd) .k-fixed-keys__row {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--muted);
+}

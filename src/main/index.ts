@@ -82,6 +82,7 @@ import { MediaGrants, mediaScheme, serveMedia } from './media'
 import { createLogger } from './log'
 import { SessionMover } from './session-move'
 import { installMenu } from './menu'
+import { setReboundShortcuts } from './artifacts/guards'
 import { isOpenedAtLogin, startMode, syncLoginItem } from './login-item'
 import { notifyAttention, notifyDiscovery, notifyNotice, RepeatedNotices } from './notifications'
 import { KeepAwake } from './power-save'
@@ -1161,6 +1162,7 @@ async function start(): Promise<void> {
       settings.update({ appearance: { zoom: stepZoom(settings.get().appearance.zoom, step) } })
     },
     reportProblem: () => sendCommand({ kind: 'report-problem' }),
+    shortcuts: () => settings.get().keyboard.shortcuts,
   }
   const applyDiagnostics = (until: number | null): void =>
     applyVerbose(
@@ -1175,6 +1177,11 @@ async function start(): Promise<void> {
     if (changed.has('diagnostics')) applyDiagnostics(next.diagnostics.verboseUntil)
     hostAdmin?.settingsChanged(next)
     const localeChanged = localeOf(next) !== currentLocale()
+    // Huli: the menu bar carries the shortcuts as the user bound them, and pages pass them on.
+    if (changed.has('keyboard')) {
+      setReboundShortcuts(next.keyboard.shortcuts, process.platform)
+      if (!localeChanged) installMenu(menuDeps)
+    }
     if (localeChanged) {
       setLocale(localeOf(next))
       installMenu(menuDeps)
@@ -1298,6 +1305,7 @@ async function start(): Promise<void> {
     }),
   )
   ipcReady = true
+  setReboundShortcuts(settings.get().keyboard.shortcuts, process.platform)
   installMenu(menuDeps)
 
   app.on('browser-window-created', (_, window) => {
