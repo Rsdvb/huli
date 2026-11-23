@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from 'react'
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { BrowserIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import {
@@ -8,90 +8,196 @@ import {
   type ComputerApp,
   type ComputerPermission,
   type ComputerPermissionKind,
+  ELEVATED_MODES,
   type ElevatedHelperChange,
   type ElevatedHelperState,
+  type ElevatedMode,
 } from '@shared/computer-use'
 import { Icon } from '@renderer/components/affect/app-shell'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@renderer/components/ui/alert-dialog'
 import { Kbd, KbdGroup } from '@renderer/components/ui/kbd'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { errorMessage, host } from '@renderer/lib/host'
 import { platform } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { useSettingsStore } from '@renderer/stores/settings'
-import { ControlError, Pill, SetButton, SettingSwitch } from './controls'
-import { ItemLine, Thing } from './rows'
+import { ControlError, Pill, SetButton, SettingSelect, SettingSwitch } from './controls'
+import { BlockLine, ItemLine, Thing } from './rows'
 
 /**
- * Huli: the administrator switch. Turning it on installs the elevated helper into Program Files
- * through Windows' administrator prompt, and the switch shows on only while that install is current
- * for this Kite; Remove takes it out again, through the prompt as well.
+ * Huli: who may drive programs run as administrator: off (the default), sandboxed sessions only, or
+ * always. Widening it waits on a dialog that says what an agent outside a sandbox could do with it,
+ * and nothing changes until the user confirms. The helper's install in Program Files is its own
+ * step, only when the user chooses Install; with the setting off nothing is asked of the helper.
  */
-export function ElevatedSwitch({ label }: { label: string }) {
+export function ElevatedChoice({ text }: { text: ReactNode }) {
   const { t } = useTranslation('settings')
-  const on = useSettingsStore((s) => s.settings.computerUse.allowElevated)
+  const mode = useSettingsStore((s) => s.settings.computerUse.elevated)
+  const [asking, setAsking] = useState<ElevatedMode | null>(null)
   const [state, setState] = useState<ElevatedHelperState | null>(null)
   const [busy, setBusy] = useState<'install' | 'remove' | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Off, the helper is not asked how it stands, unless the user changed the setting here.
+  const [looked, setLooked] = useState(mode !== 'off')
   useEffect(() => {
+    if (!looked) return
+    let gone = false
     host('computer.elevatedStatus', undefined).then(
-      (answer) => setState(answer.state),
-      () => setState(null),
+      (answer) => !gone && setState(answer.state),
+      () => !gone && setState(null),
     )
-  }, [])
-  const save = (value: boolean) =>
-    useSettingsStore.getState().update({ computerUse: { allowElevated: value } })
-  const change = async (mode: 'install' | 'remove') => {
-    setBusy(mode)
+    return () => {
+      gone = true
+    }
+  }, [looked])
+  const save = (next: ElevatedMode) => {
+    setError(null)
+    useSettingsStore
+      .getState()
+      .update({ computerUse: { elevated: next } })
+      .then(() => setLooked(true))
+      .catch((caught: unknown) => setError(errorMessage(caught)))
+  }
+  const choose = (next: ElevatedMode) => {
+    if (ELEVATED_MODES.indexOf(next) > ELEVATED_MODES.indexOf(mode)) setAsking(next)
+    else save(next)
+  }
+  const change = async (what: 'install' | 'remove') => {
+    setBusy(what)
     setError(null)
     try {
       const answer: ElevatedHelperChange = await host(
-        mode === 'install' ? 'computer.installElevated' : 'computer.uninstallElevated',
+        what === 'install' ? 'computer.installElevated' : 'computer.uninstallElevated',
         undefined,
       )
       setState(answer.state)
-      const done = mode === 'install' ? answer.state === 'current' : answer.state === 'missing'
-      if (done) await save(mode === 'install')
-      else if (answer.cancelled) setError(t('computer.allowElevated.cancelled'))
-      else setError(t('computer.allowElevated.failed', { code: answer.exitCode ?? '?' }))
+      const done = what === 'install' ? answer.state === 'current' : answer.state === 'missing'
+      if (done) return
+      if (answer.cancelled) setError(t('computer.elevated.cancelled'))
+      else if (answer.state !== 'tampered') {
+        setError(t('computer.elevated.failed', { code: answer.exitCode ?? '?' }))
+      }
     } catch (caught) {
       setError(errorMessage(caught))
     } finally {
       setBusy(null)
     }
   }
-  const installed = state === 'current' || state === 'outdated'
+  const installed = state === 'current' || state === 'outdated' || state === 'tampered'
+  const canInstall = mode !== 'off' && (state === 'missing' || state === 'outdated')
+  const note =
+    state === 'tampered'
+      ? t('computer.elevated.tampered')
+      : state === 'outdated'
+        ? t('computer.elevated.outdated')
+        : state === 'missing' && mode !== 'off'
+          ? t('computer.elevated.install.note')
+          : null
   return (
     <>
-      <ControlError error={error} />
-      {busy ? (
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Spinner className="size-3.5" />
-          {t('computer.allowElevated.waiting')}
-        </span>
-      ) : (
-        <>
-          {on && state === 'outdated' && (
-            <SetButton size="sm" onClick={() => void change('install')}>
-              {t('computer.allowElevated.reinstall')}
-            </SetButton>
+      <BlockLine text={text}>
+        <ControlError error={error} />
+        <SettingSelect
+          label={t('computer.elevated.name')}
+          value={mode}
+          disabled={busy !== null}
+          options={ELEVATED_MODES.map((value) => ({
+            value,
+            label: t(`computer.elevated.mode.${value}`),
+            hint: t(`computer.elevated.hint.${value}`),
+            danger: value === 'always',
+          }))}
+          onChange={choose}
+        />
+      </BlockLine>
+      {(note || installed || canInstall) && (
+        <div className="k-block-note flex flex-wrap items-center gap-2">
+          {note && <span className="min-w-0 flex-1">{note}</span>}
+          {busy ? (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Spinner className="size-3.5" />
+              {t('computer.elevated.waiting')}
+            </span>
+          ) : (
+            <>
+              {canInstall && (
+                <SetButton size="sm" onClick={() => void change('install')}>
+                  {state === 'missing'
+                    ? t('computer.elevated.install.action')
+                    : t('computer.elevated.reinstall')}
+                </SetButton>
+              )}
+              {installed && (
+                <SetButton size="sm" variant="ghost" onClick={() => void change('remove')}>
+                  {t('computer.elevated.remove')}
+                </SetButton>
+              )}
+            </>
           )}
-          {installed && (
-            <SetButton size="sm" variant="ghost" onClick={() => void change('remove')}>
-              {t('computer.allowElevated.remove')}
-            </SetButton>
-          )}
-        </>
+        </div>
       )}
-      <SettingSwitch
-        label={label}
-        checked={on && state === 'current'}
-        disabled={busy !== null || state === null || state === 'unsupported'}
-        onChange={(next) => {
-          if (next) void change('install')
-          else save(false).catch((caught: unknown) => setError(errorMessage(caught)))
+      <ElevatedConfirm
+        mode={asking}
+        onAnswer={(confirmed) => {
+          const next = asking
+          setAsking(null)
+          if (confirmed && next) save(next)
         }}
       />
     </>
+  )
+}
+
+/**
+ * Asks before administrator use is widened: an agent outside a sandbox runs as the user, so it can
+ * take over the administrator prompt; what the design cannot fix; and that it is the user's call.
+ */
+export function ElevatedConfirm({
+  mode,
+  onAnswer,
+}: {
+  mode: ElevatedMode | null
+  onAnswer: (confirmed: boolean) => void
+}) {
+  const { t } = useTranslation(['settings', 'common'])
+  return (
+    <AlertDialog open={mode !== null} onOpenChange={(next) => !next && onAnswer(false)}>
+      <AlertDialogContent className="sm:max-w-[460px]">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('computer.elevated.confirm.title')}</AlertDialogTitle>
+          <AlertDialogDescription className="space-y-2">
+            <span className="block">{t('computer.elevated.confirm.hijack')}</span>
+            <span className="block">
+              {mode === 'always'
+                ? t('computer.elevated.confirm.always')
+                : t('computer.elevated.confirm.sandbox')}
+            </span>
+            <span className="block">{t('computer.elevated.confirm.unfixed')}</span>
+            <span className="block">{t('computer.elevated.confirm.yours')}</span>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
+          <AlertDialogAction
+            variant={mode === 'always' ? 'destructive' : 'default'}
+            onClick={() => onAnswer(true)}
+          >
+            {mode === 'always'
+              ? t('computer.elevated.confirm.allowAlways')
+              : t('computer.elevated.confirm.allowSandbox')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 

@@ -419,7 +419,7 @@ Shortcuts and menu items that quit, log out, lock or shut down are refused.
 
 ## Apps run as administrator
 
-\`computer_list_apps\` marks apps that run as administrator. Computer use cannot click or type in them, and says so before you try; reading them may give a blank screenshot. Only when the user turned on administrator use in Settings can you use one: your first call asks the user, who then confirms Windows' prompt and the helper's own window. It then acts in the background only, the helper asks the user before risky steps (a step they refuse comes back refused: ask them how to go on), and it ends with the turn. Programs that start other programs, such as consoles, Task Manager and Explorer, are never available this way. Do not ask for it unless the task needs that app; otherwise ask the user to run the app normally.
+\`computer_list_apps\` marks apps that run as administrator. Computer use cannot click or type in them, and says so before you try; reading them may give a blank screenshot. When the task needs one, ask the user to run it normally, or to do that step themselves.
 
 ## Who is operating
 

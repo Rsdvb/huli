@@ -12,6 +12,7 @@ import {
   type DriverLike,
   type ElevatedDriverLike,
 } from './service'
+import type { ComputerHelperLike } from './helper'
 
 const APPS = [
   {
@@ -100,7 +101,7 @@ function harness(extra: Partial<ComputerUseDeps> = {}): Harness {
       pauseOnUse: true,
       stopShortcut: '',
       allowForeground: true,
-      allowElevated: false,
+      elevated: 'off',
     },
     asked: [],
     settled: [],
@@ -536,38 +537,43 @@ describe('Huli: apps run as administrator', () => {
     }
   }
 
-  function elevatedHarness(declined = false) {
+  function elevatedHarness(
+    declined = false,
+    refusal: (sessionId: string) => string | null = () => null,
+  ) {
     const elevated = new FakeElevated()
     const started: number[] = []
     const stops: string[] = []
+    const helper: ComputerHelperLike = {
+      whoami: async () => ({ sid: 'S-1-5-21-1-2-3-1001', pid: 1, integrity: 0x2000 }),
+      elevation: async (pids) => ({
+        self: 0x2000,
+        pids: Object.fromEntries(
+          pids.map((pid) => [
+            pid,
+            { integrity: pid === 12 || pid === 14 ? 0x3000 : 0x2000, elevated: pid === 12 },
+          ]),
+        ),
+      }),
+      ocr: async () => ({ languages: [], width: 1, height: 1, lines: [] }),
+      process: async () => ({ image: null, started: null }),
+      layout: async () => ({ installDir: 'C:\\x', state: 'current' }),
+      install: async () => null,
+      uninstall: async () => null,
+      elevate: async () => null,
+      stop: () => {},
+    }
     const h = harness({
+      elevatedRefusal: refusal,
       platform: 'win32',
-      helper: {
-        whoami: async () => ({ sid: 'S-1-5-21-1-2-3-1001', pid: 1, integrity: 0x2000 }),
-        elevation: async (pids) => ({
-          self: 0x2000,
-          pids: Object.fromEntries(
-            pids.map((pid) => [
-              pid,
-              { integrity: pid === 12 || pid === 14 ? 0x3000 : 0x2000, elevated: pid === 12 },
-            ]),
-          ),
-        }),
-        ocr: async () => ({ languages: [], width: 1, height: 1, lines: [] }),
-        process: async () => ({ image: null, started: null }),
-        layout: async () => ({ installDir: 'C:\\x', state: 'current' }),
-        install: async () => null,
-        uninstall: async () => null,
-        elevate: async () => null,
-        stop: () => {},
-      },
+      helper,
       elevate: async (pid) => {
         started.push(pid)
         return declined ? null : elevated
       },
       elevatedStopped: (sessionId, app) => stops.push(`${sessionId} ${app}`),
     })
-    return { h, elevated, started, stops }
+    return { h, elevated, started, stops, helper }
   }
 
   const NOTES = { pid: 12, window_id: 5 }
@@ -581,19 +587,70 @@ describe('Huli: apps run as administrator', () => {
     expect((result.content[0] as { text: string }).text).toContain('管理员权限运行')
   })
 
-  it('refuses to act in one up front while the setting is off', async () => {
-    const { h, started } = elevatedHarness()
-    expect(code(await h.service.call('a', 'computer_click', { ...NOTES, x: 1, y: 1 }))).toBe(
-      'elevated',
+  it('refuses to act in one up front while the setting is off, as without the helper', async () => {
+    const { h, started, helper } = elevatedHarness()
+    const refused = await h.service.call('a', 'computer_click', { ...NOTES, x: 1, y: 1 })
+    expect(code(refused)).toBe('elevated')
+    // Word for word as with no elevated helper at all: nothing points at the setting.
+    const without = harness({ platform: 'win32', helper, elevate: null })
+    const bare = await without.service.call('a', 'computer_click', { ...NOTES, x: 1, y: 1 })
+    expect(refused.content).toEqual(bare.content)
+    const listed = await h.service.call('a', 'computer_list_apps', {})
+    expect(listed.content).toEqual(
+      (await without.service.call('a', 'computer_list_apps', {})).content,
     )
-    expect(h.asked).toEqual([])
-    expect(h.driver.acted()).toEqual([])
+    // A read goes on through the normal driver, as before.
+    expect(
+      (await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')).isError,
+    ).toBeFalsy()
+    expect(h.asked.map((a) => a.ask)).toEqual([undefined])
     expect(started).toEqual([])
+  })
+
+  it('in sandboxed sessions only, refuses any session the gate refuses, and ends its helper', async () => {
+    let gate: string | null = 'This session is not in a container sandbox.'
+    const { h, elevated, started } = elevatedHarness(false, () => gate)
+    h.settings.elevated = 'sandbox'
+    const refused = await h.service.call('a', 'computer_click', { ...NOTES, x: 1, y: 1 })
+    expect(code(refused)).toBe('elevated')
+    expect((refused.content[0] as { text: string }).text).toContain('not in a container sandbox')
+    expect(h.asked).toEqual([])
+    expect(started).toEqual([])
+    gate = null
+    await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
+    expect(started).toEqual([12])
+    // Another session came up outside a sandbox: the next call refuses and lets the helper go.
+    gate = 'These run outside one: “Other”.'
+    const later = await h.service.call('a', 'computer_press_key', { ...NOTES, key: 'return' })
+    expect((later.content[0] as { text: string }).text).toContain('“Other”')
+    expect(elevated.running).toBe(false)
+    expect(elevated.calls.map((c) => c.tool)).toEqual(['get_window_state'])
+  })
+
+  it('checks the gate again once the card is answered, before the prompt', async () => {
+    let gate: string | null = null
+    const { h, started } = elevatedHarness(false, () => gate)
+    h.settings.elevated = 'sandbox'
+    const pending = h.service.call('a', 'computer_get_window_state', NOTES)
+    await vi.waitFor(() => expect(h.asked).toHaveLength(1))
+    gate = 'These run outside one: “Other”.'
+    h.service.answer(h.asked[0]!.requestId, 'session')
+    expect(code(await pending)).toBe('elevated')
+    expect(started).toEqual([])
+  })
+
+  it('narrowed to off, ends a running helper', async () => {
+    const { h, elevated } = elevatedHarness()
+    h.settings.elevated = 'always'
+    await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
+    h.settings.elevated = 'off'
+    h.service.settingsChanged()
+    await vi.waitFor(() => expect(elevated.running).toBe(false))
   })
 
   it('asks once, starts the helper and acts only through it', async () => {
     const { h, elevated, started } = elevatedHarness()
-    h.settings.allowElevated = true
+    h.settings.elevated = 'always'
     await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
     expect(h.asked[0]?.ask).toEqual({ kind: 'elevated' })
     expect(started).toEqual([12])
@@ -613,7 +670,7 @@ describe('Huli: apps run as administrator', () => {
 
   it('ends the helper on its Stop for the rest of the turn, and when the turn ends', async () => {
     const { h, elevated, started, stops } = elevatedHarness()
-    h.settings.allowElevated = true
+    h.settings.elevated = 'always'
     await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
     h.service.stopElevated('a')
     expect(elevated.running).toBe(false)
@@ -630,7 +687,7 @@ describe('Huli: apps run as administrator', () => {
 
   it('fails when the user says no at the administrator prompt', async () => {
     const { h } = elevatedHarness(true)
-    h.settings.allowElevated = true
+    h.settings.elevated = 'always'
     const result = await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
     expect(code(result)).toBe('not_allowed')
     expect(h.holds.at(-1)?.elevated ?? null).toBeNull()
@@ -638,7 +695,7 @@ describe('Huli: apps run as administrator', () => {
 
   it('never drives a program that starts programs as administrator', async () => {
     const { h, started } = elevatedHarness()
-    h.settings.allowElevated = true
+    h.settings.elevated = 'always'
     const explorer = { pid: 14, window_id: 6 }
     expect(code(await h.service.call('a', 'computer_get_window_state', explorer))).toBe('blocked')
     expect(h.asked).toEqual([])
@@ -647,7 +704,7 @@ describe('Huli: apps run as administrator', () => {
 
   it('keeps a no on the card for the rest of the turn', async () => {
     const { h, started } = elevatedHarness()
-    h.settings.allowElevated = true
+    h.settings.elevated = 'always'
     expect(code(await answered(h, 'a', 'computer_get_window_state', NOTES, 'deny'))).toBe(
       'not_allowed',
     )

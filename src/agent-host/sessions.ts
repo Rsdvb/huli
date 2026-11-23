@@ -306,6 +306,7 @@ import { resetTime } from './limit-text'
 import { agentOutput, retrying, StallWatch } from './stall-watch'
 import { planRevision } from './plan-revision'
 import { watchSettings, type PreparedRecords, type WatchTarget } from './prepared'
+import { sandboxGate } from './computer/policy'
 import type { Projects } from './projects'
 import {
   outsideKind,
@@ -3480,6 +3481,29 @@ export class SessionManager {
       )
     }
     return null
+  }
+
+  /**
+   * Huli: why the session may not drive apps run as administrator while the user allows that for
+   * sandboxed sessions only, or null when it may: it and every other session whose agent runs or
+   * starts must be in a container sandbox. New session's prepared sessions have had no turn, so
+   * no agent of theirs acted yet.
+   */
+  computerElevatedRefusal(sessionId: string): string | null {
+    const live = this.live.get(sessionId)
+    const others = [...this.live.values()].filter(
+      (other) =>
+        other.id !== sessionId &&
+        !other.prepared &&
+        (other.turn !== null ||
+          other.connection !== null ||
+          other.opening !== null ||
+          other.attaching !== null),
+    )
+    return sandboxGate(
+      live ? { contained: this.contained(live), title: this.titleOf(live) } : null,
+      others.map((other) => ({ contained: this.contained(other), title: this.titleOf(other) })),
+    )
   }
 
   /** The session took or released the computer, or moved to another app: its bar shows it. */

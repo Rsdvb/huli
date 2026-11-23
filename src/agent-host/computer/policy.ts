@@ -323,8 +323,9 @@ export function refusedMenuItem(path: readonly string[]): boolean {
 }
 
 /**
- * Huli: programs that start other programs, from a console or Task Manager to Explorer and script
- * hosts, which computer use never drives as administrator: what they start would run so too. The
+ * Huli: programs that start other programs or run what is typed into them, from consoles, Task
+ * Manager and Explorer to script hosts, interpreters and editors with a terminal or macros, which
+ * computer use never drives as administrator: what they start or run would run so too. The
  * elevated broker refuses the same list (native/computer-helper/windows/Broker.cs).
  */
 const LAUNCHERS = new Set([
@@ -347,9 +348,119 @@ const LAUNCHERS = new Set([
   'cscript.exe',
   'msiexec.exe',
   'control.exe',
+  'systeminformer.exe',
+  'processhacker.exe',
+  'procexp.exe',
+  'procexp64.exe',
+  'procexp64a.exe',
+  'autoruns.exe',
+  'autoruns64.exe',
+  'autoruns64a.exe',
+  'procmon.exe',
+  'procmon64.exe',
+  'psexec.exe',
+  'psexec64.exe',
+  'wsl.exe',
+  'wslhost.exe',
+  'wslg.exe',
+  'bash.exe',
+  'sh.exe',
+  'zsh.exe',
+  'mintty.exe',
+  'git-bash.exe',
+  'git-cmd.exe',
+  'python.exe',
+  'pythonw.exe',
+  'py.exe',
+  'pyw.exe',
+  'node.exe',
+  'deno.exe',
+  'bun.exe',
+  'perl.exe',
+  'ruby.exe',
+  'rubyw.exe',
+  'php.exe',
+  'java.exe',
+  'javaw.exe',
+  'dotnet.exe',
+  'csi.exe',
+  'fsi.exe',
+  'msbuild.exe',
+  'installutil.exe',
+  'regsvr32.exe',
+  'regasm.exe',
+  'hh.exe',
+  'schtasks.exe',
+  'taskschd.msc',
+  'services.exe',
+  'sc.exe',
+  'wmic.exe',
+  'runas.exe',
+  'conemu.exe',
+  'conemu64.exe',
+  'cmder.exe',
+  'alacritty.exe',
+  'wezterm.exe',
+  'wezterm-gui.exe',
+  'tabby.exe',
+  'hyper.exe',
+  'far.exe',
+  'totalcmd.exe',
+  'totalcmd64.exe',
+  'doublecmd.exe',
+  'everything.exe',
+  'code.exe',
+  'devenv.exe',
+  'winword.exe',
+  'excel.exe',
+  'powerpnt.exe',
+  'msaccess.exe',
+  'outlook.exe',
+  'sqlcmd.exe',
+  'ssms.exe',
 ])
 
 /** Huli: whether an app (by its identity, an executable's name on Windows) starts other programs. */
 export function startsPrograms(id: string): boolean {
-  return LAUNCHERS.has(id.toLowerCase())
+  const name = id.toLowerCase()
+  return LAUNCHERS.has(name) || /^(python|pythonw|pypy)[0-9.]*.exe$/.test(name)
+}
+
+/** Huli: a session as the administrator gate sees it. */
+export interface GatedSession {
+  /** Its agent runs in a container sandbox of the session's own. */
+  contained: boolean
+  title: string
+}
+
+/**
+ * Huli: why a session may not drive apps run as administrator while the user allows that for
+ * sandboxed sessions only, or null when it may. It must run in a container sandbox, and so must
+ * every other session whose agent runs: an agent outside one runs as the user, so it could take
+ * over Windows' administrator prompt the user is about to answer, or the helper's own windows.
+ */
+export function sandboxGate(
+  self: GatedSession | null,
+  others: readonly GatedSession[],
+): string | null {
+  if (!self?.contained) {
+    return (
+      'The user allows administrator use only for sessions in a container sandbox, and this ' +
+      'session is not in one. Ask the user to run the task in a session with the container ' +
+      'sandbox, or to do the step themselves.'
+    )
+  }
+  const outside = others.filter((session) => !session.contained)
+  if (outside.length === 0) return null
+  const named = outside
+    .slice(0, 3)
+    .map((session) => `“${session.title}”`)
+    .join(', ')
+  const more = outside.length > 3 ? ` and ${outside.length - 3} more` : ''
+  return (
+    'The user allows administrator use only while every running session is in a container ' +
+    'sandbox, since an agent outside one could take over Windows’ administrator prompt. These ' +
+    `run outside one: ${named}${more}. Ask the user to stop them first, or to do the step ` +
+    'themselves.'
+  )
 }

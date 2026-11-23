@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { featureOn, type FeatureId } from '@shared/features'
 import { errorMessage } from '@renderer/lib/host'
 import { useSettingsStore } from '@renderer/stores/settings'
-import { openSettings } from '@renderer/stores/view'
+import { openSettings, openSettingsRow } from '@renderer/stores/view'
 import { ControlError, Pill, SetButton, SettingSwitch } from './controls'
 
 export function FeatureSwitch({
@@ -35,6 +35,22 @@ export function FeatureSwitch({
         }}
       />
     </>
+  )
+}
+
+/** Huli: administrator use is chosen on computer use's page; this row says how it stands. */
+export function ComputerElevatedLink() {
+  const { t } = useTranslation('settings')
+  const mode = useSettingsStore((s) => s.settings.computerUse.elevated)
+  return (
+    <span className="flex items-center gap-2">
+      <Pill tone={mode === 'always' ? 'warning' : mode === 'sandbox' ? 'attention' : 'neutral'}>
+        {t(`computer.elevated.mode.${mode}`)}
+      </Pill>
+      <SetButton variant="ghost" onClick={() => openSettingsRow('computer-use', null, 'elevated')}>
+        {t('features.computerElevated.open')}
+      </SetButton>
+    </span>
   )
 }
 

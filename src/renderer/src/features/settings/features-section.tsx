@@ -12,7 +12,8 @@ import {
   type SettingId,
 } from '@shared/settings-catalog'
 import { useSettingsStore } from '@renderer/stores/settings'
-import { ComputerUseLink, FeatureSwitch } from './features-rows'
+import { platform } from '@renderer/lib/platform'
+import { ComputerElevatedLink, ComputerUseLink, FeatureSwitch } from './features-rows'
 import type { GroupDef, RowDef, SectionDef } from './model'
 import { GroupNote } from './rows'
 
@@ -57,6 +58,16 @@ export function useFeaturesSection(): SectionDef {
             group: groups.agents,
             render: () => <ComputerUseLink />,
           } satisfies RowDef,
+          ...(platform === 'win32'
+            ? [
+                {
+                  id: 'computer-elevated',
+                  setting: 'features.computer-elevated',
+                  group: groups.agents,
+                  render: () => <ComputerElevatedLink />,
+                } satisfies RowDef,
+              ]
+            : []),
         ]
       : []),
   ])

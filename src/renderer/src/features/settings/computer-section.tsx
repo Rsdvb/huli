@@ -10,7 +10,7 @@ import { Pill } from './controls'
 import {
   AllowedAppRow,
   ComputerSwitch,
-  ElevatedSwitch,
+  ElevatedChoice,
   PermissionRow,
   StopShortcut,
 } from './computer-rows'
@@ -107,10 +107,11 @@ export function useComputerUseSection(): SectionDef {
     ...(isWindows
       ? [
           {
-            id: 'allow-elevated',
-            setting: 'computer-use.allow-elevated',
+            id: 'elevated',
+            setting: 'computer-use.elevated',
             group: main,
-            render: () => <ElevatedSwitch label={t('computer.allowElevated.name')} />,
+            layout: 'block',
+            render: (text) => <ElevatedChoice text={text} />,
           } satisfies RowDef,
         ]
       : []),

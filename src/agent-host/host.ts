@@ -985,6 +985,7 @@ export class AgentHost {
           foreground: (sessionId, app) => this.sessions.computerForeground(sessionId, app),
           elevatedStopped: (sessionId, app) =>
             this.sessions.computerElevatedStopped(sessionId, app),
+          elevatedRefusal: (sessionId) => this.sessions.computerElevatedRefusal(sessionId),
           self: { pids: [computer.selfPid, process.pid], ids: computer.selfIds },
           settings: () => this.settings.computerUse,
           turnRefusal: (sessionId) => this.sessions.computerRefusal(sessionId),
@@ -4763,12 +4764,15 @@ export class AgentHost {
   }
 }
 
-/** Huli: the elevated helper is not installed in Program Files for this Kite, or is older. */
+/**
+ * Huli: the elevated helper is not installed in Program Files for this Kite, is of another
+ * protocol, or changed; only the user installs it, from Settings.
+ */
 function notInstalled(): ComputerToolError {
   return new ComputerToolError(
     'elevated',
-    'The administrator helper is not installed for this Kite, or is out of date. Ask the user to ' +
-      'turn “Allow operating chosen programs as administrator” off and on again in Settings › ' +
-      'Computer use, which installs it.',
+    'The administrator helper is not installed for this Kite, is out of date, or changed. Ask ' +
+      'the user to install it again under “Operate programs run as administrator” in Settings › ' +
+      'Computer use.',
   )
 }

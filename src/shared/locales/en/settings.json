@@ -619,15 +619,41 @@
       "description": "An action an app ignores in the background, as many Electron apps and games do, is tried once with its window brought to the front, which then goes back. The thread and a label on screen say so.",
       "keywords": "foreground front focus electron background delivery computer use"
     },
-    "allowElevated": {
-      "name": "Allow operating chosen programs as administrator",
-      "description": "Turning it on installs Kite’s administrator helper into Program Files once, at Windows’ administrator prompt. Kite’s helper has no code-signing certificate, so Windows shows an unknown publisher; answer only prompts you just asked for. Each program then asks you in its session, at the prompt and in the helper’s own window that names it, and risky steps ask in that window too. Programs that start other programs, such as consoles, Task Manager and Explorer, are never driven this way.",
-      "keywords": "administrator admin elevated uac run as administrator computer use",
+    "elevated": {
+      "name": "Operate programs run as administrator",
+      "description": "Lets agents ask to operate a program you run as administrator. Each time, you allow it in the session, confirm Windows’ prompt (for “Windows Command Processor”, which starts Kite’s helper with a clean environment) and then the helper’s own window that names the program; risky steps ask in that window too. Programs that start other programs, such as consoles, Task Manager and Explorer, are never operated this way.",
+      "keywords": "administrator admin elevated uac run as administrator sandbox computer use",
+      "mode": {
+        "off": "Off",
+        "sandbox": "Only in sandboxed sessions",
+        "always": "Always allow (high risk)"
+      },
+      "hint": {
+        "off": "Programs run as administrator stay out of reach",
+        "sandbox": "Only a session in a container sandbox, while no session outside one is running",
+        "always": "Any session may ask"
+      },
+      "install": {
+        "action": "Install helper",
+        "note": "The administrator helper goes into Program Files once. Windows asks you to let Robocopy, its own copy program, put it there."
+      },
+      "outdated": "The installed helper is from an older version of Kite. Install it again to use it.",
+      "tampered": "The installed helper changed after it was installed, so Kite no longer uses it. Remove it, then install it again.",
       "waiting": "Waiting for Windows’ administrator prompt…",
-      "reinstall": "Reinstall",
-      "remove": "Remove",
+      "reinstall": "Install again",
+      "remove": "Remove helper",
       "cancelled": "You said no at Windows’ prompt, so nothing changed.",
-      "failed": "The administrator helper did not install (code {{code}})."
+      "failed": "That did not work (code {{code}}).",
+      "confirm": {
+        "title": "Let agents operate programs run as administrator?",
+        "hijack": "An agent on this computer that is not in a sandbox runs as you. It could take over Windows’ administrator prompt or the helper’s confirmation window, so that what you approve is not what you think.",
+        "sandbox": "With “Only in sandboxed sessions”, Kite allows it only for a session in a container sandbox, and only while no other session outside one is running. Programs an agent started before, and agents in a terminal, are not checked.",
+        "always": "With “Always allow”, any session may ask, sandboxed or not.",
+        "unfixed": "Some of this cannot be fixed in Kite’s current design: the prompt and the helper’s windows sit on your normal desktop, where other programs can still interfere with them.",
+        "yours": "It is your decision, and you can turn it off again at any time.",
+        "allowSandbox": "Allow in sandboxed sessions",
+        "allowAlways": "Always allow"
+      }
     },
     "stopShortcut": {
       "name": "Stop from anywhere",
@@ -3247,6 +3273,11 @@
       "description": "Agents operate apps on this computer. It has its own switch on the Computer use page.",
       "on": "On",
       "off": "Off",
+      "open": "Open"
+    },
+    "computerElevated": {
+      "name": "Programs run as administrator",
+      "description": "Part of computer use, chosen on its page.",
       "open": "Open"
     },
     "items": {

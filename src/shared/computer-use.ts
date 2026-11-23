@@ -92,8 +92,9 @@ export function isComputerSetupStep(value: unknown): value is ComputerSetupStep 
 }
 
 /**
- * Huli: the elevated helper's install in Program Files: none, current for this Kite, outdated (an
- * older helper or another Kite program), or unsupported off Windows.
+ * Huli: the elevated helper's install in Program Files: none, current for this Kite, outdated
+ * (another protocol or Kite program), tampered (its files are not the ones it recorded, or others
+ * than administrators may change them), or unsupported off Windows.
  */
 export type ElevatedHelperState = 'unsupported' | 'missing' | 'current' | 'outdated' | 'tampered'
 
@@ -133,11 +134,17 @@ export interface ComputerUseSettings {
    */
   allowForeground: boolean
   /**
-   * Huli: Windows only. An agent may ask to drive an app that runs as administrator, which the
-   * user approves app by app and confirms with the system's administrator prompt.
+   * Huli: Windows only. Who may ask to drive an app that runs as administrator, which the user
+   * then approves app by app and confirms at the system's administrator prompt: no one (`off`),
+   * only a session in a container sandbox while no other running session is outside one
+   * (`sandbox`), or any session (`always`). Off until the user confirms the risk in Settings.
    */
-  allowElevated: boolean
+  elevated: ElevatedMode
 }
+
+/** Huli: the choices of administrator use, narrowest first. */
+export const ELEVATED_MODES = ['off', 'sandbox', 'always'] as const
+export type ElevatedMode = (typeof ELEVATED_MODES)[number]
 
 /** Stop from anywhere: Control, Option, Command and period on macOS; with Shift elsewhere. */
 export function defaultStopShortcut(platform: string): string {
@@ -150,7 +157,7 @@ export const DEFAULT_COMPUTER_USE: ComputerUseSettings = {
   pauseOnUse: true,
   stopShortcut: '',
   allowForeground: true,
-  allowElevated: false,
+  elevated: 'off',
 }
 
 const SHORTCUT_MODIFIERS = new Set(['Control', 'Alt', 'Shift', 'Command', 'Super'])
