@@ -11,6 +11,7 @@ import type {
 } from '@shared/agent-host'
 import type { ContextEstimates } from '@shared/context'
 import type {
+  BackgroundTaskView,
   ConfigOption,
   DeclaredHook,
   DeclaredMcpServer,
@@ -28,6 +29,13 @@ import type {
 import type { RiskSubject } from './risk/classify'
 import type { SessionSandbox } from './sandbox/native'
 import type { MapperContext, MapperOutput } from './session-updates'
+
+/** Huli: an agent's own reading of a session's background processes. */
+export interface AgentProcesses {
+  tasks: BackgroundTaskView[]
+  /** What the agent read of each one's process, by task id. */
+  processes: { taskId: string; pid: number | null; cpu: number | null; memory: number | null }[]
+}
 
 export interface PermissionRequest {
   toolCallId: string
@@ -636,6 +644,21 @@ export interface AgentConnection {
   stopTask?(sessionId: string, taskId: string): Promise<void>
   /** The end of a background task's output, at most 8 KiB. */
   taskOutput?(sessionId: string, taskId: string): Promise<{ output: string; truncated: boolean }>
+  /**
+   * Huli: moves the command or subagent that holds up the tool call `toolCallId` to the
+   * background, or without it every one; false when none matched. Absent where the agent cannot.
+   */
+  toBackground?(sessionId: string, toolCallId?: string): Promise<boolean>
+  /** Huli: forgets the session's background tasks that ended. Absent where the agent cannot. */
+  cleanTasks?(sessionId: string): Promise<void>
+  /**
+   * Huli: the agent's own reading of the session's background processes, for an agent whose
+   * tasks no event lists, as Codex's background terminals; null when this agent version has
+   * none. Its Clean then stops them all.
+   */
+  backgroundProcesses?(sessionId: string): Promise<AgentProcesses | null>
+  /** Huli: the process that runs the session's tools, whose descendants are its commands. */
+  toolProcess?(sessionId: string): number | null
   /**
    * Huli: tells the agent the user allowed a call its automatic review denied, with `event`, the
    * agent's own record of the denial a tool entry's appeal keeps. Absent where it takes none.

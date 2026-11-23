@@ -157,7 +157,9 @@
         "gone": "这个授权请求已不再等待回答",
         "answered": "这个授权请求已经回答过了"
       }
-    }
+    },
+    "backgroundUnsupported": "这个版本的 {{agent}} 不能列出后台进程",
+    "noToBackground": "{{agent}} 不能把任务转到后台"
   },
   "notice": {
     "historyUnavailable": {
@@ -232,6 +234,14 @@
       "title": "已停止使用电脑",
       "description": "你发下一条消息后，智能体才能再用。"
     },
+    "computerForeground": {
+      "title": "已把 {{app}} 切到前台操作",
+      "description": "它在后台不接收这个操作，所以窗口短暂切到前台完成这一步，然后切回。可在设置 › Computer use 里关闭。"
+    },
+    "computerElevatedStopped": {
+      "title": "已停止以管理员权限操作 {{app}}",
+      "description": "管理员助手已退出。你发下一条消息后，智能体才能再次请求。"
+    },
     "fullAccessNotCarried": {
       "title": "没有带上完全访问",
       "description": "这个会话在 Kettu 外面是完全访问。Kettu 不以完全访问接上会话，这里改成了「{{mode}}」。"
@@ -245,6 +255,8 @@
     "tabAccess": "想使用你的标签页「{{tab}}」",
     "terminalRename": "想把你的终端「{{terminal}}」改名为「{{name}}」",
     "computerApp": "想使用 {{app}}",
+    "computerElevated": "想以管理员权限使用 {{app}}",
+    "computerRisky": "请你确认在 {{app}} 里的一步操作",
     "computerSetup": "想使用你的电脑",
     "controlAsk": {
       "sign_in": "请你登录 {{target}}",
@@ -888,6 +900,15 @@
       "effortDescription": "这个模型能用的推理强度",
       "fast": "快速模式",
       "fastDescription": "支持的模型回复更快"
+    },
+    "background": {
+      "unsupported": "这个版本的 Claude Code 不能把任务转到后台，请先更新"
+    },
+    "goal": {
+      "active": "目标：{{objective}}",
+      "ended": "目标已结束：{{objective}}",
+      "checks_other": "已检查 {{count}} 次",
+      "unmet": "{{checks}} · 尚未达成：{{reason}}"
     }
   },
   "codex": {
@@ -1191,7 +1212,10 @@
     },
     "noValue": "Codex 的 {{option}} 没有 {{value}} 这个值",
     "cannotSignOut": "这里无法让 Codex 退出登录",
-    "unknownError": "未知错误"
+    "unknownError": "未知错误",
+    "background": {
+      "unsupported": "这个版本的 Codex 不能管理后台终端，请先更新"
+    }
   },
   "dsh": {
     "tool": {

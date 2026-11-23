@@ -115,7 +115,9 @@
         "critical": "critical risk"
       }
     },
-    "mcp": "{{server}}: {{tool}}"
+    "mcp": "{{server}}: {{tool}}",
+    "toBackground": "To background",
+    "toBackgroundTitle": "Let the turn go on while this command runs in the background"
   },
   "kettuTool": {
     "read_kettu_guide": "Read Kettu guide",
@@ -346,7 +348,35 @@
       "deny": "Denied",
       "timeout": "Not answered in time"
     },
-    "where": "Reads its windows and clicks and types in them, in the background"
+    "where": "Reads its windows and clicks and types in them, in the background",
+    "elevated": {
+      "action": "operate {{app}} as administrator",
+      "where": "{{app}} runs as administrator. Allowing starts Kite’s administrator helper through Windows’ prompt, which you confirm yourself. It drives only this program’s windows, in the background, asks before risky steps, and ends with the turn.",
+      "allow": "Allow this turn",
+      "deny": "Don’t allow",
+      "answer": {
+        "allow": "Allowed for this turn",
+        "deny": "Denied"
+      }
+    },
+    "risky": {
+      "action": "take a step in {{app}} as administrator",
+      "where": "This step runs with administrator rights. Check it before you allow it.",
+      "allow": "Take this step",
+      "deny": "Don’t",
+      "answer": {
+        "allow": "Step allowed",
+        "deny": "Step refused"
+      },
+      "step": {
+        "click": "Click “{{text}}”",
+        "type": "Type “{{text}}”",
+        "key": "Press {{text}}",
+        "drag": "Drag in the window",
+        "menu": "Choose {{text}}",
+        "unknown": "Click a point in the window"
+      }
+    }
   },
   "projectMcp": {
     "where": "Declared in the project’s .mcp.json. Once used, they run on this computer as you.",
@@ -432,7 +462,11 @@
   "computerBar": {
     "waiting": "Waiting for you to allow <app>{{app}}</app>",
     "stopping": "Taking back the computer…",
-    "stopLabel": "Stop using the computer for this turn; the turn goes on"
+    "stopLabel": "Stop using the computer for this turn; the turn goes on",
+    "elevated": "Operating <app>{{app}}</app> as administrator",
+    "elevatedStop": "Stop",
+    "elevatedStopLabel": "End the administrator helper; the turn goes on",
+    "waitingAdmin": "Waiting for your answer about <app>{{app}}</app>, run as administrator"
   },
   "computerPane": {
     "title": "Computer",
@@ -495,7 +529,8 @@
   "subagent": {
     "fallbackTitle": "Sub-agent",
     "tools_one": "{{count}} tool",
-    "tools_other": "{{count}} tools"
+    "tools_other": "{{count}} tools",
+    "toBackground": "To background"
   },
   "subagentBar": {
     "runsFor": "{{agent}} runs this sub-agent for <parent/>",
@@ -2229,6 +2264,18 @@
       "transfer": "Send them over",
       "apply": "Put them back together on {{name}}",
       "finish": "Finish"
+    }
+  },
+  "recall": {
+    "recalled_one": "Recalled 1 memory",
+    "recalled_other": "Recalled {{count}} memories",
+    "saved_one": "Saved 1 memory",
+    "saved_other": "Saved {{count}} memories",
+    "summary": "Summary of many memories",
+    "scope": {
+      "personal": "Personal",
+      "team": "Team",
+      "organization": "Organization"
     }
   }
 }

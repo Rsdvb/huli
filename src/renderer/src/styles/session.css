@@ -2707,6 +2707,30 @@
 .ks-subagent__head:hover .ks-subagent__chevron {
   color: var(--thread-ink);
 }
+/* Huli: what a running subagent says it does now, and To background while the turn waits on it. */
+.ks-subagent__now {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  margin-top: -6px;
+  padding: 0 12px 8px 40px;
+}
+.ks-subagent__line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--thread-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ks-subagent__error {
+  margin: 0;
+  padding: 0 12px 8px 40px;
+  font-size: 12px;
+  color: var(--danger);
+}
 
 /* A bar in the composer's place: a subagent's session, or computer use in progress. */
 .ks-bar {

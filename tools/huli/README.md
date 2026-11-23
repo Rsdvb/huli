@@ -423,6 +423,52 @@ none.
   the probe), `sessions.test.ts` (sessions started together, the setup command's and the agent's
   variables, archive, restart and restore), `storage.test.ts` (the stored block and column).
 
+### Background processes on the session board (后台进程、转到后台)
+
+The session's board (the rail beside its thread, `features/board/`) lists what the agent left
+running with its process, CPU, memory and ports, moves what holds up a tool call to the
+background so the turn goes on (转到后台), and cleans the list.
+
+- Reading: `sessions.processes` (`processes` in `sessions.ts`, `src/agent-host/task-processes.ts`)
+  runs one process listing (`ps`, or CIM through PowerShell on Windows, with command lines,
+  working sets and CPU time) and one port listing (`listListeningPorts` of the remote host's port
+  forwarding) for every running task of the session. The board asks when it opens, when a task
+  starts or ends or something comes to hold up a call, when a turn ends, and on its refresh
+  button; never on a timer. A task's process is the one its agent names (Codex's `osPid`, the fake
+  agent's `pid`), else, for Claude Code, the process among the descendants of its Claude Code
+  process whose command line holds the task's command. CPU is the system's percentage where `ps`
+  gives one, else the CPU time used since the last reading (since the start on the first one).
+- Ports: each task's ports are those its process tree listens on; one outside the session's
+  block (KITE_PORT) is marked, and one inside another live session's block marked as colliding.
+  A port of the session's block that a program outside the session holds shows as a warning at
+  the board's top.
+- Claude Code: `task_started` with `is_backgrounded: false` lists the command or subagent in the
+  session's `foreground` until it moves (`task_updated` `is_backgrounded`), ends or the turn
+  ends; 转到后台 (on its board row, its Bash row in the thread and the subagent's card) is
+  `Query.backgroundTasks(toolUseId)` through `sessions.toBackground`. Clean (`sessions.cleanTasks`)
+  forgets the ended tasks in the mapper. `agentProgressSummaries` is on, and `task_progress`'s
+  `summary` becomes the subagent's `progress` on its summary (its card in the thread, its board
+  row, the phone's rows) or a background MCP task's line. `memory_recall` is a quiet `recall`
+  line (回忆了 N 条记忆) that opens on which, and the main thread's writes to a project's memory
+  folder of Claude Code's own (`<config>/projects/<project>/memory/*.md`, the index left out) one
+  `saved` line a turn (保存了 N 条记忆). `active_goal` is a notice like Codex's goal: 目标：…,
+  how many checks it took and why the last found it unmet, and 目标已结束 once it is null.
+- Codex: `thread/backgroundTerminals/list` gives the board its tasks with their process, CPU and
+  memory (read only with the processes, as no notification lists them), `/terminate` stops one
+  and `/clean`, Codex's own `/clean`, stops them all, so Clean reads 全部停止 there. A Codex
+  without them answers that it has no such method, and the board says the version cannot.
+  Output is what the command's row printed.
+- The fake agent's `/processes` scenario speaks Kite's own ACP extension (`acp/kite-tasks.ts`):
+  declared as `_meta: { 'kite/tasks': true }` in its capabilities, `_kite/tasks` carries the task
+  list, what holds up a call and subagents' summaries, and `_kite/tasks/stop`, `/output`,
+  `/background` and `/clean` are its requests. It starts real Node servers and a watcher.
+- Phone: 后台任务 in the session's ⋯ menu (`mobile/src/app/background/[id].tsx`), read on open,
+  on a pull and after an action: what holds up the turn with 转到后台, running tasks with their
+  stats, ports, output and 停止, ended ones, and Clean.
+- Tests: `claude/connection.test.ts` (foreground, moves, progress, Clean, recalls, saves, goals),
+  `codex/connection.test.ts` (terminals listed, ended, missing), `acp/kite-tasks.test.ts`,
+  `validate.test.ts`.
+
 ### Risk levels and auto-approve (风险等级、自动批准低风险操作)
 
 After Codex's risk before an action, Kiro's Approve for me and Claude Code's auto mode, without
@@ -1227,6 +1273,46 @@ Generated before a build (not hand edits, never committed):
 - `node tools/huli/update-path.mjs` fills in the update channel's path (see Update channel). The
   rebrand runs it; the phone builds run it alone, before bundling.
 
+### Computer use: administrator apps, text recognition, the foreground (电脑操作增强)
+
+Cua Driver (pinned in `tools/install/cua-driver.mjs`) keeps to the background and refuses windows
+of programs run as administrator, which Windows' UIPI keeps a normal process from driving. Kite adds
+`native/computer-helper` (see its README): on Windows C# built with the .NET Framework compiler
+Windows ships, on macOS Swift; `tools/install/cua-driver.mjs` builds it beside the driver. The
+agent host starts it on a session's first call that needs it and ends it with the hold
+(`src/agent-host/computer/helper.ts`); nothing runs at startup or while idle.
+
+- **Elevated apps up front.** On Windows `computer_list_apps` asks the helper for each process's
+  integrity level (`PROCESS_QUERY_LIMITED_INFORMATION`, `TokenIntegrityLevel`, `TokenElevation`)
+  and marks those above Kite's own as run as administrator ("管理员权限运行，普通权限无法操作");
+  an action in one is refused before the driver is called, with code `elevated`. A read still
+  goes through, with a note.
+- **Blank screenshots.** A screenshot that is one solid color (or transparent), or missing when it
+  was asked for, gives way to a placeholder (a crossed-out picture, no words) and a note, so the
+  agent does not act on an empty frame (`screenshot.ts`).
+- **Text recognition.** `computer_get_window_state` reads the screenshot's text with the system's
+  OCR (Windows.Media.Ocr, Apple Vision) when the agent passes `ocr: true`, or by itself when the
+  tree holds no more than the window's frame (5 elements or fewer, no `query` or `since`). Lines
+  come back with boxes in screenshot pixels, which `computer_click` takes as x and y. On Windows two
+  engines read when installed, the user's first language's and one of the other script family,
+  merged line by line. No model is downloaded; cua-perception and OmniParser's detector are AGPL,
+  and OmniParser's MIT icon weights were not worth a download yet.
+- **The foreground once.** An action the driver refuses as `background_unavailable` (or
+  `effect: refused` with a foreground escalation) is sent once more with `delivery_mode:
+foreground` while Settings › Computer use › 允许必要时切到前台操作 is on (the default); the thread
+  notes it once a turn per app, and the floating label notes each time. Off, the agent hears it was
+  not tried. An agent may ask for the foreground on any action, which the same switch allows. An
+  action the driver delivered in the foreground by itself (Windows menus) is noted the same way.
+- **Administrator use** is held back: driving a program run as administrator through an elevated
+  helper the owner approves at Windows' prompt is not in the app yet, pending a security rework of
+  where the elevated programs run from and who may start them. The service keeps the hook
+  (`elevate` in `ComputerUseDeps`, null in the host), the cards and the badge for it.
+
+A test copy (`KITE_TEST_WINDOW=background`) keeps computer use's floating label and light off every
+display and registers no stop shortcut. To try computer use there, start a window of your own and
+drive it through the fake agent's `fake:/computer <tool> <json> ; ...` turns (see
+`tools/fake-agent/computer.ts`).
+
 ### Kite in development
 
 `pnpm dev` runs the tree as committed, yet looks like Kite: `tools/huli/dev-brand.mjs`, a Vite
@@ -1259,7 +1345,9 @@ it as on a screen; measured on Windows, a minimized or never-shown window instea
 captured and throttles its animation frames, so it is not used. An installed build ignores the
 variable. Stop the copy by ending its process tree (`taskkill /PID <electron-vite's node> /T /F`);
 it saves no window position. `src/main/test-window.ts` holds it; hooks in `src/main/window.ts`
-(the place and `keepInBackground`), `src/main/index.ts` (no tray) and `src/main/notifications.ts`.
+(the place and `keepInBackground`), `src/main/index.ts` (no tray), `src/main/notifications.ts` and
+`src/main/computer-overlay.ts`: computer use's floating label and light go off every display too,
+and the copy registers no stop shortcut.
 
 ### Kite's artwork
 

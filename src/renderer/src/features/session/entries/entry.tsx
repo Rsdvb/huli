@@ -21,6 +21,7 @@ import { SettingsChangeEntry } from './settings-change-entry'
 import { SecretRequestEntry } from './secret-request-entry'
 import { ThemeChangeEntry } from './theme-change-entry'
 import { MemoryEntry } from './memory-entry'
+import { RecallEntry } from './recall-entry'
 import { ComputerAppEntry } from './computer-app-entry'
 import { ProblemReportEntry } from './problem-report-entry'
 import { ProjectHooksEntry } from './project-hooks-entry'
@@ -66,6 +67,8 @@ export const Entry = memo(function Entry({
       return <SessionMessageEntry {...props} />
     case 'plan':
       return null
+    case 'recall':
+      return <RecallEntry {...props} />
     case 'notice':
       return <NoticeEntry {...props} />
     case 'compaction':

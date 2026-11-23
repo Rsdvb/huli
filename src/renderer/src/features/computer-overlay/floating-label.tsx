@@ -52,7 +52,13 @@ export function FloatingLabel({
   const theirs = state.control === 'you'
   return (
     <div className="kco-float-room" style={{ padding: `${MARGIN.top}px ${MARGIN.x}px 0` }}>
-      <div ref={box} role="status" className="kco-float" data-control={state.control}>
+      <div
+        ref={box}
+        role="status"
+        className="kco-float"
+        data-control={state.control}
+        data-elevated={state.elevated ? '' : undefined}
+      >
         <span key={state.control} className="kco-float__in">
           {theirs ? (
             <>
@@ -85,11 +91,17 @@ export function FloatingLabel({
               <span className="kco-float__text">
                 <Trans
                   t={t}
-                  i18nKey="label.computer.agent"
-                  values={{ agent, target: state.app ?? t('target.computer') }}
+                  i18nKey={state.elevated ? 'label.computer.elevated' : 'label.computer.agent'}
+                  values={{ agent, target: state.elevated ?? state.app ?? t('target.computer') }}
                   components={{ b }}
                 />
               </span>
+              {state.foreground !== null && (
+                // Keyed by the count, so each action in the foreground shows it once more.
+                <span key={state.foreground} className="kco-float__note">
+                  {t('label.computer.foreground')}
+                </span>
+              )}
               <button type="button" className="kco-float__btn" onClick={() => api.act('take-over')}>
                 {t('actions.takeOver')}
               </button>

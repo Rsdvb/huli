@@ -4382,3 +4382,300 @@ describe('the native sandbox', () => {
     ).rejects.toThrow()
   })
 })
+
+describe('Huli: background moves, progress, memory and goals', () => {
+  const system = (query: FakeQuery, fields: Record<string, unknown>): SdkMessage =>
+    ({ type: 'system', session_id: query.sessionId, ...fields }) as SdkMessage
+  const held = (target: Target) =>
+    target.effects.flatMap((effect) => (effect.kind === 'foreground' ? [effect.tasks] : []))
+  const lists = (target: Target) =>
+    target.effects.flatMap((effect) => (effect.kind === 'tasks' ? [effect.tasks] : []))
+
+  async function open(env: Record<string, string> = {}) {
+    const s = await setup(env)
+    const target = new Target()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, target)
+    s.sdk.script = (q) => q.running()
+    const turn = s.connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
+    await settle()
+    return { s, target, sessionId, query: s.sdk.last, turn }
+  }
+
+  it('asks for the progress summaries of subagents', async () => {
+    const { query, turn } = await open()
+    expect(query.options.agentProgressSummaries).toBe(true)
+    query.finish()
+    await turn
+  })
+
+  it('lists what holds up its call until it moves to the background or ends', async () => {
+    const { s, target, sessionId, query, turn } = await open()
+    query.emit(
+      assistant(query, 'msg_t', [
+        { type: 'tool_use', id: 'toolu_t', name: 'Bash', input: { command: 'npm test' } },
+      ]),
+      system(query, {
+        subtype: 'task_started',
+        task_id: 'b1',
+        tool_use_id: 'toolu_t',
+        description: 'Run the tests',
+        task_type: 'local_bash',
+        is_backgrounded: false,
+      }),
+      system(query, {
+        subtype: 'task_started',
+        task_id: 'agent-1',
+        tool_use_id: 'toolu_a',
+        description: 'Explore',
+        subagent_type: 'Explore',
+        task_type: 'local_agent',
+        is_backgrounded: false,
+      }),
+      // One registered in the background, or by a CLI that does not say, holds up nothing.
+      system(query, {
+        subtype: 'task_started',
+        task_id: 'b2',
+        tool_use_id: 'toolu_u',
+        description: 'Serve',
+        task_type: 'local_bash',
+      }),
+    )
+    await settle()
+    expect(held(target).at(-1)).toMatchObject([
+      { toolCallId: 'toolu_t', taskId: 'b1', kind: 'shell', title: 'Run the tests' },
+      { toolCallId: 'toolu_a', taskId: 'agent-1', kind: 'subagent', title: 'Explore' },
+    ])
+    expect(await s.connection.toBackground!(sessionId, 'toolu_t')).toBe(true)
+    expect(query.calls).toContainEqual({ method: 'backgroundTasks', args: ['toolu_t'] })
+    query.emit(
+      system(query, { subtype: 'task_updated', task_id: 'b1', patch: { is_backgrounded: true } }),
+      system(query, {
+        subtype: 'task_notification',
+        task_id: 'agent-1',
+        status: 'completed',
+        summary: 'done',
+        output_file: '',
+      }),
+    )
+    await settle()
+    expect(held(target).at(-1)).toEqual([])
+    s.sdk.backgrounded = false
+    expect(await s.connection.toBackground!(sessionId)).toBe(false)
+    expect(query.calls).toContainEqual({ method: 'backgroundTasks', args: [undefined] })
+    query.finish()
+    await turn
+  })
+
+  it('lets go of what holds up a call once the turn ends', async () => {
+    const { target, query, turn } = await open()
+    query.emit(
+      system(query, {
+        subtype: 'task_started',
+        task_id: 'b1',
+        tool_use_id: 'toolu_t',
+        description: 'Build',
+        task_type: 'local_bash',
+        is_backgrounded: false,
+      }),
+    )
+    await settle()
+    expect(held(target).at(-1)).toHaveLength(1)
+    query.finish()
+    await turn
+    expect(held(target).at(-1)).toEqual([])
+  })
+
+  it('puts the progress summary of a subagent on its row, and of a task on its line', async () => {
+    const { target, query, turn } = await open()
+    query.emit(
+      system(query, {
+        subtype: 'task_started',
+        task_id: 'agent-1',
+        tool_use_id: 'toolu_a',
+        description: 'Explore',
+        subagent_type: 'Explore',
+        task_type: 'local_agent',
+      }),
+      system(query, {
+        subtype: 'task_progress',
+        task_id: 'agent-1',
+        description: 'Explore',
+        usage: { total_tokens: 1, tool_uses: 1, duration_ms: 1 },
+        summary: '  Reading the\nauth module  ',
+      }),
+      system(query, {
+        subtype: 'background_tasks_changed',
+        tasks: [{ task_id: 'm1', task_type: 'mcp_task', description: 'Index' }],
+      }),
+      system(query, {
+        subtype: 'task_progress',
+        task_id: 'm1',
+        description: 'Index',
+        usage: { total_tokens: 0, tool_uses: 0, duration_ms: 1 },
+        summary: '40 of 90 files',
+      }),
+      // No summary, as without the option: nothing changes.
+      system(query, {
+        subtype: 'task_progress',
+        task_id: 'agent-1',
+        description: 'Explore',
+        usage: { total_tokens: 2, tool_uses: 2, duration_ms: 2 },
+      }),
+    )
+    await settle()
+    const progress = target.effects.flatMap((effect) =>
+      effect.kind === 'subagent' && effect.progress !== undefined ? [effect] : [],
+    )
+    expect(progress).toEqual([
+      { kind: 'subagent', sessionId: 'agent-1', progress: 'Reading the auth module' },
+    ])
+    expect(lists(target).at(-1)).toMatchObject([{ id: 'm1', progress: '40 of 90 files' }])
+    query.emit(
+      system(query, {
+        subtype: 'task_notification',
+        task_id: 'm1',
+        status: 'completed',
+        summary: 'Indexed',
+        output_file: '',
+      }),
+    )
+    await settle()
+    expect(lists(target).at(-1)![0]).not.toHaveProperty('progress')
+    query.finish()
+    await turn
+  })
+
+  it('forgets the ended tasks on Clean and keeps the running ones', async () => {
+    const { s, target, sessionId, query, turn } = await open()
+    query.emit(
+      system(query, {
+        subtype: 'background_tasks_changed',
+        tasks: [
+          { task_id: 'b1', task_type: 'local_bash', description: 'Serve' },
+          { task_id: 'b2', task_type: 'local_bash', description: 'Lint' },
+        ],
+      }),
+      system(query, {
+        subtype: 'background_tasks_changed',
+        tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'Serve' }],
+      }),
+    )
+    await settle()
+    expect(lists(target).at(-1)).toHaveLength(2)
+    await s.connection.cleanTasks!(sessionId)
+    expect(lists(target).at(-1)).toMatchObject([{ id: 'b1', status: 'running' }])
+    const count = lists(target).length
+    await s.connection.cleanTasks!(sessionId)
+    expect(lists(target)).toHaveLength(count)
+    query.finish()
+    await turn
+  })
+
+  it('shows the memories Claude Code recalled into the turn, cut to size', async () => {
+    const { target, query, turn } = await open()
+    query.emit(
+      system(query, {
+        subtype: 'memory_recall',
+        uuid: 'u1',
+        mode: 'select',
+        memories: [
+          { path: '/home/ada/.claude/projects/-repo/memory/testing.md', scope: 'personal' },
+          {
+            path: '<synthesis:/home/ada/.claude/projects/-repo/memory>',
+            scope: 'team',
+            content: 'x'.repeat(5000),
+          },
+          { path: '', scope: 'personal' },
+          { path: 'https://example.com/m/1', scope: 'odd' },
+        ],
+      }),
+      // A subagent's recall is its own, not the session's.
+      system(query, {
+        subtype: 'memory_recall',
+        uuid: 'u2',
+        agent_id: 'agent-1',
+        mode: 'select',
+        memories: [{ path: '/a.md', scope: 'personal' }],
+      }),
+    )
+    await settle()
+    const recalls = target.entries().filter((entry) => entry.kind === 'recall')
+    expect(recalls).toHaveLength(1)
+    const entry = recalls[0]!
+    expect(entry).toMatchObject({ id: 'mr:u1', action: 'recalled' })
+    if (entry.kind !== 'recall') throw new Error('not a recall')
+    expect(entry.memories.map((memory) => memory.path)).toEqual([
+      '/home/ada/.claude/projects/-repo/memory/testing.md',
+      '<synthesis:/home/ada/.claude/projects/-repo/memory>',
+      'https://example.com/m/1',
+    ])
+    expect(entry.memories[1]!.content).toHaveLength(4000)
+    expect(entry.memories[2]!.scope).toBe('personal')
+    query.finish()
+    await turn
+  })
+
+  it('counts the writes of a turn to the own memory of Claude Code in one line', async () => {
+    const { target, query, turn } = await open({ CLAUDE_CONFIG_DIR: '/home/ada/.claude-work' })
+    const memory = '/home/ada/.claude-work/projects/-repo/memory'
+    const write = (id: string, file: string) => ({
+      type: 'tool_use',
+      id,
+      name: 'Write',
+      input: { file_path: file, content: 'A' },
+    })
+    query.emit(
+      assistant(query, 'msg_m', [
+        write('toolu_1', `${memory}/a.md`),
+        write('toolu_2', `${memory}/MEMORY.md`),
+        write('toolu_3', `${memory}/b.md`),
+        write('toolu_4', '/repo/memory/c.md'),
+        write('toolu_5', `${memory}/d.md`),
+      ]),
+      toolResult(query, 'toolu_1', 'File created.'),
+      toolResult(query, 'toolu_2', 'Updated.'),
+      toolResult(query, 'toolu_3', 'File created.'),
+      toolResult(query, 'toolu_4', 'File created.'),
+      toolResult(query, 'toolu_5', 'Denied.', true),
+    )
+    await settle()
+    const saved = target.entries().filter((entry) => entry.kind === 'recall')
+    expect(saved).toHaveLength(1)
+    expect(saved[0]).toMatchObject({
+      action: 'saved',
+      memories: [
+        { path: `${memory}/a.md`, scope: 'personal' },
+        { path: `${memory}/b.md`, scope: 'personal' },
+      ],
+    })
+    query.finish()
+    await turn
+  })
+
+  it('shows the goal Claude Code checks, how often it checked, and its end', async () => {
+    const { target, query, turn } = await open()
+    const goal = (value: unknown, uuid: string) =>
+      ({ type: 'active_goal', value, uuid, session_id: query.sessionId }) as unknown as SdkMessage
+    const condition = 'All tests\npass'
+    query.emit(
+      goal({ condition, iterations: 0, set_at: 1, tokens_at_start: 0 }, 'g1'),
+      goal(
+        { condition, iterations: 2, set_at: 1, tokens_at_start: 0, last_reason: 'Two fail' },
+        'g2',
+      ),
+    )
+    await settle()
+    const notices = () => target.entries().filter((entry) => entry.kind === 'notice')
+    expect(notices()).toHaveLength(1)
+    expect(notices()[0]).toMatchObject({ id: 'n:goal:g1', severity: 'info' })
+    expect(JSON.stringify(notices()[0])).toContain('All tests pass')
+    expect(JSON.stringify(notices()[0])).toContain('Two fail')
+    query.emit(goal(null, 'g3'), goal(null, 'g4'))
+    await settle()
+    expect(notices()).toHaveLength(2)
+    expect(notices()[1]).toMatchObject({ id: 'n:goal:g3' })
+    query.finish()
+    await turn
+  })
+})

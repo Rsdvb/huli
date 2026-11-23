@@ -411,11 +411,15 @@ When computer use is off, or the system has not given it a permission it needs, 
 
 1. \`computer_list_apps\` lists the running apps with their process ids.
 2. \`computer_list_windows\` lists an app's windows. The first use of an app asks the user.
-3. \`computer_get_window_state\` reads a window: its accessibility tree, each row addressed by an element token \`<snapshot_id>:N\`, and a screenshot. Read narrow first with \`query\`.
-4. Act by token with \`computer_click\`, \`computer_type_text\`, \`computer_scroll\` and \`computer_drag\`, or by the pixels of the latest screenshot for what the tree misses; \`computer_press_key\`, \`computer_hotkey\` and \`computer_invoke_menu\` press keys and choose menu items. Actions reach the window in the background; \`delivery_mode\` \`foreground\` brings it to the front for a click.
+3. \`computer_get_window_state\` reads a window: its accessibility tree, each row addressed by an element token \`<snapshot_id>:N\`, and a screenshot. Read narrow first with \`query\`. When the tree is nearly empty, as in custom-drawn apps and games, the text in the screenshot comes too, read by the system with its boxes in screenshot pixels; ask for it with \`ocr\` when the tree misses what the screenshot shows. A screenshot that came back blank is replaced by a placeholder: do not act on its pixels.
+4. Act by token with \`computer_click\`, \`computer_type_text\`, \`computer_scroll\` and \`computer_drag\`, or by the pixels of the latest screenshot for what the tree misses; \`computer_press_key\`, \`computer_hotkey\` and \`computer_invoke_menu\` press keys and choose menu items. Actions reach the window in the background. An action the app drops there is tried once in the foreground by itself, as the user's settings allow; ask for \`delivery_mode\` \`foreground\` yourself only when a read shows a background action did not land.
 5. After acting, read the window again with \`since\` to get only what changed.
 
 Shortcuts and menu items that quit, log out, lock or shut down are refused.
+
+## Apps run as administrator
+
+\`computer_list_apps\` marks apps that run as administrator. Computer use cannot click or type in them, and says so before you try; reading them may give a blank screenshot. When the task needs one, ask the user to run it normally, or to do that step themselves.
 
 ## Who is operating
 

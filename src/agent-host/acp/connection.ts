@@ -30,6 +30,7 @@ import {
   type ToolCallUpdate,
 } from '@agentclientprotocol/sdk/unstable'
 import type { AgentId, ConfigOption, PermissionOption, ToolEntry } from '@shared/thread'
+import { kiteTasks, KITE_TASKS, KITE_TASKS_META } from './kite-tasks'
 import {
   AgentRequestError,
   optionAnswer,
@@ -395,6 +396,11 @@ export function mcpServers(servers: readonly McpServer[] | undefined): AcpMcpSer
 }
 
 export class AcpConnection implements AgentConnection {
+  // Huli: Kite's own extension for background tasks, set for an agent that declares it.
+  stopTask?: AgentConnection['stopTask']
+  taskOutput?: AgentConnection['taskOutput']
+  toBackground?: AgentConnection['toBackground']
+  cleanTasks?: AgentConnection['cleanTasks']
   private readonly connection: ClientConnection
   private readonly targets = new Map<string, SessionTarget>()
   private readonly pending = new Map<string, { at: number; updates: SessionUpdate[] }>()
@@ -540,6 +546,19 @@ export class AcpConnection implements AgentConnection {
           const account = mapAuthStatus(ctx.params)
           if (account) hooks.account(account)
           else hooks.ignored(null, '_auth/status_update with an unknown shape')
+        },
+      )
+      .onNotification(
+        KITE_TASKS.list,
+        (params: unknown) => params,
+        (ctx) => {
+          const listed = kiteTasks(ctx.params)
+          const target = listed ? this.targets.get(listed.sessionId) : undefined
+          if (!listed || !target) {
+            hooks.ignored(listed?.sessionId ?? null, `${KITE_TASKS.list} for no session`)
+            return
+          }
+          target.apply({ patches: [], effects: listed.effects })
         },
       )
       .onNotification('*', (ctx) => {
@@ -1011,7 +1030,37 @@ export class AcpConnection implements AgentConnection {
       'string'
     this.naming = mcpNaming(init.agentInfo)
     this.removal = hiddenRemoval(this.hooks.agentId, result.capabilities, result.version)
+    if ((caps._meta as Record<string, unknown> | null | undefined)?.[KITE_TASKS_META] === true) {
+      this.takeTasks()
+    }
     return result
+  }
+
+  /** Huli: the calls of Kite's task extension, for an agent that declared it. */
+  private takeTasks(): void {
+    const request = <T>(method: string, params: Record<string, unknown>) =>
+      this.call(() => this.connection.agent.request<T>(method, params))
+    this.stopTask = async (sessionId, taskId) => {
+      await request(KITE_TASKS.stop, { sessionId, taskId })
+    }
+    this.taskOutput = async (sessionId, taskId) => {
+      const answer = await request<{ output?: unknown; truncated?: unknown }>(KITE_TASKS.output, {
+        sessionId,
+        taskId,
+      })
+      const output = typeof answer?.output === 'string' ? answer.output.slice(-8 * 1024) : ''
+      return { output, truncated: answer?.truncated === true }
+    }
+    this.toBackground = async (sessionId, toolCallId) => {
+      const answer = await request<{ moved?: unknown }>(KITE_TASKS.background, {
+        sessionId,
+        ...(toolCallId !== undefined ? { toolCallId } : {}),
+      })
+      return answer?.moved === true
+    }
+    this.cleanTasks = async (sessionId) => {
+      await request(KITE_TASKS.clean, { sessionId })
+    }
   }
 
   private meta(options: SessionOptions): Record<string, unknown> | undefined {

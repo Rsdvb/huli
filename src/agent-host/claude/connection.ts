@@ -1162,6 +1162,8 @@ export class ClaudeConnection implements AgentConnection {
       includePartialMessages: true,
       forwardSubagentText: true,
       perTaskStopAffordance: true,
+      // Huli: a subagent's row says what it does now, in a line its own model writes.
+      ...(!hidden && !bare ? { agentProgressSummaries: true } : {}),
       settingSources: sources,
       systemPrompt: {
         type: 'preset',
@@ -2020,6 +2022,27 @@ export class ClaudeConnection implements AgentConnection {
     }
     this.context.hooks.traffic('out', { method: 'stopTask', sessionId, taskId })
     await query.stopTask(taskId)
+  }
+
+  async toBackground(sessionId: string, toolCallId?: string): Promise<boolean> {
+    const query = this.sessions.get(sessionId)?.query
+    if (!query) throw new AgentRequestError('agent_error', 'Claude Code is not running')
+    if (!query.backgroundTasks) {
+      throw new AgentRequestError('agent_error', t('claude.background.unsupported'))
+    }
+    this.context.hooks.traffic('out', { method: 'backgroundTasks', sessionId, toolCallId })
+    return query.backgroundTasks(toolCallId)
+  }
+
+  async cleanTasks(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    for (const delivery of session.mapper.cleanEnded()) this.deliver(delivery)
+  }
+
+  toolProcess(sessionId: string): number | null {
+    const root = this.children.get(sessionId) ?? sessionId
+    return this.sessions.get(root)?.process?.pid ?? null
   }
 
   async taskOutput(

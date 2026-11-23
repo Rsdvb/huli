@@ -6,6 +6,7 @@ import type {
   ComputerAct,
   ComputerApp,
   ComputerAppAnswer,
+  ComputerAppAsk,
   ComputerAppDecision,
   ComputerControl,
   ComputerFrame,
@@ -27,15 +28,19 @@ import type { Platform } from '@shared/platform'
 import type { ComputerUseView } from '@shared/thread'
 import { t } from '../i18n'
 import type { LogFn } from '../storage'
+import type { ComputerHelperLike, OcrReport, ProcessLevel } from './helper'
 import {
   appIdentity,
   blockedApp,
   refusedMenuItem,
   refusedShortcut,
+  riskyStep,
   type BlockReason,
   type DriverApp,
+  type RiskyStep,
   type SelfApp,
 } from './policy'
+import { isBlankPng, placeholderPng } from './screenshot'
 import { ComputerToolError, computerCall, tokenSnapshot, type ComputerCall } from './tools'
 
 /** A session holds the computer this long after its last call, unless its turn ends first. */
@@ -54,10 +59,28 @@ export const PAUSE_POLL_MS = 500
  */
 export const PAUSE_SETTLE_MS = 1_500
 
+/** A tree this small holds only the window's frame, so its screenshot's text is read too. */
+const DEGRADED_TREE = 5
+/** Lines of recognized text the agent reads; the structured answer keeps them all. */
+const OCR_LINES_SHOWN = 150
+
 /** What runs the driver's tools: `ComputerDriver`, or a stand-in in tests. */
 export interface DriverLike {
   call(tool: string, args: Record<string, unknown>): Promise<CallToolResult>
   stop(): Promise<void>
+}
+
+/** Huli: the elevated broker as the service drives it: `ElevatedDriver`, or a stand-in in tests. */
+export interface ElevatedDriverLike extends DriverLike {
+  readonly running: boolean
+  /** Told once when the broker ends, whoever ended it. */
+  onClosed: (() => void) | null
+}
+
+/** What a card asks beside a first use, and the step a risky one names. */
+export interface ComputerAsk {
+  kind: ComputerAppAsk
+  step: RiskyStep | null
 }
 
 export interface ComputerUseDeps {
@@ -71,8 +94,11 @@ export interface ComputerUseDeps {
   turnRefusal(sessionId: string): string | null
   /** The title a busy error names. */
   sessionTitle(sessionId: string): string
-  /** Shows the first use of an app in the session's thread; the answer comes to `answer`. */
-  asked(sessionId: string, requestId: number, app: ComputerApp): void
+  /**
+   * Shows the first use of an app in the session's thread, or (Huli) `ask`: leave to drive it as
+   * administrator, or to take a risky step there. The answer comes to `answer`.
+   */
+  asked(sessionId: string, requestId: number, app: ComputerApp, ask?: ComputerAsk): void
   /** The wait ended, with its answer, so the card shows it. */
   settled(requestId: number, answer: ComputerAppAnswer): void
   /** Always allow: main adds the app to the settings, which come back to `settings`. */
@@ -100,12 +126,25 @@ export interface ComputerUseDeps {
   agent(sessionId: string): { id: string; name: string }
   /** The hold changed in any way main draws, or ended. */
   held(hold: ComputerHold | null): void
+  /** Huli: Kite's computer use helper, on Windows and macOS; absent elsewhere or without it. */
+  helper?: ComputerHelperLike | null
+  /**
+   * Huli: starts the elevated broker for a process, through Windows' administrator prompt; null
+   * when the user said no there. Absent where there is none.
+   */
+  elevate?: ((pid: number) => Promise<ElevatedDriverLike | null>) | null
+  /** Huli: an action of the session went to the foreground in `app`: the thread notes it once a turn. */
+  foreground?(sessionId: string, app: string): void
+  /** Huli: the user ended the elevated helper: the thread says so. */
+  elevatedStopped?(sessionId: string, app: string): void
   log: LogFn
 }
 
 interface Waiting {
   sessionId: string
   app: ComputerApp
+  /** Huli: set for a card that asks more than a first use, whose answer grants nothing kept. */
+  ask: ComputerAppAsk | null
   timer: ReturnType<typeof setTimeout>
   resolve: (answer: ComputerAppAnswer) => void
 }
@@ -119,7 +158,19 @@ interface Hold {
   /** Who has the app, as last told; the session's surface in `controls` decides it. */
   control: ComputerControl
   act: ComputerAct | null
+  /** Huli: the app the elevated helper drives for the session; null for none. */
+  elevated: string | null
+  /** Huli: counts the session's actions that went to the foreground. */
+  foreground: number | null
   timer: ReturnType<typeof setTimeout> | null
+}
+
+/** Huli: the elevated broker a session drives an app run as administrator through. */
+interface ElevatedRun {
+  app: ComputerApp
+  pid: number
+  driver: ElevatedDriverLike | null
+  starting: Promise<ElevatedDriverLike> | null
 }
 
 /** The check for the user bringing the app the agent uses to the front, while the agent has it. */
@@ -143,6 +194,8 @@ interface WindowRead {
   shot: { width: number; height: number } | null
   /** Element frames in screen points, by their row in the window's latest snapshot. */
   frames: Map<number, Bounds>
+  /** Huli: element labels by their row, for naming a risky click. */
+  labels: Map<number, string>
 }
 
 /** The app a call touches, as the label on the composer shows it. */
@@ -249,6 +302,17 @@ export class ComputerUse {
   private permissionsSeen = false
   private poll: ReturnType<typeof setTimeout> | null = null
   private polling = false
+  /** Huli: the elevated broker of each session that drives an app run as administrator. */
+  private readonly elevatedRuns = new Map<string, ElevatedRun>()
+  /** Huli: apps the user let the session drive as administrator in its running turn. */
+  private readonly elevatedGranted = new Map<string, Set<string>>()
+  /** Huli: sessions whose turn the user ended the elevated helper in. */
+  private readonly elevatedRefused = new Set<string>()
+  /** Huli: apps whose foreground step the thread noted in the session's turn. */
+  private readonly foregroundNoted = new Map<string, Set<string>>()
+  /** Huli: which processes run above Kettu's integrity level, as the helper last said. */
+  private levels: { at: number; map: Map<number, boolean> } | null = null
+  private foregroundSeq = 0
 
   constructor(private readonly deps: ComputerUseDeps) {
     this.controls = new SurfaceControls({
@@ -312,12 +376,24 @@ export class ComputerUse {
     this.deps.stopped(sessionId)
   }
 
+  /** Huli: the elevated helper's badge's Stop: it ends, and the turn may not start it again. */
+  stopElevated(sessionId: string): void {
+    const run = this.elevatedRuns.get(sessionId)
+    if (!run) return
+    this.elevatedRefused.add(sessionId)
+    void this.endElevated(sessionId)
+    this.deps.elevatedStopped?.(sessionId, run.app.name)
+  }
+
   /** The session's turn ended: it lets go of the computer, and its next turn starts afresh. */
   turnEnded(sessionId: string): void {
     const setup = this.setups.get(sessionId)
     if (setup) this.settleSetup(setup, 'timeout')
     this.stopped.delete(sessionId)
     this.denied.delete(sessionId)
+    this.elevatedGranted.delete(sessionId)
+    this.elevatedRefused.delete(sessionId)
+    this.foregroundNoted.delete(sessionId)
     this.notSetUp.delete(sessionId)
     this.settleSession(sessionId)
     this.release(sessionId)
@@ -334,7 +410,11 @@ export class ComputerUse {
     // A setup waiting on the switch goes on at once rather than at its next check.
     if (this.setups.size > 0) void this.check()
     this.syncWatch()
-    if (this.deps.settings().enabled) return
+    const settings = this.deps.settings()
+    if (!settings.allowElevated) {
+      for (const sessionId of [...this.elevatedRuns.keys()]) void this.endElevated(sessionId)
+    }
+    if (settings.enabled) return
     for (const requestId of [...this.waiting.keys()]) this.settle(requestId, 'timeout')
     if (this.hold) this.release(this.hold.sessionId)
     void this.deps.driver?.stop()
@@ -398,6 +478,8 @@ export class ComputerUse {
     for (const setup of [...this.setups.values()]) this.settleSetup(setup, 'timeout')
     for (const requestId of [...this.waiting.keys()]) this.settle(requestId, 'timeout')
     if (this.hold) this.release(this.hold.sessionId)
+    await Promise.all([...this.elevatedRuns.keys()].map((sessionId) => this.endElevated(sessionId)))
+    this.deps.helper?.stop()
     await this.deps.driver?.stop()
   }
 
@@ -440,8 +522,28 @@ export class ComputerUse {
     ) {
       throw invalidToken()
     }
-    await this.approve(sessionId, app)
+    // Huli: an app run as administrator is refused up front, or, as the user allowed, driven
+    // through the elevated helper, in the background only and with risky steps confirmed.
+    const settings = this.deps.settings()
+    const elevated = call.tool !== 'computer_list_windows' && (await this.isElevated(call.pid))
+    const viaElevated = elevated && settings.allowElevated && !!this.deps.elevate
+    if (elevated && !viaElevated && call.acts) throw elevatedError(app, !!this.deps.elevate)
+    const foreground = call.args.delivery_mode === 'foreground'
+    if (viaElevated && foreground) {
+      throw new ComputerToolError(
+        'elevated',
+        `${app.name} runs as administrator, where computer use acts in the background only.`,
+      )
+    }
+    if (foreground && call.acts && !settings.allowForeground) throw foregroundOff()
+    if (viaElevated) await this.approveElevated(sessionId, app)
+    else await this.approve(sessionId, app)
     // The user may have pressed Stop, or another session taken over, while the card waited.
+    if (this.stopped.has(sessionId)) throw stoppedError()
+    const target: DriverLike = viaElevated
+      ? await this.elevatedDriver(sessionId, app, call.pid)
+      : driver
+    if (viaElevated && call.acts) await this.confirmRisky(sessionId, app, call)
     if (this.stopped.has(sessionId)) throw stoppedError()
     const using: Using = { name: app.name, path, action: call.acts ? 'act' : 'read' }
     this.take(sessionId, using, call)
@@ -463,12 +565,13 @@ export class ComputerUse {
         read && call.args.include_accessibility_tree !== false
           ? { ...call.args, tree_format: 'both' }
           : call.args
-      const result = await driver.call(call.driverTool, args)
+      const result = await this.deliver(sessionId, app.name, target, call, args, !viaElevated)
       if (read && call.windowId !== null) {
         this.remember(result, call.pid, call.windowId, call.args.since !== undefined)
         this.titled(call.pid, call.windowId)
       }
-      return passed(result)
+      const answer = passed(result)
+      return read ? await this.enrich(answer, call, elevated && !viaElevated ? app : null) : answer
     } finally {
       this.quietSince = Math.max(this.quietSince, Date.now())
       end()
@@ -590,6 +693,8 @@ export class ComputerUse {
       window: null,
       control: 'agent',
       act: null,
+      elevated: null,
+      foreground: null,
       timer: null,
     }
     this.arm(next)
@@ -642,6 +747,7 @@ export class ComputerUse {
       control: hold.control,
       window: hold.window ? { id: hold.window.id, title: hold.window.title } : null,
       act: hold.act,
+      elevated: hold.elevated,
     })
     const agent = this.deps.agent(hold.sessionId)
     this.deps.held({
@@ -653,6 +759,8 @@ export class ComputerUse {
       window: hold.window,
       control: hold.control,
       act: hold.act,
+      elevated: hold.elevated,
+      foreground: hold.foreground,
     })
   }
 
@@ -666,6 +774,10 @@ export class ComputerUse {
     this.controls.turnEnded(sessionId)
     this.deps.using(sessionId, null)
     this.deps.held(null)
+    // Huli: the elevated helper and Kite's own helper end with the session's use of the computer.
+    void this.endElevated(sessionId)
+    this.deps.helper?.stop()
+    this.levels = null
   }
 
   /**
@@ -779,13 +891,14 @@ export class ComputerUse {
     throw notAllowed(app, answer)
   }
 
-  private ask(sessionId: string, app: ComputerApp): Promise<ComputerAppAnswer> {
+  private ask(sessionId: string, app: ComputerApp, ask?: ComputerAsk): Promise<ComputerAppAnswer> {
     const requestId = this.nextRequest++
     return new Promise<ComputerAppAnswer>((resolve) => {
       const timer = setTimeout(() => this.settle(requestId, 'timeout'), COMPUTER_APP_WAIT_MS)
       timer.unref?.()
-      this.waiting.set(requestId, { sessionId, app, timer, resolve })
-      this.deps.asked(sessionId, requestId, app)
+      this.waiting.set(requestId, { sessionId, app, ask: ask?.kind ?? null, timer, resolve })
+      if (ask) this.deps.asked(sessionId, requestId, app, ask)
+      else this.deps.asked(sessionId, requestId, app)
     })
   }
 
@@ -795,7 +908,9 @@ export class ComputerUse {
     this.waiting.delete(requestId)
     clearTimeout(waiting.timer)
     const { sessionId, app } = waiting
-    if (answer === 'session' || answer === 'always') {
+    if (waiting.ask) {
+      // An elevated or risky card's answer is its caller's alone to keep.
+    } else if (answer === 'session' || answer === 'always') {
       const apps = this.granted.get(sessionId) ?? new Set<string>()
       apps.add(app.id)
       this.granted.set(sessionId, apps)
@@ -848,21 +963,318 @@ export class ComputerUse {
 
   private async listApps(driver: DriverLike): Promise<CallToolResult> {
     this.apps = null
+    this.levels = null
     const apps = await this.listedApps(driver)
+    const elevated = await this.levelsOf(apps.map((app) => app.pid))
     const rows = apps.flatMap((found) => {
       const app = appIdentity(found, this.deps.platform)
       if (!app) return []
       const blocked = blockedApp(app, found.pid, this.deps.self)
-      return [{ name: app.name, pid: found.pid, id: app.id, available: blocked === null }]
+      const admin = blocked === null && elevated.get(found.pid) === true
+      return [
+        {
+          name: app.name,
+          pid: found.pid,
+          id: app.id,
+          available: blocked === null,
+          ...(admin ? { elevated: true } : {}),
+        },
+      ]
     })
     const lines = rows.map(
-      (row) => `- ${row.name} (pid ${row.pid})${row.available ? '' : ' — not available'}`,
+      (row) =>
+        `- ${row.name} (pid ${row.pid})${
+          !row.available
+            ? ' — not available'
+            : row.elevated
+              ? ' — runs as administrator (管理员权限运行，普通权限无法操作)'
+              : ''
+        }`,
     )
+    const notes = ['Apps marked not available are never used.']
+    if (rows.some((row) => row.elevated)) {
+      notes.push(
+        this.deps.settings().allowElevated && this.deps.elevate
+          ? 'Apps marked as administrator run with administrator rights, which computer use ' +
+              'lacks; using one asks the user to allow it and to confirm Windows’ administrator ' +
+              'prompt.'
+          : 'Apps marked as administrator run with administrator rights, which computer use ' +
+              'lacks, so Windows keeps it from clicking or typing there. Ask the user to run the ' +
+              'app normally if you need it.',
+      )
+    }
     const text =
       rows.length === 0
         ? 'No apps are running.'
-        : `Running apps:\n${lines.join('\n')}\n\nApps marked not available are never used.`
+        : `Running apps:\n${lines.join('\n')}\n\n${notes.join(' ')}`
     return { content: [{ type: 'text', text }], structuredContent: { apps: rows } }
+  }
+
+  /** Huli: whether a process runs above Kettu's integrity level, which Windows keeps it from driving. */
+  private async isElevated(pid: number): Promise<boolean> {
+    return (await this.levelsOf([pid])).get(pid) === true
+  }
+
+  /** Huli: which of these processes run above Kettu's integrity level, as the helper tells. */
+  private async levelsOf(pids: number[]): Promise<Map<number, boolean>> {
+    const helper = this.deps.helper
+    if (this.deps.platform !== 'win32' || !helper || pids.length === 0) return new Map()
+    const now = Date.now()
+    if (!this.levels || now - this.levels.at >= APPS_FRESH_MS) {
+      this.levels = { at: now, map: new Map() }
+    }
+    const known = this.levels.map
+    const missing = [...new Set(pids)].filter((pid) => !known.has(pid))
+    if (missing.length > 0) {
+      try {
+        const report = await helper.elevation(missing)
+        for (const pid of missing) known.set(pid, above(report.pids[String(pid)], report.self))
+      } catch (error) {
+        this.deps.log('warn', `Computer use could not tell elevated apps: ${String(error)}`)
+      }
+    }
+    return known
+  }
+
+  /** Huli: the user's leave to drive an app as administrator in this turn, asked on its card. */
+  private async approveElevated(sessionId: string, app: ComputerApp): Promise<void> {
+    if (this.elevatedRefused.has(sessionId)) throw elevatedEnded(app)
+    if (this.elevatedGranted.get(sessionId)?.has(app.id)) return
+    // A no on the card holds for the rest of the turn, as a first use's does.
+    const deniedKey = `elevated:${app.id}`
+    if (this.denied.get(sessionId)?.has(deniedKey)) throw elevatedDenied(app)
+    const key = `${sessionId}\n${app.id}\nelevated`
+    let asking = this.asking.get(key)
+    if (!asking) {
+      asking = this.ask(sessionId, app, { kind: 'elevated', step: null }).finally(() =>
+        this.asking.delete(key),
+      )
+      this.asking.set(key, asking)
+    }
+    const answer = await asking
+    if (answer === 'session' || answer === 'always') {
+      const apps = this.elevatedGranted.get(sessionId) ?? new Set<string>()
+      apps.add(app.id)
+      this.elevatedGranted.set(sessionId, apps)
+      return
+    }
+    if (this.stopped.has(sessionId)) throw stoppedError()
+    if (answer === 'timeout') {
+      throw new ComputerToolError(
+        'not_allowed',
+        `The user did not answer whether computer use may drive ${app.name} as administrator.`,
+      )
+    }
+    const denied = this.denied.get(sessionId) ?? new Set<string>()
+    denied.add(deniedKey)
+    this.denied.set(sessionId, denied)
+    throw elevatedDenied(app)
+  }
+
+  /**
+   * Huli: the elevated broker for the session's app, started through Windows' administrator
+   * prompt the first time; one app at a time, so another app's broker ends first.
+   */
+  private async elevatedDriver(
+    sessionId: string,
+    app: ComputerApp,
+    pid: number,
+  ): Promise<ElevatedDriverLike> {
+    let run = this.elevatedRuns.get(sessionId)
+    if (run && run.pid !== pid) {
+      await this.endElevated(sessionId)
+      run = undefined
+    }
+    if (run?.driver?.running) return run.driver
+    if (run?.starting) return run.starting
+    // The switch may have gone off while the card waited.
+    if (!this.deps.settings().allowElevated) throw elevatedError(app, true)
+    const elevate = this.deps.elevate!
+    const starting = elevate(pid).then((driver) => {
+      if (driver) return driver
+      // A no at the prompt counts as a no on the card for the rest of the turn.
+      this.elevatedGranted.get(sessionId)?.delete(app.id)
+      throw new ComputerToolError(
+        'not_allowed',
+        `The user did not confirm Windows’ administrator prompt for ${app.name}.`,
+      )
+    })
+    const next: ElevatedRun = { app, pid, driver: null, starting }
+    this.elevatedRuns.set(sessionId, next)
+    let driver: ElevatedDriverLike
+    try {
+      driver = await starting
+    } catch (error) {
+      if (this.elevatedRuns.get(sessionId) === next) this.elevatedRuns.delete(sessionId)
+      if (error instanceof ComputerToolError) throw error
+      throw new ComputerToolError(
+        'failed',
+        `The administrator helper for ${app.name} did not start: ${(error as Error)?.message ?? String(error)}`,
+      )
+    }
+    if (this.elevatedRuns.get(sessionId) !== next) {
+      // The session let go, or the user stopped it, while the prompt waited.
+      await driver.stop()
+      throw this.stopped.has(sessionId) ? stoppedError() : elevatedEnded(app)
+    }
+    next.driver = driver
+    next.starting = null
+    driver.onClosed = () => {
+      if (this.elevatedRuns.get(sessionId) !== next) return
+      this.elevatedRuns.delete(sessionId)
+      this.showElevated(sessionId)
+    }
+    this.showElevated(sessionId)
+    return driver
+  }
+
+  /** Huli: ends the session's elevated broker, if it has one. */
+  private async endElevated(sessionId: string): Promise<void> {
+    const run = this.elevatedRuns.get(sessionId)
+    if (!run) return
+    this.elevatedRuns.delete(sessionId)
+    this.showElevated(sessionId)
+    await run.driver?.stop()
+  }
+
+  /** Huli: the badge follows whether the session's elevated broker runs. */
+  private showElevated(sessionId: string): void {
+    const hold = this.hold
+    if (hold?.sessionId !== sessionId) return
+    const run = this.elevatedRuns.get(sessionId)
+    const elevated = run?.driver?.running ? run.app.name : null
+    if (hold.elevated === elevated) return
+    hold.elevated = elevated
+    this.emit(hold)
+  }
+
+  /** Huli: asks the user before a risky step in an app run as administrator. */
+  private async confirmRisky(
+    sessionId: string,
+    app: ComputerApp,
+    call: ComputerCall,
+  ): Promise<void> {
+    const step = riskyStep(call, this.labelOf(call))
+    if (!step) return
+    const answer = await this.ask(sessionId, app, { kind: 'risky', step })
+    if (answer === 'session' || answer === 'always') return
+    if (this.stopped.has(sessionId)) throw stoppedError()
+    throw new ComputerToolError(
+      'not_allowed',
+      answer === 'timeout'
+        ? 'The user did not confirm that step in time, so it was not taken.'
+        : 'The user did not allow that step, so it was not taken. Ask them how to go on.',
+    )
+  }
+
+  /** The label of the element a click's token names, from its window's latest read. */
+  private labelOf(call: ComputerCall): string | null {
+    if (!call.elementToken || call.pid === null || call.windowId === null) return null
+    const read = this.windows.get(windowKey(call.pid, call.windowId))
+    const row = Number(call.elementToken.slice(call.elementToken.indexOf(':') + 1))
+    return read?.labels.get(row) ?? null
+  }
+
+  /**
+   * Huli: runs an action, and once more in the foreground when the app dropped it in the
+   * background and the user allows that; an action in the foreground is noted in the thread once
+   * a turn and on the floating label each time.
+   */
+  private async deliver(
+    sessionId: string,
+    app: string,
+    driver: DriverLike,
+    call: ComputerCall,
+    args: Record<string, unknown>,
+    mayEscalate: boolean,
+  ): Promise<CallToolResult> {
+    const asked = args.delivery_mode === 'foreground'
+    if (call.acts && asked) this.wentForeground(sessionId, app)
+    const result = await driver.call(call.driverTool, args)
+    if (!call.acts) return result
+    if (!asked && deliveredInForeground(result)) this.wentForeground(sessionId, app)
+    if (asked || !mayEscalate || !needsForeground(result)) return result
+    if (!this.deps.settings().allowForeground) return withNote(result, NOT_ESCALATED)
+    this.wentForeground(sessionId, app)
+    const retried = await driver.call(call.driverTool, { ...args, delivery_mode: 'foreground' })
+    return withNote(retried, ESCALATED)
+  }
+
+  private wentForeground(sessionId: string, app: string): void {
+    // The app coming forward now is the agent's doing, not the user taking it over.
+    this.quietSince = Math.max(this.quietSince, Date.now() + PAUSE_SETTLE_MS)
+    const hold = this.hold
+    if (hold?.sessionId === sessionId) {
+      hold.foreground = ++this.foregroundSeq
+      this.emit(hold)
+    }
+    const noted = this.foregroundNoted.get(sessionId) ?? new Set<string>()
+    if (noted.has(app)) return
+    noted.add(app)
+    this.foregroundNoted.set(sessionId, noted)
+    this.deps.foreground?.(sessionId, app)
+  }
+
+  /**
+   * Huli: a read's screenshot that came back blank or not at all gives way to a placeholder and a
+   * note; and the screenshot's text, read by the system, comes too when the agent asked or the tree
+   * holds no more than the window's frame.
+   */
+  private async enrich(
+    result: CallToolResult,
+    call: ComputerCall,
+    elevatedApp: ComputerApp | null,
+  ): Promise<CallToolResult> {
+    if (result.isError) return result
+    const content = [...result.content]
+    const data: Record<string, unknown> = { ...result.structuredContent }
+    const notes: string[] = []
+    const index = content.findIndex((item) => item.type === 'image')
+    let shot = index >= 0 && content[index]!.type === 'image' ? content[index] : null
+    if (call.args.include_screenshot !== false) {
+      const blank =
+        shot?.type === 'image' && shot.mimeType === 'image/png'
+          ? await isBlankPng(Buffer.from(shot.data, 'base64'))
+          : null
+      if (!shot || blank) {
+        const picture = {
+          type: 'image' as const,
+          mimeType: 'image/png',
+          data: await placeholderPng(),
+        }
+        if (index >= 0) content[index] = picture
+        else content.push(picture)
+        data.screenshot = shot ? 'blank' : 'missing'
+        notes.push(shot ? BLANK_SHOT : MISSING_SHOT)
+        shot = null
+      }
+    }
+    if (elevatedApp) notes.push(elevatedRead(elevatedApp))
+    const count = data.total_element_count ?? data.element_count
+    const degraded =
+      typeof count === 'number' &&
+      count <= DEGRADED_TREE &&
+      call.args.query === undefined &&
+      call.args.since === undefined
+    if (call.ocr === true || (call.ocr !== false && degraded && shot)) {
+      const helper = this.deps.helper
+      if (shot?.type !== 'image') {
+        if (call.ocr === true) notes.push('No text was read: there is no screenshot to read.')
+      } else if (!helper) {
+        if (call.ocr === true) notes.push('Text recognition is not available on this computer.')
+      } else {
+        try {
+          const report = await helper.ocr(shot.data)
+          data.ocr = report.lines
+          notes.push(ocrText(report))
+        } catch (error) {
+          notes.push(`Text recognition failed: ${(error as Error)?.message ?? String(error)}`)
+        }
+      }
+    }
+    if (notes.length === 0) return result
+    content.push({ type: 'text', text: notes.join('\n\n') })
+    return { ...result, content, structuredContent: data }
   }
 
   /**
@@ -886,6 +1298,7 @@ export class ComputerUse {
     const width = found.screenshot_width
     const height = found.screenshot_height
     const read: WindowRead = {
+      labels: diff && before ? new Map(before.labels) : new Map(),
       title: typeof found.window_title === 'string' ? found.window_title : (before?.title ?? null),
       bounds: boundsOf(found.window_bounds) ?? before?.bounds ?? null,
       shot:
@@ -896,9 +1309,12 @@ export class ComputerUse {
     }
     if (Array.isArray(found.elements)) {
       for (const element of found.elements as unknown[]) {
-        const e = element as { element_index?: unknown; frame?: unknown } | null
+        const e = element as { element_index?: unknown; frame?: unknown; label?: unknown } | null
         const frame = frameOf(e?.frame)
         if (typeof e?.element_index === 'number' && frame) read.frames.set(e.element_index, frame)
+        if (typeof e?.element_index === 'number' && typeof e.label === 'string') {
+          read.labels.set(e.element_index, e.label)
+        }
       }
       delete found.elements
     }
@@ -906,6 +1322,85 @@ export class ComputerUse {
     this.windows.set(key, read)
     if (this.windows.size > WINDOWS_KEPT) this.windows.delete(this.windows.keys().next().value!)
   }
+}
+
+/** Huli: whether a process runs above Kettu's level: by integrity, else by elevation. */
+function above(level: ProcessLevel | undefined, self: number | null): boolean {
+  if (!level) return false
+  if (level.integrity !== null && self !== null) return level.integrity > self
+  return level.elevated === true
+}
+
+/** Huli: whether the driver refused an action it cannot deliver in the background. */
+export function needsForeground(result: CallToolResult): boolean {
+  const data = result.structuredContent as Record<string, unknown> | undefined
+  if (!data) return false
+  if (data.code === 'background_unavailable') return true
+  const escalation = data.escalation as { target?: unknown; recommended?: unknown } | undefined
+  return (
+    data.effect === 'refused' &&
+    (escalation?.target === 'foreground' || escalation?.recommended === 'foreground')
+  )
+}
+
+/** Huli: whether the driver brought the window forward for an action asked in the background. */
+function deliveredInForeground(result: CallToolResult): boolean {
+  const delivery = (result.structuredContent as { delivery?: { mode?: unknown } } | undefined)
+    ?.delivery
+  return !result.isError && delivery?.mode === 'foreground'
+}
+
+function withNote(result: CallToolResult, note: string): CallToolResult {
+  return { ...result, content: [...result.content, { type: 'text', text: note }] }
+}
+
+const ESCALATED =
+  'The app dropped this action in the background, so Kettu tried it once more in the foreground: ' +
+  'the window came to the front for the action and the front went back. The result above is ' +
+  'that try’s; read the window to see what it did.'
+
+const NOT_ESCALATED =
+  'The app drops this action in the background, and the user’s settings keep computer use from ' +
+  'bringing the window to the front, so it was not tried there. Find another way, such as an ' +
+  'element_token or a menu item, or tell the user what needs the foreground.'
+
+const BLANK_SHOT =
+  'The screenshot came back as one solid color, so a placeholder stands in for it: the window ' +
+  'may be minimized, protected from capture, running as administrator or drawn by the graphics ' +
+  'card where Windows cannot capture it. Do not act on its pixels; use the tree, or ask the user.'
+
+const MISSING_SHOT =
+  'No screenshot came back for this window, so a placeholder stands in for it. Use the tree, or ' +
+  'read the window again.'
+
+function elevatedRead(app: ComputerApp): string {
+  return (
+    `${app.name} runs as administrator (管理员权限运行，普通权限无法操作): computer use can read ` +
+    'some of it but cannot click or type there.'
+  )
+}
+
+/** The recognized lines as the agent reads them. */
+function ocrText(report: OcrReport): string {
+  if (report.lines.length === 0)
+    return 'The system’s text recognition found no text in the screenshot.'
+  const lines = report.lines
+    .slice(0, OCR_LINES_SHOWN)
+    .map(
+      (line) =>
+        `- ${JSON.stringify(line.text)} at x ${Math.round(line.x)}, y ${Math.round(line.y)}, ` +
+        `${Math.round(line.width)}×${Math.round(line.height)}`,
+    )
+  const more =
+    report.lines.length > OCR_LINES_SHOWN
+      ? `\n…and ${report.lines.length - OCR_LINES_SHOWN} more lines in the structured result.`
+      : ''
+  return (
+    'Text in the screenshot, read by the system’s text recognition (boxes in screenshot pixels ' +
+    'from the top left; click a line by the x and y of its middle):\n' +
+    lines.join('\n') +
+    more
+  )
 }
 
 /** The process of the app in front, from a `list_apps` result; null when none says it is. */
@@ -995,6 +1490,41 @@ function stillTheirs(app: string): CallToolResult {
     content: [{ type: 'text', text: message }],
     structuredContent: { code: 'user_has_control', message },
   }
+}
+
+function elevatedError(app: ComputerApp, canAsk: boolean): ComputerToolError {
+  return new ComputerToolError(
+    'elevated',
+    `${app.name} runs as administrator (管理员权限运行，普通权限无法操作): computer use runs ` +
+      'without administrator rights, so Windows does not let it click or type there. ' +
+      (canAsk
+        ? 'Ask the user to run it normally, or, if they want you to drive it as administrator, to ' +
+          'turn on “Allow operating chosen programs as administrator” in Settings › Computer use.'
+        : 'Ask the user to run it normally, or to do this step themselves.'),
+  )
+}
+
+function elevatedDenied(app: ComputerApp): ComputerToolError {
+  return new ComputerToolError(
+    'not_allowed',
+    `The user did not allow driving ${app.name} as administrator in this turn.`,
+  )
+}
+
+function elevatedEnded(app: ComputerApp): ComputerToolError {
+  return new ComputerToolError(
+    'not_allowed',
+    `The user ended administrator access to ${app.name} for this turn. Do not try it again until ` +
+      'they send another message.',
+  )
+}
+
+function foregroundOff(): ComputerToolError {
+  return new ComputerToolError(
+    'not_allowed',
+    'The user’s settings keep computer use in the background, so this action cannot be sent in ' +
+      'the foreground. Try it in the background, or find another way.',
+  )
 }
 
 function stoppedError(): ComputerToolError {
