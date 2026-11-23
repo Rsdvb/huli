@@ -300,7 +300,12 @@ export function startRemoteHost(
         changed,
         drained: () => regions?.hostDrained(),
         failed: () => regions?.regionFailed(),
-        connected: (region, ok) => regions?.hostConnected(region, ok),
+        connected: (region, ok) => {
+          regions?.hostConnected(region, ok)
+          // Huli: this computer reaches the relay again, so the hosts it could not reach may be
+          // reached now too.
+          if (ok) client?.nudge()
+        },
         measured: (region, rtt) => regions?.hostMeasured(region, rtt),
         legsChanged: () => server.regionsChanged(),
         log,
@@ -611,6 +616,9 @@ export function startRemoteHost(
         withServing(({ direct }) => direct.checkAddresses())
         withRunning(() => client?.resume())
         break
+      case 'remote-host:nudge':
+        withRunning(() => client?.nudge())
+        break
       case 'remote-host:rename-device':
         if (typeof message.id === 'string') {
           withServing(async ({ server: s }) => {
@@ -714,6 +722,9 @@ export function startRemoteHost(
       case 'remote-host:presence':
         if (typeof message.present === 'boolean') {
           const now = message.present
+          // Huli: the user came back to this computer, where a host that came back meanwhile
+          // should show connected.
+          if (now && present === false) withRunning(() => client?.nudge())
           present = now
           withServing(({ notifications }) => notifications?.setPresent(now))
         }

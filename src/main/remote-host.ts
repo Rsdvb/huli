@@ -419,6 +419,11 @@ export class RemoteHost {
     this.host?.post({ type: 'remote-host:resume' })
   }
 
+  /** Huli: a window was focused: the hosts not connected are tried now, unless just tried. */
+  nudge(): void {
+    this.host?.post({ type: 'remote-host:nudge' })
+  }
+
   /** Renames a device, which its sessions hear; false when it could not. */
   renameDevice(id: string, name: string): Promise<boolean> {
     return this.withDevices(

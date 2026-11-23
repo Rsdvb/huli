@@ -1406,6 +1406,9 @@ async function start(): Promise<void> {
     agentHost.power('resume')
     remoteHost.resume()
   })
+  // Huli: the user looks at the app again, so a host that came back meanwhile is tried now rather
+  // than at the end of its backoff, which reaches a minute.
+  app.on('browser-window-focus', () => remoteHost.nudge())
 
   agentHost.start()
   backup.start()
