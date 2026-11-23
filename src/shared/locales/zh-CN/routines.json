@@ -255,9 +255,9 @@
     "deleted": "这个定时任务已被删除。",
     "backToRoutines": "返回定时任务",
     "deleteTitle": "删除 {{name}}？",
-    "deleteWithSessions_one": "它的 {{count}} 个运行会话会一并删除。",
-    "deleteWithSessions_other": "它的 {{count}} 个运行会话会一并删除。",
-    "deleteNoSessions": "它没有运行会话。",
+    "deleteWithSessions_one": "它和它的 {{count}} 个运行会话会移到回收站，可以在 设置 › 回收站 里恢复。",
+    "deleteWithSessions_other": "它和它的 {{count}} 个运行会话会移到回收站，可以在 设置 › 回收站 里恢复。",
+    "deleteNoSessions": "它会移到回收站，可以在 设置 › 回收站 里恢复。",
     "deleteConfirm": "删除",
     "deleteFailed": "无法删除定时任务：{{error}}"
   },

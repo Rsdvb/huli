@@ -256,9 +256,9 @@
     "deleted": "This routine was deleted.",
     "backToRoutines": "Back to Routines",
     "deleteTitle": "Delete {{name}}?",
-    "deleteWithSessions_one": "Its {{count}} run session is deleted with it.",
-    "deleteWithSessions_other": "Its {{count}} run sessions are deleted with it.",
-    "deleteNoSessions": "It has no run sessions.",
+    "deleteWithSessions_one": "It and its {{count}} run session move to the recycle bin, where you can restore them from Settings › Recycle bin.",
+    "deleteWithSessions_other": "It and its {{count}} run sessions move to the recycle bin, where you can restore them from Settings › Recycle bin.",
+    "deleteNoSessions": "It moves to the recycle bin, where you can restore it from Settings › Recycle bin.",
     "deleteConfirm": "Delete",
     "deleteFailed": "The routine could not be deleted: {{error}}"
   },

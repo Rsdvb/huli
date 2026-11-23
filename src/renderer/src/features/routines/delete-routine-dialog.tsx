@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { binKey } from '@shared/recycle-bin'
 import type { RoutineView } from '@shared/routines'
 import {
   AlertDialog,
@@ -13,7 +14,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@renderer/components/ui/alert-dialog'
-import { errorMessage } from '@renderer/lib/host'
+import { binnedToast, movedTitle } from '@renderer/features/recycle-bin/undo'
+import { errorMessage, routineHost } from '@renderer/lib/host'
 import { useRoutinesStore } from '@renderer/stores/routines'
 
 export function DeleteRoutineDialog({
@@ -35,9 +37,12 @@ export function DeleteRoutineDialog({
     setDeleting(true)
     setError(null)
     try {
+      const hostId = routineHost(routine.id)
       await useRoutinesStore.getState().remove(routine.id)
       onOpenChange(false)
       onDeleted?.()
+      // Huli: it waits in the recycle bin with its runs; Undo puts it back.
+      binnedToast(movedTitle(routine.name), [binKey('routine', routine.id)], hostId)
     } catch (failure) {
       setError(errorMessage(failure))
     } finally {

@@ -31,6 +31,7 @@ import {
   AlertDialogTitle,
 } from '@renderer/components/ui/alert-dialog'
 import { toast } from '@renderer/components/ui/toast'
+import { binnedToast, movedTitle } from '@renderer/features/recycle-bin/undo'
 import { Markdown } from '@renderer/features/session/markdown'
 import { fullTime, mediumAgo } from '@renderer/lib/format'
 import { memoryErrorText } from '@renderer/lib/memory-errors'
@@ -290,16 +291,18 @@ function RemoveDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const { t } = useTranslation(['settings', 'common'])
-  const { request } = useHostScope()
+  const { hostId, request } = useHostScope()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const remove = async (): Promise<void> => {
     setBusy(true)
     setError(null)
     try {
-      await request('memory.remove', { scope, id: entry.id })
+      const result = await request('memory.remove', { scope, id: entry.id })
       onOpenChange(false)
-      toast(t('memory.entry.remove.done'))
+      // Huli: it waits in the recycle bin; Undo puts it back.
+      if (result?.binKey) binnedToast(movedTitle(entry.title), [result.binKey], hostId)
+      else toast(t('memory.entry.remove.done'))
       back()
     } catch (failure) {
       setError(memoryErrorText(failure))

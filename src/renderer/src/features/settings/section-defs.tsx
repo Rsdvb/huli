@@ -76,6 +76,7 @@ import {
   HarnessPage,
 } from './harness-section'
 import { ArchivedRow } from './archived-section'
+import { BinKeepDays } from './recycle-bin-section'
 import { CloudSwitchRow, OtherConnections } from './cloud-section'
 import { useCloudOffHere } from './use-cloud-off-here'
 import { DebugModeRow } from './debug-mode'
@@ -197,6 +198,7 @@ export function useGeneralSection(): SectionDef {
     noteFor: 'background',
   })
   const thread = group('thread', t('general.groups.thread'))
+  const bin = group('recycleBin', t('general.groups.recycleBin'))
   const startup = group('startup', t('general.groups.startup'))
   const cloud = group('cloud', t('general.groups.cloud'), {
     note: <GroupNote>{t('general.cloud.note')}</GroupNote>,
@@ -330,6 +332,13 @@ export function useGeneralSection(): SectionDef {
         setting: 'general.keep-awake',
         group: sessions,
         render: () => <GeneralSwitch field="keepAwake" label={t('general.keepAwake.name')} />,
+      },
+      // Huli: how long the recycle bin keeps what was deleted.
+      {
+        id: 'bin-keep-days',
+        setting: 'general.bin-keep-days',
+        group: bin,
+        render: () => <BinKeepDays label={t('general.binKeepDays.name')} />,
       },
       {
         id: 'outline-summaries',

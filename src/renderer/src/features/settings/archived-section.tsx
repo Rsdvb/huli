@@ -157,7 +157,6 @@ function FullRow({
         title={title}
         open={deleting}
         onOpenChange={setDeleting}
-        onDeleted={() => toast(t('archived.deleted'))}
       />
     </div>
   )

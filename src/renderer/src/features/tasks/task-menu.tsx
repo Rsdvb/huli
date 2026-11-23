@@ -10,6 +10,7 @@ import {
   ViewIcon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
+import { binKey } from '@shared/recycle-bin'
 import type { TaskSummary } from '@shared/workflow'
 import {
   AlertDialog,
@@ -28,7 +29,8 @@ import {
 } from '@renderer/components/ui/dropdown-menu'
 import { toast } from '@renderer/components/ui/toast'
 import { Glyph, MenuGlyph } from '@renderer/features/shell/glyph'
-import { errorMessage, host } from '@renderer/lib/host'
+import { errorMessage, host, taskHost } from '@renderer/lib/host'
+import { binnedToast, movedTitle } from '@renderer/features/recycle-bin/undo'
 import { i18n } from '@renderer/lib/i18n'
 import { cn } from '@renderer/lib/utils'
 import { useTasksStore } from '@renderer/stores/tasks'
@@ -180,9 +182,12 @@ export function DeleteTaskDialog({
   const remove = async () => {
     onOpenChange(false)
     try {
+      const hostId = taskHost(task.id)
       await host('tasks.delete', { taskId: task.id })
       useTasksStore.getState().removed(task.id)
       onDeleted?.()
+      // Huli: it waits in the recycle bin with its steps' sessions; Undo puts it back.
+      binnedToast(movedTitle(task.title), [binKey('task', task.id)], hostId)
     } catch (error) {
       toast(errorMessage(error))
     }

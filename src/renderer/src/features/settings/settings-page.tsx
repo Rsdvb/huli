@@ -77,6 +77,7 @@ import {
   useTerminalSection,
   useUsageSection,
 } from './section-defs'
+import { useRecycleBinSection } from './recycle-bin-section'
 import { useComputerUseSection } from './computer-section'
 import { useAgentNetworkSection } from './agent-network-section'
 import { useBackupSection } from './backup-section'
@@ -250,7 +251,13 @@ function SettingsLayout({
       useUsageSection(),
       useGitSection(),
     ],
-    [useArchivedSection(), useArtifactsSection(), useSharingSection(), useTerminalSection()],
+    [
+      useArchivedSection(),
+      useRecycleBinSection(),
+      useArtifactsSection(),
+      useSharingSection(),
+      useTerminalSection(),
+    ],
     [useRemoteSection(), useAdvancedSection()],
     [about],
   ]

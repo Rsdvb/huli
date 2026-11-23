@@ -42,8 +42,8 @@
     "cancelBodyBranch": "正在做的步骤会停下。它们的会话、需求的工作树和分支都留着。",
     "cancelConfirm": "取消需求",
     "keepRunning": "继续做",
-    "deleteBody": "需求和它各步骤的会话删除后无法恢复。归档会保留它们。",
-    "deleteBodyBranch": "需求和它各步骤的会话删除后无法恢复。分支 {{branch}} 和它的工作树会留着。",
+    "deleteBody": "需求和它各步骤的会话会移到回收站，可以在 设置 › 回收站 里恢复。",
+    "deleteBodyBranch": "需求和它各步骤的会话会移到回收站，可以在 设置 › 回收站 里恢复。分支 {{branch}} 和它的工作树会留着。",
     "renameTitle": "重命名需求",
     "archived": "已归档“{{title}}”"
   },

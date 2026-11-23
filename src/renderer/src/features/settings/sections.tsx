@@ -18,6 +18,7 @@ import {
 import { Trans, useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { originLabel } from '@shared/browser'
+import { binKey } from '@shared/recycle-bin'
 import { LOCALES, LOCALE_NAMES, type LanguageSetting } from '@shared/locale'
 import { isPortBase, PORT_BASE_MAX, PORT_BASE_MIN } from '@shared/worktree-ports'
 import {
@@ -84,6 +85,7 @@ import { homeStart } from '@renderer/web/host-path'
 import { askHostPath } from '@renderer/web/host-path-request'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { openReport, useReportStore } from '@renderer/stores/report'
+import { binnedToast } from '@renderer/features/recycle-bin/undo'
 import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
 import { loadSiteIcons, useDefaultBrowser } from '@renderer/stores/site-icons'
 import { loadBrought } from '@renderer/stores/sign-ins'
@@ -1492,9 +1494,13 @@ export function RemoveAll() {
     setBusy(true)
     setError(null)
     try {
+      // Huli: each top-level one waits in the recycle bin with its sub-sessions; Undo puts all back.
+      const keys = Object.values(useSessionsStore.getState().byId)
+        .filter((summary) => hostOfSession(summary) === hostId && summary.parentId === null)
+        .map((summary) => binKey('session', summary.id))
       await request('sessions.removeAll', undefined)
       useSessionsStore.getState().setAll(await request('sessions.list', {}), hostId)
-      toast(t('advanced.removeSessions.removed'))
+      binnedToast(t('advanced.removeSessions.removed'), keys, hostId)
     } catch (e) {
       setError(errorMessage(e))
     } finally {

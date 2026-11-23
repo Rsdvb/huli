@@ -35,7 +35,7 @@
     "rename": "Rename",
     "tooLong": "A folder name can be at most {{count}} characters.",
     "deleteTitle": "Delete the folder “{{name}}”?",
-    "deleteBody": "Its sessions go back to Ungrouped. No session is deleted.",
+    "deleteBody": "The folder moves to the recycle bin and its sessions go back to Ungrouped; no session is deleted. Restored from the bin, it holds them again.",
     "delete": "Delete folder"
   }
 }
