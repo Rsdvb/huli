@@ -4,6 +4,7 @@ import {
   type BeforeDragStartEvent,
   type DragDropManager,
   type DragDropProvider,
+  type DragEndEvent,
 } from '@dnd-kit/react'
 
 type Plugins = NonNullable<ComponentProps<typeof DragDropProvider>['plugins']>
@@ -21,7 +22,7 @@ export const lightPlugins: Plugins = (defaults) =>
 const clearSelection = (): void => getSelection()?.removeAllRanges()
 
 // The element a pointer drag holds the pointer capture on, and its own cursor before the drag.
-let held: { element: HTMLElement; cursor: string } | null = null
+let held: { element: HTMLElement; pointerId: number; cursor: string } | null = null
 
 /**
  * The pointer sensor gives the body the pointer capture, which takes the hover off everything the
@@ -35,7 +36,7 @@ function holdPointer(element: HTMLElement, pointerId: number): void {
   } catch {
     return
   }
-  held = { element, cursor: element.style.cursor }
+  held = { element, pointerId, cursor: element.style.cursor }
   element.style.cursor = 'grabbing'
 }
 
@@ -54,12 +55,22 @@ function dragStarting(event: BeforeDragStartEvent, manager: DragDropManager): vo
   })
 }
 
-function dragEnded(): void {
+function dragEnded(event: DragEndEvent): void {
   document.removeEventListener('selectionchange', clearSelection, { capture: true })
   if (!held) return
-  const { element, cursor } = held
+  const { element, pointerId, cursor } = held
   held = null
   element.style.cursor = cursor
+  if (event.nativeEvent?.type !== 'pointerup') {
+    // Canceled with the button still down: the body takes the capture back, so the release clicks
+    // nothing, as the sensor expects.
+    try {
+      document.body.setPointerCapture(pointerId)
+    } catch {
+      // The pointer is up already.
+    }
+    return
+  }
   // The click that follows the release lands on the dragged element, which the sensor only
   // expects of the body; it is no click on that element.
   const swallow = (click: MouseEvent) => {
