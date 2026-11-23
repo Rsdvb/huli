@@ -4,6 +4,7 @@ import {
   Archive01Icon,
   ComputerTerminal01Icon,
   DashboardSquare02Icon,
+  Delete02Icon,
   GitBranchIcon,
   Globe02Icon,
   InformationCircleIcon,
@@ -76,7 +77,7 @@ import {
   HarnessPage,
 } from './harness-section'
 import { ArchivedRow } from './archived-section'
-import { BinKeepDays } from './recycle-bin-section'
+import { BinKeepDays, RecycleBinPage } from './recycle-bin-section'
 import { CloudSwitchRow, OtherConnections } from './cloud-section'
 import { useCloudOffHere } from './use-cloud-off-here'
 import { DebugModeRow } from './debug-mode'
@@ -1311,6 +1312,32 @@ export function useArchivedSection(): SectionDef {
     footer: archived.length === 0 && (
       <EmptyCard title={t('archived.emptyTitle')} hint={t('archived.emptyHint')} />
     ),
+  }
+}
+
+/** Huli: Settings › 回收站, the recycle bin, which reads it only while it shows. */
+export function useRecycleBinSection(): SectionDef {
+  const { t } = useTranslation('settings')
+  const list: GroupDef = {
+    id: 'recycle-bin',
+    label: t('recycleBin.group'),
+    unlabeled: true,
+    plain: true,
+  }
+  return {
+    id: 'recycle-bin',
+    title: t('sections.recycle-bin'),
+    description: t('pages.recycle-bin'),
+    icon: Delete02Icon,
+    rows: [
+      {
+        id: 'recycle-bin',
+        setting: 'recycle-bin.items',
+        group: list,
+        layout: 'bare',
+        render: () => <RecycleBinPage />,
+      },
+    ],
   }
 }
 

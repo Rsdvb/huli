@@ -61,7 +61,6 @@ import {
   SettingSelect,
   Skel,
 } from './controls'
-import type { GroupDef, SectionDef } from './model'
 import { EmptyCard, Thing } from './rows'
 import { useApply } from './use-apply'
 
@@ -80,31 +79,6 @@ const KIND_ICON: Record<BinKind, IconSvgElement> = {
 const PAGE_ROWS = 100
 
 type Filter = BinKind | 'all'
-
-export function useRecycleBinSection(): SectionDef {
-  const { t } = useTranslation('settings')
-  const list: GroupDef = {
-    id: 'recycle-bin',
-    label: t('recycleBin.group'),
-    unlabeled: true,
-    plain: true,
-  }
-  return {
-    id: 'recycle-bin',
-    title: t('sections.recycle-bin'),
-    description: t('pages.recycle-bin'),
-    icon: Delete02Icon,
-    rows: [
-      {
-        id: 'recycle-bin',
-        setting: 'recycle-bin.items',
-        group: list,
-        layout: 'bare',
-        render: () => <RecycleBinPage />,
-      },
-    ],
-  }
-}
 
 /** Settings › General's choice of how long the bin keeps what it holds. */
 export function BinKeepDays({ label }: { label: string }) {
@@ -145,14 +119,17 @@ function useBinList(): {
   const { hostId, request } = useHostScope()
   const [list, setList] = useState<BinList | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const reload = useCallback(async () => {
-    try {
-      setList(await request('bin.list', undefined))
-      setError(null)
-    } catch (e) {
-      setError(errorMessage(e))
-    }
-  }, [request])
+  const reload = useCallback(
+    () =>
+      request('bin.list', undefined).then(
+        (next) => {
+          setList(next)
+          setError(null)
+        },
+        (e: unknown) => setError(errorMessage(e)),
+      ),
+    [request],
+  )
   useEffect(() => {
     void reload()
     return onBinChanged(hostId, () => void reload())
@@ -160,7 +137,7 @@ function useBinList(): {
   return { list, error, reload }
 }
 
-function RecycleBinPage() {
+export function RecycleBinPage() {
   const { t } = useTranslation(['settings', 'sidebar', 'common'])
   const { request } = useHostScope()
   const { list, error, reload } = useBinList()
