@@ -13996,7 +13996,13 @@ export class SessionManager {
   async conversationBrief(
     sessionId: string,
     max = BRIEF_CHARS,
-  ): Promise<{ agentId: AgentId; model: string | null; text: string } | null> {
+  ): Promise<{
+    agentId: AgentId
+    model: string | null
+    text: string
+    /** The user's messages alone, oldest first, each cut. */
+    asked: string[]
+  } | null> {
     const live = await this.revive(sessionId)
     const asked: string[] = []
     let reply = ''
@@ -14020,6 +14026,7 @@ export class SessionManager {
       agentId: live.record.agentId,
       model: modelOf(live.thread.session.config),
       text: cutText([...kept, ...last].join('\n\n'), max),
+      asked,
     }
   }
 
@@ -14033,10 +14040,13 @@ export class SessionManager {
     if (!brief) throw new HostError('restricted', t('review.titleNothing'))
     const target = lightTarget(this.deps.settings().lightModel, record.agentId, brief.model)
     const agent = this.deps.agents.name(target.agentId)
+    // The first message says what the work is, the latest two where it went since.
+    const asked =
+      brief.asked.length <= 3 ? brief.asked : [brief.asked[0]!, ...brief.asked.slice(-2)]
     try {
       const writer = await this.deps.agents.ensureReady(target.agentId)
       const written = await this.askTitle(writer, target.model, [
-        { type: 'text', text: brief.text },
+        { type: 'text', text: asked.join('\n\n') },
       ])
       const title = listedTitle(written, null)
       if (!title) throw new Error('its reply held no title')
