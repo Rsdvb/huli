@@ -37,7 +37,8 @@ function useSize(outer: RefObject<HTMLDivElement | null>, box: RefObject<HTMLDiv
         current && current.width === next.width && current.most === next.most ? current : next,
       )
     }
-    measure()
+    // The observer's first call measures, once the frame is laid out, rather than a layout of the
+    // whole page forced here while the thread mounts.
     const observer = new ResizeObserver(measure)
     observer.observe(room)
     observer.observe(column)
