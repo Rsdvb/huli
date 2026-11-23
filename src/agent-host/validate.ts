@@ -81,6 +81,14 @@ import {
   type ManagerChoices,
   type ProjectManagerSettings,
 } from '@shared/manager'
+import {
+  CLONE_ID,
+  CLONE_URL_CHARS,
+  cloneUrlProblem,
+  isGitignorePreset,
+  PROJECT_NAME_CHARS,
+  projectNameProblem,
+} from '@shared/project-create'
 import { isProfileId } from '@shared/provider-profiles'
 import { AUTO_APPROVE_LEVELS, isAutoApprove } from '@shared/risk'
 import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
@@ -386,6 +394,36 @@ function formValues(value: unknown): FormValues {
       )
     }),
   )
+}
+
+// Huli: a new project's clone: an id the client made, and only an address git may be given.
+function cloneIdOf(o: Fields): string {
+  const value = o.cloneId
+  if (typeof value !== 'string' || !CLONE_ID.test(value)) {
+    throw invalidParams('cloneId must be 32 lowercase hex characters')
+  }
+  return value
+}
+
+function cloneUrl(o: Fields): string {
+  const value = o.url
+  if (typeof value !== 'string') throw invalidParams('url must be a string')
+  const problem = cloneUrlProblem(value)
+  if (problem !== null) {
+    throw invalidParams(t(`newProject.url.${problem}`), { field: 'url', problem })
+  }
+  return value.slice(0, CLONE_URL_CHARS)
+}
+
+// Huli: a new project's folder name: one folder, with nothing any platform refuses.
+function projectName(o: Fields): string {
+  const value = o.name
+  if (typeof value !== 'string') throw invalidParams('name must be a string')
+  const problem = projectNameProblem(value)
+  if (problem !== null) {
+    throw invalidParams(t(`newProject.name.${problem}`), { field: 'name', problem })
+  }
+  return value.slice(0, PROJECT_NAME_CHARS)
 }
 
 function absolutePath(o: Fields, key: string, platform: Platform): string {
@@ -2195,6 +2233,29 @@ export function createValidators(platform: Platform): Validators {
       return {
         path: absolutePath(o, 'path', platform),
         settings: worktreeSettings(o.settings, platform),
+      }
+    },
+    'projects.places': none,
+    'projects.clone': (params) => {
+      const o = fields(params)
+      return {
+        cloneId: cloneIdOf(o),
+        url: cloneUrl(o),
+        parent: absolutePath(o, 'parent', platform),
+        name: projectName(o),
+      }
+    },
+    'projects.cancelClone': (params) => ({ cloneId: cloneIdOf(fields(params)) }),
+    'projects.create': (params) => {
+      const o = fields(params)
+      if (o.gitignore !== null && !isGitignorePreset(o.gitignore)) {
+        throw invalidParams('gitignore must be one of the presets or null')
+      }
+      return {
+        parent: absolutePath(o, 'parent', platform),
+        name: projectName(o),
+        readme: flag(o, 'readme'),
+        gitignore: o.gitignore,
       }
     },
     'paths.complete': (params) => {

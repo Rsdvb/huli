@@ -130,6 +130,12 @@ import type {
 } from './git'
 import type { PortConnectionState } from './port-rpc'
 import type { AgentProfiles, ProfileBalance } from './provider-profiles'
+import type {
+  CloneProgress,
+  ProjectCloneParams,
+  ProjectCreateParams,
+  ProjectPlaces,
+} from './project-create'
 import type { PathCompletion } from './remote/host-admin'
 import type { ReportOrigin } from './report'
 import type { AutoApprove } from './risk'
@@ -1724,6 +1730,13 @@ export interface HostContract {
     params: { path: string; settings: ProjectWorktreeSettings }
     result: void
   }
+  // Huli: Add project's new projects (shared/project-create.ts). The folders one may go in, which
+  // a paired device chooses among; a clone of a repository, whose port hears its progress as
+  // `projects.cloneProgress` and which `projects.cancelClone` ends; and an empty folder with Git.
+  'projects.places': { params: void; result: ProjectPlaces }
+  'projects.clone': { params: ProjectCloneParams; result: Project }
+  'projects.cancelClone': { params: { cloneId: string }; result: void }
+  'projects.create': { params: ProjectCreateParams; result: Project }
   // The entries of a folder on the host that start as `path`'s last part does, for a path being
   // typed: absolute, or `~` for the home folder. It only reads; a folder it cannot read lists none.
   'paths.complete': { params: { path: string }; result: PathCompletion }
@@ -2917,6 +2930,10 @@ export const HOST_METHODS = [
   'projects.noProject',
   'projects.worktreeSettings',
   'projects.setWorktreeSettings',
+  'projects.places',
+  'projects.clone',
+  'projects.cancelClone',
+  'projects.create',
   'paths.complete',
   'sessions.list',
   'sessions.create',
@@ -3239,6 +3256,8 @@ export type HostEvent =
   | { type: 'agents.limitAlert'; alert: PlanAlert }
   // `noProject` is absent from hosts that cannot pin No project.
   | { type: 'projects.changed'; projects: Project[]; noProject?: NoProject }
+  // Huli: to the port whose `projects.clone` runs: what git is doing now.
+  | { type: 'projects.cloneProgress'; progress: CloneProgress }
   | { type: 'environment.changed'; info: EnvironmentInfo }
   | { type: 'git.changed'; status: GitStatus }
   | { type: 'git.pr'; projectPath: string; pr: PullRequest | null }

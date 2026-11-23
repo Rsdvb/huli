@@ -2351,6 +2351,36 @@
       "failed": "The sign-in did not finish. You can close this tab and try again in Kettu."
     }
   },
+  "newProject": {
+    "parentMissing": "{{path}} is not a folder on this computer",
+    "parentNotOffered": "Choose one of the folders this computer lists for new projects",
+    "targetTaken": "{{name}} is already there and is not a folder Kite can use",
+    "targetNotEmpty": "A folder named {{name}} is already there and is not empty",
+    "cloneRunning": "That clone is already running",
+    "tooManyClones": "4 clones are running already; try again when one finishes",
+    "noGit": "Git is not installed on this computer",
+    "initFailed": "git init failed: {{detail}}",
+    "cloneFailed": "The clone failed: {{detail}}",
+    "cloneTimedOut": "The clone took more than 30 minutes and was stopped",
+    "cancelled": "The clone was cancelled",
+    "url": {
+      "empty": "Enter the repository's address",
+      "tooLong": "The address is too long",
+      "malformed": "That does not look like a repository's address",
+      "option": "An address cannot start with -",
+      "local": "Only remote repositories can be cloned here, not a folder or file:// address",
+      "scheme": "Use an https://, ssh:// or git@host:path address",
+      "password": "Leave the password out of the address; Git's own sign-in on this computer is used"
+    },
+    "name": {
+      "empty": "Enter a folder name",
+      "tooLong": "The folder name is too long",
+      "chars": "A folder name cannot hold / \\ : * ? \" < > | or control characters",
+      "dots": "A folder name cannot be . or ..",
+      "edge": "A folder name cannot start or end with a space, or end with a dot",
+      "reserved": "Windows keeps that name for a device; choose another"
+    }
+  },
   "project": {
     "notAbsolute": "projectPath must be an absolute path",
     "notExist": "{{path}} does not exist",

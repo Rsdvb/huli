@@ -338,6 +338,8 @@ export interface ProjectsFile {
   projects: ProjectRecord[]
   noProjectPinnedAt?: number // when the user pinned the No project group
   noProjectSessionOrder?: string[] // Huli: the user's order of its rows, as a project's
+  // Huli: the folder the user last cloned or made a new project in, absolute and resolved.
+  newProjectParent?: string
 }
 
 /** How many opened pull requests a session keeps; the oldest go first. */
@@ -835,6 +837,12 @@ export function parseProjectsFile(
     projects,
     ...(isTime(data.noProjectPinnedAt) ? { noProjectPinnedAt: data.noProjectPinnedAt } : {}),
     ...sessionOrderOf('noProjectSessionOrder', data.noProjectSessionOrder),
+    ...(isString(data.newProjectParent) &&
+    data.newProjectParent.length <= MAX_FOLDER_PATH &&
+    !data.newProjectParent.includes('\0') &&
+    isAbsolutePath(data.newProjectParent, platform)
+      ? { newProjectParent: data.newProjectParent }
+      : {}),
   }
 }
 
