@@ -1,7 +1,7 @@
-// Kite's end of the broker's pipe: `connect --pipe NAME --server PID`, started by Kite's agent host
+// Kite's end of the broker's pipe: `connect --pipe NAME --launcher PID`, started by Kite's agent host
 // from the install folder, without elevation. Kite cannot ask Windows who serves a pipe, so this does
-// before the session's token goes over it: the server must be the process Kite's prompt started,
-// running the same installed helper, as administrator. It reads the token as the first line of its
+// before the session's token goes over it: the server must be the child of the launcher Kite's prompt
+// started, running the same installed helper, as administrator. It reads the token as the first line of its
 // stdin, hands it to the broker, writes the broker's answer as the first line of its stdout, then
 // relays both ways until either side closes.
 
@@ -25,10 +25,10 @@ namespace Kite.ComputerHelper
 
         public static int Run(Dictionary<string, string> options)
         {
-            string name, serverText, other;
-            int server;
+            string name, launcherText, other;
+            int launcher;
             if (!options.TryGetValue("pipe", out name) || !PipePattern.IsMatch(name)) return Fail(2, "--pipe must be kite-computer- and 32 hex digits.");
-            if (!options.TryGetValue("server", out serverText) || !int.TryParse(serverText, out server) || server <= 0) return Fail(2, "--server must be a process id.");
+            if (!options.TryGetValue("launcher", out launcherText) || !int.TryParse(launcherText, out launcher) || launcher <= 0) return Fail(2, "--launcher must be a process id.");
             options.TryGetValue("install-dir", out other);
             string own = Layout.OwnPath();
             if (!Layout.SamePath(Path.GetDirectoryName(own), Layout.InstallDir(other))) return Fail(13, "connect runs only from the install folder.");
@@ -53,7 +53,11 @@ namespace Kite.ComputerHelper
                 }
             }
             int actual;
-            if (!Native.GetNamedPipeServerProcessId(pipe.SafePipeHandle, out actual) || actual != server)
+            // The prompt started cmd.exe, which started the broker: the server is its child, started
+            // after it. Kite's helper holds the launcher's handle, so its id is no one else's yet.
+            long launcherStarted = Native.StartedAt(launcher);
+            if (!Native.GetNamedPipeServerProcessId(pipe.SafePipeHandle, out actual) || actual == launcher ||
+                Native.ParentOf(actual) != launcher || launcherStarted == 0 || Native.StartedAt(actual) < launcherStarted)
                 return Answer(stdout, "the pipe is not served by the helper Kite started");
             if (!Layout.SamePath(Native.ImageOf(actual), own))
                 return Answer(stdout, "the pipe is not served by the installed helper");

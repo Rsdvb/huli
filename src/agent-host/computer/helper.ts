@@ -50,12 +50,14 @@ export interface ProcessInfo {
 }
 
 /**
- * The elevated helper's install folder and how it stands: missing, current (the same helper as
- * this one, the driver it was built with, for this Kite program) or outdated.
+ * The elevated helper's install folder and how it stands: missing; current (its files the ones its
+ * record names, only administrators able to change them, of this helper's protocol and for this
+ * Kite program); outdated (another protocol or Kite program); or tampered (other files, or looser
+ * rights).
  */
 export interface InstallState {
   installDir: string
-  state: 'missing' | 'current' | 'outdated'
+  state: 'missing' | 'current' | 'outdated' | 'tampered'
   exitCode?: number
 }
 
@@ -82,7 +84,10 @@ export interface ComputerHelperLike {
   /** Null when the user said no at the administrator prompt. */
   install(client: string): Promise<InstallState | null>
   uninstall(): Promise<InstallState | null>
-  /** The broker's process id, or null when the user said no at the administrator prompt. */
+  /**
+   * The process id of the launcher the prompt started, the broker's parent, or null when the user
+   * said no at the administrator prompt.
+   */
   elevate(request: ElevateRequest): Promise<number | null>
   stop(): void
 }

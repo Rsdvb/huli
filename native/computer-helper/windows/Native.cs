@@ -2,6 +2,7 @@
 // objects and window owners.
 
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
@@ -202,6 +203,122 @@ namespace Kite.ComputerHelper
             {
                 CloseHandle(snapshot);
             }
+        }
+
+        /// <summary>
+        /// The live processes that the process with this id started after it started itself: its
+        /// children, and theirs in turn.
+        /// </summary>
+        public static List<int> Descendants(int pid)
+        {
+            var found = new List<int>();
+            IntPtr snapshot = CreateToolhelp32Snapshot(0x00000002, 0);
+            if (snapshot == IntPtr.Zero || snapshot == new IntPtr(-1)) return found;
+            var parents = new Dictionary<int, int>();
+            try
+            {
+                var entry = new PROCESSENTRY32 { dwSize = Marshal.SizeOf(typeof(PROCESSENTRY32)) };
+                for (bool more = Process32FirstW(snapshot, ref entry); more; more = Process32NextW(snapshot, ref entry))
+                {
+                    parents[entry.th32ProcessID] = entry.th32ParentProcessID;
+                }
+            }
+            finally
+            {
+                CloseHandle(snapshot);
+            }
+            var queue = new Queue<int>();
+            queue.Enqueue(pid);
+            while (queue.Count > 0 && found.Count < 4096)
+            {
+                int parent = queue.Dequeue();
+                long parentStarted = StartedAt(parent);
+                foreach (KeyValuePair<int, int> child in parents)
+                {
+                    if (child.Value != parent || child.Key == parent || found.Contains(child.Key)) continue;
+                    // A parent id a later process took again names no child of this one.
+                    long started = StartedAt(child.Key);
+                    if (started == 0 || parentStarted == 0 || started < parentStarted) continue;
+                    found.Add(child.Key);
+                    queue.Enqueue(child.Key);
+                }
+            }
+            return found;
+        }
+
+        [DllImport("ntdll.dll")]
+        static extern int NtQueryInformationProcess(IntPtr process, int infoClass, IntPtr info, int length, out int returned);
+
+        const int ProcessCommandLineInformation = 60;
+
+        /// <summary>The command line of the process with this id, or null.</summary>
+        public static string CommandLine(int pid)
+        {
+            IntPtr process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            if (process == IntPtr.Zero) return null;
+            try
+            {
+                int needed;
+                NtQueryInformationProcess(process, ProcessCommandLineInformation, IntPtr.Zero, 0, out needed);
+                if (needed <= 0 || needed > (1 << 20)) return null;
+                IntPtr buffer = Marshal.AllocHGlobal(needed);
+                try
+                {
+                    if (NtQueryInformationProcess(process, ProcessCommandLineInformation, buffer, needed, out needed) != 0) return null;
+                    // UNICODE_STRING: its length in bytes, its capacity, then the pointer, aligned.
+                    int length = (ushort)Marshal.ReadInt16(buffer);
+                    IntPtr text = Marshal.ReadIntPtr(buffer, IntPtr.Size);
+                    return text == IntPtr.Zero ? null : Marshal.PtrToStringUni(text, length / 2);
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            }
+            finally
+            {
+                CloseHandle(process);
+            }
+        }
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        static extern IntPtr GetWindow(IntPtr window, uint command);
+
+        [DllImport("user32.dll")]
+        static extern bool IsWindowVisible(IntPtr window);
+
+        [DllImport("dwmapi.dll")]
+        static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out int value, int size);
+
+        /// <summary>
+        /// The process of a visible window above this one in the z-order that overlaps it, layered
+        /// and transparent ones included, or 0 when none does; this process's own windows aside.
+        /// </summary>
+        public static int CoveringProcess(IntPtr window)
+        {
+            RECT mine;
+            if (!GetWindowRect(window, out mine)) return 0;
+            int self = System.Diagnostics.Process.GetCurrentProcess().Id;
+            int seen = 0;
+            // GW_HWNDPREV: the window above.
+            for (IntPtr other = GetWindow(window, 3); other != IntPtr.Zero && seen < 10000; other = GetWindow(other, 3), seen++)
+            {
+                if (!IsWindowVisible(other)) continue;
+                int cloaked;
+                // DWMWA_CLOAKED: windows of other virtual desktops and suspended apps draw nothing.
+                if (DwmGetWindowAttribute(other, 14, out cloaked, 4) == 0 && cloaked != 0) continue;
+                int pid;
+                GetWindowThreadProcessId(other, out pid);
+                if (pid == self) continue;
+                RECT rect;
+                if (!GetWindowRect(other, out rect)) continue;
+                if (rect.Right <= mine.Left || rect.Left >= mine.Right || rect.Bottom <= mine.Top || rect.Top >= mine.Bottom) continue;
+                return pid == 0 ? -1 : pid;
+            }
+            return 0;
         }
 
         /// <summary>The process that owns a top-level window, or 0 when it is no window.</summary>

@@ -1,13 +1,22 @@
-// Which steps in an app run as administrator the owner confirms in the broker's own window: every
-// acting step but those plainly harmless. A click is harmless only on an element the snapshot that
-// gave its token names, of a role that only focuses or selects, with one plain left click and a
-// label that commits nothing; every other click, a bare point included, is confirmed with a crop of
-// the window around it. Keys but moving about, shortcuts, typed line breaks, drags and menus are
-// confirmed; reading and scrolling are not.
+// Which steps in an app run as administrator the owner confirms in the broker's own window, and
+// which the broker refuses outright. Every acting step is confirmed but those plainly harmless:
+//
+// - A click is harmless only on an element the snapshot that gave its token names, of a role that
+//   only focuses or selects, with one plain left click and a label that commits nothing. Every other
+//   click is confirmed with the window and a red box at its place; one with no place to show, such
+//   as a point with no read of the window to map it, is refused.
+// - Typing is harmless only into the edit field the last step clicked, with no line break or tab;
+//   anything else typed is confirmed and shown in full, and text too long to show is refused.
+// - Keys but moving about are confirmed; pasting is refused, since the owner cannot see what it
+//   types. Drags (both ends shown) and menus are confirmed.
+// - Reading and scrolling are not confirmed. Whatever went through unconfirmed is listed in the
+//   next confirmation, so it shows what the step commits.
 
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Kite.ComputerHelper
@@ -31,24 +40,46 @@ namespace Kite.ComputerHelper
         public readonly Dictionary<long, Element> Elements = new Dictionary<long, Element>();
     }
 
-    /// <summary>A step the owner confirms: what it does, in words, and where in the window.</summary>
+    /// <summary>A rectangle on the screen a step aims at.</summary>
+    struct Place
+    {
+        public double X, Y, Width, Height;
+    }
+
+    /// <summary>A step the owner confirms, or one the broker refuses: what it does, in words, and where.</summary>
     sealed class Step
     {
         public string Kind;
         public string Text;
         public string Role;
         public long WindowId;
-        /// <summary>The screen rectangle the step aims at, when it has one.</summary>
-        public double X, Y, Width, Height;
-        public bool HasPlace;
+        /// <summary>The screen rectangles the step aims at: one, or a drag's two ends.</summary>
+        public readonly List<Place> Places = new List<Place>();
+        /// <summary>Why the broker refuses the step without asking; null when it asks.</summary>
+        public string Refusal;
+        public bool HasPlace { get { return Places.Count > 0; } }
+    }
+
+    /// <summary>What a harmless step did, for the next confirmation's list, and the edit field it focused.</summary>
+    sealed class Assessment
+    {
+        /// <summary>Null when the step goes on without asking.</summary>
+        public Step Step;
+        /// <summary>A line for the list of what went through unconfirmed.</summary>
+        public string Done;
+        /// <summary>Set when the step was a click into an edit field of this window.</summary>
+        public long FocusedEdit;
     }
 
     static class Risk
     {
+        /// <summary>The longest text typed as administrator: what the owner's window can show in full.</summary>
+        public const int MaxText = 1000;
+
         static readonly HashSet<string> BenignRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "Edit", "Document", "TabItem", "Tab", "TreeItem", "ListItem", "DataItem", "ScrollBar",
-            "Text", "Header", "HeaderItem", "StatusBar", "ToolTip",
+            "Edit", "TabItem", "Tab", "TreeItem", "ListItem", "ScrollBar", "Header", "HeaderItem",
+            "StatusBar", "ToolTip",
         };
 
         static readonly HashSet<string> MovingKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -57,8 +88,29 @@ namespace Kite.ComputerHelper
             "arrowup", "arrowdown", "arrowleft", "arrowright",
         };
 
+        public static readonly HashSet<string> ModifierNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "cmd", "ctrl", "alt", "shift",
+        };
+
+        static readonly HashSet<string> NamedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "return", "enter", "tab", "escape", "esc", "space", "backspace", "delete", "del", "forwarddelete",
+            "insert", "ins", "home", "end", "pageup", "pagedown", "page_up", "page_down", "up", "down", "left",
+            "right", "arrowup", "arrowdown", "arrowleft", "arrowright", "menu", "apps",
+        };
+
+        /// <summary>Whether a key is one the broker passes on: a named key, F1 to F24, or one printable ASCII character.</summary>
+        public static bool KnownKey(string key)
+        {
+            if (string.IsNullOrEmpty(key) || key.Length > 30) return false;
+            if (NamedKeys.Contains(key) || ModifierNames.Contains(key)) return true;
+            if (Regex.IsMatch(key, @"\A[fF]([1-9]|1[0-9]|2[0-4])\z")) return true;
+            return key.Length == 1 && key[0] > ' ' && key[0] < 0x7f;
+        }
+
         static readonly Regex CommitWords = new Regex(
-            @"\b(ok|yes|apply|delete|remove|uninstall|install|format|erase|wipe|reset|run|execute|start|launch|open|submit|confirm|save|overwrite|replace|allow|accept|agree|continue|next|finish|end task|kill|shut down|restart|update|upgrade|change|disable|enable|grant|add|create|new|import|send|copy|move|rename|set)\b",
+            @"\b(ok|yes|apply|delete|remove|uninstall|install|format|erase|wipe|reset|run|execute|start|launch|open|submit|confirm|save|overwrite|replace|allow|accept|agree|continue|next|finish|end task|kill|shut down|restart|update|upgrade|change|disable|enable|grant|add|create|new|import|send|copy|move|rename|set|ja|oui|sí|si|löschen|entfernen|ausführen|übernehmen|speichern|weiter|supprimer|exécuter|appliquer|enregistrer|eliminar|ejecutar|aplicar|guardar)\b",
             RegexOptions.IgnoreCase);
 
         static readonly string[] CommitWide =
@@ -66,7 +118,8 @@ namespace Kite.ComputerHelper
             "确定", "确认", "应用", "删除", "移除", "卸载", "安装", "格式化", "清除", "清空", "重置", "运行", "执行",
             "开始", "启动", "打开", "提交", "保存", "覆盖", "替换", "允许", "接受", "同意", "继续", "下一步", "完成",
             "结束", "关机", "重启", "更新", "升级", "更改", "禁用", "启用", "授权", "添加", "新建", "导入", "发送",
-            "复制", "移动", "重命名", "设置", "是", "好",
+            "复制", "移动", "重命名", "设置", "是", "好", "確定", "確認", "刪除", "執行", "啟動", "開啟", "儲存",
+            "削除", "実行", "適用", "保存", "開始", "はい", "続行", "삭제", "실행", "적용", "저장", "확인", "예",
         };
 
         public static bool Commits(string label)
@@ -77,123 +130,179 @@ namespace Kite.ComputerHelper
         }
 
         /// <summary>
-        /// The confirmation a tool call needs, or null when it is harmless. `snapshot` finds the
-        /// snapshot an element token names; `latest` the latest read of a window.
+        /// What a tool call needs: nothing (with a line for the list), the owner's confirmation, or a
+        /// refusal. `snapshot` finds the snapshot an element token names; `latest` the latest read of
+        /// a window; `focusedEdit` the window whose edit field the last step clicked, or 0.
         /// </summary>
-        public static Step Assess(string tool, Dictionary<string, object> args, Func<string, Snapshot> snapshot, Func<long, Snapshot> latest)
+        public static Assessment Assess(string tool, Dictionary<string, object> args, Func<string, Snapshot> snapshot, Func<long, Snapshot> latest, long focusedEdit)
         {
             long windowId = WindowOf(args);
             switch (tool)
             {
                 case "list_windows":
                 case "get_window_state":
+                    return new Assessment { FocusedEdit = focusedEdit };
                 case "scroll":
-                    return null;
+                    return new Assessment
+                    {
+                        Done = Confirm.Say("滚动 " + Text(args, "direction") + " " + Count(args, "amount", 3),
+                            "Scrolled " + Text(args, "direction") + " " + Count(args, "amount", 3)),
+                        FocusedEdit = focusedEdit,
+                    };
                 case "click":
                     return Click(args, windowId, snapshot, latest);
                 case "type_text":
                 {
-                    string text = args.ContainsKey("text") ? args["text"] as string ?? "" : "";
-                    if (text.IndexOf('\n') < 0 && text.IndexOf('\r') < 0) return null;
-                    return new Step { Kind = "type", Text = text, WindowId = windowId };
+                    string text = Text(args, "text") ?? "";
+                    if (text.Length > MaxText)
+                        return Refuse("type", "the text is longer than " + MaxText + " characters, more than the owner's window can show in full", windowId);
+                    bool plain = text.IndexOfAny(new[] { '\n', '\r', '\t' }) < 0;
+                    if (plain && focusedEdit != 0 && focusedEdit == windowId)
+                        return new Assessment { Done = Confirm.Say("输入「" + Confirm.Visible(text) + "」", "Typed “" + Confirm.Visible(text) + "”"), FocusedEdit = focusedEdit };
+                    return Ask(new Step { Kind = "type", Text = text, WindowId = windowId });
                 }
                 case "press_key":
                 {
-                    string key = args.ContainsKey("key") ? args["key"] as string ?? "" : "";
-                    var modifiers = args.ContainsKey("modifiers") ? args["modifiers"] as System.Collections.IList : null;
-                    bool plain = modifiers == null || modifiers.Count == 0;
-                    if (plain && MovingKeys.Contains(key.Trim())) return null;
-                    var keys = new List<string>();
-                    if (modifiers != null) foreach (object m in modifiers) keys.Add(Convert.ToString(m));
-                    keys.Add(key);
-                    return new Step { Kind = "key", Text = string.Join("+", keys), WindowId = windowId };
+                    string key = Text(args, "key") ?? "";
+                    var modifiers = List(args, "modifiers");
+                    if (Pastes(modifiers, key)) return Refuse("key", Paste, windowId);
+                    if (modifiers.Count == 0 && MovingKeys.Contains(key))
+                        return new Assessment { Done = Confirm.Say("按 " + key, "Pressed " + key) };
+                    var keys = new List<string>(modifiers) { key };
+                    return Ask(new Step { Kind = "key", Text = string.Join("+", keys), WindowId = windowId });
                 }
                 case "hotkey":
                 {
-                    var keys = args.ContainsKey("keys") ? args["keys"] as System.Collections.IList : null;
-                    var names = new List<string>();
-                    if (keys != null) foreach (object k in keys) names.Add(Convert.ToString(k));
-                    return new Step { Kind = "key", Text = string.Join("+", names), WindowId = windowId };
+                    var keys = List(args, "keys");
+                    string last = keys.Count == 0 ? "" : keys[keys.Count - 1];
+                    if (Pastes(keys.Take(Math.Max(0, keys.Count - 1)).ToList(), last)) return Refuse("key", Paste, windowId);
+                    return Ask(new Step { Kind = "key", Text = string.Join("+", keys), WindowId = windowId });
                 }
                 case "drag":
                 {
-                    var step = new Step { Kind = "drag", Text = null, WindowId = windowId };
-                    Place(step, latest(windowId), Number(args, "from_x"), Number(args, "from_y"));
-                    return step;
+                    var step = new Step { Kind = "drag", WindowId = windowId };
+                    Snapshot read = latest(windowId);
+                    Place from, to;
+                    if (!Map(read, Number(args, "from_x"), Number(args, "from_y"), out from) || !Map(read, Number(args, "to_x"), Number(args, "to_y"), out to))
+                        return Refuse("drag", NoPlace, windowId);
+                    step.Places.Add(from);
+                    step.Places.Add(to);
+                    return Ask(step);
                 }
                 case "invoke_menu":
                 {
-                    var path = args.ContainsKey("path") ? args["path"] as System.Collections.IList : null;
-                    var names = new List<string>();
-                    if (path != null) foreach (object p in path) names.Add(Convert.ToString(p));
-                    return new Step { Kind = "menu", Text = string.Join(" > ", names), WindowId = windowId };
+                    var path = List(args, "path");
+                    return Ask(new Step { Kind = "menu", Text = string.Join(" > ", path), WindowId = windowId });
                 }
                 default:
-                    return new Step { Kind = tool, WindowId = windowId };
+                    return Refuse(tool, "the elevated helper does not know that step", windowId);
             }
         }
 
-        static Step Click(Dictionary<string, object> args, long windowId, Func<string, Snapshot> snapshot, Func<long, Snapshot> latest)
+        const string Paste = "pasting types what is on the clipboard, which the owner cannot see, so the elevated helper never pastes";
+        const string NoPlace = "the step has no place in a read of the window to show the owner, so read the window first";
+
+        static Assessment Ask(Step step)
         {
-            string button = args.ContainsKey("button") ? args["button"] as string : null;
-            long count = args.ContainsKey("count") ? Convert.ToInt64(args["count"]) : 1;
+            return new Assessment { Step = step };
+        }
+
+        static Assessment Refuse(string kind, string why, long windowId)
+        {
+            return new Assessment { Step = new Step { Kind = kind, WindowId = windowId, Refusal = why } };
+        }
+
+        /// <summary>Ctrl+V, Ctrl+Shift+V and Shift+Insert, in any spelling the driver takes.</summary>
+        static bool Pastes(List<string> modifiers, string key)
+        {
+            var held = new HashSet<string>(modifiers, StringComparer.OrdinalIgnoreCase);
+            if ((held.Contains("ctrl") || held.Contains("cmd")) && string.Equals(key, "v", StringComparison.OrdinalIgnoreCase)) return true;
+            return held.Contains("shift") && (string.Equals(key, "insert", StringComparison.OrdinalIgnoreCase) || string.Equals(key, "ins", StringComparison.OrdinalIgnoreCase));
+        }
+
+        static Assessment Click(Dictionary<string, object> args, long windowId, Func<string, Snapshot> snapshot, Func<long, Snapshot> latest)
+        {
+            string button = Text(args, "button");
+            long count = Count(args, "count", 1);
             bool plain = (button == null || button == "left") && count <= 1;
-            string kind = button == "right" ? "right-click" : count >= 2 ? "double-click" : "click";
-            string token = args.ContainsKey("element_token") ? args["element_token"] as string : null;
+            string kind = button == "right" ? "right-click" : button == "middle" ? "middle-click" : count >= 2 ? "double-click" : "click";
+            string token = Text(args, "element_token");
             if (token != null)
             {
                 int colon = token.IndexOf(':');
                 Snapshot read = colon > 0 ? snapshot(token.Substring(0, colon)) : null;
                 long row;
                 Element element = null;
-                if (read != null && long.TryParse(token.Substring(colon + 1), out row)) read.Elements.TryGetValue(row, out element);
-                if (element != null && plain && BenignRoles.Contains(element.Role ?? "") &&
-                    !string.IsNullOrWhiteSpace(element.Label) && !Commits(element.Label))
+                if (read != null && long.TryParse(token.Substring(colon + 1), NumberStyles.None, CultureInfo.InvariantCulture, out row)) read.Elements.TryGetValue(row, out element);
+                if (element == null) return Refuse(kind, NoPlace, windowId);
+                if (plain && BenignRoles.Contains(element.Role ?? "") && !string.IsNullOrWhiteSpace(element.Label) && !Commits(element.Label))
                 {
-                    return null;
+                    return new Assessment
+                    {
+                        Done = Confirm.Say("点击「" + Confirm.Line(element.Label) + "」(" + element.Role + ")", "Clicked “" + Confirm.Line(element.Label) + "” (" + element.Role + ")"),
+                        FocusedEdit = string.Equals(element.Role, "Edit", StringComparison.OrdinalIgnoreCase) ? windowId : 0,
+                    };
                 }
-                var step = new Step { Kind = kind, Text = element == null ? null : element.Label, Role = element == null ? null : element.Role, WindowId = windowId };
-                if (element != null && element.HasFrame)
-                {
-                    step.X = element.X;
-                    step.Y = element.Y;
-                    step.Width = element.Width;
-                    step.Height = element.Height;
-                    step.HasPlace = true;
-                }
-                return step;
+                if (!element.HasFrame) return Refuse(kind, NoPlace, windowId);
+                var step = new Step { Kind = kind, Text = element.Label, Role = element.Role, WindowId = windowId };
+                step.Places.Add(new Place { X = element.X, Y = element.Y, Width = element.Width, Height = element.Height });
+                return Ask(step);
             }
-            var bare = new Step { Kind = kind, Text = null, WindowId = windowId };
-            Place(bare, latest(windowId), Number(args, "x"), Number(args, "y"));
-            return bare;
+            Place place;
+            if (!Map(latest(windowId), Number(args, "x"), Number(args, "y"), out place)) return Refuse(kind, NoPlace, windowId);
+            var bare = new Step { Kind = kind, WindowId = windowId };
+            bare.Places.Add(place);
+            return Ask(bare);
         }
 
         /// <summary>A point in the latest screenshot's pixels, as a small rectangle on the screen.</summary>
-        static void Place(Step step, Snapshot read, double? x, double? y)
+        static bool Map(Snapshot read, double? x, double? y, out Place place)
         {
-            if (read == null || !x.HasValue || !y.HasValue || read.ShotWidth <= 0 || read.ShotHeight <= 0) return;
+            place = new Place();
+            if (read == null || !x.HasValue || !y.HasValue || read.ShotWidth <= 0 || read.ShotHeight <= 0) return false;
+            if (x.Value < 0 || y.Value < 0 || x.Value > read.ShotWidth || y.Value > read.ShotHeight) return false;
             double sx = read.WindowX + x.Value * read.WindowWidth / read.ShotWidth;
             double sy = read.WindowY + y.Value * read.WindowHeight / read.ShotHeight;
-            step.X = sx - 4;
-            step.Y = sy - 4;
-            step.Width = 8;
-            step.Height = 8;
-            step.HasPlace = true;
+            place = new Place { X = sx - 4, Y = sy - 4, Width = 8, Height = 8 };
+            return true;
+        }
+
+        static string Text(Dictionary<string, object> args, string key)
+        {
+            object value;
+            return args.TryGetValue(key, out value) ? value as string : null;
+        }
+
+        static long Count(Dictionary<string, object> args, string key, long fallback)
+        {
+            object value;
+            if (!args.TryGetValue(key, out value) || value == null) return fallback;
+            try { return Json.Integer(value, key); } catch (ArgumentException) { return fallback; }
+        }
+
+        static List<string> List(Dictionary<string, object> args, string key)
+        {
+            object value;
+            var list = new List<string>();
+            var items = args.TryGetValue(key, out value) ? value as System.Collections.IList : null;
+            if (items != null) foreach (object item in items) list.Add(item as string ?? "");
+            return list;
         }
 
         static double? Number(Dictionary<string, object> args, string key)
         {
             object value;
             if (!args.TryGetValue(key, out value) || value == null) return null;
-            try { return Convert.ToDouble(value); } catch (Exception) { return null; }
+            if (!(value is int || value is long || value is decimal || value is double)) return null;
+            return Convert.ToDouble(value, CultureInfo.InvariantCulture);
         }
 
         static long WindowOf(Dictionary<string, object> args)
         {
             object value;
-            if (args.TryGetValue("window_id", out value)) return Convert.ToInt64(value);
+            if (args.TryGetValue("window_id", out value)) return Convert.ToInt64(value, CultureInfo.InvariantCulture);
             var target = args.ContainsKey("target") ? args["target"] as Dictionary<string, object> : null;
-            if (target != null && target.TryGetValue("window_id", out value)) return Convert.ToInt64(value);
+            if (target != null && target.TryGetValue("window_id", out value)) return Convert.ToInt64(value, CultureInfo.InvariantCulture);
             return 0;
         }
     }

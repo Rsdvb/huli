@@ -25,6 +25,8 @@ import { ComputerHelper } from './helper'
 const root = process.env.SystemRoot ?? 'C:\\Windows'
 const csc = path.join(root, 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe')
 const runs = process.platform === 'win32' && existsSync(csc)
+const build = path.resolve(__dirname, '../../../native/computer-helper/build.mjs')
+const HELPER = 'kite-computer-helper.exe'
 
 // Answers every request as Cua Driver would: a read gives a snapshot with a button and a field;
 // every other call says what it was called with. It writes its process id where its TEMP is.
@@ -74,7 +76,7 @@ static class FakeDriver {
 }`
 
 // A program with a window that never shows: it prints the window's handle, then on each "spawn"
-// line tries to start a program and says whether it could.
+// line tries to start a program and says whether it could; on "child" it starts one that stays a while.
 const TARGET = `
 using System; using System.Diagnostics; using System.Windows.Forms;
 static class Target {
@@ -82,7 +84,13 @@ static class Target {
     var form = new Form();
     Console.WriteLine(form.Handle.ToInt64());
     string line;
+    Process child = null;
     while ((line = Console.ReadLine()) != null) {
+      if (line == "child") {
+        child = Process.Start(new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec"), "/c ping -n 30 127.0.0.1 >nul") { UseShellExecute = false, CreateNoWindow = true });
+        Console.WriteLine("child");
+        continue;
+      }
       if (line != "spawn") continue;
       try {
         var p = Process.Start(new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec"), "/c exit") { UseShellExecute = false, CreateNoWindow = true });
@@ -90,16 +98,46 @@ static class Target {
         Console.WriteLine("spawned");
       } catch (Exception) { Console.WriteLine("refused"); }
     }
+    if (child != null) try { child.Kill(); } catch (Exception) { }
   }
 }`
 
-function compile(dir: string, name: string, source: string, references: string[]): string {
+// Writes values into a private registry hive file (RegLoadAppKey), never the user's own registry:
+// each argument is subkey\name=value, the subkey's path below the hive's root.
+const HIVE = `
+using System; using System.Runtime.InteropServices; using Microsoft.Win32; using Microsoft.Win32.SafeHandles;
+static class Hive {
+  [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+  static extern int RegLoadAppKeyW(string file, out IntPtr key, int access, int options, int reserved);
+  static int Main(string[] args) {
+    IntPtr handle;
+    int error = RegLoadAppKeyW(args[0], out handle, 0xF003F, 0, 0);
+    if (error != 0) { Console.Error.WriteLine("load " + error); return 1; }
+    using (var root = RegistryKey.FromHandle(new SafeRegistryHandle(handle, true))) {
+      for (int i = 1; i < args.Length; i++) {
+        int eq = args[i].IndexOf('=');
+        string path = args[i].Substring(0, eq), value = args[i].Substring(eq + 1);
+        int slash = path.LastIndexOf('\\\\');
+        using (var key = root.CreateSubKey(path.Substring(0, slash))) key.SetValue(path.Substring(slash + 1), value);
+      }
+    }
+    return 0;
+  }
+}`
+
+function compile(
+  dir: string,
+  name: string,
+  source: string,
+  references: string[],
+  kind = 'exe',
+): string {
   const file = path.join(dir, `${name}.cs`)
   const out = path.join(dir, `${name}.exe`)
   writeFileSync(file, source)
   const result = spawnSync(
     csc,
-    ['-nologo', `-out:${out}`, ...references.map((r) => `-r:${r}`), file],
+    ['-nologo', `-target:${kind}`, `-out:${out}`, ...references.map((r) => `-r:${r}`), file],
     { encoding: 'utf8' },
   )
   if (result.status !== 0) throw new Error(`${name}: ${result.stdout}${result.stderr}`)
@@ -164,12 +202,22 @@ function exited(pid: number, withinMs: number): Promise<boolean> {
 
 const text = (result: { content: unknown[] }) => (result.content[0] as { text: string }).text
 
+/** Waits for the target's next line after it was sent `command`. */
+async function ask(target: Target, command: string): Promise<string> {
+  const before = target.lines.length
+  target.process.stdin!.write(`${command}\n`)
+  for (let i = 0; i < 100 && target.lines.length === before; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return target.lines[before] ?? 'no answer'
+}
+
 describe.skipIf(!runs)('the elevated helper', () => {
   let work = ''
   let app = ''
   let installDir = ''
   let targetExe = ''
-  let launcherExe = ''
+  let hiveExe = ''
   let sid = ''
   let log = ''
   const children: ChildProcess[] = []
@@ -181,12 +229,11 @@ describe.skipIf(!runs)('the elevated helper', () => {
     installDir = path.join(work, 'Kite Computer Helper')
     mkdirSync(app)
     compile(app, 'cua-driver', FAKE_DRIVER, ['System.Web.Extensions.dll'])
-    const build = path.resolve(__dirname, '../../../native/computer-helper/build.mjs')
     const built = spawnSync(process.execPath, [build, app, '--test'], { encoding: 'utf8' })
     if (built.status !== 0) throw new Error(built.stdout + built.stderr)
-    targetExe = compile(work, 'target', TARGET, ['System.Windows.Forms.dll'])
-    launcherExe = path.join(work, 'taskmgr.exe')
-    copyFileSync(targetExe, launcherExe)
+    // A windowed program, as the apps run as administrator are, so it has no console host of its own.
+    targetExe = compile(work, 'target', TARGET, ['System.Windows.Forms.dll'], 'winexe')
+    hiveExe = compile(work, 'hive', HIVE, [])
     log = path.join(work, 'questions.log')
     const helper = helperFor('allow')
     sid = (await helper.whoami()).sid!
@@ -196,6 +243,7 @@ describe.skipIf(!runs)('the elevated helper', () => {
 
   afterEach(() => {
     for (const helper of helpers.splice(0)) helper.stop()
+    delete process.env.KITE_HELPER_TEST_HIVE
   })
 
   afterAll(() => {
@@ -205,14 +253,14 @@ describe.skipIf(!runs)('the elevated helper', () => {
   })
 
   /** A helper whose broker answers its windows with `answers`, in turn. */
-  function helperFor(answers: string, dir = installDir): ComputerHelper {
+  function helperFor(
+    answers: string,
+    dir = installDir,
+    exe = path.join(app, HELPER),
+  ): ComputerHelper {
     process.env.KITE_BROKER_TEST_ANSWER = answers
     process.env.KITE_BROKER_TEST_LOG = log
-    const helper = new ComputerHelper({
-      path: path.join(app, 'kite-computer-helper.exe'),
-      log: () => {},
-      installDir: dir,
-    })
+    const helper = new ComputerHelper({ path: exe, log: () => {}, installDir: dir })
     helpers.push(helper)
     return helper
   }
@@ -223,12 +271,78 @@ describe.skipIf(!runs)('the elevated helper', () => {
     return started
   }
 
+  /** A copy of the target under another name, as a program of that name would be. */
+  async function targetNamed(name: string): Promise<Target> {
+    const exe = path.join(work, name)
+    if (!existsSync(exe)) copyFileSync(targetExe, exe)
+    return target(exe)
+  }
+
+  /** A private hive file with these values, for the helper to read in place of the user's registry. */
+  function hive(...values: string[]): string {
+    const file = path.join(work, `hive-${Math.random().toString(36).slice(2)}.dat`)
+    const made = spawnSync(hiveExe, [file, ...values], { encoding: 'utf8' })
+    if (made.status !== 0) throw new Error(made.stdout + made.stderr)
+    return file
+  }
+
+  /** One request to a serve of its own, for the test build's ops, with the environment as it is now. */
+  function serve(
+    op: string,
+    fields: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> {
+    const child = spawn(path.join(app, HELPER), ['serve'], { stdio: ['pipe', 'pipe', 'ignore'] })
+    children.push(child)
+    return new Promise((resolve, reject) => {
+      let buffer = ''
+      child.stdout!.setEncoding('utf8')
+      child.stdout!.on('data', (chunk: string) => {
+        buffer += chunk
+        const end = buffer.indexOf('\n')
+        if (end < 0) return
+        child.stdin!.end()
+        const answer = JSON.parse(buffer.slice(0, end)) as {
+          ok: boolean
+          result?: unknown
+          error?: string
+        }
+        if (answer.ok) resolve(answer.result as Record<string, unknown>)
+        else reject(new Error(answer.error))
+      })
+      child.once('error', reject)
+      child.stdin!.write(`${JSON.stringify({ id: 1, op, ...fields })}\n`)
+    })
+  }
+
+  /** The test's environment with these variables set, whatever the case of the names it had. */
+  function envWith(extra: Record<string, string>): NodeJS.ProcessEnv {
+    const names = new Set(Object.keys(extra).map((name) => name.toLowerCase()))
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(([name]) => !names.has(name.toLowerCase())),
+    )
+    return { ...env, ...extra }
+  }
+
   function questions(): Record<string, unknown>[] {
     if (!existsSync(log)) return []
     return readFileSync(log, 'utf8')
       .split('\n')
       .filter(Boolean)
       .map((line) => JSON.parse(line) as Record<string, unknown>)
+  }
+
+  async function request(helper: ComputerHelper, program: Target) {
+    const info = await helper.process(program.pid)
+    return {
+      ...newSecrets(),
+      user: sid,
+      host: process.pid,
+      target: program.pid,
+      targetImage: info.image!,
+      targetStarted: info.started!,
+      idleMs: 20_000,
+      lang: 'en' as const,
+    }
   }
 
   async function start(answers: string, program: Target) {
@@ -245,100 +359,150 @@ describe.skipIf(!runs)('the elevated helper', () => {
     })
   }
 
-  it('installs only a driver that matches the build, and knows a stale install', async () => {
+  it('installs only a driver that matches the build, keeps an install across updates, and knows a changed one', async () => {
     const helper = helperFor('allow')
     expect(await helper.layout(process.execPath)).toMatchObject({ state: 'current' })
+    // Another Kite program is another client.
     expect(await helper.layout(targetExe)).toMatchObject({ state: 'outdated' })
     const swapped = path.join(work, 'swapped')
     mkdirSync(swapped)
-    copyFileSync(
-      path.join(app, 'kite-computer-helper.exe'),
-      path.join(swapped, 'kite-computer-helper.exe'),
-    )
+    copyFileSync(path.join(app, HELPER), path.join(swapped, HELPER))
     copyFileSync(targetExe, path.join(swapped, 'cua-driver.exe'))
-    const other = new ComputerHelper({
-      path: path.join(swapped, 'kite-computer-helper.exe'),
-      log: () => {},
-      installDir: path.join(work, 'other'),
-    })
-    helpers.push(other)
-    expect(await other.install(process.execPath)).toMatchObject({ state: 'missing', exitCode: 10 })
-  }, 30_000)
+    const other = helperFor('allow', path.join(work, 'other'), path.join(swapped, HELPER))
+    await expect(other.install(process.execPath)).rejects.toThrow(
+      'not the one this helper was built with',
+    )
+    expect(existsSync(path.join(work, 'other'))).toBe(false)
 
-  it('starts no broker without a current install, or for a program that starts programs', async () => {
+    // An update brings a helper built anew, of the same protocol: the install stays current, so
+    // no administrator prompt comes with it.
+    const updated = path.join(work, 'updated')
+    mkdirSync(updated)
+    copyFileSync(path.join(app, 'cua-driver.exe'), path.join(updated, 'cua-driver.exe'))
+    const rebuilt = spawnSync(process.execPath, [build, updated, '--test'], { encoding: 'utf8' })
+    if (rebuilt.status !== 0) throw new Error(rebuilt.stdout + rebuilt.stderr)
+    const newer = helperFor('allow', installDir, path.join(updated, HELPER))
+    expect(await newer.layout(process.execPath)).toMatchObject({ state: 'current' })
+
+    // A file that is not the one the install recorded makes it unusable.
+    const changed = path.join(work, 'changed')
+    const own = helperFor('allow', changed)
+    expect(await own.install(process.execPath)).toMatchObject({ state: 'current', exitCode: 0 })
+    writeFileSync(path.join(changed, 'cua-driver.exe'), 'not the driver')
+    expect(await own.layout(process.execPath)).toMatchObject({ state: 'tampered' })
+    const program = await target()
+    await expect(own.elevate(await request(own, program))).rejects.toThrow('changed')
+    expect(await own.uninstall()).toMatchObject({ state: 'missing' })
+    expect(existsSync(changed)).toBe(false)
+  }, 60_000)
+
+  it('tells a folder only administrators can change from one others can', async () => {
+    const system32 = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')
+    await expect(serve('protected', { path: system32 })).resolves.toEqual({ protected: true })
+    await expect(serve('protected', { path: work })).resolves.toEqual({ protected: false })
+  })
+
+  it('starts no broker without a current install, for a program that starts programs, or one with programs of its own running', async () => {
     const program = await target()
     const empty = helperFor('allow', path.join(work, 'empty'))
-    const info = await empty.process(program.pid)
-    const request = {
-      ...newSecrets(),
-      user: sid,
-      host: process.pid,
-      target: program.pid,
-      targetImage: info.image!,
-      targetStarted: info.started!,
-      idleMs: 20_000,
-      lang: 'en' as const,
-    }
-    await expect(empty.elevate(request)).rejects.toThrow('not installed')
-    const launcher = await target(launcherExe)
+    await expect(empty.elevate(await request(empty, program))).rejects.toThrow('not installed')
     const helper = helperFor('allow')
-    const launcherInfo = await helper.process(launcher.pid)
-    await expect(
-      helper.elevate({
-        ...request,
-        target: launcher.pid,
-        targetImage: launcherInfo.image!,
-        targetStarted: launcherInfo.started!,
-      }),
-    ).rejects.toThrow('starts other programs')
+    for (const name of ['taskmgr.exe', 'python3.12.exe', 'node.exe']) {
+      const launcher = await targetNamed(name)
+      await expect(helper.elevate(await request(helper, launcher)), name).rejects.toThrow(
+        'starts other programs',
+      )
+    }
+    const parent = await target()
+    expect(await ask(parent, 'child')).toBe('child')
+    await expect(helper.elevate(await request(helper, parent))).rejects.toThrow(
+      'programs of its own running',
+    )
+  }, 40_000)
+
+  it('names the approved program only by the image Windows gives, exactly', async () => {
+    const program = await target()
+    const helper = helperFor('allow')
+    const exact = await request(helper, program)
+    // Forms that only normalize to the image.
+    for (const image of [`${exact.targetImage}.`, `${exact.targetImage} `]) {
+      await expect(helper.elevate({ ...exact, targetImage: image })).rejects.toThrow(
+        'not the program that was approved',
+      )
+    }
   }, 30_000)
 
-  it('starts no broker while a .NET profiler would load into it', async () => {
+  it('starts nothing while a .NET setting would load code into it, wherever it is set', async () => {
     const program = await target()
-    process.env.COR_ENABLE_PROFILING = '1'
-    let helper: ComputerHelper
-    try {
-      helper = helperFor('allow')
-      await helper.whoami()
-    } finally {
-      delete process.env.COR_ENABLE_PROFILING
+    for (const name of ['COR_PROFILER_PATH', 'complus_KiteTest', 'DOTNET_EnableEventPipe']) {
+      process.env[name] = '1'
+      let helper: ComputerHelper
+      try {
+        helper = helperFor('allow')
+        await helper.whoami()
+      } finally {
+        delete process.env[name]
+      }
+      await expect(helper.elevate(await request(helper, program)), name).rejects.toThrow(name)
+      await expect(helper.install(process.execPath), name).rejects.toThrow(name)
+      await expect(helper.uninstall(), name).rejects.toThrow(name)
     }
-    const info = await helper.process(program.pid)
-    await expect(
-      helper.elevate({
-        ...newSecrets(),
-        user: sid,
-        host: process.pid,
-        target: program.pid,
-        targetImage: info.image!,
-        targetStarted: info.started!,
-        idleMs: 20_000,
-        lang: 'en',
-      }),
-    ).rejects.toThrow('COR_ENABLE_PROFILING')
-  }, 30_000)
+    // The SDK's own variables reach no .NET Framework program.
+    process.env.DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+    try {
+      await expect(serve('guard')).resolves.toEqual({ unsafe: null })
+    } finally {
+      delete process.env.DOTNET_CLI_TELEMETRY_OPTOUT
+    }
+  }, 40_000)
+
+  it('reads the user’s environment, its volatile part with each session’s and the runtime’s own settings', async () => {
+    const cases: [string[], string | null][] = [
+      [['Environment\\DOTNET_NOLOGO=1', 'Volatile Environment\\USERNAME=me'], null],
+      [['Volatile Environment\\1\\SESSIONNAME=Console'], null],
+      [['Environment\\COR_PROFILER={0}'], 'HKCU\\Environment'],
+      [['Volatile Environment\\COR_ENABLE_PROFILING=1'], 'HKCU\\Volatile Environment'],
+      [['Volatile Environment\\2\\COMPlus_AltJitName=x.dll'], 'HKCU\\Volatile Environment\\2'],
+      [['Software\\Microsoft\\.NETFramework\\AltJit=*'], 'NETFramework'],
+      [['Environment\\windir=C:\\Users\\x'], 'windir'],
+      [['Volatile Environment\\1\\SystemRoot=C:\\Users\\x'], 'SystemRoot'],
+    ]
+    for (const [values, found] of cases) {
+      process.env.KITE_HELPER_TEST_HIVE = hive(...values)
+      const { unsafe } = (await serve('guard')) as { unsafe: string | null }
+      if (found === null) expect(unsafe, values.join()).toBeNull()
+      else expect(unsafe, values.join()).toContain(found)
+    }
+  }, 40_000)
+
+  it('runs no broker with a code-loading variable or another Windows folder in its own environment', () => {
+    const exe = path.join(installDir, HELPER)
+    const run = (extra: Record<string, string>) =>
+      spawnSync(exe, ['broker'], { env: envWith(extra) }).status
+    // Names the runtime itself reads before Main stop it there: COMPlus_AltJit alone already does.
+    expect(run({ COMPlus_KiteTest: '1' })).toBe(17)
+    expect(run({ COR_PROFILER: '{0}' })).toBe(17)
+    expect(run({ CORECLR_PROFILER: 'x' })).toBe(17)
+    expect(run({ windir: 'C:\\Users\\Public' })).toBe(17)
+    // With a clean environment it goes on, to its own arguments.
+    expect(run({})).toBe(2)
+  })
 
   it('serves only the program that was approved, by its start time and image', async () => {
     const program = await target()
     const helper = helperFor('allow')
-    const info = await helper.process(program.pid)
     const secrets = newSecrets()
-    const broker = await helper.elevate({
+    const exact = await request(helper, program)
+    const launcher = await helper.elevate({
+      ...exact,
       ...secrets,
-      user: sid,
-      host: process.pid,
-      target: program.pid,
-      targetImage: info.image!,
-      targetStarted: String(BigInt(info.started!) - 10_000_000n),
-      idleMs: 20_000,
-      lang: 'en',
+      targetStarted: String(BigInt(exact.targetStarted) - 10_000_000n),
     })
-    expect(await exited(broker!, 5_000)).toBe(true)
-    const exe = path.join(installDir, 'kite-computer-helper.exe')
+    const exe = path.join(installDir, HELPER)
     await expect(
       connect(
         exe,
-        ['--pipe', secrets.pipe, '--server', String(broker), '--install-dir', installDir],
+        ['--pipe', secrets.pipe, '--launcher', String(launcher), '--install-dir', installDir],
         secrets.token,
         30_000,
       ),
@@ -348,20 +512,17 @@ describe.skipIf(!runs)('the elevated helper', () => {
   it('refuses a missing or wrong token and a client of its own, ending after three', async () => {
     const program = await target()
     const helper = helperFor('allow')
-    const info = await helper.process(program.pid)
     const secrets = newSecrets()
-    const broker = await helper.elevate({
-      ...secrets,
-      user: sid,
-      host: process.pid,
-      target: program.pid,
-      targetImage: info.image!,
-      targetStarted: info.started!,
-      idleMs: 20_000,
-      lang: 'en',
-    })
-    const exe = path.join(installDir, 'kite-computer-helper.exe')
-    const args = ['--pipe', secrets.pipe, '--server', String(broker), '--install-dir', installDir]
+    const launcher = await helper.elevate({ ...(await request(helper, program)), ...secrets })
+    const exe = path.join(installDir, HELPER)
+    const args = [
+      '--pipe',
+      secrets.pipe,
+      '--launcher',
+      String(launcher),
+      '--install-dir',
+      installDir,
+    ]
     await expect(connect(exe, args, 'not the token', 20_000)).rejects.toThrow('wrong token')
     // A client that is not the installed helper started by the host is refused before its token.
     const direct = net.connect(`\\\\.\\pipe\\${secrets.pipe}`)
@@ -372,39 +533,42 @@ describe.skipIf(!runs)('the elevated helper', () => {
     expect(answer).toContain('not the expected program')
     direct.destroy()
     await expect(connect(exe, args, secrets.tokenSha256, 20_000)).rejects.toThrow('wrong token')
-    expect(await exited(broker!, 5_000)).toBe(true)
-  }, 40_000)
+    await expect(connect(exe, args, secrets.token, 10_000)).rejects.toThrow()
+  }, 60_000)
 
-  it('connects only to the broker its prompt started', async () => {
+  it('connects only to the broker its prompt’s launcher started', async () => {
+    const exe = path.join(installDir, HELPER)
+    // A pipe of the test's own process: neither the launcher itself nor a child of another program
+    // will do, and a child of its parent is no installed helper.
     const pipe = newSecrets().pipe
     const squatter = net.createServer((socket) => socket.end()).listen(`\\\\.\\pipe\\${pipe}`)
     await new Promise((resolve) => squatter.once('listening', resolve))
-    const exe = path.join(installDir, 'kite-computer-helper.exe')
-    await expect(
-      connect(
-        exe,
-        ['--pipe', pipe, '--server', String(process.pid + 1), '--install-dir', installDir],
-        'x',
-        20_000,
-      ),
-    ).rejects.toThrow('not served by the helper Kite started')
-    await expect(
-      connect(
-        exe,
-        ['--pipe', pipe, '--server', String(process.pid), '--install-dir', installDir],
-        'x',
-        20_000,
-      ),
-    ).rejects.toThrow('not served by the installed helper')
+    const unrelated = await target()
+    const tried: [number, string][] = [
+      [process.pid, 'not served by the helper Kite started'],
+      [unrelated.pid, 'not served by the helper Kite started'],
+      [process.ppid, 'not served by the installed helper'],
+    ]
+    for (const [launcher, why] of tried) {
+      await expect(
+        connect(
+          exe,
+          ['--pipe', pipe, '--launcher', String(launcher), '--install-dir', installDir],
+          'x',
+          20_000,
+        ),
+      ).rejects.toThrow(why)
+    }
     squatter.close()
-  }, 30_000)
+  }, 40_000)
 
-  it('starts only when the owner allows it in its window, naming the program', async () => {
+  it('starts only when the owner allows it in its window, naming the program and who asks', async () => {
     const program = await target()
     await expect(start('deny', program)).rejects.toThrow('the user did not allow it')
     const asked = questions().filter((q) => q.kind === 'start')
-    expect(asked.at(-1)).toMatchObject({ kind: 'start', pid: program.pid })
+    expect(asked.at(-1)).toMatchObject({ kind: 'start', pid: program.pid, askerPid: process.pid })
     expect(String(asked.at(-1)?.target).toLowerCase()).toBe(targetExe.toLowerCase())
+    expect(String(asked.at(-1)?.asker).toLowerCase()).toBe(process.execPath.toLowerCase())
   }, 30_000)
 
   it('relays only the approved program’s windows, in the background, as it checked them', async () => {
@@ -431,8 +595,16 @@ describe.skipIf(!runs)('the elevated helper', () => {
         'get_window_state',
         { pid: approved.pid, window_id: approved.window, screenshot_out_file: 'C:\\x.png' },
       ],
+      ['get_window_state', { pid: approved.pid, window_id: approved.window, max_depth: 'deep' }],
       ['click', { target: window, x: 1, y: 1, delivery_mode: 'foreground' }],
+      ['click', { target: window, x: 1, y: 1, button: 7, delivery_mode: 'background' }],
       ['scroll', { target: window, x: 1, y: 1, direction: 'down' }],
+      [
+        'scroll',
+        { target: window, x: 1, y: 1, direction: 'sideways', delivery_mode: 'background' },
+      ],
+      ['press_key', { target: window, key: ' return', delivery_mode: 'background' }],
+      ['press_key', { target: window, key: 'tab', modifiers: 'ctrl', delivery_mode: 'background' }],
     ]
     for (const [tool, args] of refusals) {
       const result = await driver!.call(tool, args)
@@ -453,22 +625,12 @@ describe.skipIf(!runs)('the elevated helper', () => {
   it('passes on what it checked, not the line it was sent', async () => {
     const program = await target()
     const helper = helperFor('allow')
-    const info = await helper.process(program.pid)
     const secrets = newSecrets()
-    const broker = await helper.elevate({
-      ...secrets,
-      user: sid,
-      host: process.pid,
-      target: program.pid,
-      targetImage: info.image!,
-      targetStarted: info.started!,
-      idleMs: 20_000,
-      lang: 'en',
-    })
-    const exe = path.join(installDir, 'kite-computer-helper.exe')
+    const launcher = await helper.elevate({ ...(await request(helper, program)), ...secrets })
+    const exe = path.join(installDir, HELPER)
     const { child } = await connect(
       exe,
-      ['--pipe', secrets.pipe, '--server', String(broker), '--install-dir', installDir],
+      ['--pipe', secrets.pipe, '--launcher', String(launcher), '--install-dir', installDir],
       secrets.token,
     )
     children.push(child)
@@ -482,24 +644,32 @@ describe.skipIf(!runs)('the elevated helper', () => {
     child.stdin.write(
       `{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"list_windows","arguments":{"pid":${program.pid}},"task":{"x":1}}}\n`,
     )
-    for (let i = 0; i < 100 && lines.length < 2; i++)
+    child.stdin.write(
+      `{"jsonrpc":"2.0","id":9,"method":"initialize","params":{"protocolVersion":"1","capabilities":{"sampling":{}},"clientInfo":{"name":"x","version":"1"}}}\n`,
+    )
+    child.stdin.write(
+      `{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"list_windows","arguments":{"pid":${program.pid}},"_meta":{"progressToken":1,"other":2}}}\n`,
+    )
+    for (let i = 0; i < 100 && lines.length < 4; i++)
       await new Promise((resolve) => setTimeout(resolve, 50))
     expect(lines.join('\n')).not.toContain('launch_app')
-    expect(lines.find((line) => line.includes('"id":8'))).toContain('Refused by Kite')
+    for (const id of [8, 9, 10]) {
+      expect(lines.find((line) => line.includes(`"id":${id}`))).toContain('Refused by Kite')
+    }
     child.kill()
   }, 30_000)
 
-  it('asks the owner in its own window before every step but harmless ones', async () => {
+  it('asks the owner before every step but harmless ones, listing what went through unasked', async () => {
     const program = await target()
-    const driver = await start('allow,deny', program)
+    const driver = await start('allow', program)
     const window = { kind: 'window', pid: program.pid, window_id: program.window }
     const background = { target: window, delivery_mode: 'background' }
     await driver!.call('get_window_state', { pid: program.pid, window_id: program.window })
     const before = questions().length
     const harmless: [string, Record<string, unknown>][] = [
       ['scroll', { ...background, x: 5, y: 5, direction: 'down' }],
-      ['click', { ...background, element_token: 's00000001:1' }],
       ['press_key', { ...background, key: 'tab' }],
+      ['click', { ...background, element_token: 's00000001:1' }],
       ['type_text', { ...background, text: 'name' }],
     ]
     for (const [tool, args] of harmless) {
@@ -508,13 +678,15 @@ describe.skipIf(!runs)('the elevated helper', () => {
     expect(questions()).toHaveLength(before)
     const risky: [string, Record<string, unknown>, string][] = [
       ['click', { ...background, element_token: 's00000001:0' }, 'click'],
-      ['click', { ...background, element_token: 's00000001:9' }, 'click'],
       ['click', { ...background, element_token: 's00000001:1', button: 'right' }, 'right-click'],
       ['click', { ...background, element_token: 's00000001:1', count: 2 }, 'double-click'],
       ['click', { ...background, x: 20, y: 20 }, 'click'],
+      // Typing no longer follows a click into the field, so it is asked.
+      ['type_text', { ...background, text: 'plain' }, 'type'],
       ['press_key', { ...background, key: 'return' }, 'key'],
-      ['hotkey', { ...background, keys: ['ctrl', 'v'] }, 'key'],
-      ['type_text', { ...background, text: 'del *\n' }, 'type'],
+      ['hotkey', { ...background, keys: ['ctrl', 's'] }, 'key'],
+      ['type_text', { ...background, text: 'del *\n\u202Eexe.txt' }, 'type'],
+      ['type_text', { ...background, text: 'a\tb' }, 'type'],
       ['drag', { ...background, from_x: 1, from_y: 1, to_x: 9, to_y: 9 }, 'drag'],
       [
         'invoke_menu',
@@ -528,15 +700,60 @@ describe.skipIf(!runs)('the elevated helper', () => {
       ],
     ]
     for (const [tool, args] of risky) {
-      const result = await driver!.call(tool, args)
-      expect(text(result), tool).toContain('the user did not allow this step')
+      expect((await driver!.call(tool, args)).isError, tool).toBeFalsy()
     }
     const asked = questions().slice(before)
     expect(asked.map((q) => q.step)).toEqual(risky.map(([, , kind]) => kind))
-    expect(asked[0]).toMatchObject({ text: 'Delete', role: 'Button' })
-    expect(asked[7]).toMatchObject({ text: 'del *\n' })
+    expect(asked[0]).toMatchObject({ text: 'Delete', role: 'Button', places: 1 })
+    // The first question lists the four steps that went through without one.
+    expect(asked[0]!.since).toEqual([
+      'Scrolled down 3',
+      'Pressed tab',
+      'Clicked “Name” (Edit)',
+      'Typed “name”',
+    ])
+    expect(asked[1]!.since).toEqual([])
+    // Typed text is shown in full, its line breaks, tabs and direction marks made visible.
+    expect(asked[7]!.details).toContain('del *⏎')
+    expect(asked[7]!.details).toContain('⟦U+202E⟧exe.txt')
+    expect(asked[8]!.details).toContain('a⇥b')
+    expect(asked[9]).toMatchObject({ step: 'drag', places: 2 })
+
+    const refused: [string, Record<string, unknown>, string][] = [
+      ['click', { ...background, element_token: 's00000001:9' }, 'no place'],
+      ['click', { ...background, element_token: 's00000001:1', x: 1, y: 1 }, 'not both'],
+      ['click', { ...background, x: 5000, y: 5000 }, 'no place'],
+      ['hotkey', { ...background, keys: ['ctrl', 'v'] }, 'never pastes'],
+      ['press_key', { ...background, key: 'insert', modifiers: ['shift'] }, 'never pastes'],
+      ['type_text', { ...background, text: 'x'.repeat(1001) }, 'longer than 1000'],
+    ]
+    const count = questions().length
+    for (const [tool, args, why] of refused) {
+      const result = await driver!.call(tool, args)
+      expect(result.isError, tool).toBe(true)
+      expect(text(result), tool).toContain(why)
+    }
+    expect(questions()).toHaveLength(count)
     await driver!.stop()
   }, 60_000)
+
+  it('ends once the owner said no to three steps', async () => {
+    const program = await target()
+    const driver = await start('allow,deny', program)
+    const background = {
+      target: { kind: 'window', pid: program.pid, window_id: program.window },
+      delivery_mode: 'background',
+    }
+    let closed = false
+    driver!.onClosed = () => (closed = true)
+    for (let i = 0; i < 3; i++) {
+      const result = await driver!.call('press_key', { ...background, key: 'return' })
+      expect(text(result)).toContain('the user did not allow this step')
+    }
+    expect(await exited(driver!.brokerPid, 5_000)).toBe(true)
+    for (let i = 0; i < 50 && !closed; i++) await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(closed).toBe(true)
+  }, 40_000)
 
   it('keeps the program from starting programs while it runs, and lets it after', async () => {
     const program = await target()

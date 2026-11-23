@@ -1,10 +1,11 @@
 // Huli: driving a program that runs as administrator, through the elevated broker of Kite's
 // computer use helper (native/computer-helper/windows/Broker.cs), which the owner installs once into
-// Program Files and confirms each time: at Windows' administrator prompt, then in the broker's own
-// window, which names the program. The host makes a random pipe name and a token for the session;
-// the broker's command line carries only the token's SHA-256. Kite cannot ask Windows who serves a
-// pipe, so the installed helper's connect mode, started here from Program Files, checks the server
-// is the broker the prompt started before it hands over the token; the broker in turn checks that
+// Program Files and confirms each time: at Windows' administrator prompt (for cmd.exe, which starts
+// the broker with a clean environment), then in the broker's own window, which names the program.
+// The host makes a random pipe name and a token for the session; the broker's command line carries
+// only the token's SHA-256. Kite cannot ask Windows who serves a pipe, so the installed helper's
+// connect mode, started here from Program Files, checks the server is the child of the launcher the
+// prompt started before it hands over the token; the broker in turn checks that
 // its client is that connect, started by this host. The broker then relays Cua Driver's tools for
 // that program's windows alone, in the background, and confirms risky steps in its own window.
 
@@ -213,7 +214,7 @@ export class ElevatedDriver {
     })
     if (launched === null) return null
     const sdk = await loadSdk()
-    const args = ['--pipe', secrets.pipe, '--server', String(launched)]
+    const args = ['--pipe', secrets.pipe, '--launcher', String(launched)]
     if (options.testBuild) args.push('--install-dir', options.installDir)
     const { child, pid, rest } = await connect(
       path.join(options.installDir, HELPER_FILE),

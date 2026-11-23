@@ -1,29 +1,37 @@
 // The elevated broker. It runs as administrator from Program Files\Kite Computer Helper only, for
 // one program the owner approves, and serves one connection, then exits:
 //
+// - It starts through cmd.exe (see Serve.cs and Guard.cs) and refuses to run with a .NET variable
+//   that loads code, or a Windows folder other than the system's, in its environment.
 // - Who started it is not trusted. Its arguments name the program by process id, start time and
-//   image path, which it checks, and it refuses programs that start other programs (consoles, Task
-//   Manager, Explorer, script hosts and the like). The owner then confirms in its own window, which
-//   names the program and the Kite program asking; no normal process can click that window.
+//   image path, which it checks exactly, and it refuses programs that start other programs or run
+//   what is typed into them, programs that do not run as administrator and programs that have
+//   programs of their own running. The owner then confirms in its own window, which names the
+//   program, its window and the process that asks, with that process's command line and parent.
 // - Its pipe admits Kite's user alone, by the SID passed in (under Administrator protection the
 //   broker runs as the shadow administrator, another account), with a medium label that keeps lower
 //   integrity out of reading or writing it. The client must be this same installed helper in its
-//   connect mode, started by the Kite program recorded at install (the host process named), and its
-//   first line must carry the session's token, whose SHA-256 alone is on the command line.
-// - While it runs, the program sits in a job that lets it start no process, so its own dialogs
-//   cannot open a console as administrator; the limit is lifted when the broker ends.
+//   connect mode, started by the Kite program the install recorded (the host process named), and
+//   its first line must carry the session's token, whose SHA-256 alone is on the command line. Any
+//   process can run Kite's program, so this binds the broker to Kite only loosely; the checks below
+//   are the broker's own.
+// - While it runs, the program sits in a job that lets it start no process directly; the limit is
+//   set before the program joins and lifted when the broker ends.
 // - It runs Cua Driver from its own folder, checked against the hash built in while held open, in a
-//   job that ends it with the broker, with an environment of its own: home and temporary folders
-//   under the install folder and a PATH of system folders without PowerShell. It relays only the
-//   reading and input tools Kite uses, each scoped to a window of the approved program, with only
-//   the arguments Kite sends and in the background only, as it re-serializes them, and asks the owner
-//   in its own window before every step but plainly harmless ones (see Risk.cs).
-// - It ends when Kite disconnects, the program or Kite's host exits, or no request came for the idle
-//   time while none was pending.
+//   job that ends it with the broker and lets it start nothing, with an environment of its own:
+//   Windows' folders from the system, home and temporary folders under the install folder and a
+//   PATH of System32 alone. It relays only the reading and input tools Kite uses, each scoped to a
+//   window of the approved program, with only the arguments Kite sends, each of its type and range,
+//   in the background only, one tool call at a time, as it re-serializes them, and asks the owner in
+//   its own window before every step but plainly harmless ones (see Risk.cs).
+// - It ends when Kite disconnects, the program or Kite's host exits, no request came for the idle
+//   time while none was pending, the owner said no to three steps, the driver acted in the
+//   foreground, or thirty minutes passed.
 
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
@@ -111,12 +119,15 @@ namespace Kite.ComputerHelper
             return args.ToString();
         }
 
+        static readonly Regex Plain = new Regex(@"\A[A-Za-z0-9_.:-]+\z");
+
         static void Add(StringBuilder args, string name, string value)
         {
             args.Append(" --").Append(name).Append(' ');
-            // Paths have no quote of their own and never end in a backslash here.
-            if (value.IndexOf(' ') >= 0) args.Append('"').Append(value).Append('"');
-            else args.Append(value);
+            // Paths have no quote of their own and never end in a backslash here. Anything but plain
+            // words goes in quotes, where cmd.exe, which starts the broker, reads & ( ) ^ as text.
+            if (Plain.IsMatch(value)) args.Append(value);
+            else args.Append('"').Append(value).Append('"');
         }
 
         void Validate()
@@ -125,10 +136,10 @@ namespace Kite.ComputerHelper
             if (!SidPattern.IsMatch(User)) throw new ArgumentException("user must be an account SID.");
             if (!HashPattern.IsMatch(TokenSha256)) throw new ArgumentException("token-sha256 must be 64 hex digits.");
             if (Host <= 0 || Target <= 0) throw new ArgumentException("host and target must be process ids.");
-            if (!Path.IsPathRooted(TargetImage) || TargetImage.IndexOfAny(new[] { '"', '\r', '\n' }) >= 0 || TargetImage.EndsWith("\\"))
+            if (!Path.IsPathRooted(TargetImage) || TargetImage.IndexOfAny(new[] { '"', '%', '\r', '\n', '\0' }) >= 0 || TargetImage.EndsWith("\\") || TargetImage.Length > 32767)
                 throw new ArgumentException("target-image must be a full path.");
             if (Lang != "zh-CN" && Lang != "en") throw new ArgumentException("lang must be zh-CN or en.");
-            if (InstallDir != null && (!Build.Test || InstallDir.IndexOfAny(new[] { '"', '\r', '\n' }) >= 0 || InstallDir.EndsWith("\\")))
+            if (InstallDir != null && (!Build.Test || InstallDir.IndexOfAny(new[] { '"', '%', '\r', '\n', '\0' }) >= 0 || InstallDir.EndsWith("\\")))
                 throw new ArgumentException("install-dir is for test builds.");
         }
 
@@ -156,16 +167,44 @@ namespace Kite.ComputerHelper
 
     static class Broker
     {
-        /// <summary>Programs that start other programs, which the broker never drives.</summary>
-        public static readonly HashSet<string> Launchers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        /// <summary>
+        /// Programs that start other programs or run what is typed into them, which the broker never
+        /// drives: what they start or run would run as administrator too. Matched by the image's own
+        /// file name.
+        /// </summary>
+        static readonly HashSet<string> Launchers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "taskmgr.exe", "cmd.exe", "powershell.exe", "powershell_ise.exe", "pwsh.exe", "windowsterminal.exe",
             "wt.exe", "openconsole.exe", "conhost.exe", "regedit.exe", "regedt32.exe", "mmc.exe", "explorer.exe",
             "rundll32.exe", "mshta.exe", "wscript.exe", "cscript.exe", "msiexec.exe", "control.exe",
+            "systeminformer.exe", "processhacker.exe", "procexp.exe", "procexp64.exe", "procexp64a.exe",
+            "autoruns.exe", "autoruns64.exe", "autoruns64a.exe", "procmon.exe", "procmon64.exe", "psexec.exe",
+            "psexec64.exe", "wsl.exe", "wslhost.exe", "wslg.exe", "bash.exe", "sh.exe", "zsh.exe", "mintty.exe",
+            "git-bash.exe", "git-cmd.exe", "python.exe", "pythonw.exe", "py.exe", "pyw.exe", "node.exe",
+            "deno.exe", "bun.exe", "perl.exe", "ruby.exe", "rubyw.exe", "php.exe", "java.exe", "javaw.exe",
+            "dotnet.exe", "csi.exe", "fsi.exe", "msbuild.exe", "installutil.exe", "regsvr32.exe", "regasm.exe",
+            "hh.exe", "schtasks.exe", "taskschd.msc", "services.exe", "sc.exe", "wmic.exe", "runas.exe",
+            "conemu.exe", "conemu64.exe", "cmder.exe", "alacritty.exe", "wezterm.exe", "wezterm-gui.exe",
+            "tabby.exe", "hyper.exe", "far.exe", "totalcmd.exe", "totalcmd64.exe", "doublecmd.exe",
+            "everything.exe", "code.exe", "devenv.exe", "winword.exe", "excel.exe", "powerpnt.exe",
+            "msaccess.exe", "outlook.exe", "sqlcmd.exe", "ssms.exe",
         };
+
+        /// <summary>Whether a program by this image path starts other programs or runs code typed into it.</summary>
+        public static bool StartsPrograms(string image)
+        {
+            string name = Path.GetFileName(image ?? "");
+            if (Launchers.Contains(name)) return true;
+            // python3.exe, python3.12.exe, pythonw3.12.exe and the like.
+            return Regex.IsMatch(name, @"\A(python|pythonw|pypy)[0-9.]*\.exe\z", RegexOptions.IgnoreCase);
+        }
 
         public static int Run(Dictionary<string, string> values)
         {
+            // A name the launcher did not clear, or another Windows folder, means the runtime may
+            // have loaded code already; whatever it is, the broker does nothing more.
+            string environment = Guard.BrokerEnvironment();
+            if (environment != null) return Fail(17, environment);
             BrokerOptions options;
             try
             {
@@ -181,10 +220,10 @@ namespace Kite.ComputerHelper
             string dir = Path.GetDirectoryName(own);
             if (!Layout.SamePath(dir, Layout.InstallDir(options.InstallDir))) return Fail(13, "The broker runs only from its install folder.");
             if (!Build.Test && !Native.SelfIsHigh()) return Fail(9, "The broker runs as administrator only.");
-            string recorded = Path.Combine(dir, Layout.ClientFile);
-            if (!File.Exists(recorded)) return Fail(6, "The install records no Kite program.");
-            string client = File.ReadAllText(recorded, Encoding.UTF8).Trim();
-            if (Launchers.Contains(Path.GetFileName(options.TargetImage))) return Fail(8, "That program starts other programs, which the broker never drives.");
+            Record record = Layout.ReadRecord(dir);
+            if (record == null || record.Protocol != Layout.Protocol) return Fail(6, "The install has no record of this protocol.");
+            if (!Build.Test && !Layout.Protected(dir)) return Fail(18, "Others than administrators may change the install folder.");
+            if (Layout.Sha256(own) != record.HelperSha256) return Fail(18, "The broker is not the helper the install recorded.");
             Process target, host;
             try
             {
@@ -198,11 +237,33 @@ namespace Kite.ComputerHelper
             {
                 return Fail(7, "The approved program or Kite is not running.");
             }
-            if (!Layout.SamePath(Native.ImageOf(options.Target), options.TargetImage) || Native.StartedAt(options.Target) != options.TargetStarted)
+            // The image as Windows names it, matched exactly: no form of the path that only
+            // normalizes to it, such as a trailing dot or space or a short name.
+            string image = Native.ImageOf(options.Target);
+            if (image == null || !string.Equals(image, options.TargetImage, StringComparison.OrdinalIgnoreCase) || Native.StartedAt(options.Target) != options.TargetStarted)
                 return Fail(7, "The process is not the program that was approved.");
-            if (!Layout.SamePath(Native.ImageOf(options.Host), client)) return Fail(7, "The host is not the Kite program the install recorded.");
+            if (StartsPrograms(image)) return Fail(8, "That program starts other programs, which the broker never drives.");
+            if (!Build.Test && !Native.IsHigh(options.Target)) return Fail(19, "That program does not run as administrator.");
+            // What it started before the broker came would sit outside the job that holds it.
+            if (Native.Descendants(options.Target).Count > 0) return Fail(20, "That program has programs of its own running.");
+            if (!Layout.SamePath(Native.ImageOf(options.Host), record.Client)) return Fail(7, "The host is not the Kite program the install recorded.");
+            if (!Layout.MakeHome(dir)) return Fail(21, "The driver's home folder is a link.");
             Native.SetProcessDPIAware();
-            return new Session(options, own, client, target, host).Run();
+            var asker = new Asker
+            {
+                Image = Native.ImageOf(options.Host),
+                Pid = options.Host,
+                CommandLine = Native.CommandLine(options.Host),
+                ParentImage = ParentImage(options.Host),
+            };
+            return new Session(options, own, target, host, asker).Run();
+        }
+
+        static string ParentImage(int pid)
+        {
+            int parent = Native.ParentOf(pid);
+            if (parent <= 0 || Native.StartedAt(parent) == 0 || Native.StartedAt(parent) > Native.StartedAt(pid)) return null;
+            return Native.ImageOf(parent);
         }
 
         static int Fail(int code, string message)
@@ -220,11 +281,19 @@ namespace Kite.ComputerHelper
             const int MaxReply = 96 * 1024 * 1024;
             const int MaxRefusals = 3;
             const int SnapshotsKept = 32;
+            /// <summary>However busy, a session ends after this long.</summary>
+            const int LifetimeMs = 30 * 60 * 1000;
+            /// <summary>A call the driver has not answered in this time ends the session.</summary>
+            const int CallWaitMs = 3 * 60 * 1000;
+            /// <summary>Steps the owner said no to before the session ends.</summary>
+            const int MaxDenied = 3;
+            /// <summary>Requests waiting on the driver at once.</summary>
+            const int MaxPending = 8;
 
             static readonly Dictionary<string, HashSet<string>> Tools = new Dictionary<string, HashSet<string>>
             {
                 { "list_windows", Set("pid", "on_screen_only") },
-                { "get_window_state", Set("pid", "window_id", "query", "since", "max_elements", "max_depth", "include_screenshot", "include_accessibility_tree", "tree_format") },
+                { "get_window_state", Set("pid", "window_id", "query", "since", "max_elements", "max_depth", "include_screenshot", "include_accessibility_tree") },
                 { "click", Set("target", "element_token", "x", "y", "button", "count", "delivery_mode") },
                 { "type_text", Set("target", "text", "element_token", "delivery_mode") },
                 { "press_key", Set("target", "key", "modifiers", "delivery_mode") },
@@ -234,9 +303,9 @@ namespace Kite.ComputerHelper
                 { "invoke_menu", Set("pid", "window_id", "path", "delivery_mode") },
             };
             static readonly HashSet<string> Acting = Set("click", "type_text", "press_key", "hotkey", "scroll", "drag", "invoke_menu");
-            static readonly HashSet<string> PlainMethods = Set("initialize", "notifications/initialized", "notifications/cancelled", "ping", "tools/list");
             static readonly HashSet<string> MessageKeys = Set("jsonrpc", "id", "method", "params");
             static readonly HashSet<string> CallKeys = Set("name", "arguments", "_meta");
+            static readonly Regex TokenPattern = new Regex(@"\A[A-Za-z0-9_-]{1,64}:[0-9]{1,9}\z");
 
             static HashSet<string> Set(params string[] items)
             {
@@ -245,9 +314,9 @@ namespace Kite.ComputerHelper
 
             readonly BrokerOptions options;
             readonly string own;
-            readonly string client;
             readonly Process target;
             readonly Process host;
+            readonly Asker asker;
             readonly JavaScriptSerializer json = Json.Create();
             readonly SemaphoreSlim writeLock = new SemaphoreSlim(1, 1);
             readonly TaskCompletionSource<string> ended = new TaskCompletionSource<string>();
@@ -256,19 +325,28 @@ namespace Kite.ComputerHelper
             readonly Dictionary<string, Snapshot> snapshots = new Dictionary<string, Snapshot>();
             readonly Queue<string> snapshotOrder = new Queue<string>();
             readonly Dictionary<long, Snapshot> latest = new Dictionary<long, Snapshot>();
+            /// <summary>What went through unconfirmed since the owner was last asked.</summary>
+            readonly List<string> since = new List<string>();
+            /// <summary>The window whose edit field the last step clicked, or 0.</summary>
+            long focusedEdit;
+            int denied;
+            /// <summary>The tool call the driver has not answered yet, by its key; the next waits for it.</summary>
+            string callInFlight;
+            TaskCompletionSource<bool> callDone;
             NamedPipeServerStream pipe;
             Process driver;
             IntPtr driverJob = IntPtr.Zero;
             IntPtr targetJob = IntPtr.Zero;
             Timer idle;
+            Timer lifetime;
 
-            public Session(BrokerOptions options, string own, string client, Process target, Process host)
+            public Session(BrokerOptions options, string own, Process target, Process host, Asker asker)
             {
                 this.options = options;
                 this.own = own;
-                this.client = client;
                 this.target = target;
                 this.host = host;
+                this.asker = asker;
             }
 
             public int Run()
@@ -281,8 +359,10 @@ namespace Kite.ComputerHelper
                     int code = Accept();
                     if (code != 0) return code;
                     target.Refresh();
-                    if (!Confirm.Start(options.TargetImage, options.Target, target.MainWindowTitle, client))
+                    if (!Confirm.Start(options.TargetImage, options.Target, target.MainWindowTitle, asker))
                         return Refuse(14, "the user did not allow it");
+                    // The program may have started one in the meantime.
+                    if (Native.Descendants(options.Target).Count > 0) return Refuse(20, "the program has programs of its own running");
                     if (!Contain()) return Refuse(15, "the program could not be kept from starting other programs");
                     string failure = StartDriver();
                     if (failure != null) return Refuse(16, failure);
@@ -291,6 +371,7 @@ namespace Kite.ComputerHelper
                     WatchExit(host, "Kite's host exited");
                     WatchExit(driver, "Cua Driver exited");
                     idle = new Timer(delegate { End("idle"); }, null, options.IdleMs, Timeout.Infinite);
+                    lifetime = new Timer(delegate { End("its time ran out"); }, null, LifetimeMs, Timeout.Infinite);
                     Requests().ContinueWith(done => End(Reason("Kite disconnected", done)));
                     Replies().ContinueWith(done => End(Reason("Cua Driver closed its output", done)));
                     ended.Task.Wait();
@@ -430,16 +511,18 @@ namespace Kite.ComputerHelper
                 return difference == 0;
             }
 
-            /// <summary>Puts the program in a job that lets it start no process while the broker runs.</summary>
+            /// <summary>
+            /// Puts the program in a job that lets it start no process while the broker runs, the
+            /// limit set before the program joins, so no start slips in between.
+            /// </summary>
             bool Contain()
             {
                 targetJob = Native.CreateJobObjectW(IntPtr.Zero, null);
                 if (targetJob == IntPtr.Zero) return false;
                 try
                 {
-                    if (!Native.AssignProcessToJobObject(targetJob, target.Handle)) return false;
                     Native.LimitJob(targetJob, Native.JOB_OBJECT_LIMIT_ACTIVE_PROCESS, 1);
-                    return true;
+                    return Native.AssignProcessToJobObject(targetJob, target.Handle);
                 }
                 catch (Exception)
                 {
@@ -462,19 +545,21 @@ namespace Kite.ComputerHelper
                     CreateNoWindow = true,
                     WorkingDirectory = dir,
                 };
-                string root = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
+                // Windows' folders as the system names them, never as an environment says, which
+                // the user's registry shapes.
+                string root = Guard.WindowsDir();
+                string system = Guard.SystemDir();
                 var env = start.EnvironmentVariables;
                 env.Clear();
                 env["SystemRoot"] = root;
                 env["windir"] = root;
                 env["SystemDrive"] = Path.GetPathRoot(root).TrimEnd('\\');
-                env["ComSpec"] = Path.Combine(root, @"System32\cmd.exe");
                 env["NUMBER_OF_PROCESSORS"] = Environment.ProcessorCount.ToString();
-                env["PROCESSOR_ARCHITECTURE"] = Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE") ?? "AMD64";
+                env["PROCESSOR_ARCHITECTURE"] = Environment.Is64BitOperatingSystem ? "AMD64" : "x86";
                 env["ProgramFiles"] = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
                 env["ProgramData"] = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
                 env["USERNAME"] = Environment.UserName;
-                // Its own folders under the install folder, which only administrators write to, in
+                // Its own folders under the install folder, which only administrators reach, in
                 // place of the user's profile and temporary folder, which the user can write to.
                 env["USERPROFILE"] = home;
                 env["HOME"] = home;
@@ -482,12 +567,24 @@ namespace Kite.ComputerHelper
                 env["APPDATA"] = Path.Combine(home, "Roaming");
                 env["TEMP"] = Path.Combine(home, "Temp");
                 env["TMP"] = Path.Combine(home, "Temp");
-                env["PATH"] = root + @"\System32;" + root;
-                env["PSModulePath"] = root + @"\System32\WindowsPowerShell\v1.0\Modules";
+                // No ComSpec and no PATH to a shell: it starts no program (its job allows none).
+                env["PATH"] = system;
+                env["PSModulePath"] = Path.Combine(system, @"WindowsPowerShell\v1.0\Modules");
                 env["CUA_DRIVER_EMBEDDED"] = "1";
                 env["DO_NOT_TRACK"] = "1";
                 env["CUA_DRIVER_RS_UPDATE_CHECK"] = "false";
                 env["CUA_DRIVER_DISABLE_UNRESTRICTED"] = "1";
+                driverJob = Native.CreateJobObjectW(IntPtr.Zero, null);
+                if (driverJob == IntPtr.Zero) return "Cua Driver could not be tied to the broker";
+                try
+                {
+                    // It dies with the broker, and is the job's only process: it starts none.
+                    Native.LimitJob(driverJob, Native.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | Native.JOB_OBJECT_LIMIT_ACTIVE_PROCESS, 1);
+                }
+                catch (Exception error)
+                {
+                    return "Cua Driver could not be tied to the broker: " + error.Message;
+                }
                 try
                 {
                     using (FileStream held = Layout.Hold(path))
@@ -500,10 +597,11 @@ namespace Kite.ComputerHelper
                 {
                     return "Cua Driver did not start: " + error.Message;
                 }
-                driverJob = Native.CreateJobObjectW(IntPtr.Zero, null);
-                if (driverJob == IntPtr.Zero || !Native.AssignProcessToJobObject(driverJob, driver.Handle))
+                if (!Native.AssignProcessToJobObject(driverJob, driver.Handle))
+                {
+                    try { driver.Kill(); } catch (Exception) { }
                     return "Cua Driver could not be tied to the broker";
-                Native.LimitJob(driverJob, Native.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, 0);
+                }
                 // Its stderr is read and dropped so a full pipe never blocks it.
                 var stderr = driver.StandardError.BaseStream;
                 Task.Factory.StartNew(delegate
@@ -523,7 +621,11 @@ namespace Kite.ComputerHelper
                 }, TaskCreationOptions.LongRunning);
             }
 
-            /// <summary>Kite's requests: each checked, confirmed when risky, then passed on re-serialized.</summary>
+            /// <summary>
+            /// Kite's requests: each checked, confirmed when risky, then passed on re-serialized; a
+            /// tool call waits until the driver answered the one before, so what the owner is asked
+            /// about is never overtaken by an earlier step still running.
+            /// </summary>
             async Task Requests()
             {
                 Stream input = driver.StandardInput.BaseStream;
@@ -539,16 +641,37 @@ namespace Kite.ComputerHelper
                     bool tool;
                     string name;
                     string refusal = Allowed(line, out message, out id, out tool, out name);
-                    if (refusal == null && tool) refusal = Confirmed(name, Arguments(message));
+                    if (refusal == null && tool)
+                    {
+                        if (!await CallAnswered()) return;
+                        refusal = Confirmed(name, Arguments(message));
+                    }
+                    if (refusal == null)
+                    {
+                        lock (pendingLock)
+                        {
+                            if (id != null && pending.Count >= MaxPending) refusal = "too many requests are waiting";
+                            else if (id != null)
+                            {
+                                pending[Key(id)] = name ?? "";
+                                if (tool)
+                                {
+                                    callInFlight = Key(id);
+                                    callDone = new TaskCompletionSource<bool>();
+                                }
+                            }
+                        }
+                    }
                     if (refusal != null)
                     {
                         if (id != null) await SendAsync(tool ? Refused(id, refusal) : Unavailable(id, refusal));
+                        if (denied >= MaxDenied)
+                        {
+                            End("the user said no to " + MaxDenied + " steps");
+                            return;
+                        }
                         RearmIdle();
                         continue;
-                    }
-                    if (id != null)
-                    {
-                        lock (pendingLock) pending[Key(id)] = name ?? "";
                     }
                     // What passes is what was checked: the parsed message, written anew.
                     byte[] bytes = Encoding.UTF8.GetBytes(json.Serialize(message) + "\n");
@@ -556,6 +679,17 @@ namespace Kite.ComputerHelper
                     await input.FlushAsync();
                     RearmIdle();
                 }
+            }
+
+            /// <summary>Waits for the driver's answer to the call before; false when it never came.</summary>
+            async Task<bool> CallAnswered()
+            {
+                Task<bool> waiting;
+                lock (pendingLock) waiting = callInFlight == null ? null : callDone.Task;
+                if (waiting == null) return true;
+                if (await Task.WhenAny(waiting, Task.Delay(CallWaitMs)) == waiting) return true;
+                End("Cua Driver did not answer a call");
+                return false;
             }
 
             /// <summary>Cua Driver's answers, passed to Kite line by line; a read's elements are kept.</summary>
@@ -591,6 +725,7 @@ namespace Kite.ComputerHelper
             async Task Reply(byte[] bytes)
             {
                 string tool = null;
+                bool foreground = false;
                 try
                 {
                     string text = Encoding.UTF8.GetString(bytes);
@@ -598,12 +733,18 @@ namespace Kite.ComputerHelper
                     object id;
                     if (message != null && message.TryGetValue("id", out id) && id != null && !message.ContainsKey("method"))
                     {
+                        string key = Key(id);
                         lock (pendingLock)
                         {
-                            string key = Key(id);
                             if (pending.TryGetValue(key, out tool)) pending.Remove(key);
+                            if (key == callInFlight)
+                            {
+                                callInFlight = null;
+                                callDone.TrySetResult(true);
+                            }
                         }
                         if (tool == "get_window_state") Remember(message);
+                        else if (tool != null && Acting.Contains(tool)) foreground = InForeground(message);
                     }
                 }
                 catch (Exception)
@@ -621,7 +762,17 @@ namespace Kite.ComputerHelper
                 {
                     writeLock.Release();
                 }
+                // Input that went to the front reached whatever had the focus there: the session ends.
+                if (foreground) End("Cua Driver acted in the foreground");
                 if (tool != null) RearmIdle();
+            }
+
+            static bool InForeground(Dictionary<string, object> message)
+            {
+                var result = message.ContainsKey("result") ? message["result"] as Dictionary<string, object> : null;
+                var data = result != null && result.ContainsKey("structuredContent") ? result["structuredContent"] as Dictionary<string, object> : null;
+                var delivery = data != null && data.ContainsKey("delivery") ? data["delivery"] as Dictionary<string, object> : null;
+                return delivery != null && "foreground".Equals(delivery.ContainsKey("mode") ? delivery["mode"] : null);
             }
 
             /// <summary>The idle time runs only while no request of Kite's is pending.</summary>
@@ -634,7 +785,7 @@ namespace Kite.ComputerHelper
 
             static string Key(object id)
             {
-                return (id is string ? "s:" : "n:") + Convert.ToString(id, System.Globalization.CultureInfo.InvariantCulture);
+                return (id is string ? "s:" : "n:") + Convert.ToString(id, CultureInfo.InvariantCulture);
             }
 
             void Remember(Dictionary<string, object> message)
@@ -646,7 +797,7 @@ namespace Kite.ComputerHelper
                 if (id == null) return;
                 var read = new Snapshot { Id = id };
                 object value;
-                if (data.TryGetValue("window_id", out value)) read.WindowId = Convert.ToInt64(value);
+                if (data.TryGetValue("window_id", out value)) read.WindowId = Convert.ToInt64(value, CultureInfo.InvariantCulture);
                 var bounds = data.ContainsKey("window_bounds") ? data["window_bounds"] as Dictionary<string, object> : null;
                 if (bounds != null)
                 {
@@ -678,7 +829,7 @@ namespace Kite.ComputerHelper
                             element.Height = Number(frame, "h");
                             element.HasFrame = element.Width > 0 && element.Height > 0;
                         }
-                        read.Elements[Convert.ToInt64(e["element_index"])] = element;
+                        read.Elements[Convert.ToInt64(e["element_index"], CultureInfo.InvariantCulture)] = element;
                     }
                 }
                 lock (snapshots)
@@ -694,7 +845,7 @@ namespace Kite.ComputerHelper
             {
                 object value;
                 if (!o.TryGetValue(key, out value) || value == null) return 0;
-                try { return Convert.ToDouble(value); } catch (Exception) { return 0; }
+                try { return Convert.ToDouble(value, CultureInfo.InvariantCulture); } catch (Exception) { return 0; }
             }
 
             static Dictionary<string, object> Arguments(Dictionary<string, object> message)
@@ -703,32 +854,52 @@ namespace Kite.ComputerHelper
                 return parameters["arguments"] as Dictionary<string, object>;
             }
 
-            /// <summary>Null when the step may go on: harmless, or allowed by the owner in the broker's window.</summary>
+            /// <summary>
+            /// Null when the step may go on: harmless, or allowed by the owner in the broker's
+            /// window; else why not. A harmless step goes on the list the next question shows.
+            /// </summary>
             string Confirmed(string name, Dictionary<string, object> arguments)
             {
-                Step step;
+                Assessment assessment;
                 lock (snapshots)
                 {
-                    step = Risk.Assess(name, arguments,
+                    assessment = Risk.Assess(name, arguments,
                         id => { Snapshot s; return snapshots.TryGetValue(id, out s) ? s : null; },
-                        window => { Snapshot s; return latest.TryGetValue(window, out s) ? s : null; });
+                        window => { Snapshot s; return latest.TryGetValue(window, out s) ? s : null; },
+                        focusedEdit);
                 }
-                if (step == null) return null;
+                Step step = assessment.Step;
+                if (step == null)
+                {
+                    if (Acting.Contains(name))
+                    {
+                        focusedEdit = assessment.FocusedEdit;
+                        if (assessment.Done != null) since.Add(assessment.Done);
+                    }
+                    return null;
+                }
+                focusedEdit = 0;
+                if (step.Refusal != null) return step.Refusal;
                 // A window whose program does not answer would hold the capture forever; it goes without.
-                System.Drawing.Bitmap crop = null;
-                var capture = Task.Run(() => Confirm.Crop(step.WindowId, step));
+                System.Drawing.Bitmap picture = null;
+                var capture = Task.Run(() => Confirm.Picture(step.WindowId, step));
                 try
                 {
-                    if (capture.Wait(2000)) crop = capture.Result;
+                    if (capture.Wait(2000)) picture = capture.Result;
                 }
                 catch (Exception)
                 {
-                    crop = null;
+                    picture = null;
                 }
-                using (crop)
+                bool allowed;
+                using (picture)
                 {
-                    return Confirm.Step(options.TargetImage, step, crop) ? null : "the user did not allow this step";
+                    allowed = Confirm.Step(options.TargetImage, step, picture, since);
                 }
+                since.Clear();
+                if (allowed) return null;
+                denied++;
+                return "the user did not allow this step";
             }
 
             /// <summary>Why a request does not pass, or null when it does.</summary>
@@ -748,10 +919,12 @@ namespace Kite.ComputerHelper
                 }
                 if (message == null) return "not a JSON-RPC message";
                 message.TryGetValue("id", out id);
+                if (id != null && !(id is string || id is int || id is long || id is decimal)) return "the id is not a string or a number";
                 foreach (string key in message.Keys)
                 {
                     if (!MessageKeys.Contains(key)) return "the field " + key + " is not available";
                 }
+                if (!"2.0".Equals(message.ContainsKey("jsonrpc") ? message["jsonrpc"] : null)) return "not JSON-RPC 2.0";
                 object methodValue;
                 string method = message.TryGetValue("method", out methodValue) ? methodValue as string : null;
                 if (method == null)
@@ -760,16 +933,24 @@ namespace Kite.ComputerHelper
                     id = null;
                     return "no method";
                 }
-                if (PlainMethods.Contains(method)) return null;
-                if (method != "tools/call") return "method " + method + " is not available";
-                tool = true;
                 object paramsValue;
-                var parameters = message.TryGetValue("params", out paramsValue) ? paramsValue as Dictionary<string, object> : null;
+                bool hasParams = message.TryGetValue("params", out paramsValue);
+                var parameters = paramsValue as Dictionary<string, object>;
+                if (hasParams && parameters == null) return "params must be an object";
+                if (method != "tools/call")
+                {
+                    string plain = PlainParams(method, parameters);
+                    return plain;
+                }
+                tool = true;
+                if (id == null) return "a tool call needs an id";
                 if (parameters == null) return "no params";
                 foreach (string key in parameters.Keys)
                 {
                     if (!CallKeys.Contains(key)) return "the parameter " + key + " is not available";
                 }
+                string meta = Meta(parameters);
+                if (meta != null) return meta;
                 object nameValue;
                 name = parameters.TryGetValue("name", out nameValue) ? nameValue as string : null;
                 HashSet<string> allowed;
@@ -789,6 +970,8 @@ namespace Kite.ComputerHelper
                 }
                 try
                 {
+                    string typed = Typed(name, arguments);
+                    if (typed != null) return typed;
                     if (name == "list_windows") return SameProcess(arguments, "pid") ? null : OtherProgram();
                     if (name == "get_window_state" || name == "invoke_menu")
                         return SameProcess(arguments, "pid") && OwnWindow(arguments, "window_id") ? null : OtherProgram();
@@ -806,6 +989,197 @@ namespace Kite.ComputerHelper
                 {
                     return error.Message;
                 }
+            }
+
+            /// <summary>What a message other than a tool call may carry: what Kite's MCP client sends, no more.</summary>
+            static string PlainParams(string method, Dictionary<string, object> parameters)
+            {
+                switch (method)
+                {
+                    case "initialize":
+                    {
+                        if (parameters == null) return "initialize needs params";
+                        foreach (string key in parameters.Keys)
+                        {
+                            if (key != "protocolVersion" && key != "clientInfo" && key != "capabilities") return "initialize's " + key + " is not available";
+                        }
+                        if (!(parameters.ContainsKey("protocolVersion") && parameters["protocolVersion"] is string)) return "initialize needs a protocolVersion";
+                        var capabilities = parameters.ContainsKey("capabilities") ? parameters["capabilities"] as Dictionary<string, object> : null;
+                        if (capabilities == null || capabilities.Count > 0) return "initialize asks for no capabilities here";
+                        var client = parameters.ContainsKey("clientInfo") ? parameters["clientInfo"] as Dictionary<string, object> : null;
+                        if (client == null) return "initialize needs clientInfo";
+                        foreach (KeyValuePair<string, object> field in client)
+                        {
+                            if ((field.Key != "name" && field.Key != "version" && field.Key != "title") || !(field.Value is string) || ((string)field.Value).Length > 200)
+                                return "clientInfo's " + field.Key + " is not available";
+                        }
+                        return null;
+                    }
+                    case "notifications/initialized":
+                    case "ping":
+                        return Only(method, parameters);
+                    case "tools/list":
+                    {
+                        if (parameters == null) return null;
+                        foreach (string key in parameters.Keys)
+                        {
+                            if (key != "cursor" && key != "_meta") return "tools/list's " + key + " is not available";
+                        }
+                        if (parameters.ContainsKey("cursor") && !(parameters["cursor"] is string)) return "the cursor must be text";
+                        return Meta(parameters);
+                    }
+                    case "notifications/cancelled":
+                    {
+                        if (parameters == null) return "a cancellation needs params";
+                        foreach (KeyValuePair<string, object> field in parameters)
+                        {
+                            if (field.Key == "requestId" && (field.Value is string || field.Value is int || field.Value is long)) continue;
+                            if (field.Key == "reason" && field.Value is string && ((string)field.Value).Length <= 1000) continue;
+                            return "a cancellation's " + field.Key + " is not available";
+                        }
+                        return null;
+                    }
+                    default:
+                        return "method " + method + " is not available";
+                }
+            }
+
+            static string Only(string method, Dictionary<string, object> parameters)
+            {
+                if (parameters == null) return null;
+                foreach (string key in parameters.Keys)
+                {
+                    if (key != "_meta") return method + "'s " + key + " is not available";
+                }
+                return Meta(parameters);
+            }
+
+            /// <summary>`_meta` may carry a progress token alone.</summary>
+            static string Meta(Dictionary<string, object> parameters)
+            {
+                if (!parameters.ContainsKey("_meta")) return null;
+                var meta = parameters["_meta"] as Dictionary<string, object>;
+                if (meta == null) return "_meta must be an object";
+                foreach (KeyValuePair<string, object> field in meta)
+                {
+                    if (field.Key != "progressToken" || !(field.Value is string || field.Value is int || field.Value is long)) return "_meta's " + field.Key + " is not available";
+                }
+                return null;
+            }
+
+            /// <summary>Each argument's type, choice and range, as Kite sends them; null when they fit.</summary>
+            static string Typed(string name, Dictionary<string, object> a)
+            {
+                switch (name)
+                {
+                    case "list_windows":
+                        return Whole(a, "pid", 1, int.MaxValue, true) ?? Flag(a, "on_screen_only");
+                    case "get_window_state":
+                        return Whole(a, "pid", 1, int.MaxValue, true) ?? Whole(a, "window_id", 0, long.MaxValue, true) ??
+                            Words(a, "query", 200) ?? Words(a, "since", 64) ?? Whole(a, "max_elements", 1, 2000, false) ??
+                            Whole(a, "max_depth", 1, 100, false) ?? Flag(a, "include_screenshot") ??
+                            Flag(a, "include_accessibility_tree");
+                    case "click":
+                    {
+                        bool token = a.ContainsKey("element_token");
+                        bool point = a.ContainsKey("x") || a.ContainsKey("y");
+                        // One or the other: a driver that preferred the point would click where no one looked.
+                        if (token == point) return "a click takes an element_token or x and y, not both";
+                        if (token && !(a["element_token"] is string && TokenPattern.IsMatch((string)a["element_token"]))) return "element_token is not a token";
+                        if (point && (Coordinate(a, "x", true) ?? Coordinate(a, "y", true)) != null) return "x and y must be numbers";
+                        return Choice(a, "button", "left", "right", "middle") ?? Whole(a, "count", 1, 3, false);
+                    }
+                    case "type_text":
+                    {
+                        if (a.ContainsKey("element_token") && !(a["element_token"] is string && TokenPattern.IsMatch((string)a["element_token"]))) return "element_token is not a token";
+                        object text;
+                        if (!a.TryGetValue("text", out text) || !(text is string) || ((string)text).Length == 0) return "text must be text";
+                        return null;
+                    }
+                    case "press_key":
+                    {
+                        object key;
+                        if (!a.TryGetValue("key", out key) || !(key is string) || !Risk.KnownKey((string)key)) return "the key is not one the elevated helper presses";
+                        return Modifiers(a, "modifiers");
+                    }
+                    case "hotkey":
+                    {
+                        object value;
+                        var keys = a.TryGetValue("keys", out value) ? value as System.Collections.IList : null;
+                        if (keys == null || keys.Count < 2 || keys.Count > 6) return "keys must list 2 to 6 keys";
+                        foreach (object k in keys)
+                        {
+                            if (!(k is string) || !Risk.KnownKey((string)k)) return "a key is not one the elevated helper presses";
+                        }
+                        return null;
+                    }
+                    case "scroll":
+                        return Coordinate(a, "x", true) ?? Coordinate(a, "y", true) ?? Choice(a, "direction", "up", "down", "left", "right") ??
+                            (a.ContainsKey("direction") ? null : "direction is needed") ?? Whole(a, "amount", 1, 50, false) ?? Choice(a, "by", "line", "page");
+                    case "drag":
+                        return Coordinate(a, "from_x", true) ?? Coordinate(a, "from_y", true) ?? Coordinate(a, "to_x", true) ?? Coordinate(a, "to_y", true) ??
+                            Choice(a, "button", "left", "right", "middle") ?? Modifiers(a, "modifier") ?? Whole(a, "duration_ms", 0, 10000, false) ??
+                            Whole(a, "steps", 1, 200, false);
+                    case "invoke_menu":
+                    {
+                        object value;
+                        var path = a.TryGetValue("path", out value) ? value as System.Collections.IList : null;
+                        if (path == null || path.Count < 1 || path.Count > 10) return "path must list 1 to 10 menu items";
+                        foreach (object item in path)
+                        {
+                            if (!(item is string) || ((string)item).Length == 0 || ((string)item).Length > 200) return "a menu item is not a name";
+                        }
+                        return null;
+                    }
+                    default:
+                        return "the tool " + name + " is not available to the elevated helper";
+                }
+            }
+
+            static string Whole(Dictionary<string, object> a, string key, long min, long max, bool required)
+            {
+                object value;
+                if (!a.TryGetValue(key, out value)) return required ? key + " is needed" : null;
+                long number;
+                try { number = Json.Integer(value, key); } catch (ArgumentException) { return key + " must be a whole number"; }
+                return number < min || number > max ? key + " is out of range" : null;
+            }
+
+            static string Coordinate(Dictionary<string, object> a, string key, bool required)
+            {
+                object value;
+                if (!a.TryGetValue(key, out value)) return required ? key + " is needed" : null;
+                if (!(value is int || value is long || value is decimal)) return key + " must be a number";
+                double number = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+                return number < -100000 || number > 100000 ? key + " is out of range" : null;
+            }
+
+            static string Flag(Dictionary<string, object> a, string key)
+            {
+                return !a.ContainsKey(key) || a[key] is bool ? null : key + " must be true or false";
+            }
+
+            static string Words(Dictionary<string, object> a, string key, int max)
+            {
+                return !a.ContainsKey(key) || (a[key] is string && ((string)a[key]).Length <= max) ? null : key + " must be text of at most " + max + " characters";
+            }
+
+            static string Choice(Dictionary<string, object> a, string key, params string[] choices)
+            {
+                if (!a.ContainsKey(key)) return null;
+                return a[key] is string && Array.IndexOf(choices, (string)a[key]) >= 0 ? null : key + " must be one of " + string.Join(", ", choices);
+            }
+
+            static string Modifiers(Dictionary<string, object> a, string key)
+            {
+                if (!a.ContainsKey(key)) return null;
+                var list = a[key] as System.Collections.IList;
+                if (list == null || list.Count > 4) return key + " must list up to 4 modifiers";
+                foreach (object item in list)
+                {
+                    if (!(item is string) || !Risk.ModifierNames.Contains((string)item)) return key + " may hold cmd, ctrl, alt and shift";
+                }
+                return null;
             }
 
             string OtherProgram()
@@ -910,6 +1284,7 @@ namespace Kite.ComputerHelper
             void Stop()
             {
                 if (idle != null) idle.Dispose();
+                if (lifetime != null) lifetime.Dispose();
                 if (targetJob != IntPtr.Zero)
                 {
                     // The program may start programs again once the broker is gone.

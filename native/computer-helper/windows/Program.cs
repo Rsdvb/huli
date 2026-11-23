@@ -1,11 +1,10 @@
 // kite-computer-helper: what Kite's computer use needs from Windows beyond Cua Driver.
 //
 //   serve      The warm helper, over stdin and stdout, one JSON object per line: which processes
-//              run elevated, the system's text recognition, and the administrator prompts below.
-//   install    As administrator, from the app's folder: copies the helper and Cua Driver into
-//              Program Files\Kite Computer Helper, checking the driver against the hash built in.
-//   uninstall  As administrator: removes that folder.
-//   broker     As administrator, from that folder only: drives one approved program's windows for
+//              run elevated, the system's text recognition, and the administrator prompts that
+//              install the helper (Windows' robocopy), remove it (cmd) and start the broker.
+//   broker     As administrator, from Program Files\Kite Computer Helper only, started through
+//              cmd.exe: drives one approved program's windows for
 //              Kite after the owner confirms it in a window of its own.
 //   connect    From that folder, without elevation: Kite's end of the broker's pipe, which checks the
 //              pipe's server is that broker before Kite's token goes over it.
@@ -19,8 +18,8 @@ using System.Reflection;
 [assembly: AssemblyTitle("Kite computer use helper")]
 [assembly: AssemblyProduct("Kite")]
 [assembly: AssemblyDescription("Kite's computer use helper: elevation, text recognition and the elevated broker")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("2.0.0.0")]
+[assembly: AssemblyFileVersion("2.0.0.0")]
 
 namespace Kite.ComputerHelper
 {
@@ -31,7 +30,7 @@ namespace Kite.ComputerHelper
         {
             if (args.Length == 0)
             {
-                Console.Error.WriteLine("usage: kite-computer-helper serve | install | uninstall | broker | connect");
+                Console.Error.WriteLine("usage: kite-computer-helper serve | broker | connect");
                 return 2;
             }
             try
@@ -47,8 +46,6 @@ namespace Kite.ComputerHelper
                     Console.Error.WriteLine(error.Message);
                     return 2;
                 }
-                if (args[0] == "install") return Install.Run(options);
-                if (args[0] == "uninstall") return Install.Remove(options);
                 if (args[0] == "broker") return Broker.Run(options);
                 if (args[0] == "connect") return Connect.Run(options);
             }

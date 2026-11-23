@@ -95,7 +95,7 @@ export function isComputerSetupStep(value: unknown): value is ComputerSetupStep 
  * Huli: the elevated helper's install in Program Files: none, current for this Kite, outdated (an
  * older helper or another Kite program), or unsupported off Windows.
  */
-export type ElevatedHelperState = 'unsupported' | 'missing' | 'current' | 'outdated'
+export type ElevatedHelperState = 'unsupported' | 'missing' | 'current' | 'outdated' | 'tampered'
 
 /** Huli: what an install or removal left, and whether the owner said no at the prompt. */
 export interface ElevatedHelperChange {
