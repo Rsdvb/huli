@@ -152,6 +152,7 @@ describe('Huli: the recycle bin on the host', () => {
       scope: { level: 'read', web: false },
       timeLimitMinutes: 60,
       keptRunSessions: 100,
+      onLimit: 'switch',
     })
     await window.request('routines.delete', { routineId: routine.id })
     expect((await window.request('routines.list', undefined)).routines).toEqual([])
