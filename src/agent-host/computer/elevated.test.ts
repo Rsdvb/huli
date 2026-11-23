@@ -12,6 +12,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  closeSync,
+  constants,
+  openSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -397,7 +400,41 @@ describe.skipIf(!runs)('the elevated helper', () => {
     await expect(own.elevate(await request(own, program))).rejects.toThrow('changed')
     expect(await own.uninstall()).toMatchObject({ state: 'missing' })
     expect(existsSync(changed)).toBe(false)
-  }, 60_000)
+
+    // The elevated command itself wrote the record: the protocol, both hashes and Kite's program.
+    const [protocol, helperSha, driverSha, client] = readFileSync(
+      path.join(installDir, 'install.txt'),
+      'ascii',
+    )
+      .trim()
+      .split(' ')
+    expect(protocol).toBe('2')
+    expect(helperSha).toMatch(/^[0-9a-f]{64}$/)
+    expect(driverSha).toMatch(/^[0-9a-f]{64}$/)
+    expect(Buffer.from(client!, 'hex').toString('utf8')).toBe(process.execPath)
+
+    // A copy that fails on one file, here the newer helper over a locked one, records what should
+    // have landed: what is there reads tampered, now and later, whatever the copy's exit code.
+    const locked = path.join(work, 'locked')
+    expect(await helperFor('allow', locked).install(process.execPath)).toMatchObject({
+      state: 'current',
+    })
+    // libuv's UV_FS_O_EXLOCK: opened with no sharing, so robocopy cannot replace it.
+    const hold = openSync(path.join(locked, HELPER), constants.O_RDONLY | 0x10000000)
+    let failed: Awaited<ReturnType<ComputerHelper['install']>>
+    try {
+      failed = await helperFor('allow', locked, path.join(updated, HELPER)).install(
+        process.execPath,
+      )
+    } finally {
+      closeSync(hold)
+    }
+    expect(failed).toMatchObject({ state: 'tampered' })
+    expect(failed!.exitCode).not.toBe(0)
+    expect(await helperFor('allow', locked).layout(process.execPath)).toMatchObject({
+      state: 'tampered',
+    })
+  }, 90_000)
 
   it('tells a folder only administrators can change from one others can', async () => {
     const system32 = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')
@@ -483,7 +520,9 @@ describe.skipIf(!runs)('the elevated helper', () => {
       [['Volatile Environment\\APPDOMAIN_MANAGER_TYPE=x'], 'APPDOMAIN_MANAGER_TYPE'],
       // Overrides of what Windows' administrator prompt runs for a program.
       [['Software\\Classes\\exefile\\shell\\runas\\command\\=cmd.exe /c x'], 'Classes\\exefile'],
-      [['Software\\Classes\\.exe\\x=1'], 'Classes\\.exe'],
+      // Keys an app may leave there that change no verb: the class key passed makes them moot.
+      [['Software\\Classes\\.exe\\x=1'], null],
+      [['Software\\Classes\\exefile\\DefaultIcon\\=x'], null],
     ]
     for (const [values, found] of cases) {
       process.env.KITE_HELPER_TEST_HIVE = hive(...values)
@@ -508,7 +547,7 @@ describe.skipIf(!runs)('the elevated helper', () => {
     expect(run({ KITE_HELPER_TEST_HIVE: hive('Volatile Environment\\1\\COR_PROFILER={0}') })).toBe(
       17,
     )
-    expect(run({ KITE_HELPER_TEST_HIVE: hive('Software\\Classes\\exefile\\x=1') })).toBe(17)
+    expect(run({ KITE_HELPER_TEST_HIVE: hive('Software\\Classes\\exefile\\shell\\x=1') })).toBe(17)
   })
 
   it('holds the staged copy so nothing can change it until the copy is done', async () => {
@@ -530,7 +569,6 @@ describe.skipIf(!runs)('the elevated helper', () => {
     const helper = path.join(dir, HELPER)
     expect(readFileSync(helper).length).toBeGreaterThan(0)
     expect(() => writeFileSync(helper, 'x')).toThrow()
-    expect(() => writeFileSync(path.join(dir, 'install.json'), '{}')).toThrow()
     expect(() => rmSync(path.join(dir, 'cua-driver.exe'))).toThrow()
     expect(() => renameSync(dir, `${dir}-moved`)).toThrow()
     await send(2, 'unstage')
@@ -709,6 +747,24 @@ describe.skipIf(!runs)('the elevated helper', () => {
     child.kill()
   }, 30_000)
 
+  it('ends when a request has an id that is no whole number, which could alias another', async () => {
+    const program = await target()
+    const helper = helperFor('allow')
+    const secrets = newSecrets()
+    const launcher = await helper.elevate({ ...(await request(helper, program)), ...secrets })
+    const exe = path.join(installDir, HELPER)
+    const { child, pid } = await connect(
+      exe,
+      ['--pipe', secrets.pipe, '--launcher', String(launcher), '--install-dir', installDir],
+      secrets.token,
+    )
+    children.push(child)
+    child.stdin.write(
+      `{"jsonrpc":"2.0","id":5.1,"method":"tools/call","params":{"name":"list_windows","arguments":{"pid":${program.pid}}}}\n`,
+    )
+    expect(await exited(pid, 5_000)).toBe(true)
+  }, 30_000)
+
   it('ends when a request uses an id again, so no answer stands for another', async () => {
     const program = await target()
     const helper = helperFor('allow')
@@ -827,6 +883,23 @@ describe.skipIf(!runs)('the elevated helper', () => {
         'never pastes',
       ],
       ['click', { ...background, element_token: 's00000001:2' }, 'never pastes'],
+      ...[
+        ['Editar', 'Colar'],
+        ['Правка', 'Вставить'],
+        ['Bewerken', 'Plakken'],
+        ['Edycja', 'Wklej'],
+        ['Düzen', 'Yapıştır'],
+        ['Redigera', 'Klistra in'],
+        ['編集', '貼付け(&P)'],
+        ['편집', '붙여 넣기'],
+      ].map((path): [string, Record<string, unknown>, string] => [
+        'invoke_menu',
+        { pid: program.pid, window_id: program.window, path, delivery_mode: 'background' },
+        'never pastes',
+      ]),
+      // A control character is a command to a field: U+0016 pastes.
+      ['type_text', { ...background, text: 'a\u0016' }, 'control character'],
+      ['type_text', { ...background, text: '\u0085' }, 'control character'],
     ]
     const count = questions().length
     for (const [tool, args, why] of refused) {
@@ -844,31 +917,38 @@ describe.skipIf(!runs)('the elevated helper', () => {
     await driver!.call('type_text', { ...background, text: 'y', element_token: 's00000001:0' })
     expect(questions().at(-1)).toMatchObject({ step: 'type' })
 
-    // An open context menu takes a letter or Enter as its item: they are refused until a click or Escape.
+    // An open context menu or menu bar takes a letter, Enter or a click by a point as its item:
+    // they are refused until a click by element or Escape.
     for (const opener of [
       ['click', { ...background, element_token: 's00000001:1', button: 'right' }],
       ['press_key', { ...background, key: 'f10', modifiers: ['shift'] }],
       ['press_key', { ...background, key: 'menu' }],
+      ['press_key', { ...background, key: 'menu', modifiers: ['shift'] }],
+      ['press_key', { ...background, key: 'alt' }],
+      ['press_key', { ...background, key: 'f10' }],
+      ['hotkey', { ...background, keys: ['alt', 'e'] }],
     ] as [string, Record<string, unknown>][]) {
-      expect((await driver!.call(...opener)).isError, opener[0]).toBeFalsy()
+      expect((await driver!.call(...opener)).isError, JSON.stringify(opener)).toBeFalsy()
       for (const [tool, args] of [
         ['press_key', { ...background, key: 'p' }],
         ['press_key', { ...background, key: 'return' }],
         ['type_text', { ...background, text: 'p' }],
+        ['click', { ...background, x: 20, y: 20 }],
       ] as [string, Record<string, unknown>][]) {
-        expect(text(await driver!.call(tool, args)), `${opener[0]} then ${tool}`).toContain(
-          'context menu is open',
-        )
+        expect(
+          text(await driver!.call(tool, args)),
+          `${JSON.stringify(opener)} then ${tool}`,
+        ).toContain('menu bar is open')
       }
       expect((await driver!.call('press_key', { ...background, key: 'down' })).isError).toBeFalsy()
       expect(text(await driver!.call('press_key', { ...background, key: 'p' }))).toContain(
-        'context menu is open',
+        'menu bar is open',
       )
       expect(
         (await driver!.call('press_key', { ...background, key: 'escape' })).isError,
       ).toBeFalsy()
       expect(text(await driver!.call('press_key', { ...background, key: 'p' }))).not.toContain(
-        'context menu is open',
+        'menu bar is open',
       )
     }
     await driver!.stop()

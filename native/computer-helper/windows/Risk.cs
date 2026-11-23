@@ -8,11 +8,12 @@
 // - Typing is harmless only into the edit field the last step clicked (no element token, or that
 //   field's), with no line break or tab; anything else typed is confirmed and shown in full, and
 //   text too long to show is refused.
-// - Keys but moving about are confirmed. Pasting is refused by every route the broker can tell,
+// - Keys but moving about are confirmed. Pasting is refused on the routes the broker can tell,
 //   since the owner cannot see what it puts in, a list of files included: its shortcuts, a menu item
-//   or a click on an element named Paste in the languages below, and a key or typed text while a
-//   context menu is open, which picks an item by its letter; such a menu's items are clicked, so
-//   their names are checked. Drags (both ends shown) and menus are confirmed.
+//   or a click on an element named Paste in the languages below, and, while a context menu or the
+//   menu bar is open, a letter, Enter, typed text or a click by a point, as those pick an item the
+//   broker cannot name; such a menu's items are clicked by their element, so their names are
+//   checked. Drags (both ends shown) and menus are confirmed.
 // - Reading and scrolling are not confirmed. Whatever went through unconfirmed is listed in the
 //   next confirmation, so it shows what the step commits.
 
@@ -57,7 +58,7 @@ namespace Kite.ComputerHelper
         public long Edit;
         /// <summary>That field's element token.</summary>
         public string EditToken;
-        /// <summary>The last step opened a context menu, which a letter or Enter would pick from.</summary>
+        /// <summary>The last step opened a context menu or the menu bar, which a letter or Enter would pick from.</summary>
         public bool MenuOpen;
     }
 
@@ -72,7 +73,10 @@ namespace Kite.ComputerHelper
         public readonly List<Place> Places = new List<Place>();
         /// <summary>Why the broker refuses the step without asking; null when it asks.</summary>
         public string Refusal;
-        /// <summary>Allowed, the step opens a context menu (a right-click, the menu key, Shift+F10).</summary>
+        /// <summary>
+        /// Allowed, the step opens a context menu or the menu bar: a right-click, the menu key,
+        /// Shift+F10, Alt, F10, Alt with a letter, or a click on a menu item.
+        /// </summary>
         public bool OpensMenu;
         public bool HasPlace { get { return Places.Count > 0; } }
     }
@@ -140,7 +144,7 @@ namespace Kite.ComputerHelper
         };
 
         static readonly Regex PasteWords = new Regex(
-            @"\b(paste|einfügen|coller|pegar|incolla)\b|粘贴|粘貼|贴上|貼上|黏贴|黏貼|貼り付け|ペースト|붙여넣기",
+            @"\b(paste|einfügen|coller|pegar|incolla|colar|вставить|plakken|wklej|yapıştır|klistra in)\b|粘贴|粘貼|贴上|貼上|黏贴|黏貼|貼り付け|貼付け|ペースト|붙여넣기|붙여 넣기",
             RegexOptions.IgnoreCase);
 
         /// <summary>Whether a menu item's or element's name reads as Paste.</summary>
@@ -178,7 +182,7 @@ namespace Kite.ComputerHelper
                         Next = focus,
                     };
                 case "click":
-                    return Click(args, windowId, snapshot, latest);
+                    return Click(args, windowId, snapshot, latest, focus);
                 case "type_text":
                 {
                     string text = Text(args, "text") ?? "";
@@ -244,13 +248,25 @@ namespace Kite.ComputerHelper
         }
 
         const string Paste = "pasting puts in what is on the clipboard, text or files, which the owner cannot see, so the elevated helper never pastes";
-        const string MenuOpen = "a context menu is open, where a key picks an item by its letter; click the item, or press Escape";
+        const string MenuOpen = "a context menu or the menu bar is open, where a key or a click by a point picks an item the elevated helper cannot name; click the item by its element, or press Escape";
 
-        /// <summary>The menu key or Shift+F10, which open a context menu.</summary>
+        static readonly HashSet<string> MenuRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "MenuItem", "MenuBar", "MenuBarItem", "Menu",
+        };
+
+        /// <summary>
+        /// The keys that open a context menu (the menu key, with Shift or not, and Shift+F10) or the
+        /// menu bar (Alt, F10, and Alt with a letter or digit).
+        /// </summary>
         static bool OpensMenu(List<string> modifiers, string key)
         {
-            if (modifiers.Count == 0 && (string.Equals(key, "menu", StringComparison.OrdinalIgnoreCase) || string.Equals(key, "apps", StringComparison.OrdinalIgnoreCase))) return true;
-            return modifiers.Count == 1 && string.Equals(modifiers[0], "shift", StringComparison.OrdinalIgnoreCase) && string.Equals(key, "f10", StringComparison.OrdinalIgnoreCase);
+            var held = new HashSet<string>(modifiers, StringComparer.OrdinalIgnoreCase);
+            bool menuKey = string.Equals(key, "menu", StringComparison.OrdinalIgnoreCase) || string.Equals(key, "apps", StringComparison.OrdinalIgnoreCase);
+            if (menuKey && (held.Count == 0 || (held.Count == 1 && held.Contains("shift")))) return true;
+            if (string.Equals(key, "f10", StringComparison.OrdinalIgnoreCase) && (held.Count == 0 || (held.Count == 1 && held.Contains("shift")))) return true;
+            if (string.Equals(key, "alt", StringComparison.OrdinalIgnoreCase) && held.Count == 0) return true;
+            return held.Count == 1 && held.Contains("alt") && key.Length == 1 && char.IsLetterOrDigit(key[0]);
         }
         const string NoPlace = "the step has no place in a read of the window to show the owner, so read the window first";
 
@@ -272,7 +288,7 @@ namespace Kite.ComputerHelper
             return held.Contains("shift") && (string.Equals(key, "insert", StringComparison.OrdinalIgnoreCase) || string.Equals(key, "ins", StringComparison.OrdinalIgnoreCase));
         }
 
-        static Assessment Click(Dictionary<string, object> args, long windowId, Func<string, Snapshot> snapshot, Func<long, Snapshot> latest)
+        static Assessment Click(Dictionary<string, object> args, long windowId, Func<string, Snapshot> snapshot, Func<long, Snapshot> latest, Focus focus)
         {
             string button = Text(args, "button");
             long count = Count(args, "count", 1);
@@ -298,10 +314,13 @@ namespace Kite.ComputerHelper
                     };
                 }
                 if (!element.HasFrame) return Refuse(kind, NoPlace, windowId);
-                var step = new Step { Kind = kind, Text = element.Label, Role = element.Role, WindowId = windowId, OpensMenu = kind == "right-click" };
+                bool menuItem = MenuRoles.Contains(element.Role ?? "");
+                var step = new Step { Kind = kind, Text = element.Label, Role = element.Role, WindowId = windowId, OpensMenu = kind == "right-click" || menuItem };
                 step.Places.Add(new Place { X = element.X, Y = element.Y, Width = element.Width, Height = element.Height });
                 return Ask(step);
             }
+            // A point in an open menu picks an item whose name the broker cannot read.
+            if (focus.MenuOpen) return Refuse(kind, MenuOpen, windowId);
             Place place;
             if (!Map(latest(windowId), Number(args, "x"), Number(args, "y"), out place)) return Refuse(kind, NoPlace, windowId);
             var bare = new Step { Kind = kind, WindowId = windowId, OpensMenu = kind == "right-click" };

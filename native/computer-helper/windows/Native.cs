@@ -329,21 +329,47 @@ namespace Kite.ComputerHelper
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern int GetClassNameW(IntPtr window, StringBuilder name, int size);
 
+        [DllImport("user32.dll")]
+        static extern bool EnumWindows(EnumChildProc callback, IntPtr data);
+
+        /// <summary>The window classes of the shell's folder views and folder trees.</summary>
+        static readonly string[] ShellClasses = { "SHELLDLL_DefView", "SHBrowseForFolder ShellNameSpace Control", "NamespaceTreeControl" };
+
         /// <summary>
-        /// Whether a window holds the shell's view of a folder (SHELLDLL_DefView), as Open and Save
-        /// dialogs and folder windows do, where a drag or a paste moves or copies files.
+        /// Whether a window shows files: it holds the shell's view of a folder or its folder tree, as
+        /// Open, Save and Browse for Folder dialogs and folder windows do, where a drag or a paste
+        /// moves or copies files. A popup menu counts when another window of its program does, as
+        /// it may be that dialog's own.
         /// </summary>
         public static bool HostsShellView(long windowId)
         {
             if (windowId <= 0) return false;
             var handle = new IntPtr(windowId);
             if (!IsWindow(handle)) return false;
-            bool found = IsShellView(handle);
+            if (ShowsFiles(handle)) return true;
+            if (ClassOf(handle) != "#32768") return false;
+            int pid;
+            GetWindowThreadProcessId(handle, out pid);
+            bool found = false;
+            EnumWindows((window, data) =>
+            {
+                int owner;
+                GetWindowThreadProcessId(window, out owner);
+                if (owner != pid || window == handle || !ShowsFiles(window)) return true;
+                found = true;
+                return false;
+            }, IntPtr.Zero);
+            return found;
+        }
+
+        static bool ShowsFiles(IntPtr window)
+        {
+            bool found = Array.IndexOf(ShellClasses, ClassOf(window)) >= 0;
             if (!found)
             {
-                EnumChildWindows(handle, (child, data) =>
+                EnumChildWindows(window, (child, data) =>
                 {
-                    if (!IsShellView(child)) return true;
+                    if (Array.IndexOf(ShellClasses, ClassOf(child)) < 0) return true;
                     found = true;
                     return false;
                 }, IntPtr.Zero);
@@ -351,10 +377,10 @@ namespace Kite.ComputerHelper
             return found;
         }
 
-        static bool IsShellView(IntPtr window)
+        static string ClassOf(IntPtr window)
         {
-            var name = new StringBuilder(64);
-            return GetClassNameW(window, name, name.Capacity) > 0 && name.ToString() == "SHELLDLL_DefView";
+            var name = new StringBuilder(128);
+            return GetClassNameW(window, name, name.Capacity) > 0 ? name.ToString() : "";
         }
 
         /// <summary>The process that owns a top-level window, or 0 when it is no window.</summary>

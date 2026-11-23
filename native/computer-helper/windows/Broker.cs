@@ -646,8 +646,15 @@ namespace Kite.ComputerHelper
                     string refusal = Allowed(line, out message, out id, out tool, out name);
                     if (id != null)
                     {
-                        // Kite's client numbers its requests afresh; an id again would let one answer
-                        // stand for another request's, which pending, ordering and stops rely on.
+                        // Kite's client numbers its requests afresh with whole numbers; another kind,
+                        // or an id again, would let one answer stand for another request's (5.1 and
+                        // 5.10 differ here but may not in the driver's answer), which pending,
+                        // ordering and stops rely on.
+                        if (!ValidId(id))
+                        {
+                            End("a request had an id Kite's client never sends");
+                            return;
+                        }
                         if (!usedIds.Add(Key(id)) || usedIds.Count > MaxIds)
                         {
                             End("a request used an id again");
@@ -809,9 +816,35 @@ namespace Kite.ComputerHelper
                 if (!waiting) idle.Change(options.IdleMs, Timeout.Infinite);
             }
 
+            const long MaxWholeId = 9007199254740992;
+
+            /// <summary>A whole number within what a JSON reader keeps exactly, or a short string.</summary>
+            static bool ValidId(object id)
+            {
+                long number;
+                return id is string ? ((string)id).Length <= 128 : WholeId(id, out number);
+            }
+
+            static bool WholeId(object id, out long number)
+            {
+                number = 0;
+                if (id is int) number = (int)id;
+                else if (id is long) number = (long)id;
+                else if (id is decimal)
+                {
+                    decimal value = (decimal)id;
+                    if (decimal.Truncate(value) != value || value > MaxWholeId || value < -MaxWholeId) return false;
+                    number = (long)value;
+                }
+                else return false;
+                return number <= MaxWholeId && number >= -MaxWholeId;
+            }
+
             static string Key(object id)
             {
-                return (id is string ? "s:" : "n:") + Convert.ToString(id, CultureInfo.InvariantCulture);
+                if (id is string) return "s:" + (string)id;
+                long number;
+                return WholeId(id, out number) ? "n:" + number.ToString(CultureInfo.InvariantCulture) : "x:" + Convert.ToString(id, CultureInfo.InvariantCulture);
             }
 
             void Remember(Dictionary<string, object> message)
@@ -1126,6 +1159,13 @@ namespace Kite.ComputerHelper
                         if (a.ContainsKey("element_token") && !(a["element_token"] is string && TokenPattern.IsMatch((string)a["element_token"]))) return "element_token is not a token";
                         object text;
                         if (!a.TryGetValue("text", out text) || !(text is string) || ((string)text).Length == 0) return "text must be text";
+                        // A control character is a key of its own to a field: U+0016 pastes, U+0003
+                        // copies. Line breaks and tabs are the Enter and Tab keys, asked and shown.
+                        foreach (char c in (string)text)
+                        {
+                            if ((c < 0x20 && c != '\t' && c != '\n' && c != '\r') || (c >= 0x7f && c <= 0x9f))
+                                return "the text holds a control character, which a field takes as a command, such as paste";
+                        }
                         return null;
                     }
                     case "press_key":
