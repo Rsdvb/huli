@@ -621,7 +621,7 @@
     },
     "elevated": {
       "name": "Operate programs run as administrator",
-      "description": "Lets agents ask to operate a program you run as administrator. Each time, you allow it in the session, confirm Windows’ prompt (for “Windows Command Processor”, which starts Kite’s helper with a clean environment) and then the helper’s own window that names the program; risky steps ask in that window too. Programs that start other programs, such as consoles, Task Manager and Explorer, are never operated this way.",
+      "description": "Lets agents ask to operate a program you run as administrator. Each time you allow it in the session, then confirm Windows’ prompt (for “Windows Command Processor”) and the helper’s own window; risky steps ask again. Programs that start other programs, such as consoles, Task Manager and Explorer, are never operated this way.",
       "keywords": "administrator admin elevated uac run as administrator sandbox computer use",
       "mode": {
         "off": "Off",
@@ -629,8 +629,8 @@
         "always": "Always allow (high risk)"
       },
       "hint": {
-        "off": "Programs run as administrator stay out of reach",
-        "sandbox": "Only a session in a container sandbox, while no session outside one is running",
+        "off": "None can be operated",
+        "sandbox": "Container-sandboxed sessions only",
         "always": "Any session may ask"
       },
       "install": {
