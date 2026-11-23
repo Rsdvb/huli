@@ -2436,7 +2436,7 @@
     },
     "apps": {
       "title": "ChatGPT apps",
-      "manage": "Manage on ChatGPT",
+      "manage": "Manage in ChatGPT settings",
       "none": "This ChatGPT account has no apps connected.",
       "off": "Off in Codex"
     },

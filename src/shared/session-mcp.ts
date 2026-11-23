@@ -98,8 +98,12 @@ export interface PluginReload {
   errors: string[]
 }
 
-/** Where Codex's apps are managed: the ChatGPT account's connector settings. */
-export const CHATGPT_APPS_URL = 'https://chatgpt.com/#settings/Connectors'
+/**
+ * Where Codex's apps are managed. OpenAI documents only a menu path for it (Settings > Plugins in
+ * ChatGPT, help.openai.com/articles/20001494) and Codex's `app/list` names each app's own page
+ * alone, so this is ChatGPT itself rather than a deep link that may not hold.
+ */
+export const CHATGPT_APPS_URL = 'https://chatgpt.com/'
 
 /** The order the panel lists servers in, by where they come from. */
 export const SOURCE_ORDER: readonly SessionMcpSource[] = [

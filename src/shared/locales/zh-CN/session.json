@@ -2340,7 +2340,7 @@
     },
     "apps": {
       "title": "ChatGPT 应用",
-      "manage": "在 ChatGPT 管理",
+      "manage": "在 ChatGPT 设置里管理",
       "none": "这个 ChatGPT 账号还没有连接应用。",
       "off": "Codex 里已关闭"
     },
