@@ -1000,11 +1000,16 @@ export interface Project {
   // Huli: further folders its sessions work in beside its own, such as a frontend and a backend
   // repository, in the order they were added; absent on hosts older than them.
   folders?: ProjectFolder[]
+  // Huli: the user's order of its sidebar group's rows by id (shared/session-order.ts); null while
+  // they go by latest activity, absent on hosts older than it, which cannot keep one.
+  sessionOrder?: string[] | null
 }
 
 /** The sidebar's No project group, which holds the sessions started without a project. */
 export interface NoProject {
   pinnedAt: number | null
+  // Huli: the user's order of its rows, as a project's `sessionOrder`.
+  sessionOrder?: string[] | null
 }
 
 /** Huli: a further folder of a project, which its sessions' agents may read and change too. */
@@ -1687,6 +1692,9 @@ export interface HostContract {
   'projects.pin': { params: { path: string | null; pinned: boolean }; result: void }
   // Puts a project just before another of the same host, or last with a null `before`.
   'projects.move': { params: { path: string; before: string | null }; result: void }
+  // Huli: the user's order of the project's sidebar rows by id, or of No project's with a null
+  // path; null ids go back to latest activity (shared/session-order.ts).
+  'projects.orderSessions': { params: { path: string | null; ids: string[] | null }; result: void }
   'projects.noProject': { params: void; result: NoProject }
   // Huli: the project's own choice of the requests the host allows by itself; null keeps the
   // default. The windows' alone: a paired device cannot widen what is allowed without asking.
@@ -2733,6 +2741,9 @@ export interface HostContract {
   'folders.reorder': { params: { folderIds: string[] }; result: void }
   // Into a folder, or out of every folder with null; ids of sessions not on the host are skipped.
   'folders.move': { params: { sessionIds: string[]; folderId: string | null }; result: void }
+  // Its sessions in the order named, the user's from now on (`manual`), with any it holds that
+  // the list leaves out first; null goes back to latest activity and keeps the order it has.
+  'folders.order': { params: { folderId: string; sessionIds: string[] | null }; result: void }
   // Huli: moving a session to another computer (shared/session-move.ts). Main alone asks these:
   // of this computer's host through its own messages, of the others as a desktop device.
   // The source's: what the session holds, its pack in parts, and the mark once it went.
@@ -2889,6 +2900,7 @@ export const HOST_METHODS = [
   'projects.removeFolder',
   'projects.suggestFolders',
   'projects.move',
+  'projects.orderSessions',
   'projects.noProject',
   'projects.worktreeSettings',
   'projects.setWorktreeSettings',
@@ -3167,6 +3179,7 @@ export const HOST_METHODS = [
   'folders.delete',
   'folders.reorder',
   'folders.move',
+  'folders.order',
   'moves.inspect',
   'moves.pack',
   'moves.part',

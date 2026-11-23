@@ -42,7 +42,10 @@ import {
   type SessionNode,
 } from '@renderer/stores/sessions'
 import { withFolderOrder } from '@renderer/features/session-folders/drag'
-import { useSessionDragSource } from '@renderer/features/split/session-drag-model'
+import {
+  useSessionDragSource,
+  useSessionDragStore,
+} from '@renderer/features/split/session-drag-model'
 import { allPanes, paneWithSession } from '@renderer/features/split/layout'
 import { openSession, useViewStore } from '@renderer/stores/view'
 import { RenameHints } from './rename-hints'
@@ -67,6 +70,7 @@ import { onBoard } from '@shared/session-board'
 import { useEntry } from '@renderer/lib/features'
 import { SubagentBadge } from './subagent-badge'
 import { useRenaming } from './use-renaming'
+import { moveRow } from './row-drag'
 import { WaitingMark } from './waiting-mark'
 
 /**
@@ -269,6 +273,18 @@ export const SessionRow = memo(function SessionRow({
           rename.start()
           return
         }
+        // Huli: Alt+arrows move the row within its group's own order (group-order-menu.tsx).
+        if (
+          (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
+          event.altKey &&
+          !event.shiftKey &&
+          !event.ctrlKey &&
+          !event.metaKey
+        ) {
+          event.preventDefault()
+          moveRow(summary.id, event.key === 'ArrowUp' ? -1 : 1)
+          return
+        }
         if (!hasChildren) return
         if (event.key === 'ArrowRight' && !expanded) {
           event.preventDefault()
@@ -401,9 +417,14 @@ export const SessionRow = memo(function SessionRow({
               <HoverCard
                 open={cardOpen}
                 // The badge lists the sub-agents on its own hover, which the row's card leaves to it.
-                onOpenChange={(open) =>
+                // Huli: and a drag of a session opens none, as its row stays under the pointer.
+                onOpenChange={(open, details) => {
+                  if (open && useSessionDragStore.getState().dragging) {
+                    details.cancel()
+                    return
+                  }
                   setCardOpen(open && !row.current?.querySelector('[data-subagent-badge]:hover'))
-                }
+                }}
               >
                 <HoverCardTrigger
                   delay={600}

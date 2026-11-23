@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { HOST_METHODS } from '@shared/agent-host'
 import { forbiddenToDevices } from '@shared/remote/allow-list'
+import { MAX_ORDERED_ROWS, ORDER_ID_CHARS } from '@shared/session-order'
 import { createValidators, promptContent } from './validate'
 
 const posix = createValidators('darwin')
@@ -723,6 +724,29 @@ describe('createValidators', () => {
     rejects(() => move({ path: '/a' }))
     rejects(() => move({ path: null, before: '/b' }))
     rejects(() => windows['projects.move']({ path: '/a', before: null }))
+  })
+
+  it("takes a project's or No project's row ids, or null, for its sidebar order", () => {
+    const order = posix['projects.orderSessions']
+    expect(order({ path: '/a', ids: ['s1', 'g1', 's1'], extra: 1 })).toEqual({
+      path: '/a',
+      ids: ['s1', 'g1'],
+    })
+    expect(order({ path: null, ids: [] })).toEqual({ path: null, ids: [] })
+    expect(order({ path: '/a', ids: null })).toEqual({ path: '/a', ids: null })
+    const most = Array.from({ length: MAX_ORDERED_ROWS }, (_, i) => `s${i}`)
+    expect(order({ path: '/a', ids: most }).ids).toHaveLength(MAX_ORDERED_ROWS)
+    rejects(() => order({ path: '/a', ids: [...most, 'one more'] }))
+    rejects(() => order({ path: '/a', ids: ['x'.repeat(ORDER_ID_CHARS + 1)] }))
+    rejects(() => order({ path: '/a', ids: [''] }))
+    rejects(() => order({ path: '/a', ids: [7] }))
+    rejects(() => order({ path: '/a', ids: 's1' }))
+    rejects(() => order({ path: '/a' }))
+    rejects(() => order({ path: 'a', ids: [] }))
+    rejects(() => order({ ids: [] }))
+    rejects(() => order(null))
+    rejects(() => windows['projects.orderSessions']({ path: '/a', ids: [] }))
+    expect(forbiddenToDevices('projects.orderSessions', { path: '/a', ids: [] })).toBe(false)
   })
 
   it('keeps optional fields out when absent', () => {

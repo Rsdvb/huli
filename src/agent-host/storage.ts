@@ -33,6 +33,7 @@ import { isProfileId } from '@shared/provider-profiles'
 import { isBoardStatus, type SessionBoard } from '@shared/session-board'
 import { isAutoApprove, type AutoApprove } from '@shared/risk'
 import type { MovedTo } from '@shared/session-move'
+import { storedOrder } from '@shared/session-order'
 import type { SettledBy } from '@shared/session-tidy'
 import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
 import { limitPauseOf, type LimitPause } from '@shared/supervisor'
@@ -314,6 +315,9 @@ export interface ProjectRecord {
   sandbox?: SandboxChoice // Huli: the sandbox its sessions start in; absent keeps the default
   // Huli: further folders its sessions work in, absolute and resolved, each once; absent for none.
   folders?: string[]
+  // Huli: the user's order of its sidebar rows by id (shared/session-order.ts); absent while they
+  // go by latest activity.
+  sessionOrder?: string[]
 }
 
 /**
@@ -333,6 +337,7 @@ export interface ProjectsFile {
   version: 1
   projects: ProjectRecord[]
   noProjectPinnedAt?: number // when the user pinned the No project group
+  noProjectSessionOrder?: string[] // Huli: the user's order of its rows, as a project's
 }
 
 /** How many opened pull requests a session keeps; the oldest go first. */
@@ -822,13 +827,21 @@ export function parseProjectsFile(
       ...projectManagerOf(item.manager),
       ...sandboxField(item.sandbox),
       ...projectFoldersOf(item.folders, item.path, platform),
+      ...sessionOrderOf('sessionOrder', item.sessionOrder),
     })
   }
   return {
     version: 1,
     projects,
     ...(isTime(data.noProjectPinnedAt) ? { noProjectPinnedAt: data.noProjectPinnedAt } : {}),
+    ...sessionOrderOf('noProjectSessionOrder', data.noProjectSessionOrder),
   }
+}
+
+/** Huli: a stored order of a group's rows, as `storedOrder` reads it; none for no list. */
+function sessionOrderOf<K extends string>(key: K, value: unknown): { [P in K]?: string[] } {
+  const order = storedOrder(value)
+  return (order ? { [key]: order } : {}) as { [P in K]?: string[] }
 }
 
 /** The longest further folder path stored; a longer one is dropped. */

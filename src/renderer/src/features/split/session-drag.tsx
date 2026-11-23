@@ -7,14 +7,16 @@ import {
   type DragMoveEvent,
   type DragStartEvent,
 } from '@dnd-kit/react'
-import { BotIcon } from '@hugeicons/core-free-icons'
+import { BotIcon, Folder01Icon } from '@hugeicons/core-free-icons'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { dropIntoFolder } from '@renderer/features/session-folders/drag'
+import { rowDragEnded, rowDragMoved, rowDragStarted } from '@renderer/features/sidebar/row-drag'
 import {
   dropIntoComposer,
   overComposer,
 } from '@renderer/features/session/composer/session-mentions'
 import { Glyph } from '@renderer/features/shell/glyph'
+import { selectionFor, useSessionSelection } from '@renderer/stores/session-selection'
 import { hostOfSession, sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
 import { dropViewAt } from '@renderer/stores/view'
 import {
@@ -22,6 +24,7 @@ import {
   dragEnded,
   dragMoved,
   dragStarted,
+  InSessionDrag,
   useSessionDragStore,
   viewOf,
   type SessionDragData,
@@ -49,19 +52,25 @@ const pointerOf = (event: DragStartEvent | DragMoveEvent | DragEndEvent) => {
 export function SplitDragProvider({ children }: { children: React.ReactNode }) {
   const start = (event: DragStartEvent) => {
     const data = event.operation.source?.data as SessionDragData | undefined
-    if (data?.sessionId) dragStarted(data, pointerOf(event))
+    if (!data?.sessionId) return
+    dragStarted(data, pointerOf(event))
+    rowDragStarted(data, event.operation.source?.element, event.operation.position.initial)
   }
   const move = (event: DragMoveEvent) => {
     // The operation's position is still the one before this move; the move's own is `to`.
-    dragMoved(event.to ?? pointerOf(event))
-    // Huli: over a composer the drop mentions the session, so no pane is marked for it.
-    if (overComposer(event.operation.target?.data)) useSessionDragStore.setState({ drop: null })
+    const point = event.to ?? pointerOf(event)
+    // Huli: over the sidebar, the drop is the sidebar's: a row's new place or another project;
+    // over a composer it mentions the session. Neither marks a pane for it.
+    const sidebar = rowDragMoved(point)
+    dragMoved(point, sidebar || overComposer(event.operation.target?.data))
   }
   const end = (event: DragEndEvent) => {
     const drop = dragEnded(event.canceled)
     const { source, target } = event.operation
-    if (!event.canceled && dropIntoComposer(source?.data, target?.data)) return
-    if (!event.canceled && dropIntoFolder(source?.data, target?.data)) return
+    const taken =
+      !event.canceled &&
+      (dropIntoComposer(source?.data, target?.data) || dropIntoFolder(source?.data, target?.data))
+    if (rowDragEnded(event.canceled || taken) || taken) return
     const size = splitSize()
     if (!drop || !size) return
     const view = viewOf(drop.data)
@@ -69,16 +78,40 @@ export function SplitDragProvider({ children }: { children: React.ReactNode }) {
   }
   return (
     <DragDropProvider sensors={sensors} onDragStart={start} onDragMove={move} onDragEnd={end}>
-      {children}
+      <InSessionDrag value>{children}</InSessionDrag>
       <DragOverlay dropAnimation={null}>
-        <SessionChip sessionId={useSessionDragStore((s) => s.dragging?.sessionId)} />
+        {(source) =>
+          sessionOf(source.data) ? (
+            <SessionChip sessionId={sessionOf(source.data)} />
+          ) : (
+            // Huli: a sidebar group being moved, as its sortable list names it.
+            <GroupChip name={(source.data as { chip?: string } | undefined)?.chip} />
+          )
+        }
       </DragOverlay>
     </DragDropProvider>
   )
 }
 
+const sessionOf = (data: unknown): string | undefined =>
+  (data as Partial<SessionDragData> | null | undefined)?.sessionId
+
+function GroupChip({ name }: { name: string | undefined }) {
+  if (!name) return null
+  return (
+    <div className="flex h-8 max-w-60 items-center gap-[9px] rounded-lg bg-surface py-1.5 pr-2.5 pl-2 text-ui text-primary shadow-menu">
+      <Glyph icon={Folder01Icon} size={14} className="shrink-0 text-secondary" />
+      <span className="min-w-0 truncate">{name}</span>
+    </div>
+  )
+}
+
 function SessionChip({ sessionId }: { sessionId: string | undefined }) {
   const summary = useSessionsStore((s) => (sessionId ? s.byId[sessionId] : undefined))
+  // Huli: a row of the picked ones carries them all, which the chip counts.
+  const count = useSessionSelection((s) =>
+    sessionId ? (selectionFor(sessionId, s.ids)?.length ?? 1) : 1,
+  )
   if (!summary) return null
   return (
     <div className="flex h-8 max-w-60 items-center gap-[9px] rounded-lg bg-surface py-1.5 pr-2.5 pl-2 text-ui text-primary shadow-menu">
@@ -88,6 +121,11 @@ function SessionChip({ sessionId }: { sessionId: string | undefined }) {
         <AgentMark agent={summary.agentId} size={14} hostId={hostOfSession(summary)} />
       )}
       <span className="min-w-0 truncate">{sessionTitle(summary)}</span>
+      {count > 1 && (
+        <span className="-mr-0.5 shrink-0 rounded-full bg-muted px-1.5 text-hint text-secondary tabular-nums">
+          {count}
+        </span>
+      )}
     </div>
   )
 }

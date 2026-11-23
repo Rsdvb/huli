@@ -540,6 +540,17 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
     return out
   }, [projects, activeId, allComputers, fleet])
 
+  // Huli: each project's own session order, as its host keeps it (会话排序).
+  const projectOrders = useMemo(() => {
+    const out = new Map<string, readonly string[] | null | undefined>()
+    for (const p of projects) out.set(projectKey(activeId, p.path), p.sessionOrder)
+    if (allComputers) {
+      for (const [id, f] of fleet)
+        for (const p of f.projects) out.set(projectKey(id, p.path), p.sessionOrder)
+    }
+    return out
+  }, [projects, activeId, allComputers, fleet])
+
   // Tasks that wait for the user count with the sessions that do, as the desktop's Needs you
   // group lists both; a step's session that asks is counted on its task.
   const { tasks, views: taskViews } = useTaskList()
@@ -583,9 +594,11 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         showEmptyFolders: shell.filter.kind === 'all',
         openBestOf,
         foldBestOf,
+        projectOrders,
       }),
     [
       foldBestOf,
+      projectOrders,
       listed,
       foldersOf,
       projectNames,

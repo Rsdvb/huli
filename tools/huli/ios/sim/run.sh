@@ -53,6 +53,10 @@ mkdir -p "$KETTU_DAEMON_DATA"
 # Huli: a manager-mode roster of the fake agent, for the manager flow, in a fresh data folder.
 [ -f "$KETTU_DAEMON_DATA/settings.json" ] ||
   node tools/huli/ios/sim/seed-manager.mjs "$KETTU_DAEMON_DATA/settings.json"
+# Huli: a project whose sessions keep the user's own order, for the session order flow alone.
+if [[ "${FLOWS:-}" == *session-order* ]]; then
+  node tools/huli/ios/sim/seed-order.mjs "$KETTU_DAEMON_DATA" "$OUT/order-project"
+fi
 node out/daemon/main.cjs run > "$RESULTS/daemon.log" 2>&1 &
 DAEMON=$!
 # What loads the runner while the flows run, every 5 s, to tell a slow start from a stuck one.

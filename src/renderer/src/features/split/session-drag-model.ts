@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { createContext, useMemo } from 'react'
 import { useDraggable } from '@dnd-kit/react'
 import { create } from 'zustand'
 import { useSessionsStore } from '@renderer/stores/sessions'
@@ -28,6 +28,9 @@ export interface SessionDragData {
 
 // While a drag runs it counts as an overlay, so the browser pane shows the still of its page.
 export const DRAG_LAYER = 'split-drag'
+
+/** Huli: inside the provider of this drag, whose manager the sidebar's sortable lists join. */
+export const InSessionDrag = createContext(false)
 
 const paneElements = new Map<string, HTMLElement>()
 let splitElement: HTMLElement | null = null
@@ -142,10 +145,12 @@ export function dragStarted(data: SessionDragData, point: { x: number; y: number
   useOverlayStore.getState().set(DRAG_LAYER, true)
 }
 
-export function dragMoved(point: { x: number; y: number }): void {
-  const { dragging } = useSessionDragStore.getState()
+/** Huli: `elsewhere` while the pointer is over what takes the drop itself, such as the sidebar. */
+export function dragMoved(point: { x: number; y: number }, elsewhere = false): void {
+  const { dragging, drop } = useSessionDragStore.getState()
   if (!dragging) return
-  useSessionDragStore.setState({ drop: placeUnderPointer(dragging, point) })
+  const next = elsewhere ? null : placeUnderPointer(dragging, point)
+  if (next !== drop) useSessionDragStore.setState({ drop: next })
 }
 
 /** Ends the drag with the drop it made, or with nothing when it was canceled or left the panes. */

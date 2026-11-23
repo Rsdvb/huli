@@ -13,6 +13,11 @@ export interface SessionFolder {
   createdAt: number
   /** The top-level sessions in it, the latest moved in first. A session is in one folder at most. */
   sessionIds: string[]
+  /**
+   * The rows show in `sessionIds`' order, which the user dragged them into, rather than by latest
+   * activity; absent from hosts older than it, which cannot keep one.
+   */
+  manual?: boolean
 }
 
 /** The longest name a folder may have. */

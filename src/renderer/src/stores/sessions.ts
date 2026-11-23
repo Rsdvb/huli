@@ -2,12 +2,13 @@ import { create } from 'zustand'
 import type { NoProject, Project, SessionSummary } from '@shared/agent-host'
 import type { TaskSummary } from '@shared/workflow'
 import type { SessionGroupRef } from '@shared/run-groups'
+import { rankBy } from '@shared/session-order'
 import { isParked } from '@shared/session-tidy'
 import { entryShown } from '@renderer/lib/features'
 import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { i18n } from '@renderer/lib/i18n'
-import { noProjectPinned, pinnedFolders, type PinnedFolder } from './projects'
+import { noProjectKey, noProjectPinned, pinnedFolders, type PinnedFolder } from './projects'
 import { listedTasks, needingTasks, pinnedTasks, startedSteps, taskExpanded } from './tasks'
 import {
   NO_PROJECT_GROUP,
@@ -535,6 +536,26 @@ export const byActivity = (row: SidebarRow): number =>
       ? Math.max(...row.runs.map((run) => run.summary.updatedAt))
       : Math.max(row.task.updatedAt, row.origin?.summary.updatedAt ?? 0))
 
+/** Huli: the ids a row answers to in a group's own order: its own, then its runs' or its origin's. */
+export const sidebarRowIds = (row: SidebarRow): string[] =>
+  row.kind === 'session'
+    ? [row.id]
+    : row.kind === 'group'
+      ? [row.id, ...row.runs.map((run) => run.summary.id)]
+      : row.origin
+        ? [row.id, row.origin.summary.id]
+        : [row.id]
+
+/**
+ * Huli: a group's rows in the user's order once it keeps one (shared/session-order.ts), new rows
+ * first; by latest activity, as `byActivity`, until then.
+ */
+export function byGroupOrder(
+  order: readonly string[] | null | undefined,
+): (row: SidebarRow) => number {
+  return rankBy(order, sidebarRowIds, byActivity)
+}
+
 /** In the order they were pinned, as Pinned lists its rows. */
 export const byPin = (row: SidebarRow): number =>
   (row.kind === 'session'
@@ -655,13 +676,19 @@ export function visibleOrder(
           sidebarRows(
             sessionTree(byId, project.path),
             listedTasks(tasks, project.path),
-            byActivity,
+            byGroupOrder(project.sessionOrder),
           ),
         )
   const noProjectRows = (hostId: string | null): string[] =>
     view.collapsedProjects[noProjectGroup(hostId)]
       ? []
-      : flattenTree(sessionTree(byId, null, hostId), expanded)
+      : flatten(
+          sidebarRows(
+            sessionTree(byId, null, hostId),
+            [],
+            byGroupOrder(noProjects[noProjectKey(hostId)]?.sessionOrder),
+          ),
+        )
   const folderRows = (folder: PinnedFolder): string[] =>
     folder.project ? projectRows(folder.project) : noProjectRows(folder.hostId)
   const order = [

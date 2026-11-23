@@ -528,6 +528,23 @@
     "worktrees": "项目有多个文件夹时不能用工作树：工作树只能隔开项目文件夹。",
     "done": "完成"
   },
+  "order": {
+    "label": "会话排序",
+    "activity": "按最近活动排序",
+    "manual": "手动排序",
+    "moveUp": "上移",
+    "moveDown": "下移",
+    "nowManual": "「{{name}}」改为手动排序：新会话排在最上面，活动不再打乱顺序。",
+    "nowActivity": "「{{name}}」改回按最近活动排序。"
+  },
+  "rowDrag": {
+    "sameComputer": "同一台电脑上的项目之间还不能搬会话，只能搬到另一台电脑上的项目。",
+    "noProjectTarget": "会话只能搬进项目，不能搬进「无项目」。",
+    "missing": "这个项目的文件夹不见了。",
+    "moved": "这个会话已经搬走了。",
+    "noWindow": "只有桌面版纸鸢能搬会话。",
+    "oneOf": "「{{title}}」：{{why}}"
+  },
   "tidy": {
     "snooze": "稍后提醒",
     "snoozeFor": "稍后提醒…",

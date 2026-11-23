@@ -579,6 +579,23 @@
     "worktrees": "Worktrees are off while the project has several folders: one would set apart only the project folder.",
     "done": "Done"
   },
+  "order": {
+    "label": "Sort sessions",
+    "activity": "By recent activity",
+    "manual": "Manually",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "nowManual": "{{name}} is in your own order now: new sessions go to the top, and activity no longer reorders it.",
+    "nowActivity": "{{name}} is sorted by recent activity again."
+  },
+  "rowDrag": {
+    "sameComputer": "Sessions cannot move between projects on the same computer yet, only to a project on another computer.",
+    "noProjectTarget": "A session can move only into a project, not into No project.",
+    "missing": "The folder of this project is gone.",
+    "moved": "This session has moved away already.",
+    "noWindow": "Only the Kite desktop app can move sessions.",
+    "oneOf": "{{title}}: {{why}}"
+  },
   "tidy": {
     "snooze": "Snooze",
     "snoozeFor": "Snooze until…",

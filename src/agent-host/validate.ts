@@ -86,6 +86,7 @@ import { AUTO_APPROVE_LEVELS, isAutoApprove } from '@shared/risk'
 import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
 import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/run-groups'
 import { BOARD_STATUSES, isBoardStatus } from '@shared/session-board'
+import { isOrderId, MAX_ORDERED_ROWS, ORDER_ID_CHARS } from '@shared/session-order'
 import { REPORT_ERROR_MAX, REPORT_ORIGINS, type ReportOrigin } from '@shared/report'
 import {
   MAX_WORKFLOW_STEPS,
@@ -203,6 +204,24 @@ function fields(params: unknown): Fields {
     throw invalidParams('params must be an object')
   }
   return params as Fields
+}
+
+/** Huli: a sidebar group's row ids for its order: ids, each once, at most `MAX_ORDERED_ROWS`. */
+function orderIds(o: Fields, key: string): string[] {
+  const value = o[key]
+  if (!Array.isArray(value) || value.length > MAX_ORDERED_ROWS) {
+    throw invalidParams(`${key} must be a list of at most ${MAX_ORDERED_ROWS} ids, or null`)
+  }
+  return [
+    ...new Set(
+      value.map((item: unknown, index) => {
+        if (!isOrderId(item)) {
+          throw invalidParams(`${key}[${index}] must be an id of 1 to ${ORDER_ID_CHARS} characters`)
+        }
+        return item
+      }),
+    ),
+  ]
 }
 
 function none(params: unknown): void {
@@ -2160,6 +2179,13 @@ export function createValidators(platform: Platform): Validators {
       return {
         path: absolutePath(o, 'path', platform),
         before: o.before === null ? null : absolutePath(o, 'before', platform),
+      }
+    },
+    'projects.orderSessions': (params) => {
+      const o = fields(params)
+      return {
+        path: o.path === null ? null : absolutePath(o, 'path', platform),
+        ids: o.ids === null ? null : orderIds(o, 'ids'),
       }
     },
     'projects.noProject': none,

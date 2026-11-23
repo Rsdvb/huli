@@ -233,6 +233,52 @@ Hooks into upstream files, one or two lines each:
 The phone app (`mobile/`) shows them on its home list, with the system's context menus and the
 other paired computers' sessions (`mobile/src/fleet.ts`, `folders.tsx`, `homeList.ts`).
 
+### Session order (会话排序、拖到别的项目)
+
+A session row drags up or down within its group, a project's, No project's or a session folder's,
+which keeps the user's order from then on; a row dropped on a project of another computer opens
+搬到另一台电脑… with that computer picked.
+
+- Order: dragging a row of a group that goes by latest activity turns it to the user's order, says
+  so once with Undo, and from then on new sessions (and ones moved or put back in) come first and
+  activity no longer reorders it. The group's menu has 会话排序 › 按最近活动排序 / 手动排序 (back to
+  activity with Undo); a session's menu has 上移 and 下移, as do Alt+↑ and Alt+↓ on a focused row.
+  The picked rows move together, in their order. Groups never dragged keep their order as before.
+- Stored on the host (`src/shared/session-order.ts`): a project's `sessionOrder` in
+  `state/projects.json` (No project's as `noProjectSessionOrder`), the row ids in the order shown
+  (sessions, best-of-N groups, tasks), at most `MAX_ORDERED_ROWS` ids of `ORDER_ID_CHARS`; a folder's
+  is `manual` in `state/session-folders.json` with its `sessionIds` in order. No thread database
+  migration. `projects.orderSessions` and `folders.order` (null back to activity) are validated in
+  `validate.ts` and `session-folders.ts`; `Project.sessionOrder` and `NoProject.sessionOrder` are
+  null while a group goes by activity and absent from an older host, `SessionFolder.manual` absent
+  from one, which leaves dragging off there (`canOrder`). Tests: `storage.test.ts`,
+  `validate.test.ts`, `session-folders.test.ts`, `session-order.test.ts`.
+- The drag (`features/sidebar/row-drag.ts`): the split's drag drives it. Its start measures the
+  row's group and the sidebar once (again only when the sidebar scrolls), each move hit-tests that
+  geometry and slides the rows it passes by `translate` alone, rendering nothing; the dragged row's
+  place shows a line, the chip moves to the pointer's lower right over the sidebar, and reduce
+  motion drops the slide. A drop saves the order at once on the host and in the window. Over the
+  sidebar the split takes no drop.
+- Onto another project: its header and rows show as a target only where a move can go (another
+  computer, both online, the session idle, top-level, not a manager's or a worker's, sent, not
+  moved, and the window the desktop app's); elsewhere a drop says why, as for two projects of the
+  same computer, which the move cannot do yet. The dialog previews the picked computer at once,
+  says when that computer's project for the repository is another than the one dropped on, and
+  moves several dropped sessions one after another.
+- The sidebar's sortable lists (projects, hosts) now join the session drag's manager instead of
+  opening their own, whose scope had taken the session rows inside a project away from the split's
+  and the folders' drops; each list's groups take a type of their own.
+- The phone lists a project's and a folder's sessions in the same order (`mobile/src/homeList.ts`);
+  No project there still goes by activity, and the phone does not drag.
+
+Hooks into upstream files: `src/shared/agent-host.ts`, `host-request-limits.ts`,
+`src/agent-host/{storage,projects,validate,host}.ts`, `features/sidebar/sortable-list.tsx`,
+`app-sidebar.tsx` (the group's rows, order, registry and drop attributes), `project-menu.tsx`
+(`orderItems`), `session-row.tsx` (Alt+arrows, no hover card while dragging), `session-menu.tsx`
+(`RowOrderItems`), `stores/sessions.ts` (`byGroupOrder`, `visibleOrder`),
+`features/split/session-drag{,-model}.tsx` (the sidebar's drop, the chip's count) and
+`styles/affect.css`.
+
 ### Best of N (同时交给几个 Agent)
 
 One message runs on 2 to 4 agents or models at once, after Cursor's `/best-of-n`. Each run is an

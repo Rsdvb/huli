@@ -42,7 +42,7 @@ import {
   useProjectsStore,
 } from '@renderer/stores/projects'
 import {
-  byActivity,
+  byGroupOrder,
   byPin,
   hostGroup,
   hostOfSession,
@@ -74,7 +74,9 @@ import { SessionFolderDialogs } from '@renderer/features/session-folders/folder-
 import { FolderSection } from '@renderer/features/session-folders/folder-section'
 import { useUnfoldered } from '@renderer/features/session-folders/store'
 import { projectNameHints } from '@renderer/features/session/project-names'
+import { canOrder } from '@shared/session-order'
 import { AddProjectButton } from './add-project'
+import { GroupOrderItems } from './group-order-menu'
 import { HostEmpty, HostHeading, NeedsYouGroup } from './host-groups'
 import { useHostLabel } from './host-label'
 import { ImportSessionsDialog } from './import-sessions'
@@ -90,6 +92,7 @@ import { SessionRow } from './session-row'
 import { SortableGroup, SortableList } from './sortable-list'
 import { TaskRow } from './task-row'
 import { RunGroupRow } from './run-group-row'
+import { useRowGroup, type RowGroup } from './row-drag'
 import { ParkedGroup } from './parked-group'
 
 /**
@@ -295,7 +298,13 @@ function ProjectList({
   return (
     <SortableList onMove={move} onPress={toggleGroup}>
       {shown.map((project, index) => (
-        <SortableGroup key={project.path} id={project.path} index={index} disabled={!movable}>
+        <SortableGroup
+          key={project.path}
+          id={project.path}
+          index={index}
+          disabled={!movable}
+          chip={project.name}
+        >
           {(handleRef) => (
             <ProjectGroup
               project={project}
@@ -462,14 +471,37 @@ function ProjectGroup({
     useShallow((s) => (project ? listedTasks(s.summaries, project.path) : [])),
   )
   const fold = useEntry('sidebar.runGroup')
-  const rows = useMemo(() => sidebarRows(tree, tasks, byActivity, fold), [tree, tasks, fold])
+  // Huli: the user's own order once a row was dragged (shared/session-order.ts), else activity.
+  const order = project ? project.sessionOrder : noProject?.sessionOrder
+  const rows = useMemo(
+    () => sidebarRows(tree, tasks, byGroupOrder(order), fold),
+    [tree, tasks, order, fold],
+  )
+  const rowIds = useMemo(() => rows.map((row) => row.id), [rows])
+  useRowGroup(
+    useMemo(
+      (): RowGroup => ({
+        key,
+        kind: project ? 'project' : 'noProject',
+        hostId,
+        path: projectPath,
+        folderId: null,
+        name,
+        rows: rowIds,
+        order,
+        away,
+        missing: !!project?.missing,
+      }),
+      [key, project, hostId, projectPath, name, rowIds, order, away],
+    ),
+  )
   if (!project && tree.length === 0) return null
   const limited = limitRows(rows, allShown, (row) => rowInSight(row, shownId))
   // Importing reads the agents' own lists, which only this computer's do.
   const local = hostId === null
   // A host that cannot pin a group leaves its pin out.
   const canPin = project ? project.pinnedAt !== undefined : noProject !== undefined
-  const hasMenu = local || canPin
+  const hasMenu = local || canPin || canOrder(order)
 
   const toggle = () => toggleGroup(key)
   const groupStop = stop?.kind === 'group' && stop.key === key
@@ -548,6 +580,7 @@ function ProjectGroup({
       toast(errorMessage(error), undefined, { tone: 'warning' })
     }
   }
+  const orderItems = <GroupOrderItems groupKey={key} order={order} disabled={away} />
   const menuItems = !hasMenu ? null : project ? (
     <ProjectMenuItems
       project={project}
@@ -555,6 +588,7 @@ function ProjectGroup({
       onPin={pin}
       onImport={() => onImport(project)}
       onRemove={() => setRemoving(true)}
+      orderItems={orderItems}
     />
   ) : (
     <NoProjectMenuItems
@@ -562,12 +596,17 @@ function ProjectGroup({
       pinned={noProject ? noProject.pinnedAt !== null : undefined}
       pinDisabled={away}
       onPin={pin}
+      orderItems={orderItems}
     />
   )
 
   return (
     <>
-      <div className="ui-as-chat-folder-row" data-menu={moreOpen || menuOpen || undefined}>
+      <div
+        className="ui-as-chat-folder-row"
+        data-menu={moreOpen || menuOpen || undefined}
+        data-row-group-head={key}
+      >
         {hasMenu ? (
           <ContextMenu onOpenChange={setMenuOpen}>
             {/* A trigger's render must take its props, so the tooltip Root wraps the menu trigger. */}
@@ -617,7 +656,7 @@ function ProjectGroup({
         </span>
       </div>
       {open && rows.length > 0 && (
-        <ul className="ui-as-chat-folder__chats">
+        <ul className="ui-as-chat-folder__chats" data-row-group={key}>
           <RenameScope value={key}>
             <AnimatePresence initial={false}>
               {limited.rows.map((row) => (
