@@ -19,6 +19,7 @@ import type { RoutineRef } from '@shared/routines'
 import { parseReplyRunNotice } from '@shared/terminal-agent'
 import { Alert, AlertDescription, AlertTitle } from '@renderer/components/ui/alert'
 import { Button } from '@renderer/components/ui/button'
+import { toast } from '@renderer/components/ui/toast'
 import {
   Collapsible,
   CollapsibleContent,
@@ -31,6 +32,7 @@ import { dayTime } from '@renderer/features/routines/model'
 import { PANEL, stopReasonText } from './helpers'
 import { RefusalEnd } from './refusal-end'
 import { useEntry as useFeatureEntry } from '@renderer/lib/features'
+import { errorMessage, host } from '@renderer/lib/host'
 import { cn } from '@renderer/lib/utils'
 import { useRoutinesStore } from '@renderer/stores/routines'
 import { sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
@@ -308,6 +310,7 @@ export const NoticeEntry = memo(function NoticeEntry({ sessionId, entryId }: Ent
   )
   if (!entry) return null
   if (entry.cause === 'sign_in' && waitsForSignIn) return null
+  if (entry.dismissed) return null
   if (entry.cause === 'agent_stopped') {
     return (
       <CutTurnEnd
@@ -349,26 +352,49 @@ export const NoticeEntry = memo(function NoticeEntry({ sessionId, entryId }: Ent
         />
       )}
       {entry.mcpServers?.[0] !== undefined && (
-        <McpNoticeAction sessionId={sessionId} server={entry.mcpServers[0]} />
+        <McpNoticeActions sessionId={sessionId} entryId={entryId} server={entry.mcpServers[0]} />
       )}
     </Alert>
   )
 })
 
-/** Huli: a notice of an MCP server that failed or needs a sign-in opens the panel at it. */
-function McpNoticeAction({ sessionId, server }: { sessionId: string; server: string }) {
+/**
+ * Huli: a notice of an MCP server that failed or needs a sign-in opens the panel at it, and goes
+ * once dismissed; the server is told of again only once its state changes.
+ */
+function McpNoticeActions({
+  sessionId,
+  entryId,
+  server,
+}: {
+  sessionId: string
+  entryId: string
+  server: string
+}) {
   const { t } = useTranslation('session')
   const on = useFeatureEntry('notice.mcp')
-  if (!on) return null
+  const [dismissing, setDismissing] = useState(false)
   const open = () => {
     const summary = useSessionsStore.getState().byId[sessionId]
     if (summary) askMcpPanel(summary, server)
   }
+  const dismiss = () => {
+    setDismissing(true)
+    host('sessions.dismissNotice', { sessionId, entryId }).catch((e: unknown) => {
+      setDismissing(false)
+      toast(errorMessage(e), undefined, { tone: 'warning' })
+    })
+  }
   return (
-    <div className="col-start-2 mt-2 flex">
-      <Button size="compact" variant="outline" onClick={open}>
-        <HugeiconsIcon icon={PlugSocketIcon} strokeWidth={1.9} data-icon="inline-start" />
-        {t('mcp.notice.open')}
+    <div className="col-start-2 mt-2 flex flex-wrap gap-1.5">
+      {on && (
+        <Button size="compact" variant="outline" onClick={open}>
+          <HugeiconsIcon icon={PlugSocketIcon} strokeWidth={1.9} data-icon="inline-start" />
+          {t('mcp.notice.open')}
+        </Button>
+      )}
+      <Button size="compact" variant="ghost" disabled={dismissing} onClick={dismiss}>
+        {t('mcp.notice.dismiss')}
       </Button>
     </div>
   )

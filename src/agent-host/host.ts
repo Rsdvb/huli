@@ -4368,6 +4368,8 @@ export class AgentHost {
       'sessions.mcpAct': ({ sessionId, action, server }) =>
         sessions.mcpAct(sessionId, action, server),
       'sessions.mcpLogin': ({ sessionId, server }) => sessions.mcpLogin(sessionId, server),
+      'sessions.dismissNotice': ({ sessionId, entryId }) =>
+        sessions.dismissNotice(sessionId, entryId),
       'sessions.reloadPlugins': ({ sessionId }) => sessions.reloadPlugins(sessionId),
       'sessions.toBackground': ({ sessionId, toolCallId }) =>
         sessions.toBackground(sessionId, toolCallId),

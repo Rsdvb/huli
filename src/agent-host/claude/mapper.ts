@@ -2,6 +2,7 @@
 // patches and effects the ACP mapper produces. A message of a subagent goes to the subagent's
 // session, which Kettu shows as a session of its own; everything else to the session it came on.
 
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import {
   RECALL_CONTENT_CHARS,
@@ -12,9 +13,13 @@ import {
   type RecalledMemory,
   type SlashCommand,
   type ToolDenial,
+  type ThreadEntry,
   type ToolEntry,
   type TurnRefusal,
   type UserContent,
+  mcpNoticeRecovered,
+  mcpNoticeSaid,
+  type McpNoticeState,
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
 import { hasMessage, t } from '../i18n'
@@ -249,8 +254,6 @@ export class ClaudeMapper {
   private lastSentAt: number | null = null
   /** The main thread's request streaming now, timed for its speed. */
   private timing: RequestTiming | null = null
-  /** Huli: the state each MCP server was last said to be in. */
-  private readonly mcpStates = new Map<string, string>()
   /** Huli: the request Claude Code retries now, and the notice that says so. */
   private retry: { id: string; attempts: number; reason: string } | null = null
   /** Huli: commands and subagents that hold up their tool call, by task id, oldest first. */
@@ -1377,33 +1380,18 @@ export class ClaudeMapper {
 
   /**
    * Huli: the MCP servers that could not start or need a sign-in, as the init each query and turn
-   * opens with lists them: said once a server is in that state, and again only after it left it.
+   * opens with lists them. Claude Code starts again for a session many times, as after a refused
+   * key or a resume, so the thread itself says whether a server's state was told already.
    */
   private mcpServers(message: SystemMessage): Delivery[] {
     if (!Array.isArray(message.mcp_servers)) return []
-    const failed: string[] = []
-    const signIn: string[] = []
+    const reported: { name: string; status: string }[] = []
     for (const item of message.mcp_servers as unknown[]) {
       const { name, status } = inputOf(item)
-      if (typeof name !== 'string' || typeof status !== 'string') continue
-      if (this.mcpStates.get(name) === status) continue
-      this.mcpStates.set(name, status)
-      if (status === 'failed') failed.push(name)
-      else if (status === 'needs-auth') signIn.push(name)
+      if (typeof name === 'string' && typeof status === 'string') reported.push({ name, status })
     }
-    const at = String(message.uuid ?? Date.now())
-    const deliveries: Delivery[] = []
-    if (failed.length > 0) {
-      deliveries.push(
-        mcpNotice(this.sessionId, `n:mcp:failed:${at}`, failed, 'claude.notice.mcpFailed'),
-      )
-    }
-    if (signIn.length > 0) {
-      deliveries.push(
-        mcpNotice(this.sessionId, `n:mcp:auth:${at}`, signIn, 'claude.notice.mcpNeedsAuth'),
-      )
-    }
-    return deliveries
+    if (reported.length === 0) return []
+    return [mcpStatesDelivery(this.sessionId, String(message.uuid ?? Date.now()), reported)]
   }
 
   /**
@@ -2118,29 +2106,80 @@ function latestReply(ctx: MapperContext): string | null {
   return null
 }
 
-/** Huli: MCP servers that could not start, or that need a sign-in, by name. */
-function mcpNotice(
+const MCP_NOTICE = {
+  failed: 'claude.notice.mcpFailed',
+  'needs-auth': 'claude.notice.mcpNeedsAuth',
+} as const satisfies Record<McpNoticeState, string>
+
+/**
+ * Huli: tells of the servers an init reports failed or needing a sign-in that the thread does not
+ * tell of in that state yet, one notice for each state, and records those that connected or were
+ * turned off, so a later failure of theirs is told again.
+ */
+function mcpStatesDelivery(
   sessionId: string,
-  id: string,
-  names: readonly string[],
-  key: 'claude.notice.mcpFailed' | 'claude.notice.mcpNeedsAuth',
-  error?: string,
+  at: string,
+  reported: readonly { name: string; status: string }[],
 ): Delivery {
-  const title = t(key, { names: names.join(', '), count: names.length })
-  const hint = t(`${key}Hint` as 'claude.notice.mcpFailedHint')
-  const description = error ? [error, hint].join('\n') : hint
-  return noticeDelivery(sessionId, id, 'warning', title, description, { mcpServers: [...names] })
+  return {
+    sessionId,
+    map: (ctx) => {
+      const out = output()
+      const told: Record<McpNoticeState, string[]> = { failed: [], 'needs-auth': [] }
+      for (const { name, status } of reported) {
+        if (status === 'failed' || status === 'needs-auth') {
+          if (!mcpNoticeSaid(ctx.thread, name, status)) told[status].push(name)
+        } else if (status === 'connected' || status === 'disabled') {
+          const recovered = mcpNoticeRecovered(ctx.thread, name)
+          if (recovered) out.patches.push(recovered)
+        }
+      }
+      if (told.failed.length > 0) {
+        putMcpNotice(ctx, out, `n:mcp:failed:${at}`, told.failed, 'failed')
+      }
+      if (told['needs-auth'].length > 0) {
+        putMcpNotice(ctx, out, `n:mcp:auth:${at}`, told['needs-auth'], 'needs-auth')
+      }
+      return out
+    },
+  }
 }
 
-/** Huli: a server Kite gave the query once it ran could not connect. */
+/** Huli: a notice of MCP servers that could not start, or that need a sign-in, by name. */
+function putMcpNotice(
+  ctx: MapperContext,
+  out: MapperOutput,
+  id: string,
+  names: readonly string[],
+  state: McpNoticeState,
+  error?: string,
+): void {
+  const key = MCP_NOTICE[state]
+  const title = t(key, { names: names.join(', '), count: names.length })
+  const hint = t(`${key}Hint` as 'claude.notice.mcpFailedHint')
+  putNotice(ctx, out, id, {
+    severity: 'warning',
+    title,
+    description: error ? [error, hint].join('\n') : hint,
+    mcpServers: [...names],
+    mcpState: state,
+  })
+}
+
+/**
+ * Huli: a server Kite gave the query once it ran could not connect; told once until it connects,
+ * as an init's failures are.
+ */
 export function mcpFailedNotice(sessionId: string, name: string, error: string): Delivery {
-  return mcpNotice(
+  return {
     sessionId,
-    `n:mcp:failed:${name}:${Date.now()}`,
-    [name],
-    'claude.notice.mcpFailed',
-    error,
-  )
+    map: (ctx) => {
+      const out = output()
+      if (mcpNoticeSaid(ctx.thread, name, 'failed')) return out
+      putMcpNotice(ctx, out, `n:mcp:failed:${name}:${randomUUID()}`, [name], 'failed', error)
+      return out
+    },
+  }
 }
 
 /** Huli: adds a notice of Kite's own, or changes it once it shows. */
@@ -2150,25 +2189,29 @@ function noticeDelivery(
   severity: 'info' | 'warning' | 'error',
   title: string,
   description?: string,
-  extra: { mcpServers?: string[] } = {},
 ): Delivery {
   return {
     sessionId,
     map: (ctx) => {
       const out = output()
-      const changes = {
+      putNotice(ctx, out, id, {
         severity,
         title,
         ...(description !== undefined ? { description } : {}),
-        ...extra,
-      }
-      if (ctx.thread.byId[id]?.kind === 'notice') {
-        out.patches.push({ op: 'entry.update', id, changes })
-      } else {
-        addEntry(ctx, out, { kind: 'notice', id, ...changes })
-      }
+      })
       return out
     },
+  }
+}
+
+type NoticeFields = Omit<Extract<ThreadEntry, { kind: 'notice' }>, 'kind' | 'id'>
+
+/** Huli: adds a notice of Kite's own, or changes it when the thread has it already. */
+function putNotice(ctx: MapperContext, out: MapperOutput, id: string, changes: NoticeFields): void {
+  if (ctx.thread.byId[id]?.kind === 'notice') {
+    out.patches.push({ op: 'entry.update', id, changes })
+  } else {
+    addEntry(ctx, out, { kind: 'notice', id, ...changes })
   }
 }
 

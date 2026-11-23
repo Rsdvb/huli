@@ -207,6 +207,8 @@ function turnRows(entries: readonly ThreadEntry[], partsOf: PartsOf): Row[] {
       continue
     }
     if (entry.kind === 'plan' || (entry.kind === 'user' && entry.approval)) continue
+    // Huli: a notice the user dismissed, on either app.
+    if (entry.kind === 'notice' && entry.dismissed) continue
     closeRun()
     switch (entry.kind) {
       case 'user':

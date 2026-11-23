@@ -174,7 +174,7 @@ export function NoticeEntry(props: { entry: Notice }) {
           </View>
         )}
         {entry.mcpServers?.[0] !== undefined ? (
-          <McpNoticeAction sessionId={sessionId} server={entry.mcpServers[0]} />
+          <McpNoticeActions sessionId={sessionId} entryId={entry.id} server={entry.mcpServers[0]} />
         ) : null}
         <SendState sender={sender} />
       </View>
@@ -182,22 +182,44 @@ export function NoticeEntry(props: { entry: Notice }) {
   )
 }
 
-/** Huli: a notice of an MCP server that failed or needs a sign-in opens the session's MCP page. */
-function McpNoticeAction(props: { sessionId: string; server: string }) {
+/**
+ * Huli: a notice of an MCP server that failed or needs a sign-in opens the session's MCP page, and
+ * goes once dismissed; the server is told of again only once its state changes.
+ */
+function McpNoticeActions(props: { sessionId: string; entryId: string; server: string }) {
   const on = useEntryOn('phone.mcpNotice')
-  if (!on) return null
+  const link = useLink()
+  const sender = useSender()
   return (
-    <View style={styles.actions}>
-      <CardButton
-        label="查看 MCP 服务器"
-        onPress={() =>
-          router.push({
-            pathname: '/mcp/[id]',
-            params: { id: props.sessionId, server: props.server },
-          })
-        }
-      />
-    </View>
+    <>
+      <View style={styles.actions}>
+        {on ? (
+          <CardButton
+            label="查看 MCP 服务器"
+            onPress={() =>
+              router.push({
+                pathname: '/mcp/[id]',
+                params: { id: props.sessionId, server: props.server },
+              })
+            }
+          />
+        ) : null}
+        <CardButton
+          label="关闭提示"
+          busy={sender.busy === 'dismiss'}
+          disabled={sender.busy !== null}
+          onPress={() =>
+            void sender.send('dismiss', () =>
+              call(link, 'sessions.dismissNotice', {
+                sessionId: props.sessionId,
+                entryId: props.entryId,
+              }),
+            )
+          }
+        />
+      </View>
+      <SendState sender={sender} />
+    </>
   )
 }
 

@@ -8,10 +8,10 @@ import { FOLDED_LINES, FOLD_OVER } from './markdown/code-meta'
 // groupable lookup, t other tool, w tool waiting for permission, r tool whose request was answered,
 // p compaction, n plan, which the thread leaves out for the top bar, v a message Kettu sent as a
 // card's answer, which the thread leaves out as the card shows it, x a finished write to an
-// artifact, which the thread leaves out as its artifact's card stands for it, e turn end, m an
-// agent's write to project memory, which folds as work, o anything else, which a new site's
-// request, an agent's question and a proposed write to global memory are: of their own, never
-// folded into a run.
+// artifact, which the thread leaves out as its artifact's card stands for it, d a notice the user
+// dismissed, which the thread leaves out, e turn end, m an agent's write to project memory, which
+// folds as work, o anything else, which a new site's request, an agent's question and a proposed
+// write to global memory are: of their own, never folded into a run.
 export function signatureOf(state: ThreadState | null | undefined): string {
   if (!state) return ''
   let signature = ''
@@ -19,7 +19,7 @@ export function signatureOf(state: ThreadState | null | undefined): string {
   return signature
 }
 
-const HIDDEN = /[nvx]/g
+const HIDDEN = /[nvxd]/g
 
 /**
  * The entries and their signature without the ones the thread does not draw: the plans, which
@@ -31,7 +31,7 @@ export function withoutHidden(
   signature: string,
 ): { order: string[]; signature: string } {
   if (signature.search(HIDDEN) === -1) return { order, signature }
-  const shown = order.filter((_, i) => !'nvx'.includes(signature[i]!))
+  const shown = order.filter((_, i) => !'nvxd'.includes(signature[i]!))
   return { order: shown, signature: signature.replace(HIDDEN, '') }
 }
 
@@ -42,6 +42,7 @@ function charOf(entry: ThreadEntry | undefined): string {
   if (entry.kind === 'turn_end') return 'e'
   if (entry.kind === 'thought') return 'h'
   if (entry.kind === 'plan') return 'n'
+  if (entry.kind === 'notice' && entry.dismissed) return 'd'
   if (entry.kind === 'compaction') return 'p'
   if (entry.kind === 'memory') return entry.layer === 'project' ? 'm' : 'o'
   // A question, a plan and an MCP server's request are the user's to answer, never folded work.

@@ -11,7 +11,7 @@ import {
   type ThreadState,
 } from '@shared/thread'
 import { newTurnScope, type MapperContext, type MapperEffect } from '../session-updates'
-import { ClaudeMapper } from './mapper'
+import { ClaudeMapper, mcpFailedNotice, type Delivery } from './mapper'
 import type { SdkMessage } from './sdk'
 
 const SESSION = 'claude-1'
@@ -43,7 +43,7 @@ class Run {
     entries: [],
     seq: 0,
   })
-  readonly mapper = new ClaudeMapper(SESSION, '/repo')
+  mapper = new ClaudeMapper(SESSION, '/repo')
   readonly effects: MapperEffect[] = []
   readonly ignored: string[] = []
   private readonly scope = newTurnScope()
@@ -58,13 +58,24 @@ class Run {
         this.ignored.push(m.subtype ? `${m.type}/${m.subtype}` : m.type)
         continue
       }
-      for (const delivery of deliveries) {
-        if (delivery.sessionId !== SESSION) continue
-        const out = delivery.map(this.context())
-        this.thread = applyPatches(this.thread, out.patches)
-        this.effects.push(...out.effects)
-      }
+      this.deliver(...deliveries)
     }
+    return this
+  }
+
+  deliver(...deliveries: Delivery[]): this {
+    for (const delivery of deliveries) {
+      if (delivery.sessionId !== SESSION) continue
+      const out = delivery.map(this.context())
+      this.thread = applyPatches(this.thread, out.patches)
+      this.effects.push(...out.effects)
+    }
+    return this
+  }
+
+  /** Claude Code started again for the session: a new mapper on the same thread, as a resume has. */
+  restart(): this {
+    this.mapper = new ClaudeMapper(SESSION, '/repo')
     return this
   }
 
@@ -474,6 +485,52 @@ describe('MCP servers', () => {
       },
       { id: 'n:mcp:failed:d', title: 'MCP server github could not start', mcpServers: ['github'] },
     ])
+    expect(run.entry('n:mcp:failed:a')).toMatchObject({
+      mcpState: 'failed',
+      mcpRecovered: ['github'],
+    })
+    expect(run.entry('n:mcp:auth:a')).toMatchObject({ mcpState: 'needs-auth' })
+  })
+
+  it('tells of a server once across Claude Code starting again, dismissed or not', () => {
+    const failing = [
+      { name: 'github', status: 'failed' },
+      { name: 'linear', status: 'needs-auth' },
+    ]
+    const run = new Run().feed(init(failing, 'a'))
+    for (const at of ['b', 'c', 'd']) run.restart().feed(init(failing, at))
+    expect(notices(run).map((notice) => notice.id)).toEqual(['n:mcp:failed:a', 'n:mcp:auth:a'])
+
+    run.update('n:mcp:auth:a', { dismissed: true })
+    run.restart().feed(init(failing, 'e'))
+    run.deliver(mcpFailedNotice(SESSION, 'github', 'HTTP 500'))
+    expect(notices(run)).toHaveLength(2)
+
+    // A changed state is told: linear now fails, and github signed in once and needs it again.
+    run.restart().feed(
+      init(
+        [
+          { name: 'github', status: 'connected' },
+          { name: 'linear', status: 'failed' },
+        ],
+        'f',
+      ),
+    )
+    run.restart().feed(init([{ name: 'github', status: 'failed' }], 'g'))
+    expect(notices(run).slice(2)).toMatchObject([
+      { id: 'n:mcp:failed:f', mcpServers: ['linear'], mcpState: 'failed' },
+      { id: 'n:mcp:failed:g', mcpServers: ['github'], mcpState: 'failed' },
+    ])
+  })
+
+  it('tells of a failed server Kite added once, until it connects', () => {
+    const run = new Run()
+    run.deliver(mcpFailedNotice(SESSION, 'kettu', 'connect ECONNREFUSED'))
+    run.restart().deliver(mcpFailedNotice(SESSION, 'kettu', 'connect ECONNREFUSED'))
+    expect(notices(run)).toMatchObject([{ mcpServers: ['kettu'], mcpState: 'failed' }])
+    run.feed(init([{ name: 'kettu', status: 'connected' }], 'a'))
+    run.restart().deliver(mcpFailedNotice(SESSION, 'kettu', 'connect ECONNREFUSED'))
+    expect(notices(run)).toHaveLength(2)
   })
 })
 

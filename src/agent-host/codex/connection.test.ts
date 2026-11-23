@@ -2209,6 +2209,45 @@ describe('side questions', () => {
 })
 
 describe('warnings about Codex itself', () => {
+  it('tells of an MCP server once in each state, across Codex starting again', async () => {
+    const t = threadTarget()
+    const mcpNotices = () =>
+      t.entries().filter((entry) => entry.kind === 'notice' && entry.mcpServers !== undefined)
+    const report = (server: FakeAppServer, status: string, error: string | null, reason?: string) =>
+      server.notify('mcpServer/startupStatus/updated', {
+        name: 'github',
+        status,
+        error,
+        failureReason: reason ?? null,
+        threadId: 'thread-1',
+      })
+    const first = await connect()
+    await first.connection.newSession('/project')
+    first.connection.register('thread-1', t.target)
+    report(first.server, 'failed', 'spawn gh-mcp ENOENT')
+    report(first.server, 'failed', 'exited with code 1')
+    await until(() => mcpNotices().length === 1)
+
+    // Codex started again, as after a crash: a new connection to the same thread.
+    const second = await connect()
+    await second.connection.newSession('/project')
+    second.connection.register('thread-1', t.target)
+    report(second.server, 'failed', 'spawn gh-mcp ENOENT')
+    for (let i = 0; i < 5; i++) await tick()
+    expect(mcpNotices()).toHaveLength(1)
+
+    report(second.server, 'ready', null)
+    report(second.server, 'failed', 'spawn gh-mcp ENOENT')
+    await until(() => mcpNotices().length === 2)
+    report(second.server, 'failed', 'token expired', 'reauthenticationRequired')
+    await until(() => mcpNotices().length === 3)
+    expect(mcpNotices()).toMatchObject([
+      { mcpState: 'failed', mcpRecovered: ['github'] },
+      { mcpState: 'failed', title: 'MCP server github could not start' },
+      { mcpState: 'needs-auth' },
+    ])
+  })
+
   it('shows each once in every session, those from before it opened too', async () => {
     const { server, connection } = await connect()
     await connection.newSession('/project')

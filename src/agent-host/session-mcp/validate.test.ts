@@ -42,6 +42,19 @@ describe("Huli: the requests of a session's MCP panel", () => {
     rejects(() => act(['a']))
   })
 
+  it('dismisses a notice named by its session and entry alone', () => {
+    const dismiss = validators['sessions.dismissNotice']
+    expect(dismiss({ sessionId: 's1', entryId: 'n:mcp:auth:u1', hidden: true })).toEqual({
+      sessionId: 's1',
+      entryId: 'n:mcp:auth:u1',
+    })
+    rejects(() => dismiss({ sessionId: 's1' }))
+    rejects(() => dismiss({ sessionId: 's1', entryId: '' }))
+    rejects(() => dismiss({ sessionId: 's1', entryId: 'x'.repeat(257) }))
+    rejects(() => dismiss({ entryId: 'e1' }))
+    expect(HOST_METHODS).toContain('sessions.dismissNotice')
+  })
+
   it('reloads one session or every one', () => {
     expect(validators['sessions.reloadPlugins'](undefined)).toEqual({})
     expect(validators['sessions.reloadPlugins']({})).toEqual({})

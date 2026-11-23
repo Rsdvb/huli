@@ -2463,7 +2463,8 @@
       "enable": "Couldn't turn on {{name}}: {{error}}"
     },
     "notice": {
-      "open": "View MCP servers"
+      "open": "View MCP servers",
+      "dismiss": "Dismiss"
     }
   }
 }
