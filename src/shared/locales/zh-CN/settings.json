@@ -1171,6 +1171,7 @@
     "registrationNote": "首次启动时找到的 Harness，以及你在 Kettu 里安装的 Harness，Kettu 会各添加一个智能体。别的，比如之后在终端里装的程序，请在这里自己添加。移除的智能体不会自己加回来。",
     "onHarness": "运行于 {{harness}}",
     "openHarness": "到 Harness 里打开 {{harness}}",
+    "missingOnHost": "在 {{host}} 上：{{message}}",
     "mcpServers": {
       "name": "MCP 服务器",
       "description": "Kettu 自带的服务器，以及你安装的服务器。在市场中管理。",
@@ -2578,6 +2579,7 @@
     "missingLine": "未安装。点“安装”查看 {{name}} 官方文档里的安装方式。",
     "install": {
       "title": "安装 {{name}}",
+      "titleOnHost": "在 {{host}} 上安装 {{name}}",
       "body": "Kettu 不自带 {{name}}，用的是你电脑上装的那份。选一种 {{vendor}} 文档里的安装方式，Kettu 会在后台运行它，装好后重新检测 {{name}}。",
       "bodyPlain": "选一种文档里的安装方式，Kettu 会在后台运行它，装好后重新检测 {{name}}。",
       "bodyOne": "Kettu 不自带 {{name}}，用的是你电脑上装的那份。Kettu 会按 {{vendor}} 文档里的方式在后台安装它，装好后重新检测 {{name}}。",

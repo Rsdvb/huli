@@ -1181,6 +1181,7 @@
     "registrationNote": "Kettu adds an agent for each harness it finds when a computer first starts, and for each one you install in Kettu. Any other, such as a program you install later in a terminal, you add here yourself. An agent you remove is not added back on its own.",
     "onHarness": "on {{harness}}",
     "openHarness": "Open {{harness}} in Harnesses",
+    "missingOnHost": "On {{host}}: {{message}}",
     "mcpServers": {
       "name": "MCP servers",
       "description": "Kettu’s own server and the ones you install. Manage them in Marketplace.",
@@ -2610,6 +2611,7 @@
     "missingLine": "Not installed. Install shows the ways {{name}}’s maker documents.",
     "install": {
       "title": "Install {{name}}",
+      "titleOnHost": "Install {{name}} on {{host}}",
       "body": "Kettu brings no {{name}} of its own: it uses the one on your computer. Pick one of {{vendor}}’s documented ways; Kettu runs it in the background and detects {{name}} again when it is done.",
       "bodyPlain": "Pick one of the documented ways; Kettu runs it in the background and detects {{name}} again when it is done.",
       "bodyOne": "Kettu brings no {{name}} of its own: it uses the one on your computer. Kettu installs it the way {{vendor}} documents, in the background, and detects {{name}} again when it is done.",
