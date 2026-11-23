@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { DragDropProvider, useDragDropManager, type DragEndEvent } from '@dnd-kit/react'
 import { isSortable, useSortable } from '@dnd-kit/react/sortable'
+import { DragFeedback, lightPlugins } from '@renderer/components/drag-feedback'
 import { tabSensors } from '@renderer/components/tab-sensors'
 import { InSessionDrag } from '@renderer/features/split/session-drag-model'
 import { cn } from '@renderer/lib/utils'
@@ -84,7 +85,8 @@ export function SortableList({
       {body}
     </>
   ) : (
-    <DragDropProvider sensors={tabSensors} onDragEnd={dragEnded}>
+    <DragDropProvider sensors={tabSensors} plugins={lightPlugins} onDragEnd={dragEnded}>
+      <DragFeedback />
       {body}
     </DragDropProvider>
   )
