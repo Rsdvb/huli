@@ -20,7 +20,12 @@ import { useShallow } from 'zustand/react/shallow'
 import { originLabel } from '@shared/browser'
 import { LOCALES, LOCALE_NAMES, type LanguageSetting } from '@shared/locale'
 import { isPortBase, PORT_BASE_MAX, PORT_BASE_MIN } from '@shared/worktree-ports'
-import { isWebhookPort, WEBHOOK_PORT_MAX, WEBHOOK_PORT_MIN } from '@shared/routines'
+import {
+  DEFAULT_WEBHOOK_PORT,
+  isWebhookPort,
+  WEBHOOK_PORT_MAX,
+  WEBHOOK_PORT_MIN,
+} from '@shared/routines'
 import {
   DEFAULT_SETTINGS,
   NEW_SESSION_LISTS,
@@ -905,7 +910,8 @@ export function WorktreePorts() {
 /** Huli: the loopback port routines' webhooks listen on, applied when the field is left. */
 export function WebhookPort() {
   const { t } = useTranslation('settings')
-  const port = useSettings().webhooks.port
+  // A host from before routines' webhooks keeps the default.
+  const port = useSettings().webhooks?.port ?? DEFAULT_WEBHOOK_PORT
   const [apply, error] = useApply()
   const [draft, setDraft] = useState<string | null>(null)
   const next = draft === null ? port : Number(draft.trim())

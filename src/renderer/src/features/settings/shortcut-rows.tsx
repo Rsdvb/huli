@@ -20,11 +20,25 @@ import { Kbd } from '@renderer/components/ui/kbd'
 import { isMac } from '@renderer/lib/platform'
 import { HISTORY_SHORTCUTS } from '@renderer/app/history'
 import { keyCaps } from '@renderer/features/shell/shortcuts'
-import { useHostScope } from '@renderer/stores/host-scope'
+import type { SettingsPatch } from '@shared/settings'
+import { errorMessage } from '@renderer/lib/host'
+import { useSettingsStore } from '@renderer/stores/settings'
 import { ControlError, SetButton } from './controls'
-import { useApply } from './use-apply'
 
-const useKeyboard = () => useHostScope().useSettingsStore((s) => s.settings.keyboard)
+// This computer's keys, whichever host the page shows the settings of, as the backup's rows do.
+const useKeyboard = () => useSettingsStore((s) => s.settings.keyboard)
+
+function useApply(): [(patch: SettingsPatch) => void, string | null] {
+  const [error, setError] = useState<string | null>(null)
+  const apply = (patch: SettingsPatch) => {
+    setError(null)
+    useSettingsStore
+      .getState()
+      .update(patch)
+      .catch((failure: unknown) => setError(errorMessage(failure)))
+  }
+  return [apply, error]
+}
 
 /** The keys the app keeps as they are, which the page lists for what they do. */
 const FIXED = [

@@ -179,12 +179,14 @@ export function SettingsContent({ titleId }: { titleId?: string }) {
   const account = useAccountSection()
   const devices = useDevicesSection()
   const chatBridge = useChatBridgeSection()
+  // Huli: this computer's keys, which a browser's page has none of.
+  const shortcuts = useShortcutsSection()
   const devicesOn = useEntry('settings.devices')
   const chatBridgeOn = useEntry('settings.chatBridge')
   const client = [
     useGeneralSection(),
     useAppearanceSection(),
-    useShortcutsSection(),
+    ...(isWeb ? [] : [shortcuts]),
     useNotificationsSection(),
     ...(cloudOff ? [] : [account]),
     useHostsSection(),
