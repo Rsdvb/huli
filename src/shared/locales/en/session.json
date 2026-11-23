@@ -2238,7 +2238,9 @@
       "inClone": "It goes on in the folder the clone makes",
       "resume": "Conversation: {{agent}} there goes on from its own history",
       "carry": "Conversation: {{agent}} there goes on from Kite’s copy of it",
-      "here": "The session and its worktree here stay as they are, marked with where they went."
+      "here": "The session and its worktree here stay as they are, marked with where they went.",
+      "otherProject": "{{name}} on that computer is not this session’s repository, so it goes into {{path}}, which is.",
+      "otherProjectClone": "{{name}} on that computer is not this session’s repository, so it clones the repository to {{path}}."
     },
     "problems": {
       "busy": "The session is working. Move it once the turn is over.",
@@ -2275,7 +2277,10 @@
       "transfer": "Send them over",
       "apply": "Put them back together on {{name}}",
       "finish": "Finish"
-    }
+    },
+    "titleMany": "Move {{count}} sessions to another computer",
+    "titleSeparator": ", ",
+    "oneOf": "{{title}}: {{why}}"
   },
   "rewind": {
     "rewindAction": "Rewind to here",

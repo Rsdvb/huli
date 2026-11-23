@@ -2146,7 +2146,9 @@
       "inClone": "直接在克隆出来的目录里继续",
       "resume": "对话：由那边的 {{agent}} 带着它自己的记录接着聊",
       "carry": "对话：由那边的 {{agent}} 从纸鸢保存的对话副本接着聊",
-      "here": "这台电脑上的会话和工作树保持原样；搬完后会标明去了哪里。"
+      "here": "这台电脑上的会话和工作树保持原样；搬完后会标明去了哪里。",
+      "otherProject": "那台电脑上的「{{name}}」不是这个会话的仓库，会放进同一仓库的 {{path}}。",
+      "otherProjectClone": "那台电脑上的「{{name}}」不是这个会话的仓库，会另外克隆到 {{path}}。"
     },
     "problems": {
       "busy": "会话正在工作。等这一轮结束再搬。",
@@ -2183,7 +2185,10 @@
       "transfer": "传过去",
       "apply": "在 {{name}} 上还原",
       "finish": "完成"
-    }
+    },
+    "titleMany": "把 {{count}} 个会话搬到另一台电脑",
+    "titleSeparator": "、",
+    "oneOf": "「{{title}}」：{{why}}"
   },
   "rewind": {
     "rewindAction": "回退到这里",

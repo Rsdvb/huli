@@ -11,16 +11,34 @@ import { onHost } from '@renderer/lib/host-paths'
 import { switchHost } from '@renderer/stores/host-switch'
 import { openSession, THIS_COMPUTER, useViewStore } from '@renderer/stores/view'
 
+/** Huli: the project on another computer a session was dropped on in the sidebar. */
+export interface MoveDrop {
+  host: MoveHost
+  /** The project's path as the window names it (`onHost`). */
+  projectPath: string
+  projectName: string
+}
+
 interface MoveStore {
   /** The session the dialog moves; null while it is closed. */
   summary: SessionSummary | null
+  /** Huli: the other sessions dropped with it, which move after it, one at a time. */
+  more: SessionSummary[]
+  /** Huli: the project they were dropped on, whose computer the dialog picks; null from a menu. */
+  dropped: MoveDrop | null
   /** The latest of each move main runs or ran this run, by move id. */
   moves: Record<string, MoveProgress>
   /** What main found for the computer picked in the open dialog, or that it is looking. */
   preview: MovePreviewResult | 'loading' | null
 }
 
-export const useMoveStore = create<MoveStore>()(() => ({ summary: null, moves: {}, preview: null }))
+export const useMoveStore = create<MoveStore>()(() => ({
+  summary: null,
+  more: [],
+  dropped: null,
+  moves: {},
+  preview: null,
+}))
 
 /** The latest pick, so an earlier pick's late answer is dropped. */
 let asked = 0
@@ -47,11 +65,22 @@ export function canMove(): boolean {
   return typeof window.kettu.moves?.start === 'function'
 }
 
-/** Opens the dialog for the session, as its menu's 搬到另一台电脑… does. */
-export function askMove(summary: SessionSummary): void {
+/**
+ * Opens the dialog for the session, as its menu's 搬到另一台电脑… does; Huli: or for the sessions
+ * dropped on another computer's project, with that computer picked.
+ */
+export function askMove(
+  summary: SessionSummary,
+  drop: { more: SessionSummary[]; dropped: MoveDrop } | null = null,
+): void {
   listen()
   asked++
-  useMoveStore.setState({ summary, preview: null })
+  useMoveStore.setState({
+    summary,
+    more: drop?.more ?? [],
+    dropped: drop?.dropped ?? null,
+    preview: null,
+  })
 }
 
 /** The move of the session main runs now, if any. */
@@ -64,7 +93,7 @@ export function runningMove(sessionId: string): string | null {
 
 export function closeMove(): void {
   asked++
-  useMoveStore.setState({ summary: null, preview: null })
+  useMoveStore.setState({ summary: null, more: [], dropped: null, preview: null })
 }
 
 /** Asks main what moving the session to `target` would do; the dialog shows the answer. */
