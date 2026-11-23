@@ -245,6 +245,39 @@ describe('createValidators', () => {
     rejects(() => move({ toolCallId: 'toolu_1' }))
   })
 
+  it("takes a review's findings and what to do with them, each id once", () => {
+    for (const method of [
+      'sessions.review',
+      'sessions.reviewStart',
+      'sessions.reviewStop',
+      'sessions.suggestTitle',
+    ] as const) {
+      expect(posix[method]({ sessionId: 's', other: 1 })).toEqual({ sessionId: 's' })
+      rejects(() => posix[method]({}))
+    }
+    const act = posix['sessions.reviewAct']
+    expect(
+      act({ sessionId: 's', reviewId: 'r1', findingIds: ['f1', 'f2', 'f1'], action: 'fix', x: 1 }),
+    ).toEqual({ sessionId: 's', reviewId: 'r1', findingIds: ['f1', 'f2'], action: 'fix' })
+    for (const action of ['dismiss', 'restore'] as const) {
+      expect(act({ sessionId: 's', reviewId: 'r1', findingIds: ['f1'], action }).action).toBe(
+        action,
+      )
+    }
+    const base = { sessionId: 's', reviewId: 'r1', findingIds: ['f1'], action: 'fix' }
+    rejects(() => act({ ...base, action: 'delete' }))
+    rejects(() => act({ ...base, action: undefined }))
+    rejects(() => act({ ...base, findingIds: [] }))
+    rejects(() => act({ ...base, findingIds: 'f1' }))
+    rejects(() => act({ ...base, findingIds: [7] }))
+    rejects(() => act({ ...base, findingIds: [''] }))
+    rejects(() => act({ ...base, findingIds: ['x'.repeat(65)] }))
+    rejects(() => act({ ...base, findingIds: Array.from({ length: 31 }, (_, i) => `f${i}`) }))
+    rejects(() => act({ ...base, reviewId: '' }))
+    rejects(() => act({ ...base, reviewId: 'x'.repeat(65) }))
+    rejects(() => act({ ...base, sessionId: undefined }))
+  })
+
   it('takes a side question, its quote and the agent picked to answer it', () => {
     expect(posix['sessions.sideAsk']({ sessionId: 's', question: 'Why?', other: 1 })).toEqual({
       sessionId: 's',
@@ -1911,6 +1944,36 @@ describe('computer use requests', () => {
     rejects(() => posix['git.pullRequestDraft']({ projectPath: '/p', base: '--output=x' }))
     rejects(() => posix['git.pullRequestDraft']({ projectPath: '/p', base: 'main dev' }))
     rejects(() => posix['git.pullRequestDraft']({ projectPath: 'p', base: 'main' }))
+  })
+
+  it("takes a session and one part for a drafted pull request's text", () => {
+    expect(
+      posix['git.pullRequestDraft']({
+        projectPath: '/p',
+        base: 'main',
+        sessionId: 's',
+        part: 'body',
+      }),
+    ).toEqual({ projectPath: '/p', base: 'main', sessionId: 's', part: 'body' })
+    const draft = (extra: Record<string, unknown>) => () =>
+      posix['git.pullRequestDraft']({ projectPath: '/p', base: 'main', ...extra })
+    rejects(draft({ part: 'both' }))
+    rejects(draft({ part: 1 }))
+    rejects(draft({ sessionId: '' }))
+    rejects(draft({ sessionId: 7 }))
+  })
+
+  it('takes a folder, a text and an agent for a suggested branch name', () => {
+    expect(posix['git.suggestBranch']({ projectPath: '/p', other: 1 })).toEqual({
+      projectPath: '/p',
+    })
+    expect(
+      posix['git.suggestBranch']({ projectPath: '/p', text: 'Fix the clock', agentId: 'codex' }),
+    ).toEqual({ projectPath: '/p', text: 'Fix the clock', agentId: 'codex' })
+    rejects(() => posix['git.suggestBranch']({ projectPath: 'p' }))
+    rejects(() => posix['git.suggestBranch']({ projectPath: '/p', text: '  ' }))
+    rejects(() => posix['git.suggestBranch']({ projectPath: '/p', text: 'x'.repeat(8_001) }))
+    rejects(() => posix['git.suggestBranch']({ projectPath: '/p', agentId: 'nope!' }))
   })
 
   it('takes what became of a drafted problem report', () => {

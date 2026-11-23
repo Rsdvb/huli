@@ -139,6 +139,7 @@ import type {
 } from './project-create'
 import type { PathCompletion } from './remote/host-admin'
 import type { ReportOrigin } from './report'
+import type { ReviewAction, ReviewRun } from './review'
 import type { AutoApprove } from './risk'
 import type { SessionProcesses } from './task-processes'
 import type { PluginReload, SessionMcpAction, SessionMcpView } from './session-mcp'
@@ -2178,6 +2179,28 @@ export interface HostContract {
   }
   'sessions.context': { params: { sessionId: string }; result: ContextBreakdown | null }
   'sessions.contextEstimates': { params: { sessionId: string }; result: ContextEstimates | null }
+  /** Huli: the session's latest review of its changes, with its findings; null before one. */
+  'sessions.review': { params: { sessionId: string }; result: ReviewRun | null }
+  /**
+   * Huli: starts a review of the uncommitted changes in the session's folder, which replaces the
+   * last; the session's `review` follows it, and so does `sessions.review`.
+   */
+  'sessions.reviewStart': { params: { sessionId: string }; result: ReviewRun }
+  /** Huli: stops the review running beside the session. */
+  'sessions.reviewStop': { params: { sessionId: string }; result: void }
+  /**
+   * Huli: puts findings of the session's latest review aside, takes them back, or sends them to its
+   * agent as one message to fix, now or queued; answers the review as it is after.
+   */
+  'sessions.reviewAct': {
+    params: { sessionId: string; reviewId: string; findingIds: string[]; action: ReviewAction }
+    result: ReviewRun
+  }
+  /**
+   * Huli: a title for the session written from its conversation so far, for the user to edit
+   * before it is saved; nothing changes until `sessions.rename`.
+   */
+  'sessions.suggestTitle': { params: { sessionId: string }; result: { title: string } }
   'sessions.queue': {
     /** `comments` for a message built from comments on passages, which its queue row shows. */
     params: { sessionId: string; content: UserContent[]; comments?: QueuedComments }
@@ -2320,10 +2343,20 @@ export interface HostContract {
   // written by the project's preferred agent from the diffs and the repository's recent commits.
   'git.commitMessage': { params: { projectPath: string; paths: string[] }; result: string }
   // A pull request's title and description for the branch against `base`, written by the
-  // project's preferred agent from the branch's commits and files.
+  // project's preferred agent from the branch's commits and files. Huli: with `sessionId`, also
+  // from the branch's diff and that session's conversation, by its agent; `part` asks for the
+  // title or the description alone, the other coming back empty.
   'git.pullRequestDraft': {
-    params: { projectPath: string; base: string }
+    params: { projectPath: string; base: string; sessionId?: string; part?: 'title' | 'body' }
     result: { title: string; body: string }
+  }
+  /**
+   * Huli: a branch name's words (its `{slug}`) for the work `text` asks for, or, without it, for
+   * the folder's uncommitted changes, written by `agentId` or the project's preferred agent.
+   */
+  'git.suggestBranch': {
+    params: { projectPath: string; text?: string; agentId?: AgentId }
+    result: { slug: string }
   }
   'git.incoming': {
     params: { projectPath: string; from: 'upstream' | 'base' }
@@ -3076,6 +3109,11 @@ export const HOST_METHODS = [
   'sessions.context',
   'sessions.contextEstimates',
   'sessions.queue',
+  'sessions.review',
+  'sessions.reviewStart',
+  'sessions.reviewStop',
+  'sessions.reviewAct',
+  'sessions.suggestTitle',
   'sessions.runCommand',
   'sessions.launchConfigs',
   'sessions.unqueue',
@@ -3156,6 +3194,7 @@ export const HOST_METHODS = [
   'git.changes',
   'git.commitMessage',
   'git.pullRequestDraft',
+  'git.suggestBranch',
   'git.incoming',
   'git.fileDiff',
   'git.branches',

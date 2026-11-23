@@ -1100,6 +1100,72 @@ the diff screen, for a working-tree or commit diff and for a turn's or a tool's 
   edit opens with the session's id; its comments name the file alone.
 - The simulator's `80-diff-notes` flow walks the phone's part.
 
+### Review findings on the diff (审查改动)
+
+A review of a session's uncommitted changes gives findings pinned to file lines, which show on the
+diff as GitHub's review comments do, after Codex's `/review`, CodeRabbit and Claude desktop's code
+review.
+
+- Sources. Codex: its review mode (`review/start`), run on an ephemeral read-only fork of the
+  thread beside the session (`reviewChanges` in `codex/connection.ts`; this app-server's schema
+  delivers reviews `inline` only, so a separate thread is how a review runs detached), and the
+  user's own `/review`, a turn of the session; either ends with `exitedReviewMode`, whose text the
+  mapper hands the host (`review` effect). Every other agent, Claude Code included (its SDK reports
+  no review findings, and structured output is per query, not per turn): Kite's review prompt
+  (`agent-host/review.ts`), sent as Kite's own message, whose reply ends with a `kite-review` JSON
+  block, read when that turn ends.
+- Untrusted input (`src/shared/review.ts`, tested): Codex's rendered items (`- [P1] title — path:
+start-end` and the indented body) and the JSON block alike; each finding's severity, title,
+  lines and path are checked on their own, a path outside the session's folder (relative with
+  `..` or absolute elsewhere, case-insensitively on Windows) or a bad one is dropped and counted,
+  at most 30 are kept, text is cut. The host reads each finding's first line from the file (only
+  inside the folder, after `realpath`) as its anchor: a diff places the finding where that line
+  still reads the same, follows it to the nearest copy when it moved, and shows it as outdated when
+  it is gone.
+- Stored with the thread: `review` in the session view, kept in the thread database's
+  `session_json` (`threads/model.ts`), so a restart keeps it; a review still running then reads as
+  stopped. One review a session; a new one replaces it. Host requests `sessions.review`,
+  `sessions.reviewStart`, `sessions.reviewStop` and `sessions.reviewAct` (dismiss, restore, fix:
+  the findings go to the agent as one message of the user's, worded in the user's language, through
+  the queue).
+- Desktop (`features/review/`): 审查改动 on the changes card and the Files pane's diff bar; the
+  card then shows the open findings' count, which opens the first. Findings on lines the diff shows
+  are `@pierre/diffs` annotations under the last of their lines: severity, title and tags drawn by
+  CSS from attributes, so acting on one changes no node in the slot (each node added to a slot of a
+  7,200-line diff cost ~300 ms of its style and layout); a finding's detail opens on a
+  layout-contained layer over the diff, as the comments' editor does. Findings on folded or gone
+  lines are listed above the diff. A strip under the bar counts them, steps through them across
+  files, sends all open ones (全部让 Agent 修), shows the dismissed ones on request, and runs the
+  review again. A reply's `kite-review` block shows as one line in the thread. Measured on a
+  7,200-row diff: opening it is ~100-300 ms slower with a finding on it (the library measures its
+  columns once it has annotations), none without; opening a finding's detail takes ~0.2-0.4 s
+  there and 25-50 ms on a 160-line diff.
+- Phone (`components/ReviewFindings.tsx`): the diff screen reads the review as it comes into view
+  and shows the file's findings in a card over the diff, one at a time with arrows that scroll to
+  its row, with 让 Agent 修 and 忽略; the rows carry a bar of the severity's color, passed to the
+  memoized rows as one string. The changes screen has 审查改动. The simulator's
+  `88-review-findings` flow walks it in a repository `seed-review.mjs` seeds.
+- `tools/fake-agent/review.ts` answers the review prompt with findings on the lines `git diff`
+  says changed, and one outside the folder for the host to drop.
+
+### AI text for pull requests, titles and branches
+
+Kettu already drafts a commit message (`git.commitMessage`), a pull request's title and
+description from the branch's commits (`git.pullRequestDraft`, once per base as the form opens)
+and a new worktree's branch name from its first message (`writeBranchSlug`). Kite adds, through
+the same small-model hidden sessions (`light-model.ts`), and each only fills a field for the user
+to read and edit before anything is saved or sent to GitHub:
+
+- The pull request form: 重新生成 by the title, AI 写 by the description. With the side panel's
+  session, `git.pullRequestDraft` takes `sessionId` and `part`: the branch's diff (24,000
+  characters at most) and the session's conversation (`conversationBrief`: the user's messages, the
+  first kept, and the agent's last reply, 6,000 characters) go in the prompt, written by that
+  session's agent.
+- The session title's rename field: 根据对话重新生成标题 (`sessions.suggestTitle`), from the first
+  and latest two messages; nothing changes until Enter.
+- New branch: AI 建议, from the uncommitted changes; a new worktree's branch name page: AI 建议一个,
+  from the task in the message box (`git.suggestBranch`); the reply is cleaned to a slug.
+
 ### Comments on page elements (点选元素)
 
 The browser pane's Pick element toggle (点选元素), in the address row, comments on elements of the

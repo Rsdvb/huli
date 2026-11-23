@@ -3,8 +3,9 @@
 // the system's text size up to the dense cap, as the file viewer's do (app/file.tsx). Where lines
 // take comments, a tap picks a line or stretches the pick, a long press comments, and the rows a
 // comment covers carry a bar by their numbers; only the rows whose state changed draw again.
+// Huli: rows a review's finding sits on carry a bar of its severity's color.
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FlatList,
   Pressable,
@@ -54,6 +55,8 @@ const Row = memo(function Row(props: {
   sign: number
   picked: boolean
   noted: boolean
+  /** The color of a finding's severity, for a row a finding sits on. */
+  flag: string | null
   onPress: ((index: number) => void) | undefined
   onLongPress: ((index: number) => void) | undefined
 }) {
@@ -85,6 +88,8 @@ const Row = memo(function Row(props: {
     <>
       {props.noted || props.picked ? (
         <View style={[styles.noteBar, { backgroundColor: colors.note }]} />
+      ) : props.flag ? (
+        <View style={[styles.noteBar, { backgroundColor: props.flag }]} />
       ) : null}
       <Text
         style={[styles.text, styles.number, { width: gutter, color: numberColor }]}
@@ -129,6 +134,7 @@ const Row = memo(function Row(props: {
 })
 
 const NONE: ReadonlySet<number> = new Set()
+const NO_FLAGS: ReadonlyMap<number, string> = new Map()
 
 export function DiffView(props: {
   diff: Diff
@@ -140,8 +146,20 @@ export function DiffView(props: {
   onLongPressRow?: (index: number) => void
   /** Room under the last row for a bar laid over the list's bottom. */
   bottomInset?: number
+  /** The rows a review's finding sits on, with its severity's color. */
+  flags?: ReadonlyMap<number, string>
+  /** A row to scroll to, as a step to a finding asks; `at` tells one ask from the next. */
+  focus?: { row: number; at: number } | null
 }) {
-  const { diff, picked = null, noted = NONE, onPressRow, onLongPressRow } = props
+  const {
+    diff,
+    picked = null,
+    noted = NONE,
+    flags = NO_FLAGS,
+    focus = null,
+    onPressRow,
+    onLongPressRow,
+  } = props
   const { c, s } = useSessionTokens()
   const window = useWindowDimensions()
   const insets = useSafeAreaInsets()
@@ -167,6 +185,18 @@ export function DiffView(props: {
     [c, s],
   )
   const rows = useMemo(() => diff.rows.slice(0, limit), [diff.rows, limit])
+  const list = useRef<FlatList<DiffRow>>(null)
+  // A row past the rows drawn so far is drawn first, then scrolled to.
+  const focusRow = focus?.row ?? null
+  const focusAt = focus?.at ?? 0
+  useEffect(() => {
+    if (focusRow === null) return
+    if (focusRow >= limit) {
+      setLimit(Math.ceil((focusRow + 1) / PAGE) * PAGE)
+      return
+    }
+    list.current?.scrollToIndex({ index: focusRow, viewPosition: 0.3, animated: true })
+  }, [focusRow, focusAt, limit])
   const gutter = Math.ceil(String(Math.max(diff.lastLine, 9)).length * advance) + PAD
   const width = Math.max(
     window.width,
@@ -187,11 +217,12 @@ export function DiffView(props: {
         sign={signWidth}
         picked={index >= first && index <= last}
         noted={noted.has(index)}
+        flag={flags.get(index) ?? null}
         onPress={item.kind === 'hunk' ? undefined : onPressRow}
         onLongPress={item.kind === 'hunk' ? undefined : onLongPressRow}
       />
     ),
-    [colors, gutter, rowHeight, signWidth, first, last, noted, onPressRow, onLongPressRow],
+    [colors, gutter, rowHeight, signWidth, first, last, noted, flags, onPressRow, onLongPressRow],
   )
   const bottom = props.bottomInset ?? 0
 
@@ -206,6 +237,7 @@ export function DiffView(props: {
       </Text>
       <ScrollView horizontal directionalLockEnabled bounces={false} style={{ flex: 1 }}>
         <FlatList
+          ref={list}
           style={{ width }}
           data={rows}
           keyExtractor={(_, index) => String(index)}

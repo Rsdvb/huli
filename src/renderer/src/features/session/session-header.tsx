@@ -152,6 +152,7 @@ export function SessionHeader({
           <SessionTitleField
             summary={summary}
             onDone={rename.finish}
+            suggest={summary.origin !== 'subagent'}
             // The ring's outer edge is the button's box (28 px tall, text 4 px in, 6 px radius), so
             // the hover fill and the ring match and the text does not move.
             style={{ minWidth: Math.max(titleWidth - 5, 0) }}

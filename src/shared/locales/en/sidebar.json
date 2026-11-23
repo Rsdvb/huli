@@ -263,7 +263,9 @@
     "watchPr": "Watch this pull request",
     "issue": "Issue #{{number}}",
     "manager": "Manager session",
-    "managerBadge": "Manager"
+    "managerBadge": "Manager",
+    "suggestTitle": "Regenerate the title from the conversation",
+    "suggestingTitle": "Writing a title…"
   },
   "work": {
     "turn": "Current turn",

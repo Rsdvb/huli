@@ -140,6 +140,8 @@ import {
 import { BrowserTurns } from './browser-turns'
 import { writeCommitMessage } from './commit-message'
 import { writePullRequestDraft } from './pull-request-draft'
+import { writeBranchSlug } from './session-titles'
+import { cleanSlug } from './worktrees/names'
 import { lightTarget } from './light-model'
 import { reportDraftPrompt, writeReportDraft } from './report-draft'
 import { Diagnostics } from './diagnostics'
@@ -3203,25 +3205,86 @@ export class AgentHost {
   private async pullRequestDraft(
     projectPath: string,
     base: string,
+    sessionId?: string,
+    part?: 'title' | 'body',
   ): Promise<{ title: string; body: string }> {
-    const context = await this.gitProjectCall(projectPath, (g, p) => g.pullRequestContext(p, base))
-    const target = lightTarget(this.settings.lightModel, this.preferredAgent(projectPath), null)
+    // Huli: from a session, its diff and conversation too, written by the session's agent.
+    const brief = sessionId ? await this.sessions.conversationBrief(sessionId) : null
+    const context = await this.gitProjectCall(projectPath, (g, p) =>
+      g.pullRequestContext(p, base, sessionId !== undefined),
+    )
+    const target = brief
+      ? lightTarget(this.settings.lightModel, brief.agentId, brief.model)
+      : lightTarget(this.settings.lightModel, this.preferredAgent(projectPath), null)
     if (target === null) throw new HostError('agent_error', t('git.draftNoAgent'))
     const agent = this.agents.name(target.agentId)
     try {
       const runtime = await this.agents.ensureReady(target.agentId)
       const dir = path.join(this.options.userDataPath, 'agent-reports')
       await mkdir(dir, { recursive: true })
-      return await writePullRequestDraft(runtime, {
+      const draft = await writePullRequestDraft(runtime, {
         dir,
         context,
+        conversation: brief?.text ?? null,
         model: target.model,
         log: (line) => this.diagnostics.log('warn', line),
       })
+      if (part === 'title') return { title: draft.title, body: '' }
+      if (part === 'body') return { title: '', body: draft.body }
+      return draft
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       this.diagnostics.log('warn', `${agent}: could not write a pull request: ${logText(error)}`)
       throw new HostError('agent_error', t('git.draftFailed', { agent, reason }))
+    }
+  }
+
+  /**
+   * Huli: a branch name's words for the work `text` asks for, or for the folder's uncommitted
+   * changes without it, from `agentId` or the project's preferred agent.
+   */
+  private async suggestBranch(
+    projectPath: string,
+    text: string | undefined,
+    agentId: AgentId | undefined,
+  ): Promise<{ slug: string }> {
+    let message = text
+    if (message === undefined) {
+      const changes = await this.gitProjectCall(projectPath, (g, p) => g.changes(p))
+      if (changes.length === 0) throw new HostError('restricted', t('git.suggestBranchNothing'))
+      const paths = changes.map((file) => file.path)
+      const context = await this.gitProjectCall(projectPath, (g, p) => g.commitContext(p, paths))
+      message = [
+        'The uncommitted changes of a Git working tree:',
+        ...context.files.slice(0, 40).map((file) => `${file.status} ${file.path}`),
+        '',
+        context.diff,
+      ].join('\n')
+    }
+    const target = lightTarget(
+      this.settings.lightModel,
+      agentId ?? this.preferredAgent(projectPath),
+      null,
+    )
+    if (target === null) throw new HostError('agent_error', t('git.draftNoAgent'))
+    const agent = this.agents.name(target.agentId)
+    try {
+      const runtime = await this.agents.ensureReady(target.agentId)
+      const dir = path.join(this.options.userDataPath, 'agent-reports')
+      await mkdir(dir, { recursive: true })
+      const reply = await writeBranchSlug(runtime, {
+        dir,
+        model: target.model,
+        message: [{ type: 'text', text: message }],
+        log: (line) => this.diagnostics.log('warn', line),
+      })
+      const slug = cleanSlug(reply)
+      if (slug === '') throw new Error('its reply held no branch name')
+      return { slug }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      this.diagnostics.log('warn', `${agent}: could not name a branch: ${logText(error)}`)
+      throw new HostError('agent_error', t('git.suggestBranchFailed', { agent, reason }))
     }
   }
 
@@ -4234,6 +4297,12 @@ export class AgentHost {
       'sessions.sideAsk': ({ sessionId, question, quote, agentId }) =>
         sessions.sideAsk(sessionId, question, quote ?? null, agentId ?? null),
       'sessions.sideStop': ({ sessionId }) => sessions.sideStop(sessionId),
+      'sessions.review': ({ sessionId }) => sessions.review(sessionId),
+      'sessions.reviewStart': ({ sessionId }) => sessions.reviewStart(sessionId),
+      'sessions.reviewStop': ({ sessionId }) => sessions.reviewStop(sessionId),
+      'sessions.reviewAct': ({ sessionId, reviewId, findingIds, action }, { portId, device }) =>
+        sessions.reviewAct(sessionId, reviewId, findingIds, action, portId, fromDevice(device)),
+      'sessions.suggestTitle': ({ sessionId }) => sessions.suggestTitle(sessionId),
       'sessions.sideClear': ({ sessionId, undo }) => sessions.sideClear(sessionId, undo === true),
       'sessions.sideAgents': ({ sessionId }) => ({ agents: sessions.sideAgents(sessionId) }),
       'sessions.fork': ({ sessionId, entryId, worktree }) =>
@@ -4458,7 +4527,10 @@ export class AgentHost {
         this.gitProjectCall(projectPath, (g, p) => g.commit(p, oid)),
       'git.changes': ({ projectPath }) => this.gitProjectCall(projectPath, (g, p) => g.changes(p)),
       'git.commitMessage': ({ projectPath, paths }) => this.commitMessage(projectPath, paths),
-      'git.pullRequestDraft': ({ projectPath, base }) => this.pullRequestDraft(projectPath, base),
+      'git.pullRequestDraft': ({ projectPath, base, sessionId, part }) =>
+        this.pullRequestDraft(projectPath, base, sessionId, part),
+      'git.suggestBranch': ({ projectPath, text, agentId }) =>
+        this.suggestBranch(projectPath, text, agentId),
       'git.incoming': ({ projectPath, from }) =>
         this.gitProjectCall(projectPath, (g, p) => g.incoming(p, from)),
       'git.fileDiff': ({ projectPath, path, oldPath, ref }) =>

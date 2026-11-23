@@ -2,6 +2,7 @@
 // and the content refs that large images are moved out of.
 
 import type { SessionOutputs } from '@shared/agent-host'
+import { parseStoredReview, type ReviewRun } from '@shared/review'
 import { parseSideChat, type StoredSideChat } from './side-chat'
 import type { ContextBreakdown } from '@shared/context'
 import type {
@@ -38,6 +39,8 @@ export type StoredSession = Pick<
   context: ContextBreakdown | null
   /** The questions asked beside the session, never part of its conversation. */
   sideChat: StoredSideChat | null
+  /** Huli: the latest review of the session's changes, with its findings. */
+  review?: ReviewRun | null
 }
 
 export const EMPTY_SESSION: StoredSession = {
@@ -48,10 +51,11 @@ export const EMPTY_SESSION: StoredSession = {
   subagent: null,
   context: null,
   sideChat: null,
+  review: null,
 }
 
 export function storedSession(view: SessionView): StoredSession {
-  const { title, config, commands, usage, subagent, sideChat } = view
+  const { title, config, commands, usage, subagent, sideChat, review } = view
   return {
     title,
     config,
@@ -63,6 +67,7 @@ export function storedSession(view: SessionView): StoredSession {
       sideChat && (sideChat.entries.length > 0 || sideChat.answerAgent !== null)
         ? { answerAgent: sideChat.answerAgent, entries: sideChat.entries }
         : null,
+    review: review ?? null,
   }
 }
 
@@ -75,6 +80,7 @@ export function changesStored(changes: Partial<SessionView>): boolean {
     'usage' in changes ||
     'subagent' in changes ||
     'sideChat' in changes ||
+    'review' in changes ||
     // A read that starts or fails keeps the breakdown it had.
     ('context' in changes && !changes.context?.loading && !changes.context?.error)
   )
@@ -137,6 +143,8 @@ export function parseStoredSession(value: unknown): StoredSession | null {
     context: isBreakdown(value.context) ? value.context : null,
     // Absent from sessions stored before side questions; damaged entries are dropped one by one.
     sideChat: parseSideChat(value.sideChat),
+    // Absent from sessions stored before reviews; a damaged one is dropped, its bad findings alone.
+    review: parseStoredReview(value.review),
   }
 }
 

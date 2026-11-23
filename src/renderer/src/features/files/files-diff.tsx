@@ -1,5 +1,5 @@
-import { memo, useMemo } from 'react'
-import type { FileDiffMetadata, SelectedLineRange } from '@pierre/diffs'
+import { memo, useMemo, type ReactNode } from 'react'
+import type { DiffLineAnnotation, FileDiffMetadata, SelectedLineRange } from '@pierre/diffs'
 import { FileDiff, WorkerPoolContext } from '@pierre/diffs/react'
 import { useCodeThemes } from '@renderer/features/session/markdown/code-themes'
 import { diffsPool as pool } from '@renderer/features/session/markdown/diff-pool'
@@ -33,18 +33,24 @@ const NOTE_MARK =
 /**
  * The Files pane's diff of a parsed change: unified, a bar along each changed line, the first
  * hunk's header above, unchanged runs folded, lines selectable by their numbers to mention them.
- * `onRendered` hears of each render the library makes.
+ * `onRendered` hears of each render the library makes. Huli: `annotations` put a row of their own
+ * under lines, each drawn by `renderAnnotation` from its id; both keep their identity while the
+ * rows stay, since each new one draws the diff again.
  */
 function FilesDiffImpl({
   fileDiff,
   selected,
   onSelect,
   onRendered,
+  annotations,
+  renderAnnotation,
 }: {
   fileDiff: FileDiffMetadata
   selected: SelectedLineRange | null
   onSelect: (range: SelectedLineRange | null) => void
   onRendered: () => void
+  annotations?: DiffLineAnnotation<string>[]
+  renderAnnotation?: (id: string) => ReactNode
 }) {
   const dark = useDark()
   const theme = useCodeThemes()
@@ -79,6 +85,13 @@ function FilesDiffImpl({
         options={options}
         selectedLines={selected}
         className="files-diff"
+        {...(annotations && renderAnnotation
+          ? {
+              lineAnnotations: annotations,
+              renderAnnotation: (annotation: DiffLineAnnotation<string>) =>
+                renderAnnotation(annotation.metadata),
+            }
+          : {})}
       />
     </WorkerPoolContext.Provider>
   )

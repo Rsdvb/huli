@@ -436,6 +436,16 @@ describe("Codex 0.170's details", () => {
       { kind: 'notice', title: 'Review finished' },
     ])
   })
+
+  it("hands the review's text to the host when review mode ends, and not when it starts", () => {
+    const { effects } = run([
+      completed({ type: 'enteredReviewMode', id: 'rv', review: 'uncommitted changes' }),
+      completed({ type: 'exitedReviewMode', id: 'rv2', review: '- [P1] Bug — /p/a.ts:1-1' }),
+    ])
+    expect(effects.filter((effect) => effect.kind === 'review')).toEqual([
+      { kind: 'review', text: '- [P1] Bug — /p/a.ts:1-1' },
+    ])
+  })
 })
 
 describe('hooks', () => {

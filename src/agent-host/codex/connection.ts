@@ -1313,6 +1313,65 @@ export class CodexConnection implements AgentConnection {
     }
   }
 
+  /**
+   * Huli: a review of the uncommitted changes in review mode, run inline on an ephemeral fork of
+   * the thread, read only with every approval declined, so the session runs on beside it and its
+   * own thread gets none of it. Answers the review as Codex renders it at the end.
+   */
+  async reviewChanges(
+    sessionId: string,
+    options: SessionOptions = {},
+    signal: AbortSignal,
+  ): Promise<string> {
+    await this.requireSignIn()
+    const parent = this.threads.get(sessionId)
+    if (!parent?.cwd) {
+      throw new AgentRequestError('agent_error', t('agentRun.notOpen', { id: sessionId }))
+    }
+    const cwd = parent.cwd
+    signal.throwIfAborted()
+    const source = parent.known ? parent.settings : undefined
+    const servers = (options.mcpServers ?? []).map((server) =>
+      server.type === 'stdio' ? server : { ...server, autoAllow: [] },
+    )
+    this.hooks.traffic('out', { method: 'reviewChanges', sessionId })
+    const response = await this.call<ThreadResponse>('thread/fork', {
+      threadId: sessionId,
+      cwd,
+      approvalPolicy: 'never',
+      sandbox: 'read-only',
+      ...(source ? { model: source.model } : {}),
+      config: sessionConfig(cwd, { ...options, mcpServers: servers }),
+      ...developerInstructions(options),
+      ...workspaceRoots(cwd, parent.folders),
+      ephemeral: true,
+      excludeTurns: true,
+    })
+    const record = await this.record(response.thread.id, cwd, response, true, source)
+    record.prompted = true
+    const threadId = record.id
+    let review: string | null = null
+    this.pending.delete(threadId)
+    this.collectors.set(threadId, ({ method, params }) => {
+      const item = (params as { item?: ThreadItem }).item
+      if (method === 'item/completed' && item?.type === 'exitedReviewMode') review = item.review
+    })
+    const stop = (): void => void this.cancel(threadId).catch(() => {})
+    signal.addEventListener('abort', stop)
+    try {
+      await this.review(record, { type: 'uncommittedChanges' })
+      signal.throwIfAborted()
+      if (review === null) throw new AgentRequestError('agent_error', t('codex.review.noReview'))
+      return review
+    } finally {
+      signal.removeEventListener('abort', stop)
+      this.collectors.delete(threadId)
+      await this.removeHidden(threadId, (message) =>
+        this.hooks.ignored(threadId, `review fork not removed: ${message}`),
+      )
+    }
+  }
+
   async closeSession(sessionId: string): Promise<void> {
     await this.call('thread/unsubscribe', { threadId: sessionId })
   }

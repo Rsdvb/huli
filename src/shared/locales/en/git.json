@@ -173,7 +173,11 @@
       "openLog": "Open log",
       "copyLink": "Copy link",
       "drafting": "Drafting…",
-      "drafted": "Drafted by the agent"
+      "drafted": "Drafted by the agent",
+      "regenerate": "Regenerate",
+      "regenerateTitle": "Write the title again from the branch",
+      "aiWrite": "Write with AI",
+      "aiWriteTitle": "Write the description from the branch's diff and this session's conversation"
     }
   },
   "timeline": {
@@ -328,7 +332,9 @@
       "fromCommit": "Starts from {{commit}} and switches to it; uncommitted changes come along.",
       "name": "Name",
       "invalid": "Git can’t use this as a branch name.",
-      "action": "Create branch"
+      "action": "Create branch",
+      "suggest": "Suggest",
+      "suggestTitle": "Name the branch from the uncommitted changes"
     }
   },
   "switcher": {

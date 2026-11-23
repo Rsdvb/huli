@@ -22,6 +22,9 @@ import { SvgBlock } from './svg-block'
 
 const MermaidBlock = lazy(() => import('./mermaid-block'))
 const MathBlock = lazy(() => import('./math').then((m) => ({ default: m.MathBlock })))
+const ReviewBlock = lazy(() =>
+  import('@renderer/features/review/review-block').then((m) => ({ default: m.ReviewBlock })),
+)
 
 function codeOf(children: ReactNode): string {
   if (typeof children === 'string') return children
@@ -51,6 +54,14 @@ export function BlockCode({ node, className, children }: ComponentProps<'code'> 
     isIncomplete,
   }
   if (language === 'svg') return <SvgBlock {...props} />
+  // Huli: the findings a reply gives Kite's review prompt, as one line rather than their JSON.
+  if (reply !== null && language === 'kite-review') {
+    return (
+      <Suspense fallback={<CodeFrame {...props} />}>
+        <ReviewBlock sessionId={reply} code={code} />
+      </Suspense>
+    )
+  }
   // Windows takes the most languages, so a block no host runs skips the host lookup.
   if (reply !== null && isCommandLanguage(language, 'win32')) {
     return <ReplyCommand sessionId={reply} {...props} />

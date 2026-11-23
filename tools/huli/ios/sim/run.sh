@@ -57,6 +57,10 @@ mkdir -p "$KETTU_DAEMON_DATA"
 if [[ "${FLOWS:-}" == *session-order* ]]; then
   node tools/huli/ios/sim/seed-order.mjs "$KETTU_DAEMON_DATA" "$OUT/order-project"
 fi
+# Huli: a repository with an uncommitted change, for the review findings flow alone.
+if [[ "${FLOWS:-}" == *review-findings* ]]; then
+  node tools/huli/ios/sim/seed-review.mjs "$KETTU_DAEMON_DATA" "$OUT/review-project"
+fi
 node out/daemon/main.cjs run > "$RESULTS/daemon.log" 2>&1 &
 DAEMON=$!
 # What loads the runner while the flows run, every 5 s, to tell a slow start from a stuck one.

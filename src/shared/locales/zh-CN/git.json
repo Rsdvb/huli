@@ -173,7 +173,11 @@
       "openLog": "打开日志",
       "copyLink": "复制链接",
       "drafting": "正在起草…",
-      "drafted": "智能体起草"
+      "drafted": "智能体起草",
+      "regenerate": "重新生成",
+      "regenerateTitle": "根据分支重新写标题",
+      "aiWrite": "AI 写",
+      "aiWriteTitle": "根据分支的改动和这个会话的对话写描述"
     }
   },
   "timeline": {
@@ -326,7 +330,9 @@
       "fromCommit": "从 {{commit}} 开始并切换过去；未提交的更改会一起带上。",
       "name": "名称",
       "invalid": "Git 不能用它作为分支名。",
-      "action": "新建分支"
+      "action": "新建分支",
+      "suggest": "AI 建议",
+      "suggestTitle": "根据未提交的改动起一个分支名"
     }
   },
   "switcher": {

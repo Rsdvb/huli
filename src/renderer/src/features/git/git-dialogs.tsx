@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
-import { GlobalIcon, SquareLock02Icon, Tick02Icon, Upload04Icon } from '@hugeicons/core-free-icons'
+import {
+  GlobalIcon,
+  SparklesIcon,
+  SquareLock02Icon,
+  Tick02Icon,
+  Upload04Icon,
+} from '@hugeicons/core-free-icons'
 import { Trans, useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import {
@@ -388,8 +394,26 @@ function NewBranchForm({ status, onClose }: { status: GitStatus; onClose: () => 
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [suggesting, setSuggesting] = useState(false)
   const typed = name.trim()
   const valid = isBranchName(typed)
+  const { staged, unstaged, untracked } = status.changes
+  const changed = staged + unstaged + untracked > 0
+
+  // Huli: a name for the uncommitted changes, put in the field for the user to change.
+  const suggest = async (): Promise<void> => {
+    if (suggesting) return
+    setSuggesting(true)
+    setError(null)
+    try {
+      const { slug } = await host('git.suggestBranch', { projectPath: status.projectPath })
+      setName(slug)
+    } catch (failure) {
+      setError(errorMessage(failure))
+    } finally {
+      setSuggesting(false)
+    }
+  }
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
@@ -415,7 +439,27 @@ function NewBranchForm({ status, onClose }: { status: GitStatus; onClose: () => 
             ? t('dialog.newBranch.fromCommit', { commit: status.head.oid?.slice(0, 7) ?? 'HEAD' })
             : t('dialog.newBranch.from', { branch: status.head.branch ?? 'HEAD' })}
         </p>
-        <Label htmlFor="new-branch">{t('dialog.newBranch.name')}</Label>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="new-branch">{t('dialog.newBranch.name')}</Label>
+          {changed && (
+            <Button
+              type="button"
+              variant="quiet"
+              size="xs"
+              className="ml-auto h-5 text-hint text-tertiary"
+              title={t('dialog.newBranch.suggestTitle')}
+              disabled={suggesting}
+              onClick={() => void suggest()}
+            >
+              {suggesting ? (
+                <Spinner className="size-3" />
+              ) : (
+                <Glyph icon={SparklesIcon} size={12} />
+              )}
+              {t('dialog.newBranch.suggest')}
+            </Button>
+          )}
+        </div>
         <Input
           id="new-branch"
           value={name}

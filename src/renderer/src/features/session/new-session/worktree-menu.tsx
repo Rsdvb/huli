@@ -31,6 +31,12 @@ import {
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@renderer/components/ui/input-group'
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
 import { Skeleton } from '@renderer/components/ui/skeleton'
+import { Spinner } from '@renderer/components/ui/spinner'
+import {
+  flushDraft,
+  NEW_SESSION_DRAFT,
+  readDraft,
+} from '@renderer/features/session/composer/drafts'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { shortAgo } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
@@ -554,6 +560,30 @@ function NamePage({ projectPath, onBack }: { projectPath: string; onBack: () => 
   const frame = template === undefined ? null : slugFrame(template)
   const invalid = !!branch && branchProblem(branch) !== null
   const example = frame ? frame.before + EXAMPLE_SLUG + frame.after(EXAMPLE_SLUG) : EXAMPLE_SLUG
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestError, setSuggestError] = useState<string | null>(null)
+
+  // Huli: a name for the task the composer holds, put in the field for the user to change.
+  const suggest = async (): Promise<void> => {
+    flushDraft(NEW_SESSION_DRAFT)
+    const text = readDraft(NEW_SESSION_DRAFT).trim()
+    if (suggesting) return
+    if (text === '') {
+      setSuggestError(t('worktree.suggestNeedsText'))
+      return
+    }
+    setSuggesting(true)
+    setSuggestError(null)
+    try {
+      const { slug: written } = await host('git.suggestBranch', { projectPath, text })
+      writeSlug(written)
+      input.current?.focus()
+    } catch (error) {
+      setSuggestError(errorMessage(error))
+    } finally {
+      setSuggesting(false)
+    }
+  }
 
   useEffect(() => {
     const element = input.current
@@ -604,7 +634,23 @@ function NamePage({ projectPath, onBack }: { projectPath: string; onBack: () => 
             </InputGroupAddon>
           )}
         </InputGroup>
-        {failed ? (
+        <Button
+          type="button"
+          variant="quiet"
+          size="xs"
+          className="self-start text-tertiary"
+          title={t('worktree.suggestNameTitle')}
+          disabled={suggesting}
+          onClick={() => void suggest()}
+        >
+          {suggesting ? <Spinner className="size-3" /> : <Glyph icon={SparklesIcon} size={12} />}
+          {t('worktree.suggestName')}
+        </Button>
+        {suggestError ? (
+          <p className="text-meta text-danger" title={suggestError}>
+            {suggestError.split('\n')[0]}
+          </p>
+        ) : failed ? (
           <p className="text-meta text-danger" title={failed}>
             {t('worktree.templateFailed', { message: failed.split('\n')[0] })}
           </p>

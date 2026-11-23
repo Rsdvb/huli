@@ -417,8 +417,23 @@ import {
   sideRouteWith,
 } from './side-chat'
 import { SIDE_ENTRIES, type StoredSideChat } from './threads/side-chat'
+import {
+  parseCodexReview,
+  parseReviewAnswer,
+  type ParsedReview,
+  type ReviewAction,
+  type ReviewFindingState,
+  type ReviewRun,
+} from '@shared/review'
+import { anchoredFindings, fixMessage, reviewMark, reviewPrompt, reviewReply } from './review'
 import { ToolActivity } from './session-activity'
-import { listedTitle, titleMessageText, writeBranchSlug, writeSessionTitle } from './session-titles'
+import {
+  listedTitle,
+  TITLE_PROMPT_CHARS,
+  titleMessageText,
+  writeBranchSlug,
+  writeSessionTitle,
+} from './session-titles'
 import {
   addTokenTotals,
   firstUserMessage,
@@ -1029,6 +1044,16 @@ interface Live {
 }
 
 const TITLE_LENGTH = 60
+/** Huli: a conversation brief keeps this much at most, and each message in it this much. */
+const BRIEF_CHARS = 6_000
+const BRIEF_MESSAGE_CHARS = 1_500
+
+/** Text cut at `max` characters, never inside a surrogate pair, marked where it was cut. */
+function cutText(text: string, max: number): string {
+  const chars = Array.from(text)
+  return chars.length <= max ? text : `${chars.slice(0, max - 1).join('')}…`
+}
+
 // Titles from `session/list`, kept for an import that follows; bounded like every cache here.
 const LISTED_SESSIONS = 1_000
 // The sessions a search of the conversations returns, the most recently changed first.
@@ -1509,6 +1534,8 @@ export class SessionManager {
   private readonly handedMcp = new Map<string, string[]>()
   /** The side question each session is answering, stopped through its controller. */
   private readonly sideRuns = new Map<string, AbortController>()
+  /** Huli: the reviews running beside their sessions, stopped through their controllers. */
+  private readonly reviewRuns = new Map<string, AbortController>()
   /** What the last clear of each session's side chat emptied, for its undo. */
   private readonly sideCleared = new Map<string, SideChatEntry[]>()
   /** Sessions whose outline titles are being written, and when the last failed for others. */
@@ -4131,6 +4158,7 @@ export class SessionManager {
             usage: page.session.usage,
             ...storedContext(page.session.context),
             ...storedSide(view, page.session.sideChat),
+            ...(page.session.review ? { review: page.session.review } : {}),
           }
         : view,
       entries: page ? page.entries.map(settled) : [],
@@ -5336,6 +5364,17 @@ export class SessionManager {
         this.persist(live)
         break
       }
+      case 'review':
+        // Huli: the user's own `/review`, a turn of the session; a replay brings back no review.
+        if (!live.replaying) {
+          const running = live.thread.session.review
+          const id = running?.status === 'running' && running.mode === 'inline' ? running.id : null
+          void this.finishReview(live, id, parseCodexReview(effect.text, folder), {
+            source: 'codex',
+            mode: 'inline',
+          })
+        }
+        break
       case 'ignored':
         this.deps.diagnostics.ignored(agentId, live.id, `${effect.variant}: ${effect.detail}`)
         break
@@ -8041,7 +8080,7 @@ export class SessionManager {
       live.nextPos = Math.max(live.nextPos, pos + 1)
       live.counter = Math.max(live.counter, idNumber(entry.id))
     }
-    const { config, commands, usage, context, sideChat } = stored.session
+    const { config, commands, usage, context, sideChat, review } = stored.session
     live.thread = {
       session: {
         ...live.thread.session,
@@ -8050,6 +8089,7 @@ export class SessionManager {
         usage,
         ...storedContext(context),
         ...storedSide(live.thread.session, sideChat),
+        ...(review ? { review } : {}),
       },
       order,
       byId,
@@ -10361,6 +10401,7 @@ export class SessionManager {
     // A turn ended by an error has no stop reason; its failure sets the ending.
     if (stopReason) live.record.lastTurn = { reason: stopReason, endedAt: this.now() }
     this.closeOpenEntries(live)
+    this.reviewTurnEnded(live, stopReason)
     live.activity.clear()
     this.clearPermissions(live, 'cancelled', true)
     this.stalls.turnEnded(live.id)
@@ -13842,6 +13883,312 @@ export class SessionManager {
     if (record.worktree?.removed === 'branch') {
       throw new HostError('restricted', t('session.worktreeGone'))
     }
+  }
+
+  // Huli: reviews of a session's changes.
+
+  /** The session's latest review, with its findings; null before its first. */
+  async review(sessionId: string): Promise<ReviewRun | null> {
+    this.recordOf(sessionId)
+    const live = await this.revive(sessionId)
+    return live.thread.session.review ?? null
+  }
+
+  /**
+   * Starts a review of the uncommitted changes in the session's folder, which the session's
+   * `review` follows: Codex's review mode in a fork of its own beside the session, or for another
+   * agent Kite's review prompt as a turn of the session, sent now or queued. A review replaces the
+   * one before it.
+   */
+  async reviewStart(sessionId: string): Promise<ReviewRun> {
+    const record = this.recordOf(sessionId)
+    if (record.origin === 'subagent') throw new HostError('restricted', t('review.subagent'))
+    this.refuseIfCannotSend(sessionId)
+    const live = await this.revive(sessionId)
+    if (this.reviewRunning(live)) throw new HostError('busy', t('review.running'))
+    const runtime = await this.deps.agents.ensureReady(record.agentId)
+    const detached = runtime.connection.reviewChanges !== undefined
+    const now = this.now()
+    const run: ReviewRun = {
+      id: randomUUID().slice(0, 8),
+      source: detached ? 'codex' : 'prompt',
+      mode: detached ? 'detached' : 'inline',
+      status: 'running',
+      startedAt: now,
+      endedAt: null,
+      summary: null,
+      error: null,
+      findings: [],
+      dropped: 0,
+    }
+    this.update(live, { review: run })
+    if (detached) {
+      const controller = new AbortController()
+      this.reviewRuns.set(sessionId, controller)
+      void this.runDetachedReview(live, run.id, controller.signal).finally(() => {
+        if (this.reviewRuns.get(sessionId) === controller) this.reviewRuns.delete(sessionId)
+      })
+      return run
+    }
+    try {
+      await this.sendFromKettu(sessionId, reviewPrompt(run.id))
+    } catch (error) {
+      this.reviewFailed(live, run.id, agentError(error).message)
+      throw error
+    }
+    return run
+  }
+
+  /**
+   * Whether a review of the session still runs: one beside it, or Kite's prompt sent or waiting in
+   * the queue. A prompt taken out of the queue unsent leaves its review to end.
+   */
+  private reviewRunning(live: Live): boolean {
+    const review = live.thread.session.review
+    if (review?.status !== 'running') return false
+    if (review.mode === 'detached') return this.reviewRuns.has(live.id)
+    if (review.source === 'codex') return live.turn !== null
+    if (reviewReply(live.thread, review.id) !== null) return live.turn !== null
+    const mark = reviewMark(review.id)
+    return live.thread.session.queue.some((item) =>
+      item.content.some((part) => part.type === 'text' && part.text.includes(mark)),
+    )
+  }
+
+  private async runDetachedReview(
+    live: Live,
+    reviewId: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      await this.attachClosed(live)
+      const runtime = await this.deps.agents.ensureReady(live.record.agentId)
+      const { connection } = runtime
+      if (!connection.reviewChanges)
+        throw new HostError('agent_unavailable', t('review.unsupported'))
+      const options = await this.attachOptions(live.id, live.record, runtime)
+      const text = await connection.reviewChanges(live.record.acpSessionId, options, signal)
+      await this.finishReview(live, reviewId, parseCodexReview(text, workDir(live.record)))
+    } catch (error) {
+      this.reviewFailed(live, reviewId, signal.aborted ? null : agentError(error).message)
+      if (!signal.aborted) {
+        this.deps.diagnostics.log('warn', `The review of ${live.id} failed: ${logText(error)}`)
+      }
+    }
+  }
+
+  /** A turn ended; when it answered Kite's review prompt, the reply's findings end the review. */
+  private reviewTurnEnded(live: Live, stopReason: StopReason | null): void {
+    const review = live.thread.session.review
+    if (review?.status !== 'running' || review.mode !== 'inline') return
+    if (review.source === 'codex') {
+      // A `/review` whose turn ended without the review Codex renders at its end.
+      if (stopReason !== 'end_turn') this.reviewFailed(live, review.id, null)
+      return
+    }
+    const reply = reviewReply(live.thread, review.id)
+    if (reply === null) {
+      if (!this.reviewRunning(live)) this.reviewFailed(live, review.id, t('review.notSent'))
+      return
+    }
+    if (stopReason !== 'end_turn') {
+      this.reviewFailed(live, review.id, stopReason === 'cancelled' ? null : t('review.turnFailed'))
+      return
+    }
+    const parsed = parseReviewAnswer(reply, workDir(live.record))
+    if (parsed === null) {
+      this.reviewFailed(live, review.id, t('review.noBlock'))
+      return
+    }
+    void this.finishReview(live, review.id, parsed)
+  }
+
+  /**
+   * The review's findings, anchored to the files as they are now, replace the running review's,
+   * or, with no `reviewId`, come as a review of their own. Nothing changes once another review
+   * replaced it meanwhile.
+   */
+  private async finishReview(
+    live: Live,
+    reviewId: string | null,
+    parsed: ParsedReview,
+    fresh?: Pick<ReviewRun, 'source' | 'mode'>,
+  ): Promise<void> {
+    const findings = await anchoredFindings(parsed, workDir(live.record))
+    const current = live.thread.session.review
+    const base =
+      reviewId !== null && current?.id === reviewId
+        ? current
+        : reviewId === null && fresh
+          ? { id: randomUUID().slice(0, 8), ...fresh, startedAt: this.now() }
+          : null
+    if (base === null) return
+    const ended: ReviewRun = {
+      ...base,
+      status: 'done',
+      endedAt: this.now(),
+      summary: parsed.summary,
+      error: null,
+      findings,
+      dropped: parsed.dropped,
+    }
+    this.update(live, { review: ended })
+    if (ended.mode === 'detached') this.reviewNotice(live, ended)
+    if (!this.inFront(live.id)) this.markUnread(live.id, true)
+    this.touch(live.id)
+  }
+
+  /** A review that failed, or stopped without an error; only while it is the session's latest. */
+  private reviewFailed(live: Live, reviewId: string, error: string | null): void {
+    const current = live.thread.session.review
+    if (current?.id !== reviewId || current.status !== 'running') return
+    const review: ReviewRun = {
+      ...current,
+      status: error === null ? 'stopped' : 'failed',
+      endedAt: this.now(),
+      error,
+    }
+    this.update(live, { review })
+    if (error !== null && review.mode === 'detached') this.reviewNotice(live, review)
+    this.touch(live.id)
+  }
+
+  /** A review that ran beside the session says in its thread how it ended. */
+  private reviewNotice(live: Live, review: ReviewRun): void {
+    const failed = review.status === 'failed'
+    const count = review.findings.length
+    const description = failed ? review.error : review.summary
+    this.emit(live, [
+      {
+        op: 'entry.add',
+        entry: {
+          kind: 'notice',
+          id: this.nextId(live),
+          severity: failed ? 'warning' : 'info',
+          title: failed
+            ? t('review.notice.failed')
+            : count === 0
+              ? t('review.notice.clean')
+              : t('review.notice.found', { count }),
+          ...(description ? { description } : {}),
+          after: agentEntryBefore(live.thread),
+        },
+      },
+    ])
+  }
+
+  /**
+   * Huli: what the user asked in the session and the agent's last reply, cut to about `max`
+   * characters, for a text written from it, such as a pull request's description; with the agent
+   * and model the session runs on. Null for a session with nothing said yet.
+   */
+  async conversationBrief(
+    sessionId: string,
+    max = BRIEF_CHARS,
+  ): Promise<{
+    agentId: AgentId
+    model: string | null
+    text: string
+    /** The user's messages alone, oldest first, each cut. */
+    asked: string[]
+  } | null> {
+    const live = await this.revive(sessionId)
+    const asked: string[] = []
+    let reply = ''
+    for (const entry of threadEntries(live.thread)) {
+      if (entry.kind === 'user' && !entry.kettu && !entry.approval) {
+        const text = entry.content
+          .flatMap((part) => (part.type === 'text' ? [part.text.trim()] : []))
+          .join('\n')
+        if (text !== '') asked.push(cutText(text, BRIEF_MESSAGE_CHARS))
+      } else if (entry.kind === 'agent' && entry.markdown.trim() !== '') {
+        reply = entry.markdown.trim()
+      }
+    }
+    if (asked.length === 0) return null
+    // The first message says what the work is; the latest ones, where it went since.
+    const lines = asked.map((text) => `User: ${text}`)
+    const last = reply === '' ? [] : [`Agent (last reply): ${cutText(reply, BRIEF_MESSAGE_CHARS)}`]
+    const kept = [...lines]
+    while (kept.length > 1 && [...kept, ...last].join('\n\n').length > max) kept.splice(1, 1)
+    return {
+      agentId: live.record.agentId,
+      model: modelOf(live.thread.session.config),
+      text: cutText([...kept, ...last].join('\n\n'), max),
+      asked,
+    }
+  }
+
+  /**
+   * Huli: a title written from the session's conversation so far, for the user to edit before it
+   * is saved; the session keeps its title until then.
+   */
+  async suggestTitle(sessionId: string): Promise<{ title: string }> {
+    const record = this.recordOf(sessionId)
+    const brief = await this.conversationBrief(sessionId, TITLE_PROMPT_CHARS)
+    if (!brief) throw new HostError('restricted', t('review.titleNothing'))
+    const target = lightTarget(this.deps.settings().lightModel, record.agentId, brief.model)
+    const agent = this.deps.agents.name(target.agentId)
+    // The first message says what the work is, the latest two where it went since.
+    const asked =
+      brief.asked.length <= 3 ? brief.asked : [brief.asked[0]!, ...brief.asked.slice(-2)]
+    try {
+      const writer = await this.deps.agents.ensureReady(target.agentId)
+      const written = await this.askTitle(writer, target.model, [
+        { type: 'text', text: asked.join('\n\n') },
+      ])
+      const title = listedTitle(written, null)
+      if (!title) throw new Error('its reply held no title')
+      return { title }
+    } catch (error) {
+      this.deps.diagnostics.log(
+        'warn',
+        `${agent}: could not title session ${sessionId}: ${logText(error)}`,
+      )
+      throw new HostError('agent_error', t('review.titleFailed', { agent, reason: logText(error) }))
+    }
+  }
+
+  /** Stops the review running beside the session; a turn of the session stops as turns do. */
+  reviewStop(sessionId: string): void {
+    this.reviewRuns.get(sessionId)?.abort()
+  }
+
+  /**
+   * What the user does with findings of the session's latest review: puts them aside, takes them
+   * back, or sends them to its agent as one message, now or queued, to fix. Answers the review as
+   * it is after.
+   */
+  async reviewAct(
+    sessionId: string,
+    reviewId: string,
+    findingIds: readonly string[],
+    action: ReviewAction,
+    portId?: string,
+    device?: FromDevice,
+  ): Promise<ReviewRun> {
+    const live = await this.revive(sessionId)
+    const review = live.thread.session.review
+    if (!review || review.id !== reviewId) throw notFound(t('review.gone'))
+    const ids = new Set(findingIds)
+    const picked = review.findings.filter((finding) => ids.has(finding.id))
+    if (picked.length === 0) throw notFound(t('review.findingGone'))
+    if (action === 'fix') {
+      await this.queue(sessionId, [{ type: 'text', text: fixMessage(picked) }], portId, device)
+    }
+    const state: ReviewFindingState =
+      action === 'dismiss' ? 'dismissed' : action === 'restore' ? 'open' : 'sent'
+    // The send may have waited on the session; the review is read again after it.
+    const now = live.thread.session.review
+    if (!now || now.id !== reviewId) throw notFound(t('review.gone'))
+    const next: ReviewRun = {
+      ...now,
+      findings: now.findings.map((finding) =>
+        ids.has(finding.id) ? { ...finding, state } : finding,
+      ),
+    }
+    this.update(live, { review: next })
+    return next
   }
 
   // Worktrees.
