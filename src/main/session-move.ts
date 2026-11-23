@@ -148,11 +148,11 @@ export class SessionMover {
         if (facts.worktree) problems.push('worktree')
       }
       const into = there.project?.path ?? ''
-      const same =
-        facts.platform === 'win32'
-          ? into.toLowerCase() === facts.projectPath.toLowerCase()
-          : into === facts.projectPath
-      if (same) problems.push('sameProject')
+      const same = (a: string, b: string) =>
+        facts.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+      // A host older than moves within it ignores the project and matches one by its remote.
+      if (!same(into, project ?? '')) problems.push('olderHost')
+      else if (same(into, facts.projectPath)) problems.push('sameProject')
     }
     const targetName = local ? nameOf(there.project?.path ?? '') : this.deps.hostName(target)
     return { source: facts, target: there, problems, notes, targetName }
