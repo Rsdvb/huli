@@ -1,0 +1,31 @@
+# Huli: a project's own session order (会话排序), as the desktop keeps it on the host: the seeded
+# project lists 排序 C, A, B, the order its host keeps, where latest activity would list A, B, C.
+# run.sh seeds the daemon for it (seed-order.mjs) when FLOWS names it; in a run of every flow,
+# without the seed, it only looks.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- extendedWaitUntil:
+    visible: '排序演示'
+    timeout: 60000
+    optional: true
+- takeScreenshot: o01-home
+- runFlow:
+    when:
+      visible: '排序演示'
+    commands:
+      - assertVisible:
+          text: '排序 A'
+          below:
+            text: '排序 C'
+      - assertVisible:
+          text: '排序 B'
+          below:
+            text: '排序 A'

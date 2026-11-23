@@ -7,6 +7,7 @@
 import type { SessionSummary } from '@shared/agent-host'
 import type { SessionGroupRef } from '@shared/run-groups'
 import { shownFolders, type SessionFolder } from '@shared/session-folders'
+import { rankBy } from '@shared/session-order'
 import type { TaskSummary } from '@shared/workflow'
 import type { HomeGrouping } from './prefs'
 import { folder as folderName, listOrder, needsYou } from './sessions'
@@ -72,6 +73,11 @@ export interface HomeInput {
   openBestOf?: ReadonlySet<string>
   /** Huli: false while best-of-N is turned off on the computer: each run is a row of its own. */
   foldBestOf?: boolean
+  /**
+   * Huli: each project's own order of its sessions, as its host keeps it for every window and phone
+   * (shared/session-order.ts), by `projectKey`; a project without one goes by latest activity.
+   */
+  projectOrders?: ReadonlyMap<string, readonly string[] | null | undefined>
 }
 
 export const placedKey = (p: Placed) => `${p.computer}\0${p.session.id}`
@@ -202,8 +208,23 @@ export function homeItems(input: HomeInput): HomeItem[] {
     return out
   }
 
+  // Huli: a folder's or a project's own order once the user dragged one (会话排序), new ones first;
+  // a best-of-N group's row answers to its group's id, as the desktop names the row.
+  const ownOrder = (group: Omit<Group, 'count'>) =>
+    group.folder
+      ? group.folder.manual
+        ? group.folder.sessionIds
+        : null
+      : group.projectPath
+        ? input.projectOrders?.get(projectKey(group.computer, group.projectPath))
+        : null
   const pushGroup = (group: Omit<Group, 'count'>, members: Placed[]) => {
-    const list = [...members].sort(byTime)
+    const rank = rankBy(
+      ownOrder(group),
+      (p: Placed) => (p.session.group ? [p.session.id, p.session.group.id] : [p.session.id]),
+      (p) => -p.session.updatedAt,
+    )
+    const list = [...members].sort((a, b) => rank(a) - rank(b))
     out.push({ kind: 'group', key: group.key, group: { ...group, count: list.length } })
     if (group.collapsed) return
     const all = input.expanded.has(group.key)
