@@ -9,6 +9,7 @@ import {
 } from '@dnd-kit/react'
 import { BotIcon, Folder01Icon } from '@hugeicons/core-free-icons'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
+import { DragFeedback, lightPlugins } from '@renderer/components/drag-feedback'
 import { dropIntoFolder } from '@renderer/features/session-folders/drag'
 import { rowDragEnded, rowDragMoved, rowDragStarted } from '@renderer/features/sidebar/row-drag'
 import {
@@ -77,7 +78,14 @@ export function SplitDragProvider({ children }: { children: React.ReactNode }) {
     if (view) dropViewAt(view, drop.place, size)
   }
   return (
-    <DragDropProvider sensors={sensors} onDragStart={start} onDragMove={move} onDragEnd={end}>
+    <DragDropProvider
+      sensors={sensors}
+      plugins={lightPlugins}
+      onDragStart={start}
+      onDragMove={move}
+      onDragEnd={end}
+    >
+      <DragFeedback />
       <InSessionDrag value>{children}</InSessionDrag>
       <DragOverlay dropAnimation={null}>
         {(source) =>

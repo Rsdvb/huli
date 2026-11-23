@@ -611,7 +611,9 @@ export function SurfaceTabs({ panel, projectPath }: { panel: string; projectPath
             <span className="kp-stab">
               <span className="kp-stab__btn">
                 <span className="kp-stab__icon">
-                  <PaneSpinner />
+                  <span className="kp-stab__glyph">
+                    <PaneSpinner />
+                  </span>
                 </span>
                 <span className="kp-stab__name">{t('terminal:panel.starting')}</span>
               </span>
@@ -730,7 +732,7 @@ function SurfaceTab({
           style={editing ? { visibility: 'hidden' } : undefined}
         >
           <span className="kp-stab__icon">
-            {item.icon}
+            <span className="kp-stab__glyph">{item.icon}</span>
             {item.dot && <span aria-hidden className="kp-stab__badge" data-tone={item.dot.tone} />}
           </span>
           <span className="kp-stab__name">{item.name}</span>

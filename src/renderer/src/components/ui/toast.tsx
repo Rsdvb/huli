@@ -260,6 +260,22 @@ export function Toaster() {
     useOverlayStore.getState().set(id, shown)
     return () => useOverlayStore.getState().set(id, false)
   }, [id, shown])
+  // The model and permission menus open inside the main area, which sits under the toast layer,
+  // so the toasts step aside while one is open. A `body:has()` rule did this, but made every
+  // element added anywhere restyle the sidebar's rows.
+  useEffect(() => {
+    const box = frame.current
+    if (!box) return
+    const check = () =>
+      box.toggleAttribute(
+        'data-aside',
+        document.querySelector('.ui-mdpc[data-open], .ui-ccc__menu[data-open="true"]') !== null,
+      )
+    const observer = new MutationObserver(check)
+    observer.observe(document.body, { subtree: true, attributeFilter: ['data-open'] })
+    check()
+    return () => observer.disconnect()
+  }, [])
   // Huli: how far up from the window's foot the stack reaches, as `--toast-room` on the root, so
   // a screen it stays over, such as Settings, can scroll its last rows clear of it.
   useEffect(() => {
