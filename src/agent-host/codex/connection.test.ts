@@ -467,6 +467,73 @@ describe('sessions', () => {
     }
   })
 
+  it("gives a workspace turn the user's own network access and folders, read again after a write", async () => {
+    const { server, connection } = await connect()
+    let config: Record<string, unknown> = {
+      sandbox_workspace_write: { network_access: true, writable_roots: ['/cache'] },
+    }
+    server.on('config/read', () => ({ config }))
+    server.on('config/value/write', () => ({ status: 'ok' }))
+    const opened = await connection.newSession('/project')
+    await connection.setConfigOption(opened.sessionId, 'mode', 'workspace-write')
+    const { target } = threadTarget()
+    connection.register(opened.sessionId, target)
+    const turnOnce = async (count: number) => {
+      const prompt = connection.prompt(opened.sessionId, [{ type: 'text', text: 'hi' }])
+      await until(() => server.sent('turn/start').length === count)
+      server.notify('turn/completed', {
+        threadId: opened.sessionId,
+        turn: turn(`turn-${count}`, 'completed'),
+      })
+      await prompt
+      return server.sent('turn/start')[count - 1]
+    }
+    expect(await turnOnce(1)).toMatchObject({
+      sandboxPolicy: { type: 'workspaceWrite', networkAccess: true, writableRoots: ['/cache'] },
+    })
+    config = {}
+    await connection.request('config/value/write', {
+      keyPath: 'sandbox_workspace_write.network_access',
+      value: null,
+      mergeStrategy: 'replace',
+    })
+    expect(await turnOnce(2)).toMatchObject({
+      sandboxPolicy: { type: 'workspaceWrite', networkAccess: false, writableRoots: [] },
+    })
+    expect(server.sent('config/read')).toHaveLength(2)
+  })
+
+  it('names the provider when its quota runs out off a ChatGPT plan, as out of credit', async () => {
+    const { server, connection } = await connect()
+    server.on('account/read', () => ({ account: null, requiresOpenaiAuth: false }))
+    server.on('config/read', () => ({
+      config: { model_provider: 'deepseek', model_providers: { deepseek: { name: 'DeepSeek' } } },
+    }))
+    const opened = await connection.newSession('/project')
+    const { target } = threadTarget()
+    connection.register(opened.sessionId, target)
+    const prompt = connection.prompt(opened.sessionId, [{ type: 'text', text: 'hi' }])
+    await until(() => server.sent('turn/start').length === 1)
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: {
+        ...turn('turn-1', 'failed'),
+        error: {
+          message: 'Quota exceeded. Check your plan and billing details.',
+          codexErrorInfo: 'usageLimitExceeded',
+          additionalDetails: null,
+        },
+      },
+    })
+    const failure = await prompt.catch((error: unknown) => error as AgentRequestError)
+    expect(failure).toBeInstanceOf(AgentRequestError)
+    expect((failure as AgentRequestError).message).toMatch(/^DeepSeek turned the request down/)
+    expect((failure as AgentRequestError).data).toMatchObject({
+      codexErrorInfo: 'usageLimitExceeded',
+      providerQuota: 'DeepSeek',
+    })
+  })
+
   it('makes the project’s further folders workspace roots of the thread and of every turn', async () => {
     const { server, connection } = await connect()
     const folders = ['/api', '/web']

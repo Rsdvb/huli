@@ -1012,6 +1012,29 @@
         }
       }
     },
+    "codexSettings": {
+      "name": "Codex 设置",
+      "readFailed": "没能读取 Codex 的设置：{{error}}",
+      "locked": "这一项由你所在组织的托管配置设定。",
+      "memories": {
+        "name": "记忆",
+        "description": "Codex 记住它在各会话里学到的东西，用在之后的会话里。写入 Codex 的 config.toml，新会话生效。"
+      },
+      "network": {
+        "name": "工作区沙箱里的网络",
+        "description": "能写工作区的会话，它的命令也能联网（sandbox_workspace_write.network_access）。纸鸢的会话从下一轮起照此执行。",
+        "roots": "另外可写：{{roots}}"
+      },
+      "profile": {
+        "name": "权限档案",
+        "description": "Codex 自己的新线程用的档案（default_permissions）。纸鸢的会话仍按你在输入框里选的模式。",
+        "default": "Codex 默认"
+      },
+      "features": {
+        "name": "测试版功能",
+        "description": "Codex 列出的实验功能。改动对新会话生效。"
+      }
+    },
     "autoCompact": {
       "name": "自动压缩",
       "catalog": "智能体的 Harness 什么时候自己压缩对话，按它自己设置的单位。",

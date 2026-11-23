@@ -137,6 +137,7 @@ import {
   type QuestionAnswer,
   type UserContent,
 } from '@shared/thread'
+import { checkCodexChange } from './codex/settings'
 import { FORM_FIELDS, FORM_KEY_CHARS } from './elicitation'
 import { invalidParams } from './errors'
 import { t } from './i18n'
@@ -1767,6 +1768,15 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'agents.codebuddySettings': agent,
+    'agents.codexSettings': agent,
+    'agents.setCodexSetting': (params) => {
+      const o = fields(params)
+      try {
+        return { agentId: agentId(o), change: checkCodexChange(o.change) }
+      } catch (error) {
+        throw invalidParams((error as Error).message)
+      }
+    },
     'agents.setCodebuddySite': (params) => {
       const o = fields(params)
       const change = fields(o.change)

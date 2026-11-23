@@ -55,6 +55,9 @@ import { planMarkdown } from '../plan-revision'
 import { addEntry, mergeConfig, type MapperEffect, type MapperOutput } from '../session-updates'
 import { SIDE_INSTRUCTIONS, sideTurnText } from '../side-chat'
 import { errorStatus, isProviderQuota, providerName } from './provider-quota'
+import { workspaceWrite } from './settings'
+
+type WorkspaceWrite = ReturnType<typeof workspaceWrite>
 import { mapAccount, mapPlanExtras, mapRateLimits } from './account'
 import { isAsyncQuestion, type AsyncQuestionItem } from './async-questions'
 import {
@@ -533,6 +536,19 @@ function workspaceRoots(
 }
 
 /** Huli: a policy that writes in the workspace writes in the project's further folders too. */
+/**
+ * Huli: a workspace turn's policy with the user's own `sandbox_workspace_write`: its network
+ * access and its further writable folders, as Codex gives its own workspace turns.
+ */
+function withWorkspace(policy: SandboxPolicy, workspace: WorkspaceWrite | null): SandboxPolicy {
+  if (policy.type !== 'workspaceWrite' || !workspace) return policy
+  return {
+    ...policy,
+    networkAccess: policy.networkAccess || workspace.networkAccess,
+    writableRoots: [...new Set([...policy.writableRoots, ...workspace.writableRoots])],
+  }
+}
+
 function withFolders(policy: SandboxPolicy, folders: readonly string[]): SandboxPolicy {
   if (policy.type !== 'workspaceWrite' || folders.length === 0) return policy
   return { ...policy, writableRoots: [...new Set([...policy.writableRoots, ...folders])] }
@@ -579,6 +595,12 @@ export class CodexConnection implements AgentConnection {
   private readonly rpc: RpcPeer
   private readonly closeTransport: () => void
   private readonly threads = new Map<string, ThreadRecord>()
+  /**
+   * Huli: the user's `sandbox_workspace_write`, which Kite's workspace turns take as Codex's own
+   * do; read before a turn, again after a config write, null when it could not be read.
+   */
+  private workspace: WorkspaceWrite | null = null
+  private workspaceRead: Promise<void> | null = null
   private readonly targets = new Map<string, SessionTarget>()
   private readonly pending = new Map<string, { at: number; updates: Delivery[] }>()
   private readonly unregistered = new Set<string>()
@@ -644,7 +666,22 @@ export class CodexConnection implements AgentConnection {
 
   /** A request of app-server outside any thread, such as its plugins and skills. */
   request<T>(method: string, params?: unknown): Promise<T> {
+    // Huli: a write of the configuration may change what workspace turns may do.
+    if (method.startsWith('config/') && method !== 'config/read') this.workspaceRead = null
     return this.call<T>(method, params)
+  }
+
+  /** Huli: reads the user's workspace sandbox settings once, and again after a write. */
+  private readWorkspace(): Promise<void> {
+    this.workspaceRead ??= this.call<{ config: Record<string, unknown> }>('config/read', {}).then(
+      (read) => {
+        this.workspace = workspaceWrite(read.config)
+      },
+      () => {
+        this.workspace = null
+      },
+    )
+    return this.workspaceRead
   }
 
   /**
@@ -1841,7 +1878,10 @@ export class CodexConnection implements AgentConnection {
       threadId: record.id,
       approvalPolicy: mode.approvalPolicy,
       approvalsReviewer: mode.approvalsReviewer,
-      sandboxPolicy: withFolders(heldPolicy(mode.sandbox, record.sandbox), record.folders),
+      sandboxPolicy: withFolders(
+        heldPolicy(withWorkspace(mode.sandbox, this.workspace), record.sandbox),
+        record.folders,
+      ),
       ...workspaceRoots(record.cwd, record.folders),
       summary: 'auto',
       ...(settings.model ? { model: settings.model } : {}),
@@ -1873,7 +1913,7 @@ export class CodexConnection implements AgentConnection {
     const command = parseCommand(prompt)
     if (command) return this.runCommand(record, command)
     return this.runTurn(record, async () => {
-      await this.listModels()
+      await Promise.all([this.listModels(), this.readWorkspace()])
       const response = await this.call<{ turn: Turn }>(
         'turn/start',
         this.turnParams(record, userInputs(prompt)),
@@ -2273,7 +2313,7 @@ export class CodexConnection implements AgentConnection {
     start: (prompting: Prompting) => Promise<string | null>,
   ): Promise<PromptResult> {
     return this.runTurn(record, async (prompting) => {
-      await this.listModels()
+      await Promise.all([this.listModels(), this.readWorkspace()])
       await this.call('thread/settings/update', this.settingsParams(record))
       return start(prompting)
     })
@@ -2323,6 +2363,7 @@ export class CodexConnection implements AgentConnection {
     return this.commandTurn(record, async (prompting) => {
       await this.call<ThreadGoalSetResponse>('thread/goal/set', { threadId: record.id, ...goal })
       if (await this.goalStarted(record, prompting)) return null
+      await this.readWorkspace()
       if (prompting.cancel) {
         record.prompting = null
         prompting.resolve(stopped('cancelled'))

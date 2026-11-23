@@ -868,6 +868,41 @@ export interface CodebuddySettings {
 /** The site to write; `automatic` removes the key. */
 export type CodebuddySiteChange = { site: CodebuddySite | 'automatic' }
 
+/**
+ * Huli: what a Codex agent's page edits in Codex's own configuration, as app-server's config API
+ * reads it. A part this Codex does not offer is null.
+ */
+export interface CodexSettings {
+  /** The `memories` feature, on or off as the configuration has it. */
+  memories: boolean | null
+  /** `sandbox_workspace_write`: what a turn that may write the workspace may also do. */
+  workspace: { networkAccess: boolean; writableRoots: string[] } | null
+  /** `default_permissions`, the profile new threads take; null for Codex's own default. */
+  permissionProfile: string | null
+  /** The permission profiles there are, from `permissionProfile/list`. */
+  profiles: { id: string; description: string | null; allowed: boolean }[] | null
+  /** The features in beta, from `experimentalFeature/list`, each on or off. */
+  features: CodexFeature[] | null
+  /** The keys a managed layer pins, which the page shows but cannot change. */
+  locked: string[]
+}
+
+export interface CodexFeature {
+  /** Its key under `[features]`. */
+  name: string
+  displayName: string
+  description: string | null
+  enabled: boolean
+  defaultEnabled: boolean
+}
+
+/** Huli: one key of Codex's configuration to write; null removes it. */
+export type CodexSettingChange =
+  | { setting: 'memories'; value: boolean }
+  | { setting: 'networkAccess'; value: boolean }
+  | { setting: 'permissionProfile'; value: string | null }
+  | { setting: 'feature'; name: string; value: boolean }
+
 /** A place the agent reads its own configuration from, in the order Settings lists them. */
 export interface AgentConfigItem {
   id: 'folder' | 'settings' | 'instructions'
@@ -1493,6 +1528,14 @@ export interface HostContract {
   // Writes the site into that file and nothing else in it.
   'agents.setCodebuddySite': {
     params: { agentId: AgentId; change: CodebuddySiteChange }
+    result: void
+  }
+  // Huli: a Codex agent's memories, workspace sandbox, permission profile and features in beta,
+  // read through its app-server's config API; rejects with the reason when that cannot be read.
+  'agents.codexSettings': { params: { agentId: AgentId }; result: CodexSettings }
+  // Huli: writes one key of them through that API, which keeps the file's comments.
+  'agents.setCodexSetting': {
+    params: { agentId: AgentId; change: CodexSettingChange }
     result: void
   }
   'agents.refreshAccount': { params: { agentId: AgentId; force?: boolean }; result: void }
@@ -2856,6 +2899,8 @@ export const HOST_METHODS = [
   'agents.setAutoCompact',
   'agents.codebuddySettings',
   'agents.setCodebuddySite',
+  'agents.codexSettings',
+  'agents.setCodexSetting',
   'agents.refreshAccount',
   'agents.readSignIn',
   'agents.listSessions',

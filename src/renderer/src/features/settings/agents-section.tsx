@@ -30,6 +30,7 @@ import {
   signsInWithKeyOnly,
   takesClaudeSettings,
   takesCodebuddySettings,
+  takesCodexSettings,
   takesStartMode,
   type CodebuddySite,
 } from '@shared/agents'
@@ -134,6 +135,7 @@ import {
 import { AutoCompactRows } from './auto-compact-rows'
 import { ClaudeSettingsRows } from './claude-settings-rows'
 import { CodebuddySettingsRows } from './codebuddy-settings-rows'
+import { CodexSettingsRows } from './codex-settings-rows'
 import { PlaceRow } from './places'
 import {
   DIALOG_FIELD,
@@ -1654,6 +1656,7 @@ function ConfigurationGroup({ status }: { status: AgentStatus }) {
         {takesCodebuddySettings(status.id) && (
           <CodebuddySettingsRows key={status.id} status={status} />
         )}
+        {takesCodexSettings(status.id) && <CodexSettingsRows key={status.id} status={status} />}
         {/* Huli: the agent network is this computer's alone. */}
         {hostId === null && !isWeb && <NetworkChoiceRow agentId={status.id} />}
         {/* The Marketplace shows this computer's servers only. */}
