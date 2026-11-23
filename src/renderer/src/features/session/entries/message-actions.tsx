@@ -1,5 +1,10 @@
 import { memo, useRef, useState } from 'react'
-import { ArrowTurnDownIcon, PencilEdit02Icon, Undo02Icon } from '@hugeicons/core-free-icons'
+import {
+  ArrowTurnBackwardIcon,
+  ArrowTurnDownIcon,
+  PencilEdit02Icon,
+  Undo02Icon,
+} from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
@@ -89,6 +94,9 @@ export function UserActions({
   const labels = useCopyLabels(t('userActions.copyMessage'))
   const editable = useEditable(sessionId, entryId)
   const edit = useEditFrom(sessionId, entryId)
+  // Huli: Rewind to here keeps the message and its reply and sets aside the turns after it.
+  const rewindable = useEditable(sessionId, entryId, 'rewind')
+  const rewind = useEditFrom(sessionId, entryId, 'rewind')
   const row = useRef<HTMLSpanElement>(null)
   const cancelled = useRef<HTMLButtonElement>(null)
   // Only the last turn's message stands for a cancelled turn still waiting to be written again.
@@ -103,7 +111,7 @@ export function UserActions({
     return false
   })
   const meta = (
-    <span ref={row} className="ks-user__meta" data-open={edit.open ? '' : undefined}>
+    <span ref={row} className="ks-user__meta" data-open={edit.open || rewind.open ? '' : undefined}>
       {steered && (
         <span className="inline-flex shrink-0 items-center gap-1">
           <HugeiconsIcon
@@ -122,9 +130,15 @@ export function UserActions({
         actions={['copy']}
         label={t('userActions.label')}
         labels={labels}
-        className={editable ? 'ks-user__actions--edit' : undefined}
-        leadingActions={
-          editable
+        className={
+          editable && rewindable
+            ? 'ks-user__actions--rewind'
+            : editable || rewindable
+              ? 'ks-user__actions--edit'
+              : undefined
+        }
+        leadingActions={[
+          ...(editable
             ? [
                 {
                   key: 'edit',
@@ -135,10 +149,23 @@ export function UserActions({
                     edit.start(row.current?.querySelector('.ui-mac__btn--edit') ?? null),
                 },
               ]
-            : []
-        }
+            : []),
+          ...(rewindable
+            ? [
+                {
+                  key: 'rewind',
+                  tip: t('rewind.rewindAction'),
+                  label: t('rewind.rewindAction'),
+                  icon: <Glyph icon={ArrowTurnBackwardIcon} />,
+                  onClick: () =>
+                    rewind.start(row.current?.querySelector('.ui-mac__btn--rewind') ?? null),
+                },
+              ]
+            : []),
+        ]}
       />
       {edit.popover}
+      {rewind.popover}
     </span>
   )
   if (!end) return meta

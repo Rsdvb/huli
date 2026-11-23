@@ -338,6 +338,20 @@ export async function editFromMessage(sessionId: string, entryId: string): Promi
   emitAppEvent({ kind: 'draft-written', draft: sessionId, focus: true })
 }
 
+/**
+ * Huli: Rewind to here, from the message after it, `entryId`: the turns from it are set aside as
+ * an edit sets them, and the composer keeps what it holds, which Put back gives back too.
+ */
+export async function rewindToMessage(sessionId: string, entryId: string): Promise<void> {
+  const held = draftAttachments(sessionId).filter((item) => item.status === 'ready')
+  const text = readDraft(sessionId)
+  const draft: UserContent[] = [
+    ...(text.trim() ? [{ type: 'text' as const, text }] : []),
+    ...attachmentContent(held),
+  ]
+  await host('sessions.rewind', { sessionId, entryId, draft })
+}
+
 /** Put back: the turns an edit set aside return, and the composer holds what it did before it. */
 export async function putBackRewound(sessionId: string): Promise<void> {
   const { draft } = await host('sessions.putBack', { sessionId })

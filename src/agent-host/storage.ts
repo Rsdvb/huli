@@ -497,6 +497,8 @@ export interface PendingCarry {
   summarize?: boolean
   /** The values chosen for it, set once its session opens. */
   values?: Record<string, string | boolean>
+  /** Huli: a rewind's new session of the same agent, which keeps the session's own values. */
+  rewound?: true
 }
 
 /** An agent that had a session before another took it over, and its own session for it. */
@@ -1074,6 +1076,7 @@ function carryOf(value: unknown): { carry?: PendingCarry } {
       fromTurn: value.fromTurn,
       ...(value.summarize === true ? { summarize: true } : {}),
       ...(values && Object.keys(values).length > 0 ? { values } : {}),
+      ...(value.rewound === true ? { rewound: true as const } : {}),
     },
   }
 }

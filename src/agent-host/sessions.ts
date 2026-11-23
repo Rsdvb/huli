@@ -33,6 +33,9 @@ import {
   type PlanLimit,
   type PlanProgress,
   type ReturnedMessage,
+  type FilesRestored,
+  type RewindFiles,
+  type RewindPreview,
   type RunningWork,
   type SessionAttention,
   type SessionOutputs,
@@ -265,6 +268,7 @@ import {
   type SideQuestion,
 } from './connection'
 import type { Diagnostics } from './diagnostics'
+import { ChangedSincePreview, type FileCheckpoints } from './file-checkpoints/store'
 import { answeredFields, checkedValues } from './elicitation'
 import { holdsNothing, mayBeEmpty } from './empty-sessions'
 import type { McpTransports } from './marketplace/servers'
@@ -463,6 +467,10 @@ export interface SessionTimings {
   contextDebounceMs: number
   /** Huli: when a session its plan limit stopped goes on, and how often it looks again. */
   limitResume: LimitResumeTimings
+  /** Huli: how long a turn waits for its file checkpoint's listing before it goes without one. */
+  checkpointListMs: number
+  /** Huli: and for its copies, which then go on beside the turn. */
+  checkpointCopyMs: number
 }
 
 /** The longest a thread's write waits after writes that failed. */
@@ -481,6 +489,8 @@ export const SESSION_TIMINGS: SessionTimings = {
   contextRefreshMs: CONTEXT_REFRESH_MS,
   contextDebounceMs: 500,
   limitResume: LIMIT_RESUME_TIMINGS,
+  checkpointListMs: 8_000,
+  checkpointCopyMs: 1_500,
 }
 
 export interface SessionEvents {
@@ -666,6 +676,8 @@ export interface SessionManagerDeps {
   prepared?: PreparedRecords
   /** Huli: removes what an agent keeps of a session past its own delete; without it nothing is. */
   copies?: Pick<AgentCopies, 'removeDeleted' | 'discardUnprompted'>
+  /** Huli: Kite's own file checkpoints, for agents that keep none; without it no rewind restores files. */
+  fileCheckpoints?: FileCheckpoints
   /** Huli: the deleted sessions whose agent keeps a copy, never offered for import again. */
   deleted?: Pick<DeletedSessions, 'load' | 'flush' | 'idsOf' | 'add' | 'forget'>
   /** What to watch for changes to the agent's options in a folder; without it nothing is. */
@@ -8091,12 +8103,13 @@ export class SessionManager {
       )
     }
     const gone = (): boolean => live.closing || this.live.get(live.id) !== live
-    const wanted = carry
+    const takeover = carry && !carry.rewound
+    const wanted = takeover
       ? this.takeoverValues(record.agentId, config, carry)
       : carryMode(own, config)
     const values = agentValues(wanted)
     config = await this.applyStartOptions(live, connection, values, {
-      restore: !carry,
+      restore: !takeover,
       from: config,
       stop: () => gone() || connection.isClosed,
       resend: resumed ? resentOnResume(record.agentId, values) : undefined,
@@ -9848,6 +9861,210 @@ export class SessionManager {
     this.touch(live.id)
   }
 
+  // Huli: what Edit from here and Rewind to here would do to the files, and the files put back.
+
+  /** A session the files of which a rewind may put back: not a subagent, between turns. */
+  private async rewindable(sessionId: string): Promise<Live> {
+    if (this.recordOf(sessionId).origin === 'subagent') {
+      throw new HostError('restricted', t('session.subagent.noRevert'))
+    }
+    const live = await this.revive(sessionId)
+    const { status } = live.thread.session
+    if (live.turn || (status !== 'ready' && status !== 'closed')) throw busyError(status)
+    if (waitingCount(live) > 0) throw busyError('awaiting_permission')
+    return live
+  }
+
+  /** The folders a session's checkpoints cover: its own and its project's further ones. */
+  private checkpointFolders(record: SessionRecord): string[] {
+    return [workDir(record), ...this.agentFolders(record)]
+  }
+
+  /** The title of another session at work in any of these folders, or null when none is. */
+  private busyIn(live: Live, folders: readonly string[]): string | null {
+    const { platform } = this.deps
+    const overlaps = (a: string, b: string): boolean =>
+      samePath(a, b, platform) || isInside(a, b, platform) || isInside(b, a, platform)
+    for (const other of this.live.values()) {
+      if (other === live) continue
+      const status = other.thread.session.status
+      if (!other.turn && status !== 'running' && waitingCount(other) === 0) continue
+      const theirs = this.checkpointFolders(other.record)
+      if (folders.some((folder) => theirs.some((their) => overlaps(folder, their)))) {
+        return other.record.customTitle ?? other.thread.session.title ?? other.record.id
+      }
+    }
+    return null
+  }
+
+  /**
+   * What going back to before the user's message `entryId` would do: the messages that leave, how
+   * the agent takes it, and what the files would become; changes nothing.
+   */
+  async rewindPreview(sessionId: string, entryId: string): Promise<RewindPreview> {
+    const live = await this.rewindable(sessionId)
+    const cut = rewindCut(live.thread, entryId)
+    const { record } = live
+    const native =
+      this.deps.agents.status(record.agentId).capabilities.rewind === true && !record.noRewind
+    const conversation: RewindPreview['conversation'] = !cut.keepsAny
+      ? 'empty'
+      : native
+        ? 'agent'
+        : 'fresh'
+    return {
+      messages: cut.messages,
+      conversation,
+      files: await this.rewindFilesPreview(live, cut),
+    }
+  }
+
+  private async rewindFilesPreview(live: Live, cut: RewindCut): Promise<RewindFiles> {
+    const folders = this.checkpointFolders(live.record)
+    const busy = this.busyIn(live, folders)
+    if (busy) return { state: 'unavailable', reason: 'busy', detail: busy }
+    const kite = this.deps.fileCheckpoints
+    try {
+      if (!kite || !(await kite.has(live.id, cut.from, folders))) {
+        return { state: 'unavailable', reason: 'none' }
+      }
+      const preview = await kite.preview(live.id, { entryId: cut.from }, folders)
+      if (!preview) return { state: 'unavailable', reason: 'none' }
+      if (preview.folders.every((folder) => folder.changes.length === 0)) {
+        return { state: 'unchanged' }
+      }
+      let insertions = 0
+      let deletions = 0
+      for (const folder of preview.folders) {
+        for (const change of folder.changes) {
+          insertions += change.insertions ?? 0
+          deletions += change.deletions ?? 0
+        }
+      }
+      return {
+        state: 'ready',
+        folders: preview.folders.map((folder) => ({
+          folder: folder.folder,
+          changes: folder.changes.map((change) => ({
+            path: change.key,
+            action: change.action,
+            insertions: change.insertions,
+            deletions: change.deletions,
+            ...(change.binary ? { binary: true } : {}),
+          })),
+          kept: folder.kept.length,
+          ...(folder.missing ? { missing: true } : {}),
+        })),
+        insertions,
+        deletions,
+        token: preview.token,
+      }
+    } catch (error) {
+      this.deps.diagnostics.log(
+        'warn',
+        `Rewind preview of ${live.id} failed: ${(error as Error).message}`,
+      )
+      return { state: 'unavailable', reason: 'failed', detail: agentError(error).message }
+    }
+  }
+
+  /**
+   * Puts the files of the session's folders back as they were when the user's message `entryId`
+   * was sent, while they are as the preview's `token` found them, keeping a backup of them first.
+   */
+  async restoreFiles(sessionId: string, entryId: string, token: string): Promise<FilesRestored> {
+    const live = await this.rewindable(sessionId)
+    const cut = rewindCut(live.thread, entryId)
+    const folders = this.checkpointFolders(live.record)
+    const busy = this.busyIn(live, folders)
+    if (busy) throw new HostError('conflict', t('session.rewindFolderBusy', { session: busy }))
+    const kite = this.deps.fileCheckpoints
+    if (!kite || !(await kite.has(live.id, cut.from, folders))) {
+      throw new HostError('conflict', t('session.rewindNoCheckpoint'))
+    }
+    try {
+      const done = await kite.restore(live.id, { entryId: cut.from }, folders, token)
+      return { restored: done.restored, failed: done.failed.length, backup: done.backup }
+    } catch (error) {
+      if (error instanceof ChangedSincePreview) {
+        throw new HostError('conflict', t('session.rewindFilesChanged'))
+      }
+      throw new HostError(
+        'internal',
+        t('session.rewindFilesFailed', { reason: (error as Error).message }),
+      )
+    }
+  }
+
+  /** Puts the files back as a rewind found them, from the backup it kept. */
+  async undoRewindFiles(
+    sessionId: string,
+    backup: string,
+  ): Promise<{ restored: number; failed: number }> {
+    const live = await this.rewindable(sessionId)
+    const kite = this.deps.fileCheckpoints
+    if (!kite) throw new HostError('conflict', t('session.rewindNoCheckpoint'))
+    const folders = this.checkpointFolders(live.record)
+    const busy = this.busyIn(live, folders)
+    if (busy) throw new HostError('conflict', t('session.rewindFolderBusy', { session: busy }))
+    try {
+      const preview = await kite.preview(live.id, { backup }, folders)
+      if (!preview) throw new HostError('conflict', t('session.rewindNoCheckpoint'))
+      const done = await kite.restore(live.id, { backup }, folders, preview.token)
+      return { restored: done.restored, failed: done.failed.length }
+    } catch (error) {
+      if (error instanceof HostError) throw error
+      throw new HostError(
+        'internal',
+        t('session.rewindFilesFailed', { reason: (error as Error).message }),
+      )
+    }
+  }
+
+  /**
+   * Starts the checkpoint of the session's files for the turn's message, whatever its agent: one's
+   * own checkpoints, as Claude Code's, know only what its edit tools changed. Null when none is
+   * taken.
+   */
+  private beginCheckpoint(
+    live: Live,
+    turn: Turn,
+  ): { listed: Promise<void>; saved: Promise<void>; cancel: () => void } | null {
+    const kite = this.deps.fileCheckpoints
+    const { record } = live
+    if (!kite || !turn.entryId || record.origin === 'subagent') return null
+    if (!featureOn(this.deps.settings().features, 'fileCheckpoints')) return null
+    const entry = live.thread.byId[turn.entryId]
+    if (entry?.kind !== 'user' || entry.steered) return null
+    return kite.begin(live.id, turn.entryId, this.checkpointFolders(record))
+  }
+
+  /**
+   * Waits for the checkpoint's listing, up to a budget, and a moment for its copies, which go on
+   * beside the turn after it; a listing that takes longer is dropped.
+   */
+  private async checkpointListed(
+    checkpoint: { listed: Promise<void>; saved: Promise<void>; cancel: () => void } | null,
+  ): Promise<void> {
+    if (!checkpoint) return
+    const within = async (promise: Promise<void>, ms: number): Promise<boolean> => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const done = await Promise.race([
+        promise.then(() => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), ms)
+        }),
+      ])
+      clearTimeout(timer)
+      return done
+    }
+    if (!(await within(checkpoint.listed, this.timings.checkpointListMs))) {
+      checkpoint.cancel()
+      return
+    }
+    await within(checkpoint.saved, this.timings.checkpointCopyMs)
+  }
+
   /**
    * A fork that an earlier agent of the source takes on: no fork of its own session, which ended
    * before the reply's turn did, but a session of its own given the conversation up to the reply.
@@ -9958,24 +10175,34 @@ export class SessionManager {
   }
 
   private async runTurn(live: Live, turn: Turn): Promise<void> {
+    // Huli: the files as the message found them, listed before the agent hears of it.
+    const checkpoint = this.beginCheckpoint(live, turn)
     if (live.record.rewound) {
       // An edit waits to be sent: the agent's session is cut there before the message goes.
       try {
         await this.applyRewind(live)
       } catch (error) {
+        checkpoint?.cancel()
         if (!turn.ended) this.failTurn(live, turn, error)
         return
       }
-      if (turn.ended) return
+      if (turn.ended) {
+        checkpoint?.cancel()
+        return
+      }
     }
     let connection: AgentConnection
     try {
       connection = await this.connect(live)
     } catch (error) {
+      checkpoint?.cancel()
       if (!turn.ended) this.failConnect(live, turn, error)
       return
     }
-    if (turn.ended) return
+    if (turn.ended) {
+      checkpoint?.cancel()
+      return
+    }
     try {
       const resolved = await this.resolveAttachments(live, turn.content)
       if (turn.ended) return
@@ -10013,6 +10240,8 @@ export class SessionManager {
       }
       const named = opensWithCommand(resolved.wire) ? null : this.foldersNote(live, connection)
       if (named) wire = [{ type: 'text', text: `${named}\n\n` }, ...wire]
+      await this.checkpointListed(checkpoint)
+      if (turn.ended) return
       const entryId = turn.entryId
       const sent = (ref: string): void => {
         if (!entryId || live.thread.byId[entryId]?.kind !== 'user') return
@@ -11308,11 +11537,6 @@ export class SessionManager {
     if (live.prepared || live.first || live.heldFirst || live.rewinding) {
       throw new HostError('busy', t('rewind.starting'))
     }
-    const agent = this.deps.agents.name(live.record.agentId)
-    if (!this.deps.agents.status(live.record.agentId).capabilities.rewind) {
-      throw new HostError('restricted', t('rewind.unsupported', { agent }))
-    }
-    if (live.record.noRewind) throw new HostError('restricted', t('rewind.olderThread'))
     const editable = (): boolean => {
       const at = live.thread.order.indexOf(entryId)
       return at >= 0 && canEditAt(live.thread, at)
@@ -11332,7 +11556,7 @@ export class SessionManager {
     })
     const prior = live.record.rewound
     const carried = live.record.carried
-    const carry =
+    let carry =
       carried && aside.some((item) => item.entry.id === carried.entryId)
         ? carried.carry
         : prior?.carry
@@ -11356,6 +11580,40 @@ export class SessionManager {
     if (aside[0]) live.cutAt = Math.min(live.cutAt ?? aside[0].pos, aside[0].pos)
     live.failure = null
     this.emit(live, [{ op: 'thread.truncate', id: entryId }])
+    // Huli: an agent that cannot cut its own session carries on in a new one at the next send,
+    // given the conversation kept, as a takeover's agent is; its line stands where the cut is.
+    const native =
+      this.deps.agents.status(live.record.agentId).capabilities.rewind === true &&
+      !live.record.noRewind
+    const marked = carry?.rewound === true && live.thread.byId[carry.entryId] !== undefined
+    if (!native && !marked && (!carry || carry.rewound)) {
+      const keeps = live.thread.order.some((id) => {
+        const item = live.thread.byId[id]
+        return item?.kind === 'user' && !item.steered
+      })
+      carry = undefined
+      if (keeps) {
+        const markerId = this.nextId(live)
+        carry = { entryId: markerId, fromTurn: 1, rewound: true }
+        this.emit(live, [
+          {
+            op: 'entry.add',
+            entry: {
+              kind: 'takeover',
+              id: markerId,
+              agentId: live.record.agentId,
+              turns: 0,
+              omitted: 0,
+              carried: '',
+              rewound: true,
+              after: agentEntryBefore(live.thread),
+            },
+          },
+        ])
+      }
+      if (carry) live.record.rewound.carry = carry
+      else delete live.record.rewound.carry
+    }
     const used = usedAtEnd(live.thread)
     const usage = live.thread.session.usage
     this.update(live, {
@@ -11471,7 +11729,11 @@ export class SessionManager {
       return entry && pos !== undefined && pos > from ? [{ pos, entry }] : []
     })
     if (later[0]) this.emit(live, [{ op: 'thread.truncate', id: later[0].entry.id }])
-    const back = [...aside, ...later].sort((a, b) => a.pos - b.pos)
+    // Huli: the line of the new session the edit would have carried on in goes with it.
+    const marker = rewound.carry?.rewound ? rewound.carry.entryId : null
+    const back = [...aside, ...later.filter(({ entry }) => entry.id !== marker)].sort(
+      (a, b) => a.pos - b.pos,
+    )
     for (const { pos, entry } of back) live.positions.set(entry.id, pos)
     this.emit(
       live,
@@ -11518,18 +11780,20 @@ export class SessionManager {
     const { record } = live
     const rewound = record.rewound
     if (!rewound) return
-    const agent = this.deps.agents.name(record.agentId)
     const from = record.acpSessionId
     let cut: RewoundSession = { sessionId: from }
-    if (from !== '') {
-      const runtime = await this.deps.agents.ensureReady(record.agentId)
-      const { connection } = runtime
-      if (!runtime.init.capabilities.rewind || !connection.rewindSession) {
-        throw new HostError('restricted', t('rewind.unsupported', { agent }))
-      }
-      if (connection.rewindsOpen) await this.connect(live)
+    // Huli: an agent that cannot cut its own session leaves it, and a new one carries on.
+    const runtime = from === '' ? null : await this.deps.agents.ensureReady(record.agentId)
+    const native =
+      !!runtime?.init.capabilities.rewind && !!runtime.connection.rewindSession && !record.noRewind
+    if (runtime && !native) cut = { sessionId: '' }
+    const rewindSession = native
+      ? runtime?.connection.rewindSession?.bind(runtime.connection)
+      : null
+    if (runtime && rewindSession) {
+      if (runtime.connection.rewindsOpen) await this.connect(live)
       try {
-        cut = await connection.rewindSession(
+        cut = await rewindSession(
           from,
           await this.cwdOf(live),
           rewound.point,
@@ -14729,6 +14993,8 @@ export class SessionManager {
     }
     void this.deps.attachments?.release(queuedAttachments(all))
     for (const item of all) void this.deps.envFiles?.remove(item.id).catch(() => {})
+    // Huli: the session's file checkpoints go with it.
+    for (const item of all) void this.deps.fileCheckpoints?.forget(item.id).catch(() => {})
     for (const item of all) this.forget(item.id)
     this.saveIndex()
     this.removeThreads(all.map((item) => item.id))
@@ -15677,6 +15943,41 @@ export function revertCut(
       removed: agentItemIds(ids),
       kept: agentItemIds(thread.order.slice(0, at)).reverse(),
     },
+  }
+}
+
+/** Huli: where a rewind to one of the user's messages cuts the thread. */
+export interface RewindCut {
+  /** The first entry it takes out: a user's message that starts a turn. */
+  from: string
+  /** The entries it takes out, from `from` to the end. */
+  ids: string[]
+  /** The user's messages that leave. */
+  messages: number
+  /** Whether any message of the user's stays. */
+  keepsAny: boolean
+}
+
+/**
+ * Huli: a rewind to before the user's message `entryId`, which started a turn: it and every entry
+ * after it leave.
+ */
+export function rewindCut(thread: Pick<ThreadState, 'order' | 'byId'>, entryId: string): RewindCut {
+  const startsTurn = (id: string): boolean => {
+    const entry = thread.byId[id]
+    return entry?.kind === 'user' && !entry.steered
+  }
+  const start = thread.order.indexOf(entryId)
+  if (start < 0 || !startsTurn(entryId)) {
+    throw new HostError('invalid_params', t('session.rewindNoPoint'))
+  }
+  const ids = thread.order.slice(start)
+  const before = thread.order.slice(0, start)
+  return {
+    from: thread.order[start]!,
+    ids,
+    messages: ids.filter(startsTurn).length,
+    keepsAny: before.some(startsTurn),
   }
 }
 

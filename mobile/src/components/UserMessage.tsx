@@ -54,10 +54,11 @@ export const UserMessage = memo(function UserMessage(props: {
 }) {
   const { content } = props
   const { c, s } = useSessionTokens()
-  const { sessionId, commands, command } = useSessionRows((r) => ({
+  const { sessionId, commands, command, rewind } = useSessionRows((r) => ({
     sessionId: r.sessionId,
     commands: r.commands,
     command: r.command,
+    rewind: r.rewind ?? null,
   }))
   const refs = useFileRefs()
   const text = textOf(content)
@@ -157,6 +158,26 @@ export const UserMessage = memo(function UserMessage(props: {
       ? `从 ${props.device.name} 发送`
       : null
 
+  // Huli: back to this message, with a preview of what leaves and what the files would become.
+  const rewindItems: MenuNode[] = []
+  const entryId = props.id
+  if (rewind && entryId && !props.steered && !props.from) {
+    rewindItems.push(
+      {
+        key: 'edit-from-here',
+        label: '从这里重新编辑',
+        icon: 'pencil',
+        onPress: () => rewind(entryId, 'edit'),
+      },
+      {
+        key: 'rewind-to-here',
+        label: '回退到这里',
+        icon: 'arrow.uturn.backward',
+        onPress: () => rewind(entryId, 'rewind'),
+      },
+    )
+  }
+
   const menu: MenuNode[] = [
     {
       key: 'copy',
@@ -176,6 +197,7 @@ export const UserMessage = memo(function UserMessage(props: {
       icon: 'doc.plaintext',
       onPress: () => void copyText(text),
     },
+    ...rewindItems,
   ]
 
   return (

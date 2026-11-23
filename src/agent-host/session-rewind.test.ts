@@ -172,14 +172,14 @@ it('loses nothing when the agent cannot cut its session, and puts the turns back
   expect(said(window.entries(id))).toEqual(['one', 'two', 'two again'])
 })
 
-it('refuses a message of an older thread its agent cannot cut', async () => {
+it('carries on in a new session, given the conversation kept, where the agent cannot cut', async () => {
   dir = await tempFolder('kettu-rewind-')
-  const { host, window, id } = await session(['one'])
-  const one = entryOf(window, id, 'one')
+  const { host, window, id } = await session(['one', 'two'])
+  const two = entryOf(window, id, 'two')
   await host.stop()
   hosts.splice(0)
 
-  // The thread is asked as the session attaches again, here for its next message.
+  // Huli: an older thread its agent cannot cut, which upstream refuses to edit from.
   const { server, started } = appServer()
   server.on('thread/read', (params) => ({
     thread: { ...threadResponse(params.threadId as string).thread, historyMode: 'legacy' },
@@ -189,11 +189,34 @@ it('refuses a message of an older thread its agent cannot cut', async () => {
   await reopened.open(id)
   await reopened.request('sessions.queue', {
     sessionId: id,
-    content: [{ type: 'text', text: 'two' }],
+    content: [{ type: 'text', text: 'three' }],
   })
-  await vi.waitFor(() => expect(started.has('two')).toBe(true))
+  await vi.waitFor(() => expect(started.has('three')).toBe(true))
+  const { threadId, turnId } = started.get('three')!
+  server.notify('turn/completed', { threadId, turn: turn(turnId, 'completed') })
   await reopened.until(() => reopened.thread(id).session.noRewind === true)
-  await expect(
-    reopened.request('sessions.rewind', { sessionId: id, entryId: one.id, draft: [] }),
-  ).rejects.toMatchObject({ code: 'restricted' })
+  await reopened.until(() => reopened.summary(id)?.status === 'ready')
+
+  await reopened.request('sessions.rewind', { sessionId: id, entryId: two.id, draft: [] })
+  // The new session's line stands where the cut is, its patch in the batch after the cut's.
+  await reopened.until(() => reopened.entries(id).at(-1)?.kind === 'takeover')
+  expect(said(reopened.entries(id))).toEqual(['one'])
+  expect(reopened.entries(id).at(-1)).toMatchObject({ kind: 'takeover', rewound: true })
+  const threads = server.sent('thread/start').length
+  await reopened.request('sessions.queue', {
+    sessionId: id,
+    content: [{ type: 'text', text: 'two again' }],
+  })
+  await vi.waitFor(() => expect(server.sent('thread/start').length).toBe(threads + 1))
+  await vi.waitFor(() =>
+    expect(JSON.stringify(server.sent('turn/start').at(-1))).toContain('two again'),
+  )
+  expect(server.sent('thread/revert')).toEqual([])
+  // The new session hears of the turn kept, in its history or ahead of the prompt.
+  const heard = JSON.stringify([
+    ...server.sent('thread/inject_items'),
+    server.sent('turn/start').at(-1),
+  ])
+  expect(heard).toContain('one')
+  expect(heard).not.toContain('three')
 })

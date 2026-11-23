@@ -1059,6 +1059,63 @@ export interface SessionPullRequest {
   failing: boolean // an open one has a failing check
 }
 
+/** Huli: one file a rewind would put back, by what it does to the file as it is now. */
+export interface RewindChange {
+  /** Relative to its folder, `/`-separated. */
+  path: string
+  action: 'restore' | 'delete' | 'recreate'
+  /** Lines the restore adds and removes; null where they were not counted. */
+  insertions: number | null
+  deletions: number | null
+  binary?: boolean
+}
+
+/** Huli: what a rewind would do to the files of the session's folders. */
+export type RewindFiles =
+  | {
+      state: 'ready'
+      folders: {
+        folder: string
+        changes: RewindChange[]
+        /** Files that may differ but stay as they are, as no copy of them was kept. */
+        kept: number
+        /** No checkpoint of this folder for the message. */
+        missing?: boolean
+      }[]
+      insertions: number | null
+      deletions: number | null
+      /** Passed back to the rewind, which restores only while the files are as previewed. */
+      token: string
+    }
+  | { state: 'unchanged' }
+  | {
+      state: 'unavailable'
+      /** `none`: no checkpoint for the message; `busy`: another session is at work in the files. */
+      reason: 'none' | 'busy' | 'failed'
+      detail?: string
+    }
+
+/** Huli: a rewind's preview, which changes nothing. */
+export interface RewindPreview {
+  /** The user's messages that leave the conversation. */
+  messages: number
+  /**
+   * How the conversation goes back: `agent`, the agent takes the turns out of its own history;
+   * `fresh`, the agent cannot, so a new session of it carries on, given the conversation kept;
+   * `empty`, nothing is kept and the next message starts a new session.
+   */
+  conversation: 'agent' | 'fresh' | 'empty'
+  files: RewindFiles
+}
+
+/** Huli: what restoring the files to a message's checkpoint did. */
+export interface FilesRestored {
+  restored: number
+  failed: number
+  /** The copy of the files as they were before, which `sessions.undoRewindFiles` restores. */
+  backup: string | null
+}
+
 export interface SessionSummary {
   id: string
   agentId: AgentId
@@ -1947,6 +2004,23 @@ export interface HostContract {
   // Undoes the latest turn, which `entryId`, the user's message, starts: the agent's history loses
   // it and the thread its entries. What it changed on disk stays.
   'sessions.revert': { params: { sessionId: string; entryId: string }; result: void }
+  // Huli: what taking the session back to before `entryId`, one of the user's messages, would do
+  // to its conversation and files, changing nothing.
+  'sessions.rewindPreview': {
+    params: { sessionId: string; entryId: string }
+    result: RewindPreview
+  }
+  // Huli: puts the files of the session's folders back as they were when `entryId` was sent, while
+  // they are as the preview's `token` found them, keeping a backup of them as they are.
+  'sessions.restoreFiles': {
+    params: { sessionId: string; entryId: string; token: string }
+    result: FilesRestored
+  }
+  // Huli: puts the files back as a restore found them, from its backup.
+  'sessions.undoRewindFiles': {
+    params: { sessionId: string; backup: string }
+    result: { restored: number; failed: number }
+  }
   // What removing the session's worktree would lose, and the other sessions still in it.
   'worktrees.inspect': {
     params: { sessionId: string }
@@ -2838,6 +2912,9 @@ export const HOST_METHODS = [
   'sessions.putBack',
   'sessions.fork',
   'sessions.revert',
+  'sessions.rewindPreview',
+  'sessions.restoreFiles',
+  'sessions.undoRewindFiles',
   'worktrees.inspect',
   'worktrees.remove',
   'worktrees.retrySetup',

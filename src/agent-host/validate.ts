@@ -2386,6 +2386,28 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       return { sessionId: sessionId(o), entryId: string(o, 'entryId', ACP_ID_CHARS) }
     },
+    'sessions.rewindPreview': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), entryId: string(o, 'entryId', ACP_ID_CHARS) }
+    },
+    'sessions.restoreFiles': (params) => {
+      const o = fields(params)
+      if (typeof o.token !== 'string' || !/^[0-9a-f]{64}$/.test(o.token)) {
+        throw invalidParams('token must be a preview token')
+      }
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ACP_ID_CHARS),
+        token: o.token,
+      }
+    },
+    'sessions.undoRewindFiles': (params) => {
+      const o = fields(params)
+      if (typeof o.backup !== 'string' || !/^b-\d{1,16}$/.test(o.backup)) {
+        throw invalidParams('backup must be a rewind backup')
+      }
+      return { sessionId: sessionId(o), backup: o.backup }
+    },
     'worktrees.inspect': session,
     'worktrees.remove': (params) => {
       const o = fields(params)
