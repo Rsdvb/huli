@@ -543,6 +543,10 @@ async function start(): Promise<void> {
       void marketKeys.setProjectSecrets(project, values).catch((error: unknown) => {
         log.warn(`Could not save a project's secrets: ${(error as Error).message}`)
       }),
+    onWebhookSecret: (routineId, secret) =>
+      void marketKeys.setWebhookSecret(routineId, secret).catch((error: unknown) => {
+        log.warn(`Could not save a webhook's secret: ${(error as Error).message}`)
+      }),
     onFirstStart: (harnesses) => settings.firstStart(harnesses),
     onAttention: (message) => {
       // While the island runs, it shows what needs the user in place of a notification.

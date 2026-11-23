@@ -30,6 +30,7 @@ import { SETTLE_DAYS } from './session-tidy'
 import { TOOL_CALL_VIEWS } from './zen-view'
 import type { AgentId, HarnessId } from './thread'
 import { PORT_BASE_MAX, PORT_BASE_MIN } from './worktree-ports'
+import { WEBHOOK_PORT_MAX, WEBHOOK_PORT_MIN } from './routines'
 import { WORKING_STEP_LIMITS } from './workflow'
 
 export const SETTINGS_SECTIONS = [
@@ -1951,6 +1952,22 @@ const ENTRIES = {
       const noProxy = file.proxy.mode === 'custom' ? file.proxy.noProxy : ''
       return { proxy: { mode: 'custom', url, noProxy } }
     },
+  },
+  // Huli: the loopback port routines' webhooks listen on.
+  'advanced.webhook-port': {
+    section: 'advanced',
+    row: 'webhook-port',
+    group: 'advanced.groups.network',
+    name: 'advanced.webhookPort.name',
+    description: 'advanced.webhookPort.description',
+    keywords: 'advanced.webhookPort.keywords',
+    part: 'host',
+    access: 'ask',
+    kind: 'number',
+    min: WEBHOOK_PORT_MIN,
+    max: WEBHOOK_PORT_MAX,
+    get: (file) => file.webhooks.port,
+    patch: (value) => ({ webhooks: { port: Number(value) } }),
   },
   'advanced.report': {
     section: 'advanced',

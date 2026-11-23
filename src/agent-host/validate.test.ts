@@ -1195,6 +1195,19 @@ describe('routine requests', () => {
     expect(posix['routines.update']({ routineId, changes })).toEqual({ routineId, changes })
   })
 
+  it('Huli: runs on its webhook with its schedule kept, and makes a secret for one routine', () => {
+    const schedule = draft.trigger.schedule
+    expect(
+      posix['routines.create']({ ...draft, trigger: { kind: 'webhook', schedule } }).trigger,
+    ).toEqual({ kind: 'webhook', schedule })
+    rejects(() => posix['routines.create']({ ...draft, trigger: { kind: 'webhook' } }))
+    const routineId = 'r-0123456789ab'
+    expect(posix['routines.webhookSecret']({ routineId })).toEqual({ routineId })
+    rejects(() => posix['routines.webhookSecret']({ routineId: 'r-1' }))
+    rejects(() => posix['routines.webhookSecret']({}))
+    rejects(() => posix['routines.webhookSecret']({ routineId, secret: 'mine' }))
+  })
+
   it("sets a session's pull request automation only for a pull request URL and a switch", () => {
     const url = 'https://github.com/octo-org/hello-world/pull/7'
     expect(posix['sessions.setPrFlow']({ sessionId: 's', url, autoMerge: true })).toEqual({

@@ -167,6 +167,7 @@ import {
   TextSize,
   WorktreeLocation,
   WorktreePorts,
+  WebhookPort,
   Zoom,
 } from './sections'
 import { useAllowedSites } from './allowed-sites'
@@ -1090,6 +1091,7 @@ export function useAdvancedSection(): SectionDef {
   const { hostId } = useHostScope()
   const debugOn = useDebugStore((s) => s.status.on)
   const data = group('data', t('advanced.groups.data'))
+  const webhooksOn = useEntry('settings.webhookPort')
   return {
     id: 'advanced',
     title: t('sections.advanced'),
@@ -1103,6 +1105,16 @@ export function useAdvancedSection(): SectionDef {
         layout: 'block',
         render: (text) => <Proxy label={text} />,
       },
+      ...(webhooksOn
+        ? [
+            {
+              id: 'webhook-port',
+              setting: 'advanced.webhook-port',
+              group: group('network', t('advanced.groups.network')),
+              render: () => <WebhookPort />,
+            } satisfies RowDef,
+          ]
+        : []),
       {
         id: 'report',
         setting: 'advanced.report',

@@ -70,6 +70,7 @@ import { AUTO_APPROVE_LEVELS } from '@shared/risk'
 import { SANDBOX_NETWORKS, SANDBOX_TIERS } from '@shared/sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
 import { SETTLE_DAYS } from '@shared/session-tidy'
+import { isWebhookPort, WEBHOOK_PORT_MAX, WEBHOOK_PORT_MIN } from '@shared/routines'
 import { TOOL_CALL_VIEWS } from '@shared/zen-view'
 import { THEME_ID } from '@shared/themes'
 import { WORKING_STEP_LIMITS } from '@shared/workflow'
@@ -249,6 +250,10 @@ const isPortBaseValue: Check = (value, path) =>
   isPortBase(value)
     ? null
     : `"${path}" must be a whole number from ${PORT_BASE_MIN} to ${PORT_BASE_MAX}`
+const isWebhookPortValue: Check = (value, path) =>
+  isWebhookPort(value)
+    ? null
+    : `"${path}" must be a whole number from ${WEBHOOK_PORT_MIN} to ${WEBHOOK_PORT_MAX}`
 const isUserFonts: Check = (value, path) => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return `"${path}" must be an object`
@@ -372,6 +377,7 @@ const SECTION_FIELDS = {
     idleDays: oneOf(...SETTLE_DAYS),
     merged: isBoolean,
   },
+  webhooks: { port: isWebhookPortValue },
   workflow: { maxWorkingSteps: oneOf(...WORKING_STEP_LIMITS) },
   computerUse: {
     enabled: isBoolean,
@@ -1966,6 +1972,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     idleSessions: { ...settings.idleSessions },
     supervisor: { ...settings.supervisor },
     tidy: { ...settings.tidy },
+    webhooks: { ...settings.webhooks },
     workflow: { ...settings.workflow },
     usage: { fromComputer: settings.usage.fromComputer },
     sessionTitles: settings.general.sessionTitles,
@@ -2013,6 +2020,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'idleSessions',
   'supervisor',
   'tidy',
+  'webhooks',
   'workflow',
   'usage',
   'computerUse',

@@ -76,6 +76,7 @@ export const FEATURES = [
       'search.routines',
       'page.routines',
       'settings.routineNotifications',
+      'settings.webhookPort',
       'session.routineLink',
       'phone.routines',
     ],

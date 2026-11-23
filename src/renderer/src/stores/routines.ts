@@ -71,6 +71,8 @@ interface RoutinesStore {
   update(routineId: string, changes: RoutineChanges): Promise<RoutineView>
   remove(routineId: string): Promise<void>
   markSeen(routineId: string): Promise<void>
+  /** Huli: a new secret for a webhook routine of this computer, shown once. */
+  webhookSecret(routineId: string): Promise<{ secret: string }>
 }
 
 const UNREAD: OtherRoutines = { loaded: false, read: false, problem: null, error: null, ids: [] }
@@ -263,6 +265,10 @@ export const useRoutinesStore = create<RoutinesStore>()((set, get) => ({
         }
       })
     }
+  },
+
+  webhookSecret(routineId) {
+    return host('routines.webhookSecret', { routineId })
   },
 
   async runNow(routineId) {

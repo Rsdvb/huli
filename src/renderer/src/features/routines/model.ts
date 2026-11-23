@@ -224,12 +224,14 @@ export function runTrigger(run: RoutineRun): string {
   if (run.trigger === 'manual') return i18n.t('routines:trigger.manual')
   if (run.trigger === 'catch-up') return i18n.t('routines:trigger.catchUp')
   if (run.trigger === 'event') return run.cause?.title ?? i18n.t('routines:trigger.event')
+  if (run.trigger === 'webhook') return i18n.t('routines:trigger.webhook')
   return i18n.t('routines:trigger.schedule')
 }
 
 /** Huli: when a routine runs, in words: its schedule's, or the GitHub event it runs on. */
 export function triggerWords(trigger: RoutineTrigger): string {
   if (trigger.kind === 'schedule') return scheduleWords(trigger.schedule)
+  if (trigger.kind === 'webhook') return i18n.t('routines:on.webhookSummary')
   return githubEventWords(trigger.event)
 }
 

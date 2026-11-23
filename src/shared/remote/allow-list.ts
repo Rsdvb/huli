@@ -40,6 +40,8 @@ const WINDOW_ONLY: ReadonlySet<string> = new Set<HostMethod>([
   'sandbox.containerStatus',
   'sandbox.pullImage',
   'sandbox.removeImage',
+  // Huli: a webhook's secret is shown once, at the computer whose loopback the webhook is on.
+  'routines.webhookSecret',
   // Huli: so is Moli's download for background web reading, whose size the window shows first.
   'webReader.status',
   'webReader.install',

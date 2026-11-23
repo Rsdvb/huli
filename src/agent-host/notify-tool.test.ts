@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest'
 import type { Caller } from './artifacts/tools'
 import {
   NOTE_BODY_CHARS,
+  NOTE_LIMITS,
   NOTE_TITLE_CHARS,
-  NoteLimiter,
   NOTIFY_TOOL,
   NotifyTools,
   parseNote,
   type Note,
 } from './notify-tool'
+import { WindowLimiter } from './window-limiter'
 
 const caller = (sessionId: string) => ({ sessionId, project: '/p' }) as Caller
 
@@ -16,7 +17,7 @@ describe('parseNote', () => {
   it('keeps one line of plain text, without control or reordering marks', () => {
     const note = parseNote({
       title: ' Build\n\tdone\u0007 ',
-      body: 'All ‮tests‬ passed\u0000.\r\nNext: ship.',
+      body: 'All \u202etests\u202c passed\u0000.\r\nNext: ship.',
     })
     expect(note).toEqual({ title: 'Build done', body: 'All tests passed. Next: ship.' })
   })
@@ -33,16 +34,16 @@ describe('parseNote', () => {
     expect(() => parseNote(null)).toThrow()
     expect(() => parseNote(['T'])).toThrow()
     expect(() => parseNote({ body: 'B' })).toThrow()
-    expect(() => parseNote({ title: ' ​\n' })).toThrow()
+    expect(() => parseNote({ title: ' \u200b\n' })).toThrow()
     expect(() => parseNote({ title: 'T', body: 7 })).toThrow()
     expect(() => parseNote({ title: 'T', sessionId: 'other' })).toThrow()
   })
 })
 
-describe('NoteLimiter', () => {
+describe('WindowLimiter with the limits of notes', () => {
   it('lets a session send 3 a minute, then says how long to wait', () => {
     let now = 1_000_000
-    const limiter = new NoteLimiter(undefined, () => now)
+    const limiter = new WindowLimiter(NOTE_LIMITS, () => now)
     for (let i = 0; i < 3; i++) {
       expect(limiter.take('s1').ok).toBe(true)
       now += 1000
@@ -57,7 +58,7 @@ describe('NoteLimiter', () => {
 
   it('holds a session to 30 an hour however slowly it sends', () => {
     let now = 0
-    const limiter = new NoteLimiter(undefined, () => now)
+    const limiter = new WindowLimiter(NOTE_LIMITS, () => now)
     for (let i = 0; i < 30; i++) {
       expect(limiter.take('s1').ok).toBe(true)
       now += 61_000
@@ -71,7 +72,7 @@ describe('NoteLimiter', () => {
 
   it('counts no refused call', () => {
     let now = 0
-    const limiter = new NoteLimiter(undefined, () => now)
+    const limiter = new WindowLimiter(NOTE_LIMITS, () => now)
     for (let i = 0; i < 3; i++) limiter.take('s1')
     for (let i = 0; i < 10; i++) expect(limiter.take('s1').ok).toBe(false)
     now = 60_000

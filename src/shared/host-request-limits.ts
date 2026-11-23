@@ -235,6 +235,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'routines.cancelRun': AGENT_MS,
   'routines.runs': HOST_MS,
   'routines.markSeen': HOST_MS,
+  'routines.webhookSecret': HOST_MS,
   'workflows.list': HOST_MS,
   'workflows.read': HOST_MS,
   'workflows.add': AGENT_MS,

@@ -852,6 +852,12 @@
       "name": "备份",
       "description": "每天把 Kettu 的数据在这台电脑上备份一份，也可以从备份恢复。",
       "open": "备份设置…"
+    },
+    "webhookPort": {
+      "name": "定时任务 Webhook 端口",
+      "description": "由 Webhook 触发的定时任务在这台电脑上接收请求的端口。只有这类定时任务开启时纸鸢才监听。",
+      "keywords": "webhook 定时任务 端口 监听 http 触发 本机",
+      "invalid": "请输入 {{min}} 到 {{max}} 之间的整数。"
     }
   },
   "agents": {

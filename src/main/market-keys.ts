@@ -32,6 +32,7 @@ import type { Logger } from './log'
 import type { IdentityCipher } from './remote-identity'
 import { MAX_MARKET_SERVERS } from './settings-schema'
 import { secretNameProblem, secretValueProblem } from '@shared/secret-request'
+import { ROUTINE_ID } from '@shared/routines'
 
 /** The values of each server's inputs, by server id and input name, for the agent host alone. */
 export type MarketKeyValues = Record<string, Record<string, string>>
@@ -44,6 +45,8 @@ export interface MarketKeysPush {
   profiles: Record<string, StoredProfiles>
   /** Huli: values saved from secret cards, by project path, then name; absent while none are. */
   projectSecrets?: Record<string, Record<string, string>>
+  /** Huli: each webhook routine's secret, by routine id; absent while none are. */
+  webhookSecrets?: Record<string, string>
 }
 
 /** Huli: an agent's profiles with their keys, and the one its new sessions start with. */
@@ -68,6 +71,9 @@ export const MAX_OAUTH_BYTES = 64 * 1024
 const MAX_SECRET_PROJECTS = 200
 const MAX_SECRETS_PER_PROJECT = 32
 const MAX_PROJECT_CHARS = 4096
+/** Huli: how many webhook routines may keep a secret, and what one is: 32 bytes in base64url. */
+const MAX_WEBHOOK_SECRETS = 200
+const WEBHOOK_SECRET = /^[A-Za-z0-9_-]{43}$/
 
 export function marketKeysFile(dataPath: string): string {
   return join(dataPath, 'market-keys.json')
@@ -96,6 +102,8 @@ interface Contents {
   profiles: Map<string, StoredProfiles>
   /** Huli: values saved from secret cards, by project path, then name. */
   projects: Keys
+  /** Huli: each webhook routine's secret, by routine id. */
+  webhooks: Map<string, string>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -203,6 +211,7 @@ function parseContents(raw: unknown, version: 1 | 2 | 3): Contents | null {
         agentEnv: new Map(),
         profiles: new Map(),
         projects: new Map(),
+        webhooks: new Map(),
       }
     )
   }
@@ -212,12 +221,14 @@ function parseContents(raw: unknown, version: 1 | 2 | 3): Contents | null {
   const agentEnv = version === 3 ? parseValues(raw.agentEnv) : new Map()
   const profiles = raw.profiles === undefined ? new Map() : parseProfiles(raw.profiles)
   const projects = raw.projectSecrets === undefined ? new Map() : parseProjects(raw.projectSecrets)
+  const webhooks = raw.webhookSecrets === undefined ? new Map() : parseWebhooks(raw.webhookSecrets)
   return (
     keys &&
     oauth &&
     agentEnv &&
     profiles &&
-    projects && { keys, oauth, agentEnv, profiles, projects }
+    projects &&
+    webhooks && { keys, oauth, agentEnv, profiles, projects, webhooks }
   )
 }
 
@@ -261,14 +272,39 @@ function parseProfiles(raw: unknown): Map<string, StoredProfiles> | null {
   return profiles
 }
 
-function contentsObject({ keys, oauth, agentEnv, profiles, projects }: Contents): MarketKeysPush {
+function contentsObject({
+  keys,
+  oauth,
+  agentEnv,
+  profiles,
+  projects,
+  webhooks,
+}: Contents): MarketKeysPush {
   return {
     values: toObject(keys),
     oauth: Object.fromEntries(oauth),
     agentEnv: toObject(agentEnv),
     profiles: Object.fromEntries(profiles),
     ...(projects.size > 0 ? { projectSecrets: toObject(projects) } : {}),
+    ...(webhooks.size > 0 ? { webhookSecrets: Object.fromEntries(webhooks) } : {}),
   }
+}
+
+/** Huli: the webhook routines' secrets as the file keeps them; null when one is not valid. */
+function parseWebhooks(raw: unknown): Map<string, string> | null {
+  if (!isRecord(raw)) return null
+  const entries = Object.entries(raw)
+  if (entries.length > MAX_WEBHOOK_SECRETS) return null
+  const webhooks = new Map<string, string>()
+  for (const [routineId, secret] of entries) {
+    if (!ROUTINE_ID.test(routineId) || !isWebhookSecretText(secret)) return null
+    webhooks.set(routineId, secret)
+  }
+  return webhooks
+}
+
+function isWebhookSecretText(value: unknown): value is string {
+  return typeof value === 'string' && WEBHOOK_SECRET.test(value)
 }
 
 /** Huli: values saved from secret cards as the file keeps them; null when one is not valid. */
@@ -307,10 +343,17 @@ function toObject(keys: Keys): MarketKeyValues {
  * of a server that is gone or no longer signs in with OAuth.
  */
 function pruned(
-  { keys, oauth, agentEnv, profiles, projects }: Contents,
+  { keys, oauth, agentEnv, profiles, projects, webhooks }: Contents,
   servers: readonly MarketServer[],
 ): Contents {
-  const next: Contents = { keys: new Map(), oauth: new Map(), agentEnv, profiles, projects }
+  const next: Contents = {
+    keys: new Map(),
+    oauth: new Map(),
+    agentEnv,
+    profiles,
+    projects,
+    webhooks,
+  }
   for (const server of servers) {
     const inputs = keys.get(server.id)
     if (inputs) {
@@ -448,6 +491,7 @@ export class MarketKeys {
       agentEnv: new Map(),
       profiles: new Map(),
       projects: new Map(),
+      webhooks: new Map(),
     }
     let readOnly: ReadOnly | null = null
     let resave = false
@@ -677,6 +721,29 @@ export class MarketKeys {
     })
   }
 
+  /**
+   * Huli: keeps a webhook routine's new secret or, with null, forgets it, from an untrusted
+   * message of the agent host. Settles once the file holds the change.
+   */
+  async setWebhookSecret(routineId: unknown, secret: unknown): Promise<void> {
+    if (typeof routineId !== 'string' || !ROUTINE_ID.test(routineId)) {
+      throw invalid('"routineId" must name a routine')
+    }
+    // The message never names the value.
+    if (secret !== null && !isWebhookSecretText(secret)) throw invalid('The secret is not valid')
+    await this.run(async () => {
+      if (this.readOnly) throw new MarketKeysError('unavailable', readOnlyText(this.readOnly))
+      const webhooks = new Map(this.contents.webhooks)
+      if (secret === null) webhooks.delete(routineId)
+      else webhooks.set(routineId, secret)
+      if (webhooks.size > MAX_WEBHOOK_SECRETS) {
+        throw invalid(`At most ${MAX_WEBHOOK_SECRETS} routines may keep a webhook secret`)
+      }
+      if (secret === null && !this.contents.webhooks.has(routineId)) return
+      await this.commit({ ...this.contents, webhooks }, true)
+    })
+  }
+
   /** Everything the agent host is sent: the values, and every OAuth sign-in. */
   contentsForHost(): MarketKeysPush {
     return contentsObject(this.contents)
@@ -788,7 +855,8 @@ export class MarketKeys {
       contents.oauth.size === 0 &&
       contents.agentEnv.size === 0 &&
       contents.profiles.size === 0 &&
-      contents.projects.size === 0
+      contents.projects.size === 0 &&
+      contents.webhooks.size === 0
     ) {
       await rm(file, { force: true })
       return

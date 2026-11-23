@@ -212,7 +212,9 @@ export default function RoutinePage() {
                 ? ' · 补跑'
                 : run.trigger === 'event'
                   ? ` · ${run.cause?.title ?? 'GitHub 事件'}`
-                  : ''}
+                  : run.trigger === 'webhook'
+                    ? ' · Webhook'
+                    : ''}
             {run.count > 1 ? ` · ${run.count} 次合并` : ''}
           </Text>
           {run.error ? (
@@ -320,7 +322,7 @@ export default function RoutinePage() {
             }
           />
           <ListRow
-            title={routine.trigger.kind === 'github' ? '运行时机' : '计划'}
+            title={routine.trigger.kind === 'schedule' ? '计划' : '运行时机'}
             value={triggerText(routine.trigger)}
           />
           <ListRow

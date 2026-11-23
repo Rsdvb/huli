@@ -1768,6 +1768,9 @@ export interface HostContract {
   }
   // The routine's page is shown: its ended runs count as seen.
   'routines.markSeen': { params: { routineId: string }; result: void }
+  // Huli: a new secret for a webhook routine, in place of its old one, answered this once. Windows
+  // only: a paired device never sees one.
+  'routines.webhookSecret': { params: { routineId: string }; result: { secret: string } }
   // Workflows: the user's library. See workflow; an older host also sends the ones it shipped with.
   'workflows.list': { params: void; result: WireWorkflowEntry[] }
   'workflows.read': {
@@ -3018,6 +3021,7 @@ export const HOST_METHODS = [
   'routines.cancelRun',
   'routines.runs',
   'routines.markSeen',
+  'routines.webhookSecret',
   'workflows.list',
   'workflows.read',
   'workflows.add',

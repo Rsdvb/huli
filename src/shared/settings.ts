@@ -15,6 +15,7 @@ import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
 import { DEFAULT_PORT_BASE } from './worktree-ports'
 import { DEFAULT_WORKING_STEPS, type WorkingStepLimit } from './workflow'
+import { DEFAULT_WEBHOOK_PORT } from './routines'
 
 /** Whether a host's first start has run, so it runs once. */
 export interface InitialSetup {
@@ -145,6 +146,8 @@ export interface SettingsFile {
   supervisor: SupervisorSettings
   // Huli: the rules that settle sessions out of the active list by themselves (会话整理).
   tidy: TidySettings
+  // Huli: the loopback port routines' webhooks listen on, while one of them uses its webhook.
+  webhooks: { port: number }
   // How many workflow step sessions work at once across every task.
   workflow: { maxWorkingSteps: WorkingStepLimit }
   // source: where updates come from; GitHub only never reaches Kettu's download service.
@@ -444,6 +447,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   idleSessions: { release: 'auto', outOfView: 5, inView: 30, limit: null },
   supervisor: DEFAULT_SUPERVISOR,
   tidy: { ...DEFAULT_TIDY },
+  webhooks: { port: DEFAULT_WEBHOOK_PORT },
   workflow: { maxWorkingSteps: DEFAULT_WORKING_STEPS },
   updates: { automatic: 'download', source: 'auto' },
   privacy: { hideAccount: false },
@@ -554,6 +558,7 @@ export interface SettingsPatch {
   idleSessions?: Partial<SettingsFile['idleSessions']>
   supervisor?: Partial<SettingsFile['supervisor']>
   tidy?: Partial<SettingsFile['tidy']>
+  webhooks?: Partial<SettingsFile['webhooks']>
   workflow?: Partial<SettingsFile['workflow']>
   updates?: Partial<SettingsFile['updates']>
   privacy?: Partial<SettingsFile['privacy']>
@@ -602,6 +607,8 @@ export interface HostSettings {
   supervisor?: SettingsFile['supervisor']
   // Huli: the rules that settle sessions by themselves; absent from a parent older than them.
   tidy?: SettingsFile['tidy']
+  // Huli: routines' webhook port; absent from a parent older than it, which leaves the default.
+  webhooks?: SettingsFile['webhooks']
   workflow: SettingsFile['workflow']
   usage: { fromComputer: boolean }
   sessionTitles: boolean // write a title for a session its agent leaves untitled

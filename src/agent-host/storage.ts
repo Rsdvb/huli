@@ -666,6 +666,7 @@ function routineOf(value: unknown): Routine | null {
     value.options.length > ROUTINE_OPTION_LIMIT ||
     !isRecord(value.trigger) ||
     (value.trigger.kind !== 'schedule' &&
+      value.trigger.kind !== 'webhook' &&
       !(value.trigger.kind === 'github' && isGithubEvent(value.trigger.event))) ||
     !isSchedule(value.trigger.schedule) ||
     !isPermissionScope(value.scope) ||
@@ -705,7 +706,9 @@ function routineOf(value: unknown): Routine | null {
     trigger:
       value.trigger.kind === 'github' && isGithubEvent(value.trigger.event)
         ? { kind: 'github', event: value.trigger.event, schedule: value.trigger.schedule }
-        : { kind: 'schedule', schedule: value.trigger.schedule },
+        : value.trigger.kind === 'webhook'
+          ? { kind: 'webhook', schedule: value.trigger.schedule }
+          : { kind: 'schedule', schedule: value.trigger.schedule },
     scope: value.scope,
     timeLimitMinutes: value.timeLimitMinutes,
     keptRunSessions,

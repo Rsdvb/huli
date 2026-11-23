@@ -6,13 +6,14 @@
 
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { Caller } from './artifacts/tools'
+import { WindowLimiter, type WindowLimit } from './window-limiter'
 
 export const NOTIFY_TOOL = 'notify'
 export const NOTE_TITLE_CHARS = 80
 export const NOTE_BODY_CHARS = 300
 
 /** How many notes one session may send within each window. */
-export const NOTE_LIMITS: readonly { windowMs: number; max: number }[] = [
+export const NOTE_LIMITS: readonly WindowLimit[] = [
   { windowMs: 60_000, max: 3 },
   { windowMs: 60 * 60_000, max: 30 },
 ]
@@ -109,43 +110,6 @@ export function parseNote(input: unknown): Note {
   return { title, body: plainNote(fields.body ?? '', NOTE_BODY_CHARS) }
 }
 
-/**
- * The notes each session sent within the longest window, newest last. Nothing runs between calls:
- * each one drops what has aged out, and the sessions with nothing left.
- */
-export class NoteLimiter {
-  private readonly sent = new Map<string, number[]>()
-  private readonly longest: number
-
-  constructor(
-    private readonly limits = NOTE_LIMITS,
-    private readonly now: () => number = Date.now,
-  ) {
-    this.longest = Math.max(...limits.map((limit) => limit.windowMs))
-  }
-
-  /** Counts a note of the session's when it is within every limit; else how long until it is. */
-  take(sessionId: string): { ok: true } | { ok: false; retryMs: number } {
-    const now = this.now()
-    for (const [id, times] of this.sent) {
-      const kept = times.filter((at) => now - at < this.longest)
-      if (kept.length === 0) this.sent.delete(id)
-      else if (kept.length !== times.length) this.sent.set(id, kept)
-    }
-    const times = this.sent.get(sessionId) ?? []
-    let retryMs = 0
-    for (const { windowMs, max } of this.limits) {
-      const inWindow = times.filter((at) => now - at < windowMs)
-      if (inWindow.length >= max) {
-        retryMs = Math.max(retryMs, inWindow[inWindow.length - max]! + windowMs - now)
-      }
-    }
-    if (retryMs > 0) return { ok: false, retryMs }
-    this.sent.set(sessionId, [...times, now])
-    return { ok: true }
-  }
-}
-
 export interface NotifyToolsDeps {
   /** Raises the note as the session's attention; `none` for a session Kettu does not hold. */
   notify(sessionId: string, note: Note): 'sent' | 'none'
@@ -153,10 +117,10 @@ export interface NotifyToolsDeps {
 }
 
 export class NotifyTools {
-  private readonly limiter: NoteLimiter
+  private readonly limiter: WindowLimiter
 
   constructor(private readonly deps: NotifyToolsDeps) {
-    this.limiter = new NoteLimiter(NOTE_LIMITS, deps.now)
+    this.limiter = new WindowLimiter(NOTE_LIMITS, deps.now)
   }
 
   /** Serves a call; a refusal becomes a tool error whose text says why. */

@@ -122,6 +122,8 @@ export interface HostsOptions {
   marketOAuth?(serverId: unknown, state: unknown): void
   /** Huli: values a secret card saved or forgot for a project, unchecked. */
   projectSecrets?(project: unknown, values: unknown): void
+  /** Huli: a webhook routine's new secret, or null to forget it, unchecked. */
+  webhookSecret?(routineId: unknown, secret: unknown): void
   /** The Kettu account the Marketplace tools publish with, which follows the agent host's init. */
   marketAccount(): MarketAccount | null
   /** Makes a Marketplace API call of the agent host's with the account's access token. */
@@ -992,6 +994,9 @@ export class Hosts {
         break
       case 'host:project-secrets':
         this.options.projectSecrets?.(message.project, message.values)
+        break
+      case 'host:webhook-secret':
+        this.options.webhookSecret?.(message.routineId, message.secret)
         break
       case 'host:first-start':
         this.options.firstStart?.(message.harnesses)

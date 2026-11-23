@@ -28,8 +28,9 @@ export function clockText(time: string): string {
   return clockOf(date.getTime())
 }
 
-/** Huli: when a routine runs: its schedule, or the GitHub event it runs on. */
+/** Huli: when a routine runs: its schedule, the GitHub event it runs on, or its webhook. */
 export function triggerText(trigger: RoutineTrigger): string {
+  if (trigger.kind === 'webhook') return '收到 Webhook 请求时'
   return trigger.kind === 'github' ? eventText(trigger.event) : scheduleText(trigger.schedule)
 }
 

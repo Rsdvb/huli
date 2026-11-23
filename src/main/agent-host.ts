@@ -100,6 +100,8 @@ export interface AgentHostDeps {
   onMarketOAuth?(serverId: unknown, state: unknown): void
   /** Huli: values a secret card saved or forgot for a project, unchecked. */
   onProjectSecrets?(project: unknown, values: unknown): void
+  /** Huli: a webhook routine's new secret, or null to forget it, unchecked. */
+  onWebhookSecret?(routineId: unknown, secret: unknown): void
   /** The Kettu account the Marketplace tools publish with, which follows init at each start. */
   marketAccount(): MarketAccount | null
   /** Huli: the chat bridges' configuration, which follows init at each start. */
@@ -911,6 +913,9 @@ export class AgentHost {
         break
       case 'host:project-secrets':
         this.deps.onProjectSecrets?.(message.project, message.values)
+        break
+      case 'host:webhook-secret':
+        this.deps.onWebhookSecret?.(message.routineId, message.secret)
         break
       case 'host:first-start':
         this.deps.onFirstStart?.(message.harnesses)

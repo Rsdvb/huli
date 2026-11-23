@@ -861,6 +861,12 @@
       "name": "Backup",
       "description": "A copy of Kettu’s data each day on this computer, and restoring one.",
       "open": "Backup settings…"
+    },
+    "webhookPort": {
+      "name": "Routines' webhook port",
+      "description": "Where routines that run on a webhook take requests, on this computer alone. Kite listens only while one of them is on.",
+      "keywords": "webhook routine port listen http trigger loopback",
+      "invalid": "Enter a whole number from {{min}} to {{max}}."
     }
   },
   "agents": {
