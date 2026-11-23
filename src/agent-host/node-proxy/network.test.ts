@@ -416,20 +416,26 @@ describe('the computer’s interfaces', () => {
     expect(parseWindowsAdapters('')).toEqual([])
   })
 
-  it('lists a Mac’s interfaces but loopback, an inactive one as down', () => {
+  it('lists a Mac’s interfaces but loopback and its own link-local utuns, an inactive one as down', () => {
     const ifconfig = [
       'lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384',
       'en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500',
       '\tstatus: active',
       'en1: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500',
       '\tstatus: inactive',
+      'utun0: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380',
+      '\tinet6 fe80::5a3c:1b2e:8f1d:2c4a%utun0 prefixlen 64 scopeid 0x10',
       'utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1500',
       '\tinet 198.18.0.1 --> 198.18.0.1 netmask 0xffff0000',
+      'utun5: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1400',
+      '\tinet6 fe80::1%utun5 prefixlen 64 scopeid 0x15',
+      '\tinet6 fd7a:115c:a1e0::1 prefixlen 48',
     ].join('\n')
     const ports = 'Hardware Port: Wi-Fi\nDevice: en0\n\nHardware Port: Thunderbolt 1\nDevice: en1\n'
     expect(parseMacInterfaces(ifconfig, ports)).toEqual([
       { name: 'en0', description: 'Wi-Fi', up: true, tunnel: false },
       { name: 'utun4', description: null, up: true, tunnel: true },
+      { name: 'utun5', description: null, up: true, tunnel: true },
       { name: 'en1', description: 'Thunderbolt 1', up: false, tunnel: false },
     ])
   })

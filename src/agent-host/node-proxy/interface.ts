@@ -157,17 +157,25 @@ export function parseMacInterfaces(ifconfig: string, ports = ''): NetworkInterfa
     if (hardware) port = hardware[1]!
     else if (device && port) names.set(device[1]!, port)
   }
-  const blocks: { name: string; flags: string[]; inactive: boolean }[] = []
+  const blocks: { name: string; flags: string[]; inactive: boolean; routable: boolean }[] = []
   for (const line of ifconfig.split('\n')) {
     const head = /^([^\s:]+):\s+flags=\d+<([^>]*)>/.exec(line)
-    if (head) blocks.push({ name: head[1]!, flags: head[2]!.split(','), inactive: false })
-    else if (blocks.length > 0 && /^\s+status:\s*inactive/.test(line)) {
-      blocks[blocks.length - 1]!.inactive = true
+    const last = blocks[blocks.length - 1]
+    if (head) {
+      blocks.push({ name: head[1]!, flags: head[2]!.split(','), inactive: false, routable: false })
+    } else if (last && /^\s+status:\s*inactive/.test(line)) last.inactive = true
+    else if (last && /^\s+inet\s/.test(line)) last.routable = true
+    else if (last && /^\s+inet6\s/.test(line) && !/^\s+inet6\s+fe80:/i.test(line)) {
+      last.routable = true
     }
   }
   return byName(
     blocks
       .filter((b) => !b.flags.includes('LOOPBACK') && !/^(gif|stf)\d/.test(b.name))
+      // Huli: macOS keeps a row of utun interfaces with only a link-local address for its own
+      // services (iCloud Private Relay and the like); none carries a proxy's or a VPN's traffic,
+      // so they are no choice. A proxy client's or a VPN's TUN has an address of its own.
+      .filter((b) => !(/^utun\d+$/.test(b.name) && !b.routable))
       .map((b) => {
         const description = names.get(b.name) ?? null
         return {

@@ -2862,7 +2862,7 @@
       "autoFound": "自动（{{name}}）",
       "autoHint": "纸鸢挑一块已连接的物理网卡，网络变了会跟着换。",
       "down": "未连接",
-      "tunnelHint": "代理或 VPN 建的虚拟网卡，选它就绕不开它们",
+      "tunnelHint": "代理或 VPN 的虚拟网卡",
       "missing": "现在找不到这块网卡"
     },
     "subscriptions": {
