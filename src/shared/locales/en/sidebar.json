@@ -638,5 +638,74 @@
       "past": "Pick a time after now.",
       "snooze": "Snooze"
     }
+  },
+  "newProject": {
+    "menu": {
+      "label": "Add project",
+      "open": "Open Folder…",
+      "clone": "Clone from Git…",
+      "empty": "New Empty Project…"
+    },
+    "clone": {
+      "title": "Clone from Git",
+      "description": "Clones the repository on this computer and adds it as a project. A private repository uses the sign-in Git already has here.",
+      "descriptionOn": "Clones the repository on {{host}} and adds it as a project there. A private repository uses the sign-in Git already has on {{host}}.",
+      "submit": "Clone",
+      "cancel": "Cancel Clone"
+    },
+    "empty": {
+      "title": "New Empty Project",
+      "description": "Makes a folder, runs git init in it and adds it as a project.",
+      "descriptionOn": "Makes a folder on {{host}}, runs git init in it and adds it as a project there.",
+      "submit": "Create"
+    },
+    "url": {
+      "label": "Repository address",
+      "placeholder": "https://github.com/owner/repo.git",
+      "empty": "Enter the repository's address",
+      "tooLong": "The address is too long",
+      "malformed": "That does not look like a repository's address",
+      "option": "An address cannot start with -",
+      "local": "Only remote repositories can be cloned here, not a folder or file:// address",
+      "scheme": "Use an https://, ssh:// or git@host:path address",
+      "password": "Leave the password out of the address; Git's own sign-in on the computer is used"
+    },
+    "parent": {
+      "label": "Location",
+      "choose": "Choose Another Folder…",
+      "last": "Last used",
+      "home": "Home",
+      "loadFailed": "The locations did not load: {{error}}",
+      "none": "The computer offers no location for a new project"
+    },
+    "name": {
+      "label": "Folder name",
+      "target": "Creates {{path}}",
+      "empty": "Enter a folder name",
+      "tooLong": "The folder name is too long",
+      "chars": "A folder name cannot hold / \\ : * ? \" < > | or control characters",
+      "dots": "A folder name cannot be . or ..",
+      "edge": "A folder name cannot start or end with a space, or end with a dot",
+      "reserved": "Windows keeps that name for a device; choose another"
+    },
+    "readme": "Add README.md",
+    "gitignore": {
+      "label": ".gitignore",
+      "none": "None",
+      "general": "General (system and editor files)",
+      "node": "Node.js",
+      "python": "Python",
+      "go": "Go",
+      "rust": "Rust"
+    },
+    "phase": {
+      "connecting": "Connecting…",
+      "counting": "Counting objects…",
+      "compressing": "Compressing on the remote…",
+      "receiving": "Receiving objects…",
+      "resolving": "Resolving deltas…",
+      "checkout": "Checking out files…"
+    },
+    "percent": "{{percent}}%"
   }
 }

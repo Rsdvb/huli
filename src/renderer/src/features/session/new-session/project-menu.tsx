@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
 import {
+  CloudDownloadIcon,
   ComputerIcon,
   Folder01Icon,
+  FolderAddIcon,
   FolderOpenIcon,
   Search01Icon,
 } from '@hugeicons/core-free-icons'
@@ -25,6 +27,7 @@ import {
   useComboboxFilter,
 } from '@renderer/components/ui/combobox'
 import { InputGroupAddon } from '@renderer/components/ui/input-group'
+import { openNewProject } from '@renderer/features/new-project/store'
 import { HostIcon } from '@renderer/features/settings/remote-parts'
 import { errorMessage } from '@renderer/lib/host'
 import { hostOfPath, hostPath } from '@renderer/lib/host-paths'
@@ -41,6 +44,10 @@ import { HostFolderDialog } from './host-folder-dialog'
 // The values of the No project and Open project… items, which no project's path can take.
 const NO_PROJECT = '\0no-project'
 const OPEN_PROJECT = '\0open-project'
+// Huli: Clone from Git... and New empty project... on this computer.
+const CLONE_PROJECT = '\0clone-project'
+const EMPTY_PROJECT = '\0empty-project'
+const LOCAL_NEW = [OPEN_PROJECT, CLONE_PROJECT, EMPTY_PROJECT]
 // Open project on <host>..., followed by the host's id.
 const OPEN_ON = '\0open-on:'
 
@@ -70,7 +77,7 @@ function projectGroups(
       },
       {
         value: 'open',
-        items: scope === null ? [OPEN_PROJECT] : online ? [`${OPEN_ON}${scope}`] : [],
+        items: scope === null ? LOCAL_NEW : online ? [`${OPEN_ON}${scope}`] : [],
       },
     ]
     return scoped.filter((group) => group.items.length > 0)
@@ -79,7 +86,7 @@ function projectGroups(
     return [
       { value: 'none', items: [NO_PROJECT] },
       { value: 'recent', items: projects.map((p) => p.path) },
-      { value: 'open', items: [OPEN_PROJECT] },
+      { value: 'open', items: LOCAL_NEW },
     ]
   }
   const of = (hostId: string | null) =>
@@ -94,7 +101,7 @@ function projectGroups(
     {
       value: 'open',
       items: [
-        OPEN_PROJECT,
+        ...LOCAL_NEW,
         ...hosts.filter((h) => h.connection.state === 'online').map((h) => `${OPEN_ON}${h.id}`),
       ],
     },
@@ -124,7 +131,7 @@ export function ProjectMenu({
   /** Lists only this host's projects, null being this computer, as the chosen host's. */
   host?: string | null
 }) {
-  const { t } = useTranslation('session')
+  const { t } = useTranslation(['session', 'sidebar'])
   const choose = onChoose ?? chooseNewSessionProject
   const projects = useProjectsStore((s) => s.projects)
   const hosts = useOtherHosts()
@@ -151,19 +158,23 @@ export function ProjectMenu({
       : (hosts.find((h) => h.id === hostId)?.name ?? hostId)
   const projectHost = project ? hostOfPath(project.path) : null
   const label = (value: string) =>
-    value === NO_PROJECT
-      ? t('newSession.noProject')
-      : value === OPEN_PROJECT
-        ? t(
-            hosts.length > 0 && host === undefined
-              ? 'newSession.openProjectHere'
-              : 'newSession.openProject',
-          )
-        : value.startsWith(OPEN_ON)
-          ? host === undefined
-            ? t('newSession.openProjectOn', { host: hostName(value.slice(OPEN_ON.length)) })
-            : t('newSession.openProject')
-          : (byPath.get(value)?.name ?? value)
+    value === CLONE_PROJECT
+      ? t('sidebar:newProject.menu.clone')
+      : value === EMPTY_PROJECT
+        ? t('sidebar:newProject.menu.empty')
+        : value === NO_PROJECT
+          ? t('newSession.noProject')
+          : value === OPEN_PROJECT
+            ? t(
+                hosts.length > 0 && host === undefined
+                  ? 'newSession.openProjectHere'
+                  : 'newSession.openProject',
+              )
+            : value.startsWith(OPEN_ON)
+              ? host === undefined
+                ? t('newSession.openProjectOn', { host: hostName(value.slice(OPEN_ON.length)) })
+                : t('newSession.openProject')
+              : (byPath.get(value)?.name ?? value)
   const add = async () => {
     onError(null)
     try {
@@ -180,7 +191,14 @@ export function ProjectMenu({
       value={noProject ? NO_PROJECT : (project?.path ?? null)}
       onValueChange={(value: string | null) => {
         if (value === OPEN_PROJECT) void add()
-        else if (value?.startsWith(OPEN_ON)) {
+        else if (value === CLONE_PROJECT || value === EMPTY_PROJECT) {
+          onError(null)
+          openNewProject({
+            kind: value === CLONE_PROJECT ? 'clone' : 'empty',
+            hostId: null,
+            onDone: choose,
+          })
+        } else if (value?.startsWith(OPEN_ON)) {
           onError(null)
           setBrowsing({ hostId: value.slice(OPEN_ON.length), open: true })
         } else if (value === NO_PROJECT) choose(null)
@@ -188,7 +206,7 @@ export function ProjectMenu({
       }}
       itemToStringLabel={label}
       filter={(value: string, query: string) =>
-        value === OPEN_PROJECT ||
+        LOCAL_NEW.includes(value) ||
         value.startsWith(OPEN_ON) ||
         contains(
           `${label(value)} ${hints.get(value) ?? ''} ${hosts.length > 0 ? hostName(hostOfPath(value)) : ''}`,
@@ -336,7 +354,16 @@ export function ProjectMenu({
                 <ComboboxCollection>
                   {(value: string) => (
                     <ComboboxItem key={value} value={value} className="pr-2">
-                      <Glyph icon={FolderOpenIcon} className="kettu-menu-mark" />
+                      <Glyph
+                        icon={
+                          value === CLONE_PROJECT
+                            ? CloudDownloadIcon
+                            : value === EMPTY_PROJECT
+                              ? FolderAddIcon
+                              : FolderOpenIcon
+                        }
+                        className="kettu-menu-mark"
+                      />
                       {label(value)}
                       {value === OPEN_PROJECT && (
                         <span className="ml-auto pl-4 text-xs text-muted-foreground tabular">

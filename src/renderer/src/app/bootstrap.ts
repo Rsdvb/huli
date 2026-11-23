@@ -51,6 +51,7 @@ import {
   useAgentsStore,
 } from '@renderer/stores/agents'
 import { receiveRemovalProgress } from '@renderer/stores/agent-removal'
+import { receiveCloneProgress } from '@renderer/features/new-project/store'
 import {
   artifactsChanged,
   artifactsHostClosed,
@@ -173,6 +174,9 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
       return
     case 'agents.removalProgress':
       receiveRemovalProgress(hostId, event.progress)
+      return
+    case 'projects.cloneProgress':
+      receiveCloneProgress(event.progress)
       return
     case 'agents.limitAlert':
       showLimitAlert(event.alert, hostId)

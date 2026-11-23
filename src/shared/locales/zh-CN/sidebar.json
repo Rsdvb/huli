@@ -584,5 +584,74 @@
       "past": "请选现在之后的时间。",
       "snooze": "推迟"
     }
+  },
+  "newProject": {
+    "menu": {
+      "label": "添加项目",
+      "open": "打开文件夹…",
+      "clone": "从 Git 克隆…",
+      "empty": "新建空项目…"
+    },
+    "clone": {
+      "title": "从 Git 克隆",
+      "description": "把仓库克隆到这台电脑，并添加为项目。私有仓库会用这台电脑上 Git 已有的登录。",
+      "descriptionOn": "把仓库克隆到 {{host}}，并在那里添加为项目。私有仓库会用 {{host}} 上 Git 已有的登录。",
+      "submit": "克隆",
+      "cancel": "取消克隆"
+    },
+    "empty": {
+      "title": "新建空项目",
+      "description": "新建一个文件夹，在里面运行 git init，并添加为项目。",
+      "descriptionOn": "在 {{host}} 上新建一个文件夹，在里面运行 git init，并在那里添加为项目。",
+      "submit": "创建"
+    },
+    "url": {
+      "label": "仓库地址",
+      "placeholder": "https://github.com/owner/repo.git",
+      "empty": "填写仓库地址",
+      "tooLong": "地址太长了",
+      "malformed": "这不像是一个仓库地址",
+      "option": "地址不能以 - 开头",
+      "local": "这里只能克隆远程仓库，不能用文件夹或 file:// 地址",
+      "scheme": "请用 https://、ssh:// 或 git@主机:路径 形式的地址",
+      "password": "地址里别写密码，会用电脑上 Git 自己的登录"
+    },
+    "parent": {
+      "label": "位置",
+      "choose": "选择其他文件夹…",
+      "last": "上次用过",
+      "home": "主目录",
+      "loadFailed": "没能读到可选位置：{{error}}",
+      "none": "这台电脑没有可放新项目的位置"
+    },
+    "name": {
+      "label": "文件夹名",
+      "target": "将创建 {{path}}",
+      "empty": "填写文件夹名",
+      "tooLong": "文件夹名太长了",
+      "chars": "文件夹名不能包含 / \\ : * ? \" < > | 或控制字符",
+      "dots": "文件夹名不能是 . 或 ..",
+      "edge": "文件夹名开头结尾不能是空格，结尾不能是句点",
+      "reserved": "这个名字被 Windows 留给设备用了，换一个吧"
+    },
+    "readme": "添加 README.md",
+    "gitignore": {
+      "label": ".gitignore",
+      "none": "不添加",
+      "general": "通用（系统和编辑器文件）",
+      "node": "Node.js",
+      "python": "Python",
+      "go": "Go",
+      "rust": "Rust"
+    },
+    "phase": {
+      "connecting": "正在连接…",
+      "counting": "正在统计对象…",
+      "compressing": "远程正在压缩…",
+      "receiving": "正在接收对象…",
+      "resolving": "正在处理差异…",
+      "checkout": "正在检出文件…"
+    },
+    "percent": "{{percent}}%"
   }
 }

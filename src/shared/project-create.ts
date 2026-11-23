@@ -31,10 +31,10 @@ const SCP = /^([A-Za-z0-9._][A-Za-z0-9._-]*)@([A-Za-z0-9][A-Za-z0-9.-]*):(.+)$/
 export function cloneUrlProblem(url: string): CloneUrlProblem | null {
   if (url === '') return 'empty'
   if (url.length > CLONE_URL_CHARS) return 'tooLong'
-  if (/[\s\p{Cc}]/u.test(url)) return 'malformed'
   if (url.startsWith('-')) return 'option'
   // `<transport>::<address>` runs a remote helper, such as ext:: and fd::.
   if (url.includes('::')) return 'scheme'
+  if (/[\s\p{Cc}]/u.test(url)) return 'malformed'
   const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)(.*)$/.exec(url)
   if (scheme) {
     const protocol = scheme[1]!.toLowerCase()

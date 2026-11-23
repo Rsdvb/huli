@@ -271,7 +271,14 @@ function isProjectCall(method: string): boolean {
 
 /** A host's result as the window names folders, with the sessions it lists learned. */
 export function fromHost(hostId: string, method: string, result: unknown): unknown {
-  if (method === 'projects.list' || method === 'projects.add' || method === 'projects.addFolder') {
+  if (
+    method === 'projects.list' ||
+    method === 'projects.add' ||
+    method === 'projects.addFolder' ||
+    // Huli: a project cloned or made there.
+    method === 'projects.clone' ||
+    method === 'projects.create'
+  ) {
     qualifyProjects(hostId, result)
   }
   // Huli: a suggested folder is that host's folder, which adding names again.

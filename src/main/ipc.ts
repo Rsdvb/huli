@@ -608,6 +608,18 @@ export function registerIpcHandlers({
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
 
+  handle('dialog:choose-new-project-parent', 1, async ({ window }, defaultPath) => {
+    const options: Electron.OpenDialogOptions = {
+      title: t('dialogs.chooseNewProjectParent'),
+      properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'],
+      ...(defaultPath === null ? {} : { defaultPath: absolutePath(defaultPath) }),
+    }
+    const result = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+
   handle('dialog:choose-shell', 0, async ({ window }) => {
     const path = await chooseProgram(window, t('dialogs.chooseShell'))
     if (path) settings.setShellPath(path)

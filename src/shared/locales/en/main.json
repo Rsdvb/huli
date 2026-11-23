@@ -57,6 +57,7 @@
     "exportTheme": "Export Theme",
     "chooseAgentFolder": "Choose Agent Folder",
     "chooseHistoryFolder": "Choose a Folder of Agent Sessions",
+    "chooseNewProjectParent": "Choose Where the New Project Goes",
     "chooseProjectFolder": "Add a Folder to the Project",
     "chooseEditor": "Choose Editor",
     "chooseSshKey": "Choose SSH Key File",

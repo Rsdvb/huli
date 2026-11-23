@@ -26,12 +26,13 @@ describe('cloneUrlProblem', () => {
   })
 
   it('refuses transport helpers, options and other protocols', () => {
-    expect(cloneUrlProblem('ext::sh -c touch% /tmp/pwned')).toBe('malformed')
+    expect(cloneUrlProblem('ext::sh -c touch% /tmp/pwned')).toBe('scheme')
     expect(cloneUrlProblem('ext::sh%20-c%20id')).toBe('scheme')
     expect(cloneUrlProblem('fd::17')).toBe('scheme')
     expect(cloneUrlProblem('https::github.com/owner/repo')).toBe('scheme')
+    expect(cloneUrlProblem('https://host/x::y')).toBe('scheme')
     expect(cloneUrlProblem('-uhttps://github.com/x/y')).toBe('option')
-    expect(cloneUrlProblem('--upload-pack=touch /tmp/x')).toBe('malformed')
+    expect(cloneUrlProblem('--upload-pack=touch /tmp/x')).toBe('option')
     expect(cloneUrlProblem('--upload-pack=id')).toBe('option')
     expect(cloneUrlProblem('http://github.com/owner/repo')).toBe('scheme')
     expect(cloneUrlProblem('git://github.com/owner/repo')).toBe('scheme')

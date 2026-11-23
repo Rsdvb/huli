@@ -57,6 +57,7 @@
     "exportTheme": "导出主题",
     "chooseAgentFolder": "选择智能体的配置目录",
     "chooseHistoryFolder": "选择存有 Agent 会话的文件夹",
+    "chooseNewProjectParent": "选择新项目放在哪里",
     "chooseProjectFolder": "给项目添加文件夹",
     "chooseEditor": "选择编辑器",
     "chooseSshKey": "选择 SSH 密钥文件",
