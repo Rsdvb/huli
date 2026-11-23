@@ -22,6 +22,7 @@ export type SessionMenuItem =
   | 'fork'
   | 'forkSame'
   | 'newSubSession'
+  | 'subagents'
   | 'openInSplit'
   | 'pullRequest'
   | 'openInEditor'
@@ -99,6 +100,8 @@ export interface SessionMenuContext {
   movable?: boolean
   /** Huli: it has an open pull request to merge once green or to watch. */
   prFlow?: boolean
+  /** Its row's badge lists sub-agents, which the menu lists too. */
+  subagents?: boolean
 }
 
 /**
@@ -122,6 +125,7 @@ export function sessionMenuGroups(
     exportable = false,
     movable = false,
     prFlow = false,
+    subagents = false,
   }: SessionMenuContext,
 ): SessionMenuItem[][] {
   const running = isRunning(summary)
@@ -192,7 +196,7 @@ export function sessionMenuGroups(
           tidy,
           own,
           flow,
-          [...forks, 'newSubSession'],
+          [...forks, 'newSubSession', ...(subagents ? (['subagents'] as const) : [])],
           [
             ...(shown ? [] : (['openInSplit'] as const)),
             ...((summary.prs?.length ?? (summary.pr ? 1 : 0)) > 0

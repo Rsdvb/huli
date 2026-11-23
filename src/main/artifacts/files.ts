@@ -22,6 +22,7 @@ import {
 } from '@shared/artifacts'
 import type { ArtifactContentFile, ArtifactContentResult } from '@shared/host-control'
 import { safeName } from '@shared/file-name'
+import { t } from '../i18n'
 import { overviewOf } from './overview'
 import { isInside, isStored } from './protocol'
 
@@ -93,6 +94,19 @@ export class ArtifactFiles {
    * version of several files in a folder of its own.
    */
   async openExternal(id: unknown, version: unknown): Promise<void> {
+    await shell.openExternal(pathToFileURL(await this.copyOut(id, version)).href)
+  }
+
+  /**
+   * `artifact:reveal`: the same copy as `openExternal` makes, selected in the file manager and
+   * never run.
+   */
+  async reveal(id: unknown, version: unknown): Promise<void> {
+    shell.showItemInFolder(await this.copyOut(id, version))
+  }
+
+  /** Copies the version's files into the temporary folder; the page that opens it. */
+  private async copyOut(id: unknown, version: unknown): Promise<string> {
     const found = await this.find(id, version)
     await mkdir(this.tempDir, { recursive: true, mode: 0o700 })
     const name = `${found.id}-v${found.version}`
@@ -108,7 +122,7 @@ export class ArtifactFiles {
       page = path.join(folder, ARTIFACT_ENTRY)
       if (overview) await writeFile(page, overview)
     }
-    await shell.openExternal(pathToFileURL(page).href)
+    return page
   }
 
   /**
@@ -158,8 +172,8 @@ export class ArtifactFiles {
   ): Promise<boolean> {
     const wanted = parseVersion(id, version)
     const found = await this.deps.content(wanted.id, wanted.version)
-    if (found.kind === 'failed') throw new Error('The agent host did not answer')
-    if (found.kind === 'not_found' || !found.type) throw new Error('Not found')
+    if (found.kind === 'failed') throw new Error(t('artifacts.hostSilent'))
+    if (found.kind === 'not_found' || !found.type) throw new Error(t('artifacts.notFound'))
     const type = found.type
     if (!isExportFormat(type.name, format)) throw new Error('Not a format this type exports to')
     const name = safeName(found.title, wanted.id)
@@ -223,13 +237,13 @@ export class ArtifactFiles {
   private async find(id: unknown, version: unknown): Promise<FoundVersion> {
     const wanted = parseVersion(id, version)
     const found = await this.deps.content(wanted.id, wanted.version)
-    if (found.kind === 'failed') throw new Error('The agent host did not answer')
+    if (found.kind === 'failed') throw new Error(t('artifacts.hostSilent'))
     if (
       found.kind === 'not_found' ||
       !found.files.some((file) => file.path === ARTIFACT_ENTRY || file.path === CANVAS_FILE) ||
       !found.files.every((file) => isStored(this.deps, wanted.id, file.file))
     ) {
-      throw new Error('Not found')
+      throw new Error(t('artifacts.notFound'))
     }
     await this.deps.ready?.(wanted.id, found.version, null)
     return { ...wanted, title: found.title, files: found.files }

@@ -24,14 +24,18 @@ import {
 import { SignInActions } from '@renderer/features/agents/sign-in-actions'
 import { NodeInstallAction } from '@renderer/features/agents/node-install'
 import { OptionMenu } from '@renderer/features/session/composer/control-row'
+import { FIX_URLS, reasonLabel } from '@renderer/features/agents/harness-problem'
+import { FixButton } from '@renderer/features/agents/fix-button'
+import { openInstall } from '@renderer/features/settings/harness-install'
 import { HostChip } from '@renderer/features/session/composer/host-chip'
 import { useModeControl } from '@renderer/features/session/composer/mode-control'
 import { isSelect } from '@renderer/features/session/composer/options'
 import { Glyph } from '@renderer/features/shell/glyph'
+import { NO_PROJECT_ICON } from '@renderer/features/shell/no-project-icon'
 import { ModelMenu } from '@renderer/features/session/composer/model-menu'
 import { SendButton } from '@renderer/features/session/composer/send-button'
 import type { SelectOption } from '@renderer/features/session/composer/levels'
-import { tightestLimit } from '@renderer/features/sidebar/plan-usage'
+import { tightestLimit } from '@shared/session-groups'
 import { useHostLabel } from '@renderer/features/sidebar/host-label'
 import { NoDrag, TopBar } from '@renderer/features/shell/top-bar'
 import { usePane } from '@renderer/features/split/pane-context'
@@ -123,9 +127,10 @@ import { useGuideStatuses } from './new-session/guide-statuses'
 import {
   agentNeed,
   canStart,
+  menuAgents,
   noAgentCanStart,
-  noAgentUntilUpdated,
   startValues,
+  type NoAgentReason,
 } from './new-session/start-options'
 import { useStartConfig } from './new-session/use-start-config'
 import { openTask } from './new-session/open-task'
@@ -323,7 +328,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
   const readings = usePlanReadings()
   const limits = status ? newestLimits(readings, status) : undefined
   // A default agent that became usable after this page opened, such as the first start's, is what
-  // the page starts with.
+  // the page starts with; without one, the only agent the host can start is.
   const defaultAgent = useSettingsStore((s) => s.settings.general.defaultAgent)
   const defaultOff = useSettingsStore(
     (s) => !!defaultAgent && s.settings.disabledAgents.includes(defaultAgent),
@@ -332,28 +337,29 @@ ${parent?.projectPath ?? project?.path ?? ''}`
     // Until this computer's agents are read after launch, the settings say whether it is off.
     if (!s.loaded) return !!defaultAgent && !defaultOff
     const candidate = defaultAgent ? s.byId[defaultAgent] : undefined
-    return !!candidate && candidate.registered !== false && !candidate.disabled
+    return !!candidate && canStart(candidate)
+  })
+  const onlyAgent = useAgentsStore((s) => {
+    if (hostId === null ? !s.loaded : !(hostId in s.hosts)) return null
+    const { order, byId } = agentsOn(s, hostId)
+    const startable = menuAgents(usableAgents(order, byId))
+    return startable.length === 1 ? startable[0]!.id : null
   })
   useEffect(() => {
-    if (paneId && !agentId && !parent && hostId === null && defaultAgent && defaultUsable) {
-      choosePaneAgent(paneId, defaultAgent)
-    }
-  }, [paneId, agentId, parent, hostId, defaultAgent, defaultUsable])
-  const waitingForNode = useAgentsStore(
+    if (!paneId || agentId || parent) return
+    // The default agent is this computer's setting, so another host starts on its only agent.
+    const starts = hostId === null && defaultAgent && defaultUsable ? defaultAgent : onlyAgent
+    if (starts) choosePaneAgent(paneId, starts)
+  }, [paneId, agentId, parent, hostId, defaultAgent, defaultUsable, onlyAgent])
+  // The agents that are on, once they are read.
+  const onAgents = useAgentsStore(
     useShallow((s) => {
       if (hostId === null ? !s.loaded : !(hostId in s.hosts)) return null
       const { order, byId } = agentsOn(s, hostId)
-      const usable = usableAgents(order, byId).filter((a) => !a.disabled)
-      return usable.length === 0 ? [] : noAgentCanStart(usable)
+      return usableAgents(order, byId).filter((a) => !a.disabled)
     }),
   )
-  const waitingForUpdate = useAgentsStore(
-    useShallow((s) => {
-      if (hostId === null ? !s.loaded : !(hostId in s.hosts)) return []
-      const { order, byId } = agentsOn(s, hostId)
-      return noAgentUntilUpdated(usableAgents(order, byId).filter((a) => !a.disabled))
-    }),
-  )
+  const stopped = onAgents && noAgentCanStart(onAgents)
   // This computer has no agent at all, not merely none that is on: the install guide shows.
   const noAgent = useAgentsStore(
     (s) => hostId === null && s.loaded && usableAgents(s.order, s.byId).length === 0,
@@ -738,10 +744,12 @@ ${parent?.projectPath ?? project?.path ?? ''}`
               commandsNote={commandsNote}
               placeholder={
                 reached?.resetsAt
-                  ? tc('prompt.placeholder.limitReached', {
-                      limit: limitPhrase(reached),
-                      time: resetTime(reached.resetsAt),
-                    })
+                  ? tc(
+                      reached.extraUsage
+                        ? 'prompt.placeholder.limitExtraUsage'
+                        : 'prompt.placeholder.limitReached',
+                      { limit: limitPhrase(reached), time: resetTime(reached.resetsAt) },
+                    )
                   : t('newSession.describeTask')
               }
               label={name ? t('newSession.messageAgent', { agent: name }) : t('newSession.message')}
@@ -792,6 +800,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                 agentId={agentId}
                 hostId={hostId}
                 agentName={name ?? ''}
+                harness={status?.harnessName ?? name ?? ''}
                 config={config ?? []}
                 onSelect={pick}
                 onOpenChange={(open) => {
@@ -969,13 +978,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
           />
         )}
         {agentId && <StartNotices agentId={agentId} hostId={hostId} />}
-        {waitingForNode && !(noAgent && guide) && (
-          <NoAgentLine
-            waitingForNode={waitingForNode}
-            waitingForUpdate={waitingForUpdate}
-            hostId={hostId}
-          />
-        )}
+        {stopped && !(noAgent && guide) && <NoAgentLine stopped={stopped} hostId={hostId} />}
       </div>
       {children}
     </>
@@ -1080,63 +1083,75 @@ function noticeText(
 }
 
 /**
- * While no agent can start: why, in one line, and the way to Settings › Agents to fix it; on
- * another host only why, since this computer's Settings do not set up its agents.
+ * While no agent can start: why, in one line, as its harness's state says it, and the button for
+ * the cause: a tool's guide, the install window for one harness to install, Settings › Harnesses
+ * for a harness to update or fix, or Settings › Agents when none is on. Another host only says why,
+ * since this computer's Settings do not set up its agents.
  */
-function NoAgentLine({
-  waitingForNode,
-  waitingForUpdate,
-  hostId,
-}: {
-  waitingForNode: string[]
-  waitingForUpdate: string[]
-  hostId: string | null
-}) {
-  const { t } = useTranslation('session')
+function NoAgentLine({ stopped, hostId }: { stopped: NoAgentReason; hostId: string | null }) {
+  const { t } = useTranslation(['session', 'agents'])
   const hostLabel = useHostLabel(hostId)
+  const { reason, agents, harnesses } = stopped
   const text =
     hostId !== null
       ? t('newSession.noAgentOnHost', { host: hostLabel })
-      : waitingForNode.length > 0
-        ? t('newSession.noAgentNode', { agents: waitingForNode, count: waitingForNode.length })
-        : waitingForUpdate.length > 0
-          ? t('newSession.noAgentUpdate', {
-              agents: waitingForUpdate,
-              count: waitingForUpdate.length,
-            })
-          : t('newSession.noAgent')
-  const updating = waitingForNode.length === 0 && waitingForUpdate.length > 0
-  const noneYet = waitingForNode.length === 0 && !updating
+      : reason
+        ? t('newSession.noAgentBecause', { agents, reason: reasonLabel(reason) })
+        : t('newSession.noAgent')
+  const kind = reason?.kind
+  const tool =
+    kind === 'needs-node'
+      ? 'node'
+      : kind === 'needs-npm'
+        ? 'npm'
+        : kind === 'needs-uv'
+          ? 'uv'
+          : null
+  // One harness opens its own page; several, the list.
+  const harness = harnesses.length === 1 ? harnesses[0]! : null
   return (
     <div className="flex min-w-0 items-center gap-2 px-2.75">
       <p
         className={cn(
           'truncate text-xs',
-          noneYet ? 'text-secondary' : updating ? 'text-warning' : 'text-destructive',
+          !reason ? 'text-secondary' : kind === 'too-old' ? 'text-warning' : 'text-destructive',
         )}
         title={text}
       >
         {text}
       </p>
-      {hostId === null && waitingForNode.length > 0 && (
-        <NodeInstallAction look="inline" className="shrink-0" />
-      )}
-      {hostId === null && waitingForNode.length === 0 && (
-        <Button
-          variant="outline"
-          size="xs"
-          className="shrink-0"
-          onClick={() => (noneYet ? openAgentSettings(null) : openHarnessSettings(null))}
-        >
-          {t(
-            noneYet
-              ? 'newSession.addAgent'
-              : updating
-                ? 'newSession.updateHarness'
-                : 'newSession.installHarness',
-          )}
-        </Button>
-      )}
+      {hostId === null &&
+        // Huli: Kite installs a Node.js of its own, in place of a link to nodejs.org.
+        (tool === 'node' ? (
+          <NodeInstallAction look="inline" className="shrink-0" />
+        ) : tool ? (
+          <FixButton
+            action={{ label: t(`agents:problem.fix.${tool}`), href: FIX_URLS[tool], run: null }}
+          />
+        ) : (
+          <Button
+            variant="outline"
+            size="xs"
+            className="shrink-0"
+            onClick={() =>
+              !reason
+                ? openAgentSettings(null)
+                : kind === 'not-installed' && harness
+                  ? void openInstall(harness)
+                  : openHarnessSettings(harness)
+            }
+          >
+            {t(
+              !reason
+                ? 'newSession.addAgent'
+                : kind === 'too-old'
+                  ? 'newSession.updateHarness'
+                  : kind === 'cannot-run'
+                    ? 'newSession.openHarness'
+                    : 'newSession.installHarness',
+            )}
+          </Button>
+        ))}
     </div>
   )
 }
@@ -1147,7 +1162,7 @@ function ParentProject({ project, scratch }: { project: Project | null; scratch:
   return (
     <Tooltip>
       <TooltipTrigger render={<span className="ui-as-tray-link" data-static="" />}>
-        <FolderMark />
+        {scratch ? <Glyph icon={NO_PROJECT_ICON} size={14} /> : <FolderMark />}
         <span className="kettu-tray-link__text">
           {scratch ? t('newSession.noProject') : project?.name}
         </span>

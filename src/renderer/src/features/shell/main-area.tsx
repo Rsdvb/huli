@@ -40,7 +40,7 @@ export function MainArea() {
   const selected = useViewStore((s) => s.projectPath)
   const main = useViewStore((s) => s.main)
   const layout = useViewStore((s) => s.layout)
-  const paths = useViewStore(shownProjects)
+  const paths = useViewStore((s) => shownProjects(s, projects))
   const shownSessions = useViewStore((s) => shownLayoutSessions(s).join('\n'))
   // The worktrees the sessions in view work in, which their panels follow.
   const worktrees = useSessionsStore((s) =>
@@ -146,7 +146,7 @@ export function MainArea() {
     return (
       <PageSheet>
         <Suspense fallback={null}>
-          <ArtifactViewer key={main.id} id={main.id} history={main.history === true} />
+          <ArtifactViewer key={main.id} where="main" id={main.id} history={main.history === true} />
         </Suspense>
       </PageSheet>
     )

@@ -102,6 +102,12 @@ describe('parseAttention', () => {
     expect(parseAttention({ ...limit, agentId: 'claude-code' })).toBeNull()
     expect(parseAttention({ ...limit, window: 'five_hour', sessionId: 's1' })).toBeNull()
     expect(parseAttention({ ...limit, agentId: 'claude-code', window: 'x'.repeat(201) })).toBeNull()
+    // The host's notice, whose key names the account, then the window.
+    const notice = { ...limit, agentId: 'claude-code', level: 'near', usedPercent: 92 }
+    expect(
+      parseAttention({ ...notice, key: 'claude-code:me@example.com:five_hour' }),
+    ).toMatchObject({ agentId: 'claude-code', window: 'five_hour' })
+    expect(parseAttention({ ...notice, key: 'claude-code:me@example.com:' })).toBeNull()
   })
 })
 

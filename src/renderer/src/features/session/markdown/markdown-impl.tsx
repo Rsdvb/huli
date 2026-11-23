@@ -53,6 +53,7 @@ import { INCOMPLETE_LINK, localTarget, unopenedTarget } from './local-links'
 import { githubAlerts } from './github-alerts'
 import { bareReferenceNumber } from './github-refs'
 import { fenceInlineSvg } from './inline-svg'
+import { fenceBracketMath } from './maths'
 import { remarkPlugins } from './remark'
 import { BlockCode } from './code-frame'
 import { MarkdownTable } from './markdown-table'
@@ -335,11 +336,12 @@ const ChunkPlaceholder = memo(function ChunkPlaceholder({
 
 /**
  * Agent prose. Raw HTML goes through the sanitizer, and an inline `<svg>` is first written as an
- * `svg` code block (`inline-svg.ts`). A long text renders in chunks (`chunks.ts`), so a streamed
- * update re-renders, lays out and paints the live tail instead of the whole message, and only its
- * chunks near the view render (`in-parts.ts`). Streaming mode splits each chunk into memoized
- * blocks, and the mode never changes: static mode renders one tree, so switching when a message
- * finishes would rebuild all of it. Finishing only turns off incomplete-markdown repair.
+ * `svg` code block (`inline-svg.ts`) and a `\[...\]` on lines of its own as a `$$` block
+ * (`maths.ts`). A long text renders in chunks (`chunks.ts`), so a streamed update re-renders, lays
+ * out and paints the live tail instead of the whole message, and only its chunks near the view
+ * render (`in-parts.ts`). Streaming mode splits each chunk into memoized blocks, and the mode never
+ * changes: static mode renders one tree, so switching when a message finishes would rebuild all
+ * of it. Finishing only turns off incomplete-markdown repair.
  */
 function MarkdownImpl({
   markdown,
@@ -356,7 +358,7 @@ function MarkdownImpl({
   const entryId = useContext(EntryIdContext)
   const key = sessionId !== null && entryId !== null ? `${sessionId}\0${entryId}` : null
   const split = useChunks(
-    useMemo(() => fenceInlineSvg(markdown, live), [markdown, live]),
+    useMemo(() => fenceBracketMath(fenceInlineSvg(markdown, live), live), [markdown, live]),
     key,
   )
   const { chunks, slots } = split

@@ -1,4 +1,5 @@
 import type { PlanLimit } from '@shared/agent-host'
+import { windowParts, type WindowParts } from '@shared/plan-limits'
 import { currentLocale, i18n } from './i18n'
 import { hostPath } from './host-paths'
 import { groupName } from './plan-limit'
@@ -24,6 +25,7 @@ function makeFormatters(locale: string) {
     // Huli: with the part of the day in Chinese, as `dayClock`, so a reset later in the week reads
     // like one today rather than on a 24-hour clock.
     weekdayClock: new Intl.DateTimeFormat(locale, { weekday: 'short', ...dayClockOptions(locale) }),
+    weekday: new Intl.DateTimeFormat(locale, { weekday: 'short' }),
     monthDay: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
     monthDayClock: new Intl.DateTimeFormat(locale, {
       month: 'short',
@@ -94,11 +96,15 @@ export function mediumAgo(at: number, now = Date.now()): string {
   return ago(at, now) ?? format().monthDay.format(at)
 }
 
+/** Calendar days from `now` to a reset at `at`, rounded since a day across a DST change is not 24 hours. */
+function daysAhead(at: number, now: number): number {
+  const day = (t: number): number => new Date(t).setHours(0, 0, 0, 0)
+  return Math.round((day(at) - day(now)) / DAY)
+}
+
 /** When a limit resets: the clock time today, the weekday and time within six days, the date beyond. */
 export function resetTime(at: number, now = Date.now()): string {
-  const day = (t: number): number => new Date(t).setHours(0, 0, 0, 0)
-  // Rounded, since a day across a DST change is not 24 hours.
-  const days = Math.round((day(at) - day(now)) / DAY)
+  const days = daysAhead(at, now)
   if (days === 0) return format().dayClock.format(at)
   return days > 0 && days <= 6 ? format().weekdayClock.format(at) : format().monthDay.format(at)
 }
@@ -112,6 +118,13 @@ export function backTime(at: number, now = Date.now()): string {
   if (days === 0) return format().dayClock.format(at)
   if (days === 1) return i18n.t('time.tomorrowAt', { time: format().dayClock.format(at) })
   return resetTime(at, now)
+}
+
+/** `resetTime` for a tag that has little room: the weekday alone within six days. */
+export function resetDay(at: number, now = Date.now()): string {
+  const days = daysAhead(at, now)
+  if (days === 0) return format().dayClock.format(at)
+  return days > 0 && days <= 6 ? format().weekday.format(at) : format().monthDay.format(at)
 }
 
 export function fullTime(at: number): string {
@@ -191,34 +204,39 @@ export function timeLeft(ms: number): string {
     : countdown(ms)
 }
 
+type WindowTable = 'planWindow' | 'planWindowInText' | 'composer:usage.shortWindow'
+
+/** The window's own name from one of the catalogs, without the model or group it counts. */
+function windowName(parts: Pick<WindowParts, 'kind' | 'count'>, table: WindowTable): string {
+  const key = `${table}.${parts.kind}` as 'planWindow.five_hour'
+  return parts.count === null ? i18n.t(key) : i18n.t(key, { count: parts.count })
+}
+
+type WindowName = Pick<WindowParts, 'kind' | 'count' | 'scope'>
+
+/** Huli: a model group's "and" in the interface's language: "Claude 和 GPT Models". */
+const scopeName = (scope: string): string =>
+  scope.replace(/\s+and\s+/i, ` ${i18n.t('tasks:and').trim()} `)
+
+/** A window's long name, the length first and then the model or group it is for: "Weekly · Fable". */
+export function windowLabel(parts: WindowName): string {
+  const name = windowName(parts, 'planWindow')
+  return parts.scope
+    ? i18n.t('planWindow.scoped', { window: name, scope: scopeName(parts.scope) })
+    : name
+}
+
 /** A plan-limit window's name: Kettu's for the windows it knows, else the agent's own. */
 export function limitLabel(limit: Pick<PlanLimit, 'window' | 'label'>): string {
-  const key = `planWindow.${limit.window}`
-  if (i18n.exists(key)) return i18n.t(key as 'planWindow.five_hour')
-  // Claude Code names a weekly limit per model, "Weekly · Fable", and Antigravity both its
-  // windows per model group, "5-hour · Gemini Models", in English; a group reads as the tray's
-  // and the account cards' do, "Claude 和 GPT".
-  const and = i18n.t('tasks:and')
-  const weekly = /^Weekly · (.+)$/.exec(limit.label)
-  if (weekly) return i18n.t('planWindow.weeklyOf', { model: groupName(weekly[1]!, and) })
-  const fiveHour = /^5-hour · (.+)$/.exec(limit.label)
-  return fiveHour
-    ? i18n.t('planWindow.fiveHourOf', { model: groupName(fiveHour[1]!, and) })
-    : limit.label
+  const parts = windowParts(limit)
+  if (!parts.kind) return limit.label
+  return parts.provider ? `${parts.provider} · ${windowLabel(parts)}` : windowLabel(parts)
 }
 
-// Huli: the balances vendors report under these English names, by their names in the catalogs.
-const BALANCE_LABELS: Record<string, string> = {
-  Balance: 'usage:limits.balance',
-  'Extra usage': 'usage:limits.extraUsage',
-  'Prepaid balance': 'usage:limits.prepaidBalance',
-  'Add-on credits': 'usage:limits.addOnCredits',
-}
-
-/** A balance's name: Kettu's for the ones it knows, else the vendor's own. */
-export function balanceLabel(label: string): string {
-  const key = BALANCE_LABELS[label]
-  return key ? i18n.t(key as 'usage:limits.balance') : label
+/** A window's name without the model it is for: "Weekly" for "Weekly · Fable". */
+export function limitWindowName(limit: Pick<PlanLimit, 'window' | 'label'>): string {
+  const parts = windowParts(limit)
+  return parts.kind && !parts.provider ? windowName(parts, 'planWindow') : limitLabel(limit)
 }
 
 /**
@@ -226,15 +244,42 @@ export function balanceLabel(label: string): string {
  * two windows.
  */
 export function limitPhrase(limit: Pick<PlanLimit, 'window' | 'label'>): string {
-  const key = `planWindowInText.${limit.window}`
-  if (i18n.exists(key)) return i18n.t(key as 'planWindowInText.seven_day_opus')
-  const known = i18n.exists(`planWindow.${limit.window}`)
-  const weekly = known ? null : /^Weekly · (.+)$/.exec(limit.label)
-  if (weekly) return i18n.t('planWindowInText.weeklyOf', { model: weekly[1] })
-  const fiveHour = known ? null : /^5-hour · (.+)$/.exec(limit.label)
-  return fiveHour
-    ? i18n.t('planWindowInText.fiveHourOf', { model: fiveHour[1] })
-    : limitLabel(limit)
+  const parts = windowParts(limit)
+  if (!parts.kind || !parts.scope) return limitLabel(limit)
+  return i18n.t('planWindowInText.scoped', {
+    scope: parts.scope,
+    window: windowName(parts, 'planWindowInText'),
+  })
+}
+
+/**
+ * A window's short name where space is tight, the length first and then the model or group it is
+ * for, without the "Models" a group's name ends in: "5h", "7d Fable", "5h Gemini".
+ */
+export function windowShort(parts: WindowName, separator = ' '): string {
+  const name = windowName(parts, 'composer:usage.shortWindow')
+  const scope = shortScope(parts)
+  return scope ? `${name}${separator}${scope}` : name
+}
+
+const shortScope = (parts: Pick<WindowParts, 'scope'>): string | null =>
+  parts.scope ? groupName(parts.scope, i18n.t('tasks:and')) : null
+
+export function limitShort(limit: Pick<PlanLimit, 'window' | 'label'>, separator = ' '): string {
+  const parts = windowParts(limit)
+  return parts.kind ? windowShort(parts, separator) : limit.label
+}
+
+/** The length alone of `limitShort`, "7d" for "7d · Fable"; the agent's own label when it has none. */
+export function limitLength(limit: Pick<PlanLimit, 'window' | 'label'>): string {
+  const parts = windowParts(limit)
+  return parts.kind ? windowName(parts, 'composer:usage.shortWindow') : limit.label
+}
+
+/** The end of `limitShort` that names a model, group or pool, as written there; null without one. */
+export function limitShortScope(limit: Pick<PlanLimit, 'window' | 'label'>): string | null {
+  const parts = windowParts(limit)
+  return parts.kind ? shortScope(parts) : null
 }
 
 /** A count compactly, for figures, readouts and legends: "980", "1.2K", "41.7B". */
@@ -314,6 +359,24 @@ export function planAmount(used: number, total: number, unit: string, unitLabel 
 export function planBalance(amount: number, unit: string, unitLabel = unit): string {
   if (/^[A-Z]{3}$/.test(unit)) return money(amount, unit)
   return `${new Intl.NumberFormat(currentLocale(), { maximumFractionDigits: 2 }).format(amount)} ${unitLabel}`
+}
+
+// The host names a balance in English, the same for every client, and each client shows it in its
+// own language. A product's own name, such as G1 credits, stays as sent.
+const BALANCE_LABELS = {
+  Balance: 'usage:limits.balance',
+  'Prepaid balance': 'usage:limits.prepaidBalance',
+  'Extra usage': 'usage:limits.extraUsage',
+  'Add-on credits': 'usage:limits.addOnCredits',
+  'Recharge balance': 'usage:limits.rechargeBalance',
+  'Bonus balance': 'usage:limits.bonusBalance',
+} as const
+
+/** A balance's name in the interface language. */
+export function balanceLabel(label: string): string {
+  return Object.hasOwn(BALANCE_LABELS, label)
+    ? i18n.t(BALANCE_LABELS[label as keyof typeof BALANCE_LABELS])
+    : label
 }
 
 /** The last part of a path, for either separator. */

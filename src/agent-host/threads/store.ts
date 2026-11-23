@@ -6,6 +6,7 @@ import type { OutlineTitle } from '@shared/agent-host'
 import type { ArtifactState } from '@shared/artifacts'
 import type { ArtifactCall, ArtifactCallName, ArtifactCalls } from '../artifacts/model'
 import type { RuntimeCall, RuntimeCallName, RuntimeCalls } from '../artifacts/runtime/calls'
+import { translate, type HostMessage } from '../i18n'
 import type { RoutineCall, RoutineCallName, RoutineCalls } from '../routines/calls'
 import type { TaskCall, TaskCallName, TaskCalls } from '../workflow/model'
 import type { FindAnswer, SearchAnswer } from '../search/reads'
@@ -21,6 +22,7 @@ import type {
   ThreadPage,
   ThreadWrite,
 } from './model'
+import type { StoredOrigin } from './origins'
 import type {
   ThreadDbStatus,
   ThreadErrorCode,
@@ -58,12 +60,17 @@ export function nodeThreadWorker(worker: Worker): ThreadWorker {
 }
 
 export class ThreadStoreError extends Error {
+  /** The message in English, for agents and logs; `message` is in the user's language. */
+  readonly english: string
+
   constructor(
     message: string,
     readonly code: ThreadErrorCode | null,
     readonly data?: ArtifactState,
+    text?: HostMessage,
   ) {
-    super(message)
+    super(text ? translate(text) : message)
+    this.english = message
     this.name = 'ThreadStoreError'
   }
 }
@@ -157,7 +164,7 @@ export class ThreadStore {
           break
         case 'error':
           this.settle(slot, reply.id)?.reject(
-            new ThreadStoreError(reply.message, reply.code, reply.data),
+            new ThreadStoreError(reply.message, reply.code, reply.data, reply.text),
           )
           break
       }
@@ -417,6 +424,16 @@ export class ThreadStore {
   /** Stores outline titles; false when the session has no stored thread to keep them with. */
   setOutlineTitles(sessionId: string, titles: OutlineTitle[]): Promise<boolean> {
     return this.sessionWrite({ op: 'setOutlineTitles', sessionId, titles }, [sessionId])
+  }
+
+  /** Who sent the messages Kettu marked in a session, in the order they were added. */
+  origins(sessionId: string): Promise<StoredOrigin[]> {
+    return this.read({ op: 'origins', sessionId }, sessionId)
+  }
+
+  /** Keeps who sent a message Kettu marked, so a thread rebuilt from the agent's history has it. */
+  putOrigin(sessionId: string, origin: StoredOrigin): Promise<void> {
+    return this.sessionWrite({ op: 'putOrigin', sessionId, origin }, [sessionId])
   }
 
   /** A call on the artifact records, which share the database. */

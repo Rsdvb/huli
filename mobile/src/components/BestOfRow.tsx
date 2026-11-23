@@ -4,7 +4,7 @@
 
 import { memo } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
-import { phaseCounts } from '@shared/session-groups'
+import { phaseCounts } from '@shared/run-groups'
 import type { BestOf } from '../homeList'
 import { AgentAvatar } from '../ui/AgentAvatar'
 import { haptic } from '../ui/haptics'

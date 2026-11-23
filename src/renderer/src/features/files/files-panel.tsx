@@ -41,6 +41,7 @@ import {
   PaneSpinner,
   PanelButton,
 } from '@renderer/features/shell/panel-button'
+import { PaneSwitch } from '@renderer/features/shell/pane-switch'
 import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { formatShortcut, isMod, isWeb } from '@renderer/lib/platform'
@@ -54,6 +55,7 @@ import {
   useFilesStore,
   watchFiles,
 } from '@renderer/stores/files'
+import { openGitPane } from '@renderer/features/git/pane/open-pane'
 import { openGitDialog, useGitStore } from '@renderer/stores/git'
 import { useFurtherFolders } from '@renderer/stores/projects'
 import { useSessionsStore } from '@renderer/stores/sessions'
@@ -322,6 +324,7 @@ function FilesPane({
           </>
         }
       >
+        <PaneSwitch panel={panel} projectPath={projectPath} pane="files" />
         {!bare && (
           <PanelButton
             label={(phone ? phoneList : treeShown) ? t('panel.hideTree') : t('panel.showTree')}
@@ -585,7 +588,10 @@ function ChangesFoot({ projectPath, changes }: { projectPath: string; changes: F
           className="kp-btn kp-btn--sm kp-btn--solid"
           disabled={blocked}
           onClick={() =>
-            openGitDialog(projectPath, { kind: 'commit', paths: list.map((c) => c.file.path) })
+            openGitPane(projectPath, {
+              tab: 'changes',
+              commit: { only: list.map((c) => c.file.path), andPush: false },
+            })
           }
         >
           {t('changes.commit')}

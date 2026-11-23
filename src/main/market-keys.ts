@@ -26,6 +26,7 @@ import {
   type ProfileDraft,
   type StoredProfile,
 } from '@shared/provider-profiles'
+import { t, tEnglish } from './i18n'
 import { quarantineFile, readJsonFile, writeFileAtomic } from './json-file'
 import type { Logger } from './log'
 import type { IdentityCipher } from './remote-identity'
@@ -101,13 +102,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+type ValueProblem = 'empty' | 'tooLarge' | 'nul' | 'lineBreak'
+
 /** A value an input may hold; a header's must stay on one line, which would else start another. */
-function valueProblem(value: string, header: boolean): string | null {
-  if (value.length === 0) return 'is empty; null clears an input'
-  if (Buffer.byteLength(value, 'utf8') > MAX_KEY_BYTES) return `is over ${MAX_KEY_BYTES} bytes`
-  if (value.includes('\0')) return 'holds a NUL character'
-  if (header && /[\r\n]/.test(value)) return 'holds a line break, which a header cannot'
+function valueProblem(value: string, header: boolean): ValueProblem | null {
+  if (value.length === 0) return 'empty'
+  if (Buffer.byteLength(value, 'utf8') > MAX_KEY_BYTES) return 'tooLarge'
+  if (value.includes('\0')) return 'nul'
+  if (header && /[\r\n]/.test(value)) return 'lineBreak'
   return null
+}
+
+/** A value's problem as the error says it, for the input it was meant for. */
+function valueProblemText(problem: ValueProblem, name: string): string {
+  switch (problem) {
+    case 'empty':
+      return t('marketKeys.valueEmpty', { name })
+    case 'tooLarge':
+      return t('marketKeys.valueTooLarge', { name, bytes: MAX_KEY_BYTES })
+    case 'nul':
+      return t('marketKeys.valueNul', { name })
+    case 'lineBreak':
+      return t('marketKeys.valueLineBreak', { name })
+  }
+}
+
+/** Why a keys file is read but never written this run. */
+type ReadOnly = 'unreadable' | 'newer' | 'undecryptable'
+
+function readOnlyText(reason: ReadOnly, say: typeof t = t): string {
+  switch (reason) {
+    case 'unreadable':
+      return say('marketKeys.unreadable')
+    case 'newer':
+      return say('marketKeys.newer')
+    case 'undecryptable':
+      return say('marketKeys.undecryptable')
+  }
 }
 
 /** The inputs of a spec by name, with whether each is a header. */
@@ -405,7 +436,7 @@ export class MarketKeys {
     private readonly options: MarketKeysOptions,
     private contents: Contents,
     /** Why the file is not written this run, as when this system cannot decrypt it now. */
-    private readonly readOnly: string | null,
+    private readonly readOnly: ReadOnly | null,
   ) {}
 
   static async load(options: MarketKeysOptions): Promise<MarketKeys> {
@@ -418,7 +449,7 @@ export class MarketKeys {
       profiles: new Map(),
       projects: new Map(),
     }
-    let readOnly: string | null = null
+    let readOnly: ReadOnly | null = null
     let resave = false
     const quarantine = async (reason: string): Promise<void> => {
       log.warn(`${file} is invalid: ${reason}`)
@@ -426,7 +457,7 @@ export class MarketKeys {
         log.warn(`Moved the invalid file to ${await quarantineFile(file)}`)
       } catch (error) {
         log.error(`Could not move the invalid ${file} aside`, error)
-        readOnly = 'Kettu could not read its keys file'
+        readOnly = 'unreadable'
       }
     }
     // The parser's message quotes the text, which holds keys.
@@ -439,7 +470,7 @@ export class MarketKeys {
       const stored = isRecord(raw) ? (version === 1 ? raw.values : raw.contents) : undefined
       if (typeof version === 'number' && version > VERSION) {
         log.warn(`${file} comes from a newer version of Kettu; its keys are not used`)
-        readOnly = 'The keys were saved by a newer version of Kettu'
+        readOnly = 'newer'
       } else if (
         !isRecord(raw) ||
         (version !== 1 && version !== 2 && version !== VERSION) ||
@@ -454,7 +485,7 @@ export class MarketKeys {
         resave = parsed !== null && (version !== VERSION || !options.plainTextAllowed)
       } else if (!(await cipher.available())) {
         log.warn(`${file} is encrypted, which this system cannot undo now; its keys are not used`)
-        readOnly = 'This system cannot decrypt the keys now'
+        readOnly = 'undecryptable'
       } else {
         try {
           if (typeof stored !== 'string' || stored.length > MAX_SEALED_CHARS) {
@@ -516,12 +547,12 @@ export class MarketKeys {
       throw invalid('The agent and environment variable must be named')
     }
     await this.run(async () => {
-      if (this.readOnly) throw new MarketKeysError('unavailable', this.readOnly)
+      if (this.readOnly) throw new MarketKeysError('unavailable', readOnlyText(this.readOnly))
       const vars = new Map(this.contents.agentEnv.get(agentId))
       if (value === null) vars.delete(variable)
       else {
         const problem = valueProblem(value, false)
-        if (problem) throw invalid(`The value of "${variable}" ${problem}`)
+        if (problem) throw invalid(valueProblemText(problem, variable))
         vars.set(variable, value)
       }
       const agentEnv = new Map(this.contents.agentEnv)
@@ -538,7 +569,7 @@ export class MarketKeys {
   async saveProfile(raw: unknown): Promise<string> {
     const draft = parseDraft(raw)
     return this.run(async () => {
-      if (this.readOnly) throw new MarketKeysError('unavailable', this.readOnly)
+      if (this.readOnly) throw new MarketKeysError('unavailable', readOnlyText(this.readOnly))
       const current = this.contents.profiles.get(draft.agentId) ?? { items: [], defaultId: null }
       const before = draft.id === undefined ? null : current.items.find((p) => p.id === draft.id)
       if (draft.id !== undefined && !before) throw invalid('The agent has no such profile')
@@ -573,7 +604,7 @@ export class MarketKeys {
     const agent = profileAgent(agentId)
     if (!isProfileId(profileId)) throw invalid('"profileId" must name a profile')
     await this.run(async () => {
-      if (this.readOnly) throw new MarketKeysError('unavailable', this.readOnly)
+      if (this.readOnly) throw new MarketKeysError('unavailable', readOnlyText(this.readOnly))
       const current = this.contents.profiles.get(agent)
       if (!current?.items.some((each) => each.id === profileId)) return
       await this.commitProfiles(agent, {
@@ -590,7 +621,7 @@ export class MarketKeys {
       throw invalid('"profileId" must name a profile, or be null')
     }
     await this.run(async () => {
-      if (this.readOnly) throw new MarketKeysError('unavailable', this.readOnly)
+      if (this.readOnly) throw new MarketKeysError('unavailable', readOnlyText(this.readOnly))
       const current = this.contents.profiles.get(agent)
       if (profileId !== null && !current?.items.some((each) => each.id === profileId)) {
         throw invalid('The agent has no such profile')
@@ -626,7 +657,7 @@ export class MarketKeys {
       }
     }
     await this.run(async () => {
-      if (this.readOnly) throw new MarketKeysError('unavailable', this.readOnly)
+      if (this.readOnly) throw new MarketKeysError('unavailable', readOnlyText(this.readOnly))
       const values = new Map(this.contents.projects.get(project))
       for (const [name, value] of entries) {
         if (value === null) values.delete(name)
@@ -658,9 +689,9 @@ export class MarketKeys {
   async set(raw: unknown): Promise<MarketKeyState> {
     const patch = parsePatch(raw)
     return this.run(async () => {
-      if (this.readOnly) throw new MarketKeysError('unavailable', this.readOnly)
+      if (this.readOnly) throw new MarketKeysError('unavailable', readOnlyText(this.readOnly))
       const server = this.options.servers().find((each) => each.id === patch.serverId)
-      if (!server) throw invalid(`No server "${patch.serverId}" is installed`)
+      if (!server) throw invalid(t('marketKeys.noServer'))
       const declared = inputsOf(server.spec)
       const inputs = new Map(this.contents.keys.get(server.id))
       for (const [name, value] of patch.values) {
@@ -671,7 +702,7 @@ export class MarketKeys {
           continue
         }
         const problem = valueProblem(value, header)
-        if (problem) throw invalid(`The value of "${name}" ${problem}`)
+        if (problem) throw invalid(valueProblemText(problem, name))
         inputs.set(name, value)
       }
       const keys: Keys = new Map(this.contents.keys)
@@ -704,7 +735,7 @@ export class MarketKeys {
       if (!server || !signsIn(server)) {
         return refused(`"${serverId}" is no server that signs in with OAuth`)
       }
-      if (state !== null && this.readOnly) return refused(this.readOnly)
+      if (state !== null && this.readOnly) return refused(readOnlyText(this.readOnly, tEnglish))
       const oauth = new Map(this.contents.oauth)
       if (state === null) oauth.delete(serverId)
       else oauth.set(serverId, state)
@@ -764,7 +795,7 @@ export class MarketKeys {
     }
     const encrypted = await cipher.available()
     if (!encrypted && !plainTextAllowed) {
-      throw new MarketKeysError('unavailable', 'This system cannot encrypt keys, so none are kept')
+      throw new MarketKeysError('unavailable', t('marketKeys.cannotEncrypt'))
     }
     const plain = contentsObject(contents)
     const stored: KeysFile = {

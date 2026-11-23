@@ -4,7 +4,7 @@ import {
   type ReturnedMessage,
   type SessionSummary,
 } from '@shared/agent-host'
-import type { GroupRunStart } from '@shared/session-groups'
+import type { GroupRunStart } from '@shared/run-groups'
 import type { AgentId, UserContent } from '@shared/thread'
 import type { SandboxChoice } from '@shared/sandbox'
 import {
@@ -17,9 +17,11 @@ import {
   writeDraft,
 } from '@renderer/features/session/composer/drafts'
 import {
+  attachmentContent,
   contentAttachments,
   dropAttachments,
   releaseResent,
+  resetAttachments,
   restoreAttachments,
 } from '@renderer/features/session/composer/attachments'
 import { loadMarkdown, preloadRenderers } from '@renderer/features/session/markdown/preload'
@@ -310,6 +312,40 @@ export async function createSession(
       },
     })
   }
+}
+
+/**
+ * Edit from a message: the host sets the turns from it aside and gives the message back, which goes
+ * into the composer above what it held, after a blank line, with the caret at the end. What it
+ * held is kept with the edit for Put back.
+ */
+export async function editFromMessage(sessionId: string, entryId: string): Promise<void> {
+  const held = draftAttachments(sessionId).filter((item) => item.status === 'ready')
+  const text = readDraft(sessionId)
+  const draft: UserContent[] = [
+    ...(text.trim() ? [{ type: 'text' as const, text }] : []),
+    ...attachmentContent(held),
+  ]
+  const { content } = await host('sessions.rewind', { sessionId, entryId, draft })
+  const message = promptText(content)
+  const written = readDraft(sessionId)
+  writeDraft(sessionId, !message ? written : written.trim() ? `${message}\n\n${written}` : message)
+  const items = draftAttachments(sessionId)
+  restoreAttachments(sessionId, content)
+  // The message's attachments go in front of those the composer held.
+  const added = draftAttachments(sessionId).slice(items.length)
+  setDraftAttachments(sessionId, [...added, ...items])
+  flushDraft(sessionId)
+  emitAppEvent({ kind: 'draft-written', draft: sessionId, focus: true })
+}
+
+/** Put back: the turns an edit set aside return, and the composer holds what it did before it. */
+export async function putBackRewound(sessionId: string): Promise<void> {
+  const { draft } = await host('sessions.putBack', { sessionId })
+  writeDraft(sessionId, promptText(draft))
+  resetAttachments(sessionId, draft)
+  flushDraft(sessionId)
+  emitAppEvent({ kind: 'draft-written', draft: sessionId })
 }
 
 /**

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ApiIcon, ArrowDataTransferHorizontalIcon } from '@hugeicons/core-free-icons'
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
+import { ApiIcon } from '@hugeicons/core-free-icons'
 import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { cacheExpiry, knownExpiry } from '@shared/prompt-cache'
 import {
   compactPrompt,
+  QUEUED_COMMENTS_TEXT,
   harnessOf,
   type AgentId,
   type ConfigOption,
@@ -18,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 import { useCachePhase } from '@renderer/features/prompt-cache/cache-phase'
 import { BranchTrayLink, FolderBranchLinks } from '@renderer/features/git/git-status'
 import { limitPhrase, resetTime, tokens } from '@renderer/lib/format'
+import { onAppEvent } from '@renderer/app/events'
 import { errorMessage, host } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
 import { useNow } from '@renderer/lib/use-now'
@@ -34,11 +36,11 @@ import {
 } from '@renderer/stores/agent-switch'
 import { agentsOn, useAgentsStore, usePlanReadings } from '@renderer/stores/agents'
 import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
+import { taskFrom, useTasksStore } from '@renderer/stores/tasks'
 import { AgentMarkHost } from '@renderer/components/agents/agent-mark-host'
 import { AgentMenu } from '@renderer/features/session/new-session/agent-menu'
 import { readFirstOptions } from '@renderer/features/session/new-session/prepared'
 import { startConfig } from '@renderer/features/session/new-session/start-options'
-import { Glyph } from '@renderer/features/shell/glyph'
 import { runningWorkOf, workItems, type WorkItem } from '@renderer/features/sidebar/running-work'
 import { setPaneSelection, useArtifactsStore } from '@renderer/stores/artifacts'
 import { useSettingsStore } from '@renderer/stores/settings'
@@ -47,6 +49,14 @@ import { showSending, useThreadsStore } from '@renderer/stores/threads'
 import { refreshLimits } from '@renderer/stores/usage'
 import { useViewStore } from '@renderer/stores/view'
 import { askSide, openSideChat, sideQuestionOf } from '@renderer/stores/side-chat'
+import {
+  commentsOf,
+  keepComments,
+  removeComments,
+  useReplyComments,
+} from '@renderer/stores/reply-comments'
+import { commentsMessage } from '../entries/reply-quote'
+import { CommentList } from './comment-list'
 import { awaitsAnswer, endedOnRejection } from '../turn-phase'
 import { TrayStyles } from './affect-styles'
 import { attachmentContent, attachmentsBlock, type AttachmentsBlock } from './attachments'
@@ -55,9 +65,19 @@ import { mentionSurfacesOf } from './mention-surfaces'
 import { OptionMenu } from './control-row'
 import { useModeControl } from './mode-control'
 import { isSelect, onCycleKeys } from './options'
-import { hasMessage } from './drafts'
+import {
+  hasMessage,
+  readDraftNotes,
+  readDraftPageNotes,
+  useNoteCount,
+  writeDraftNotes,
+  writeDraftPageNotes,
+} from './drafts'
+import { notesMessage } from '@renderer/features/diff-notes/notes'
+import { pageNoteShots, pageNotesText } from '@renderer/features/page-notes/notes'
 import { HistoryHeader } from './history-header'
-import { levelsOf, type SelectOption } from './levels'
+import { RewoundHeader } from './rewound-header'
+import { dialStops, type SelectOption } from './levels'
 import { shownChoice } from './model-list'
 import { ModelMenu } from './model-menu'
 import { nextChoice, nextMode } from './modes'
@@ -87,6 +107,7 @@ import { useSessionFolder } from '@renderer/lib/session-folder'
 import { firstWaiting, pressWaitingCard } from '../waiting-card'
 import { limitsForModel } from '@shared/plan-limits'
 import { planQuota } from '@shared/plan-quota'
+import { Glyph } from '@renderer/features/shell/glyph'
 import { usePhoneWindow } from '@renderer/features/shell/narrow'
 
 const valuesOf = (config: readonly ConfigOption[]): Record<string, string | boolean> =>
@@ -127,6 +148,8 @@ export function Composer({
   const { t } = useTranslation(['composer', 'session'])
   const { t: ta } = useTranslation('agents')
   const sessionId = session.id
+  // A task this conversation started still runs; what is said here goes to this agent alone.
+  const taskRunning = useTasksStore((s) => taskFrom(s.summaries, sessionId)?.status === 'running')
   // Another agent picked to take the session over with the next message, shown as its own.
   const pending = useAgentSwitchStore((s) => s.pending[sessionId] ?? null)
   // Every agent here is one of the host the session is on.
@@ -227,8 +250,12 @@ export function Composer({
     // During a turn the send key queues the message and the steer key sends it into the turn.
     canQueue: running && holds && !blocked && pending === null && !mustSwitch,
   })
+  // Comments on passages go with the message, so with one, Send works on an empty box.
+  // Huli: so do the comments on diff lines and page elements waiting in the tray above.
+  const noted = useNoteCount(sessionId) > 0
+  const commented = useReplyComments(sessionId).length > 0 || noted
   // Read as values, so typing renders the composer only when one of them changes.
-  const holdsMessage = useBoxText(box, (text) => hasMessage(text, attachments))
+  const holdsMessage = useBoxText(box, (text) => hasMessage(text, attachments)) || commented
   const blockedBy = useBoxText(box, (text) => attachmentsBlock(attachments, text)?.message ?? null)
   const blocked = blockedBy === null ? null : attachmentsBlock(attachments, box.source.text)
   const { canSend, canQueue } = can(holdsMessage, blocked)
@@ -261,7 +288,10 @@ export function Composer({
   // The message as a key comes, from the editor itself, which a render may not have caught up with.
   const live = () => {
     const text = box.editor.current?.text() ?? box.source.text
-    const holds = hasMessage(text, attachments)
+    const holds =
+      hasMessage(text, attachments) ||
+      commentsOf(sessionId).length > 0 ||
+      readDraftNotes(sessionId).length + readDraftPageNotes(sessionId).length > 0
     return { holds, ...can(holds, attachmentsBlock(attachments, text)) }
   }
   // Why the send key does nothing now, for the line under the box.
@@ -444,14 +474,46 @@ export function Composer({
     send: () => send(live()),
   })
 
+  // The comments stay in the composer until the message is sent, and with it when it fails.
   const takeContent = () => {
     const taken = box.take()
+    const comments = commentsOf(sessionId)
+    keepComments(sessionId)
     const sent = selection && taken.prompt.trim() ? selection : null
     const prompt = sent ? selectionPrompt(taken.prompt, sent) : taken.prompt
     if (sent) setPaneSelection(null)
+    // Huli: the comments on diff lines and page elements go after it, with their screenshots
+    // after the message's own images; they leave the tray once the message went.
+    const notes = readDraftNotes(sessionId)
+    const pageNotes = readDraftPageNotes(sessionId)
+    const held = attachmentContent(taken.held)
+    const images = held.filter(
+      (c) => c.type === 'ref' && c.ref.kind === 'attachment' && c.ref.attachment.type === 'image',
+    ).length
+    const text = [
+      commentsMessage(comments, prompt),
+      ...(notes.length > 0 ? [notesMessage(notes)] : []),
+      ...(pageNotes.length > 0 ? [pageNotesText(pageNotes, images + 1)] : []),
+    ]
+      .filter((part) => part.trim())
+      .join('\n\n')
+    const count = comments.length + notes.length + pageNotes.length
+    const first = comments[0]?.comment ?? notes[0]?.text ?? pageNotes[0]?.comment ?? ''
+    // How the message reads in the queue: the count, then the text or else the first comment.
+    const summary =
+      count > 0 && (taken.prompt.trim() || first.trim())
+        ? {
+            count,
+            text: (taken.prompt.trim() || first.trim()).slice(0, QUEUED_COMMENTS_TEXT),
+          }
+        : null
     const content: UserContent[] = [
-      ...(prompt.trim() ? [{ type: 'text' as const, text: prompt }] : []),
-      ...attachmentContent(taken.held),
+      ...(text.trim() ? [{ type: 'text' as const, text }] : []),
+      ...held,
+      ...pageNoteShots(pageNotes).map((attachment): UserContent => ({
+        type: 'ref',
+        ref: { kind: 'attachment', attachment },
+      })),
       // A terminal, tab or device the text mentions goes with it, which lets the agent use it.
       ...surfaceRefs(prompt, mentionResolver([], null, mentionSurfacesOf(sessionId))).map(
         (ref) => ({
@@ -460,7 +522,22 @@ export function Composer({
         }),
       ),
     ]
-    return { taken, sent, content }
+    const commentIds = comments.map((c) => c.id)
+    const noteIds = new Set([...notes, ...pageNotes].map((n) => n.id))
+    return { taken, sent, content, commentIds, noteIds, summary }
+  }
+
+  // Huli: the notes that went with a message leave the draft; ones added meanwhile stay.
+  const dropSentNotes = (ids: ReadonlySet<string>) => {
+    if (ids.size === 0) return
+    writeDraftNotes(
+      sessionId,
+      readDraftNotes(sessionId).filter((n) => !ids.has(n.id)),
+    )
+    writeDraftPageNotes(
+      sessionId,
+      readDraftPageNotes(sessionId).filter((n) => !ids.has(n.id)),
+    )
   }
 
   // The background work the session's agent would stop by switching, while the user is asked.
@@ -484,7 +561,7 @@ export function Composer({
   const switchNow = () => {
     const now = useAgentSwitchStore.getState().pending[sessionId]
     if (!now) return
-    const { taken, sent, content } = takeContent()
+    const { taken, sent, content, commentIds, noteIds } = takeContent()
     const options = Object.keys(now.values).length > 0 ? { options: now.values } : {}
     host('sessions.switchAgent', {
       sessionId,
@@ -493,7 +570,11 @@ export function Composer({
       ...options,
       ...(now.summarize ? { summarize: true } : {}),
     })
-      .then(() => setPendingSwitch(sessionId, null))
+      .then(() => {
+        setPendingSwitch(sessionId, null)
+        removeComments(sessionId, commentIds)
+        dropSentNotes(noteIds)
+      })
       .catch((reason: unknown) => {
         if (sent) setPaneSelection(sent)
         box.restore(taken)(reason)
@@ -520,10 +601,12 @@ export function Composer({
 
   /** With `shown`, the session is free, so the message shows in the thread as it goes. */
   const queue = (steer: boolean, shown = false) => {
-    const { taken, sent, content } = takeContent()
+    const { taken, sent, content, commentIds, noteIds, summary } = takeContent()
     const unshow = shown ? showSending(sessionId, content) : null
-    host('sessions.queue', { sessionId, content })
+    host('sessions.queue', { sessionId, content, ...(summary ? { comments: summary } : {}) })
       .then(({ itemId }) => {
+        removeComments(sessionId, commentIds)
+        dropSentNotes(noteIds)
         // It waits in the queue after all, which shows it there.
         if (itemId) unshow?.()
         // Once queued, a failed steer leaves the message in the queue, not lost.
@@ -544,6 +627,21 @@ export function Composer({
     host('sessions.cancel', { sessionId }).catch((e: unknown) => setError(errorMessage(e)))
   }
 
+  // Add and send in the selection box sends what this composer holds, the new comment included.
+  const paneId = usePane()?.paneId ?? null
+  const sendFromReply = useEffectEvent(() => {
+    const now = live()
+    if (now.canSend || now.canQueue) send(now)
+  })
+  useEffect(
+    () =>
+      onAppEvent((event) => {
+        if (event.kind !== 'send-composer' || event.sessionId !== sessionId) return
+        if (event.paneId === null || event.paneId === paneId) sendFromReply()
+      }),
+    [sessionId, paneId],
+  )
+
   // A step asked for and not yet reported, so quick presses keep stepping from it.
   const stepped = useRef<Record<string, { from: string | undefined; to: string }>>({})
   // Shift+Tab steps through the permission modes and Alt+E through the effort levels.
@@ -553,14 +651,8 @@ export function Composer({
     const reported = option.value === undefined ? undefined : String(option.value)
     const asked = stepped.current[option.id]
     const current = asked && asked.from === reported ? asked.to : reported
-    const model = config.find((o) => o.category === 'model')?.value
-    const levels =
-      category === 'mode'
-        ? null
-        : levelsOf(option as SelectOption, current, typeof model === 'string' ? model : undefined)
-    const next = levels
-      ? nextChoice(levels.levels, levels.shown)
-      : nextMode(option.choices, current)
+    const levels = category === 'mode' ? null : dialStops(option as SelectOption, current)
+    const next = levels ? nextChoice(levels.stops, levels.shown) : nextMode(option.choices, current)
     if (next === undefined || next === current) return true
     stepped.current[option.id] = { from: reported, to: next }
     if (pending) {
@@ -646,15 +738,19 @@ export function Composer({
       : awaiting
         ? t(asked ? 'prompt.placeholder.awaitingAnswer' : 'prompt.placeholder.awaiting')
         : !running && reached?.resetsAt
-          ? t('prompt.placeholder.limitReached', {
-              limit: limitPhrase(reached),
-              time: resetTime(reached.resetsAt),
-            })
+          ? t(
+              reached.extraUsage
+                ? 'prompt.placeholder.limitExtraUsage'
+                : 'prompt.placeholder.limitReached',
+              { limit: limitPhrase(reached), time: resetTime(reached.resetsAt) },
+            )
           : !running && rejected
             ? t('prompt.placeholder.denied')
             : running
               ? t(phone ? 'prompt.placeholder.runningTouch' : 'prompt.placeholder.runningQueue')
-              : t('prompt.placeholder.ask')
+              : taskRunning
+                ? t('prompt.placeholder.taskRunning')
+                : t('prompt.placeholder.ask')
 
   const cache = cacheExpiry(session, agent?.account ?? null)
   const timed = cache?.expiresAt != null ? cache : null
@@ -753,7 +849,16 @@ export function Composer({
             onKeyDown={onKeyDown}
             top={
               <>
-                {box.historyPosition && <HistoryHeader position={box.historyPosition} />}
+                {box.historyPosition ? (
+                  <HistoryHeader position={box.historyPosition} />
+                ) : (
+                  session.rewound && (
+                    <RewoundHeader sessionId={sessionId} turns={session.rewound.turns} />
+                  )
+                )}
+                <CommentList sessionId={sessionId} />
+                {/* Huli: the comments on diff lines and page elements, which also go with Send. */}
+                <NotesTray sessionId={sessionId} place="composer" />
                 <AnimatePresence initial={false}>
                   {outOfCredit && !starting && (
                     <OutOfCreditStrip
@@ -816,7 +921,6 @@ export function Composer({
                 {selection && (
                   <SelectionChip selection={selection} onRemove={() => setPaneSelection(null)} />
                 )}
-                <NotesTray sessionId={sessionId} place="composer" />
               </>
             }
           />
@@ -852,6 +956,7 @@ export function Composer({
               agentId={session.agentId}
               hostId={hostId}
               agentName={agent?.name ?? agentName}
+              harness={agent?.harnessName ?? agentName}
               config={config}
               running={running}
               onSelect={set}
@@ -864,17 +969,9 @@ export function Composer({
               wallet={agent?.balance?.balances}
               source={agent?.version ? `${agent.harnessName} ${agent.version}` : null}
               cacheNote={cacheNote}
-              actions={[
-                ...profileAction,
-                {
-                  id: 'switch-agent',
-                  label: t('switchAgent.menu'),
-                  icon: <Glyph icon={ArrowDataTransferHorizontalIcon} />,
-                  disabled: !idle,
-                  ...(idle ? {} : { hint: t('switchAgent.betweenTurns') }),
-                  onSelect: () => setChoosingAgent(true),
-                },
-              ]}
+              onSwitchAgent={() => setChoosingAgent(true)}
+              canSwitchAgent={idle}
+              actions={profileAction}
             />
           ))
         }
@@ -893,8 +990,8 @@ export function Composer({
             <TrayStyles />
             <span className="kettu-tray__group">
               <SessionPlace sessionId={sessionId} projectPath={session.projectPath} />
-              <BranchTrayLink projectPath={folder} />
-              <FolderBranchLinks projectPath={session.projectPath} />
+              <BranchTrayLink projectPath={folder} sessionId={sessionId} />
+              <FolderBranchLinks projectPath={session.projectPath} sessionId={sessionId} />
               {!pending && !mustSwitch && (
                 <ProfileChip
                   agentId={session.agentId}

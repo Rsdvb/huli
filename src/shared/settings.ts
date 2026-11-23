@@ -14,6 +14,7 @@ import type { ToolCallView } from './zen-view'
 import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
 import { DEFAULT_PORT_BASE } from './worktree-ports'
+import { DEFAULT_WORKING_STEPS, type WorkingStepLimit } from './workflow'
 
 /** Whether a host's first start has run, so it runs once. */
 export interface InitialSetup {
@@ -89,15 +90,22 @@ export interface SettingsFile {
     reduceMotion: 'system' | 'always'
     zoom: ZoomLevel // Chromium's page zoom of the whole window
     sidebarHover: boolean // pointing at the toggle of a collapsed sidebar shows it over the page
+    sidebarOrder: SidebarPage[] // every page once, as the sidebar lists them; replaced whole
+    sidebarHidden: SidebarPage[] // pages the sidebar leaves out; replaced whole
+    fonts: UserFonts // replaced whole; a role left out keeps the theme's face
   }
   notifications: {
     permission: boolean
     turnEnded: boolean
     error: boolean
     routines: boolean // a routine's run ended, or its routines paused at a plan limit
-    limits: boolean // a plan window crossed 90% used or ran out: a toast, and a notification away
+    updates: boolean // Kettu's new version downloaded, or waiting for a step of the user's
+    planLimits: boolean // a plan limit window at 90%, used up, or reset after it was used up
     sound: boolean
     badge: boolean // the Dock icon on macOS, the taskbar button on Windows
+    // macOS: the notch island shows what needs the user, in place of the notifications of the
+    // kinds it shows, while it runs
+    island: boolean
   }
   // Keyed by harness: the program picked for it, and its default agent's folder and visibility.
   // configDir: a folder picked before agents could be added, which the default agent keeps.
@@ -137,6 +145,8 @@ export interface SettingsFile {
   supervisor: SupervisorSettings
   // Huli: the rules that settle sessions out of the active list by themselves (会话整理).
   tidy: TidySettings
+  // How many workflow step sessions work at once across every task.
+  workflow: { maxWorkingSteps: WorkingStepLimit }
   // source: where updates come from; GitHub only never reaches Kettu's download service.
   updates: { automatic: 'download' | 'restart' | 'notify' | 'off'; source: 'auto' | 'github' }
   privacy: { hideAccount: boolean } // kept so older files still parse; loading turns it off
@@ -223,6 +233,36 @@ export type LinkDestination = 'browser' | 'session'
 export type OpenLinksIn = LinkDestination | 'ask'
 
 export const MAX_FONT_FAMILY_CHARS = 100
+
+/** The text the user may draw in a face of their own: the interface, replies and code. */
+/** The pages under New session in the sidebar, in their default order. */
+export const SIDEBAR_PAGES = ['overview', 'artifacts', 'routines', 'marketplace', 'usage'] as const
+export type SidebarPage = (typeof SIDEBAR_PAGES)[number]
+
+export function isSidebarPage(value: unknown): value is SidebarPage {
+  return (SIDEBAR_PAGES as readonly unknown[]).includes(value)
+}
+
+/** The known pages of a stored list, each once; anything else, such as a later version's, dropped. */
+export function readSidebarPages(value: unknown): SidebarPage[] {
+  return Array.isArray(value) ? [...new Set<unknown>(value)].filter(isSidebarPage) : []
+}
+
+/** A stored order, with each page it lacks put back after the page it follows by default. */
+export function readSidebarOrder(value: unknown): SidebarPage[] {
+  const order = readSidebarPages(value)
+  SIDEBAR_PAGES.forEach((page, i) => {
+    if (order.includes(page)) return
+    const before = i === 0 ? -1 : order.indexOf(SIDEBAR_PAGES[i - 1]!)
+    order.splice(before + 1, 0, page)
+  })
+  return order
+}
+
+export const USER_FONT_ROLES = ['ui', 'prose', 'code'] as const
+export type UserFontRole = (typeof USER_FONT_ROLES)[number]
+/** A face installed on the computer by role, each drawn before the theme's, which fills in. */
+export type UserFonts = Partial<Record<UserFontRole, string>>
 
 /** One face name, safe to put in quotes in a CSS font stack: no quotes, separators or controls. */
 export function isFontFamilyName(value: string): boolean {
@@ -377,15 +417,20 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     reduceMotion: 'system',
     zoom: 1.1,
     sidebarHover: true,
+    sidebarOrder: [...SIDEBAR_PAGES],
+    sidebarHidden: [],
+    fonts: {},
   },
   notifications: {
     permission: true,
     turnEnded: true,
     error: true,
     routines: true,
-    limits: true,
+    updates: true,
+    planLimits: true,
     sound: false,
     badge: true,
+    island: true,
   },
   agents: {},
   addedAgents: [],
@@ -399,6 +444,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   idleSessions: { release: 'auto', outOfView: 5, inView: 30, limit: null },
   supervisor: DEFAULT_SUPERVISOR,
   tidy: { ...DEFAULT_TIDY },
+  workflow: { maxWorkingSteps: DEFAULT_WORKING_STEPS },
   updates: { automatic: 'download', source: 'auto' },
   privacy: { hideAccount: false },
   diagnostics: { verboseUntil: null },
@@ -441,6 +487,30 @@ export function stepZoom(zoom: ZoomLevel, step: ZoomStep): ZoomLevel {
 }
 
 /**
+ * Changes to a kept list, applied to the list the settings owner holds when the patch arrives:
+ * `put` adds an entry or replaces the one with its id, in place, and `remove` drops ids. Removes
+ * apply first.
+ */
+export interface ListEdit<T> {
+  put?: T[]
+  remove?: string[]
+}
+
+export function applyListEdit<T extends { id: string }>(
+  list: readonly T[],
+  edit: ListEdit<T>,
+): T[] {
+  const removed = new Set(edit.remove)
+  const next = list.filter((item) => !removed.has(item.id))
+  for (const item of edit.put ?? []) {
+    const at = next.findIndex((other) => other.id === item.id)
+    if (at < 0) next.push(item)
+    else next[at] = item
+  }
+  return next
+}
+
+/**
  * A change from the renderer. Sections merge key by key; `proxy` is replaced whole.
  * Executable paths and configuration folders can only be cleared here (`null`); setting one goes
  * through a native dialog in main, so the renderer never sends a path to a program or folder.
@@ -471,12 +541,20 @@ export interface SettingsPatch {
   }
   git?: Partial<SettingsFile['git']>
   mcp?: { kettu: { off: AgentId[] } } // the list is replaced whole
-  marketplace?: { mcp?: MarketServer[]; skills?: MarketSkill[] } // each list is replaced whole
+  // Each list is replaced whole, then its edit is applied; an edit is for a client that must not
+  // overwrite what another changed meanwhile.
+  marketplace?: {
+    mcp?: MarketServer[]
+    skills?: MarketSkill[]
+    mcpEdit?: ListEdit<MarketServer>
+    skillsEdit?: ListEdit<MarketSkill>
+  }
   disabledAgents?: AgentId[] // replaced whole
   startModes?: Partial<Record<AgentId, string | null>> // merged by agent; null clears one
   idleSessions?: Partial<SettingsFile['idleSessions']>
   supervisor?: Partial<SettingsFile['supervisor']>
   tidy?: Partial<SettingsFile['tidy']>
+  workflow?: Partial<SettingsFile['workflow']>
   updates?: Partial<SettingsFile['updates']>
   privacy?: Partial<SettingsFile['privacy']>
   diagnostics?: Partial<SettingsFile['diagnostics']>
@@ -524,6 +602,7 @@ export interface HostSettings {
   supervisor?: SettingsFile['supervisor']
   // Huli: the rules that settle sessions by themselves; absent from a parent older than them.
   tidy?: SettingsFile['tidy']
+  workflow: SettingsFile['workflow']
   usage: { fromComputer: boolean }
   sessionTitles: boolean // write a title for a session its agent leaves untitled
   claudeTestEntrypoint: string | null

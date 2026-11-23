@@ -204,6 +204,13 @@
      tile. Each reaches 3:1 on the page; the tint, which follows it, fills a chosen tile. */
   --control-on: #0060e2;
   --control-on-tint: color-mix(in srgb, var(--control-on) 7%, transparent);
+  /* A commented passage in the thread, at rest and while its row is pointed at, and its number:
+     blue, which no other ground behind thread text uses. The number is opaque so the passage's
+     tint does not deepen under it. */
+  --comment-mark: color-mix(in srgb, var(--control-on) 14%, transparent);
+  --comment-mark-hover: color-mix(in srgb, var(--control-on) 24%, transparent);
+  --comment-num: color-mix(in srgb, var(--control-on) 10%, var(--bg-app));
+  --comment-num-hover: color-mix(in srgb, var(--control-on) 14%, var(--bg-app));
   --switch-on: #3c85e9;
   /* The send button once there is something to send: the same fox in both themes, since the
      lighter dark-theme fox leaves its white arrow under 3:1. */
@@ -398,6 +405,8 @@
   --kind-web: #2d6e7e;
   --kind-web-tint: #e6f2f4;
   --kind-canvas: #7653c9;
+  /* The dots of a canvas's ground in the artifact viewer. */
+  --canvas-dot: #d2d2d6;
   --kind-canvas-tint: #f1edfb;
   --kind-document: #2f6bd1;
   --kind-document-tint: #e8f0fc;
@@ -653,6 +662,17 @@
   --composer-ultra-1: #e879f9;
   --composer-ultra-2: #8b5cf6;
   --composer-ultra-3: #3b82f6;
+  /* The effort dial in the model menus: its face and rim, the ticks and names along its arc, the
+     ticks lit up to the level at the mark, and the lens behind the mark. */
+  --dial-face: color-mix(in srgb, var(--composer-strong) 4.5%, transparent);
+  --dial-rim: color-mix(in srgb, var(--composer-strong) 13%, transparent);
+  --dial-tick: color-mix(in srgb, var(--composer-strong) 24%, transparent);
+  --dial-tick-major: color-mix(in srgb, var(--composer-strong) 52%, transparent);
+  --dial-lit: color-mix(in srgb, var(--control-on) 62%, transparent);
+  --dial-lit-major: color-mix(in srgb, var(--control-on) 95%, transparent);
+  --dial-name: color-mix(in srgb, var(--composer-strong) 50%, transparent);
+  --dial-name-on: color-mix(in srgb, var(--composer-strong) 90%, transparent);
+  --dial-lens: color-mix(in srgb, var(--control-on) 8%, transparent);
   /* The GitHub star card: the glow behind its Star button from its crest down, and the colors
      flowing through its ask. */
   --star-glow-1: color-mix(in srgb, var(--tile-amber) 85%, var(--send));
@@ -814,6 +834,11 @@
 
     --control-on: #5b9aff;
     --control-on-tint: color-mix(in srgb, var(--control-on) 11%, transparent);
+    /* The commented passage and its number, a step stronger. */
+    --comment-mark: color-mix(in srgb, var(--control-on) 22%, transparent);
+    --comment-mark-hover: color-mix(in srgb, var(--control-on) 36%, transparent);
+    --comment-num: color-mix(in srgb, var(--control-on) 16%, var(--bg-app));
+    --comment-num-hover: color-mix(in srgb, var(--control-on) 22%, var(--bg-app));
     --switch-on: #4d8dff;
     --send: #f2581b;
     --switch-thumb: #ffffff;
@@ -859,6 +884,7 @@
     --kind-web: #6cc0d2;
     --kind-web-tint: #1e3236;
     --kind-canvas: #a88beb;
+    --canvas-dot: #3a3a40;
     --kind-canvas-tint: #2b2540;
     --kind-document: #7fa9f2;
     --kind-document-tint: #1f2a3d;
@@ -1059,6 +1085,16 @@
     --composer-waiting: #ff8a5c;
     --composer-ultra-text: #a78bfa;
     --composer-ultra-shine: #faf5ff;
+    /* The effort dial and the switch cards, as in the light theme. */
+    --dial-face: color-mix(in srgb, var(--composer-strong) 6%, transparent);
+    --dial-rim: color-mix(in srgb, var(--composer-strong) 16%, transparent);
+    --dial-tick: color-mix(in srgb, var(--composer-strong) 22%, transparent);
+    --dial-tick-major: color-mix(in srgb, var(--composer-strong) 56%, transparent);
+    --dial-lit: color-mix(in srgb, var(--control-on) 72%, transparent);
+    --dial-lit-major: var(--control-on);
+    --dial-name: color-mix(in srgb, var(--composer-strong) 50%, transparent);
+    --dial-name-on: color-mix(in srgb, var(--composer-strong) 95%, transparent);
+    --dial-lens: color-mix(in srgb, var(--control-on) 14%, transparent);
 
     /* The artifact canvas, as in the light theme. */
     --note-ink: #ededed;
@@ -1209,6 +1245,11 @@
 
   --control-on: #5b9aff;
   --control-on-tint: color-mix(in srgb, var(--control-on) 11%, transparent);
+  /* The commented passage and its number, a step stronger. */
+  --comment-mark: color-mix(in srgb, var(--control-on) 22%, transparent);
+  --comment-mark-hover: color-mix(in srgb, var(--control-on) 36%, transparent);
+  --comment-num: color-mix(in srgb, var(--control-on) 16%, var(--bg-app));
+  --comment-num-hover: color-mix(in srgb, var(--control-on) 22%, var(--bg-app));
   --switch-on: #4d8dff;
   --send: #f2581b;
   --switch-thumb: #ffffff;
@@ -1254,6 +1295,7 @@
   --kind-web: #6cc0d2;
   --kind-web-tint: #1e3236;
   --kind-canvas: #a88beb;
+  --canvas-dot: #3a3a40;
   --kind-canvas-tint: #2b2540;
   --kind-document: #7fa9f2;
   --kind-document-tint: #1f2a3d;
@@ -1454,6 +1496,16 @@
   --composer-waiting: #ff8a5c;
   --composer-ultra-text: #a78bfa;
   --composer-ultra-shine: #faf5ff;
+  /* The effort dial and the switch cards, as in the light theme. */
+  --dial-face: color-mix(in srgb, var(--composer-strong) 6%, transparent);
+  --dial-rim: color-mix(in srgb, var(--composer-strong) 16%, transparent);
+  --dial-tick: color-mix(in srgb, var(--composer-strong) 22%, transparent);
+  --dial-tick-major: color-mix(in srgb, var(--composer-strong) 56%, transparent);
+  --dial-lit: color-mix(in srgb, var(--control-on) 72%, transparent);
+  --dial-lit-major: var(--control-on);
+  --dial-name: color-mix(in srgb, var(--composer-strong) 50%, transparent);
+  --dial-name-on: color-mix(in srgb, var(--composer-strong) 95%, transparent);
+  --dial-lens: color-mix(in srgb, var(--control-on) 14%, transparent);
 
   /* The artifact canvas, as in the light theme. */
   --note-ink: #ededed;
@@ -1669,7 +1721,6 @@
   --destructive-tint-hover: color-mix(in srgb, var(--danger) 13%, transparent);
   /* The line a reference points at, in the Files pane's editor. */
   --marked-line: color-mix(in srgb, var(--info) 7%, transparent);
-  --sheen: color-mix(in srgb, var(--text-primary) 6%, transparent);
   /* What a typed filter matched in a menu's rows: the fox, faint. */
   --match: color-mix(in srgb, var(--attention-dot) 16%, transparent);
 

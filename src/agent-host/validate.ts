@@ -84,7 +84,7 @@ import {
 import { isProfileId } from '@shared/provider-profiles'
 import { AUTO_APPROVE_LEVELS, isAutoApprove } from '@shared/risk'
 import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
-import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/session-groups'
+import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/run-groups'
 import { BOARD_STATUSES, isBoardStatus } from '@shared/session-board'
 import { REPORT_ERROR_MAX, REPORT_ORIGINS, type ReportOrigin } from '@shared/report'
 import {
@@ -126,7 +126,9 @@ import {
 import { ATTACHMENT_BYTES, ATTACHMENT_LIMIT, PROMPT_BYTES, THUMB_CHARS } from '@shared/attachments'
 import { UPLOAD_FILE_NAME } from '@shared/remote/streams'
 import {
+  QUEUED_COMMENTS_TEXT,
   isAgentId,
+  isQueuedComments,
   type AgentId,
   type ContentRef,
   type FormValues,
@@ -136,6 +138,7 @@ import {
 } from '@shared/thread'
 import { FORM_FIELDS, FORM_KEY_CHARS } from './elicitation'
 import { invalidParams } from './errors'
+import { t } from './i18n'
 import { bundleToken } from './marketplace/bundles'
 import { TASK_ID } from './workflow/model'
 import { isCompletablePath } from './path-completion'
@@ -210,8 +213,8 @@ function none(params: unknown): void {
 function string(o: Fields, key: string, max: number): string {
   const value = o[key]
   if (typeof value !== 'string') throw invalidParams(`${key} must be a string`)
-  if (value.length === 0) throw invalidParams(`${key} must not be empty`)
-  if (value.length > max) throw invalidParams(`${key} is longer than ${max} characters`)
+  if (value.length === 0) throw invalidParams(t('validate.empty', { key }))
+  if (value.length > max) throw invalidParams(t('validate.tooLong', { key, max }))
   return value
 }
 
@@ -260,7 +263,7 @@ function removalSteps(value: unknown): string[] {
 
 function agentId(o: Fields, key = 'agentId'): AgentId {
   const value = string(o, key, ID_CHARS)
-  if (!isAgentId(value)) throw invalidParams(`Unknown agent ${value}`)
+  if (!isAgentId(value)) throw invalidParams(t('agent.unknown', { agent: value }))
   return value
 }
 
@@ -671,6 +674,35 @@ function taskStart(value: unknown, platform: Platform): HostParams<'tasks.start'
   }
 }
 
+const SUGGESTION_ID = /^wfs-[a-z2-7]{12}$/
+const SUGGESTION_ANSWERS: ReadonlySet<unknown> = new Set([
+  'start',
+  'decline',
+  'another',
+  'reconsider',
+  'save',
+  'not_save',
+])
+
+function suggestionId(o: Fields): string {
+  const id = string(o, 'id', 16)
+  if (!SUGGESTION_ID.test(id)) throw invalidParams('id must name a workflow card')
+  return id
+}
+
+function answerSuggestion(value: unknown): HostParams<'workflows.answerSuggestion'> {
+  const o = fields(value)
+  if (!SUGGESTION_ANSWERS.has(o.answer)) {
+    throw invalidParams('answer must be start, decline, another, reconsider, save or not_save')
+  }
+  return {
+    id: suggestionId(o),
+    answer: o.answer as HostParams<'workflows.answerSuggestion'>['answer'],
+    ...(o.agentId === undefined ? {} : { agentId: agentId(o) }),
+    ...(o.options === undefined ? {} : { options: configValues(o.options) }),
+  }
+}
+
 function workflowAddSource(value: unknown): HostParams<'workflows.add'> {
   const o = fields(value)
   if (o.kind === 'url') return { kind: 'url', url: string(o, 'url', URL_CHARS) }
@@ -693,7 +725,7 @@ function workflowSettingsChange(value: unknown): HostParams<'workflows.setSettin
     if (entries.length > 64) throw invalidParams('autoPick names too many agents')
     autoPick = {}
     for (const [id, allowed] of entries) {
-      if (!isAgentId(id)) throw invalidParams(`Unknown agent ${id}`)
+      if (!isAgentId(id)) throw invalidParams(t('agent.unknown', { agent: id }))
       if (allowed !== null && typeof allowed !== 'boolean') {
         throw invalidParams('autoPick values must be true, false or null')
       }
@@ -730,21 +762,28 @@ function worktreeSettings(value: unknown, platform: Platform): ProjectWorktreeSe
   const o = fields(value)
   const template = o.branchTemplate
   if (typeof template !== 'string' || template.length > MAX_TEMPLATE) {
-    throw invalidParams(`branchTemplate must be a string of at most ${MAX_TEMPLATE} characters`)
+    throw invalidParams(t('validate.branchTemplate', { max: MAX_TEMPLATE }), { field: 'branch' })
   }
   // A template must give a usable name with and without an issue.
   for (const issue of ['', '1']) {
     checkWorktreeBranch(branchFromTemplate(template, { slug: 'slug', type: 'feat', issue }))
   }
   if (!Array.isArray(o.copy) || o.copy.length > MAX_WORKTREE_COPY_PATHS) {
-    throw invalidParams(`copy must be a list of at most ${MAX_WORKTREE_COPY_PATHS} paths`)
+    throw invalidParams(t('validate.copyCount', { max: MAX_WORKTREE_COPY_PATHS }), {
+      field: 'copy',
+    })
   }
   const copy = o.copy.map((entry) => {
     if (typeof entry !== 'string' || entry.length === 0 || entry.length > 1024) {
-      throw invalidParams('copy must list paths')
+      throw invalidParams(t('validate.copyPaths'), { field: 'copy' })
     }
     const checked = checkIncludeEntry(entry, platform)
-    if ('reason' in checked) throw invalidParams(`copy: ${entry} ${checked.reason}`)
+    if ('reason' in checked) {
+      throw invalidParams(
+        t('validate.copyEntry', { entry, reason: t(`worktree.includeProblem.${checked.problem}`) }),
+        { field: 'copy' },
+      )
+    }
     return checked.path
   })
   const setup = o.setup
@@ -755,9 +794,7 @@ function worktreeSettings(value: unknown, platform: Platform): ProjectWorktreeSe
       setup.length > MAX_SETUP_COMMAND ||
       setup.includes('\0'))
   ) {
-    throw invalidParams(
-      `setup must be null or a command of at most ${MAX_SETUP_COMMAND} characters`,
-    )
+    throw invalidParams(t('validate.setupCommand', { max: MAX_SETUP_COMMAND }), { field: 'setup' })
   }
   return {
     branchTemplate: template,
@@ -916,10 +953,10 @@ function routineDraft(value: unknown, platform: Platform): RoutineDraft {
   const o = fields(value)
   const name = o.name === undefined ? '' : o.name
   if (typeof name !== 'string' || name.length > ROUTINE_NAME_CHARS) {
-    throw invalidParams(`name must be at most ${ROUTINE_NAME_CHARS} characters`)
+    throw invalidParams(t('validate.routineName', { max: ROUTINE_NAME_CHARS }))
   }
   if (typeof o.prompt !== 'string' || o.prompt.trim() === '' || o.prompt.length > PROMPT_CHARS) {
-    throw invalidParams(`prompt must be 1 to ${PROMPT_CHARS} characters`)
+    throw invalidParams(t('validate.routinePrompt', { max: PROMPT_CHARS }))
   }
   return {
     name,
@@ -961,13 +998,13 @@ function routineChanges(value: unknown, platform: Platform): RoutineChanges {
   const changes: RoutineChanges = {}
   if (o.name !== undefined) {
     if (typeof o.name !== 'string' || o.name.length > ROUTINE_NAME_CHARS) {
-      throw invalidParams(`name must be at most ${ROUTINE_NAME_CHARS} characters`)
+      throw invalidParams(t('validate.routineName', { max: ROUTINE_NAME_CHARS }))
     }
     changes.name = o.name
   }
   if (o.prompt !== undefined) {
     if (typeof o.prompt !== 'string' || o.prompt.trim() === '' || o.prompt.length > PROMPT_CHARS) {
-      throw invalidParams(`prompt must be 1 to ${PROMPT_CHARS} characters`)
+      throw invalidParams(t('validate.routinePrompt', { max: PROMPT_CHARS }))
     }
     changes.prompt = o.prompt
   }
@@ -1124,7 +1161,7 @@ function threadId(o: Fields): string {
 function commentBody(o: Fields): string {
   const value = o.body
   if (typeof value !== 'string' || value.trim() === '' || longer(value, COMMENT_CHARS)) {
-    throw invalidParams(`body must be 1 to ${COMMENT_CHARS} characters, not blank`)
+    throw invalidParams(t('validate.commentBody', { max: COMMENT_CHARS }))
   }
   return value
 }
@@ -1264,7 +1301,7 @@ function uploadName(o: Fields): string {
 export function promptContent(value: unknown): UserContent[] {
   if (!Array.isArray(value)) throw invalidParams('content must be an array')
   if (value.length > PROMPT_ITEMS)
-    throw invalidParams(`content has more than ${PROMPT_ITEMS} items`)
+    throw invalidParams(t('validate.promptItems', { max: PROMPT_ITEMS }))
   const out: UserContent[] = []
   let bytes = 0
   let attachments = 0
@@ -1281,16 +1318,16 @@ export function promptContent(value: unknown): UserContent[] {
       const { ref, bytes: size } = contentRef(o.ref, at)
       bytes += size
       if (ref.kind === 'attachment' && ++attachments > ATTACHMENT_LIMIT) {
-        throw invalidParams(`A prompt carries at most ${ATTACHMENT_LIMIT} attachments`)
+        throw invalidParams(t('validate.promptAttachments', { max: ATTACHMENT_LIMIT }))
       }
       substance = true
       out.push({ type: 'ref', ref })
     } else {
       throw invalidParams(`${at}.type must be text or ref`)
     }
-    if (bytes > PROMPT_BYTES) throw invalidParams('The prompt is larger than 10 MB')
+    if (bytes > PROMPT_BYTES) throw invalidParams(t('validate.promptTooLarge'))
   })
-  if (!substance) throw invalidParams('The prompt is empty')
+  if (!substance) throw invalidParams(t('validate.promptEmpty'))
   return out
 }
 
@@ -1635,6 +1672,7 @@ export function createValidators(platform: Platform): Validators {
         ...(method !== undefined ? { method: method as AgentInstallMethod['id'] } : {}),
       }
     },
+    'agents.installOffer': agent,
     'agents.cancelTask': agent,
     'agents.uninstall': (params) => {
       const o = fields(params)
@@ -1696,6 +1734,19 @@ export function createValidators(platform: Platform): Validators {
         },
       }
     },
+    'agents.autoCompact': agent,
+    'agents.setAutoCompact': (params) => {
+      const o = fields(params)
+      const change = fields(o.change)
+      const value = change.value
+      if (value !== null && (typeof value !== 'number' || !Number.isInteger(value))) {
+        throw invalidParams('change.value must be a whole number or null')
+      }
+      return {
+        agentId: agentId(o),
+        change: { model: change.model === null ? null : string(change, 'model', 256), value },
+      }
+    },
     'agents.codebuddySettings': agent,
     'agents.setCodebuddySite': (params) => {
       const o = fields(params)
@@ -1716,6 +1767,14 @@ export function createValidators(platform: Platform): Validators {
       return { agentId: agentId(o), ...(watch !== undefined ? { watch } : {}) }
     },
     'agents.options': none,
+    'agents.pinModel': (params) => {
+      const o = fields(params)
+      return {
+        agentId: agentId(o),
+        model: string(o, 'model', TEXT_CHARS),
+        pinned: flag(o, 'pinned'),
+      }
+    },
     'agents.lightAgents': none,
     'agents.draftReport': (params) => {
       const o = fields(params)
@@ -2050,7 +2109,10 @@ export function createValidators(platform: Platform): Validators {
     'projects.touch': folder,
     'projects.pin': (params) => {
       const o = fields(params)
-      return { path: absolutePath(o, 'path', platform), pinned: flag(o, 'pinned') }
+      return {
+        path: o.path === null ? null : absolutePath(o, 'path', platform),
+        pinned: flag(o, 'pinned'),
+      }
     },
     'projects.setManager': (params) => {
       const o = fields(params)
@@ -2093,6 +2155,14 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'projects.suggestFolders': folder,
+    'projects.move': (params) => {
+      const o = fields(params)
+      return {
+        path: absolutePath(o, 'path', platform),
+        before: o.before === null ? null : absolutePath(o, 'before', platform),
+      }
+    },
+    'projects.noProject': none,
     'projects.worktreeSettings': folder,
     'projects.setWorktreeSettings': (params) => {
       const o = fields(params)
@@ -2218,7 +2288,7 @@ export function createValidators(platform: Platform): Validators {
       if (
         raw !== 'system' &&
         !/^\d+-\d+(,\d+-\d+)*$/.test(raw) &&
-        !/^msg_[A-Za-z0-9]+(,msg_[A-Za-z0-9]+)*$/.test(raw)
+        !/^msg_[A-Za-z0-9_]+(,msg_[A-Za-z0-9_]+)*$/.test(raw)
       ) {
         throw invalidParams('raw must name records of a page')
       }
@@ -2277,6 +2347,13 @@ export function createValidators(platform: Platform): Validators {
     },
     'sessions.cleanTasks': session,
     'sessions.retry': session,
+    'sessions.rewind': (params) => {
+      const o = fields(params)
+      // An empty composer keeps nothing for Put back.
+      const draft = Array.isArray(o.draft) && o.draft.length === 0 ? [] : promptContent(o.draft)
+      return { sessionId: sessionId(o), entryId: string(o, 'entryId', ACP_ID_CHARS), draft }
+    },
+    'sessions.putBack': session,
     'sessions.sideAsk': (params) => {
       const o = fields(params)
       const question = string(o, 'question', SIDE_QUESTION_CHARS)
@@ -2371,7 +2448,18 @@ export function createValidators(platform: Platform): Validators {
     'sessions.contextEstimates': session,
     'sessions.queue': (params) => {
       const o = fields(params)
-      return { sessionId: sessionId(o), content: promptContent(o.content) }
+      if (o.comments !== undefined && !isQueuedComments(o.comments)) {
+        throw invalidParams(
+          `comments must be a count from 1 and a text of 1 to ${QUEUED_COMMENTS_TEXT} characters`,
+        )
+      }
+      return {
+        sessionId: sessionId(o),
+        content: promptContent(o.content),
+        ...(o.comments === undefined
+          ? {}
+          : { comments: { count: o.comments.count, text: o.comments.text } }),
+      }
     },
     'sessions.runCommand': (params) => {
       const o = fields(params)
@@ -2570,6 +2658,9 @@ export function createValidators(platform: Platform): Validators {
     },
     'workflows.settings': none,
     'workflows.setSettings': workflowSettingsChange,
+    'workflows.suggestions': (params) => ({ sessionId: sessionId(fields(params)) }),
+    'workflows.suggestionFile': (params) => ({ id: suggestionId(fields(params)) }),
+    'workflows.answerSuggestion': answerSuggestion,
     'tasks.list': none,
     'tasks.get': (params) => ({ taskId: taskId(fields(params)) }),
     'tasks.sessions': (params) => ({ taskId: taskId(fields(params)) }),
@@ -2609,6 +2700,8 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       return { taskId: taskId(o), stepId: stepId(o), pick: stepPickOf(o.pick ?? null) }
     },
+    'tasks.saveWorkflow': (params) => ({ taskId: taskId(fields(params)) }),
+    'tasks.publishWorkflow': (params) => ({ taskId: taskId(fields(params)) }),
     'tasks.update': (params) => {
       const o = fields(params)
       const title = optionalString(o, 'title', TASK_TITLE_CHARS)
@@ -2692,6 +2785,10 @@ export function createValidators(platform: Platform): Validators {
     'git.commitMessage': (params) => {
       const o = fields(params)
       return { projectPath: absolutePath(o, 'projectPath', platform), paths: gitPaths(o, 'paths') }
+    },
+    'git.pullRequestDraft': (params) => {
+      const o = fields(params)
+      return { projectPath: absolutePath(o, 'projectPath', platform), base: refName(o, 'base') }
     },
     'git.incoming': (params) => {
       const o = fields(params)
@@ -2912,7 +3009,7 @@ export function createValidators(platform: Platform): Validators {
       const o = fields(params)
       // An empty file is text too, so `string` does not fit; the host checks the size in bytes.
       if (typeof o.text !== 'string') throw invalidParams('text must be a string')
-      if (o.text.length > FILE_READ_LIMIT) throw invalidParams('text is larger than 1 MiB')
+      if (o.text.length > FILE_READ_LIMIT) throw invalidParams(t('validate.textTooLarge'))
       return {
         projectPath: absolutePath(o, 'projectPath', platform),
         path: relativePath(o, 'path', platform),
@@ -2983,11 +3080,18 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'artifacts.versions': artifact,
+    'artifacts.changes': (params) => {
+      const o = fields(params)
+      const from = version(o, 'from')
+      const to = version(o, 'to')
+      if (from === to) throw invalidParams('from and to must be two different versions')
+      return { id: artifactId(o), from, to }
+    },
     'artifacts.rename': (params) => {
       const o = fields(params)
       const title = o.title
       if (typeof title !== 'string' || title.trim() === '' || longer(title, ARTIFACT_TITLE_CHARS)) {
-        throw invalidParams(`title must be 1 to ${ARTIFACT_TITLE_CHARS} characters, not blank`)
+        throw invalidParams(t('validate.artifactTitle', { max: ARTIFACT_TITLE_CHARS }))
       }
       return { id: artifactId(o), title }
     },
@@ -3059,6 +3163,10 @@ export function createValidators(platform: Platform): Validators {
         throw invalidParams('page must be a canvas page id or null')
       }
       return { id: artifactId(o), page: page as string | null }
+    },
+    'artifacts.seen': (params) => {
+      const o = fields(params)
+      return { id: artifactId(o), version: version(o, 'version') }
     },
     'artifacts.setParams': (params) => {
       const o = fields(params)

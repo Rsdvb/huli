@@ -2,7 +2,7 @@
 // host-level actions of the Settings page. The remote host hands each call to its parent, the
 // desktop app's main process or the daemon, which runs it with the checks of the local page.
 
-import type { ThumbnailPage } from '../artifacts'
+import type { ThumbnailPage, ThumbnailPart } from '../artifacts'
 import type { HostToMain } from '../host-control'
 import type { AppInfo, RemotePairingEvent } from '../ipc'
 import type { AgentNetworkChoice, DefaultRoute } from '../agent-network'
@@ -52,6 +52,7 @@ export const HOST_SETTING_KEYS = {
   startModes: 'all',
   idleSessions: 'all',
   supervisor: 'all',
+  workflow: 'all',
   updates: 'all',
   usage: ['fromComputer'],
   remote: 'all',
@@ -74,6 +75,7 @@ export interface HostSettingsPart {
   startModes: SettingsFile['startModes']
   idleSessions: SettingsFile['idleSessions']
   supervisor: SettingsFile['supervisor']
+  workflow: SettingsFile['workflow']
   updates: SettingsFile['updates']
   usage: Pick<SettingsFile['usage'], 'fromComputer'>
   remote: SettingsFile['remote']
@@ -163,7 +165,26 @@ export interface HostInfo extends AppInfo {
   remoteReset: boolean
   /** Capturing artifact previews, which the desktop app does and the daemon cannot. */
   thumbnails: boolean
+  /**
+   * Capturing a preview of one frame, one slide, or a document in one theme, as
+   * `artifacts.partThumbnail`; absent from hosts before it.
+   */
+  partThumbnails?: boolean
+  /**
+   * What the host's agent host keeps of its artifacts beyond the versions, as its requests and
+   * fields name them; absent from hosts before any of them.
+   */
+  artifactRecords?: ArtifactRecord[]
 }
+
+/**
+ * `seen`: the owner's seen version (`artifacts.seen`, `seen` in summaries and reads). `changes`:
+ * `artifacts.changes`. `held`: direct edits refused for what an agent's running turn wrote, and
+ * `held` in presence. `links`: `places` in the artifact tools' results. `pageErrors`: the page
+ * script the host serves its pages with reports their uncaught errors.
+ */
+export const ARTIFACT_RECORDS = ['seen', 'changes', 'held', 'links', 'pageErrors'] as const
+export type ArtifactRecord = (typeof ARTIFACT_RECORDS)[number]
 
 /** The host's themes folder: the themes it holds, and why the others fail. */
 export interface HostThemes {
@@ -288,6 +309,11 @@ export interface HostAdminContract {
     params: { id: string; version: number; layout: ThumbnailPage[] | null }
     result: string | null
   }
+  /** One frame, one slide or a document in one theme as a data URL; null when it cannot be. */
+  'artifacts.partThumbnail': {
+    params: { id: string; version: number; part: ThumbnailPart }
+    result: string | null
+  }
   /** A page of a version at its own size as a PNG `data:` URL; null when it cannot render. */
   'artifacts.png': {
     params: {
@@ -364,6 +390,7 @@ const METHODS: Record<HostAdminMethod, true> = {
   'themes.catalog': true,
   'themes.installCatalog': true,
   'artifacts.thumbnail': true,
+  'artifacts.partThumbnail': true,
   'artifacts.png': true,
   'artifacts.printPdf': true,
   'host.report': true,

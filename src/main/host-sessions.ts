@@ -1,8 +1,9 @@
 // Relays each window's port to the sessions on other hosts: a request goes to the port of the
 // host it names under an id of main's own, so windows never share one, and its answer comes back
 // to the window that asked; each host's events and resyncs go to every window. A host's browser
-// calls are main's to run, and its answers to them main's own requests. Main also asks hosts on
-// the same ports, and answers a window's media from them on its media scheme.
+// calls are main's to run, and its answers to them main's own requests, and what it says needs
+// the user main's to notify about. Main also asks hosts on the same ports, and answers a window's
+// media from them on its media scheme.
 
 import { MessageChannelMain, type MessagePortMain, type WebContents } from 'electron'
 import type { DeviceFileContent, FileContent } from '@shared/files'
@@ -12,6 +13,7 @@ import type { PortError } from '@shared/port-rpc'
 import { DEVICE_ID } from '@shared/remote/device'
 import type { HostStatus } from '@shared/remote/hosts'
 import type { MediaReadParams } from '@shared/remote/streams'
+import { t } from './i18n'
 import { createLogger } from './log'
 
 const log = createLogger('host-sessions')
@@ -79,8 +81,16 @@ export interface HostSessionsOptions {
   originDecided?(hostId: string, event: unknown): void
   /** A host's `browser.turnEnded` or `browser.askAnswered` event, for that page too. */
   browserEvent?(hostId: string, event: unknown): void
+  /** What a host says needs its owner, for this computer's notifications; windows never see it. */
+  attention?(hostId: string, attention: unknown): void
   /** The host's session ended. */
   ended?(hostId: string): void
+  /** A session with the host opened, so main's own reads of it may start. */
+  opened?(hostId: string): void
+  /** Each of a host's events but `attention`, for main's own use; the windows get it as well. */
+  event?(hostId: string, event: unknown): void
+  /** The host lost what it kept for this computer, so what was read of it is read again. */
+  resync?(hostId: string): void
   /**
    * A host's event about its artifacts, for main's copy of them. An `artifacts.runtime` event is
    * main's alone, since only main opens streams there; the windows hear the others too.
@@ -89,7 +99,12 @@ export interface HostSessionsOptions {
   media?: HostMediaGrants
 }
 
-const OFFLINE: PortError = { code: 'host_offline', message: 'The host is not connected' }
+/** Built when needed, so its words follow the interface language. */
+const offline = (): PortError => ({
+  code: 'host_offline',
+  message: t('hostSessions.offline'),
+  log: 'The host is not connected',
+})
 
 export class HostSessions {
   private readonly hosts = new Map<string, RelayPort>()
@@ -137,6 +152,12 @@ export class HostSessions {
       this.send(held.asker, hostId, held.method, held.params)
     }
     this.held.delete(hostId)
+    this.options.opened?.(hostId)
+  }
+
+  /** The hosts whose session is open now. */
+  openHosts(): string[] {
+    return [...this.hosts.keys()]
   }
 
   /** The session ended: its requests fail, and the windows hear of it. */
@@ -214,7 +235,11 @@ export class HostSessions {
       this.inFlight.delete(mainId)
       request.asker.answer({
         type: 'error',
-        error: { code: 'host_restarted', message: 'The connection to the host ended' },
+        error: {
+          code: 'host_restarted',
+          message: t('hostSessions.ended'),
+          log: 'The connection to the host ended',
+        },
       })
     }
     for (const window of this.windows) this.post(window, { kind: 'closed', hostId })
@@ -325,14 +350,14 @@ export class HostSessions {
     if (this.hosts.has(hostId)) return this.send(asker, hostId, method, params)
     const list = this.held.get(hostId) ?? []
     if (!this.connecting.has(hostId) || list.length >= MAX_HELD) {
-      return asker.answer({ type: 'error', error: OFFLINE })
+      return asker.answer({ type: 'error', error: offline() })
     }
     const timer = setTimeout(() => {
       const waiting = this.held.get(hostId)
       const at = waiting?.indexOf(held) ?? -1
       if (at < 0) return
       waiting!.splice(at, 1)
-      asker.answer({ type: 'error', error: OFFLINE })
+      asker.answer({ type: 'error', error: offline() })
     }, this.options.holdMs ?? HOLD_MS)
     const held: Held = { asker, method, params, timer }
     list.push(held)
@@ -344,13 +369,13 @@ export class HostSessions {
     this.held.delete(hostId)
     for (const held of list) {
       clearTimeout(held.timer)
-      held.asker.answer({ type: 'error', error: OFFLINE })
+      held.asker.answer({ type: 'error', error: offline() })
     }
   }
 
   private send(asker: Asker, hostId: string, method: string, params: unknown): void {
     const port = this.hosts.get(hostId)
-    if (!port) return asker.answer({ type: 'error', error: OFFLINE })
+    if (!port) return asker.answer({ type: 'error', error: offline() })
     const mainId = this.nextId++
     this.inFlight.set(mainId, { hostId, asker })
     try {
@@ -391,7 +416,16 @@ export class HostSessions {
       message.type === 'resync' ||
       (message.type === 'terminals.restarted' && Array.isArray(message.ids))
     if (!passed) return
-    const event = message.event as { type?: unknown; call?: unknown } | undefined
+    const event = message.event as
+      { type?: unknown; call?: unknown; attention?: unknown } | undefined
+    if (message.type === 'event' && event?.type === 'attention') {
+      this.options.attention?.(hostId, event.attention)
+      return
+    }
+    if (message.type === 'resync') this.options.resync?.(hostId)
+    if (message.type === 'event' && typeof event === 'object' && event !== null) {
+      this.options.event?.(hostId, event)
+    }
     if (message.type === 'event' && event?.type === 'browser.call') {
       this.options.browserCall?.(hostId, event.call)
       return

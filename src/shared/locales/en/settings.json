@@ -309,11 +309,25 @@
       "description": "With the sidebar collapsed, pointing at its button shows it over the page until the pointer leaves.",
       "keywords": "sidebar collapse expand peek reveal hover"
     },
+    "sidebarPages": {
+      "overview": "Overview",
+      "artifacts": "Artifacts",
+      "routines": "Routines",
+      "marketplace": "Marketplace",
+      "usage": "Usage",
+      "description": "Listed in the sidebar. Hidden, it still opens from Search.",
+      "keywords": "sidebar page show hide order reorder customize",
+      "move": "Move {{name}}",
+      "restore": "Restore default",
+      "featureOff": "Turned off in Features, so it is not in the sidebar.",
+      "openFeatures": "Open Features"
+    },
     "groups": {
       "theme": "Theme",
       "scale": "Zoom and text",
       "sidebar": "Sidebar",
-      "motion": "Motion"
+      "motion": "Motion",
+      "fonts": "Fonts"
     },
     "zoom": {
       "name": "Zoom",
@@ -322,6 +336,22 @@
       "zoomIn": "Zoom in",
       "zoomOut": "Zoom out",
       "reset": "Reset"
+    },
+    "fonts": {
+      "keywords": "font family typeface installed",
+      "default": "Theme’s font",
+      "ui": {
+        "name": "Interface font",
+        "description": "Menus, buttons, the sidebar and Settings. The theme’s font fills in what it lacks."
+      },
+      "prose": {
+        "name": "Reply font",
+        "description": "Replies and your messages in the thread. The theme’s font fills in what it lacks."
+      },
+      "code": {
+        "name": "Code font",
+        "description": "Code blocks, inline code, diffs and the editor, and the terminal unless it has a font of its own. Only monospace fonts are listed."
+      }
     }
   },
   "terminal": {
@@ -335,14 +365,9 @@
     },
     "fontFamily": {
       "name": "Font",
-      "description": "A font installed on this computer, such as a Nerd Font for prompt icons. The theme’s code font fills in what it lacks.",
+      "description": "A font installed on this computer, such as a Nerd Font for prompt icons. The code font fills in what it lacks.",
       "keywords": "font family typeface nerd font monospace icons",
-      "default": "Theme’s code font",
-      "search": "Search or type a font name",
-      "use": "Use “{{name}}”",
-      "noMatch": "No monospace font matches.",
-      "loading": "Reading the installed fonts…",
-      "unavailable": "This browser cannot list fonts. Type a name to use it."
+      "default": "Code font"
     },
     "fontSize": {
       "name": "Font size",
@@ -411,14 +436,19 @@
       "description": "A run ended, or paused near a plan limit.",
       "keywords": "routine schedule background"
     },
-    "limits": {
-      "name": "Plan limit alerts",
-      "description": "A plan limit reached 90% or ran out, once per reset period. With a window in front, it shows there.",
-      "keywords": "limit quota plan usage 5-hour weekly"
-    },
     "error": {
       "name": "Errors",
       "description": "A session failed or an agent stopped."
+    },
+    "updates": {
+      "name": "Kettu updates",
+      "description": "A new version downloaded, or one waiting for a step of yours. Once per version.",
+      "keywords": "update version upgrade"
+    },
+    "planLimits": {
+      "name": "Plan limit alerts",
+      "description": "A plan limit at 90%, used up, or reset after it was used up, once per reset period. With a window in front, it shows there.",
+      "keywords": "limit quota plan usage 5-hour weekly"
     },
     "sound": {
       "name": "Play a sound",
@@ -429,6 +459,17 @@
       "nameTaskbar": "Show a count on the taskbar button",
       "description": "Sessions waiting for your approval.",
       "keywords": "badge"
+    },
+    "island": {
+      "name": "Dynamic Island",
+      "description": "What needs you comes out of the Dynamic Island at the top of the screen, where you can answer it. While it is on, those kinds come there instead of as notifications.",
+      "keywords": "notch menu bar",
+      "retry": "Try again",
+      "failed": {
+        "crashed": "The Dynamic Island stopped after it quit three times within a minute. Notifications show as before.",
+        "protocol": "This build’s Dynamic Island does not match Kettu. Notifications show as before.",
+        "missing": "This build has no Dynamic Island. Notifications show as before."
+      }
     },
     "footer": "Shows only while no Kettu window is in front.",
     "groups": {
@@ -846,13 +887,6 @@
       "not-yet-supported": "Kettu does not read this agent's plan usage yet.",
       "console-managed": "With this sign-in, its usage is in Google AI Studio or Google Cloud."
     },
-    "spend": {
-      "group": "Spend",
-      "month": "This month",
-      "description": "{{name}} doesn’t report plan limits for API keys. Kettu counts what it sent.",
-      "descriptionProviders": "What Kettu sent through this agent this month, by its own record.",
-      "unpriced": "Not priced"
-    },
     "configuration": "Configuration",
     "config": {
       "folder": "Folder",
@@ -924,6 +958,22 @@
         }
       }
     },
+    "autoCompact": {
+      "name": "Auto-compact",
+      "catalog": "When the agent’s harness compacts a conversation on its own, in the unit its own setting takes.",
+      "description": {
+        "window": "The context size in tokens {{harness}} works within, compacting the conversation as it nears it. Auto lets {{harness}} decide. A project’s own settings win in that project, and a change applies from the next session.",
+        "trigger": "How many tokens of a conversation {{harness}} lets build up before it compacts it. Auto lets {{harness}} decide. A project’s own settings win in that project, and a change applies from the next session.",
+        "percent": "How full {{harness}} lets the context window get before it compacts the conversation. Auto lets {{harness}} decide. A project’s own settings win in that project, and a change applies from the next session.",
+        "reserve": "How many tokens of the context window {{harness}} keeps free; it compacts the conversation once less is left. Auto lets {{harness}} decide. A project’s own settings win in that project, and a change applies from the next session."
+      },
+      "perModel": "Set one for all models, and a different one for a model if you like.",
+      "range": "From {{min}} to {{max}}",
+      "use": "Use {{value}}",
+      "typeTokens": "Type a value, such as 272K",
+      "typePercent": "Type a percent, such as 85%",
+      "typeModel": "Type a model id"
+    },
     "keyOnly": {
       "note": "This agent signs in only with an API key. {{name}} keeps its browser and WeChat sign-in for the whole computer, outside this agent’s folder, so a second agent would share that account."
     },
@@ -944,9 +994,7 @@
     },
     "advanced": "Advanced",
     "readingAccount": "Reading the account…",
-    "noAccount": "No account reported",
     "readingUsage": "Reading plan usage…",
-    "noUsage": "No plan usage",
     "usageOnceRunning": "Plan usage shows once it runs",
     "hidden": "Hidden",
     "revealAccount": "Click to show",
@@ -1404,6 +1452,10 @@
         "name": "Agents can suggest a workflow",
         "description": "In a regular session, an agent offers a workflow when it thinks the work needs one, and it starts only when you click Start. Turned off, agents don’t see the feature."
       },
+      "steps": {
+        "name": "Steps working at once",
+        "description": "Across every task on this computer. One task runs at most 3 steps at once, and the rest wait their turn. Your own sessions don’t count."
+      },
       "auto": {
         "group": "Agents Auto can pick",
         "note": "When a step is Auto, the agent handing off to it picks one of these, with its model and effort. You can still pin any of them to a step on the workflow’s page in the Marketplace.",
@@ -1600,6 +1652,12 @@
         "name": "Allow commits in a sandbox (.git writable)",
         "description": "Off, a container mounts the project's .git read-only and Claude Code's sandbox may not write it, so the agent cannot commit or rewrite history. Codex always keeps .git read-only itself."
       }
+    },
+    "modelProviders": {
+      "models_one": "{{count}} model",
+      "models_other": "{{count}} models",
+      "unread": "Shows once {{name}} has started.",
+      "hint": "{{name}} signs in to each provider itself: Add provider opens {{name}} in a terminal, where /login signs in to a subscription or an API key is set. Kettu never sees the credentials."
     }
   },
   "about": {
@@ -1687,7 +1745,7 @@
     "remote_web": "Use {{host}}’s sessions from Kettu on an iPhone, an iPad or another computer.",
     "browser": "Sign-ins, how links from agents open, and the sites they may use.",
     "browserWeb": "Links in agents’ replies open in a new tab.",
-    "harnesses": "The programs agents run on: Claude Code, Codex and the rest. Kettu installs and updates them for you.",
+    "harnesses": "The programs agents run on: Claude Code, Codex and the rest. Kettu uses what is already on your computer, and installs a copy only when there is none.",
     "memory": "What agents learn about you and about each project, kept on this computer and handed to every agent.",
     "memory_web": "What agents learn about you and about each project, kept on {{host}} and handed to every agent there.",
     "hosts": "Other computers running Kettu that this one connects to. Their sessions show up in your sidebar.",
@@ -2428,7 +2486,10 @@
       "brew": "Homebrew",
       "npm": "npm",
       "script": "Official install script",
-      "winget": "WinGet"
+      "winget": "WinGet",
+      "pnpm": "pnpm",
+      "bun": "bun",
+      "yarn": "Yarn"
     },
     "updateTo": "Update to {{version}}",
     "agentCount_one": "{{count}} agent",
@@ -2438,6 +2499,8 @@
       "title": "Install {{name}}",
       "body": "Kettu brings no {{name}} of its own: it uses the one on your computer. Pick one of {{vendor}}’s documented ways; Kettu runs it in the background and detects {{name}} again when it is done.",
       "bodyPlain": "Pick one of the documented ways; Kettu runs it in the background and detects {{name}} again when it is done.",
+      "bodyOne": "Kettu brings no {{name}} of its own: it uses the one on your computer. Kettu installs it the way {{vendor}} documents, in the background, and detects {{name}} again when it is done.",
+      "bodyOnePlain": "Kettu installs {{name}} the way its maker documents, in the background, and detects it again when it is done.",
       "setupBody": "Complete the requirements below to install {{name}}, then reload the environment to detect it.",
       "guide": "Installation guide",
       "method": "Install with",
@@ -2448,12 +2511,32 @@
       "copy": "Copy command",
       "ownTerminal": "You can also run it in your own terminal, then come back and reload the environment.",
       "open": "Install…",
-      "cliBody": "Kettu runs your own {{command}}, and brings none. Install it one of the ways its maker documents."
+      "cliBody": "Kettu runs your own {{command}}, and brings none. Install it one of the ways its maker documents.",
+      "bodyCopy": "Kettu installs a copy of {{name}} for you and runs it on your Node.js. If you install {{command}} yourself, Kettu uses yours first.",
+      "bodyCopyPlain": "Kettu installs a copy of {{name}} for you and runs it on your Node.js.",
+      "bodyUvx": "{{name}} runs through uv, which fetches it into its own cache the first time a session starts, so nothing installs now.",
+      "copyRoute": "Kettu installs a copy",
+      "usesYours": "Installs your own {{command}}, which Kettu then uses first",
+      "needsFirst": "Install what it needs first, then reload the environment.",
+      "factWhat": "Installs",
+      "factVersion": "Version",
+      "factSource": "From",
+      "factFolder": "Into",
+      "factSize": "Size",
+      "factNeeds": "Needs",
+      "newest": "The newest available",
+      "fromNpm": "{{host}}, your npm registry",
+      "fromNpmUnknown": "Your npm registry",
+      "fromRegistry": "{{host}}, as the ACP Registry lists it",
+      "fromPypi": "PyPI, through uv",
+      "uvCache": "uv’s own cache",
+      "sizePackage": "{{size}}, not counting its dependencies",
+      "needsNode": "Node.js {{version}} or later",
+      "needsNodeAny": "Node.js",
+      "foundVersion": "found {{version}}"
     },
     "cliOutdated": "Your {{name}} {{current}} is older than Kettu needs; update it to use it.",
-    "cliOutdatedTitle": "{{name}} needs an update",
     "cliOutdatedManual": "Your {{name}} {{current}} is older than Kettu needs (at least {{minimum}}). Update it the way you installed it, then check again.",
-    "needsUpdate": "Needs update",
     "startFailedTitle": "{{name}} could not start",
     "recheck": "Check again",
     "sdkOnFirstUse": "SDK installs on first use",
@@ -2472,6 +2555,16 @@
     "programSdk": "Your own, which the SDK runs.",
     "programOwn": "Your own, which Kettu runs.",
     "programKettu": "Installed by Kettu, in Kettu’s data folder.",
+    "programChosen": "Picked by you, which Kettu runs.",
+    "programUnused": "Your own, which Kettu does not run.",
+    "programKettuCopy": "Kettu’s own copy runs.",
+    "unused": {
+      "range": "Your {{command}} {{version}} is outside {{range}}, the versions Kettu runs.",
+      "manifest": "Kettu’s checks say your {{command}} {{version}} does not work.",
+      "from": "{{version}} or later",
+      "kettuRuns": "Kettu’s own copy, {{version}}, runs instead.",
+      "install": "Install Kettu’s own copy to use {{name}}."
+    },
     "packageGroup": "Installed by Kettu",
     "sdkLine": "{{version}} · in Kettu’s data folder, without the CLI",
     "adapterLine": "{{version}} · in Kettu’s data folder",
@@ -2493,7 +2586,8 @@
       "offKettu": "Stays on the version it runs, and offers each new version Kettu's checks recommend.",
       "wentBackBroken": "Went back from {{from}} to {{to}} {{ago}}: Kettu's checks found {{from}} does not work with this version of Kettu",
       "wentBackManifest": "Went back from {{from}} to {{to}} {{ago}}: Kettu's checks recommend {{to}}",
-      "wentBackBundled": "Went back from {{from}} to {{to}} {{ago}}: this version of Kettu comes with {{to}}"
+      "wentBackBundled": "Went back from {{from}} to {{to}} {{ago}}: this version of Kettu comes with {{to}}",
+      "noChecksum": "This version has no checksum, so it can’t update automatically. Updating by hand installs it without that check."
     },
     "switchBack": {
       "line": "The ACP Registry lists {{version}} now",
@@ -2517,7 +2611,9 @@
       "unsupportedTitle": "{{name}} {{version}} is outside the versions Kettu works with ({{supported}})",
       "bodyUpdate": "Kettu's checks found a problem with this version. Updating to {{update}} fixes it.",
       "bodyRecommended": "Kettu's checks passed {{recommended}}. Install that version the way you installed {{name}}, then detect again.",
-      "bodyOther": "Install another version the way you installed {{name}}, then detect again."
+      "bodyOther": "Install another version the way you installed {{name}}, then detect again.",
+      "pillBroken": "Does not work",
+      "pillUnsupported": "Unsupported"
     },
     "removedLine": "Removed from Kettu",
     "movedAccounts": {
@@ -3238,5 +3334,13 @@
         "description": "Hide tool calls that went well, or show only your messages and the agent's final replies, for each session or by default. Requests and questions always show."
       }
     }
+  },
+  "fonts": {
+    "search": "Search or type a font name",
+    "use": "Use “{{name}}”",
+    "noMatch": "No font matches.",
+    "noMonospaceMatch": "No monospace font matches.",
+    "loading": "Reading the installed fonts…",
+    "unavailable": "This browser cannot list fonts. Type a name to use it."
   }
 }

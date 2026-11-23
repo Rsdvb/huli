@@ -6,7 +6,7 @@
 // so the screen only renders what this returns.
 
 import type { SessionSummary } from '@shared/agent-host'
-import type { SessionGroupRef } from '@shared/session-groups'
+import type { SessionGroupRef } from '@shared/run-groups'
 import { shownFolders, type SessionFolder } from '@shared/session-folders'
 import type { TaskSummary } from '@shared/workflow'
 import type { HomeGrouping } from './prefs'

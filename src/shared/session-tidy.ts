@@ -95,16 +95,18 @@ export const RESET_MARGIN_MS = 60_000
 
 /**
  * When the session's agent's plan comes back, as 额度恢复后 snoozes it: a minute after the reset
- * of its stopped turn or of its agent's used-up windows; null when no reset is known.
+ * of its paused turn, of the window that ended its last turn, or of its agent's used-up windows;
+ * null when no reset is known.
  */
 export function planReturns(
-  summary: Pick<SessionSummary, 'limitPause'>,
+  summary: Pick<SessionSummary, 'limitPause' | 'lastTurn'>,
   agent: Pick<AgentStatus, 'limits' | 'balances'> | undefined,
   now: number,
 ): number | null {
   const quota = agent ? planQuota(agent, now) : null
   const reset =
     summary.limitPause?.resetsAt ??
+    summary.lastTurn?.limit?.resetsAt ??
     (quota?.kind === 'out' || quota?.kind === 'extra' ? quota.resetsAt : null)
   return reset !== null && reset > now ? reset + RESET_MARGIN_MS : null
 }

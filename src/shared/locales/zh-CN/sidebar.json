@@ -14,7 +14,9 @@
     "searchField": "搜索…",
     "projects": "项目",
     "openProject": "打开项目…",
-    "resize": "调整侧边栏宽度"
+    "resize": "调整侧边栏宽度",
+    "hidePage": "从侧边栏隐藏",
+    "customize": "自定义侧边栏…"
   },
   "search": {
     "placeholder": "搜索会话、产物、定时任务等",
@@ -41,6 +43,7 @@
     "action": {
       "newSession": "新建会话",
       "openProject": "打开项目…",
+      "openOverview": "打开总览",
       "openUsage": "打开用量",
       "openArtifacts": "打开产物",
       "openRoutines": "打开定时任务",
@@ -101,6 +104,8 @@
       "newSession": "新建会话",
       "pin": "置顶项目",
       "unpin": "取消置顶项目",
+      "pinNoProject": "置顶",
+      "unpinNoProject": "取消置顶",
       "openInTerminal": "在终端中打开",
       "startAgent": "在终端中启动 Agent",
       "startAgentLabel": "Agent 自己的 CLI，在这个文件夹中",
@@ -154,6 +159,7 @@
     "autoResume": "额度恢复后自动继续",
     "renameTitle": "重命名会话",
     "newSubSession": "新建子会话",
+    "subagents": "子智能体",
     "delete": "删除",
     "deleteMenu": "删除…",
     "deleteTitle": "删除“{{title}}”？",
@@ -390,9 +396,11 @@
     "limits": "套餐限额",
     "limitUsed": "{{window}}：已用 {{percent}}%",
     "limitLeft": "{{window}}：剩余 {{percent}}%",
-    "ring": "{{account}} · {{window}} 已用 {{percent}}%",
-    "ringLeft": "{{account}} · {{window}} 剩余 {{percent}}%",
-    "ringNone": "{{agent}} 不报告套餐限额",
+    "ring": "{{account}} · {{windows}}",
+    "ringWindow": "{{window}} 已用 {{percent}}%",
+    "ringWindowLeft": "{{window}} 剩余 {{percent}}%",
+    "ringBalance": "{{account}} · 余额 {{amount}}",
+    "ringBalanceWallets": "{{account}} · 余额 {{amount}}（{{wallets}}）",
     "ringButton": "套餐限额：{{limit}}",
     "reorderCards": "拖动卡片调整顺序，也可以按住 Alt 键并按方向键。",
     "cardMoved": "已将 {{name}} 移到第 {{position}} 位。",
@@ -442,7 +450,9 @@
     "timeLeftAbout": "大约还剩 {{time}}",
     "done": "已完成",
     "took": "用时 {{time}}",
-    "moreReferences_other": "还有 {{count}} 个 issue 和 PR"
+    "moreReferences_other": "还有 {{count}} 个 issue 和 PR",
+    "moreArtifacts_other": "还有 {{count}} 个产物",
+    "artifactFacts": "v{{version}} · {{time}}"
   },
   "subagents": {
     "title": "这个会话的子智能体",

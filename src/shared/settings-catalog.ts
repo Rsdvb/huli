@@ -4,6 +4,7 @@
 
 import { isFullAccessMode } from './agents'
 import { FEATURE_IDS, featureOn, type FeatureId } from './features'
+import { takesAutoCompact } from './auto-compact'
 import { IDLE_RELEASE_MODES } from './idle-release'
 import { LOCALE_NAMES, LOCALES } from './locale'
 import type { Platform } from './platform'
@@ -14,8 +15,10 @@ import {
   isBackupTime,
   isFontFamilyName,
   MAX_FONT_FAMILY_CHARS,
+  type UserFontRole,
   NEW_SESSION_LISTS,
   ZOOM_LEVELS,
+  type SidebarPage,
   type SettingsFile,
   type SettingsPatch,
 } from './settings'
@@ -26,6 +29,7 @@ import { SETTLE_DAYS } from './session-tidy'
 import { TOOL_CALL_VIEWS } from './zen-view'
 import type { AgentId, HarnessId } from './thread'
 import { PORT_BASE_MAX, PORT_BASE_MIN } from './worktree-ports'
+import { WORKING_STEP_LIMITS } from './workflow'
 
 export const SETTINGS_SECTIONS = [
   'general',
@@ -175,6 +179,51 @@ function flag<S extends keyof SettingsPatch>(
     options: ON_OFF,
     get: (file) => read(file),
     patch: (value) => ({ [section]: { [key]: value === true } }) as SettingsPatch,
+  }
+}
+
+/** A face of the user's own for one kind of text; empty goes back to the theme's. */
+function userFont(role: UserFontRole): CatalogEntry {
+  return {
+    section: 'appearance',
+    row: `font-${role}`,
+    group: 'appearance.groups.fonts',
+    name: `appearance.fonts.${role}.name`,
+    description: `appearance.fonts.${role}.description`,
+    keywords: 'appearance.fonts.keywords',
+    part: 'desktop',
+    access: 'change',
+    kind: 'text',
+    chars: MAX_FONT_FAMILY_CHARS,
+    check: (value) => value === '' || isFontFamilyName(value),
+    get: (file) => file.appearance.fonts[role] ?? null,
+    patch: (value, file) => {
+      const fonts = { ...file.appearance.fonts }
+      if (value === '' || value === null) delete fonts[role]
+      else fonts[role] = String(value)
+      return { appearance: { fonts } }
+    },
+  }
+}
+
+/** Whether the sidebar lists a page; its place among the others is set in the list only. */
+function sidebarPage(page: SidebarPage): CatalogEntry {
+  return {
+    section: 'appearance',
+    row: `sidebar-${page}`,
+    group: 'appearance.groups.sidebar',
+    name: `appearance.sidebarPages.${page}`,
+    description: 'appearance.sidebarPages.description',
+    keywords: 'appearance.sidebarPages.keywords',
+    part: 'desktop',
+    access: 'change',
+    kind: 'switch',
+    options: ON_OFF,
+    get: (file) => !file.appearance.sidebarHidden.includes(page),
+    patch: (value, file) => {
+      const others = file.appearance.sidebarHidden.filter((hidden) => hidden !== page)
+      return { appearance: { sidebarHidden: value === true ? others : [...others, page] } }
+    },
   }
 }
 
@@ -501,6 +550,9 @@ const ENTRIES = {
       choices(['small', 'default', 'large'], (size) => `appearance.textSize.${size}`),
     ),
   },
+  'appearance.font-ui': userFont('ui'),
+  'appearance.font-prose': userFont('prose'),
+  'appearance.font-code': userFont('code'),
   'appearance.sidebar-hover': {
     section: 'appearance',
     row: 'sidebar-hover',
@@ -512,6 +564,11 @@ const ENTRIES = {
     access: 'change',
     ...flag('appearance', 'sidebarHover', (file) => file.appearance.sidebarHover),
   },
+  'appearance.sidebar-overview': sidebarPage('overview'),
+  'appearance.sidebar-artifacts': sidebarPage('artifacts'),
+  'appearance.sidebar-routines': sidebarPage('routines'),
+  'appearance.sidebar-marketplace': sidebarPage('marketplace'),
+  'appearance.sidebar-usage': sidebarPage('usage'),
   'appearance.reduce-motion': {
     section: 'appearance',
     row: 'reduce-motion',
@@ -540,6 +597,17 @@ const ENTRIES = {
     description: 'notifications.test',
     part: 'desktop',
     kind: 'action',
+  },
+  'notifications.island': {
+    section: 'notifications',
+    row: 'island',
+    name: 'notifications.island.name',
+    description: 'notifications.island.description',
+    keywords: 'notifications.island.keywords',
+    part: 'desktop',
+    access: 'change',
+    on: (ctx) => ctx.desktop && ctx.platform === 'darwin',
+    ...flag('notifications', 'island', (file) => file.notifications.island),
   },
   'notifications.permission': {
     section: 'notifications',
@@ -583,6 +651,30 @@ const ENTRIES = {
     part: 'desktop',
     access: 'change',
     ...flag('notifications', 'error', (file) => file.notifications.error),
+  },
+  'notifications.updates': {
+    section: 'notifications',
+    row: 'updates',
+    group: 'notifications.groups.when',
+    name: 'notifications.updates.name',
+    description: 'notifications.updates.description',
+    keywords: 'notifications.updates.keywords',
+    part: 'desktop',
+    access: 'change',
+    on: (ctx) => ctx.desktop,
+    ...flag('notifications', 'updates', (file) => file.notifications.updates),
+  },
+  'notifications.plan-limits': {
+    section: 'notifications',
+    row: 'plan-limits',
+    group: 'notifications.groups.when',
+    name: 'notifications.planLimits.name',
+    description: 'notifications.planLimits.description',
+    keywords: 'notifications.planLimits.keywords',
+    part: 'desktop',
+    access: 'change',
+    on: (ctx) => ctx.desktop,
+    ...flag('notifications', 'planLimits', (file) => file.notifications.planLimits),
   },
   'notifications.sound': {
     section: 'notifications',
@@ -1047,17 +1139,17 @@ const ENTRIES = {
   },
   'agents.auto-compact': {
     section: 'agents',
-    row: 'claude-settings',
-    name: 'agents.claudeSettings.compact.name',
-    description: 'agents.claudeSettings.compact.description',
+    row: 'auto-compact',
+    name: 'agents.autoCompact.name',
+    description: 'agents.autoCompact.catalog',
     part: 'host',
     kind: 'info',
     item: 'agent',
-    on: (ctx, item) => ctx.agents.some((a) => a.id === item && a.harnessId === 'claude-code'),
+    on: (ctx, item) => ctx.agents.some((a) => a.id === item && takesAutoCompact(a.id)),
   },
   'agents.prompt-cache': {
     section: 'agents',
-    row: 'claude-settings',
+    row: 'prompt-cache',
     name: 'agents.claudeSettings.cache.name',
     description: 'agents.claudeSettings.cache.description',
     part: 'host',
@@ -1220,6 +1312,22 @@ const ENTRIES = {
     keywords: 'agents.workflow.keywords',
     part: 'host',
     kind: 'info',
+  },
+  'agents.workflow-steps': {
+    section: 'agents',
+    row: 'workflow-steps',
+    group: 'agents.workflow.group',
+    name: 'agents.workflow.steps.name',
+    description: 'agents.workflow.steps.description',
+    keywords: 'agents.workflow.keywords',
+    part: 'host',
+    access: 'change',
+    ...pick(
+      'workflow',
+      'maxWorkingSteps',
+      (file) => file.workflow.maxWorkingSteps,
+      WORKING_STEP_LIMITS.map((n) => ({ value: n, label: { text: String(n) } })),
+    ),
   },
 
   // ---- Manager mode (Huli): its roster and choices, the user's alone; agents never change them.
@@ -2049,17 +2157,6 @@ const ENTRIES = {
     access: 'change',
     feature: 'sessionTidy',
     ...flag('tidy', 'merged', (file) => file.tidy.merged),
-  },
-  'notifications.limits': {
-    section: 'notifications',
-    row: 'limits',
-    group: 'notifications.groups.when',
-    name: 'notifications.limits.name',
-    description: 'notifications.limits.description',
-    keywords: 'notifications.limits.keywords',
-    part: 'desktop',
-    access: 'change',
-    ...flag('notifications', 'limits', (file) => file.notifications.limits),
   },
   'account.huli-this-computer': {
     section: 'account',

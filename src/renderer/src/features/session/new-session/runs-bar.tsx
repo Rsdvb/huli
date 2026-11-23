@@ -1,7 +1,7 @@
 import { Add01Icon, Delete02Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import { GROUP_RUNS_MAX, GROUP_RUNS_MIN } from '@shared/session-groups'
+import { GROUP_RUNS_MAX, GROUP_RUNS_MIN } from '@shared/run-groups'
 import type { AgentId, ConfigOption } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import {
@@ -21,12 +21,18 @@ import { agentName, agentsOn, usableAgents, useAgentsStore } from '@renderer/sto
 import { addRun, removeRun, setRun, useBestOfN, type RunPick } from '@renderer/stores/best-of-n'
 import { readFirstOptions } from './prepared'
 import { modelOption } from './run-starts'
-import { menuAgents, menuModels, startConfig } from './start-options'
+import { menuAgents, startConfig } from './start-options'
 
 // A model's value is never empty, so the agent's own model takes the empty value.
 const OWN_MODEL = ''
 
 type Choices = NonNullable<ConfigOption['choices']>
+
+/** The models a run may pick, the agent's current ones first; one shown as another is left out. */
+function runModels(choices: Choices): Choices {
+  const listed = choices.filter((c) => !c.shownAs)
+  return [...listed.filter((c) => !c.older), ...listed.filter((c) => c.older)]
+}
 
 /** The agents New session can start on the host, as the agent picker lists them. */
 function useStartable(hostId: string | null) {
@@ -101,7 +107,7 @@ function RunChip({
   const config = entry?.config
   const model = modelOption(config)
   const choices: Choices = model?.choices ?? []
-  const { current, older } = menuModels(choices)
+  const models = runModels(choices)
   // The agent's own model is the one a session would start with: its default or the last used.
   const ownValue = entry ? modelOption(startConfig(entry, {}, { startMode: true }))?.value : null
   const own =
@@ -163,7 +169,7 @@ function RunChip({
                 {own ? t('group.runs.ownModelNamed', { model: own }) : t('group.runs.ownModel')}
               </span>
             </DropdownMenuRadioItem>
-            {[...current, ...older].map((choice) => (
+            {models.map((choice) => (
               <DropdownMenuRadioItem key={choice.value} value={choice.value} closeOnClick>
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate">{choice.name}</span>

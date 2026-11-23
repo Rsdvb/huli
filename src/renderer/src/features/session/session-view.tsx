@@ -13,6 +13,8 @@ import { BrowserLabel } from '@renderer/features/browser/browser-label'
 import { DeviceLabels } from '@renderer/features/devices/device-label'
 import { TerminalLabels } from '@renderer/features/terminal/terminal-label'
 import { ProjectPathContext } from '@renderer/features/files/file-refs'
+import { HarnessPageButton } from '@renderer/features/agents/fix-button'
+import { harnessAtFault } from '@renderer/features/agents/problem-fix'
 import { openHostSettings } from '@renderer/features/settings/host-sections'
 import { SHEET_INSIDE_RADIUS } from '@renderer/features/shell/sheet'
 import { usePane } from '@renderer/features/split/pane-context'
@@ -21,6 +23,7 @@ import { useScrollbarGutter } from '@renderer/hooks/use-scrollbar-gutter'
 import { errorMessage, host } from '@renderer/lib/host'
 import { isMac } from '@renderer/lib/platform'
 import { AccountMovedAlert } from '@renderer/features/agents/moved-accounts'
+import { useMissingCopy } from '@renderer/features/settings/harness-install'
 import { agentName, agentsOn, useAgentsStore } from '@renderer/stores/agents'
 import { ensureFiles, ensureFreshFiles } from '@renderer/stores/files'
 import { isAway, useOtherHost } from '@renderer/stores/hosts'
@@ -50,6 +53,7 @@ import {
   ComposerPlaceholder,
   FailedState,
   HostAway,
+  InstallCopyButton,
   StartingAgent,
   ThreadSkeleton,
 } from './session-states'
@@ -89,6 +93,7 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
     (s) => agentsOn(s, hostId).byId[summary.agentId]?.registered === false,
   )
   const agentStatus = useAgentsStore((s) => agentsOn(s, hostId).byId[summary.agentId])
+  const missingCopy = useMissingCopy(summary.agentId, hostId)
   const movedTo = agentStatus?.movedAccounts?.to
   const movedToName = useAgentsStore(
     (s) => (movedTo && agentsOn(s, hostId).byId[movedTo]?.harnessName) || movedTo,
@@ -212,7 +217,19 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
   } else {
     body = (
       <>
-        <Thread sessionId={sessionId} projectPath={folder} agentName={name} working={running} />
+        <Thread
+          sessionId={sessionId}
+          projectPath={folder}
+          agentName={name}
+          working={running}
+          commenting={
+            !!session &&
+            !away &&
+            !archived &&
+            summary.origin !== 'subagent' &&
+            summary.worktree?.state !== 'gone'
+          }
+        />
         <ThreadWidthGrips gutter={gutter} />
       </>
     )
@@ -255,6 +272,15 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
                     message={session.error?.message ?? t('view.couldNotContinue', { agent: name })}
                     detail={session.error?.detail}
                     onRetry={retry}
+                    action={
+                      missingCopy ? (
+                        <InstallCopyButton missing={missingCopy} />
+                      ) : (
+                        harnessAtFault(agentStatus) && (
+                          <HarnessPageButton status={agentStatus} hostId={hostId} />
+                        )
+                      )
+                    }
                     report={{ hostId: otherHost?.id ?? null, sessionId, agentId: summary.agentId }}
                   />
                 ) : null}

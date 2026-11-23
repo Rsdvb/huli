@@ -5,6 +5,7 @@ import {
   AGENT_NAME_CHARS,
   BACKUP_KEEP_MAX,
   BACKUP_KEEP_MIN,
+  applyListEdit,
   CONFIG_VARIABLES,
   DEFAULT_SETTINGS,
   AGENT_COLORS,
@@ -18,17 +19,23 @@ import {
   nextAgentColor,
   isFontFamilyName,
   isLinkSite,
+  isSidebarPage,
+  readSidebarOrder,
+  readSidebarPages,
   LIGHT_MODEL_CHARS,
   MAX_LINK_SITES,
   NEW_SESSION_LISTS,
   ONBOARDING_STEPS,
+  SIDEBAR_PAGES,
   type AddedAgent,
   type HostSettings,
+  type ListEdit,
   type ProxySettings,
   type DirectSettings,
   type SettingsFile,
   type SettingsPatch,
   type TerminalSettings,
+  USER_FONT_ROLES,
   ZOOM_LEVELS,
 } from '@shared/settings'
 import { isComputerApp, isStopShortcut } from '@shared/computer-use'
@@ -65,6 +72,7 @@ import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
 import { SETTLE_DAYS } from '@shared/session-tidy'
 import { TOOL_CALL_VIEWS } from '@shared/zen-view'
 import { THEME_ID } from '@shared/themes'
+import { WORKING_STEP_LIMITS } from '@shared/workflow'
 import { isAbsolutePath } from '../agent-host/paths'
 import {
   AUTO_AGENT_HARNESSES,
@@ -74,10 +82,10 @@ import {
   isHarnessId,
   harnessOf,
   MULTI_AGENT_HARNESSES,
-  USER_PROGRAM_HARNESSES,
   type AgentId,
   type HarnessId,
 } from '@shared/thread'
+import { t } from './i18n'
 
 export const SETTINGS_VERSION = 1
 
@@ -241,6 +249,38 @@ const isPortBaseValue: Check = (value, path) =>
   isPortBase(value)
     ? null
     : `"${path}" must be a whole number from ${PORT_BASE_MIN} to ${PORT_BASE_MAX}`
+const isUserFonts: Check = (value, path) => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return `"${path}" must be an object`
+  }
+  for (const [role, family] of Object.entries(value)) {
+    if (!(USER_FONT_ROLES as readonly string[]).includes(role)) {
+      return `"${path}" names an unknown text "${role}"`
+    }
+    const problem = checkFontFamily(family, `${path}.${role}`)
+    if (problem) return problem
+  }
+  return null
+}
+
+const PAGES_LIST = SIDEBAR_PAGES.map((page) => JSON.stringify(page)).join(', ')
+
+/** Pages of the sidebar, each at most once. */
+const isSidebarPages: Check = (value, path) =>
+  Array.isArray(value) && value.every(isSidebarPage) && new Set(value).size === value.length
+    ? null
+    : `"${path}" must list pages of ${PAGES_LIST}, each at most once`
+
+/** The sidebar's order: every page once. */
+const isSidebarOrder: Check = (value, path) =>
+  isSidebarPages(value, path) === null && (value as unknown[]).length === SIDEBAR_PAGES.length
+    ? null
+    : `"${path}" must list each of ${PAGES_LIST} once`
+
+// Stored values read leniently, so a file a later version wrote keeps what this one knows.
+const LENIENT_FIELDS: Partial<Record<FieldSection, Record<string, (value: unknown) => unknown>>> = {
+  appearance: { sidebarOrder: readSidebarOrder, sidebarHidden: readSidebarPages },
+}
 
 /** Null, or an absolute path on this computer that has no NUL. */
 function isWorktreeRoot(value: unknown, path: string): string | null {
@@ -289,15 +329,20 @@ const SECTION_FIELDS = {
     reduceMotion: oneOf('system', 'always'),
     zoom: oneOf(...ZOOM_LEVELS),
     sidebarHover: isBoolean,
+    sidebarOrder: isSidebarOrder,
+    sidebarHidden: isSidebarPages,
+    fonts: isUserFonts,
   },
   notifications: {
     permission: isBoolean,
     turnEnded: isBoolean,
     error: isBoolean,
     routines: isBoolean,
-    limits: isBoolean,
+    updates: isBoolean,
+    planLimits: isBoolean,
     sound: isBoolean,
     badge: isBoolean,
+    island: isBoolean,
   },
   git: { backgroundFetch: isBoolean, worktreeRoot: isWorktreeRoot, portBase: isPortBaseValue },
   updates: {
@@ -327,6 +372,7 @@ const SECTION_FIELDS = {
     idleDays: oneOf(...SETTLE_DAYS),
     merged: isBoolean,
   },
+  workflow: { maxWorkingSteps: oneOf(...WORKING_STEP_LIMITS) },
   computerUse: {
     enabled: isBoolean,
     allowedApps: isComputerApps,
@@ -884,13 +930,47 @@ function readMarketList<T extends { id: string; name: string }>(
   return items
 }
 
-/** `marketplace` in a patch: each list it holds replaces the stored one whole. */
+/** An edit in a patch: each entry to put valid, its id and name once, and ids to remove. */
+function checkMarketEdit<T extends { id: string; name: string }>(
+  raw: unknown,
+  path: string,
+  max: number,
+  parse: MarketParse<T>,
+  kind: string,
+): ListEdit<T> | string {
+  if (!isRecord(raw)) return `"${path}" must be an object`
+  const extra = extraKey(raw, ['put', 'remove'], path, true)
+  if (extra) return extra
+  const checked: ListEdit<T> = {}
+  if (raw.put !== undefined) {
+    const put = checkMarketList(raw.put, `${path}.put`, max, parse, kind)
+    if (typeof put === 'string') return put
+    checked.put = put
+  }
+  if (raw.remove !== undefined) {
+    const { remove } = raw
+    if (
+      !Array.isArray(remove) ||
+      remove.length > max ||
+      remove.some((id) => typeof id !== 'string' || id.length > MAX_MARKET_ID)
+    ) {
+      return `"${path}.remove" must list at most ${max} ids of at most ${MAX_MARKET_ID} characters`
+    }
+    checked.remove = [...(remove as string[])]
+  }
+  return checked
+}
+
+/**
+ * `marketplace` in a patch: each list it holds replaces the stored one whole, then its edit
+ * changes the list as it stands.
+ */
 function checkMarketplace(
   value: unknown,
   path: string,
 ): NonNullable<SettingsPatch['marketplace']> | string {
   if (!isRecord(value)) return `"${path}" must be an object`
-  const extra = extraKey(value, ['mcp', 'skills'], path, true)
+  const extra = extraKey(value, ['mcp', 'skills', 'mcpEdit', 'skillsEdit'], path, true)
   if (extra) return extra
   const checked: NonNullable<SettingsPatch['marketplace']> = {}
   if (value.mcp !== undefined) {
@@ -914,6 +994,28 @@ function checkMarketplace(
     )
     if (typeof skills === 'string') return skills
     checked.skills = skills
+  }
+  if (value.mcpEdit !== undefined) {
+    const edit = checkMarketEdit(
+      value.mcpEdit,
+      `${path}.mcpEdit`,
+      MAX_MARKET_SERVERS,
+      parseMarketServer,
+      'server',
+    )
+    if (typeof edit === 'string') return edit
+    checked.mcpEdit = edit
+  }
+  if (value.skillsEdit !== undefined) {
+    const edit = checkMarketEdit(
+      value.skillsEdit,
+      `${path}.skillsEdit`,
+      MAX_MARKET_SKILLS,
+      parseMarketSkill,
+      'skill',
+    )
+    if (typeof edit === 'string') return edit
+    checked.skillsEdit = edit
   }
   return checked
 }
@@ -1200,9 +1302,39 @@ export function effectiveDirect(settings: SettingsFile, signedIn: boolean): Dire
   return held && !direct.enabled ? { ...direct, enabled: true } : direct
 }
 
+/** A kept list with an edit applied; throws when it would then repeat a name or run past `max`. */
+function editedList<T extends { id: string; name: string }>(
+  list: readonly T[],
+  edit: ListEdit<T>,
+  max: number,
+  kind: 'server' | 'skill',
+): T[] {
+  const next = applyListEdit(list, edit)
+  if (next.length > max) {
+    throw new SettingsError(
+      kind === 'server'
+        ? t('settings.tooManyServers', { max })
+        : t('settings.tooManySkills', { max }),
+    )
+  }
+  const names = new Set<string>()
+  for (const item of next) {
+    if (names.has(item.name)) {
+      throw new SettingsError(
+        kind === 'server'
+          ? t('settings.repeatedServer', { name: item.name })
+          : t('settings.repeatedSkill', { name: item.name }),
+      )
+    }
+    names.add(item.name)
+  }
+  return next
+}
+
 /**
  * Applies a validated patch. Sections merge key by key; `proxy` is replaced whole. Run in the
- * background and direct connections stay on while remote access is.
+ * background and direct connections stay on while remote access is. Throws a `SettingsError`
+ * when an edit of the servers or skills would leave two with one name.
  */
 export function mergeSettings(current: SettingsFile, patch: SettingsPatch): SettingsFile {
   const next = structuredClone(current)
@@ -1215,6 +1347,22 @@ export function mergeSettings(current: SettingsFile, patch: SettingsPatch): Sett
   if (patch.marketplace?.mcp) next.marketplace.mcp = structuredClone(patch.marketplace.mcp)
   if (patch.marketplace?.skills) {
     next.marketplace.skills = structuredClone(patch.marketplace.skills)
+  }
+  if (patch.marketplace?.mcpEdit) {
+    next.marketplace.mcp = editedList(
+      next.marketplace.mcp,
+      structuredClone(patch.marketplace.mcpEdit),
+      MAX_MARKET_SERVERS,
+      'server',
+    )
+  }
+  if (patch.marketplace?.skillsEdit) {
+    next.marketplace.skills = editedList(
+      next.marketplace.skills,
+      structuredClone(patch.marketplace.skillsEdit),
+      MAX_MARKET_SKILLS,
+      'skill',
+    )
   }
   if (patch.disabledAgents) next.disabledAgents = [...patch.disabledAgents]
   if (patch.startModes) {
@@ -1312,7 +1460,7 @@ export function agentName(value: unknown): string {
   const name = typeof value === 'string' ? value.trim() : ''
   const control = [...name].some((char) => char.charCodeAt(0) < 0x20)
   if (name.length === 0 || [...name].length > AGENT_NAME_CHARS || control) {
-    throw new SettingsError(`An agent's name must be 1 to ${AGENT_NAME_CHARS} characters`)
+    throw new SettingsError(t('settings.agentName', { max: AGENT_NAME_CHARS }))
   }
   return name
 }
@@ -1335,17 +1483,21 @@ export function withAddedAgent(current: SettingsFile, agent: AddedAgent): Settin
 }
 
 /**
- * Adds the default agents of the harnesses a host's first start found, in the order the list
- * of such harnesses has, and records the first start as done; it does nothing once it is. A
- * harness that was added or removed before is left as it is. The first one added becomes the
- * default agent when none is chosen, so New session can start at once.
+ * Adds the default agents of the harnesses whose own program a host's first start found, in
+ * catalog order, which starts with Claude Code, Codex, OpenCode and Pi, and records the first
+ * start as done; it does nothing once it is. A harness that was added or removed before is left as
+ * it is. The first one added becomes the default agent when none is chosen, so New session can
+ * start at once.
  */
 export function withFirstStart(current: SettingsFile, found: unknown): SettingsFile {
   if (current.initialSetup.done) return current
   const wanted = new Set<unknown>(Array.isArray(found) ? found : [])
   const next = structuredClone(current)
-  const added = USER_PROGRAM_HARNESSES.filter(
-    (id) => wanted.has(id) && next.agents[id]?.enabled === undefined,
+  const added = HARNESS_IDS.filter(
+    (id) =>
+      wanted.has(id) &&
+      !AUTO_AGENT_HARNESSES.includes(id) &&
+      next.agents[id]?.enabled === undefined,
   )
   for (const id of added) next.agents[id] = { ...next.agents[id], enabled: true }
   if (added.length > 0 && next.general.defaultAgent === null) next.general.defaultAgent = added[0]!
@@ -1503,10 +1655,25 @@ export function parseSettingsFile(raw: unknown): LoadedSettings {
     const target = settings[section] as Record<string, unknown>
     for (const [key, check] of Object.entries(fields)) {
       if (!(key in value)) continue
+      const lenient = LENIENT_FIELDS[section]?.[key]
+      if (lenient && Array.isArray(value[key])) {
+        target[key] = lenient(value[key])
+        continue
+      }
       const problem = check(value[key], `${section}.${key}`)
       if (problem) problems.push(problem)
       else target[key] = value[key]
     }
+  }
+  // Huli: Kite's own switch for plan limit alerts, `notifications.limits`, is now Kettu's
+  // `planLimits`; a file from before keeps its choice.
+  const notifications = raw.notifications
+  if (
+    isRecord(notifications) &&
+    !('planLimits' in notifications) &&
+    typeof notifications.limits === 'boolean'
+  ) {
+    settings.notifications.planLimits = notifications.limits
   }
   if (raw.agents !== undefined) {
     if (!isRecord(raw.agents)) problems.push('"agents" must be an object')
@@ -1799,6 +1966,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     idleSessions: { ...settings.idleSessions },
     supervisor: { ...settings.supervisor },
     tidy: { ...settings.tidy },
+    workflow: { ...settings.workflow },
     usage: { fromComputer: settings.usage.fromComputer },
     sessionTitles: settings.general.sessionTitles,
     claudeTestEntrypoint: settings.general.claudeTestEntrypoint
@@ -1845,6 +2013,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'idleSessions',
   'supervisor',
   'tidy',
+  'workflow',
   'usage',
   'computerUse',
   'agentNetwork',

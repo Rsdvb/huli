@@ -7,6 +7,7 @@ import {
   File01Icon,
   FolderOpenIcon,
   Globe02Icon,
+  KanbanIcon,
   KeyboardIcon,
   PaintBoardIcon,
   PencilEdit02Icon,
@@ -43,6 +44,7 @@ import {
   openArtifact,
   openArtifacts,
   openMarketplace,
+  openOverview,
   openRoutine,
   openRoutines,
   openSession,
@@ -96,6 +98,9 @@ function runAction(action: SearchAction): void {
       break
     case 'openProject':
       void openProjectDialog()
+      break
+    case 'openOverview':
+      openOverview()
       break
     case 'openUsage':
       openUsage()
@@ -349,6 +354,7 @@ function SearchPalette() {
 const ACTION_ICON: Record<SearchAction, IconSvgElement> = {
   newSession: PencilEdit02Icon,
   openProject: FolderOpenIcon,
+  openOverview: KanbanIcon,
   openUsage: PieChartIcon,
   openArtifacts: DashboardSquare02Icon,
   openRoutines: TimeScheduleIcon,

@@ -6,6 +6,7 @@ import { Trans, useTranslation } from 'react-i18next'
 import { useEntry } from '@renderer/lib/features'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { HeldBubble } from '@renderer/components/control/held-bubble'
+import { PillDock } from '@renderer/components/control/pill-dock'
 import { SurfaceLight } from '@renderer/components/control/surface-light'
 import { SurfacePill } from '@renderer/components/control/surface-pill'
 import { useControlAgent } from '@renderer/components/control/use-control-agent'
@@ -166,7 +167,7 @@ export function TerminalControl({
           onTakeOver={takeOver}
         />
       )}
-      <div className="kp-tbox__pill">
+      <PillDock kind="terminal" className="kp-tbox__pill">
         <AnimatePresence>
           {control && (
             <SurfacePill
@@ -182,7 +183,7 @@ export function TerminalControl({
             />
           )}
         </AnimatePresence>
-      </div>
+      </PillDock>
     </>
   )
 }

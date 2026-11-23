@@ -38,6 +38,7 @@ import type {
 import type { RuntimeCall } from '../artifacts/runtime/calls'
 import type { RoutineCall, RoutineCalls, RoutineRunStats } from '../routines/calls'
 import type { IndexedMessage } from '../search/messages'
+import { transaction } from '../sqlite'
 import { taskRecordOf, type TaskCall, type TaskCalls } from '../workflow/model'
 import {
   storedBlobs,
@@ -62,6 +63,8 @@ import {
   type ThreadWrite,
 } from './model'
 import { hasMedia, mediaDirOf, putMedia, readMedia, removeMedia, sweepMedia } from './media'
+import { originOf, type MessageOrigin, type StoredOrigin } from './origins'
+import type { HostMessage } from '../i18n'
 import type { ThreadDbStatus, ThreadErrorCode } from './protocol'
 import {
   declarationAt,
@@ -72,7 +75,9 @@ import {
   type RuntimeStatements,
 } from './runtime-db'
 
-export const SCHEMA_VERSION = 10
+// Huli: Kite's databases took version 10 for MEDIA before Kettu numbered ORIGINS, SET_ASIDE and
+// ARTIFACT_SEEN 10 to 12, so here those come one later; a merge renumbers each new one of Kettu's.
+export const SCHEMA_VERSION = 13
 
 // `turn` is the position of the entry that opened the entry's turn, so a page that starts at a
 // turn is one range of the primary key.
@@ -249,6 +254,52 @@ const MEDIA = `
   CREATE INDEX session_media_by_media ON session_media (media_hash);
 `
 
+// Who sent each message Kettu marked as not the user's, in the order they were added, so a thread
+// rebuilt from the agent's own history gets them back. They do not reference threads, so writing a
+// thread whole keeps them. The messages stored before the table came are its first rows, read
+// through the kind index so a large database reads only its user messages, not every entry.
+const ORIGINS = `
+  CREATE TABLE origins (
+    session_id TEXT NOT NULL,
+    seq        INTEGER NOT NULL,
+    text       TEXT NOT NULL,
+    json       TEXT NOT NULL,
+    PRIMARY KEY (session_id, seq)
+  ) STRICT, WITHOUT ROWID;
+  INSERT INTO origins (session_id, seq, text, json)
+    SELECT e.session_id, e.pos,
+      COALESCE((SELECT group_concat(json_extract(part.value, '$.text'), char(10))
+        FROM json_each(e.json, '$.content') AS part
+        WHERE json_extract(part.value, '$.type') = 'text'), ''),
+      json_remove(e.json, '$.kind', '$.id', '$.content', '$.at', '$.steered')
+    FROM threads t CROSS JOIN entries e INDEXED BY entries_by_kind
+      ON e.session_id = t.session_id AND e.kind = 'user'
+    WHERE json_extract(e.json, '$.from') IS NOT NULL
+      OR json_extract(e.json, '$.device') IS NOT NULL
+      OR json_extract(e.json, '$.approval') IS NOT NULL
+      OR json_extract(e.json, '$.kettu') IS NOT NULL;
+`
+
+// The entries an edit from a message took out of a thread, at the positions they had, until the
+// next send drops them or Put back returns them.
+const SET_ASIDE = `
+  CREATE TABLE set_aside (
+    session_id TEXT NOT NULL REFERENCES threads (session_id) ON DELETE CASCADE,
+    pos        INTEGER NOT NULL,
+    entry_id   TEXT NOT NULL,
+    json       TEXT NOT NULL,
+    PRIMARY KEY (session_id, pos)
+  ) STRICT, WITHOUT ROWID;
+`
+
+// The newest version of each artifact its owner had open in a viewer, kept with the artifact and
+// outside its versions; null until they open it. The artifacts made before it count as seen, so an
+// upgrade marks nothing as changed.
+const ARTIFACT_SEEN = `
+  ALTER TABLE artifacts ADD COLUMN seen INTEGER;
+  UPDATE artifacts SET seen = head;
+`
+
 /** What brings a database of the version before each key up to it; a new one runs them all. */
 const MIGRATIONS: Record<number, string> = {
   2: ARTIFACTS,
@@ -260,6 +311,9 @@ const MIGRATIONS: Record<number, string> = {
   8: ARTIFACT_TYPES,
   9: WORKFLOW_TASKS,
   10: MEDIA,
+  11: ORIGINS,
+  12: SET_ASIDE,
+  13: ARTIFACT_SEEN,
 }
 
 /** The tables of a database at schema `version`, as a new one made then had them. */
@@ -312,6 +366,8 @@ export class ThreadDbError extends Error {
     message: string,
     readonly code: ThreadErrorCode,
     readonly data?: ArtifactState,
+    /** The message for the user, which the worker cannot word in their language itself. */
+    readonly text?: HostMessage,
   ) {
     super(message)
     this.name = 'ThreadDbError'
@@ -350,7 +406,7 @@ type Row = Record<string, SQLOutputValue>
 // under its creator when the user made it.
 const LISTING = `
   SELECT a.id, a.title, a.project, COALESCE(v.author, a.session_id) AS shown_under, a.head,
-    v.pages, v.size, a.created_at, a.updated_at, a.deleted_at,
+    v.pages, v.size, a.created_at, a.updated_at, a.deleted_at, a.seen,
     (SELECT COUNT(*) FROM artifact_files f WHERE f.artifact_id = a.id AND f.n = a.head) AS files,
     EXISTS (SELECT 1 FROM artifact_files f
       WHERE f.artifact_id = a.id AND f.n = a.head AND f.path = '${CANVAS_FILE}') AS canvas
@@ -369,6 +425,7 @@ function artifactRecord(row: Row): ArtifactRecord {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
     deletedAt: row.deleted_at === null ? null : Number(row.deleted_at),
+    seen: row.seen === null || row.seen === undefined ? null : Number(row.seen),
   }
 }
 
@@ -401,6 +458,7 @@ function listing(row: Row): ArtifactListing {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
     deletedAt: row.deleted_at === null ? null : Number(row.deleted_at),
+    seen: row.seen === null ? null : Number(row.seen),
     type: null,
   }
 }
@@ -419,6 +477,7 @@ const stateOf = (artifact: ArtifactRecord): ArtifactState => ({
 })
 
 function prepareAll(db: DatabaseSync) {
+  // Plain `?` marks only: Node 22 binds no positional arguments to numbered ones such as `?1`.
   const sql = (text: string): StatementSync => db.prepare(text)
   return {
     thread: sql(
@@ -444,23 +503,25 @@ function prepareAll(db: DatabaseSync) {
     turnFrom: sql(
       'SELECT turn FROM entries WHERE session_id = ? AND pos >= ? ORDER BY pos LIMIT 1',
     ),
-    // A message's text as `outlineText` reads it, in two parts.
+    // A message's text as `outlineText` reads it, in two parts: the length, then the session.
     userMessages: sql(`
       SELECT e.pos, e.entry_id, t.title,
         substr((SELECT group_concat(json_extract(part.value, '$.text'), char(10))
           FROM json_each(e.json, '$.content') AS part
-          WHERE json_extract(part.value, '$.type') = 'text'), 1, ?2) AS text,
+          WHERE json_extract(part.value, '$.type') = 'text'), 1, ?) AS text,
         (SELECT group_concat(COALESCE(
             json_extract(part.value, '$.ref.attachment.name'),
             json_extract(part.value, '$.ref.name')), ', ')
           FROM json_each(e.json, '$.content') AS part
           WHERE json_extract(part.value, '$.type') = 'ref') AS names
       FROM entries e LEFT JOIN outline_titles t ON t.session_id = e.session_id AND t.pos = e.pos
-      WHERE e.session_id = ?1 AND e.kind = 'user'
+      WHERE e.session_id = ? AND e.kind = 'user'
         AND json_extract(e.json, '$.from') IS NULL
-        AND json_extract(e.json, '$.approval') IS NULL ORDER BY e.pos`),
+        AND json_extract(e.json, '$.approval') IS NULL
+        AND json_extract(e.json, '$.kettu') IS NULL ORDER BY e.pos`),
     // The text of the user messages and agent replies in a range of positions, as the search
-    // index reads them; an answer a card already shows is no message of the user's own.
+    // index reads them; an answer a card already shows, or a message Kettu wrote itself, is no
+    // message of the user's own.
     messagesIn: sql(`
       SELECT pos, entry_id, kind,
         CASE kind WHEN 'agent' THEN json_extract(json, '$.markdown')
@@ -469,7 +530,7 @@ function prepareAll(db: DatabaseSync) {
             WHERE json_extract(part.value, '$.type') = 'text') END AS text
       FROM entries
       WHERE session_id = ? AND pos >= ? AND pos < ? AND kind IN ('user', 'agent')
-        AND json_extract(json, '$.approval') IS NULL
+        AND json_extract(json, '$.approval') IS NULL AND json_extract(json, '$.kettu') IS NULL
       ORDER BY pos`),
     threadState: sql('SELECT next_pos, updated_at FROM threads WHERE session_id = ?'),
     threadMarks: sql('SELECT session_id, updated_at FROM threads'),
@@ -484,8 +545,8 @@ function prepareAll(db: DatabaseSync) {
       WHERE session_id = ? AND kind = 'agent' AND instr(json, 'github.com/') > 0
       ORDER BY pos DESC`),
     lastReply: sql(`
-      SELECT substr(json_extract(json, '$.markdown'), 1, ?2) AS markdown FROM entries
-      WHERE session_id = ?1 AND kind = 'agent' AND json_extract(json, '$.markdown') <> ''
+      SELECT substr(json_extract(json, '$.markdown'), 1, ?) AS markdown FROM entries
+      WHERE session_id = ? AND kind = 'agent' AND json_extract(json, '$.markdown') <> ''
       ORDER BY pos DESC LIMIT 1`),
     lastTurnMs: sql(`
       SELECT json_extract(json, '$.durationMs') AS ms FROM entries
@@ -509,6 +570,22 @@ function prepareAll(db: DatabaseSync) {
         next_pos = excluded.next_pos,
         updated_at = excluded.updated_at`),
     deleteThread: sql('DELETE FROM threads WHERE session_id = ?'),
+    cutFrom: sql('DELETE FROM entries WHERE session_id = ? AND pos >= ?'),
+    setAside: sql('SELECT pos, json FROM set_aside WHERE session_id = ? ORDER BY pos'),
+    clearSetAside: sql('DELETE FROM set_aside WHERE session_id = ?'),
+    insertSetAside: sql(
+      'INSERT INTO set_aside (session_id, pos, entry_id, json) VALUES (?, ?, ?, ?)',
+    ),
+    // `entries.json`, as in `mentions`; a hash is 64 hex digits, so no other text holds one.
+    namesBlob: sql(
+      'SELECT 1 FROM entries WHERE session_id = ? AND instr(entries.json, ?) > 0 LIMIT 1',
+    ),
+    deleteTitle: sql('DELETE FROM outline_titles WHERE session_id = ? AND pos = ?'),
+    origins: sql('SELECT text, json FROM origins WHERE session_id = ? ORDER BY seq'),
+    putOrigin: sql(`
+      INSERT INTO origins (session_id, seq, text, json)
+      SELECT ?, COALESCE(MAX(seq), -1) + 1, ?, ? FROM origins WHERE session_id = ?`),
+    deleteOrigins: sql('DELETE FROM origins WHERE session_id = ?'),
     // The bytes of version 9, until the worker moves them into files.
     legacyBlob: sql('SELECT mime, data FROM blobs WHERE session_id = ? AND hash = ?'),
     legacyBatch: sql('SELECT session_id, hash, mime, data FROM blobs LIMIT ?'),
@@ -555,16 +632,16 @@ function prepareAll(db: DatabaseSync) {
     sessionJson: sql('SELECT session_json FROM threads WHERE session_id = ?'),
     settledThreads: sql('SELECT session_id FROM threads WHERE updated_at < ? ORDER BY session_id'),
     // `entries.json`, since json_each has a hidden column of that name.
-    mentions: sql(`SELECT 1 FROM entries WHERE session_id = ?1 AND (
-      (kind = 'agent' AND instr(json_extract(json, '$.markdown'), ?2) > 0)
+    mentions: sql(`SELECT 1 FROM entries WHERE session_id = ? AND (
+      (kind = 'agent' AND instr(json_extract(json, '$.markdown'), ?) > 0)
       OR (kind = 'user' AND EXISTS (
         SELECT 1 FROM json_each(entries.json, '$.content') AS part
         WHERE json_extract(part.value, '$.type') = 'text'
-          AND instr(json_extract(part.value, '$.text'), ?2) > 0
+          AND instr(json_extract(part.value, '$.text'), ?) > 0
       ))
     ) LIMIT 1`),
     artifact: sql(
-      'SELECT id, project, title, head, session_id, created_at, updated_at, deleted_at FROM artifacts WHERE id = ?',
+      'SELECT id, project, title, head, session_id, created_at, updated_at, deleted_at, seen FROM artifacts WHERE id = ?',
     ),
     version: sql(
       'SELECT n, size, pages, author, note, created_at FROM artifact_versions WHERE artifact_id = ? AND n = ?',
@@ -583,8 +660,9 @@ function prepareAll(db: DatabaseSync) {
       `${LISTING} WHERE a.deleted_at IS NOT NULL ORDER BY a.deleted_at DESC, a.id DESC`,
     ),
     insertArtifact: sql(`
-      INSERT INTO artifacts (id, project, title, head, session_id, created_at, updated_at)
-      VALUES (?, ?, ?, 1, ?, ?, ?)`),
+      INSERT INTO artifacts (id, project, title, head, session_id, created_at, updated_at, seen)
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?)`),
+    setSeen: sql('UPDATE artifacts SET seen = ? WHERE id = ?'),
     insertVersion: sql(`
       INSERT INTO artifact_versions (artifact_id, n, size, pages, author, note, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`),
@@ -620,7 +698,7 @@ function prepareAll(db: DatabaseSync) {
     ),
     insertComment: sql(`
       INSERT INTO artifact_comments (artifact_id, thread_id, n, person, session_id, body, created_at)
-      VALUES (?1, ?2, (SELECT COUNT(*) FROM artifact_comments WHERE artifact_id = ?1 AND thread_id = ?2), ?3, ?4, ?5, ?6)`),
+      VALUES (?, ?, (SELECT COUNT(*) FROM artifact_comments WHERE artifact_id = ? AND thread_id = ?), ?, ?, ?, ?)`),
     setResolved: sql(
       'UPDATE artifact_threads SET resolved_at = ? WHERE artifact_id = ? AND id = ?',
     ),
@@ -858,7 +936,10 @@ export class ThreadDb {
   /** As `guard`, for what has no answer without the database: it fails with `unavailable`. */
   private must<T>(run: (sql: Statements, db: DatabaseSync) => T): T {
     const { sql, db } = this
-    if (!sql || !db) throw new ThreadDbError('The thread database is not open', 'unavailable')
+    if (!sql || !db)
+      throw new ThreadDbError('The thread database is not open', 'unavailable', undefined, {
+        key: 'threadDb.notOpen',
+      })
     return this.attempt(sql, db, run)
   }
 
@@ -878,6 +959,8 @@ export class ThreadDb {
         throw new ThreadDbError(
           `The thread database was damaged: ${(error as Error).message}`,
           'corrupt',
+          undefined,
+          { key: 'threadDb.damaged', params: { reason: (error as Error).message } },
         )
       }
       if (resultCode(error) === SQLITE_CONSTRAINT) {
@@ -894,15 +977,7 @@ export class ThreadDb {
   }
 
   private transaction<T>(db: DatabaseSync, run: () => T): T {
-    db.exec('BEGIN')
-    try {
-      const result = run()
-      db.exec('COMMIT')
-      return result
-    } catch (error) {
-      if (db.isTransaction) db.exec('ROLLBACK')
-      throw error
-    }
+    return transaction(db, run)
   }
 
   // Reading.
@@ -1075,7 +1150,7 @@ export class ThreadDb {
     return this.guard((sql) => {
       const head = this.headOf(sql, sessionId)
       if (!head) return null
-      const entries: OutlineRow[] = sql.userMessages.all(sessionId, OUTLINE_TEXT).map((row) => ({
+      const entries: OutlineRow[] = sql.userMessages.all(OUTLINE_TEXT, sessionId).map((row) => ({
         pos: Number(row.pos),
         entryId: String(row.entry_id),
         text: optionalText(row.text) || (optionalText(row.names) ?? ''),
@@ -1153,7 +1228,7 @@ export class ThreadDb {
         }
         if (references.length >= OUTPUT_REFERENCES) break
       }
-      const reply = optionalText(sql.lastReply.get(sessionId, OUTPUT_REPLY)?.markdown)
+      const reply = optionalText(sql.lastReply.get(OUTPUT_REPLY, sessionId)?.markdown)
       const ms = sql.lastTurnMs.get(sessionId)?.ms
       const latest = sql.latestPlan.get(sessionId)
       const planEntry = latest ? this.entryOf(sql, sessionId, latest, 'refs') : null
@@ -1168,6 +1243,33 @@ export class ThreadDb {
         },
       }
     }, null)
+  }
+
+  /** Who sent the messages Kettu marked in a session, in the order they were added. */
+  origins(sessionId: string): StoredOrigin[] {
+    return this.guard((sql) => {
+      const out: StoredOrigin[] = []
+      for (const row of sql.origins.all(sessionId)) {
+        let origin: MessageOrigin | null = null
+        try {
+          const parsed: unknown = JSON.parse(String(row.json))
+          if (typeof parsed === 'object' && parsed !== null) {
+            origin = originOf({ ...(parsed as MessageOrigin), kind: 'user', id: '', content: [] })
+          }
+        } catch {
+          // A row that does not parse marks nothing.
+        }
+        if (origin) out.push({ text: String(row.text), origin })
+      }
+      return out
+    }, [])
+  }
+
+  /** Keeps who sent a message Kettu marked, after the session's others. */
+  putOrigin(sessionId: string, origin: StoredOrigin): void {
+    this.guard((sql) => {
+      sql.putOrigin.run(sessionId, origin.text, JSON.stringify(origin.origin), sessionId)
+    }, undefined)
   }
 
   /** Stores the outline's titles of a session's messages; false when it has no stored thread. */
@@ -1194,9 +1296,58 @@ export class ThreadDb {
         if (!entry) return null
         entries.push({ pos: Number(row.pos), entry })
       }
+      // What does not parse of them is only gone from Put back; the thread opens without it.
+      const setAside: PositionedEntry[] = []
+      for (const row of sql.setAside.all(sessionId)) {
+        const entry = this.entryOf(sql, sessionId, row, 'refs')
+        if (entry) setAside.push({ pos: Number(row.pos), entry })
+      }
       const { session, ...rest } = head
-      return { head: rest, session, entries }
+      return { head: rest, session, entries, setAside }
     }, null)
+  }
+
+  /** The entries an edit set aside as stored, parsed only for the bytes they name. */
+  private storedSetAside(sql: Statements, sessionId: string): PositionedEntry[] {
+    const out: PositionedEntry[] = []
+    for (const row of sql.setAside.all(sessionId)) {
+      try {
+        const value: unknown = JSON.parse(String(row.json))
+        if (isThreadEntry(value)) out.push({ pos: Number(row.pos), entry: value })
+      } catch {
+        // Unreadable, so it names nothing that could be kept.
+      }
+    }
+    return out
+  }
+
+  /**
+   * Writes the set-aside entries whole. The bytes and outline titles that only the earlier ones
+   * named go, unless the thread names them again, as after Put back. Huli: it returns the media
+   * whose last name in the session went, for the caller's `unused` to drop once no session names
+   * them.
+   */
+  private writeSetAside(sql: Statements, sessionId: string, next: PositionedEntry[]): string[] {
+    const before = this.storedSetAside(sql, sessionId)
+    sql.clearSetAside.run(sessionId)
+    for (const { pos, entry } of next) {
+      sql.insertSetAside.run(sessionId, pos, entry.id, this.storedJson(sql, sessionId, entry))
+    }
+    const kept = storedBlobs(next.map(({ entry }) => entry))
+    const held: string[] = []
+    for (const hash of storedBlobs(before.map(({ entry }) => entry))) {
+      if (kept.has(hash) || sql.namesBlob.get(sessionId, hash)) continue
+      const ref = sql.ref.get(sessionId, hash)
+      if (ref?.media_hash) held.push(String(ref.media_hash))
+      sql.deleteRef.run(sessionId, hash)
+      sql.deleteLegacy.run(sessionId, hash)
+    }
+    const positions = new Set(next.map(({ pos }) => pos))
+    for (const { pos, entry } of before) {
+      if (entry.kind !== 'user' || positions.has(pos) || sql.userAt.get(sessionId, pos)) continue
+      sql.deleteTitle.run(sessionId, pos)
+    }
+    return held
   }
 
   // Writing.
@@ -1316,9 +1467,12 @@ export class ThreadDb {
         let held: string[] = []
         // So do the outline's titles, whose positions keep their messages.
         let titles: Row[] = []
+        // An edit's set-aside entries, written whole with a replace, keep theirs as well.
+        const aside = change.setAside ?? []
         if (change.replace) {
           held = sql.mediaOf.all(sessionId).map((row) => String(row.hash))
-          for (const hash of storedBlobs(change.entries.map(({ entry }) => entry))) {
+          const named = [...change.entries, ...aside].map(({ entry }) => entry)
+          for (const hash of storedBlobs(named)) {
             const ref = sql.ref.get(sessionId, hash)
             if (ref) {
               keptRefs.push({ hash, mime: ref.mime, media_hash: ref.media_hash })
@@ -1352,6 +1506,7 @@ export class ThreadDb {
         for (const blob of [...kept, ...(change.blobs ?? [])]) {
           this.putBlob(sql, sessionId, blob.hash, blob.mime, blob.data)
         }
+        if (change.cut !== undefined && !change.replace) sql.cutFrom.run(sessionId, change.cut)
         const entries = [...change.entries].sort((a, b) => a.pos - b.pos)
         for (const { pos, entry } of entries) {
           const json = this.storedJson(sql, sessionId, entry)
@@ -1374,8 +1529,16 @@ export class ThreadDb {
           )
           sql.insertEntry.run(sessionId, pos, turn, entry.id, entry.kind, json)
         }
+        if (change.setAside !== undefined) {
+          held.push(...this.writeSetAside(sql, sessionId, change.setAside))
+        }
+        const asideUsers = new Set(
+          aside.flatMap(({ pos, entry }) => (entry.kind === 'user' ? [pos] : [])),
+        )
         for (const { pos, title } of titles) {
-          if (sql.userAt.get(sessionId, pos)) sql.putTitle.run(sessionId, pos, title)
+          if (asideUsers.has(Number(pos)) || sql.userAt.get(sessionId, pos)) {
+            sql.putTitle.run(sessionId, pos, title)
+          }
         }
         return this.unused(sql, held)
       })
@@ -1396,7 +1559,7 @@ export class ThreadDb {
    * live thread tells it (`entryHolds`).
    */
   mentions(sessionId: string, text: string): boolean {
-    return this.guard((sql) => sql.mentions.get(sessionId, text) !== undefined, false)
+    return this.guard((sql) => sql.mentions.get(sessionId, text, text) !== undefined, false)
   }
 
   /** Drops the threads of these sessions, with the media no other session names, and the space. */
@@ -1407,6 +1570,7 @@ export class ThreadDb {
         for (const sessionId of sessionIds) {
           for (const row of sql.mediaOf.all(sessionId)) held.push(String(row.hash))
           sql.deleteThread.run(sessionId)
+          sql.deleteOrigins.run(sessionId)
         }
         return this.unused(sql, held)
       })
@@ -1505,6 +1669,8 @@ export class ThreadDb {
         for (const match of json.matchAll(NAMED_BLOB)) named.add(match[1]!)
       }
       for (const row of sql.namingEntries.all(sessionId)) collect(String(row.json))
+      // An edit's set-aside entries come back with Put back, so what they name stays.
+      for (const row of sql.setAside.all(sessionId)) collect(String(row.json))
       collect(String(sql.sessionJson.get(sessionId)?.session_json ?? ''))
       const stale = refs.filter((ref) => !named.has(String(ref.hash)))
       if (stale.length === 0) return 0
@@ -1625,10 +1791,16 @@ export class ThreadDb {
     const row = sql.artifact.get(id)
     const artifact = row ? artifactRecord(row) : null
     if (!artifact || (project !== null && artifact.project !== project)) {
-      throw new ThreadDbError(`No artifact ${id}`, 'not_found')
+      throw new ThreadDbError(`No artifact ${id}`, 'not_found', undefined, {
+        key: 'artifacts.noArtifact',
+        params: { id },
+      })
     }
     if (live && artifact.deletedAt !== null) {
-      throw new ThreadDbError(`${id} is in Recently deleted`, 'deleted', stateOf(artifact))
+      throw new ThreadDbError(`${id} is in Recently deleted`, 'deleted', stateOf(artifact), {
+        key: 'artifacts.deleted',
+        params: { id },
+      })
     }
     return artifact
   }
@@ -1654,6 +1826,15 @@ export class ThreadDb {
           `version ${baseVersion}`,
         'conflict',
         { ...stateOf(artifact), changed },
+        {
+          key: 'artifacts.changedSince',
+          params: {
+            id: artifact.id,
+            head: artifact.head,
+            changed: changed.join(', '),
+            base: baseVersion,
+          },
+        },
       )
     }
     if (!Number.isSafeInteger(baseVersion) || baseVersion < 1 || baseVersion > artifact.head) {
@@ -1738,7 +1919,12 @@ export class ThreadDb {
       const artifact = this.artifactIn(sql, id, project, project !== null)
       const n = version ?? artifact.head
       const row = sql.version.get(id, n)
-      if (!row) throw new ThreadDbError(`${id} has no version ${n}`, 'not_found')
+      if (!row) {
+        throw new ThreadDbError(`${id} has no version ${n}`, 'not_found', undefined, {
+          key: 'artifacts.noVersion',
+          params: { id, version: n },
+        })
+      }
       return {
         artifact,
         version: versionRecord(row),
@@ -1764,8 +1950,9 @@ export class ThreadDb {
       this.transaction(db, () => {
         const { id, project, sessionId, title, pages, note, at } = params
         const files = params.files.map((file) => this.putFile(file.path, file.data))
-        sql.insertArtifact.run(id, project, title, sessionId, at, at)
+        // What the user imported they have seen; what an agent made waits for them to open it.
         const author = sessionId === NO_SESSION ? null : sessionId
+        sql.insertArtifact.run(id, project, title, sessionId, at, at, author === null ? 1 : null)
         this.insertVersion(sql, id, 1, files, { pages, author, note, at, type: params.type })
         putDeclaration(
           this.runtimeStatements(db),
@@ -1831,6 +2018,8 @@ export class ThreadDb {
           params.declaration ?? declarationAt(runtime, artifact.id, artifact.head),
         )
         sql.setHead.run(n, at, artifact.id)
+        // The user writes only what a viewer shows them, so their own version is seen.
+        if (author === null) sql.setSeen.run(n, artifact.id)
         return { version: n }
       }),
     )
@@ -1843,7 +2032,12 @@ export class ThreadDb {
         const artifact = this.artifactIn(sql, params.id, params.project, true)
         const row = sql.version.get(artifact.id, params.version)
         if (!row) {
-          throw new ThreadDbError(`${artifact.id} has no version ${params.version}`, 'not_found')
+          throw new ThreadDbError(
+            `${artifact.id} has no version ${params.version}`,
+            'not_found',
+            undefined,
+            { key: 'artifacts.noVersion', params: { id: artifact.id, version: params.version } },
+          )
         }
         // Restoring writes every file in which the old version differs from the latest.
         const old = new Map(
@@ -1871,9 +2065,24 @@ export class ThreadDb {
           declarationAt(runtime, artifact.id, restored.version),
         )
         sql.setHead.run(n, at, artifact.id)
+        if (author === null) sql.setSeen.run(n, artifact.id)
         return { version: n }
       }),
     )
+  }
+
+  /**
+   * The owner had `version` open in a viewer: it becomes the seen version when it is newer than
+   * the one recorded, never past the latest. `changed` is false when the record stayed.
+   */
+  seeArtifact({ id, version }: ArtifactCalls['see']['params']): ArtifactCalls['see']['result'] {
+    return this.must((sql) => {
+      const artifact = this.artifactIn(sql, id, null, false)
+      const next = Math.min(artifact.head, Math.max(artifact.seen ?? 0, version))
+      if (next === artifact.seen || next < 1) return { seen: artifact.seen, changed: false }
+      sql.setSeen.run(next, id)
+      return { seen: next, changed: true }
+    })
   }
 
   /** The title is not versioned: renaming changes the artifact, not a version or its time. */
@@ -1911,7 +2120,10 @@ export class ThreadDb {
     this.must((sql, db) => {
       const artifact = this.artifactIn(sql, id, null, false)
       if (artifact.deletedAt === null) {
-        throw new ThreadDbError(`${id} is not in Recently deleted`, 'conflict', stateOf(artifact))
+        throw new ThreadDbError(`${id} is not in Recently deleted`, 'conflict', stateOf(artifact), {
+          key: 'artifacts.notDeleted',
+          params: { id },
+        })
       }
       const hashes = sql.hashesOf.all(id).map((row) => String(row.hash))
       sql.deleteArtifact.run(id)
@@ -1947,7 +2159,12 @@ export class ThreadDb {
 
   private threadRow(sql: Statements, artifactId: string, threadId: string): Row {
     const row = sql.threadOf.get(artifactId, threadId)
-    if (!row) throw new ThreadDbError(`${artifactId} has no thread ${threadId}`, 'not_found')
+    if (!row) {
+      throw new ThreadDbError(`${artifactId} has no thread ${threadId}`, 'not_found', undefined, {
+        key: 'artifacts.noThread',
+        params: { id: artifactId, thread: threadId },
+      })
+    }
     return row
   }
 
@@ -1994,10 +2211,15 @@ export class ThreadDb {
         this.artifactIn(sql, id, params.project, true)
         const count = Number((sql.threadCount.get(id) as { n?: number } | undefined)?.n ?? 0)
         if (count >= THREADS_PER_ARTIFACT) {
-          throw new ThreadDbError(`${id} holds ${THREADS_PER_ARTIFACT} threads`, 'conflict')
+          throw new ThreadDbError(
+            `${id} holds ${THREADS_PER_ARTIFACT} threads`,
+            'conflict',
+            undefined,
+            { key: 'artifacts.threadsFull', params: { id, count: THREADS_PER_ARTIFACT } },
+          )
         }
         sql.insertThread.run(id, threadId, JSON.stringify(anchor), at)
-        sql.insertComment.run(id, threadId, author.person, author.session, body, at)
+        sql.insertComment.run(id, threadId, id, threadId, author.person, author.session, body, at)
         return this.threadNow(sql, id, threadId)
       }),
     )
@@ -2011,9 +2233,17 @@ export class ThreadDb {
         this.artifactIn(sql, id, params.project, true)
         const thread = this.threadNow(sql, id, threadId)
         if (thread.comments.length >= COMMENTS_PER_THREAD) {
-          throw new ThreadDbError(`${threadId} holds ${COMMENTS_PER_THREAD} comments`, 'conflict')
+          throw new ThreadDbError(
+            `${threadId} holds ${COMMENTS_PER_THREAD} comments`,
+            'conflict',
+            undefined,
+            {
+              key: 'artifacts.commentsFull',
+              params: { thread: threadId, count: COMMENTS_PER_THREAD },
+            },
+          )
         }
-        sql.insertComment.run(id, threadId, author.person, author.session, body, at)
+        sql.insertComment.run(id, threadId, id, threadId, author.person, author.session, body, at)
         if (author.session === null) sql.setSent.run(null, null, id, threadId)
         return this.threadNow(sql, id, threadId)
       }),

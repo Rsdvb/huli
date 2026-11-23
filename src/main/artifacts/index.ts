@@ -10,8 +10,8 @@ import {
   type Session,
   type WebContents,
 } from 'electron'
-import type { SelectMessage } from '@shared/artifact-runtime/page-messages'
-import { type ArtifactImportResult, parseArtifactRef } from '@shared/artifacts'
+import type { PageErrorMessage, SelectMessage } from '@shared/artifact-runtime/page-messages'
+import { type ArtifactImportResult, parseArtifactRef, parseThumbnailPart } from '@shared/artifacts'
 import type { RuntimeAnswer } from '@shared/artifact-capabilities'
 import {
   type ArtifactExportFormat,
@@ -22,7 +22,7 @@ import { safeName } from '@shared/file-name'
 import type { ArtifactContentResult, ArtifactExportResult } from '@shared/host-control'
 import type { ArtifactOpenResult } from '@shared/ipc'
 import { sendEvent } from '../events'
-import { locale } from '../i18n'
+import { locale, t } from '../i18n'
 import { ArtifactFiles, parseVersion } from './files'
 import { filterArtifactRequests, guardArtifactFrames } from './guards'
 import { ARTIFACT_SCHEME, ArtifactOrigins, originId } from './origins'
@@ -35,6 +35,8 @@ const MAX_URL_CHARS = 2_048
 const NAME_CHARS = 200
 /** The picks a page may report each second; a page that sends more loses the rest. */
 export const PICKS_PER_SECOND = 20
+/** The errors the frames of one artifact may report each second; more are dropped. */
+export const PAGE_ERRORS_PER_SECOND = 10
 
 /** Counts each origin's reports per second, so a page cannot flood the windows that show it. */
 export class ReportLimit {
@@ -97,6 +99,7 @@ export class Artifacts {
   private readonly files: ArtifactFiles
   private readonly windows = new Set<WebContents>()
   private readonly picks = new ReportLimit(PICKS_PER_SECOND)
+  private readonly errors = new ReportLimit(PAGE_ERRORS_PER_SECOND)
   /** The origin ids whose latest version declares what reads beyond the page, as last served. */
   private readonly declaredStrict = new Set<string>()
   /**
@@ -113,6 +116,7 @@ export class Artifacts {
       content: (id, version) => deps.content(id, version),
       ...(deps.ready && { ready: deps.ready }),
       selected: (host, message) => this.selected(host, message),
+      pageError: (host, message) => this.pageError(host, message),
       runtime: {
         send: (id, message, answer) => deps.runtime(id, message, answer),
         reading: (id) => this.reading.add(originId(id)),
@@ -167,6 +171,17 @@ export class Artifacts {
     }
   }
 
+  /** A page's error, for the windows that opened its origin; the page's data is checked already. */
+  private pageError(host: string, message: PageErrorMessage): void {
+    if (!this.errors.allow(host)) return
+    const origin = `${ARTIFACT_SCHEME}://${host}`
+    for (const contents of this.windows) {
+      if (!contents.isDestroyed() && this.origins.isOpenedIn(contents, origin)) {
+        sendEvent(contents, 'artifact:page-error', { origin, message })
+      }
+    }
+  }
+
   /** Whether the artifact on this origin id loads nothing from the CDNs, whatever its policy. */
   private isStrict(host: string): boolean {
     return this.declaredStrict.has(host) || this.reading.has(host)
@@ -201,6 +216,14 @@ export class Artifacts {
     return this.thumbnails.thumbnail(wanted.id, wanted.version, parseLayout(layout))
   }
 
+  /** `artifact:part-thumbnail`: a frame, a slide or a document in one theme. */
+  async partThumbnail(id: unknown, version: unknown, part: unknown): Promise<string | null> {
+    const wanted = parseVersion(id, version)
+    const checked = parseThumbnailPart(part)
+    if (!checked) throw new Error('Not a thumbnail part')
+    return this.thumbnails.part(wanted.id, wanted.version, checked)
+  }
+
   /** A page of a version as a PNG at its own size; null when it cannot render. */
   async png(id: unknown, version: unknown, page: unknown, size: unknown): Promise<Buffer | null> {
     const wanted = parseVersion(id, version)
@@ -220,7 +243,7 @@ export class Artifacts {
   ): Promise<boolean> {
     if (typeof name !== 'string' || name.length > NAME_CHARS) throw new Error('Not a file name')
     const image = await this.png(id, version, page, size)
-    if (!image) throw new Error('The page could not be rendered')
+    if (!image) throw new Error(t('artifacts.notRendered'))
     const options: Electron.SaveDialogOptions = {
       defaultPath: join(app.getPath('downloads'), `${safeName(name, 'page')}.png`),
       filters: [{ name: 'PNG', extensions: ['png'] }],
@@ -236,6 +259,11 @@ export class Artifacts {
   /** `artifact:open-external`. */
   openExternal(id: unknown, version: unknown): Promise<void> {
     return this.files.openExternal(id, version)
+  }
+
+  /** `artifact:reveal`. */
+  reveal(id: unknown, version: unknown): Promise<void> {
+    return this.files.reveal(id, version)
   }
 
   /** `artifact:export`. */
@@ -264,7 +292,7 @@ export class Artifacts {
   async printPdf(id: unknown, version: unknown): Promise<Buffer> {
     const wanted = parseVersion(id, version)
     const found = await this.deps.content(wanted.id, wanted.version)
-    if (found.kind !== 'found' || !found.type) throw new Error('Not found')
+    if (found.kind !== 'found' || !found.type) throw new Error(t('artifacts.notFound'))
     if (!isExportFormat(found.type.name, 'pdf'))
       throw new Error('Not a format this type exports to')
     return this.thumbnails.print(wanted.id, wanted.version)
@@ -276,8 +304,9 @@ export class Artifacts {
     format: ArtifactExportFormat,
   ): Promise<ExportedFile[]> {
     const result = await this.deps.exportVersion(id, version, format)
-    if (result.kind === 'not_found') throw new Error('Not found')
-    if (result.kind === 'failed') throw new Error(`The export failed: ${result.message}`)
+    if (result.kind === 'not_found') throw new Error(t('artifacts.notFound'))
+    if (result.kind === 'failed')
+      throw new Error(t('artifacts.exportFailed', { reason: result.message }))
     return result.files
   }
 

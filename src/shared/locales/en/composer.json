@@ -10,7 +10,9 @@
       "awaiting": "Waiting for your approval",
       "awaitingAnswer": "Waiting for your answer",
       "limitReached": "{{limit}} limit reached · resets {{time}}",
+      "limitExtraUsage": "{{limit}} limit reached · using extra usage",
       "ask": "Reply…",
+      "taskRunning": "Keep chatting; this doesn’t change the task",
       "denied": "Say what to do differently",
       "runningQueue": "Queue a message · Esc stops",
       "runningTouch": "Queue a message",
@@ -35,12 +37,17 @@
     "changesBetweenTurns": "Changes between turns",
     "levelsHint": "Higher effort thinks longer and uses more of your plan. <shortcut>{{shortcut}}</shortcut> cycles it.",
     "moreModels": "More models",
+    "defaultTag": "Default",
+    "defaultUses": "Uses {{model}}",
+    "pin": "Pin {{model}} to the menu",
+    "unpin": "Unpin {{model}}",
+    "pinsFull": "Up to {{count}} models can be pinned; unpin one first",
     "searchModels": "Search models",
     "cyclesModes": "cycles modes",
     "effort": "Effort",
-    "followsAgent": "Follows the agent's setting",
-    "followsAgentOn": "Follows the agent's setting · on",
-    "followsAgentOff": "Follows the agent's setting · off",
+    "followsAgent": "Follows {{agent}}",
+    "followsAgentOn": "Follows {{agent}} · on",
+    "followsAgentOff": "Follows {{agent}} · off",
     "modelsFrom": "From {{source}}",
     "optionValue": "{{name}}: {{value}}",
     "permissionMode": "Permission mode",
@@ -50,10 +57,6 @@
     "balance": "{{amount}} balance",
     "effortHint": "Higher thinks longer, uses more of your plan · {{shortcut}}",
     "modelSettings": "Model settings",
-    "speed": "Speed",
-    "quality": "Quality",
-    "cost": "Cost",
-    "varies": "Varies",
     "noModels": "No models available",
     "noModelMatch": "No models match",
     "chooseModel": "Choose a model",
@@ -147,10 +150,20 @@
     "shortWindow": {
       "five_hour": "5h",
       "seven_day": "7d",
-      "seven_day_opus": "7d Opus",
-      "seven_day_sonnet": "7d Sonnet",
+      "daily": "1d",
       "monthly": "30d",
-      "annual": "1y"
+      "annual": "1y",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}h",
+      "days": "{{count}}d",
+      "overage": "Extra",
+      "auto": "Auto",
+      "other_models": "Other models",
+      "on_demand": "On-demand",
+      "budget": "Budget",
+      "tool_calls": "Tool calls",
+      "tokens": "Tokens",
+      "usage": "Usage"
     },
     "context": {
       "parts": {
@@ -326,6 +339,12 @@
   "history": {
     "label": "History"
   },
+  "rewound": {
+    "turns_one": "Rewound {{count}} turn",
+    "turns_other": "Rewound {{count}} turns",
+    "putBack": "Put back",
+    "putBackFailed": "Could not put back: {{error}}"
+  },
   "slash": {
     "loading": "Listing commands…",
     "chooseProject": "Choose a project to list its commands"
@@ -364,5 +383,14 @@
     "thisComputer_mac": "This Mac",
     "unknownHost": "Another host",
     "noProject": "No project"
+  },
+  "comments": {
+    "label": "Comments sent with your message",
+    "header_one": "{{count}} comment · sent with your message below",
+    "header_other": "{{count}} comments · sent with your message below",
+    "removeAll": "Remove all",
+    "remove": "Remove comment {{number}}",
+    "edit": "Edit comment {{number}}",
+    "show": "Show passage {{number}} in the thread"
   }
 }

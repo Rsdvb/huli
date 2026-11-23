@@ -55,7 +55,14 @@ import {
   toolPath,
   writesFile,
 } from './mapper'
-import { CONFIG, configOptions, hasModel, parseModelValue, parseScope } from './options'
+import {
+  CONFIG,
+  configOptions,
+  hasModel,
+  modelProviders,
+  parseModelValue,
+  parseScope,
+} from './options'
 import type {
   PiCommandInfo,
   PiDisposition,
@@ -457,7 +464,7 @@ export class PiConnection implements AgentConnection {
   ): Promise<Session> {
     const existing = this.sessions.get(sessionId)
     if (existing?.turn) {
-      throw new AgentRequestError('agent_error', 'The session has a turn running')
+      throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
     }
     if (existing) {
       // Its servers and their tokens are the process's, so it starts again with the new ones.
@@ -713,6 +720,7 @@ export class PiConnection implements AgentConnection {
     ])
     session.models = Array.isArray(models?.models) ? models.models : []
     session.levels = Array.isArray(levels?.levels) ? levels.levels : []
+    this.hooks.modelProviders?.(modelProviders(session.models))
     this.took(session, state)
   }
 
@@ -850,7 +858,7 @@ export class PiConnection implements AgentConnection {
 
   async prompt(sessionId: string, prompt: readonly PromptBlock[]): Promise<PromptResult> {
     const session = this.requireSession(sessionId)
-    if (session.turn) throw new AgentRequestError('agent_error', 'A turn is already running')
+    if (session.turn) throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
     const proc = await this.ready(session)
     const { message, images } = promptMessage(prompt)
     const command = images.length === 0 ? parseCommand(message) : null
@@ -909,7 +917,7 @@ export class PiConnection implements AgentConnection {
 
   async collect(sessionId: string, text: string): Promise<string[]> {
     const session = this.requireSession(sessionId)
-    if (session.turn) throw new AgentRequestError('agent_error', 'A turn is already running')
+    if (session.turn) throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
     const proc = await this.ready(session)
     const texts: string[] = []
     session.collected = texts
@@ -986,18 +994,18 @@ export class PiConnection implements AgentConnection {
   ): Promise<ConfigOption[]> {
     const session = this.requireSession(sessionId)
     if (typeof value !== 'string' || value === '') {
-      throw new AgentRequestError('agent_error', `${optionId} takes a choice`)
+      throw new AgentRequestError('agent_error', t('agentRun.takesChoice', { option: optionId }))
     }
     const proc = await this.ready(session)
     try {
       if (optionId === CONFIG.model) {
         const model = parseModelValue(value)
-        if (!model) throw new AgentRequestError('agent_error', `No model ${value}`)
+        if (!model) throw new AgentRequestError('agent_error', t('agentRun.noModel', { value }))
         await proc.rpc.request({ type: 'set_model', ...model })
       } else if (optionId === CONFIG.level) {
         await proc.rpc.request({ type: 'set_thinking_level', level: value })
       } else {
-        throw new AgentRequestError('agent_error', `No option ${optionId}`)
+        throw new AgentRequestError('agent_error', t('agentRun.noOption', { option: optionId }))
       }
       await this.refresh(session, proc)
     } catch (error) {
@@ -1474,7 +1482,11 @@ export class PiConnection implements AgentConnection {
     this.assertOpen()
     const session = this.sessions.get(sessionId)
     if (!session) {
-      throw new AgentRequestError('agent_error', `No session ${sessionId}`, RESOURCE_NOT_FOUND)
+      throw new AgentRequestError(
+        'agent_error',
+        t('agentRun.noSession', { id: sessionId }),
+        RESOURCE_NOT_FOUND,
+      )
     }
     return session
   }

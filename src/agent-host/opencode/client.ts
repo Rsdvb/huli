@@ -7,6 +7,7 @@ import type { AgentProvider, AgentProviderAction } from '@shared/agent-host'
 import type { Platform } from '@shared/platform'
 import { runProgram, type ProgramOptions, type ProgramRun } from '../adapter-install'
 import { getEnv, type Env } from '../find-command'
+import { t } from '../i18n'
 import {
   failedUsage,
   hasUsageEndpoint,
@@ -19,7 +20,7 @@ import {
 const READ_TIMEOUT = 30_000
 const ACTION_TIMEOUT = 30_000
 const SESSION_ID = /^ses_[A-Za-z0-9]+$/
-const MESSAGE_ID = /^msg_[A-Za-z0-9]+$/
+const MESSAGE_ID = /^msg_[A-Za-z0-9_]+$/
 // OpenCode's cursors are base64url.
 const CURSOR = /^[A-Za-z0-9_-]{1,1024}$/
 
@@ -234,10 +235,10 @@ export class OpenCodeClient {
 
   async action(input: Omit<AgentProviderAction, 'agentId'>): Promise<void> {
     const providerId = typeof input.providerId === 'string' ? input.providerId : ''
-    if (!providerId) throw new Error('OpenCode does not know this provider.')
+    if (!providerId) throw new Error(t('opencode.account.unknownProvider'))
     const integrations = await this.listIntegrations()
     const provider = integrations.find((integration) => integration.id === providerId)
-    if (!provider) throw new Error('OpenCode does not know this provider.')
+    if (!provider) throw new Error(t('opencode.account.unknownProvider'))
 
     if (input.action === 'set-key') {
       await this.setKey(provider, input.key)
@@ -248,17 +249,17 @@ export class OpenCodeClient {
     const path = `/api/credential/${encodeURIComponent(credentialId)}`
     if (input.action === 'logout') {
       const run = await this.runTool(['api', 'delete', path], undefined, ACTION_TIMEOUT)
-      if (failed(run)) throw new Error('OpenCode could not remove the account.')
+      if (failed(run)) throw new Error(t('opencode.account.removeFailed'))
       return
     }
-    if (input.action !== 'activate') throw new Error('OpenCode does not know this action.')
+    if (input.action !== 'activate') throw new Error(t('opencode.account.unknownAction'))
     const run = await this.runTool(['api', 'post', `${path}/activate`], undefined, ACTION_TIMEOUT)
-    if (failed(run)) throw new Error('OpenCode could not activate the account.')
+    if (failed(run)) throw new Error(t('opencode.account.activateFailed'))
   }
 
   private credentialId(value: unknown): string {
     if (typeof value !== 'string' || value.trim() === '') {
-      throw new Error('A credential is required.')
+      throw new Error(t('opencode.account.credentialRequired'))
     }
     return value
   }
@@ -268,14 +269,14 @@ export class OpenCodeClient {
       const connection = record(item)
       return connection?.type === 'credential' && connection.id === credentialId
     })
-    if (!owned) throw new Error('The credential does not belong to this provider.')
+    if (!owned) throw new Error(t('opencode.account.wrongProvider'))
   }
 
   private async setKey(provider: Integration, value: unknown): Promise<void> {
     const key = typeof value === 'string' ? value : ''
-    if (key.trim() === '') throw new Error('A key is required.')
+    if (key.trim() === '') throw new Error(t('opencode.account.keyRequired'))
     const hasKey = provider.methods.some((item) => record(item)?.type === 'key')
-    if (!hasKey) throw new Error('This provider has no key sign-in.')
+    if (!hasKey) throw new Error(t('opencode.account.noKeySignIn'))
 
     const id = `cred_${randomBytes(12).toString('hex')}`
     const entry = [
@@ -288,23 +289,23 @@ export class OpenCodeClient {
       },
     ]
     const imported = await this.runTool(['auth', 'import'], JSON.stringify(entry), ACTION_TIMEOUT)
-    if (failed(imported)) throw new Error('OpenCode could not save the key.')
+    if (failed(imported)) throw new Error(t('opencode.account.saveKeyFailed'))
     const activated = await this.runTool(
       ['api', 'post', `/api/credential/${encodeURIComponent(id)}/activate`],
       undefined,
       ACTION_TIMEOUT,
     )
     if (failed(activated)) {
-      throw new Error('The key was saved, but OpenCode could not activate the account.')
+      throw new Error(t('opencode.account.keySavedNotActivated'))
     }
   }
 
   private async listIntegrations(): Promise<Integration[]> {
     const answer = await this.get('/api/integration')
-    if (answer.kind !== 'ok') throw new Error('OpenCode could not list its providers.')
+    if (answer.kind !== 'ok') throw new Error(t('opencode.account.listFailed'))
     const root = record(answer.value)
     const data = root ? list(root.data) : list(answer.value)
-    if (!data) throw new Error('OpenCode could not list its providers.')
+    if (!data) throw new Error(t('opencode.account.listFailed'))
     return data
       .map(integrationOf)
       .filter((integration): integration is Integration => integration !== null)
@@ -462,10 +463,10 @@ export class OpenCodeClient {
 
   private async listCredentials(): Promise<Map<string, StoredCredential>> {
     const answer = await this.get('/api/credential')
-    if (answer.kind !== 'ok') throw new Error('OpenCode could not read its credentials.')
+    if (answer.kind !== 'ok') throw new Error(t('opencode.account.readCredentialsFailed'))
     const root = record(answer.value)
     const data = root ? list(root.data) : list(answer.value)
-    if (!data) throw new Error('OpenCode could not read its credentials.')
+    if (!data) throw new Error(t('opencode.account.readCredentialsFailed'))
     const credentials = new Map<string, StoredCredential>()
     for (const item of data) {
       const row = record(item)

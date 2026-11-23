@@ -7,6 +7,7 @@ import type {
   AgentStatus,
   EnvironmentInfo,
   PlanLimit,
+  ProgramMethod,
 } from '@shared/agent-host'
 import type { HostLink } from '@shared/remote/link'
 import type { SettingsPatch } from '@shared/settings'
@@ -31,12 +32,15 @@ export const VENDORS: Partial<Record<HarnessId, string>> = {
   doubao: 'ByteDance',
 }
 
-export const METHOD_NAMES: Record<AgentInstallMethod['id'], string> = {
+export const METHOD_NAMES: Record<ProgramMethod, string> = {
   archive: '下载',
   brew: 'Homebrew',
   npm: 'npm',
   script: '官方安装脚本',
   winget: 'WinGet',
+  pnpm: 'pnpm',
+  bun: 'Bun',
+  yarn: 'Yarn',
 }
 
 /** The agents the user added or turned on: catalog entries without an agent are left out. */

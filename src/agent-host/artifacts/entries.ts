@@ -29,6 +29,7 @@ type OwnEntry = Extract<
       | 'settings_change'
       | 'secret_request'
       | 'theme_change'
+      | 'task_delivery'
       | 'takeover'
   }
 >
@@ -164,6 +165,7 @@ function isOwn(entry: ThreadEntry): entry is OwnEntry {
     case 'settings_change':
     case 'secret_request':
     case 'theme_change':
+    case 'task_delivery':
     case 'session_started':
     case 'git':
     case 'turn_end':

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { Project } from '@shared/agent-host'
 import type { AgentId, HarnessId } from '@shared/thread'
 import {
   GROUPINGS,
@@ -28,6 +29,7 @@ import {
   type PaneView,
   type Place,
 } from '@renderer/features/split/layout'
+import { newSessionProject } from '@renderer/features/split/new-session-project'
 import type { RoutineExampleId } from '@renderer/features/routines/examples'
 import { NARROW_WINDOW, PHONE_WINDOW } from '@renderer/features/shell/narrow'
 import { hostOfPath } from '@renderer/lib/host-paths'
@@ -129,6 +131,7 @@ export const THIS_COMPUTER = 'this-computer'
 export type SidePane =
   | 'terminal'
   | 'files'
+  | 'git'
   | 'browser'
   | 'devices'
   | 'surfaces'
@@ -185,6 +188,11 @@ interface ViewStore {
   collapsedProjects: Record<string, true>
   /** The one host the sidebar lists, by id or `THIS_COMPUTER`; null lists every host. */
   hostFilter: string | null
+  /**
+   * The order the user dragged the sidebar's hosts into, by id or `THIS_COMPUTER`; empty until
+   * then. It is this window's, since each computer connects to hosts of its own.
+   */
+  hostOrder: string[]
   /** Parent sessions the user collapsed or expanded; others follow activity. */
   expandedParents: Record<string, boolean>
   /** Groups whose every row shows, past the first few; by the group's key. Not persisted. */
@@ -208,6 +216,13 @@ interface ViewStore {
    * for the panel's own folder.
    */
   filesRoot: Record<string, string>
+  /**
+   * Huli: the repository each panel's Git pane shows, a further folder of its project; absent for
+   * the panel's own folder.
+   */
+  gitRoot: Record<string, string>
+  /** A canvas page asked to be shown in a panel's artifact pane, until it is. Not persisted. */
+  sideArtifactPage: Record<string, ArtifactPageRequest>
   sidePaneMaximized: boolean
   /** The sessions whose board is open at the right of their thread. */
   boardOpen: Record<string, true>
@@ -223,6 +238,7 @@ interface Persisted {
   sidebarCollapsed: boolean
   collapsedProjects: Record<string, true>
   hostFilter?: string | null
+  hostOrder?: string[]
   expandedParents: Record<string, boolean>
   showFinishedSubagents?: boolean
   /** Per panel; the per-project `sidePane` of earlier versions is not read. */
@@ -258,6 +274,9 @@ export const useViewStore = create<ViewStore>()(() => ({
   sidebarPeek: null,
   collapsedProjects: saved.collapsedProjects ?? {},
   hostFilter: typeof saved.hostFilter === 'string' ? saved.hostFilter : null,
+  hostOrder: Array.isArray(saved.hostOrder)
+    ? saved.hostOrder.filter((id): id is string => typeof id === 'string')
+    : [],
   expandedParents: saved.expandedParents ?? {},
   allRowsShown: {},
   showFinishedSubagents: saved.showFinishedSubagents === true,
@@ -265,6 +284,8 @@ export const useViewStore = create<ViewStore>()(() => ({
   sidePane: saved.sidePanes ?? {},
   sideArtifact: {},
   filesRoot: {},
+  gitRoot: {},
+  sideArtifactPage: {},
   sidePaneMaximized: false,
   boardOpen: saved.boardOpen ?? {},
   sideChatOpen: saved.sideChatOpen ?? {},
@@ -288,6 +309,7 @@ useViewStore.subscribe((state) => {
       sidebarCollapsed: state.sidebarCollapsed,
       collapsedProjects: state.collapsedProjects,
       hostFilter: state.hostFilter,
+      hostOrder: state.hostOrder,
       expandedParents: state.expandedParents,
       showFinishedSubagents: state.showFinishedSubagents,
       // An artifact's pane is not remembered: it opens from the thread, for the work at hand;
@@ -382,12 +404,19 @@ export function layoutSessions(layout: Layout): string[] {
   )
 }
 
-/** The projects the panes in view work in, joined, for their git status. */
-export function shownProjects(state: ViewStore): string {
+/**
+ * The projects the panes in view work in, joined, for their git status: a New session pane's
+ * included, which falls back to the selected or first project when it has none of its own.
+ */
+export function shownProjects(state: ViewStore, projects: readonly Project[]): string {
   const panes = new Set(state.visiblePanes.length ? state.visiblePanes : paneOrder(state.layout))
-  const paths = allPanes(state.layout).flatMap((pane) =>
-    panes.has(pane.id) && pane.view.projectPath ? [pane.view.projectPath] : [],
-  )
+  const paths = allPanes(state.layout).flatMap((pane) => {
+    if (!panes.has(pane.id)) return []
+    const { view } = pane
+    const fallback =
+      view.kind === 'new' ? newSessionProject(view, state.projectPath, projects)?.path : undefined
+    return [view.projectPath, fallback].filter((path): path is string => !!path)
+  })
   return [...new Set(paths)].join('\n')
 }
 
@@ -991,6 +1020,17 @@ export function showSidePane(projectPath: string, pane: SidePane): void {
   toggleSidePane(panel, 'files', true)
 }
 
+/** Huli: the repository the panel's Git pane shows; null for the panel's own folder. */
+export function chooseGitRoot(panel: string, root: string | null): void {
+  useViewStore.setState((s) => {
+    if ((s.gitRoot[panel] ?? null) === root) return s
+    const gitRoot = { ...s.gitRoot }
+    if (root === null) delete gitRoot[panel]
+    else gitRoot[panel] = root
+    return { gitRoot }
+  })
+}
+
 /** Huli: the folder the panel's Files pane shows; null for the panel's own. */
 export function chooseFilesRoot(panel: string, root: string | null): void {
   useViewStore.setState((s) => {
@@ -1002,6 +1042,16 @@ export function chooseFilesRoot(panel: string, root: string | null): void {
   })
 }
 
+/** A canvas page the artifact pane brings into view once it has laid it out. */
+export interface ArtifactPageRequest {
+  artifactId: string
+  pageId: string
+  /** Tells a repeated request for the same page from one already handled. */
+  seq: number
+}
+
+let pageRequests = 0
+
 /** Shows the artifact beside a session's thread, or closes the pane when it already shows it. */
 export function toggleArtifactPane(panel: string, id: string, open?: boolean): void {
   useViewStore.setState((s) => {
@@ -1012,6 +1062,27 @@ export function toggleArtifactPane(panel: string, id: string, open?: boolean): v
       sideArtifact: shown ? s.sideArtifact : { ...s.sideArtifact, [panel]: id },
       sidePaneMaximized: false,
     }
+  })
+}
+
+/** Shows a canvas artifact beside a session's thread with one of its pages in view. */
+export function showArtifactPage(panel: string, id: string, pageId: string): void {
+  toggleArtifactPane(panel, id, true)
+  useViewStore.setState((s) => ({
+    sideArtifactPage: {
+      ...s.sideArtifactPage,
+      [panel]: { artifactId: id, pageId, seq: ++pageRequests },
+    },
+  }))
+}
+
+/** The pane showed the page it was asked for. */
+export function artifactPageShown(panel: string, seq: number): void {
+  useViewStore.setState((s) => {
+    if (s.sideArtifactPage[panel]?.seq !== seq) return s
+    const sideArtifactPage = { ...s.sideArtifactPage }
+    delete sideArtifactPage[panel]
+    return { sideArtifactPage }
   })
 }
 

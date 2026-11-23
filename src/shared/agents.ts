@@ -145,31 +145,6 @@ export const OWN_INTERFACE_HARNESSES: readonly HarnessId[] = [
 export const AUTO_AGENT_HARNESSES: readonly HarnessId[] = ['fake-agent']
 
 /**
- * The harnesses that run the user's own program, in the order a host's first start adds their
- * default agents for the ones it finds. The others are installed by Kettu, so none is found.
- */
-export const USER_PROGRAM_HARNESSES: readonly HarnessId[] = [
-  'claude-code',
-  'codex',
-  'opencode',
-  'pi',
-  'minimax',
-  'cursor',
-  'kimi',
-  'amp',
-  'goose',
-  'kilo',
-  'omp',
-  'hermes',
-  'muse',
-  'codewhale',
-  'antigravity',
-  'doubao',
-  'kiro',
-  'fx',
-]
-
-/**
  * An agent: the default one is its harness's own id, so sessions and settings from before agents
  * keep theirs; an added one is `<harness>~<slug>`.
  */
@@ -258,11 +233,6 @@ export function isStartMode(id: AgentId, value: unknown): value is string {
 /** The range in tokens Claude Code accepts for a model's auto-compact window. */
 export const AUTO_COMPACT_MIN = 100_000
 export const AUTO_COMPACT_MAX = 1_000_000
-
-/** The windows Settings offers beside Auto. */
-export const AUTO_COMPACT_STEPS: readonly number[] = [
-  100_000, 200_000, 300_000, 400_000, 500_000, 750_000, 1_000_000,
-]
 
 export const PROMPT_CACHE_TTLS = ['5m', '1h'] as const
 export type PromptCacheTtl = (typeof PROMPT_CACHE_TTLS)[number]

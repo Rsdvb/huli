@@ -1,13 +1,13 @@
 import { create } from 'zustand'
-import type { Project, SessionSummary } from '@shared/agent-host'
+import type { NoProject, Project, SessionSummary } from '@shared/agent-host'
 import type { TaskSummary } from '@shared/workflow'
-import type { SessionGroupRef } from '@shared/session-groups'
+import type { SessionGroupRef } from '@shared/run-groups'
 import { isParked } from '@shared/session-tidy'
 import { entryShown } from '@renderer/lib/features'
 import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { i18n } from '@renderer/lib/i18n'
-import { pinnedProjects } from './projects'
+import { noProjectPinned, pinnedFolders, type PinnedFolder } from './projects'
 import { listedTasks, needingTasks, pinnedTasks, startedSteps, taskExpanded } from './tasks'
 import {
   NO_PROJECT_GROUP,
@@ -49,12 +49,15 @@ const leaving = new Map<string, { at: number; parentId: string; reported: string
 /**
  * A summary as the list shows it: one archived here stays archived, and a sub-session it leaves
  * stays on its own, until the host answers. Huli: without `working`, which names the running tool
- * call for the phone's list; the window draws a turn's work from its thread, and the field changed
- * at every tool call, re-rendering every list of sessions in a burst of them.
+ * call for the phone's list, nor `activity` and `phase`, the menu bar panel's and the notch's; the
+ * window draws a turn's work from its thread, and the fields change at every tool call,
+ * re-rendering every list of sessions in a burst of them.
  */
 function listed(received: SessionSummary): SessionSummary {
   const summary = { ...received }
   delete summary.working
+  delete summary.activity
+  delete summary.phase
   const at = archiving.get(summary.id)
   const shown = at === undefined || summary.archivedAt ? summary : { ...summary, archivedAt: at }
   const left = leaving.get(summary.id)
@@ -465,17 +468,22 @@ function sameNode(a: SessionNode, b: SessionNode): boolean {
   )
 }
 
-/** A row of a sidebar group: a session with its sub-sessions, or a task with its steps. */
+/**
+ * A row of a sidebar group: a session with its sub-sessions, or a task with its steps and, when a
+ * suggestion card in it started the task, the conversation it started from, whose row it took.
+ */
 export type SidebarRow =
   | { kind: 'session'; id: string; node: SessionNode }
-  | { kind: 'task'; id: string; task: TaskSummary }
+  | { kind: 'task'; id: string; task: TaskSummary; origin?: SessionNode }
   // Huli: a best-of-N group's runs listed here, two or more, oldest first; `id` is the group's.
   | { kind: 'group'; id: string; group: SessionGroupRef; runs: SessionNode[] }
 
 /**
  * A group's sessions and tasks in one list, by `order` of each. Runs of one best-of-N group make
  * one row while two or more of them are listed; a run left alone is a session's row again. With
- * `fold` off (Huli: best-of-N turned off in Settings > Features), each run is a row of its own.
+ * `fold` off (Huli: best-of-N turned off in Settings > Features), each run is a row of its own. A
+ * task started from a session of the same list takes that session's row, the session hanging under
+ * it; one session goes under one task, the latest.
  */
 export function sidebarRows(
   nodes: readonly SessionNode[],
@@ -483,13 +491,24 @@ export function sidebarRows(
   order: (row: SidebarRow) => number,
   fold = entryShown('sidebar.runGroup'),
 ): SidebarRow[] {
+  const byId = new Map(nodes.map((node) => [node.summary.id, node]))
+  const origins = new Map<string, SessionNode>()
+  const taken = new Set<string>()
+  for (const task of [...tasks].sort((a, b) => b.createdAt - a.createdAt)) {
+    const id = task.from?.sessionId
+    const node = id ? byId.get(id) : undefined
+    if (!node || taken.has(node.summary.id)) continue
+    origins.set(task.id, node)
+    taken.add(node.summary.id)
+  }
+  const listed = nodes.filter((node) => !taken.has(node.summary.id))
   const runs = new Map<string, SessionNode[]>()
-  for (const node of nodes) {
+  for (const node of listed) {
     const group = fold ? node.summary.group : undefined
     if (group) runs.set(group.id, [...(runs.get(group.id) ?? []), node])
   }
   const rows: SidebarRow[] = []
-  for (const node of nodes) {
+  for (const node of listed) {
     const group = fold ? node.summary.group : undefined
     const together = group ? runs.get(group.id) : undefined
     if (!group || !together || together.length < 2) {
@@ -499,17 +518,22 @@ export function sidebarRows(
       rows.push({ kind: 'group', id: group.id, group, runs: sorted })
     }
   }
-  for (const task of tasks) rows.push({ kind: 'task', id: task.id, task })
+  for (const task of tasks) {
+    const origin = origins.get(task.id)
+    rows.push(
+      origin ? { kind: 'task', id: task.id, task, origin } : { kind: 'task', id: task.id, task },
+    )
+  }
   return rows.sort((a, b) => order(a) - order(b))
 }
 
-/** Latest activity first, as a project's group lists its rows. */
+/** Latest activity first, as a project's group lists its rows; a task counts its conversation's. */
 export const byActivity = (row: SidebarRow): number =>
   -(row.kind === 'session'
     ? row.node.summary.updatedAt
     : row.kind === 'group'
       ? Math.max(...row.runs.map((run) => run.summary.updatedAt))
-      : row.task.updatedAt)
+      : Math.max(row.task.updatedAt, row.origin?.summary.updatedAt ?? 0))
 
 /** In the order they were pinned, as Pinned lists its rows. */
 export const byPin = (row: SidebarRow): number =>
@@ -589,7 +613,7 @@ export function hostGroup(hostId: string | null): string {
 export type SidebarTabStop = { kind: 'session'; id: string } | { kind: 'group'; key: string }
 
 /**
- * The rows the sidebar lists, in its order: Pinned, then each project's, then No project's. A
+ * The rows the sidebar lists, in its order: Pinned, then No project's, then each project's. A
  * collapsed group, parent or task leaves out the rows it hides. A row is a session's id, a task's,
  * or a task's step: its session's id, or `taskId/stepId` for a person's step.
  */
@@ -598,6 +622,7 @@ export function visibleOrder(
   byId: Record<string, SessionSummary>,
   projects: readonly Project[],
   tasks: Record<string, TaskSummary> = {},
+  noProjects: Readonly<Record<string, NoProject>> = {},
 ): string[] {
   const expanded = (id: string) => view.expandedParents[id] ?? false
   const hosts = view.hosts ?? [null]
@@ -615,8 +640,11 @@ export function visibleOrder(
             ]
           : [
               row.id,
-              ...(open && taskExpanded(view, row.id, byId)
-                ? startedSteps(row.task).map((step) => step.id)
+              ...(open && taskExpanded(view, row.id, byId, row.origin?.summary.id)
+                ? [
+                    ...(row.origin ? [row.origin.summary.id] : []),
+                    ...startedSteps(row.task).map((step) => step.id),
+                  ]
                 : []),
             ],
     )
@@ -630,6 +658,12 @@ export function visibleOrder(
             byActivity,
           ),
         )
+  const noProjectRows = (hostId: string | null): string[] =>
+    view.collapsedProjects[noProjectGroup(hostId)]
+      ? []
+      : flattenTree(sessionTree(byId, null, hostId), expanded)
+  const folderRows = (folder: PinnedFolder): string[] =>
+    folder.project ? projectRows(folder.project) : noProjectRows(folder.hostId)
   const order = [
     ...(view.hosts
       ? flatten(
@@ -644,7 +678,7 @@ export function visibleOrder(
     ...(view.collapsedProjects[PINNED_GROUP]
       ? []
       : [
-          ...pinnedProjects(projects, hosts).flatMap(projectRows),
+          ...pinnedFolders(projects, noProjects, hosts).flatMap(folderRows),
           ...flatten(
             sidebarRows(
               pinnedTree(byId).filter(shown),
@@ -657,12 +691,10 @@ export function visibleOrder(
       view.collapsedProjects[hostGroup(hostId)]
         ? []
         : [
+            ...(noProjectPinned(noProjects, hostId) ? [] : noProjectRows(hostId)),
             ...projects
               .filter((p) => p.pinnedAt == null && hostOfPath(p.path) === hostId)
               .flatMap(projectRows),
-            ...(view.collapsedProjects[noProjectGroup(hostId)]
-              ? []
-              : flattenTree(sessionTree(byId, null, hostId), expanded)),
           ],
     ),
     // Huli: the snoozed and settled sessions, below every host's.
@@ -685,8 +717,9 @@ export function sidebarTabStop(
   byId: Record<string, SessionSummary>,
   projects: readonly Project[],
   tasks: Record<string, TaskSummary> = {},
+  noProjects: Readonly<Record<string, NoProject>> = {},
 ): SidebarTabStop | null {
-  const order = visibleOrder(view, byId, projects, tasks)
+  const order = visibleOrder(view, byId, projects, tasks, noProjects)
   const front =
     view.main.kind === 'session'
       ? view.main.sessionId
@@ -699,8 +732,11 @@ export function sidebarTabStop(
   const hosts = view.hosts ?? [null]
   const shown = (node: SessionNode) => hosts.includes(hostOfSession(node.summary))
   const shownTask = (task: TaskSummary) => hosts.includes(hostOfPath(task.projectPath))
+  // A pinned No project shows only while it has sessions; a pinned project shows without.
   if (
-    projects.some((p) => p.pinnedAt != null && hosts.includes(hostOfPath(p.path))) ||
+    pinnedFolders(projects, noProjects, hosts).some(
+      (folder) => folder.project || sessionTree(byId, null, folder.hostId).length > 0,
+    ) ||
     pinnedTree(byId).some(shown) ||
     pinnedTasks(tasks).some(shownTask)
   ) {
@@ -711,15 +747,15 @@ export function sidebarTabStop(
     if (view.hosts && view.collapsedProjects[hostGroup(hostId)]) {
       return { kind: 'group', key: hostGroup(hostId) }
     }
+    if (!noProjectPinned(noProjects, hostId) && sessionTree(byId, null, hostId).length > 0) {
+      return { kind: 'group', key: noProjectGroup(hostId) }
+    }
     const own = projects.filter((p) => p.pinnedAt == null && hostOfPath(p.path) === hostId)
     firstProject ??= own[0]
     const project = own.find(
       (p) => sessionTree(byId, p.path).length > 0 || listedTasks(tasks, p.path).length > 0,
     )
     if (project) return { kind: 'group', key: project.path }
-    if (sessionTree(byId, null, hostId).length > 0) {
-      return { kind: 'group', key: noProjectGroup(hostId) }
-    }
   }
   return firstProject ? { kind: 'group', key: firstProject.path } : null
 }
