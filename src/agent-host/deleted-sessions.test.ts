@@ -131,6 +131,9 @@ describe('deleting a session whose agent keeps it', () => {
     expect(back.acpSessionId).toBe(acp)
     expect((await sidebar()).sessions.find((s) => s.acpSessionId === acp)?.imported).toBe(true)
     await window.request('sessions.delete', { sessionId: back.id })
+    // Huli: what the agent keeps is noted once the recycle bin deletes it for good.
+    await window.request('bin.purge', { keys: [`session:${back.id}`] })
+    expect((await sidebar()).sessions.some((s) => s.acpSessionId === acp)).toBe(false)
     await host.stop()
     const kept = JSON.parse(
       await readFile(path.join(dir, 'state', 'deleted-sessions.json'), 'utf8'),
@@ -145,6 +148,7 @@ describe('deleting a session whose agent keeps it', () => {
     const window = host.connect()
     const [id] = await promptedSession(window, host.project)
     await window.request('sessions.delete', { sessionId: id })
+    await window.request('bin.purge', { keys: [`session:${id}`] })
     await host.stop()
     const kept = await readFile(path.join(dir, 'state', 'deleted-sessions.json'), 'utf8').catch(
       () => null,

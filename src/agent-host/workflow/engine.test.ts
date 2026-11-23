@@ -235,6 +235,8 @@ async function harness(
   const sent: { sessionId: string; text: string; due?: () => boolean }[] = []
   const cancelled: string[] = []
   const sessions = new Set<string>(options.live ?? [])
+  // Huli: the bin item each deleted session went in with.
+  const binnedWith = new Map<string, string | undefined>()
   const merges: { cwd: string; branch: string }[] = []
   const uncommitted = new Map<string, string[]>()
   const documents = new Set<string>()
@@ -287,8 +289,9 @@ async function harness(
       cancel: async (sessionId) => {
         cancelled.push(sessionId)
       },
-      delete: async (sessionId) => {
+      delete: async (sessionId, group) => {
         sessions.delete(sessionId)
+        binnedWith.set(sessionId, group)
       },
       has: (sessionId) => sessions.has(sessionId),
     },
@@ -378,6 +381,7 @@ async function harness(
     sent,
     cancelled,
     sessions,
+    binnedWith,
     merges,
     uncommitted,
     documents,
@@ -1124,7 +1128,40 @@ steps:
     await h.engine.cancel(task.id)
     expect(h.cancelled).toEqual([h.created.length > 0 ? 's1' : ''])
     await h.engine.delete(task.id)
-    expect(h.store.has(task.id)).toBe(false)
     expect(h.sessions.has('s1')).toBe(false)
+    // Huli: into the recycle bin with its step sessions, out of every list and lookup.
+    expect(h.binnedWith.get('s1')).toBe(`task:${task.id}`)
+    expect(h.store.get(task.id)?.deletedAt).toEqual(expect.any(Number))
+    expect(h.engine.list()).toEqual([])
+    expect(() => h.engine.get(task.id)).toThrow()
+    expect(h.engine.refOf('s1')).toBeNull()
+    expect(h.engine.binnedTasks().map((t) => t.id)).toEqual([task.id])
+  })
+
+  it('Huli: restores a binned task as it was, and purges it for good', async () => {
+    const h = await harness({ workflows: { parallel: PARALLEL } })
+    const task = await h.start('parallel')
+    await h.engine.cancel(task.id)
+    const before = h.engine.get(task.id)
+    await h.engine.delete(task.id)
+    expect(await h.engine.restore(task.id)).toBe(true)
+    expect(await h.engine.restore(task.id)).toBe(false)
+    expect(h.engine.get(task.id)).toEqual(before)
+    expect(h.store.get(task.id)?.deletedAt).toBeUndefined()
+    await h.engine.delete(task.id)
+    await h.engine.purge([task.id])
+    expect(h.store.has(task.id)).toBe(false)
+    expect(h.engine.binnedTasks()).toEqual([])
+  })
+
+  it('Huli: keeps a binned task out of the list after a restart', async () => {
+    const first = await harness({ workflows: { parallel: PARALLEL } })
+    const task = await first.start('parallel')
+    await first.engine.cancel(task.id)
+    await first.engine.delete(task.id)
+    const stored = [...first.store.values()]
+    const h = await harness({ workflows: { parallel: PARALLEL }, stored })
+    expect(h.engine.list()).toEqual([])
+    expect(h.engine.binnedTasks().map((t) => t.id)).toEqual([task.id])
   })
 })
