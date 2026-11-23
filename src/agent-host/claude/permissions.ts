@@ -323,6 +323,7 @@ export function pendingQuestions(questions: readonly AskedQuestion[]): PendingQu
     options: asked.options.map((option) => ({
       label: option.label,
       ...(option.description ? { description: option.description } : {}),
+      ...(option.preview ? { preview: option.preview } : {}),
     })),
     allowsText: true,
     secret: false,
@@ -341,6 +342,25 @@ export function questionAnswers(
     if (asked) given[asked.question] = answerWords(asked, answer).join(', ')
   }
   return given
+}
+
+/**
+ * Huli: what Claude Code takes as `annotations`, by question text: the preview of the one option
+ * picked, as its own dialog sends it, so the model knows which mockup the user chose. Null when no
+ * answer picked one option that has a preview.
+ */
+export function questionAnnotations(
+  questions: readonly AskedQuestion[],
+  answers: readonly QuestionAnswer[],
+): Record<string, { preview: string }> | null {
+  const given: Record<string, { preview: string }> = {}
+  for (const answer of answers) {
+    const asked = questions[answer.question]
+    if (!asked || answer.choices.length !== 1) continue
+    const preview = asked.options[answer.choices[0]!]?.preview
+    if (preview) given[asked.question] = { preview }
+  }
+  return Object.keys(given).length > 0 ? given : null
 }
 
 /** A question's answers as options: each choice, then one to answer in the user's own words. */

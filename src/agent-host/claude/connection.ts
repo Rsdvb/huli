@@ -93,6 +93,7 @@ import {
   BUILD_MODES,
   OTHER_ANSWER,
   pendingQuestions,
+  questionAnnotations,
   permissionOptions,
   permissionResult,
   planResult,
@@ -1164,6 +1165,9 @@ export class ClaudeConnection implements AgentConnection {
       perTaskStopAffordance: true,
       // Huli: a subagent's row says what it does now, in a line its own model writes.
       ...(!hidden && !bare ? { agentProgressSummaries: true } : {}),
+      // Huli: a question's options may show a mockup or code beside them, which the card renders
+      // as markdown; HTML would need a sandboxed frame no client has.
+      ...(!bare ? { toolConfig: { askUserQuestion: { previewFormat: 'markdown' as const } } } : {}),
       settingSources: sources,
       systemPrompt: {
         type: 'preset',
@@ -2386,20 +2390,27 @@ export class ClaudeConnection implements AgentConnection {
     if (answer === 'cancelled' || 'values' in answer)
       return permissionResult(null, input, permission)
     let answers: Record<string, string>
+    let annotations: Record<string, { preview: string }> | null = null
     if ('answers' in answer) {
       answers = questionAnswers(questions, answer.answers)
       if (Object.keys(answers).length === 0) {
         return { behavior: 'deny', message: QUESTIONS_SKIPPED, toolUseID }
       }
+      annotations = questionAnnotations(questions, answer.answers)
     } else {
       const chosen = questions[0]!.options[Number(answer.optionId.replace(/^answer:/, ''))]
       if (answer.optionId === OTHER_ANSWER || !chosen) {
         return { behavior: 'deny', message: ANSWER_IN_REPLY, toolUseID }
       }
       answers = { [questions[0]!.question]: chosen.label }
+      if (chosen.preview) annotations = { [questions[0]!.question]: { preview: chosen.preview } }
     }
     target.apply(session.mapper.toolStatus(target.context(), toolUseID, 'in_progress'))
-    return { behavior: 'allow', updatedInput: { ...input, answers }, toolUseID }
+    return {
+      behavior: 'allow',
+      updatedInput: { ...input, answers, ...(annotations ? { annotations } : {}) },
+      toolUseID,
+    }
   }
 
   // MCP servers' requests.

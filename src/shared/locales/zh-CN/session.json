@@ -1186,6 +1186,11 @@
     "skipped": "已跳过",
     "secret": "已隐藏",
     "secretHint": "输入时隐藏，也不留在对话里",
+    "preview": {
+      "label": "选项预览",
+      "title": "预览",
+      "none": "这个选项没有预览"
+    },
     "hint": {
       "one": "选一项",
       "oneOrOwn": "选一项，或写下你自己的回答",

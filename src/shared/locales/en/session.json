@@ -1235,6 +1235,11 @@
     "skipped": "Skipped",
     "secret": "Hidden",
     "secretHint": "Hidden as you type, and not kept in the conversation",
+    "preview": {
+      "label": "Preview of the option",
+      "title": "Preview",
+      "none": "This option has no preview"
+    },
     "hint": {
       "one": "Pick one",
       "oneOrOwn": "Pick one, or type your own",

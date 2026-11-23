@@ -187,6 +187,12 @@ export interface QueryOptions {
   promptSuggestions?: boolean
   /** Huli: a running subagent's `task_progress` carries a one-line summary of what it does. */
   agentProgressSummaries?: boolean
+  /**
+   * Huli: how built-in tools present to the host. `previewFormat` lets AskUserQuestion's options
+   * carry a `preview` the host renders, in markdown or an HTML fragment; without it the tool never
+   * asks for previews.
+   */
+  toolConfig?: { askUserQuestion?: { previewFormat?: 'markdown' | 'html' } }
   settingSources?: SettingSource[]
   systemPrompt?: { type: 'preset'; preset: 'claude_code'; append?: string }
   /** The built-in tools, by name; an empty list has none. */

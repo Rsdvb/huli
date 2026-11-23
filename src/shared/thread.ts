@@ -1290,7 +1290,9 @@ export interface PendingQuestion {
   header: string
   question: string
   multiSelect: boolean
-  options: { label: string; description?: string }[]
+  // Huli: `preview` is a mockup, code or diagram of the option in markdown, shown beside the
+  // options, as Claude Code's AskUserQuestion previews are.
+  options: { label: string; description?: string; preview?: string }[]
   // Whether the user may write an answer of their own
   allowsText: boolean
   // Whether the answer is a secret: typed as dots, never kept

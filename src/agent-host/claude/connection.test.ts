@@ -2421,6 +2421,46 @@ describe('permissions', () => {
     expect(target.entry('t:toolu_q')).toMatchObject({ status: 'in_progress' })
   })
 
+  it("shows the options' previews and tells Claude Code which preview was picked", async () => {
+    const layouts = {
+      ...which,
+      question: 'Which layout?',
+      header: 'Layout',
+      options: [
+        { label: 'Sidebar', description: '', preview: '```\n| nav | body |\n```' },
+        { label: 'Tabs', description: 'One row', preview: '```\n[a][b]\n```' },
+        { label: 'Plain', description: '', preview: 42 },
+      ],
+    }
+    expect(s.sdk.last.options.toolConfig).toEqual({
+      askUserQuestion: { previewFormat: 'markdown' },
+    })
+    let answer = askQuestions([layouts, second])
+    await settle()
+    expect(target.asked[0]!.request.questions?.[0]?.options).toEqual([
+      { label: 'Sidebar', preview: '```\n| nav | body |\n```' },
+      { label: 'Tabs', description: 'One row', preview: '```\n[a][b]\n```' },
+      { label: 'Plain' },
+    ])
+    target.asked[0]!.answer({
+      answers: [
+        { question: 0, choices: [1] },
+        { question: 1, choices: [0] },
+      ],
+    })
+    expect(await answer).toMatchObject({
+      behavior: 'allow',
+      updatedInput: {
+        answers: { 'Which layout?': 'Tabs', 'Add a test?': 'Fix it here' },
+        annotations: { 'Which layout?': { preview: '```\n[a][b]\n```' } },
+      },
+    })
+    answer = askQuestions([layouts])
+    await settle()
+    target.asked[1]!.answer({ answers: [{ question: 0, choices: [], text: 'Both' }] })
+    expect(await answer).not.toHaveProperty('updatedInput.annotations')
+  })
+
   it('joins the labels of a multi-select question and takes typed text as an answer', async () => {
     const answer = askQuestions([checks, which])
     await settle()

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type Ref } from 'react'
+import { useEffect, useMemo, useRef, useState, type Ref, type SyntheticEvent } from 'react'
 import { Cancel01Icon, CheckmarkCircle02Icon, LockIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
+import { hasPreviews, previewMarkdown, shownPreview } from '@shared/question-preview'
 import type { AnsweredQuestion, PendingQuestion, PermissionOption, ToolEntry } from '@shared/thread'
 import { emitAppEvent } from '@renderer/app/events'
 import { Icon } from '@renderer/components/affect/app-shell'
@@ -13,6 +14,7 @@ import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { cn } from '@renderer/lib/utils'
 import { useSessionsStore } from '@renderer/stores/sessions'
+import { Markdown } from '../markdown'
 import { codeSpans, respondToPermission, respondToQuestions } from './helpers'
 import {
   choose,
@@ -150,10 +152,35 @@ export function QuestionCard({
   const cleared = withDraft(state, { choices: [], text: '' })
   const last = state.step === count - 1
   const given = state.drafts.filter(isAnswered).length
+  // Huli: the option the pointer or the focus is on, whose preview shows beside the options.
+  const [pointed, setPointed] = useState<{ step: number; option: number } | null>(null)
+  const previewed = hasPreviews(question)
+  const preview = previewed
+    ? shownPreview(
+        question,
+        pointed?.step === state.step ? pointed.option : null,
+        own ? [] : draft.choices,
+      )
+    : null
+  const point = (event: SyntheticEvent, mouse: boolean) => {
+    if (!previewed || !mouse) return
+    const option = optionRow(event.target)
+    if (option !== null) setPointed({ step: state.step, option })
+  }
 
   return (
-    <div ref={ref} data-entry-id={entry.id} className={cn('min-w-0', className)}>
-      <div ref={root} className="min-w-0">
+    <div
+      ref={ref}
+      data-entry-id={entry.id}
+      className={cn('min-w-0', previewed && 'ks-question-frame', className)}
+    >
+      <div
+        ref={root}
+        className={cn('min-w-0', previewed && 'ks-question-split')}
+        onPointerOver={(event) => point(event, event.pointerType === 'mouse')}
+        onFocus={(event) => point(event, true)}
+        onPointerLeave={() => setPointed(null)}
+      >
         <ExperimentCard
           {...shared}
           {...switching}
@@ -241,9 +268,46 @@ export function QuestionCard({
             onClick: () => (last ? void submit(state) : step((s) => goTo(s, s.step + 1))),
           }}
         />
+        {previewed && (
+          <OptionPreview
+            label={preview === null ? null : question.options[preview]!.label}
+            preview={preview === null ? null : question.options[preview]!.preview!}
+          />
+        )}
       </div>
       <CardError error={error} />
     </div>
+  )
+}
+
+/** Huli: which of a card's option rows an event's target lies in, by its place; null for none. */
+function optionRow(target: EventTarget | null): number | null {
+  const row =
+    target instanceof Element ? target.closest('.ui-xcc__rows > button.ui-xcc__row') : null
+  if (!row?.parentElement) return null
+  const at = [...row.parentElement.querySelectorAll(':scope > button.ui-xcc__row')].indexOf(row)
+  return at >= 0 ? at : null
+}
+
+/**
+ * Huli: an option's preview beside the options, or under them in a narrow column: its mockup,
+ * code or diagram as markdown, which the agent wrote to tell the options apart.
+ */
+function OptionPreview({ label, preview }: { label: string | null; preview: string | null }) {
+  const { t } = useTranslation('session')
+  const markdown = useMemo(() => (preview === null ? null : previewMarkdown(preview)), [preview])
+  return (
+    <section className="ks-option-preview" aria-label={t('question.preview.label')}>
+      <header className="ks-option-preview__head">
+        <span>{t('question.preview.title')}</span>
+        {label && <span className="ks-option-preview__name">{label}</span>}
+      </header>
+      {markdown === null ? (
+        <p className="ks-option-preview__none">{t('question.preview.none')}</p>
+      ) : (
+        <Markdown markdown={markdown} className="ks-option-preview__body" />
+      )}
+    </section>
   )
 }
 
