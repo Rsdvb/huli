@@ -1814,9 +1814,20 @@ export class SessionManager {
     return undefined
   }
 
-  /** Huli: the agent's sessions deleted here whose copy it keeps, which stay out of imports. */
+  /**
+   * Huli: the agent's sessions deleted here whose copy it keeps, which stay out of imports, and
+   * those in the recycle bin, which an import by its id brings back from there.
+   */
   deletedIds(agentId: AgentId): Set<string> {
-    return this.deps.deleted?.idsOf(this.sharingHistory(agentId)) ?? new Set()
+    const agents = this.sharingHistory(agentId)
+    const ids = this.deps.deleted?.idsOf(agents) ?? new Set<string>()
+    const sharing = new Set(agents)
+    for (const record of this.binned.values()) {
+      if (sharing.has(record.agentId) && record.acpSessionId) ids.add(record.acpSessionId)
+      for (const item of record.earlier ?? [])
+        if (sharing.has(item.agentId)) ids.add(item.acpSessionId)
+    }
+    return ids
   }
 
   private recordOf(sessionId: string): SessionRecord {
