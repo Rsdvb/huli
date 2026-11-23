@@ -1384,7 +1384,15 @@ Three small things Claude Code, Cursor and Moshi have, on the desktop and the ph
   of what happened meanwhile (`ThreadView.reads`). Closing the bar, its jump and a message sent
   are done with it. Each device keeps its marks (300 at most): the desktop in localStorage
   (`session-seen`, `features/session/recap/`); the phone in `<documents>/huli/seen/<computer>.json`
-  (`mobile/src/seen.ts`, through `seenBook`). Neither covers the conversation: the desktop's bar
+  (`mobile/src/seen.ts`, through `seenBook`). A host that keeps marks too has one per session,
+  the latest any device reported (`SessionRecord.seen`, `SessionSummary.seen`, null before any,
+  absent from older hosts): each device sends it every mark it writes, when later than the host's,
+  through `sessions.setSeen` (a time, clamped to the host's clock, and the entry or null), at most
+  one per session every 5 s (`seenReporter`, whose timer runs only while a mark waits, sent at
+  once as the window closes or the app goes to the background); the mark arrives with the
+  session's summary, and coming into view a device starts from the later of its own and the
+  host's (`laterMark`), so the phone does not recap what the desktop showed. An older host keeps
+  each device on its own marks. Neither covers the conversation: the desktop's bar
   sits above the message scroller, which gives it its room; the phone's is a solid surface under
   the header, the chips, a banner and the plan's pill (`RecapBar`, drawn by the session screen
   from the conversation's `recapSlot`), and the conversation adds its height to its top room while
@@ -2403,10 +2411,23 @@ untrusted wrapping, and the feature gate (`web-reader.test.ts`, `service.test.ts
 
 Kite's MCP server has `notify` (`src/agent-host/notify-tool.ts`): a title and a short body, which
 the host raises as the session's attention of kind `note` (`sessions.noteToUser`). It so goes
-where a finished turn's notice goes: main's desktop notification (under Settings › 通知 › 回复完成,
-`ATTENTION_SETTING.note`), the phones' push (`choices.turnEnded`, each phone's muted sessions, the
-notification extension's `note` with the reply action of a finished turn), the chat bridges and
-the island. The desktop has no mute of a session's own; the phone's list is the session's mute.
+where a finished turn's notice goes: main's desktop notification (under Settings › 通知 › Agent
+主动通知, `notifications.agentNotes`, on by default and shown while the feature is), the phones'
+push (`choices.turnEnded`, the notification extension's `note` with the reply action of a
+finished turn), the chat bridges and the island, unless the session is muted (below).
+
+The session's mute (静音通知, in the desktop's row and More menus and the phone's): the host keeps
+it with the session (`SessionRecord.muted`, `SessionSummary.muted`, absent from older hosts,
+set by `sessions.setMuted`) and drops a muted session's `turn-ended` and `note` attention at
+the source (`SessionManager.attention`), so no window, island, web client, phone push or chat
+bridge hears of them; approvals and questions (`permission`), errors and stalls still notify, as
+the menu's line under the item says. A muted row in the sidebar shows a small bell. The phone
+mutes on the computer when it keeps mutes, else on its own list as before
+(`mobile/src/push/muted.ts`, quiet in the notification extension, every kind); a session of that
+list on a computer that keeps mutes moves to the computer after a sync (`liftMuted`) and leaves
+the list. A muted session never takes the Lock Screen's activity on the phone, as before. Tests:
+the stored fields (`storage.test.ts`, `sessions.test.ts`), the requests (`validate.test.ts`) and
+the later mark (`recap.test.ts`).
 The text is cut to one plain line (80 and 300 characters, control and reordering marks out) and is
 never drawn as Markdown. A session may send 3 a minute and 30 an hour (`WindowLimiter`, which runs
 nothing between calls); a refused call says how long to wait. Kite's instructions say to use it
