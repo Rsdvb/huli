@@ -4696,7 +4696,8 @@ describe("Huli: a session's MCP panel", () => {
   }
 
   it('lists the servers with their states, sources and tools, never their settings', async () => {
-    const { sdk, connection } = await setup()
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
     const { sessionId } = await connection.newSession('/repo', { mcpServers: [kettu] })
     sdk.mcpStatus = [
       {
@@ -4757,20 +4758,23 @@ describe("Huli: a session's MCP panel", () => {
   })
 
   it('counts a server the user named as Kite names its own as the user’s', async () => {
-    const { sdk, connection } = await setup()
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
     const { sessionId } = await connection.newSession('/repo', {})
     sdk.mcpStatus = [{ name: 'kettu', status: 'connected', source: 'user', tools: [] }]
     expect((await connection.readMcp(sessionId, ['kettu']))?.servers[0]?.source).toBe('user')
   })
 
   it('reads nothing for a session it runs no query for', async () => {
-    const { connection } = await setup()
+    const { connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
     expect(await connection.readMcp('nobody', [])).toBeNull()
     await expect(connection.reconnectMcp('nobody', 'github')).rejects.toThrow()
   })
 
   it('reconnects one server at a time', async () => {
-    const { sdk, connection } = await setup()
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
     const { sessionId } = await connection.newSession('/repo', {})
     await connection.reconnectMcp(sessionId, 'github')
     expect(sdk.last.calls.filter((call) => call.method === 'reconnectMcpServer')).toEqual([
@@ -4780,7 +4784,8 @@ describe("Huli: a session's MCP panel", () => {
   })
 
   it("turns Kite's own server off for the session alone, and the user's through Claude Code", async () => {
-    const { sdk, connection } = await setup()
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
     const { sessionId } = await connection.newSession('/repo', {
       mcpServers: [kettu, playwright],
     })
@@ -4808,7 +4813,8 @@ describe("Huli: a session's MCP panel", () => {
   })
 
   it("starts the session's next query without Kite's server it turned off", async () => {
-    const { sdk, connection } = await setup()
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
     const { sessionId } = await connection.newSession('/repo', { mcpServers: [kettu, playwright] })
     await connection.toggleMcp(sessionId, 'kettu', false, ['kettu', 'playwright'])
     await connection.closeSession(sessionId)
@@ -4817,7 +4823,8 @@ describe("Huli: a session's MCP panel", () => {
   })
 
   it('reloads plugins and skills between turns, and leaves a running turn alone', async () => {
-    const { sdk, connection } = await setup()
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
     const target = new Target()
     const { sessionId } = await connection.newSession('/repo', {})
     connection.register(sessionId, target)
