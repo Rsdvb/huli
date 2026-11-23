@@ -7,8 +7,8 @@ export function sidePointer(inside: HTMLElement | null): (() => void) | undefine
   const list = inside?.closest('.ui-as-side__nav')
   const side = list?.closest('.ui-as-side')
   if (!list || !side) return
-  const enter = (): void => list.toggleAttribute('data-pointer', true)
-  const leave = (): void => list.toggleAttribute('data-pointer', false)
+  const enter = (): void => list.setAttribute('data-pointer', '')
+  const leave = (): void => list.removeAttribute('data-pointer')
   side.addEventListener('pointerenter', enter)
   side.addEventListener('pointerleave', leave)
   if (side.matches(':hover')) enter()
