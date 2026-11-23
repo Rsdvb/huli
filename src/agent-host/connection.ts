@@ -687,6 +687,16 @@ export interface AgentConnection {
     signal: AbortSignal,
   ): Promise<SideAnswer>
   /**
+   * Huli: reviews the uncommitted changes in the session's folder in the agent's own review mode,
+   * in a fork of the session beside it that leaves no trace, and answers the review as the agent
+   * renders it. Absent where the agent has no review mode.
+   */
+  reviewChanges?(
+    sessionId: string,
+    options: SessionOptions | undefined,
+    signal: AbortSignal,
+  ): Promise<string>
+  /**
    * Adds earlier messages to the history the session's model sees, ahead of its next turn. False
    * where this agent's version takes none, and the host sends them with the prompt instead.
    */

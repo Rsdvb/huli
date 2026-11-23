@@ -38,6 +38,7 @@ import { boardOf, KITE_TASKS } from './processes.ts'
 import { SCENARIO_RUNNERS, compact, syntheticAttachments, syntheticHistory } from './scenarios.ts'
 import { isReportDraftPrompt, reportDraft } from './report-draft.ts'
 import { isTitlesPrompt, titles } from './titles.ts'
+import { isReviewPrompt, review } from './review.ts'
 import type { FakeSessionState, Turn } from './turn.ts'
 
 // Kite's own ACP extension for background tasks, declared in the capabilities' `_meta`.
@@ -1099,9 +1100,11 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
           ? titles
           : isReportDraftPrompt(text)
             ? reportDraft
-            : choice.scenario === 'compact'
-              ? compact
-              : SCENARIO_RUNNERS[choice.scenario]
+            : isReviewPrompt(text)
+              ? review
+              : choice.scenario === 'compact'
+                ? compact
+                : SCENARIO_RUNNERS[choice.scenario]
         let stopReason: StopReason = 'end_turn'
         try {
           stopReason = await run(turn)

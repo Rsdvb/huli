@@ -661,7 +661,9 @@
       "pullRequestList": "gh 的输出不符合预期：不是 PR 列表",
       "revList": "rev-list 的计数输出不符合预期：{{output}}",
       "show": "git show 对 {{oid}} 的输出不符合预期"
-    }
+    },
+    "suggestBranchNothing": "没有未提交的改动，没法据此起分支名",
+    "suggestBranchFailed": "{{agent}} 没能起分支名：{{reason}}"
   },
   "files": {
     "projectMissing": "项目文件夹不存在",
@@ -1169,7 +1171,8 @@
       "entered": "开始审查",
       "exited": "审查结束",
       "appealUnsupported": "这个版本的 Codex 还不能放行被自动审查拒绝的操作，请升级 Codex。",
-      "appealGone": "Codex 对这次拒绝的记录读不出来了，请让它重新尝试。"
+      "appealGone": "Codex 对这次拒绝的记录读不出来了，请让它重新尝试。",
+      "noReview": "Codex 结束了审查，但没有给出结果"
     },
     "agent": {
       "model": "使用 {{model}}",
@@ -2368,5 +2371,34 @@
     "extractFailed": "Moli 的压缩包解压失败：{{reason}}",
     "doesNotRun": "Moli 已解压，但在这台电脑上运行不起来。",
     "inUse": "有 Agent 正在用 Moli 读网页，等它读完再试。"
+  },
+  "review": {
+    "subagent": "子 Agent 的改动请在它所属的会话里审查",
+    "running": "这个会话的审查还在进行",
+    "unsupported": "这个 Agent 没有自己的审查模式",
+    "notSent": "审查请求还没发出就被移出了队列",
+    "turnFailed": "审查改动的这一轮失败了",
+    "noBlock": "回复里没有按纸鸢要求的格式给出审查结果",
+    "gone": "这次审查已经不是会话最新的了",
+    "findingGone": "审查里已经没有这些问题了",
+    "titleNothing": "这个会话还没有对话内容",
+    "titleFailed": "{{agent}} 没能写出标题：{{reason}}",
+    "notice": {
+      "failed": "改动的审查没能完成",
+      "clean": "审查完成：没有发现问题",
+      "found_other": "审查完成：发现 {{count}} 个问题"
+    },
+    "severity": {
+      "critical": "严重",
+      "high": "高",
+      "medium": "中",
+      "low": "低"
+    },
+    "fix": {
+      "one": "请修复审查改动时发现的这个问题：",
+      "many": "请修复审查改动时发现的这 {{count}} 个问题：",
+      "item": "{{n}}. [{{severity}}] {{place}} — {{title}}",
+      "after": "只改需要改的地方，改完简单说说改了什么。"
+    }
   }
 }

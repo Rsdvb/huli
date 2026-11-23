@@ -1047,6 +1047,9 @@ export class ThreadMapper {
               : t('codex.review.exited'),
           ...(item.type === 'enteredReviewMode' && what ? { description: what } : {}),
         })
+        // The review as Codex renders it, which the host reads the findings from.
+        if (item.type === 'exitedReviewMode')
+          out.effects.push({ kind: 'review', text: item.review })
         break
       }
       default:

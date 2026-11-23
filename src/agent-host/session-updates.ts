@@ -89,6 +89,8 @@ export type MapperEffect =
   // Extra usage starts or stops letting requests through while the plan's used-up windows refuse them.
   | { kind: 'extra-usage'; inUse: boolean }
   | { kind: 'title'; title: string | null }
+  // Huli: a review the agent's own review mode ended, as it renders it; the host reads its findings.
+  | { kind: 'review'; text: string }
   | { kind: 'ignored'; variant: string; detail: string }
   | {
       kind: 'tool'

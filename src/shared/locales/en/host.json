@@ -669,7 +669,9 @@
       "pullRequestList": "Unexpected gh output: not a pull request list",
       "revList": "Unexpected rev-list count output: {{output}}",
       "show": "Unexpected git show output for {{oid}}"
-    }
+    },
+    "suggestBranchNothing": "There are no uncommitted changes to name a branch for",
+    "suggestBranchFailed": "{{agent}} could not name a branch: {{reason}}"
   },
   "files": {
     "projectMissing": "The project folder does not exist",
@@ -1186,7 +1188,8 @@
       "entered": "Review started",
       "exited": "Review finished",
       "appealUnsupported": "This version of Codex can't allow an action its automatic review denied. Update Codex.",
-      "appealGone": "Codex's record of this denial can't be read anymore. Ask it to try again."
+      "appealGone": "Codex's record of this denial can't be read anymore. Ask it to try again.",
+      "noReview": "Codex ended the review without its findings"
     },
     "agent": {
       "model": "Runs on {{model}}",
@@ -2389,5 +2392,35 @@
     "extractFailed": "The Moli archive could not be extracted: {{reason}}",
     "doesNotRun": "Moli was extracted, but it does not run on this computer.",
     "inUse": "An agent is reading a page with Moli. Try again once it is done."
+  },
+  "review": {
+    "subagent": "A subagent's changes are reviewed from the session it works for",
+    "running": "A review of this session is still running",
+    "unsupported": "This agent has no review mode of its own",
+    "notSent": "The review request left the queue before it was sent",
+    "turnFailed": "The turn that reviewed the changes failed",
+    "noBlock": "The reply held no findings in the form Kite asked for",
+    "gone": "This review is no longer the session's latest",
+    "findingGone": "The review no longer has these findings",
+    "titleNothing": "Nothing has been said in this session yet",
+    "titleFailed": "{{agent}} could not write a title: {{reason}}",
+    "notice": {
+      "failed": "The review of the changes did not finish",
+      "clean": "Review finished: no problems found",
+      "found_one": "Review finished: {{count}} finding",
+      "found_other": "Review finished: {{count}} findings"
+    },
+    "severity": {
+      "critical": "Critical",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "fix": {
+      "one": "Please fix this problem the review of the changes found:",
+      "many": "Please fix these {{count}} problems the review of the changes found:",
+      "item": "{{n}}. [{{severity}}] {{place}} — {{title}}",
+      "after": "Change only what they need, then say briefly what you changed."
+    }
   }
 }

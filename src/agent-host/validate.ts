@@ -147,6 +147,7 @@ import { isAbsolutePath } from './paths'
 import { networkValidators } from './node-proxy/validate'
 import { nodeRuntimeValidators } from './node-runtime/validate'
 import { MAX_SECRET_FIELDS, MAX_SECRET_VALUE, SECRET_NAME } from '@shared/secret-request'
+import { MAX_FINDINGS, REVIEW_ACTIONS, REVIEW_ID_CHARS, type ReviewAction } from '@shared/review'
 import { folderValidators } from './session-folders'
 import { moveValidators } from './session-move/validate'
 import { MAX_WORKTREE_COPY_PATHS } from './storage'
@@ -162,6 +163,8 @@ const TEXT_CHARS = 4_096
 const TERMINAL_NAME_CHARS = 256
 // A side question and the passage it quotes, which a hidden session gets with carried context.
 const SIDE_QUESTION_CHARS = 32_000
+/** Huli: the text a branch name is suggested for, as long as a title's prompt keeps. */
+const SUGGEST_TEXT_CHARS = 8_000
 const SIDE_QUOTE_CHARS = 16_000
 const URL_CHARS = 2_048
 const PROMPT_ITEMS = 1_000
@@ -2397,6 +2400,32 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'sessions.sideStop': session,
+    'sessions.review': session,
+    'sessions.reviewStart': session,
+    'sessions.reviewStop': session,
+    'sessions.reviewAct': (params) => {
+      const o = fields(params)
+      if (!REVIEW_ACTIONS.includes(o.action as ReviewAction)) {
+        throw invalidParams('action must be dismiss, restore or fix')
+      }
+      const ids = o.findingIds
+      if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_FINDINGS) {
+        throw invalidParams(`findingIds must be a list of 1 to ${MAX_FINDINGS} ids`)
+      }
+      const findingIds = ids.map((id, i) => {
+        if (typeof id !== 'string' || id === '' || id.length > REVIEW_ID_CHARS) {
+          throw invalidParams(`findingIds[${i}] must be an id`)
+        }
+        return id
+      })
+      return {
+        sessionId: sessionId(o),
+        reviewId: string(o, 'reviewId', REVIEW_ID_CHARS),
+        findingIds: [...new Set(findingIds)],
+        action: o.action as ReviewAction,
+      }
+    },
+    'sessions.suggestTitle': session,
     'sessions.sideClear': (params) => {
       const o = fields(params)
       if (o.undo !== undefined && typeof o.undo !== 'boolean') {
@@ -2840,7 +2869,25 @@ export function createValidators(platform: Platform): Validators {
     },
     'git.pullRequestDraft': (params) => {
       const o = fields(params)
-      return { projectPath: absolutePath(o, 'projectPath', platform), base: refName(o, 'base') }
+      if (o.part !== undefined && o.part !== 'title' && o.part !== 'body') {
+        throw invalidParams('part must be title or body')
+      }
+      return {
+        projectPath: absolutePath(o, 'projectPath', platform),
+        base: refName(o, 'base'),
+        ...(o.sessionId === undefined ? {} : { sessionId: sessionId(o) }),
+        ...(o.part === undefined ? {} : { part: o.part }),
+      }
+    },
+    'git.suggestBranch': (params) => {
+      const o = fields(params)
+      const text = optionalString(o, 'text', SUGGEST_TEXT_CHARS)
+      if (text !== undefined && text.trim() === '') throw invalidParams('text must not be blank')
+      return {
+        projectPath: absolutePath(o, 'projectPath', platform),
+        ...(text === undefined ? {} : { text }),
+        ...(o.agentId === undefined ? {} : { agentId: agentId(o) }),
+      }
     },
     'git.incoming': (params) => {
       const o = fields(params)

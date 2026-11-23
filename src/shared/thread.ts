@@ -39,6 +39,7 @@ import type { RoutineRef } from './routines'
 import type { SecretField, SecretTarget } from './secret-request'
 import type { SettingScalar, SettingsSection } from './settings-catalog'
 import type { AgentThemeInstalled } from './theme-palette'
+import type { ReviewRun } from './review'
 import type { LimitPause, Stall } from './supervisor'
 import type { TaskDeliverable, Workflow } from './workflow'
 
@@ -135,6 +136,8 @@ export interface SessionView {
   rewound?: RewoundView | null
   /** The agent said this conversation cannot be cut, as a Codex thread of the older format. */
   noRewind?: boolean
+  /** Huli: the latest review of the session's changes and its findings; absent from older hosts. */
+  review?: ReviewRun | null
 }
 
 export interface RewoundView {
