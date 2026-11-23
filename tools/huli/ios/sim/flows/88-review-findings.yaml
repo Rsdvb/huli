@@ -25,6 +25,10 @@ appId: io.github.rsdvb.huli
       - tapOn:
           text: '(想让|给) .*'
       - inputText: '/basic-turn'
+      # The keyboard goes first, as in 80-diff-notes; with it up, 发送 sent nothing.
+      - tapOn:
+          text: '选一个项目，或者直接说你要什么。'
+          optional: true
       - tapOn: '发送'
       - extendedWaitUntil:
           visible:
