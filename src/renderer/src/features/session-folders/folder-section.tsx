@@ -145,7 +145,7 @@ function FolderList({
           <span
             className={cn(
               '-my-1 flex shrink-0 gap-0.5 opacity-0 transition-opacity duration-(--duration-fast)',
-              'group-hover/folders:opacity-100 group-focus-within/folders:opacity-100',
+              'hover-folders:opacity-100 focus-within-folders:opacity-100',
               optionsOpen && 'opacity-100',
             )}
           >

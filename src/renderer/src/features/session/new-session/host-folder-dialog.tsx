@@ -424,14 +424,14 @@ function FolderRow({
       </span>
       <span className="min-w-0 flex-1 truncate">{entry.name}</span>
       {entry.repo && (
-        <span className="shrink-0 text-small text-tertiary opacity-0 group-hover/row:opacity-100 group-data-highlighted/row:opacity-100">
+        <span className="shrink-0 text-small text-tertiary opacity-0 hover-row:opacity-100 group-data-highlighted/row:opacity-100">
           {t('newSession.hostFolders.repo')}
         </span>
       )}
       <Glyph
         icon={ArrowRight01Icon}
         size={13}
-        className="shrink-0 text-tertiary opacity-0 group-hover/row:opacity-100 group-data-highlighted/row:opacity-100"
+        className="shrink-0 text-tertiary opacity-0 hover-row:opacity-100 group-data-highlighted/row:opacity-100"
       />
     </div>
   )

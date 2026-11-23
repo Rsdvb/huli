@@ -1,6 +1,7 @@
 // @ts-check
 // Local ESLint plugin: keeps color literals out of the renderer's strings and templates, and
-// (Huli) the upstream product's name out of the phone app's text.
+// (Huli) Tailwind variants that restyle whole subtrees out of its classes and the upstream
+// product's name out of the phone app's text.
 import { colorLiteralMessage, findColorLiterals } from './color-literals.mjs'
 
 /** @type {import('eslint').Rule.RuleModule} */
@@ -88,9 +89,48 @@ const noUpstreamName = {
   },
 }
 
+/**
+ * Huli: Tailwind's group and peer state variants compile to .x:is(:where(.group):hover *), and
+ * with any rule of that shape in the page Chromium restyles the whole subtree of every element
+ * whose hover, focus or contents change. The plain variants in globals.css say the same; the
+ * unnamed group-hover is redefined there and so stays allowed.
+ * @type {import('eslint').Rule.RuleModule}
+ */
+const noGroupStateVariant = {
+  meta: {
+    type: 'problem',
+    docs: { description: 'Disallow group and peer state variants that restyle whole subtrees' },
+    schema: [],
+    messages: {
+      variant:
+        '{{ variant }} restyles a whole subtree on every change: use the plain variants in styles/globals.css (hover-<group>:, focus-within-<group>:, focus-visible-<group>:) or an arbitrary [[data-slot=x]:has(...)_&]: variant.',
+    },
+  },
+  create(context) {
+    const VARIANT =
+      /(?<![\w-])(?:group-hover\/[\w-]+|(?:group|peer)-(?:focus|focus-within|focus-visible|active)(?:\/[\w-]+)?|peer-hover(?:\/[\w-]+)?|(?:group|peer)-has-[^\s:'"`]*)(?=:)/
+
+    /** @param {import('eslint').Rule.Node} node @param {string} text */
+    function check(node, text) {
+      const match = VARIANT.exec(text)
+      if (match) context.report({ node, messageId: 'variant', data: { variant: match[0] } })
+    }
+
+    return {
+      Literal(node) {
+        if (typeof node.value === 'string') check(node, node.value)
+      },
+      TemplateElement(node) {
+        check(node, node.value.raw)
+      },
+    }
+  },
+}
+
 export const rules = {
   'no-color-literals': noColorLiterals,
   'no-upstream-name': noUpstreamName,
+  'no-group-state-variant': noGroupStateVariant,
 }
 
 export default { meta: { name: 'kettu' }, rules }

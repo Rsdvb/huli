@@ -89,6 +89,7 @@ import { RenameScope } from './rename-scope'
 import { limitRows, rowInSight, ROWS_SHOWN } from './row-limit'
 import { RowEnd } from './session-indicator'
 import { SessionRow } from './session-row'
+import { sidePointer } from './side-pointer'
 import { SortableGroup, SortableList } from './sortable-list'
 import { TaskRow } from './task-row'
 import { RunGroupRow } from './run-group-row'
@@ -146,7 +147,7 @@ export function SidebarList() {
   const importSessions = (project: Project) => setImporting({ project, open: true })
 
   return (
-    <div className="kettu-side-list" role="presentation" onKeyDown={moveRowFocus}>
+    <div ref={sidePointer} className="kettu-side-list" role="presentation" onKeyDown={moveRowFocus}>
       <HostSwitchBar />
       <div
         role="group"

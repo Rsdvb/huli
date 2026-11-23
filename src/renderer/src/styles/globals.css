@@ -63,6 +63,98 @@
   }
 }
 
+/* Huli: a group's hover or focus as a plain descendant selector, :where(.group\/x):hover .util.
+   Tailwind's group-hover/x compiles to .util:is(:where(.group\/x):hover *), and with any rule of
+   that shape in the page Chromium restyles the whole subtree of every element whose hover or
+   focus changes: the pointer entering the sidebar of 300 rows took 85 ms. These say the same at
+   the same specificity; lint (kettu/no-group-state-variant) keeps the named Tailwind ones out.
+   The unnamed group-hover, which Streamdown's classes use too, is redefined the same way. */
+@custom-variant group-hover {
+  @media (hover: hover) {
+    :where(.group):hover & {
+      @slot;
+    }
+  }
+}
+@custom-variant hover-card {
+  @media (hover: hover) {
+    :where(.group\/card):hover & {
+      @slot;
+    }
+  }
+}
+@custom-variant hover-file {
+  @media (hover: hover) {
+    :where(.group\/file):hover & {
+      @slot;
+    }
+  }
+}
+@custom-variant hover-folders {
+  @media (hover: hover) {
+    :where(.group\/folders):hover & {
+      @slot;
+    }
+  }
+}
+@custom-variant hover-hidden {
+  @media (hover: hover) {
+    :where(.group\/hidden):hover & {
+      @slot;
+    }
+  }
+}
+@custom-variant hover-kstar {
+  @media (hover: hover) {
+    :where(.group\/kstar):hover & {
+      @slot;
+    }
+  }
+}
+@custom-variant hover-media {
+  @media (hover: hover) {
+    :where(.group\/media):hover & {
+      @slot;
+    }
+  }
+}
+@custom-variant hover-notice {
+  @media (hover: hover) {
+    :where(.group\/notice):hover & {
+      @slot;
+    }
+  }
+}
+@custom-variant hover-row {
+  @media (hover: hover) {
+    :where(.group\/row):hover & {
+      @slot;
+    }
+  }
+}
+@custom-variant hover-takeover {
+  @media (hover: hover) {
+    :where(.group\/takeover):hover & {
+      @slot;
+    }
+  }
+}
+@custom-variant hover-tile {
+  @media (hover: hover) {
+    :where(.group\/tile):hover & {
+      @slot;
+    }
+  }
+}
+@custom-variant focus-within-card (:where(.group\/card):focus-within &);
+@custom-variant focus-within-file (:where(.group\/file):focus-within &);
+@custom-variant focus-within-folders (:where(.group\/folders):focus-within &);
+@custom-variant focus-within-kstar (:where(.group\/kstar):focus-within &);
+@custom-variant focus-within-media (:where(.group\/media):focus-within &);
+@custom-variant focus-within-notice (:where(.group\/notice):focus-within &);
+@custom-variant focus-visible-hidden (:where(.group\/hidden):focus-visible &);
+@custom-variant focus-visible-tile (:where(.group\/tile):focus-visible &);
+
 @theme inline {
   /* The faces the theme gives each kind of text, below. Page titles, a reply's first heading and
      dialog titles take the display face; other headings the prose face. */

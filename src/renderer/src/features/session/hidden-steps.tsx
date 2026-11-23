@@ -15,7 +15,7 @@ export function HiddenSteps({ count, onShow }: { count: number; onShow: () => vo
     >
       <Glyph icon={ViewOffSlashIcon} size={14} className="shrink-0" />
       <span className="truncate">{t('zen.hidden', { count })}</span>
-      <span className="shrink-0 text-tertiary opacity-0 transition-opacity duration-(--duration-fast) group-hover/hidden:opacity-100 group-focus-visible/hidden:opacity-100">
+      <span className="shrink-0 text-tertiary opacity-0 transition-opacity duration-(--duration-fast) hover-hidden:opacity-100 focus-visible-hidden:opacity-100">
         {t('zen.show')}
       </span>
     </button>

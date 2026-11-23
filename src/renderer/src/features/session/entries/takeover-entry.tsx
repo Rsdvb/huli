@@ -70,7 +70,7 @@ export const TakeoverEntry = memo(function TakeoverEntry({ sessionId, entryId }:
         render={<CollapsibleTrigger className="group/takeover outline-none" />}
       >
         <MarkerIcon className="size-3.5">{icon}</MarkerIcon>
-        <MarkerContent className="inline-flex items-center gap-1 group-hover/takeover:text-foreground">
+        <MarkerContent className="inline-flex items-center gap-1 hover-takeover:text-foreground">
           {text}
           <HugeiconsIcon
             icon={ArrowRight01Icon}

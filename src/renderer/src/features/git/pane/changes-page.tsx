@@ -259,7 +259,7 @@ function FileEntry({
           <>
             <span
               className={cn(
-                'hidden shrink-0 items-center group-focus-within/file:flex group-hover/file:flex',
+                'hidden shrink-0 items-center focus-within-file:flex hover-file:flex',
                 open && 'flex',
               )}
             >
@@ -279,7 +279,7 @@ function FileEntry({
             </span>
             <LineCounts insertions={file.insertions} deletions={file.deletions} />
             {!open && file.insertions !== null && file.deletions !== null && (
-              <span className="group-focus-within/file:hidden group-hover/file:hidden">
+              <span className="focus-within-file:hidden hover-file:hidden">
                 <LineBar insertions={file.insertions} deletions={file.deletions} />
               </span>
             )}
