@@ -53,6 +53,9 @@ const WINDOW_ONLY: ReadonlySet<string> = new Set<HostMethod>([
   'sync.preview',
   'sync.apply',
   'sync.saveSnippets',
+  // Huli: an MCP server's sign-in opens its page in this computer's browser, whose answer comes
+  // back to a port on this computer; a device's own browser could never finish it.
+  'sessions.mcpLogin',
 ])
 
 function sourceHas(params: unknown, key: string): boolean {

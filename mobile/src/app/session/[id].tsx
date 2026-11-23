@@ -1118,6 +1118,12 @@ function Session() {
           ...(backgroundCount > 0 ? { detail: `${backgroundCount} 个运行中` } : {}),
           onPress: () => router.push({ pathname: '/background/[id]', params: { id } }),
         },
+        {
+          key: 'mcp',
+          label: 'MCP 服务器',
+          icon: G.plug,
+          onPress: () => router.push({ pathname: '/mcp/[id]', params: { id } }),
+        },
         ...(devServers
           ? [
               {

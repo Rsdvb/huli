@@ -34,7 +34,7 @@ import { useCloudOff } from '@renderer/lib/cloud'
 import { relativePath } from '@renderer/lib/format'
 import { i18n } from '@renderer/lib/i18n'
 import { glide } from '@renderer/lib/motion'
-import { LIMIT_FILL, limitLevel, shownPercent } from '@renderer/lib/plan-limit'
+import { LIMIT_FILL, limitLevel, paceMark, shownPercent } from '@renderer/lib/plan-limit'
 import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
 import { useSettingsStore } from '@renderer/stores/settings'
@@ -595,7 +595,7 @@ function MenuRow({
 }
 
 function Limits() {
-  const { t } = useTranslation('tray')
+  const { t } = useTranslation(['tray', 'composer'])
   const agents = useTrayPanelStore((s) => s.agents)
   const view = useLimitView()
   const now = useNow()
@@ -607,17 +607,34 @@ function Limits() {
       <GroupLabel>{t('group.limits')}</GroupLabel>
       {rows.map(({ agent, plan, limit }) => {
         const shown = shownPercent(Math.round(limit.usedPercent ?? 0), view)
+        const pace = paceMark(limit, view, now)
         return (
           <div key={agent.id} className="flex h-6 items-center gap-2 px-3.5">
             <AgentMark agent={agent.id} size={14} dot={agent.color ?? null} />
             <span className="min-w-0 flex-1 truncate text-small text-secondary">
               {plan ? t('limitLabel', { agent: agent.name, plan }) : agent.name}
             </span>
-            <span className="h-1 w-17.5 overflow-hidden rounded-full bg-border-soft">
+            <span
+              className={cn(
+                'h-1 w-17.5 rounded-full bg-border-soft',
+                pace === null ? 'overflow-hidden' : 'kettu-pace-host',
+              )}
+              title={
+                pace === null
+                  ? undefined
+                  : t(
+                      view === 'left'
+                        ? 'composer:usage.limits.paceLeft'
+                        : 'composer:usage.limits.paceUsed',
+                      { percent: pace },
+                    )
+              }
+            >
               <span
-                className={cn('block h-full', LIMIT_FILL[limitLevel(limit)])}
+                className={cn('block h-full rounded-full', LIMIT_FILL[limitLevel(limit)])}
                 style={{ width: `${Math.min(100, Math.max(0, shown))}%` }}
               />
+              {pace !== null && <i className="kettu-pace" style={{ left: `${pace}%` }} />}
             </span>
             <span className="w-7.5 text-right text-caption text-primary tabular">{shown}%</span>
           </div>

@@ -258,6 +258,28 @@ describe('createValidators', () => {
     rejects(() => posix['agents.setClaudeSetting']({ agentId: 'claude-code' }))
   })
 
+  it('takes one Codex setting of a shape the page sends, dropping anything else', () => {
+    expect(
+      posix['agents.setCodexSetting']({
+        agentId: 'codex',
+        change: { setting: 'feature', name: 'apps', value: true, keyPath: 'model' },
+      }),
+    ).toEqual({ agentId: 'codex', change: { setting: 'feature', name: 'apps', value: true } })
+    expect(
+      posix['agents.setCodexSetting']({
+        agentId: 'codex',
+        change: { setting: 'permissionProfile', value: null },
+      }),
+    ).toEqual({ agentId: 'codex', change: { setting: 'permissionProfile', value: null } })
+    const bad = (change: unknown): void =>
+      rejects(() => posix['agents.setCodexSetting']({ agentId: 'codex', change }))
+    bad({ setting: 'memories', value: 1 })
+    bad({ setting: 'feature', name: 'a.b', value: true })
+    bad({ setting: 'permissionProfile', value: 'x y' })
+    bad({ setting: 'approval_policy', value: 'never' })
+    bad(undefined)
+  })
+
   it('takes only a site Settings offers for a Codebuddy Code agent', () => {
     for (const site of ['international', 'china', 'automatic']) {
       expect(

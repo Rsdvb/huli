@@ -154,6 +154,9 @@ export interface SettingsFile {
   // source: where updates come from; GitHub only never reaches Kettu's download service.
   updates: { automatic: 'download' | 'restart' | 'notify' | 'off'; source: 'auto' | 'github' }
   privacy: { hideAccount: boolean } // kept so older files still parse; loading turns it off
+  // Huli: whose cookies and storage each session's browser pages use: everyone's, the session's
+  // worktree's own, or the session's own for as long as the app runs.
+  browserProfiles: { mode: 'shared' | 'worktree' | 'session' }
   // Detailed records are on until this time (ms since the epoch); null when off.
   diagnostics: { verboseUntil: number | null }
   usage: {
@@ -357,6 +360,8 @@ export interface ClaudeRunSettings {
   fallbackModel: string | null
   budgetUsd: number | null // what one run may spend; null for no limit
   budgetAllSessions: boolean // false: the budget holds for routine runs only
+  // Huli: the output style a new session starts in; null or absent keeps Claude Code's own setting.
+  outputStyle?: string | null
 }
 
 export const CLAUDE_RUN_DEFAULTS: ClaudeRunSettings = {
@@ -375,6 +380,19 @@ export function isClaudeFallbackModel(value: unknown): value is string {
     value.length > 0 &&
     value.length <= CLAUDE_MODEL_CHARS &&
     /^[^\s,]+$/.test(value)
+  )
+}
+
+export const OUTPUT_STYLE_CHARS = 100
+
+/** Huli: an output style's name as Claude Code's settings take it: a line of at most 100 characters. */
+export function isOutputStyleName(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.trim() === value &&
+    value.length > 0 &&
+    value.length <= OUTPUT_STYLE_CHARS &&
+    !/\p{Cc}/u.test(value)
   )
 }
 
@@ -455,6 +473,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   workflow: { maxWorkingSteps: DEFAULT_WORKING_STEPS },
   updates: { automatic: 'download', source: 'auto' },
   privacy: { hideAccount: false },
+  browserProfiles: { mode: 'shared' },
   diagnostics: { verboseUntil: null },
   usage: { fromComputer: false, sidebar: 'today', limits: 'used' },
   remote: {
@@ -567,6 +586,7 @@ export interface SettingsPatch {
   workflow?: Partial<SettingsFile['workflow']>
   updates?: Partial<SettingsFile['updates']>
   privacy?: Partial<SettingsFile['privacy']>
+  browserProfiles?: Partial<SettingsFile['browserProfiles']>
   diagnostics?: Partial<SettingsFile['diagnostics']>
   computerUse?: Partial<SettingsFile['computerUse']> // allowedApps is replaced whole
   agentNetwork?: Partial<SettingsFile['agentNetwork']> // agents is replaced whole

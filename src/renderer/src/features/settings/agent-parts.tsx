@@ -31,7 +31,7 @@ import {
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { errorMessage } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
-import { limitLevel, limitPercent } from '@renderer/lib/plan-limit'
+import { limitLevel, limitPercent, paceMark } from '@renderer/lib/plan-limit'
 import { useNow } from '@renderer/lib/use-now'
 import { openSignInPage, usePlanReadings } from '@renderer/stores/agents'
 import { useHostScope } from '@renderer/stores/host-scope'
@@ -513,6 +513,7 @@ export function UsageGroup({
         <RowGroup>
           {limits.map((limit) => {
             const level = limitLevel(limit)
+            const pace = paceMark(limit, view, now)
             return (
               <RowFrame
                 key={limit.window}
@@ -530,6 +531,17 @@ export function UsageGroup({
                   value={limitPercent(limit, view) ?? 0}
                   level={level}
                   text={percent(limit, view)}
+                  pace={pace}
+                  paceText={
+                    pace === null
+                      ? undefined
+                      : t(
+                          view === 'left'
+                            ? 'composer:usage.limits.paceLeft'
+                            : 'composer:usage.limits.paceUsed',
+                          { percent: pace },
+                        )
+                  }
                   label={t(
                     view === 'left' ? 'composer:usage.limits.left' : 'composer:usage.limits.used',
                     { limit: limitLabel(limit) },

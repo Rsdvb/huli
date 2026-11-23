@@ -85,10 +85,18 @@
     "confirmOther": "This session is still open in another Claude Code. Once you carry on here, don't send messages there at the same time.",
     "confirm": "Carry on here"
   },
+  "shell": {
+    "note": "Runs as a shell command in the session's folder; Codex adds its output to the conversation",
+    "noteAsks": "Runs as a shell command in the session's folder, once you allow it; Codex adds its output to the conversation"
+  },
+  "modelCache": {
+    "note": "Now on {{model}}: the prompt cache starts over, so the next turn costs more"
+  },
   "outOfCredit": {
     "modelTitle": "{{model}} is out of credit",
     "strip": "The provider's balance for {{model}} ran out. Top up, or pick another model to keep going.",
     "stripNoModel": "The model provider's balance ran out. Top up to keep going.",
+    "stripProvider": "{{provider}} turned the request down for want of quota or balance. Top up or check billing with {{provider}}, then retry, or switch the model.",
     "switchModel": "Switch model"
   },
   "limitPause": {
@@ -218,7 +226,9 @@
       "resets": "Resets {{time}}",
       "updated": "Updated {{ago}}",
       "planOf": "Plan · {{plan}}",
-      "title": "Plan limits"
+      "title": "Plan limits",
+      "paceUsed": "At an even pace, {{percent}}% would be used by now",
+      "paceLeft": "At an even pace, {{percent}}% would be left by now"
     },
     "cache": {
       "title": "Prompt cache",

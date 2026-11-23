@@ -277,3 +277,34 @@ export function limitLevel(limit: Pick<PlanLimit, 'usedPercent' | 'state'>): Lim
   if (used >= 70) return 'warn'
   return 'ok'
 }
+
+const PACED_LENGTHS: Partial<Record<WindowKind, number>> = {
+  five_hour: 5 * HOUR_MS,
+  seven_day: 7 * DAY_MS,
+  daily: DAY_MS,
+}
+const COUNTED_LENGTHS: Partial<Record<WindowKind, number>> = {
+  minutes: 60_000,
+  hours: HOUR_MS,
+  days: DAY_MS,
+}
+
+/**
+ * Huli: the share of a window's use, 0 to 100, that would be spent by `now` were it spent evenly
+ * from the window's start, which a bar marks so the user sees whether they run ahead or behind.
+ * Null for a window of no fixed length, such as a month, or with no reset ahead to count from.
+ */
+export function evenPacePercent(
+  limit: Pick<PlanLimit, 'window' | 'label' | 'resetsAt'>,
+  now: number,
+): number | null {
+  if (limit.resetsAt === null || limit.resetsAt <= now) return null
+  const { kind, count } = windowParts(limit)
+  if (kind === null) return null
+  const unit = COUNTED_LENGTHS[kind]
+  const length = unit !== undefined ? (count === null ? null : count * unit) : PACED_LENGTHS[kind]
+  if (!length) return null
+  const left = limit.resetsAt - now
+  if (left > length) return null
+  return (1 - left / length) * 100
+}

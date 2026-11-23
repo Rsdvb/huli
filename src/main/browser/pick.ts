@@ -15,7 +15,9 @@ import {
   type PageBox,
   type PickColor,
   type PickEvent,
+  MAX_PICK_STYLES,
 } from '@shared/page-notes'
+import { FIND_SOURCE, sourceOf, type SourceLocation } from './source-location'
 
 const isChannel = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 255
@@ -97,7 +99,22 @@ const READ_ELEMENT = `function (wanted) {
   } catch (error) {}
   const root = el.getRootNode()
   const host = root && root.host ? root.host : null
+  // Huli: the styles that shape it, leaving out the ones at a plain default.
+  const computed = getComputedStyle(el)
+  const styles = {}
+  // Each property's plain value, which says nothing about the element; flex and grid ones only
+  // matter in a flex or grid container.
+  const plain = { position: 'static', margin: '0px', padding: '0px', gap: 'normal', 'flex-direction': 'row', 'justify-content': 'normal', 'align-items': 'normal', 'grid-template-columns': 'none', 'background-color': 'rgba(0, 0, 0, 0)', 'background-image': 'none', 'border-radius': '0px', 'box-shadow': 'none', opacity: '1', 'z-index': 'auto', overflow: 'visible' }
+  const layout = /flex|grid/.test(computed.display)
+  for (const name of ['display', 'position', 'width', 'height', 'margin', 'padding', 'gap', 'flex-direction', 'justify-content', 'align-items', 'grid-template-columns', 'color', 'background-color', 'background-image', 'font-family', 'font-size', 'font-weight', 'line-height', 'border', 'border-radius', 'box-shadow', 'opacity', 'z-index', 'overflow']) {
+    const value = computed.getPropertyValue(name)
+    if (!value || plain[name] === value) continue
+    if (!layout && ['gap', 'flex-direction', 'justify-content', 'align-items', 'grid-template-columns'].includes(name)) continue
+    if (name === 'border' && /^0px /.test(value)) continue
+    styles[name] = value.slice(0, 200)
+  }
   return {
+    styles,
     path,
     text: String(text).slice(0, 2000),
     box: { x, y, width: rect.width, height: rect.height },
@@ -128,6 +145,42 @@ interface ReadResult {
   box: unknown
   host: unknown
   title: unknown
+  styles: unknown
+}
+
+/**
+ * Huli: where the element's source is, as the page's dev build tells it. The frameworks' records
+ * hang on the element's object in the page's own world, so it is read there, and only read.
+ */
+async function readSource(
+  contents: WebContents,
+  backendNodeId: number,
+): Promise<SourceLocation | null> {
+  try {
+    const { object } = await send<{ object: RemoteObject }>(contents, 'DOM.resolveNode', {
+      backendNodeId,
+      objectGroup: GROUP,
+    })
+    if (!object.objectId) return null
+    const found = await send<{ result?: { value?: unknown } }>(contents, 'Runtime.callFunctionOn', {
+      objectId: object.objectId,
+      functionDeclaration: FIND_SOURCE,
+      returnByValue: true,
+    })
+    return await sourceOf(contents, found.result?.value ?? null)
+  } catch {
+    return null
+  }
+}
+
+/** Huli: the styles the page answered, checked. */
+function stylesOf(value: unknown): Record<string, string> | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const styles: Record<string, string> = {}
+  for (const [name, style] of Object.entries(value).slice(0, MAX_PICK_STYLES)) {
+    if (/^[a-z-]{1,40}$/.test(name) && typeof style === 'string') styles[name] = style.slice(0, 200)
+  }
+  return Object.keys(styles).length > 0 ? styles : undefined
 }
 
 function send<T>(contents: WebContents, method: string, params?: object): Promise<T> {
@@ -302,7 +355,11 @@ async function readElement(
       }
     : null
   const url = contents.getURL()
+  const source = await readSource(contents, backendNodeId)
+  const styles = stylesOf(read.styles)
   return {
+    ...(styles ? { styles } : {}),
+    ...(source ? { source } : {}),
     url,
     title: typeof read.title === 'string' ? read.title : null,
     selector,

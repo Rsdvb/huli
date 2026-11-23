@@ -515,6 +515,47 @@ background so the turn goes on (转到后台), and cleans the list.
   `codex/connection.test.ts` (terminals listed, ended, missing), `acp/kite-tasks.test.ts`,
   `validate.test.ts`.
 
+### A session's MCP servers (MCP 服务器…, 重新加载技能和插件)
+
+The session's More menu opens MCP 服务器…, which lists the MCP servers the session's agent
+really has: each one's state (connected, connecting, failed with its error, needs sign-in, off),
+where it comes from (Kite, the user's settings, the project's, a plugin, an organization, the
+account) and its tools, which a row unfolds. Marketplace › Installed still shows what Kite keeps
+and where each agent keeps its own; the panel is the session's live view.
+
+- Host: `sessions.mcp`, `sessions.mcpAct` (reconnect, disable, enable), `sessions.mcpLogin` and
+  `sessions.reloadPlugins` (`src/agent-host/session-mcp/`, guards in its `validate.ts`; the
+  connection methods `readMcp`, `reconnectMcp`, `toggleMcp`, `loginMcp` and `reloadPlugins`).
+  `session.mcpChanged` goes to the ports watching the session when its agent reports a change
+  (an `mcp` mapper effect) or after an action. Errors leave the host as one line with every
+  address's query masked (`session-mcp/text.ts`); a server's configuration never does.
+- Claude Code: `mcpServerStatus` (its `source`, else its `scope`), `reconnectMcpServer` one server
+  at a time, `reloadPlugins({ refuseIfBusy: true })` then `reloadSkills`, between turns only.
+  Kite's own servers (the names its last attach handed the agent, under the `dynamic` scope) turn
+  off for the session alone: `setMcpServers` without them, and its later queries start without
+  them too. The user's own go through `toggleMcpServer`, which Claude Code keeps in the folder's
+  entry of its `.claude.json` (`disabledMcpServers`), so the menu says it lasts. Sign-in stays in
+  Claude Code's own `/mcp`: the SDK's `mcpAuthenticate` is not in its published types.
+- Codex: `mcpServerStatus/list` with the thread, `config/read`'s `origins` for each server's layer
+  (user, project, managed), `pluginId` for a plugin's; Reconnect is one `config/mcpServer/reload`
+  for every server (concurrent ones share it). 登录 runs `mcpServer/oauth/login` with the thread;
+  its `authorizationUrl` must be http(s) and opens through the window's own link path, and
+  `mcpServer/oauthLogin/completed` reloads the servers and tells the panel how it ended. No token
+  passes through Kite. Its apps are `app/list`'s linked ones (`isAccessible`), at most five pages,
+  listed read-only with 在 ChatGPT 管理; Codex has no per-thread switch for a server, so none shows.
+- Other agents (ACP, OpenCode, Pi, Cline, DeepSeek Harness) report no servers: the panel lists
+  those Kite handed the session, their state unknown.
+- Reload: 重新加载技能和插件 in the panel, and 重新加载 in the Marketplace's toolbar for every
+  session whose agent runs (`sessions.reloadPlugins` without a session), so a skill or plugin
+  installed meanwhile applies without a restart.
+- Nothing reads before the panel opens (its dialog is a lazy chunk); it reads again on Refresh,
+  after an action and 250 ms after the last `session.mcpChanged`; no timer otherwise.
+- Phone: MCP 服务器 in the session's ⋯ menu (`mobile/src/app/mcp/[id].tsx`): states, sources,
+  errors and tools, with Reconnect; read on open, on a pull and on `session.mcpChanged`. Turning
+  a server off and signing in stay on the computer, and `sessions.mcpLogin` is refused to devices.
+- Tests: `claude/connection.test.ts` and `codex/connection.test.ts` (Huli: a session's MCP panel),
+  `session-mcp/validate.test.ts`.
+
 ### Risk levels and auto-approve (风险等级、自动批准低风险操作)
 
 After Codex's risk before an action, Kiro's Approve for me and Claude Code's auto mode, without
@@ -1095,6 +1136,57 @@ do. They join the session's comment tray beside the diff's and go with them as o
   in the draft's `pageNotes` (at most 20), then the page and the mode come back. The tray
   (`NotesTray`) lists both kinds, under the page too, and Send to agent puts them in one message
   with the screenshots as its images.
+
+### Browser tools, second batch (浏览器工具第二批)
+
+Nine more `browser_*` tools for agents testing web apps, and what the user sees of them.
+
+- Arguments: `src/shared/browser-args.ts` parses them (with tests); the agent host checks a call
+  with it and forwards what the agent gave, and main (`BrowserCdp.call`) parses it again, since
+  another computer's host sends calls too.
+- `browser_emulate` (`src/main/browser/emulation.ts`, `views.ts`): a device's size, pixel ratio,
+  touch and mobile user agent (presets in `DEVICE_PRESETS`, or `viewport`), color scheme, reduced
+  motion, locale, time zone, location and network (slow 3G, fast 3G, 4G, offline) over CDP
+  `Emulation`/`Network`, per tab and applied again when a released tab's page is made anew. A
+  device's size becomes the tab's viewport, which `size()` lays out at. The pane's chip
+  (`emulation-chip.tsx`) shows it with Reset (`browser:reset-emulation`). Only a tab emulating a
+  location gets the geolocation permission (`policy.ts`), and turning it off leaves the override
+  at "position unavailable", so the computer's own position never reaches a page.
+- `browser_route` (`routes.ts`, tests): rules of a session (fixed response, delay or abort, by URL
+  pattern and method, at most 50), answered through CDP `Fetch`, which a tab enables only while its
+  session has rules and the agent used the tab. A document of a site that needs the user's allow
+  is never mocked. Mocked requests carry `mocked` in `browser_network_requests`.
+- `browser_hover`, `browser_drag` (HTML drag and drop through `Input.setInterceptDrags`, or the
+  mouse held down for pointer-based ones), `browser_click_at` (inside the viewport, with a reason
+  the thread's tool row shows).
+- Downloads and PDF (`downloads.ts`): a download of the agent's tab during its turn goes to
+  `<session folder>/.kite/downloads/` (a `.gitignore` of `*` keeps it out of git), above 50 MB only
+  after the pane's Allow (`download-bar.tsx`, `browser:answer-download`); the user's own keep the
+  save dialog. `browser_downloads` lists them; `browser_pdf` prints with `webContents.printToPDF`
+  (Electron's debugger has no `Page.printToPDF`). The host sends main the session's folder with
+  each call (`host:browser-call` `folder`); another computer's calls get neither tool.
+- `browser_trace` (`trace.ts`): CDP `Tracing` for a few seconds, read back as a stream, summed up
+  as long tasks, the longest scripts, style, layout and paint time, LCP and FCP (the page's own
+  reports when the trace has no navigation). No Lighthouse.
+- Cross-origin iframes (`cdp.ts`): from a tab's first snapshot, `Target.setAutoAttach` with
+  flatten; a frame target's nodes join the outline under their iframe with ids in a slot of their
+  own (`SLOT`), commands on them go to their target, and clicks go to the frame's own target at its
+  CSS pixels, since the page's input does not reach into it here.
+- Profiles and saved sign-ins (`views.ts`, `saved-states.ts` with tests, `state-tools.ts`): Settings
+  › 浏览器 › 每个会话的浏览器数据 (`browserProfiles.mode`): shared, each worktree
+  (`persist:kite-wt-<hash>`) or each session (in memory). A session takes its partition with its
+  first page. `browser_storage_state` and the pane's browser data popover (`browser-data.tsx`)
+  save the shown site's cookies and local storage under a name and restore them into another
+  session's partition; `state/browser-states.json` keeps them sealed with the system encryption
+  (as `market-keys.json`), never without it, and Settings lists them with Delete.
+- Pick (`pick.ts`, `source-location.ts`): a picked element also carries its key computed styles
+  and, from a dev build, its source: inspector attributes, React's `_debugSource` or, since React
+  19, `_debugStack` mapped through the script's source map (read from the page's own origin), or
+  Svelte and Vue's records. The note's message lists both.
+- `.claude/launch.json` (`src/shared/launch-configs.ts`, host `sessions.launchConfigs`): the
+  session folder's configurations as presets in the browser pane (`launch-presets.tsx`) and the
+  phone's 开发服务器 when opened from a session; Start runs the command with `sessions.runCommand`
+  and the pane opens the page, again on a failed load for a few tries.
 
 ### Ports of other computers (端口转发)
 
@@ -1763,6 +1855,53 @@ the denied call's card (`denial-appeal.tsx`), the phone in the call's screen (`m
 both with the risk and a confirmation for a high one. Tests: `codex/mapper.test.ts`,
 `codex-appeal-host.test.ts`, `validate.test.ts`.
 
+### Agent controls (选项预览、输出风格、`!` 命令、换模型提示、节奏刻度、Codex 设置)
+
+- **Question previews.** Claude Code's AskUserQuestion asks for option previews only when the host
+  names a format, so `claude/connection.ts` passes `toolConfig.askUserQuestion.previewFormat:
+'markdown'`. `claude/tools.ts` keeps an option's `preview` (left out past 32 KiB),
+  `PendingQuestion` carries it, and the answer sends `annotations` with the picked option's
+  preview, as Claude Code's own dialog does. The desktop card shows the preview of the option
+  pointed at or picked beside the options (under them below a 600 px column), the phone the
+  picked one's under the options with 展开 for a sheet; `src/shared/question-preview.ts` fences a
+  preview with no fenced block, since Claude Code shows them in a monospace box. Markdown renders
+  without raw HTML (Streamdown's `skipHtml`).
+- **Output style.** The SDK's initialize answer lists `available_output_styles` and the
+  `output_style` in use; the session's options carry them as `__outputStyle` with `place: 'menu'`,
+  which keeps it out of the composer and puts it in the session's More menu
+  (`features/session/menu-options.tsx`); a change goes through `applyFlagSettings({ outputStyle })`,
+  which Claude Code tells the model of with the next request. Settings › Claude Code saves the
+  style new sessions start in as `claudeRuns[agent].outputStyle` (optional, so older files still
+  load), passed as the flag settings' `outputStyle`; its list is the built-in styles plus the
+  user's own `output-styles/*.md` beside the agent's settings file, read only
+  (`claude/output-styles.ts`).
+- **Codex `!command`.** A Codex prompt of text alone that starts with `!` runs through
+  `thread/shellCommand` in the turn it opens (`commandTurn`), so Codex adds the command and its
+  output to the conversation. Codex runs it outside its sandbox, so unless the mode is full access
+  Kite asks first with a command card the host's approval rules answer (risk auto-approve
+  included); it never runs in a sandbox Kite holds, and a Codex without the method fails the turn
+  saying so. The composer shows a line while such a message is typed. The side question (`/btw`)
+  was already there, on an ephemeral `thread/fork`.
+- **Model change and refusals.** After a model change mid-session, Claude Code's and Codex's
+  composers say the prompt cache starts over (`composer/cache-restart.ts`; other agents' providers
+  say nothing to go by), until the next request. A refused turn offers 换个模型重试, the session's
+  other models, which sets the model and sends the same message.
+- **Pace tick.** `evenPacePercent` (`src/shared/plan-limits.ts`) is where a window's use would be
+  now if spread evenly, for windows of a fixed length (5-hour, daily, weekly, counted); the
+  composer's plan bars, the agent page's, the tray's and the phone's mark it, computed as they
+  render.
+- **Codex settings.** The Codex agent's page reads memories (`features.memories`), the workspace
+  sandbox's network access (`sandbox_workspace_write`), `default_permissions` with
+  `permissionProfile/list`, and the beta features of `experimentalFeature/list` through
+  `config/read`, and writes one key with `config/value/write`, which edits config.toml in place
+  and keeps comments (`codex/settings.ts`). A key a managed layer sets shows locked. Kite's
+  workspace turns take the user's network access and writable folders, read before a turn and
+  again after a config write.
+- **A provider's quota.** Off a ChatGPT plan, Codex's `usageLimitExceeded`, a 402 or a provider's
+  billing words end the turn as out of credit rather than a plan limit
+  (`codex/provider-quota.ts`), naming the provider from `config/read`'s `model_providers`, in the
+  notice's title and the composer's strip. The Anthropic Console preset was already a profile.
+
 ### Kite's own Node.js
 
 Agents that run on Node.js (most package agents; DeepSeek wants ≥ 24.9) said 「需要 Node.js」 and
@@ -2248,6 +2387,46 @@ Its preload (`src/preload/mini.ts`) exposes settings and themes, three host meth
 window (`markOwnPage`) or its URL, and from the overlay only `CAPTURE_CHANNELS`; the window's page
 may open the mini window but never send those pages' calls. It reads the session on open and
 then follows `session.summary` events. Tests: `ipc.test.ts`, `capture.test.ts`.
+
+### Device recordings and diagnostics (录屏、截图对比、诊断)
+
+Beyond Kettu's `device_*` tools, agents get agent-device's (0.21.41) recording, screenshot diff,
+network and memory commands, and a few readings of the platforms' own tools, for an app under test
+on an iOS simulator, an Android emulator or phone (and, where noted, an iPhone).
+
+- `device_record_start` / `device_record_stop`: `record start` into
+  `<session folder>/.kite/device/recordings/<name or time>.mp4` (the app's scope once the session
+  launched an app, the whole screen before). The device host stops it itself after 3 minutes
+  (`MAX_DEVICE_RECORDING_MS`, a timer that exists only while recording), when the session ends,
+  when the device is closed, moved or shut down, and when the host quits (waiting 3 s). The stop
+  links the video as a `resource_link` with a `file:` URI, which `toolMedia` in `named.ts` shows
+  under the call as it shows a diff's files.
+- `device_screenshot_compare`: `screenshot --normalize-status-bar` (simulators and Android) into
+  `.kite/device/shots/`, then agent-device's own `diff screenshot` against a baseline .png the
+  agent names in the session folder (saved from this shot when it does not exist yet; `update`
+  replaces it) or the session's previous shot. It answers the share of differing pixels and the
+  regions, with the diff image from `.kite/device/diffs/` inline up to 4 MB. No pixel code of
+  Kite's own: agent-device's diff scales a shot of another size and runs on Windows too.
+- `device_logs` reads the file `logs path --json` names, from its end, and adds the crash reports
+  of the app the session launched, since its launch: Android's crash buffer (`adb logcat -b crash
+-d -v epoch -t 2000`, grouped by pid, kept when they name the package), an iOS simulator's
+  `.ips` files in `~/Library/Logs/DiagnosticReports` (its bundle id, and its process path naming
+  the simulator's UDID). An iPhone's crash reports are not read.
+- `device_network` is agent-device's `network dump` (requests parsed from the app's log, so only
+  an app that logs them shows any; the first call starts the capture). `device_perf` is
+  `perf memory sample` plus a CPU reading of Kite's own over one second: on Android two reads of
+  `/proc/<pid>/stat` and `/proc/uptime` in one `adb shell` built from the pid alone, on a simulator
+  `ps -o time=` of the app's process on the Mac. No CPU for an iPhone. `device_push` is `push`
+  (simulators and Android; iPhones refuse), `device_reset_app` is `settings clear-app-state` (and
+  `reset-keychain clear` for a simulator), `device_set_permission` takes `reset` and `all`.
+- What may be written: only under `.kite/device` in the folder the session works in, made with a
+  `.gitignore` of `*`, and the baselines the agent names there. `captures.ts` resolves every path
+  through the folder's real path and refuses one a link leads out of. The agent host checks every
+  argument first (`tools.ts`): names and baselines are plain relative names, payloads are checked
+  for the device's platform (an APNs payload with `aps`, or an Android broadcast's action,
+  receiver and plain extras; 4 KB at most), and the agent's words go after `--`.
+- Answers are capped at 48 KB of text with a `structuredContent` copy. Tests: the arguments, the
+  command lines, the session folder's bounds (`tools.test.ts`, `agent.test.ts`).
 
 ## Merging Kettu
 

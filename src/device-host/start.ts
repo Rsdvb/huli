@@ -2,6 +2,7 @@
 // host's out, and each client's port as it connects. index.ts runs it in Electron's utility
 // process, node-main.ts under Node.js.
 
+import { isAbsolute, join } from 'node:path'
 import { CONTROL_WAIT_MS, ControlWait } from '@shared/control'
 import type {
   DeviceAction,
@@ -25,6 +26,8 @@ import { PortServer } from './server'
 
 /** The point agent-device reports a tap by reference at, in the device's points. */
 const TAPPED_AT = /^Tapped @\S+ \((-?[\d.]+), (-?[\d.]+)\)/m
+/** How long quitting waits for running recordings to stop, within main's 6 s for the host. */
+const SHUTDOWN_RECORDING_WAIT_MS = 3000
 
 export interface StartedDeviceHost {
   connect(
@@ -84,15 +87,17 @@ export function startDeviceHost(
         'devices.environment': () => devices.environment(),
         'devices.list': () => devices.list(),
         'devices.open': (_, params) => devices.open(params.deviceId, params.sessionId),
-        'devices.move': (_, params) => {
+        'devices.move': async (_, params) => {
           // The other session's agent may be acting on it right now.
           running.get(params.deviceId)?.abort()
+          await actions?.stopRecordings((_, deviceId) => deviceId === params.deviceId)
           return devices.move(params.deviceId, params.sessionId)
         },
         'devices.close': (_, params) =>
           devices.close(params.deviceId, params.sessionId, params.shutdown === true),
-        'devices.shutdown': (_, params) => {
+        'devices.shutdown': async (_, params) => {
           running.get(params.deviceId)?.abort()
+          await actions?.stopRecordings((_, deviceId) => deviceId === params.deviceId)
           return devices.shutdown(params.deviceId, params.sessionId)
         },
         'devices.watch': (port, params) => devices.watch(port, params.deviceId, params.sessionId),
@@ -177,6 +182,9 @@ export function startDeviceHost(
         }
       }
       if (request.kind === 'close') {
+        await agent.stopRecordings(
+          (sessionId, deviceId) => sessionId === request.sessionId && deviceId === request.deviceId,
+        )
         await devices.close(request.deviceId, request.sessionId, request.shutdown)
         return { result: { text: 'Closed.' } }
       }
@@ -207,8 +215,8 @@ export function startDeviceHost(
       running.set(request.deviceId, controller)
       try {
         const action = request.action
-        if (action.type === 'install' && request.projectPath && !action.path.startsWith('/')) {
-          action.path = `${request.projectPath}/${action.path}`
+        if (action.type === 'install' && request.projectPath && !isAbsolute(action.path)) {
+          action.path = join(request.projectPath, action.path)
         }
         // A turn made through XCTest is invisible to the stream, which would keep drawing the
         // device upright; a device that streams is turned through its driver instead.
@@ -219,7 +227,13 @@ export function startDeviceHost(
           devices.acted(request.deviceId, null)
           return { result: { text: `Rotated to ${action.orientation.replace(/_/g, '-')}` } }
         }
-        const result = await agent.run(request.sessionId, target, action, controller.signal)
+        const result = await agent.run(
+          request.sessionId,
+          target,
+          action,
+          controller.signal,
+          request.projectPath,
+        )
         void actedOn(devices, request.deviceId, action, result.text)
         return { result }
       } finally {
@@ -251,6 +265,10 @@ export function startDeviceHost(
         if (isLocale(message.locale)) setLocale(message.locale)
         break
       case 'device-host:sessions-ended': {
+        const ended = new Set(message.sessionIds)
+        void actions
+          ?.stopRecordings((sessionId) => ended.has(sessionId))
+          .catch((error: unknown) => warn(`Cannot stop ended sessions' recordings: ${error}`))
         void manager
           ?.endSessions(message.sessionIds)
           .catch((error: unknown) => warn(`Cannot let go of ended sessions' devices: ${error}`))
@@ -267,11 +285,17 @@ export function startDeviceHost(
         )
         break
       case 'device-host:shutdown':
-        void (manager?.dispose() ?? Promise.resolve()).finally(() => {
-          server?.closeAll()
-          send({ type: 'device-host:stopped' })
-          process.exit(0)
-        })
+        // A recording left running would go on in agent-device's daemon after the app quit.
+        void Promise.race([
+          actions?.stopRecordings(() => true) ?? Promise.resolve(),
+          new Promise((resolve) => setTimeout(resolve, SHUTDOWN_RECORDING_WAIT_MS)),
+        ])
+          .then(() => manager?.dispose())
+          .finally(() => {
+            server?.closeAll()
+            send({ type: 'device-host:stopped' })
+            process.exit(0)
+          })
     }
   })
 
@@ -311,6 +335,8 @@ async function actedOn(
     case 'open_url':
     case 'keyboard':
     case 'batch':
+    case 'push':
+    case 'reset_app':
       break
     case 'find':
       if (!['click', 'focus', 'fill', 'type'].includes(action.action)) return

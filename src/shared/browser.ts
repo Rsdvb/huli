@@ -1,3 +1,4 @@
+import type { BrowserEmulation } from './browser-args'
 import type { SurfaceControl } from './control'
 
 /** The partition every page in the side panel's browser uses, shared by all sessions. */
@@ -60,6 +61,8 @@ export type BrowserNotice =
   | { kind: 'load-failed'; description: string }
   | { kind: 'crashed' }
   | { kind: 'unresponsive' }
+  // Huli: a download an agent's page started, saved into the session's folder.
+  | { kind: 'saved'; name: string; path: string }
 
 /** What the user answered a request to open a new origin. */
 export type BrowserOriginDecision = 'session' | 'project' | 'deny'
@@ -141,7 +144,44 @@ export interface BrowserState {
   control: SurfaceControl
   /** A new site that waits for the user, or the answer just given, for the pane's bar. */
   originRequest: BrowserOriginRequest | null
+  /** Huli: what the selected tab emulates, for the pane's chip; null when nothing. */
+  emulation: BrowserEmulation | null
+  /** Huli: a large download of the agent's page waiting for the user's allow. */
+  downloadRequest: BrowserDownloadRequest | null
+  /** Huli: whose cookies and storage the session's pages use. */
+  profile: BrowserProfile
 }
+
+/** Huli: a download above DOWNLOAD_ASK_BYTES that waits for the user. */
+export interface BrowserDownloadRequest {
+  id: number
+  name: string
+  /** Bytes, or null when the server did not say. */
+  size: number | null
+}
+
+/**
+ * Huli: the browser data a session's pages use: everyone's, its worktree's own, or its own for as
+ * long as the app runs.
+ */
+export type BrowserProfileKind = 'shared' | 'worktree' | 'session'
+
+export interface BrowserProfile {
+  kind: BrowserProfileKind
+  /** The worktree folder's name for a worktree's profile. */
+  label: string | null
+}
+
+/** Huli: a saved sign-in state, as Settings and the pane list it; never what it holds. */
+export interface SavedStateSummary {
+  name: string
+  sites: string[]
+  savedAt: number
+}
+
+/** Huli: Settings' choice of which browser data each session uses. */
+export const BROWSER_PROFILE_MODES = ['shared', 'worktree', 'session'] as const
+export type BrowserProfileMode = (typeof BROWSER_PROFILE_MODES)[number]
 
 /** The browser tools the `kettu` MCP server offers, which main runs on the page. */
 export const BROWSER_TOOL_NAMES = [
@@ -163,6 +203,16 @@ export const BROWSER_TOOL_NAMES = [
   'browser_ask_user',
   'browser_tabs',
   'browser_upload_file',
+  // Huli: the second batch.
+  'browser_hover',
+  'browser_drag',
+  'browser_click_at',
+  'browser_emulate',
+  'browser_route',
+  'browser_downloads',
+  'browser_pdf',
+  'browser_trace',
+  'browser_storage_state',
 ] as const
 
 /** The most files one `browser_upload_file` call puts into a page. */
@@ -237,6 +287,13 @@ export interface BrowserCallRequest {
   args: Record<string, unknown>
   /** The calling session's project, whose always-allowed sites the page reads. */
   projectPath: string
+  /**
+   * Huli: the folder the session works in, its worktree's or its project's, where its downloads
+   * and PDFs go; absent for a call of another computer's host, whose files are not here.
+   */
+  folder?: string
+  /** Huli: whether `folder` is a worktree of the project, which may have a profile of its own. */
+  worktree?: boolean
   /** A tab of the user's they just allowed the agent, which the call may then act on. */
   allowTab?: string
 }

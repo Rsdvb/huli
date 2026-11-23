@@ -345,6 +345,116 @@ describe('the agent-device commands the tools pass on', () => {
     }
   })
 
+  it('builds recordings, comparisons and diagnostics from checked arguments', () => {
+    expect(actionOf('device_record_start', {})).toEqual({ type: 'record_start' })
+    expect(actionOf('device_record_start', { name: 'sign-in_flow.v2.mp4' })).toEqual({
+      type: 'record_start',
+      name: 'sign-in_flow.v2',
+    })
+    expect(
+      actionOf('device_screenshot_compare', {
+        baseline: 'tests\\screens\\主页.png',
+        threshold: 0,
+        update: true,
+      }),
+    ).toEqual({
+      type: 'screenshot_compare',
+      baseline: 'tests/screens/主页.png',
+      threshold: 0,
+      update: true,
+    })
+    expect(actionOf('device_network', {})).toEqual({
+      type: 'network',
+      limit: 20,
+      include: 'summary',
+    })
+    expect(actionOf('device_logs', { crashes: false })).toEqual({
+      type: 'logs',
+      lines: 200,
+      crashes: false,
+    })
+    expect(
+      actionOf('device_set_permission', { app: 'com.example', permission: 'all', state: 'reset' }),
+    ).toEqual({ type: 'permission', app: 'com.example', permission: 'all', state: 'reset' })
+    // The form before reset.
+    expect(
+      actionOf('device_set_permission', { app: 'com.example', permission: 'camera', grant: false }),
+    ).toMatchObject({ state: 'deny' })
+    expect(
+      actionOf('device_reset_app', { deviceId: SIM, app: 'com.example', keychain: true }),
+    ).toEqual({ type: 'reset_app', app: 'com.example', keychain: true })
+  })
+
+  it('checks a push payload for the platform it goes to', () => {
+    expect(
+      actionOf('device_push', { deviceId: SIM, payload: { aps: { alert: 'Hi', badge: 1 } } }),
+    ).toEqual({ type: 'push', payload: { aps: { alert: 'Hi', badge: 1 } } })
+    expect(
+      actionOf('device_push', {
+        deviceId: 'android:emulator-5554',
+        app: 'com.example',
+        payload: {
+          action: 'com.example.PUSH',
+          receiver: 'com.example/.PushReceiver',
+          extras: { title: 'Hi; rm -rf /', count: 2, silent: true },
+        },
+      }),
+    ).toEqual({
+      type: 'push',
+      app: 'com.example',
+      payload: {
+        action: 'com.example.PUSH',
+        receiver: 'com.example/.PushReceiver',
+        extras: { title: 'Hi; rm -rf /', count: 2, silent: true },
+      },
+    })
+  })
+
+  it('refuses paths, names and payloads that could reach past the session folder or a flag', () => {
+    const android = 'android:emulator-5554'
+    const refused: [Parameters<typeof actionOf>[0], Record<string, unknown>][] = [
+      ['device_record_start', { name: '../escape' }],
+      ['device_record_start', { name: '--out=/tmp/x' }],
+      ['device_record_start', { name: '.hidden' }],
+      ['device_record_start', { name: 'a/b' }],
+      ['device_screenshot_compare', { baseline: '/etc/passwd.png' }],
+      ['device_screenshot_compare', { baseline: 'C:\\Windows\\x.png' }],
+      ['device_screenshot_compare', { baseline: '~/x.png' }],
+      ['device_screenshot_compare', { baseline: 'screens/../../x.png' }],
+      ['device_screenshot_compare', { baseline: '\\\\server\\share\\x.png' }],
+      ['device_screenshot_compare', { baseline: 'screens/-x.png' }],
+      ['device_screenshot_compare', { baseline: 'screens/home.jpg' }],
+      ['device_screenshot_compare', { baseline: 'screens/a:b.png' }],
+      ['device_screenshot_compare', { threshold: 2 }],
+      ['device_screenshot_compare', { update: true }],
+      ['device_network', { limit: 0 }],
+      ['device_network', { include: 'all' }],
+      ['device_set_permission', { app: 'com.example', permission: 'camera', state: 'revoke' }],
+      ['device_set_permission', { app: 'com.example', permission: 'siri', state: 'grant' }],
+      [
+        'device_set_permission',
+        { app: 'com.example', permission: 'camera', state: 'grant', grant: true },
+      ],
+      ['device_reset_app', { deviceId: SIM, app: '--all' }],
+      ['device_reset_app', { deviceId: android, app: 'com.example', keychain: true }],
+      ['device_push', { deviceId: SIM, payload: { alert: 'no aps' } }],
+      ['device_push', { deviceId: SIM, payload: [] }],
+      ['device_push', { deviceId: SIM, payload: { aps: { alert: 'x'.repeat(5000) } } }],
+      ['device_push', { deviceId: 'ios:00008110-0001', payload: { aps: {} } }],
+      ['device_push', { deviceId: SIM, app: '-x', payload: { aps: {} } }],
+      ['device_push', { deviceId: android, payload: { extras: { a: { nested: 1 } } } }],
+      ['device_push', { deviceId: android, payload: { extras: { 'a b': 'x' } } }],
+      ['device_push', { deviceId: android, payload: { action: '-n evil/.X' } }],
+      ['device_push', { deviceId: android, payload: { receiver: 'evil' } }],
+      ['device_push', { deviceId: android, payload: { component: 'x' } }],
+    ]
+    for (const [tool, input] of refused) {
+      expect(() => actionOf(tool, input), `${tool} ${JSON.stringify(input)}`).toThrow(
+        DeviceArgsError,
+      )
+    }
+  })
+
   it('answers a malformed call with invalid_params, before the device sees it', async () => {
     const { tools: subject, calls } = tools('session')
     const result = await subject.call(caller, 'device_batch', {

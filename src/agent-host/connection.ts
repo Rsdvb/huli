@@ -11,6 +11,7 @@ import type {
   ProviderBalance,
 } from '@shared/agent-host'
 import type { ContextEstimates } from '@shared/context'
+import type { SessionMcpActions, SessionMcpApp, SessionMcpServer } from '@shared/session-mcp'
 import type {
   BackgroundTaskView,
   ConfigOption,
@@ -508,6 +509,14 @@ export interface SessionOptions {
   folders?: readonly string[]
 }
 
+/** Huli: the MCP servers a session's agent has, as it reports them, and what it can do with them. */
+export interface AgentMcp {
+  servers: SessionMcpServer[]
+  /** Codex's apps; null where the agent has none. */
+  apps: SessionMcpApp[] | null
+  can: Omit<SessionMcpActions, 'start'>
+}
+
 /** Kettu's memory as a session starts with it. */
 export interface SessionMemory {
   /** The index of both layers and how to use them, marked as reference data. */
@@ -742,4 +751,29 @@ export interface AgentConnection {
    */
   readContext?(sessionId: string, cwd: string, options: SessionOptions): Promise<ContextBreakdown>
   readContextEstimates?(sessionId: string, cwd: string): Promise<ContextEstimates>
+
+  /**
+   * Huli: the session's MCP servers as its agent reports them, `kite` naming those Kite handed it
+   * (as Kite names them); null while the agent runs nothing for the session.
+   */
+  readMcp?(sessionId: string, kite: readonly string[]): Promise<AgentMcp | null>
+  /** Huli: connects the server again, or with null every one, where the agent does them together. */
+  reconnectMcp?(sessionId: string, server: string | null): Promise<void>
+  /** Huli: turns a server off or on again; `kite` as for `readMcp`. */
+  toggleMcp?(
+    sessionId: string,
+    server: string,
+    enabled: boolean,
+    kite: readonly string[],
+  ): Promise<void>
+  /**
+   * Huli: starts the agent's sign-in to the server and answers with the page to open in the
+   * browser; how it ended comes as an `mcp` effect with `login`.
+   */
+  loginMcp?(sessionId: string, server: string): Promise<{ url: string }>
+  /**
+   * Huli: the agent reads its skills and plugins again without starting over; 'busy' while a turn
+   * runs, which a reload would change under it.
+   */
+  reloadPlugins?(sessionId: string): Promise<'reloaded' | 'busy'>
 }

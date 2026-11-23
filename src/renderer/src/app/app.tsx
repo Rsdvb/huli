@@ -51,6 +51,7 @@ import { usePathRequest } from '@renderer/web/host-path-request'
 import { useKeyboardShortcuts } from './shortcuts'
 import { useActionLog, useAppCommands } from './commands'
 import { useSnoozeAsk } from '@renderer/features/sidebar/tidy'
+import { useMcpPanelStore } from '@renderer/features/session/mcp/mcp-panel'
 import { QuitHint } from './quit-hint'
 
 const SettingsPage = lazy(() => import('@renderer/features/settings/settings-page'))
@@ -63,6 +64,12 @@ const Onboarding = lazy(() => import('@renderer/features/onboarding/onboarding')
 const SessionMoveDialog = lazy(() =>
   import('@renderer/features/session/move/move-dialog').then((m) => ({
     default: m.SessionMoveDialog,
+  })),
+)
+// Huli: MCP 服务器…, a session's MCP panel, loaded once first asked for.
+const SessionMcpDialog = lazy(() =>
+  import('@renderer/features/session/mcp/mcp-dialog').then((m) => ({
+    default: m.SessionMcpDialog,
   })),
 )
 // What an install of a harness brings, shown before it runs; loaded once an Install first opens it.
@@ -95,6 +102,8 @@ export function App() {
   const moveAsked = useMoveStore((s) => s.summary !== null)
   const [moveLoaded, setMoveLoaded] = useState(false)
   if (moveAsked && !moveLoaded) setMoveLoaded(true)
+  // Huli: so does the MCP panel, once first asked for.
+  const mcpLoaded = useMcpPanelStore((s) => s.loaded)
   const snoozeAsked = useSnoozeAsk((s) => s.asked)
   if (pathAsked && !pathPicker) setPathPicker(true)
   useKeyboardShortcuts()
@@ -177,6 +186,11 @@ export function App() {
         {moveLoaded && (
           <Suspense fallback={null}>
             <SessionMoveDialog />
+          </Suspense>
+        )}
+        {mcpLoaded && (
+          <Suspense fallback={null}>
+            <SessionMcpDialog />
           </Suspense>
         )}
         {snoozeAsked && (

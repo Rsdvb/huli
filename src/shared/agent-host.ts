@@ -2,6 +2,7 @@
 
 import type { CodebuddyShellOverride, CodebuddySite, PromptCacheTtl } from './agents'
 import type { AgentRemovalPreview, AgentRemovalProgress, AgentRemovalResult } from './agent-removal'
+import type { LaunchConfig } from './launch-configs'
 import type {
   AgentSyncState,
   SyncApplied,
@@ -134,6 +135,7 @@ import type { PathCompletion } from './remote/host-admin'
 import type { ReportOrigin } from './report'
 import type { AutoApprove } from './risk'
 import type { SessionProcesses } from './task-processes'
+import type { PluginReload, SessionMcpAction, SessionMcpView } from './session-mcp'
 import type { AgentSandboxSupport, ContainerStatus, SandboxChoice } from './sandbox'
 import type { WebReaderStatus } from './web-reader'
 import type {
@@ -799,6 +801,20 @@ export interface ClaudeSettings {
   compact: ClaudeCompactRow[]
   /** The file's `promptCacheTtl`; null when it has none. */
   promptCacheTtl: PromptCacheTtl | null
+  /** Huli: the file's `outputStyle`; null when it has none. Absent from an older host. */
+  outputStyle?: string | null
+  /** Huli: Claude Code's output styles, built-in and the user's own. Absent from an older host. */
+  outputStyles?: OutputStyleInfo[]
+}
+
+/** Huli: one of Claude Code's output styles, as its configuration folder lists it. */
+export interface OutputStyleInfo {
+  /** As Claude Code's settings take it. */
+  name: string
+  /** As menus show it: a built-in style's in the host's language. */
+  label: string
+  description: string | null
+  builtIn: boolean
 }
 
 /** One change to those settings; a null value removes the key, and a null model means all. */
@@ -853,6 +869,41 @@ export interface CodebuddySettings {
 
 /** The site to write; `automatic` removes the key. */
 export type CodebuddySiteChange = { site: CodebuddySite | 'automatic' }
+
+/**
+ * Huli: what a Codex agent's page edits in Codex's own configuration, as app-server's config API
+ * reads it. A part this Codex does not offer is null.
+ */
+export interface CodexSettings {
+  /** The `memories` feature, on or off as the configuration has it. */
+  memories: boolean | null
+  /** `sandbox_workspace_write`: what a turn that may write the workspace may also do. */
+  workspace: { networkAccess: boolean; writableRoots: string[] } | null
+  /** `default_permissions`, the profile new threads take; null for Codex's own default. */
+  permissionProfile: string | null
+  /** The permission profiles there are, from `permissionProfile/list`. */
+  profiles: { id: string; description: string | null; allowed: boolean }[] | null
+  /** The features in beta, from `experimentalFeature/list`, each on or off. */
+  features: CodexFeature[] | null
+  /** The keys a managed layer pins, which the page shows but cannot change. */
+  locked: string[]
+}
+
+export interface CodexFeature {
+  /** Its key under `[features]`. */
+  name: string
+  displayName: string
+  description: string | null
+  enabled: boolean
+  defaultEnabled: boolean
+}
+
+/** Huli: one key of Codex's configuration to write; null removes it. */
+export type CodexSettingChange =
+  | { setting: 'memories'; value: boolean }
+  | { setting: 'networkAccess'; value: boolean }
+  | { setting: 'permissionProfile'; value: string | null }
+  | { setting: 'feature'; name: string; value: boolean }
 
 /** A place the agent reads its own configuration from, in the order Settings lists them. */
 export interface AgentConfigItem {
@@ -1481,6 +1532,14 @@ export interface HostContract {
     params: { agentId: AgentId; change: CodebuddySiteChange }
     result: void
   }
+  // Huli: a Codex agent's memories, workspace sandbox, permission profile and features in beta,
+  // read through its app-server's config API; rejects with the reason when that cannot be read.
+  'agents.codexSettings': { params: { agentId: AgentId }; result: CodexSettings }
+  // Huli: writes one key of them through that API, which keeps the file's comments.
+  'agents.setCodexSetting': {
+    params: { agentId: AgentId; change: CodexSettingChange }
+    result: void
+  }
   'agents.refreshAccount': { params: { agentId: AgentId; force?: boolean }; result: void }
   // Huli: what the agent signs in with and whether it is signed in, starting it when this run has
   // not; with `watch`, a signed-out agent is checked again every few seconds for a few minutes,
@@ -1982,6 +2041,21 @@ export interface HostContract {
   // Huli: the session's background processes for its board, read now: their CPU, memory and
   // ports, and the tasks of an agent whose tasks no event lists.
   'sessions.processes': { params: { sessionId: string }; result: SessionProcesses }
+  // Huli: the MCP servers the session's agent has, read when its panel opens and when
+  // `session.mcpChanged` says they changed; nothing reads them before.
+  'sessions.mcp': { params: { sessionId: string }; result: SessionMcpView }
+  // Huli: reconnects a server (every one, where the agent reconnects them together, with `server`
+  // null), or turns one off for this session alone and on again; answers with the servers then.
+  'sessions.mcpAct': {
+    params: { sessionId: string; action: SessionMcpAction; server: string | null }
+    result: SessionMcpView
+  }
+  // Huli: starts the agent's sign-in to a server that needs one. The window opens `url` in the
+  // browser, and `session.mcpChanged` with `login` says how it ended. This computer's windows alone.
+  'sessions.mcpLogin': { params: { sessionId: string; server: string }; result: { url: string } }
+  // Huli: the agent reloads its skills and plugins without starting again, in the session, or
+  // without one in every session whose agent runs, so a newly installed one applies.
+  'sessions.reloadPlugins': { params: { sessionId?: string }; result: PluginReload }
   // Huli: moves a command or subagent that holds up its tool call to the background, so the turn
   // goes on; without `toolCallId`, every one of the session's. False when none matched.
   'sessions.toBackground': {
@@ -2108,6 +2182,8 @@ export interface HostContract {
     params: { sessionId: string; command: string; notify: boolean }
     result: { terminalId: string; notified: boolean }
   }
+  /** Huli: the dev servers `.claude/launch.json` names in the session's folder, for presets. */
+  'sessions.launchConfigs': { params: { sessionId: string }; result: { configs: LaunchConfig[] } }
   'sessions.unqueue': { params: { sessionId: string; itemId: string }; result: void }
   'sessions.steer': { params: { sessionId: string; itemId: string }; result: void }
   // Steers where the agent can; otherwise stops the turn and sends the prompt as the next one.
@@ -2845,6 +2921,8 @@ export const HOST_METHODS = [
   'agents.setAutoCompact',
   'agents.codebuddySettings',
   'agents.setCodebuddySite',
+  'agents.codexSettings',
+  'agents.setCodexSetting',
   'agents.refreshAccount',
   'agents.readSignIn',
   'agents.listSessions',
@@ -2952,6 +3030,10 @@ export const HOST_METHODS = [
   'sessions.stopTask',
   'sessions.taskOutput',
   'sessions.processes',
+  'sessions.mcp',
+  'sessions.mcpAct',
+  'sessions.mcpLogin',
+  'sessions.reloadPlugins',
   'sessions.toBackground',
   'sessions.cleanTasks',
   'sessions.sideAsk',
@@ -2981,6 +3063,7 @@ export const HOST_METHODS = [
   'sessions.contextEstimates',
   'sessions.queue',
   'sessions.runCommand',
+  'sessions.launchConfigs',
   'sessions.unqueue',
   'sessions.steer',
   'sessions.sendNow',
@@ -3225,6 +3308,13 @@ export type HostEvent =
   // To a port that watches the session: the others that have it in front, never the port's own
   // computer or device.
   | { type: 'session.viewers'; sessionId: string; viewers: SessionViewer[] }
+  // Huli: to the ports watching the session: its agent's MCP servers changed, so an open panel
+  // reads them again; `login` ends a sign-in the panel started.
+  | {
+      type: 'session.mcpChanged'
+      sessionId: string
+      login?: { server: string; ok: boolean; error: string | null }
+    }
   | { type: 'agent.status'; status: AgentStatus }
   | { type: 'agent.removed'; agentId: AgentId }
   | { type: 'agent.options'; options: AgentOptions }

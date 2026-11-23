@@ -242,6 +242,7 @@
     "copySessionId": "Copy session ID",
     "copiedSessionId": "Copied the session ID",
     "export": "Export…",
+    "mcp": "MCP servers…",
     "move": "Move to another computer…",
     "showInParent": "Show in parent session",
     "agentOf": "{{harness}} · {{agent}}",

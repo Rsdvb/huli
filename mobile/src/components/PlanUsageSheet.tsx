@@ -41,6 +41,7 @@ import { gentle } from '../ui/session/Press'
 import { UsageRing } from '../ui/session/StatusLine'
 import { useTicking } from '../ui/session/ticking'
 import { usableAgents } from './ConfigMenus'
+import { PacedBar, paceWords } from './PaceTick'
 
 /** The clock the sheets count down by: every 15 seconds while shown. */
 export { useTicking }
@@ -404,6 +405,7 @@ function WindowRow(props: { limit: PlanLimit; now: number; compact?: boolean }) 
         `${windowName(limit)}，已用 ${limit.usedPercent === null && !out ? '未知' : `${used}%`}`,
         out ? '已用完' : null,
         reset,
+        paceWords(limit, now),
       ]
         .filter(Boolean)
         .join('，')}
@@ -423,16 +425,22 @@ function WindowRow(props: { limit: PlanLimit; now: number; compact?: boolean }) 
           {limit.usedPercent === null && !out ? '—' : `${used}%`}
         </Text>
       </View>
-      <View
-        style={[styles.bar, props.compact && styles.barCompact, { backgroundColor: c.fillStrong }]}
-      >
+      <PacedBar limit={limit} now={now} height={props.compact ? 4 : 6} color={c.textSecondary}>
         <View
           style={[
-            styles.barFill,
-            { backgroundColor: color, width: `${Math.min(100, Math.max(0, used))}%` },
+            styles.bar,
+            props.compact && styles.barCompact,
+            { backgroundColor: c.fillStrong },
           ]}
-        />
-      </View>
+        >
+          <View
+            style={[
+              styles.barFill,
+              { backgroundColor: color, width: `${Math.min(100, Math.max(0, used))}%` },
+            ]}
+          />
+        </View>
+      </PacedBar>
       {reset || limit.amount ? (
         <View style={styles.windowFoot}>
           <Text

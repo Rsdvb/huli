@@ -14,6 +14,20 @@ import {
   type UploadAnswer,
 } from '@shared/browser'
 import {
+  BROWSER_ARGS,
+  BrowserArgsInvalid,
+  clickAtArgs,
+  dragArgs,
+  emulateArgs,
+  isArgsTool,
+  pdfArgs,
+  routeArgs,
+  storageStateArgs,
+  traceArgs,
+  type BrowserEmulation,
+  type EmulationChange,
+} from '@shared/browser-args'
+import {
   ControlWait,
   isControlStep,
   type ControlWaitOptions,
@@ -52,6 +66,9 @@ import { isNeverOpened } from './policy'
 import { elementMet, SEARCH, selectorMet, type FrameSearch } from './page-wait'
 import { diffOutline } from './snapshot-diff'
 import { UploadRefused, type UploadFile } from './upload'
+import { emulationText, emulationValue } from './emulation'
+import { answerFor, mockedLabel, RouteBook, ruleText } from './routes'
+import { summarizeTrace, TRACE_CATEGORIES, traceEvents, traceText } from './trace'
 
 /** How long the network stays quiet before a page counts as settled. */
 export const QUIET_MS = 500
@@ -129,6 +146,42 @@ export interface BrowserCdpDeps {
     ask: Omit<UploadConsent, 'id'>,
     wait: ControlWaitOptions,
   ): Promise<UploadAnswer>
+  /** Huli: changes what a tab emulates, and answers what it emulates then. */
+  emulate?(tabId: string, change: EmulationChange): Promise<BrowserEmulation>
+  /**
+   * Huli: whether a page of the session may show `url` without asking the user; a document of a
+   * site that needs their allow is never mocked, so a rule cannot make a page pass for that site.
+   */
+  mayOpen?(sessionId: string, url: string): boolean
+  /** Huli: the files the session's pages downloaded. */
+  downloads?(sessionId: string): DownloadInfo[]
+  /** Huli: writes a file into the session's downloads; null when it has no folder here. */
+  saveFile?(sessionId: string, name: string, data: Buffer): Promise<string | null>
+  /** Huli: saved sign-in states (browser_storage_state). */
+  states?: SavedStateTools
+}
+
+/** Huli: a download of the session's pages, as `browser_downloads` lists it. */
+export interface DownloadInfo {
+  name: string
+  path: string | null
+  bytes: number
+  state: 'waiting' | 'progressing' | 'completed' | 'cancelled' | 'interrupted'
+}
+
+/** Huli: what `browser_storage_state` asks of the saved states. */
+export interface SavedStateTools {
+  save(
+    sessionId: string,
+    tabId: string,
+    name: string,
+  ): Promise<{ sites: string[]; cookies: number }>
+  restore(
+    sessionId: string,
+    tabId: string | null,
+    name: string,
+  ): Promise<{ sites: string[]; cookies: number; storage: number }>
+  list(): Promise<{ name: string; sites: string[]; savedAt: number }[]>
 }
 
 interface ConsoleMessage extends ConsoleEntry {
@@ -203,7 +256,48 @@ interface PageState {
   frameId: string | null
   /** The file chooser the agent's last action opened, which waits for files; null when none. */
   chooser: FileChooser | null
+  /** Huli: the tab's page, whose debugger the rules' paused requests are answered on. */
+  contents: WebContents
+  /** Huli: the session the tab is in, and whether the agent used it, so its rules apply. */
+  session: string | null
+  agentUsed: boolean
+  /** Huli: the Fetch patterns the tab pauses requests by now, joined; '' while it pauses none. */
+  fetchKey: string
+  /** Huli: the requests a rule answered, by their network id, with what it did. */
+  mocked: Map<string, string>
+  /** Huli: settles with the stream of the trace that ended, or null for none. */
+  trace: ((stream: string | null) => void) | null
+  /** Huli: the data of a drag the page started while drags are intercepted. */
+  drag: Record<string, unknown> | null
+  /**
+   * Huli: the page's frames of other sites, each a target of its own in another process, by the
+   * debugger session flattened auto-attach gave it, and by the slot its nodes' ids are kept in.
+   */
+  children: Map<string, ChildFrame>
+  slots: Map<number, ChildFrame>
+  nextSlot: number
+  /** Huli: whether the tab attaches its frames of other sites, from its first snapshot on. */
+  attaching: boolean
+  /** Huli: the frame target each element object of such a frame belongs to. */
+  objects: Map<string, string>
 }
+
+/** Huli: a frame of another site, which Chromium runs in a process of its own. */
+interface ChildFrame {
+  /** Its flattened debugger session. */
+  session: string
+  /** Its target's id, which is its frame's id too. */
+  targetId: string
+  /** The session of the frame that holds it; null for the page itself. */
+  parent: string | null
+  slot: number
+}
+
+/**
+ * Huli: a node of a frame of another site is known by its backend id there, which may be any
+ * other target's too, plus its frame's slot times this: one number, as refs keep it.
+ */
+const SLOT = 2 ** 32
 
 interface FileChooser {
   /** The file input's backend node id. */
@@ -362,6 +456,31 @@ export function checkAgentNavigation(url: string): string {
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms))
 
+/** Huli: the tools that need no page, since they read or change the session's own state. */
+const PAGELESS = new Set<BrowserToolName>([
+  'browser_navigate',
+  'browser_tabs',
+  'browser_route',
+  'browser_downloads',
+  'browser_storage_state',
+])
+
+/** Huli: the most of a trace read back, past which it is cut rather than held in memory. */
+const MAX_TRACE_BYTES = 200 * 1024 * 1024
+
+/** Huli: a PDF's file name, from the page's title or its address. */
+export function pdfName(title: string, url: string): string {
+  const from = title.trim() || siteOf(url) || 'page'
+  const name = from
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+    .replace(/[. ]+$/, '')
+  return `${name || 'page'}.pdf`
+}
+
 function failure(error: unknown): ToolFailure {
   if (error instanceof ToolFailure) return error
   if (error instanceof ControlWait) return waitFailure(error)
@@ -402,11 +521,15 @@ export class BrowserCdp {
    * opens takes over only once the action is done.
    */
   private readonly acting = new Map<string, string>()
+  /** Huli: each session's network mocking rules. */
+  private readonly routes = new RouteBook()
+  /** Huli: what each session's downloads said since the agent's last action, for its result. */
+  private readonly downloadNotes = new Map<string, string[]>()
 
   constructor(private readonly deps: BrowserCdpDeps) {}
 
   /** A tab's debugger starts handing its events here; the debugger stays attached as it was. */
-  watch(tabId: string, contents: WebContents): void {
+  watch(tabId: string, contents: WebContents, sessionId: string | null = null): void {
     if (this.pages.has(tabId)) return
     const page: PageState = {
       nav: 0,
@@ -425,8 +548,22 @@ export class BrowserCdp {
       status: null,
       frameId: null,
       chooser: null,
+      contents,
+      session: sessionId,
+      // A tab made for the agent, or a popup of its call, takes the session's rules at once.
+      agentUsed: sessionId !== null && this.deps.tab(sessionId) === tabId,
+      fetchKey: '',
+      mocked: new Map(),
+      trace: null,
+      drag: null,
+      children: new Map(),
+      slots: new Map(),
+      nextSlot: 0,
+      attaching: false,
+      objects: new Map(),
     }
     this.pages.set(tabId, page)
+    if (page.agentUsed) void this.syncRoutes(page)
     for (const method of [
       'DOM.enable',
       'Runtime.enable',
@@ -443,14 +580,159 @@ export class BrowserCdp {
         return tree
       })
       .catch(() => {})
-    contents.debugger.on('message', (_event, method, params) => {
-      this.event(page, method, params as Record<string, unknown>)
+    contents.debugger.on('message', (_event, method, params, session?: string) => {
+      this.event(page, method, params as Record<string, unknown>, session || null)
     })
+  }
+
+  /**
+   * Huli: from the tab's first snapshot on, its frames of other sites attach as targets of their
+   * own (`Target.setAutoAttach` with flatten), so their elements read and act as the page's do.
+   */
+  private async attachFrames(page: PageState): Promise<void> {
+    if (page.attaching) return
+    page.attaching = true
+    await page.contents.debugger
+      .sendCommand('Target.setAutoAttach', {
+        autoAttach: true,
+        waitForDebuggerOnStart: false,
+        flatten: true,
+      })
+      .catch(() => {
+        page.attaching = false
+      })
+  }
+
+  /** Huli: a frame of another site attached, under the frame whose session `parent` is. */
+  private frameAttached(
+    page: PageState,
+    params: Record<string, unknown>,
+    parent: string | null,
+  ): void {
+    const info = (params.targetInfo ?? {}) as { targetId?: string; type?: string }
+    const session = typeof params.sessionId === 'string' ? params.sessionId : null
+    if (!session) return
+    const command = (method: string, extra: Record<string, unknown> = {}): void => {
+      void page.contents.debugger.sendCommand(method, extra, session).catch(() => {})
+    }
+    if (info.type === 'iframe' && typeof info.targetId === 'string') {
+      const frame: ChildFrame = { session, targetId: info.targetId, parent, slot: ++page.nextSlot }
+      page.children.set(session, frame)
+      page.slots.set(frame.slot, frame)
+      // Its own frames of yet other sites attach under it.
+      command('Target.setAutoAttach', {
+        autoAttach: true,
+        waitForDebuggerOnStart: false,
+        flatten: true,
+      })
+    }
+    if (params.waitingForDebugger === true) command('Runtime.runIfWaitingForDebugger')
+  }
+
+  /** Huli: a frame target went with its frame. */
+  private frameDetached(page: PageState, params: Record<string, unknown>): void {
+    const frame = typeof params.sessionId === 'string' ? page.children.get(params.sessionId) : null
+    if (!frame) return
+    page.children.delete(frame.session)
+    page.slots.delete(frame.slot)
+    for (const [object, session] of page.objects) {
+      if (session === frame.session) page.objects.delete(object)
+    }
+  }
+
+  /** Huli: the frame target a node id names, and its id there; the page's own has none. */
+  private nodeTarget(
+    page: PageState,
+    backend: number,
+  ): { target: string | null; backend: number } | null {
+    if (backend < SLOT) return { target: null, backend }
+    const frame = page.slots.get(Math.floor(backend / SLOT))
+    return frame ? { target: frame.session, backend: backend % SLOT } : null
+  }
+
+  /**
+   * Huli: where a frame of another site's viewport starts in the page's, in CSS pixels: its
+   * element's content box in the frame holding it, added up to the page.
+   */
+  private async frameOffset(
+    sessionId: string,
+    page: PageState,
+    backend: number,
+  ): Promise<{ x: number; y: number }> {
+    let x = 0
+    let y = 0
+    let frame = backend < SLOT ? undefined : page.slots.get(Math.floor(backend / SLOT))
+    for (let depth = 0; frame && depth < 8; depth++) {
+      const holder = frame.parent ?? ''
+      const owner = await this.send<{ backendNodeId?: number }>(
+        sessionId,
+        'DOM.getFrameOwner',
+        { frameId: frame.targetId },
+        holder,
+      )
+      if (typeof owner.backendNodeId !== 'number') break
+      const box = await this.send<{ model?: { content?: number[] } }>(
+        sessionId,
+        'DOM.getBoxModel',
+        { backendNodeId: owner.backendNodeId },
+        holder,
+      )
+      const content = box.model?.content
+      if (!content || content.length < 2) break
+      x += content[0]!
+      y += content[1]!
+      frame = frame.parent ? page.children.get(frame.parent) : undefined
+    }
+    return { x, y }
+  }
+
+  /**
+   * Huli: PROBE for an element of a frame of another site gives its centre in that frame's
+   * viewport, which the frame's place in the page moves into the page's.
+   */
+  private async inPage(sessionId: string, backend: number, probe: Probe): Promise<Probe> {
+    if (backend < SLOT || !probe.connected) return probe
+    const page = this.pageOf(sessionId)
+    const offset = await this.frameOffset(sessionId, page, backend)
+    const view = await this.viewport(sessionId)
+    const x = probe.x + offset.x
+    const y = probe.y + offset.y
+    const target = this.nodeTarget(page, backend)?.target ?? null
+    return {
+      ...probe,
+      x,
+      y,
+      inside: x >= 0 && y >= 0 && x <= view.width && y <= view.height,
+      // The page's own input does not reach into such a frame here: its events go to the frame.
+      ...(target ? { frame: { target, x: probe.x, y: probe.y } } : {}),
+    }
+  }
+
+  /** Huli: the point and target a mouse event at a probed element goes to. */
+  private pointOf(spot: Probe): { x: number; y: number; target: string | undefined } {
+    const frame = (spot as Probe & { frame?: { target: string; x: number; y: number } }).frame
+    return frame
+      ? { x: frame.x, y: frame.y, target: frame.target }
+      : { x: spot.x, y: spot.y, target: undefined }
   }
 
   /** A tab's page is gone. */
   forget(tabId: string): void {
+    this.pages.get(tabId)?.trace?.(null)
     this.pages.delete(tabId)
+  }
+
+  /** Huli: the session's browser is gone, and its rules with it. */
+  forgetSession(sessionId: string): void {
+    this.downloadNotes.delete(sessionId)
+    if (this.routes.clear(sessionId) > 0) void this.routesChanged(sessionId)
+  }
+
+  /** Huli: a download of the session's page started or ended; the agent's next result says so. */
+  downloadNote(sessionId: string, note: string): void {
+    const notes = this.downloadNotes.get(sessionId) ?? []
+    notes.push(note)
+    this.downloadNotes.set(sessionId, notes.slice(-10))
   }
 
   /** The ids of the page's frames, the main one first, then its same-origin children. */
@@ -468,7 +750,12 @@ export class BrowserCdp {
     } catch {
       // Without a frame tree the page's own nodes are all there is.
     }
-    return ids.length > 0 ? ids : ['']
+    // Huli: a frame of another site is read through its own target.
+    const tab = this.tabOf(sessionId)
+    const page = tab === null ? undefined : this.pages.get(tab)
+    const remote = new Set([...(page?.children.values() ?? [])].map((frame) => frame.targetId))
+    const local = ids.filter((id, index) => index === 0 || !remote.has(id))
+    return local.length > 0 ? local : ['']
   }
 
   /** A dialog a tab's page opened, which views.ts answered at once. */
@@ -490,7 +777,17 @@ export class BrowserCdp {
     wait: ControlWaitOptions,
   ): Promise<BrowserCallResult> {
     if (tool === 'browser_ask_user') return this.askUser(sessionId, args, wait)
-    if (tool !== 'browser_navigate' && tool !== 'browser_tabs') this.pageOf(sessionId)
+    // Huli: main checks the second batch's arguments itself, as another computer's host sends
+    // calls too; each tool reads them again through its parser.
+    if (isArgsTool(tool)) {
+      try {
+        BROWSER_ARGS[tool](args)
+      } catch (error) {
+        if (error instanceof BrowserArgsInvalid) throw new ToolFailure('invalid', error.message)
+        throw error
+      }
+    }
+    if (!PAGELESS.has(tool)) this.pageOf(sessionId)
     let end: () => void
     try {
       end = await this.deps.controls.begin(sessionId, wait)
@@ -501,6 +798,13 @@ export class BrowserCdp {
     const tab = this.deps.tab(sessionId)
     const pinned = !this.acting.has(sessionId) && tab !== null
     if (pinned) this.acting.set(sessionId, tab)
+    // Huli: a tab the agent acts on takes the session's rules from now on.
+    const acted = tab === null ? undefined : this.pages.get(tab)
+    if (acted && (!acted.agentUsed || acted.session !== sessionId)) {
+      acted.agentUsed = true
+      acted.session = sessionId
+      await this.syncRoutes(acted)
+    }
     let stop!: (failure: ToolFailure) => void
     const stopped = new Promise<never>((_, reject) => (stop = reject))
     const running = this.running.get(sessionId) ?? new Set()
@@ -603,6 +907,24 @@ export class BrowserCdp {
         return this.deps.tabs(sessionId, args)
       case 'browser_upload_file':
         return this.upload(sessionId, args)
+      case 'browser_hover':
+        return this.hover(sessionId, args)
+      case 'browser_drag':
+        return this.drag(sessionId, args)
+      case 'browser_click_at':
+        return this.clickAt(sessionId, args)
+      case 'browser_emulate':
+        return this.emulate(sessionId, args)
+      case 'browser_route':
+        return this.route(sessionId, args)
+      case 'browser_downloads':
+        return this.downloadsResult(sessionId)
+      case 'browser_pdf':
+        return this.pdf(sessionId, args)
+      case 'browser_trace':
+        return this.trace(sessionId, args)
+      case 'browser_storage_state':
+        return this.storageState(sessionId, args)
       case 'browser_ask_user':
         throw new ToolFailure('invalid', 'browser_ask_user does not run as a page action.')
     }
@@ -652,20 +974,34 @@ export class BrowserCdp {
     await this.deps.controls.gate(sessionId, wait)
   }
 
-  /** Runs one CDP command, once the page is the agent's: the user may hold it meanwhile. */
+  /**
+   * Runs one CDP command, once the page is the agent's: the user may hold it meanwhile. Huli: a
+   * command on a node or an object of a frame of another site goes to that frame's target, and
+   * `target` names one outright ('' for the page itself).
+   */
   private async send<T = Record<string, unknown>>(
     sessionId: string,
     method: string,
     params: Record<string, unknown> = {},
+    target?: string,
   ): Promise<T> {
     await this.gate(sessionId)
     const contents = this.contentsOf(sessionId)
+    const routed = this.routed(sessionId, params, target)
+    params = routed.params
     // Chromium reports an injected input event as it reports the user's, so the pane's input
     // watch must know this one is the agent's.
     const injecting = method.startsWith('Input.')
     const tab = this.tabOf(sessionId)
     const state = tab === null ? undefined : this.pages.get(tab)
-    if (method === 'Input.dispatchMouseEvent' && tab !== null && this.deps.pointScale) {
+    // A drag event's point is in the page's own CSS pixels, which Chromium scales itself, and so
+    // is a frame target's: only the page's own widget takes the view's pixels.
+    if (
+      method === 'Input.dispatchMouseEvent' &&
+      routed.target === null &&
+      tab !== null &&
+      this.deps.pointScale
+    ) {
       // The debugger takes the point in the view's pixels, and a page of a fixed size draws
       // scaled there. Nothing runs between reading the scale and sending the event.
       const scale = await this.deps.pointScale(tab)
@@ -675,10 +1011,42 @@ export class BrowserCdp {
     }
     if (injecting && state) state.injecting += 1
     try {
-      return (await contents.debugger.sendCommand(method, params)) as T
+      if (routed.target === null) return (await contents.debugger.sendCommand(method, params)) as T
+      const answer = (await contents.debugger.sendCommand(method, params, routed.target)) as T
+      // Huli: an object of a frame of another site is used on its target from now on.
+      const object = (answer as { object?: { objectId?: string } } | null)?.object?.objectId
+      if (method === 'DOM.resolveNode' && object && state) {
+        state.objects.set(object, routed.target)
+        if (state.objects.size > 2_000) state.objects.delete(state.objects.keys().next().value!)
+      }
+      return answer
     } finally {
       if (injecting && state) state.injecting -= 1
     }
+  }
+
+  /** Huli: the frame target a command goes to, and its parameters there; null for the page. */
+  private routed(
+    sessionId: string,
+    params: Record<string, unknown>,
+    target: string | undefined,
+  ): { target: string | null; params: Record<string, unknown> } {
+    if (target !== undefined) return { target: target === '' ? null : target, params }
+    const tab = this.tabOf(sessionId)
+    const page = tab === null ? undefined : this.pages.get(tab)
+    if (!page) return { target: null, params }
+    if (typeof params.backendNodeId === 'number' && params.backendNodeId >= SLOT) {
+      const node = this.nodeTarget(page, params.backendNodeId)
+      if (!node) {
+        throw new ToolFailure(
+          'stale_ref',
+          'That element’s frame is no longer on the page. Take a new snapshot.',
+        )
+      }
+      return { target: node.target, params: { ...params, backendNodeId: node.backend } }
+    }
+    const object = typeof params.objectId === 'string' ? page.objects.get(params.objectId) : null
+    return object ? { target: object, params } : { target: null, params }
   }
 
   /** Whether an input event a tab's page reports right now is the agent's own. */
@@ -686,7 +1054,16 @@ export class BrowserCdp {
     return (this.pages.get(tabId)?.injecting ?? 0) > 0
   }
 
-  private event(page: PageState, method: string, params: Record<string, unknown>): void {
+  private event(
+    page: PageState,
+    method: string,
+    params: Record<string, unknown>,
+    child: string | null = null,
+  ): void {
+    // Huli: frames of other sites attach and go; their own events are not the page's.
+    if (method === 'Target.attachedToTarget') return this.frameAttached(page, params, child)
+    if (method === 'Target.detachedFromTarget') return this.frameDetached(page, params)
+    if (child !== null) return
     switch (method) {
       case 'Runtime.consoleAPICalled':
         this.pushConsole(page, consoleCall(params))
@@ -843,6 +1220,15 @@ export class BrowserCdp {
         page.chooser = null
         break
       }
+      case 'Fetch.requestPaused':
+        void this.paused(page, params)
+        break
+      case 'Tracing.tracingComplete':
+        page.trace?.(typeof params.stream === 'string' ? params.stream : null)
+        break
+      case 'Input.dragIntercepted':
+        page.drag = (params.data as Record<string, unknown> | undefined) ?? null
+        break
       case 'Page.fileChooserOpened': {
         // Reported only while views.ts intercepts choosers, that is while the agent holds the tab.
         const backend = params.backendNodeId
@@ -906,6 +1292,7 @@ export class BrowserCdp {
     scope: { root?: number; depth?: number } = {},
   ): Promise<{ outline: string; head: string; all: string[]; found: boolean }> {
     // Each frame has a tree of its own, which goes under the element of the frame that holds it.
+    await this.attachFrames(page)
     let main: AXNode[] | null = null
     const frames: { owner: number | null; nodes: AXNode[] }[] = []
     for (const frameId of await this.frameIds(sessionId)) {
@@ -923,6 +1310,33 @@ export class BrowserCdp {
         frameId,
       }).catch(() => null)
       frames.push({ owner: owner?.backendNodeId ?? null, nodes: tree.nodes })
+    }
+    // Huli: each frame of another site through its own target, its nodes' ids in its slot; a
+    // frame holding another comes first, as it attached first.
+    for (const frame of page.children.values()) {
+      const tree = await this.send<{ nodes: AXNode[] }>(
+        sessionId,
+        'Accessibility.getFullAXTree',
+        {},
+        frame.session,
+      ).catch(() => null)
+      if (!tree) continue
+      const owner = await this.send<{ backendNodeId?: number }>(
+        sessionId,
+        'DOM.getFrameOwner',
+        { frameId: frame.targetId },
+        frame.parent ?? '',
+      ).catch(() => null)
+      const holder = frame.parent ? (page.children.get(frame.parent)?.slot ?? 0) : 0
+      frames.push({
+        owner:
+          typeof owner?.backendNodeId === 'number' ? holder * SLOT + owner.backendNodeId : null,
+        nodes: tree.nodes.map((node) =>
+          node.backendDOMNodeId === undefined
+            ? node
+            : { ...node, backendDOMNodeId: frame.slot * SLOT + node.backendDOMNodeId },
+        ),
+      })
     }
     const nodes = mergeFrames(main ?? [], frames)
     const contents = this.contentsOf(sessionId)
@@ -1043,6 +1457,7 @@ export class BrowserCdp {
         ...dialogs,
         ...chooser,
         ...opened,
+        ...this.takeDownloadNotes(sessionId),
         ...newErrors(current),
         ...(diff ? ['The snapshot shows what changed since your last one.'] : []),
       ].join(' '),
@@ -1165,31 +1580,40 @@ export class BrowserCdp {
     const spot = await this.actionable(sessionId, backend, args, 'click')
     const { x, y } = spot
     this.deps.acted?.(sessionId, { x, y }, true)
-    await this.send(sessionId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
-    const clicks = double ? 2 : 1
-    for (let count = 1; count <= clicks; count++) {
-      await this.send(sessionId, 'Input.dispatchMouseEvent', {
-        type: 'mousePressed',
-        x,
-        y,
-        button,
-        buttons: buttonMask(button),
-        clickCount: count,
-      })
-      await this.send(sessionId, 'Input.dispatchMouseEvent', {
-        type: 'mouseReleased',
-        x,
-        y,
-        button,
-        buttons: 0,
-        clickCount: count,
-      })
-    }
+    const point = this.pointOf(spot)
+    await this.clickPoint(sessionId, point.x, point.y, button, double, point.target)
     return this.afterAction(
       sessionId,
       page,
       `Clicked ${describe(args, 'the element')}${double ? ' twice' : ''}.`,
     )
+  }
+
+  /** Moves to a point and clicks there, once or twice. */
+  private async clickPoint(
+    sessionId: string,
+    x: number,
+    y: number,
+    button: string,
+    double: boolean,
+    target?: string,
+  ): Promise<void> {
+    await this.send(sessionId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, target)
+    const clicks = double ? 2 : 1
+    for (let count = 1; count <= clicks; count++) {
+      await this.send(
+        sessionId,
+        'Input.dispatchMouseEvent',
+        { type: 'mousePressed', x, y, button, buttons: buttonMask(button), clickCount: count },
+        target,
+      )
+      await this.send(
+        sessionId,
+        'Input.dispatchMouseEvent',
+        { type: 'mouseReleased', x, y, button, buttons: 0, clickCount: count },
+        target,
+      )
+    }
   }
 
   /**
@@ -1220,10 +1644,11 @@ export class BrowserCdp {
           return null
         },
       )
-      const problem = probe
-        ? actionProblem(probe, action)
+      const placed = probe ? await this.inPage(sessionId, backend, probe) : null
+      const problem = placed
+        ? actionProblem(placed, action)
         : actionProblem({ connected: false } as Probe, action)
-      if (!problem) return probe!
+      if (!problem) return placed!
       if (!problem.retry || Date.now() - started >= AUTO_WAIT_MS) {
         throw new ToolFailure(
           problem.code,
@@ -1273,7 +1698,9 @@ export class BrowserCdp {
         await this.send(sessionId, 'Input.dispatchKeyEvent', { type: 'keyUp', key: char })
       }
     } else {
-      await this.send(sessionId, 'Input.insertText', { text })
+      // Huli: a field of a frame of another site takes its text through that frame's target.
+      const node = this.nodeTarget(page, backend)
+      await this.send(sessionId, 'Input.insertText', { text }, node?.target ?? '')
     }
     if (args.submit === true) await this.pressKey(sessionId, 'Enter')
     return this.afterAction(
@@ -1858,15 +2285,19 @@ export class BrowserCdp {
         }
         return true
       })
-      .map(({ id, method, url, status, type, size, error }) => ({
-        id,
-        method,
-        url,
-        status,
-        type,
-        size,
-        ...(error === null ? {} : { error }),
-      }))
+      .map(({ id, method, url, status, type, size, error }) => {
+        const mocked = page.mocked.get(id)
+        return {
+          id,
+          method,
+          url,
+          status,
+          type,
+          size,
+          ...(error === null ? {} : { error }),
+          ...(mocked === undefined ? {} : { mocked }),
+        }
+      })
     const count =
       requests.length === 0
         ? 'No network requests'
@@ -1956,7 +2387,7 @@ export class BrowserCdp {
         timing: requestTiming(entry),
         request_body: requestBody?.text ?? null,
         response_body: responseBody?.text ?? null,
-        notes,
+        notes: page.mocked.has(id) ? [`It was ${page.mocked.get(id)!}.`, ...notes] : notes,
       },
     }
   }
@@ -1998,6 +2429,8 @@ export class BrowserCdp {
     }>(sessionId, 'Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: source,
+      // Huli: the element is the function's argument, as the tool says, and `this` as well.
+      ...(args.ref !== undefined ? { arguments: [{ objectId }] } : {}),
       returnByValue: true,
       awaitPromise: true,
     })
@@ -2021,6 +2454,495 @@ export class BrowserCdp {
     return {
       text: `Ran the function on ${contents.getURL() || 'about:blank'}.`,
       value: { value: json },
+    }
+  }
+
+  // --- Huli: the second batch ---------------------------------------------------------------------
+
+  private takeDownloadNotes(sessionId: string): string[] {
+    const notes = this.downloadNotes.get(sessionId) ?? []
+    this.downloadNotes.delete(sessionId)
+    return notes
+  }
+
+  /** What the page says of an element now, without scrolling it; a gone one is not connected. */
+  private async probe(sessionId: string, backend: number, action: ActionKind): Promise<Probe> {
+    const probe = await this.onElement<Probe | null>(sessionId, backend, PROBE, [action]).catch(
+      (error: unknown) => {
+        if (error instanceof ToolFailure || error instanceof ControlWait) throw error
+        return null
+      },
+    )
+    return probe ? this.inPage(sessionId, backend, probe) : ({ connected: false } as Probe)
+  }
+
+  private async hover(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const page = this.pageOf(sessionId)
+    const backend = this.resolveRef(page, String(args.ref ?? ''))
+    const spot = await this.actionable(sessionId, backend, args, 'click')
+    this.deps.acted?.(sessionId, { x: spot.x, y: spot.y }, false)
+    const point = this.pointOf(spot)
+    await this.send(
+      sessionId,
+      'Input.dispatchMouseEvent',
+      { type: 'mouseMoved', x: point.x, y: point.y },
+      point.target,
+    )
+    return this.afterAction(sessionId, page, `Hovered over ${describe(args, 'the element')}.`)
+  }
+
+  /**
+   * Drags one element onto another with the mouse held down. A page's own HTML drag and drop is
+   * a drag Chromium starts itself, which the protocol hands back as data to drop; a page that
+   * drags on pointer events alone follows the moves.
+   */
+  private async drag(sessionId: string, args: Record<string, unknown>): Promise<BrowserCallResult> {
+    const given = dragArgs(args)
+    const page = this.pageOf(sessionId)
+    const from = { ref: given.start_ref, element: given.start_element }
+    const to = { ref: given.end_ref, element: given.end_element }
+    const start = this.resolveRef(page, given.start_ref)
+    const end = this.resolveRef(page, given.end_ref)
+    let source = await this.actionable(sessionId, start, from, 'click')
+    let target = await this.probe(sessionId, end, 'select')
+    if (!target.connected) {
+      throw new ToolFailure('stale_ref', `${describe(to, 'The element')} is no longer on the page.`)
+    }
+    if (!target.inside) {
+      target = await this.actionable(sessionId, end, to, 'select')
+      source = await this.probe(sessionId, start, 'select')
+      if (!source.inside) {
+        throw new ToolFailure(
+          'invalid',
+          `${describe(from, 'The element')} and ${describe(to, 'the element')} do not show on the screen at once, so one cannot be dragged onto the other.`,
+        )
+      }
+    }
+    this.deps.acted?.(sessionId, { x: source.x, y: source.y }, true)
+    const mouse = (type: string, at: { x: number; y: number }, extra = {}): Promise<unknown> =>
+      this.send(sessionId, 'Input.dispatchMouseEvent', { type, x: at.x, y: at.y, ...extra })
+    page.drag = null
+    const intercepting = await this.send(sessionId, 'Input.setInterceptDrags', { enabled: true })
+      .then(() => true)
+      .catch(() => false)
+    let dropped = false
+    try {
+      await mouse('mouseMoved', source)
+      await mouse('mousePressed', source, { button: 'left', buttons: 1, clickCount: 1 })
+      const steps = 10
+      for (let step = 1; step <= steps && !page.drag; step++) {
+        const at = {
+          x: source.x + ((target.x - source.x) * step) / steps,
+          y: source.y + ((target.y - source.y) * step) / steps,
+        }
+        await mouse('mouseMoved', at, { button: 'left', buttons: 1 })
+        await sleep(16)
+      }
+      const data = page.drag
+      if (data) {
+        dropped = true
+        for (const type of ['dragEnter', 'dragOver', 'drop']) {
+          await this.send(sessionId, 'Input.dispatchDragEvent', {
+            type,
+            x: target.x,
+            y: target.y,
+            data,
+          })
+        }
+      }
+      await mouse('mouseReleased', target, { button: 'left', buttons: 0, clickCount: 1 })
+    } finally {
+      page.drag = null
+      if (intercepting) {
+        await this.send(sessionId, 'Input.setInterceptDrags', { enabled: false }).catch(() => {})
+      }
+    }
+    return this.afterAction(
+      sessionId,
+      page,
+      `Dragged ${describe(from, 'the element')} onto ${describe(to, 'the element')}${dropped ? ', as a drag and drop the page started' : ''}.`,
+    )
+  }
+
+  /** Clicks at a point inside the visible page, for what no ref names. */
+  private async clickAt(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const { x, y, reason, button, double } = clickAtArgs(args)
+    const page = this.pageOf(sessionId)
+    const view = await this.viewport(sessionId)
+    if (x >= view.width || y >= view.height) {
+      throw new ToolFailure(
+        'invalid',
+        `(${x}, ${y}) lies outside the visible page, which is ${Math.round(view.width)} by ${Math.round(view.height)} CSS pixels. Scroll first, or give a point inside it.`,
+      )
+    }
+    this.deps.acted?.(sessionId, { x, y }, true)
+    await this.clickPoint(sessionId, x, y, button, double)
+    return this.afterAction(
+      sessionId,
+      page,
+      `Clicked${double ? ' twice' : ''} at (${x}, ${y}): ${reason.replace(/[.\s]+$/, '')}.`,
+    )
+  }
+
+  private async emulate(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const change = emulateArgs(args)
+    const tab = this.tabOf(sessionId)
+    if (tab === null || !this.deps.emulate) {
+      throw new ToolFailure('no_page', 'This session has no page yet. Use browser_navigate first.')
+    }
+    const now = await this.deps.emulate(tab, change)
+    const reload =
+      change.set.device !== undefined ||
+      change.set.locale !== undefined ||
+      change.off.includes('device') ||
+      change.off.includes('locale')
+    return {
+      text: `Your tab emulates ${emulationText(now)}.${reload ? ' Reload the page for what it already loaded to follow.' : ''}`,
+      value: { emulation: emulationValue(now) },
+    }
+  }
+
+  /** Points the tab's Fetch domain at the session's rules, or turns it off without any. */
+  private async syncRoutes(page: PageState): Promise<void> {
+    const patterns = page.session && page.agentUsed ? this.routes.patterns(page.session) : []
+    const key = patterns.join('\n')
+    if (key === page.fetchKey) return
+    page.fetchKey = key
+    const command =
+      patterns.length === 0
+        ? page.contents.debugger.sendCommand('Fetch.disable')
+        : page.contents.debugger.sendCommand('Fetch.enable', {
+            patterns: patterns.map((urlPattern) => ({ urlPattern, requestStage: 'Request' })),
+          })
+    await command.catch((error: unknown) => {
+      this.deps.log('warn', `Could not set a tab's network rules: ${(error as Error).message}`)
+    })
+  }
+
+  private async routesChanged(sessionId: string): Promise<void> {
+    await Promise.all(
+      [...this.pages.values()]
+        .filter((page) => page.session === sessionId)
+        .map((page) => this.syncRoutes(page)),
+    )
+  }
+
+  /**
+   * A request a tab paused: the first rule that matches answers it, after its delay; any other
+   * goes on. Every paused request is answered, so a page never hangs on one.
+   */
+  private async paused(page: PageState, params: Record<string, unknown>): Promise<void> {
+    const requestId = String(params.requestId ?? '')
+    const request = (params.request ?? {}) as Record<string, unknown>
+    const url = String(request.url ?? '')
+    const answer = (method: string, extra: Record<string, unknown> = {}): Promise<unknown> =>
+      page.contents.debugger.sendCommand(method, { requestId, ...extra }).catch(() => {})
+    const sessionId = page.session
+    let decided =
+      sessionId === null
+        ? null
+        : answerFor(this.routes.rules(sessionId), {
+            url,
+            method: String(request.method ?? 'GET'),
+            headers: objectOf(request.headers) as Record<string, string>,
+            resourceType: String(params.resourceType ?? ''),
+          })
+    if (
+      decided?.rule &&
+      params.resourceType === 'Document' &&
+      sessionId !== null &&
+      this.deps.mayOpen?.(sessionId, url) === false
+    ) {
+      decided = null
+    }
+    if (!decided?.rule || sessionId === null) {
+      await answer('Fetch.continueRequest')
+      return
+    }
+    const rule = decided.rule
+    if (this.routes.used(sessionId, rule)) void this.routesChanged(sessionId)
+    const label = mockedLabel(decided)
+    const networkId = typeof params.networkId === 'string' ? params.networkId : null
+    if (label && networkId) {
+      page.mocked.set(networkId, label)
+      if (page.mocked.size > MAX_REQUESTS) page.mocked.delete(page.mocked.keys().next().value!)
+    }
+    if (rule.delayMs > 0) await sleep(rule.delayMs)
+    switch (decided.kind) {
+      case 'continue':
+        await answer('Fetch.continueRequest')
+        break
+      case 'fail':
+        await answer('Fetch.failRequest', { errorReason: decided.reason })
+        break
+      case 'fulfill':
+        await answer('Fetch.fulfillRequest', {
+          responseCode: decided.status,
+          responseHeaders: decided.headers,
+          body: Buffer.from(decided.body, 'utf8').toString('base64'),
+        })
+        break
+    }
+  }
+
+  private async route(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const call = routeArgs(args)
+    let done: string
+    switch (call.action) {
+      case 'add': {
+        let rule
+        try {
+          rule = this.routes.add(sessionId, call.rule)
+        } catch (error) {
+          throw new ToolFailure('invalid', (error as Error).message)
+        }
+        await this.routesChanged(sessionId)
+        done = `Added rule ${rule.id}: ${rule.method ?? 'any'} ${rule.pattern} ${ruleText(rule)}.`
+        break
+      }
+      case 'remove':
+        if (!this.routes.remove(sessionId, call.id)) {
+          throw new ToolFailure(
+            'invalid',
+            `There is no rule ${call.id}; list the rules to see theirs.`,
+          )
+        }
+        await this.routesChanged(sessionId)
+        done = `Removed rule ${call.id}.`
+        break
+      case 'clear': {
+        const count = this.routes.clear(sessionId)
+        await this.routesChanged(sessionId)
+        done =
+          count === 0 ? 'There were no rules.' : `Cleared ${count} rule${count === 1 ? '' : 's'}.`
+        break
+      }
+      case 'list':
+        done = 'The rules, the first that matches answering:'
+        break
+    }
+    const rules = this.routes.rules(sessionId).map((rule) => ({
+      id: rule.id,
+      url: rule.pattern,
+      method: rule.method,
+      does: ruleText(rule),
+      used: rule.used,
+    }))
+    const lines = rules.map(
+      (rule) => `- ${rule.id}: ${rule.method ?? 'any'} ${rule.url} ${rule.does}; used ${rule.used}`,
+    )
+    return {
+      text: [done, ...(rules.length === 0 ? ['No rules now.'] : lines)].join('\n'),
+      value: { rules },
+    }
+  }
+
+  private downloadsResult(sessionId: string): BrowserCallResult {
+    const downloads = this.deps.downloads?.(sessionId) ?? []
+    return {
+      text:
+        downloads.length === 0
+          ? 'No downloads in this session.'
+          : downloads
+              .map(
+                (d) => `- ${d.name}: ${d.state}, ${d.bytes} bytes${d.path ? `, at ${d.path}` : ''}`,
+              )
+              .join('\n'),
+      value: { downloads },
+    }
+  }
+
+  private async pdf(sessionId: string, args: Record<string, unknown>): Promise<BrowserCallResult> {
+    const { landscape, background } = pdfArgs(args)
+    await this.gate(sessionId)
+    const contents = this.contentsOf(sessionId)
+    // Electron prints through its own printing, which the debugger's Page.printToPDF lacks.
+    const data = await contents
+      .printToPDF({ landscape, printBackground: background, preferCSSPageSize: true })
+      .catch((error: unknown) => {
+        throw new ToolFailure(
+          'invalid',
+          `The page could not be printed: ${(error as Error).message}`,
+        )
+      })
+    const path = await this.deps.saveFile?.(
+      sessionId,
+      pdfName(contents.getTitle(), contents.getURL()),
+      data,
+    )
+    if (!path) {
+      throw new ToolFailure(
+        'invalid',
+        'This session has no folder on this computer to save the PDF into.',
+      )
+    }
+    return {
+      text: `Saved the page as a PDF of ${Math.max(1, Math.round(data.length / 1024))} KB at ${path}.`,
+      value: { path, bytes: data.length },
+    }
+  }
+
+  /** Records the page for a few seconds over the Tracing domain and sums up what it did. */
+  private async trace(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const { seconds, reload } = traceArgs(args)
+    const page = this.pageOf(sessionId)
+    if (page.trace) throw new ToolFailure('invalid', 'A trace of this tab is already running.')
+    let settle!: (stream: string | null) => void
+    const complete = new Promise<string | null>((resolve) => (settle = resolve))
+    page.trace = settle
+    let stream: string | null
+    try {
+      await this.send(sessionId, 'Tracing.start', {
+        transferMode: 'ReturnAsStream',
+        traceConfig: { recordMode: 'recordAsMuchAsPossible', includedCategories: TRACE_CATEGORIES },
+      })
+      try {
+        if (reload) await this.deps.reload(sessionId)
+        const until = Date.now() + seconds * 1000
+        while (Date.now() < until) {
+          await this.gate(sessionId)
+          await sleep(Math.min(100, Math.max(1, until - Date.now())))
+        }
+      } finally {
+        await this.send(sessionId, 'Tracing.end').catch(() => settle(null))
+      }
+      stream = await Promise.race([complete, sleep(15_000).then(() => null)])
+    } finally {
+      page.trace = null
+    }
+    if (!stream) throw new ToolFailure('timeout', 'The trace did not finish. Try again.')
+    const chunks: Buffer[] = []
+    let read = 0
+    try {
+      for (;;) {
+        const chunk = await this.send<{ data?: string; eof?: boolean; base64Encoded?: boolean }>(
+          sessionId,
+          'IO.read',
+          { handle: stream, size: 4 * 1024 * 1024 },
+        )
+        const bytes = Buffer.from(chunk.data ?? '', chunk.base64Encoded ? 'base64' : 'utf8')
+        read += bytes.length
+        if (read > MAX_TRACE_BYTES)
+          throw new ToolFailure('invalid', 'The trace was too large to read.')
+        chunks.push(bytes)
+        if (chunk.eof) break
+      }
+    } finally {
+      await this.send(sessionId, 'IO.close', { handle: stream }).catch(() => {})
+    }
+    let events
+    try {
+      events = traceEvents(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+    } catch {
+      throw new ToolFailure('invalid', 'The trace could not be read.')
+    }
+    const paints = await this.pagePaints(sessionId)
+    const summary = summarizeTrace(events, paints.lcp, paints.fcp)
+    return { text: traceText(summary), value: { summary } }
+  }
+
+  /** The page's own paints, as it reports them: its largest and its first contentful paint. */
+  private async pagePaints(
+    sessionId: string,
+  ): Promise<{ lcp: { ms: number; element: string | null } | null; fcp: number | null }> {
+    const answer = await this.send<{ result?: { value?: unknown } }>(
+      sessionId,
+      'Runtime.evaluate',
+      {
+        expression: `new Promise((resolve) => {
+        const fcp = performance.getEntriesByName('first-contentful-paint')[0]
+        let last = null
+        try {
+          const observer = new PerformanceObserver((list) => {
+            const entries = list.getEntries()
+            last = entries[entries.length - 1] || last
+          })
+          observer.observe({ type: 'largest-contentful-paint', buffered: true })
+          setTimeout(() => {
+            observer.disconnect()
+            resolve({
+              fcp: fcp ? fcp.startTime : null,
+              lcp: last ? { ms: last.startTime, element: last.element ? last.element.localName : null } : null,
+            })
+          }, 100)
+        } catch (error) {
+          resolve({ fcp: fcp ? fcp.startTime : null, lcp: null })
+        }
+      })`,
+        awaitPromise: true,
+        returnByValue: true,
+      },
+    ).catch(() => null)
+    const value = answer?.result?.value as
+      { fcp?: unknown; lcp?: { ms?: unknown; element?: unknown } | null } | undefined
+    const lcp =
+      value?.lcp && typeof value.lcp.ms === 'number'
+        ? {
+            ms: value.lcp.ms,
+            element: typeof value.lcp.element === 'string' ? value.lcp.element : null,
+          }
+        : null
+    return { lcp, fcp: typeof value?.fcp === 'number' ? value.fcp : null }
+  }
+
+  private async storageState(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const call = storageStateArgs(args)
+    const states = this.deps.states
+    if (!states) throw new ToolFailure('invalid', 'Saved sign-in states are not available here.')
+    const listed = async (): Promise<Record<string, unknown>[]> =>
+      (await states.list()).map((state) => ({
+        name: state.name,
+        sites: state.sites,
+        saved_at: new Date(state.savedAt).toISOString(),
+      }))
+    try {
+      if (call.action === 'list') {
+        const all = await listed()
+        return {
+          text:
+            all.length === 0
+              ? 'No saved sign-in states.'
+              : all
+                  .map((s) => `- ${String(s.name)}: ${(s.sites as string[]).join(', ')}`)
+                  .join('\n'),
+          value: { states: all },
+        }
+      }
+      if (call.action === 'save') {
+        const tab = this.tabOf(sessionId)
+        this.contentsOf(sessionId)
+        const saved = await states.save(sessionId, tab!, call.name)
+        return {
+          text: `Saved the sign-in state of ${saved.sites.join(', ')} as "${call.name}": ${saved.cookies} cookie${saved.cookies === 1 ? '' : 's'} and the site's local storage, encrypted.`,
+          value: { states: await listed() },
+        }
+      }
+      const restored = await states.restore(sessionId, this.tabOf(sessionId), call.name)
+      return {
+        text: `Restored "${call.name}" into this session's browser: ${restored.cookies} cookie${restored.cookies === 1 ? '' : 's'} for ${restored.sites.join(', ')}${restored.storage > 0 ? ` and the local storage of ${restored.storage} site${restored.storage === 1 ? '' : 's'}` : ''}. Open or reload the site to use it.`,
+        value: { states: await listed() },
+      }
+    } catch (error) {
+      if (error instanceof ToolFailure) throw error
+      throw new ToolFailure('invalid', (error as Error).message)
     }
   }
 }

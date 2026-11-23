@@ -86,6 +86,7 @@ import {
   Undo2,
   EyeOff,
   Inbox,
+  Plug,
 } from 'lucide-react-native'
 import type { HarnessId } from '@shared/agents'
 import { harnessOf, markFor } from '../agent-marks'
@@ -176,6 +177,7 @@ export const G = {
   select: { sf: 'character.cursor.ibeam', lucide: TextSelect },
   comment: { sf: 'bubble.left', lucide: MessageSquare },
   devServer: { sf: 'server.rack', lucide: Server },
+  plug: { sf: 'powerplug', lucide: Plug },
   globe: { sf: 'globe', lucide: Globe },
 } satisfies Record<string, IconSpec>
 

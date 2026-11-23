@@ -467,6 +467,130 @@ describe('sessions', () => {
     }
   })
 
+  it("gives a workspace turn the user's own network access and folders, read again after a write", async () => {
+    const { server, connection } = await connect()
+    let config: Record<string, unknown> = {
+      sandbox_workspace_write: { network_access: true, writable_roots: ['/cache'] },
+    }
+    server.on('config/read', () => ({ config }))
+    server.on('config/value/write', () => ({ status: 'ok' }))
+    const opened = await connection.newSession('/project')
+    await connection.setConfigOption(opened.sessionId, 'mode', 'workspace-write')
+    const { target } = threadTarget()
+    connection.register(opened.sessionId, target)
+    const turnOnce = async (count: number) => {
+      const prompt = connection.prompt(opened.sessionId, [{ type: 'text', text: 'hi' }])
+      await until(() => server.sent('turn/start').length === count)
+      server.notify('turn/completed', {
+        threadId: opened.sessionId,
+        turn: turn(`turn-${count}`, 'completed'),
+      })
+      await prompt
+      return server.sent('turn/start')[count - 1]
+    }
+    expect(await turnOnce(1)).toMatchObject({
+      sandboxPolicy: { type: 'workspaceWrite', networkAccess: true, writableRoots: ['/cache'] },
+    })
+    config = {}
+    await connection.request('config/value/write', {
+      keyPath: 'sandbox_workspace_write.network_access',
+      value: null,
+      mergeStrategy: 'replace',
+    })
+    expect(await turnOnce(2)).toMatchObject({
+      sandboxPolicy: { type: 'workspaceWrite', networkAccess: false, writableRoots: [] },
+    })
+    expect(server.sent('config/read')).toHaveLength(2)
+  })
+
+  it('runs a !command with Codex’s own shell in the turn it opens, asking first unless full access', async () => {
+    const { server, connection } = await connect()
+    server.on('thread/shellCommand', () => ({}))
+    const opened = await connection.newSession('/project')
+    await connection.setConfigOption(opened.sessionId, 'mode', 'agent-full-access')
+    const asked: PermissionRequest[] = []
+    let allow = true
+    const { target, entry } = threadTarget((request) => {
+      asked.push(request)
+      return { optionId: allow ? 'allow_once' : 'decline' }
+    })
+    connection.register(opened.sessionId, target)
+    const shell = (text: string) => connection.prompt(opened.sessionId, [{ type: 'text', text }])
+    const finish = (count: number) => {
+      server.notify('turn/started', { threadId: opened.sessionId, turn: turn(`turn-${count}`) })
+      server.notify('turn/completed', {
+        threadId: opened.sessionId,
+        turn: turn(`turn-${count}`, 'completed'),
+      })
+    }
+
+    let ran = shell('  !ls -la | head  ')
+    await until(() => server.sent('thread/shellCommand').length === 1)
+    expect(server.sent('thread/shellCommand')[0]).toEqual({
+      threadId: opened.sessionId,
+      command: 'ls -la | head',
+    })
+    expect(server.sent('turn/start')).toHaveLength(0)
+    expect(asked).toHaveLength(0)
+    finish(1)
+    expect(await ran).toMatchObject({ stopReason: 'end_turn' })
+
+    // In a mode that asks, the command runs once allowed, and its card goes.
+    await connection.setConfigOption(opened.sessionId, 'mode', 'workspace-write')
+    ran = shell('!git status')
+    await until(() => server.sent('thread/shellCommand').length === 2)
+    expect(asked[0]).toMatchObject({
+      options: [
+        { id: 'allow_once', kind: 'allow_once' },
+        { id: 'decline', kind: 'reject_once' },
+      ],
+      subject: { kind: 'command', command: 'git status', cwd: '/project' },
+    })
+    expect(entry(asked[0]!.toolEntryId)).toBeUndefined()
+    finish(2)
+    await ran
+
+    allow = false
+    expect(await shell('!rm -rf build')).toMatchObject({ stopReason: 'end_turn' })
+    expect(server.sent('thread/shellCommand')).toHaveLength(2)
+    expect(entry(asked[1]!.toolEntryId)).toBeDefined()
+
+    expect(await connection.steer(opened.sessionId, [{ type: 'text', text: '!ls' }])).toBe(
+      'promptRequired',
+    )
+  })
+
+  it('names the provider when its quota runs out off a ChatGPT plan, as out of credit', async () => {
+    const { server, connection } = await connect()
+    server.on('account/read', () => ({ account: null, requiresOpenaiAuth: false }))
+    server.on('config/read', () => ({
+      config: { model_provider: 'deepseek', model_providers: { deepseek: { name: 'DeepSeek' } } },
+    }))
+    const opened = await connection.newSession('/project')
+    const { target } = threadTarget()
+    connection.register(opened.sessionId, target)
+    const prompt = connection.prompt(opened.sessionId, [{ type: 'text', text: 'hi' }])
+    await until(() => server.sent('turn/start').length === 1)
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: {
+        ...turn('turn-1', 'failed'),
+        error: {
+          message: 'Quota exceeded. Check your plan and billing details.',
+          codexErrorInfo: 'usageLimitExceeded',
+          additionalDetails: null,
+        },
+      },
+    })
+    const failure = await prompt.catch((error: unknown) => error as AgentRequestError)
+    expect(failure).toBeInstanceOf(AgentRequestError)
+    expect((failure as AgentRequestError).message).toMatch(/^DeepSeek turned the request down/)
+    expect((failure as AgentRequestError).data).toMatchObject({
+      codexErrorInfo: 'usageLimitExceeded',
+      providerQuota: 'DeepSeek',
+    })
+  })
+
   it('makes the project’s further folders workspace roots of the thread and of every turn', async () => {
     const { server, connection } = await connect()
     const folders = ['/api', '/web']
@@ -2400,5 +2524,207 @@ describe('Huli: background terminals', () => {
       processId: 'p1',
     })
     expect(server.sent('thread/backgroundTerminals/clean').at(-1)).toEqual({ threadId: 'thread-1' })
+  })
+})
+
+describe("Huli: a session's MCP panel", () => {
+  const connected = { runtimeStatus: 'connected', toolsError: null, authStatus: 'unsupported' }
+
+  it("lists the thread's servers with their states, sources, tools and apps", async () => {
+    const { server, connection } = await connect()
+    const { sessionId } = await connection.newSession('/project', {
+      mcpServers: [
+        { type: 'http', name: 'kettu', url: 'http://127.0.0.1:9/mcp', headers: [] },
+        { type: 'stdio', name: 'my files', command: 'files-mcp', args: [], env: [] },
+      ],
+    })
+    server.notify('mcpServer/startupStatus/updated', {
+      threadId: sessionId,
+      name: 'db',
+      status: 'failed',
+      error: 'MCP startup failed: connect https://db.example.com/mcp?key=sk-123 refused',
+    })
+    server.on('mcpServerStatus/list', () => ({
+      nextCursor: null,
+      data: [
+        { ...connected, name: 'kettu', tools: { show: {}, ask: {} } },
+        { ...connected, name: 'my_files', tools: { read: {} } },
+        { ...connected, name: 'db', runtimeStatus: 'failed', tools: {} },
+        { ...connected, name: 'linear', runtimeStatus: null, authStatus: 'notLoggedIn', tools: {} },
+        { ...connected, name: 'docs', pluginId: 'docs@openai', tools: { search: {} } },
+        { ...connected, name: 'team', runtimeStatus: 'starting', tools: {} },
+        { ...connected, name: 'off', runtimeStatus: 'disabled', tools: {} },
+      ],
+    }))
+    server.on('config/read', () => ({
+      config: {},
+      origins: {
+        'mcp_servers.db.url': { name: { type: 'user', file: '/home/.codex/config.toml' } },
+        'mcp_servers.linear.url': { name: { type: 'project', dotCodexFolder: '/project/.codex' } },
+        'mcp_servers.team': { name: { type: 'enterpriseManaged', id: 'a', name: 'b' } },
+        'mcp_servers.offline.url': { name: { type: 'project' } },
+      },
+    }))
+    server.on('app/list', ({ cursor }) =>
+      cursor
+        ? {
+            data: [{ id: 'drive', name: 'Drive', isAccessible: true, isEnabled: false }],
+            nextCursor: null,
+          }
+        : {
+            data: [
+              {
+                id: 'gmail',
+                name: 'Gmail',
+                description: 'Mail',
+                installUrl: 'https://chatgpt.com/apps/gmail',
+                isAccessible: true,
+                isEnabled: true,
+              },
+              { id: 'slack', name: 'Slack', isAccessible: false, isEnabled: true },
+              { id: 'odd', name: 'Odd', installUrl: 'javascript:alert(1)', isAccessible: true },
+            ],
+            nextCursor: 'next',
+          },
+    )
+    await tick()
+
+    const read = await connection.readMcp(sessionId, ['kettu', 'my files'])
+    expect(read?.can).toEqual({ reconnect: 'all', toggle: false, login: true, reload: true })
+    const none = { error: null, plugin: null }
+    expect(read?.servers).toEqual([
+      { ...none, name: 'kettu', state: 'connected', source: 'kite', tools: ['show', 'ask'] },
+      { ...none, name: 'my_files', state: 'connected', source: 'kite', tools: ['read'] },
+      {
+        name: 'db',
+        state: 'failed',
+        error: 'connect https://db.example.com/mcp?key=•••• refused',
+        source: 'user',
+        plugin: null,
+        tools: null,
+      },
+      { ...none, name: 'linear', state: 'needs-auth', source: 'project', tools: null },
+      {
+        name: 'docs',
+        state: 'connected',
+        error: null,
+        source: 'plugin',
+        plugin: 'docs@openai',
+        tools: ['search'],
+      },
+      { ...none, name: 'team', state: 'pending', source: 'managed', tools: null },
+      { ...none, name: 'off', state: 'disabled', source: 'other', tools: null },
+    ])
+    expect(JSON.stringify(read)).not.toContain('sk-123')
+    expect(read?.apps).toEqual([
+      {
+        id: 'gmail',
+        name: 'Gmail',
+        description: 'Mail',
+        enabled: true,
+        linked: true,
+        url: 'https://chatgpt.com/apps/gmail',
+      },
+      { id: 'odd', name: 'Odd', description: null, enabled: true, linked: true, url: null },
+      { id: 'drive', name: 'Drive', description: null, enabled: false, linked: true, url: null },
+    ])
+    expect(server.sent('config/read')).toEqual([{ includeLayers: false, cwd: '/project' }])
+    expect(server.sent('app/list')).toEqual([
+      { threadId: sessionId },
+      { threadId: sessionId, cursor: 'next' },
+    ])
+  })
+
+  it('reads nothing for a thread Codex has not loaded, and no apps where it has none', async () => {
+    const { server, connection } = await connect()
+    server.on('mcpServerStatus/list', ({ threadId }) => {
+      if (threadId) throw new FakeRpcError(-32002, 'Thread not loaded')
+      return { data: [], nextCursor: null }
+    })
+    expect(await connection.readMcp('thread-9', [])).toBeNull()
+    const { sessionId } = await connection.newSession('/project')
+    server.on('mcpServerStatus/list', () => ({ data: [], nextCursor: null }))
+    server.on('app/list', () => {
+      throw new FakeRpcError(-32600, 'apps are not enabled')
+    })
+    expect((await connection.readMcp(sessionId, []))?.apps).toBeNull()
+  })
+
+  it('reconnects every server with one reload, however many sessions ask', async () => {
+    const { server, connection } = await connect()
+    const a = await connection.newSession('/project')
+    const b = await connection.newSession('/project')
+    await Promise.all([connection.reconnectMcp(a.sessionId), connection.reconnectMcp(b.sessionId)])
+    expect(server.sent('config/mcpServer/reload')).toHaveLength(1)
+  })
+
+  it('signs in through Codex, then reconnects and tells the thread how it ended', async () => {
+    const { server, connection } = await connect()
+    const { sessionId } = await connection.newSession('/project')
+    const t = threadTarget()
+    connection.register(sessionId, t.target)
+    server.on('mcpServer/oauth/login', () => ({
+      authorizationUrl: 'https://auth.example.com/authorize?state=abc',
+      loginId: 'login-1',
+    }))
+    expect(await connection.loginMcp(sessionId, 'linear')).toEqual({
+      url: 'https://auth.example.com/authorize?state=abc',
+    })
+    expect(server.sent('mcpServer/oauth/login')).toEqual([{ name: 'linear', threadId: sessionId }])
+    const panel = () => t.effects.filter((effect) => effect.kind === 'mcp')
+    server.notify('mcpServer/oauthLogin/completed', {
+      name: 'linear',
+      success: true,
+      loginId: 'login-1',
+      threadId: null,
+    })
+    await until(() => panel().length === 1)
+    expect(panel()).toEqual([{ kind: 'mcp', login: { server: 'linear', ok: true, error: null } }])
+    expect(server.sent('config/mcpServer/reload')).toHaveLength(1)
+
+    server.notify('mcpServer/oauthLogin/completed', {
+      name: 'linear',
+      success: false,
+      error: 'access denied',
+      loginId: 'login-2',
+      threadId: sessionId,
+    })
+    await until(() => panel().length === 2)
+    expect(panel()[1]).toEqual({
+      kind: 'mcp',
+      login: { server: 'linear', ok: false, error: 'access denied' },
+    })
+    expect(server.sent('config/mcpServer/reload')).toHaveLength(1)
+  })
+
+  it('refuses a sign-in page that is no web page', async () => {
+    const { server, connection } = await connect()
+    const { sessionId } = await connection.newSession('/project')
+    server.on('mcpServer/oauth/login', () => ({ authorizationUrl: 'file:///etc/passwd' }))
+    await expect(connection.loginMcp(sessionId, 'linear')).rejects.toThrow()
+  })
+
+  it("tells the thread's panel when a server's startup state changes", async () => {
+    const { server, connection } = await connect()
+    const { sessionId } = await connection.newSession('/project')
+    const t = threadTarget()
+    connection.register(sessionId, t.target)
+    server.notify('mcpServer/startupStatus/updated', {
+      threadId: null,
+      name: 'db',
+      status: 'ready',
+      error: null,
+    })
+    await until(() => t.effects.some((effect) => effect.kind === 'mcp'))
+    expect(t.effects.filter((effect) => effect.kind === 'mcp')).toEqual([{ kind: 'mcp' }])
+  })
+
+  it('reloads skills and the MCP configuration between turns only', async () => {
+    const { server, connection } = await connect()
+    const { sessionId } = await connection.newSession('/project')
+    expect(await connection.reloadPlugins(sessionId)).toBe('reloaded')
+    expect(server.sent('skills/list')).toContainEqual({ forceReload: true, cwds: ['/project'] })
+    expect(server.sent('config/mcpServer/reload')).toHaveLength(1)
+    await expect(connection.reloadPlugins('thread-9')).rejects.toThrow()
   })
 })

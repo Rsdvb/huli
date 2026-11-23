@@ -22,6 +22,7 @@ import {
   PencilEdit02Icon,
   PinIcon,
   PinOffIcon,
+  PlugSocketIcon,
   RefreshIcon,
   SidebarBottomIcon,
   SidebarRightIcon,
@@ -122,6 +123,8 @@ import {
 import { confirmArchive } from './archive-confirm-model'
 import { NeverSettleItem, SettleItem, SnoozeMenu } from './tidy-menu'
 import { ZenMenu } from '@renderer/features/session/zen-menu'
+import { MenuOptions } from '@renderer/features/session/menu-options'
+import { useMenuOptions } from '@renderer/features/session/menu-options-model'
 import { undoToast } from './undo'
 import { workAtStake, type WorkItem } from './running-work'
 import { RunningWorkList } from './running-work-list'
@@ -139,6 +142,7 @@ import { BoardStatusMenu } from '@renderer/features/task-board/status'
 import { ManagerMenu } from '@renderer/features/manager/manager-menu'
 import { askExport, canExport, exportAs } from '@renderer/features/session/export/export'
 import { askMove, canMove } from '@renderer/features/session/move/move'
+import { askMcpPanel } from '@renderer/features/session/mcp/mcp-panel'
 import {
   askRemoveWorktree,
   canRemoveWorktree,
@@ -275,6 +279,7 @@ export function SessionMenuItems({
   const prTarget = prFlowTarget(summary, currentPr)
   const showFinished = useViewStore((s) => s.showFinishedSubagents)
   const listed = subagents ? listedSubagents(subagents, showFinished) : []
+  const menuOptions = useMenuOptions(summary.id)
 
   const item = (name: SessionMenuItem) => {
     // Huli: the terminal's item carries the terminal's keys as the user bound them.
@@ -374,6 +379,8 @@ export function SessionMenuItems({
         return <NeverSettleItem key={name} summary={summary} />
       case 'toolCalls':
         return <ZenMenu key={name} sessionId={summary.id} />
+      case 'menuOptions':
+        return <MenuOptions key={name} sessionId={summary.id} />
       case 'board':
         return <BoardStatusMenu key={name} summary={summary} />
       case 'manager':
@@ -627,6 +634,13 @@ export function SessionMenuItems({
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         )
+      case 'mcp':
+        return (
+          <DropdownMenuItem key={name} {...props} onClick={() => askMcpPanel(summary)}>
+            <MenuGlyph icon={PlugSocketIcon} />
+            {t('row.mcp')}
+          </DropdownMenuItem>
+        )
       case 'move':
         return (
           <DropdownMenuItem key={name} {...props} onClick={() => askMove(summary)}>
@@ -719,6 +733,7 @@ export function SessionMenuItems({
     mini: local && window.kettu.mini !== undefined,
     prFlow: prTarget !== null,
     subagents: listed.length > 0,
+    menuOptions: menuOptions.length > 0,
   }
   return sessionMenuGroups(summary, context).map((group, index) => (
     <DropdownMenuGroup key={group[0]}>

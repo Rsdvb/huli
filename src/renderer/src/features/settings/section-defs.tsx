@@ -170,6 +170,8 @@ import {
   WebhookPort,
   Zoom,
 } from './sections'
+import { BrowserProfiles, SavedStateRow, SavedStatesEmpty } from './browser-data-rows'
+import { useSavedStates } from '@renderer/features/browser/saved-states'
 import { useAllowedSites } from './allowed-sites'
 import { SidebarCard } from './sidebar-pages'
 import { ThemeTiles } from './theme-section'
@@ -964,6 +966,11 @@ export function useBrowserSection(): SectionDef {
     ),
   })
   const links = group('links-from-agents', t('browser.groups.links'))
+  const savedStates = useSavedStates(!isWeb)
+  const savedGroup = group('saved-states', t('browser.groups.savedStates'), {
+    count: savedStates?.length,
+    note: <GroupNote>{t('browser.savedStates.note')}</GroupNote>,
+  })
   const brought = useBroughtSites()
   const [allBrought, setAllBrought] = useState(false)
   const signIns = group('sign-ins', t('browser.groups.signIns'))
@@ -1051,6 +1058,33 @@ export function useBrowserSection(): SectionDef {
       group: group('site-data', t('browser.groups.siteData')),
       render: () => <ClearBrowsingData />,
     },
+    // Huli: whose browser data each session uses, and the sign-ins saved to move between them.
+    ...(isWeb
+      ? []
+      : [
+          {
+            id: 'profiles',
+            setting: 'browser.profiles',
+            group: group('site-data', t('browser.groups.siteData')),
+            render: () => <BrowserProfiles label={t('browser.profiles.name')} />,
+          } satisfies RowDef,
+          {
+            id: 'saved-states',
+            setting: 'browser.saved-states',
+            searchOnly: !!savedStates?.length,
+            group: savedGroup,
+            layout: 'custom',
+            render: () => <SavedStatesEmpty loading={savedStates === null} />,
+          } satisfies RowDef,
+          ...(savedStates ?? []).map((state): RowDef => ({
+            id: `saved-state-${state.name}`,
+            setting: 'browser.saved-states',
+            item: { name: state.name },
+            group: savedGroup,
+            layout: 'custom',
+            render: () => <SavedStateRow state={state} />,
+          })),
+        ]),
     {
       id: 'allowed-sites',
       setting: 'browser.allowed-sites',

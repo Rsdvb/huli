@@ -118,9 +118,10 @@ export const sameFile = (path: string) => path.replace(/\\/g, '/').replace(/^(?:
 
 /**
  * The media files a tool call names, which its details show: its diffs' paths, then its
- * locations, each once. Its command and text output are full of paths, so they are not read. A
- * call whose content carries a picture shows that alone, since Claude Code's Read sends the file
- * it read both ways; and what a deletion names is gone.
+ * locations, then the local files its result links, as a device recording, each once. Its command
+ * and text output are full of paths, so they are not read. A call whose content carries a picture
+ * shows that alone, since Claude Code's Read sends the file it read both ways; and what a
+ * deletion names is gone.
  */
 export function toolMedia(entry: Pick<ToolEntry, 'toolKind' | 'content' | 'locations'>): string[] {
   if (entry.toolKind === 'delete') return []
@@ -128,6 +129,9 @@ export function toolMedia(entry: Pick<ToolEntry, 'toolKind' | 'content' | 'locat
   const paths = [
     ...entry.content.flatMap((c) => (c.type === 'diff' ? [c.path] : [])),
     ...entry.locations.map((location) => location.path),
+    ...entry.content.flatMap((c) =>
+      c.type === 'ref' && c.ref.kind === 'link' && FILE_URI.test(c.ref.uri) ? [c.ref.uri] : [],
+    ),
   ]
   const seen = new Set<string>()
   return paths.filter((path) => {

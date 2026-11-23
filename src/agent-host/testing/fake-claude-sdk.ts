@@ -10,10 +10,12 @@ import type {
   FlagSettings,
   InitializeAnswer,
   McpServerConfig,
+  McpServerStatus,
   McpSetServersResult,
   PermissionMode,
   Query,
   QueryOptions,
+  ReloadPluginsAnswer,
   SdkMessage,
   SessionInfo,
   StoredMessage,
@@ -211,6 +213,30 @@ export class FakeQuery implements Query {
     return { added: Object.keys(servers), removed: [], errors: {} }
   }
 
+  async mcpServerStatus(): Promise<McpServerStatus[]> {
+    this.record('mcpServerStatus')
+    return this.sdk.mcpStatus
+  }
+
+  async reconnectMcpServer(serverName: string): Promise<void> {
+    this.record('reconnectMcpServer', serverName)
+  }
+
+  async toggleMcpServer(serverName: string, enabled: boolean): Promise<void> {
+    this.record('toggleMcpServer', serverName, enabled)
+  }
+
+  async reloadPlugins(options?: { refuseIfBusy?: boolean }): Promise<ReloadPluginsAnswer> {
+    this.record('reloadPlugins', options)
+    if (this.sdk.reloadError) throw this.sdk.reloadError
+    return { commands: this.sdk.reloadedCommands, mcpServers: this.sdk.mcpStatus, error_count: 0 }
+  }
+
+  async reloadSkills(): Promise<{ skills: { name: string; description: string }[] }> {
+    this.record('reloadSkills')
+    return { skills: [] }
+  }
+
   async generateSessionTitle(description: string, options: { persist: boolean }) {
     this.record('generateSessionTitle', description, options)
     if (this.sdk.titleError) throw this.sdk.titleError
@@ -273,6 +299,12 @@ export class FakeClaudeSdk implements ClaudeSdk {
   taskOutput = { output: '', total_bytes: 0, truncated: false }
   /** What `backgroundTasks` answers: whether a task was moved. */
   backgrounded = true
+  /** What a query's `mcpServerStatus` answers. */
+  mcpStatus: McpServerStatus[] = []
+  /** What a query's `reloadPlugins` answers with as its commands. */
+  reloadedCommands: { name: string; description: string }[] = []
+  /** Thrown by `reloadPlugins` until cleared. */
+  reloadError: Error | null = null
   /** What a query's `askSideQuestion` answers; undefined for an SDK without it. */
   sideAnswer: { response: string; synthetic: boolean } | null | undefined = undefined
   context: ContextUsageAnswer = {

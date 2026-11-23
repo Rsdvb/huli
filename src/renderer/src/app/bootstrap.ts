@@ -113,6 +113,7 @@ import {
 import { goneHosts, hostListed, initHostSessions } from './host-sessions'
 import { showLimitAlert } from './limit-alerts'
 import { followWindowTitle } from './window-title'
+import { mcpPanelChanged } from '@renderer/features/session/mcp/mcp-panel'
 
 /** An event of this computer's agent host, or with `hostId` of another host's. */
 function onHostEvent(event: HostEvent, hostId: string | null = null): void {
@@ -135,6 +136,9 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
       return
     case 'session.viewers':
       receiveViewers(event.sessionId, event.viewers)
+      return
+    case 'session.mcpChanged':
+      mcpPanelChanged(event.sessionId, event.login)
       return
     case 'projects.changed':
       useProjectsStore.getState().setAll(event.projects, hostId)

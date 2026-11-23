@@ -13,6 +13,8 @@ import {
 import { DeviceAccessStore } from './devices/access'
 import os from 'node:os'
 import path from 'node:path'
+import { parse as parseJsonc } from 'jsonc-parser'
+import { LAUNCH_FILE, parseLaunchConfigs, type LaunchConfig } from '@shared/launch-configs'
 import { cp, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import type {
   AgentOptions,
@@ -1534,6 +1536,12 @@ export class AgentHost {
         seen: (sessionId) => options.send({ type: 'host:seen', sessionId }),
         busy: (counts) => options.send({ type: 'host:busy-changed', ...counts }),
         completed: () => void this.star.turnCompleted(),
+        mcpChanged: (sessionId, login, portIds) =>
+          this.hub.send(portIds, {
+            type: 'session.mcpChanged',
+            sessionId,
+            ...(login ? { login } : {}),
+          }),
       },
     })
     this.agentHistory = new AgentHistory({
@@ -3482,6 +3490,7 @@ export class AgentHost {
         args: request.args,
         projectPath: request.projectPath,
         ...(request.allowTab ? { allowTab: request.allowTab } : {}),
+        ...(request.folder ? { folder: request.folder, worktree: request.worktree === true } : {}),
       })
     })
   }
@@ -3603,6 +3612,24 @@ export class AgentHost {
     const answer = await this.terminalCall({ kind: 'allow', sessionId, terminalId, allowed: false })
     if ('error' in answer) throw new HostError('not_found', answer.error.message)
     this.sessions.surfaceAccessRevoked(sessionId, terminalId)
+  }
+
+  /**
+   * Huli: the dev servers the session's folder names in Claude Code's `.claude/launch.json`, read
+   * when asked for; none when the file is missing or unfit.
+   */
+  private async launchConfigs(sessionId: string): Promise<{ configs: LaunchConfig[] }> {
+    const session = this.sessions.browserSession(sessionId) ?? sessionId
+    const folder = this.sessions.sessionFolder(session) ?? this.sessions.sessionProject(session)
+    if (!folder) return { configs: [] }
+    let text: string
+    try {
+      text = await readFile(path.join(folder, LAUNCH_FILE), 'utf8')
+    } catch {
+      return { configs: [] }
+    }
+    if (text.length > 256 * 1024) return { configs: [] }
+    return { configs: parseLaunchConfigs(parseJsonc(text, [], { allowTrailingComma: true })) }
   }
 
   /** Sends an agent's terminal call to its parent, which hands it to the terminal host. */
@@ -4020,6 +4047,10 @@ export class AgentHost {
       'agents.setAutoCompact': ({ agentId, change }) =>
         agents.setAutoCompact(agentId, change, () => this.appServer(agentId)),
       'agents.codebuddySettings': ({ agentId }) => agents.codebuddySettings(agentId),
+      'agents.codexSettings': ({ agentId }) =>
+        agents.codexSettings(agentId, () => this.appServer(agentId)),
+      'agents.setCodexSetting': ({ agentId, change }) =>
+        agents.setCodexSetting(agentId, change, () => this.appServer(agentId)),
       'agents.setCodebuddySite': ({ agentId, change }) => agents.setCodebuddySite(agentId, change),
       'agents.refreshAccount': ({ agentId, force }) => agents.refreshAccount(agentId, { force }),
       'agents.readSignIn': ({ agentId, watch }) => agents.readSignIn(agentId, { watch }),
@@ -4243,6 +4274,11 @@ export class AgentHost {
       'sessions.stopTask': ({ sessionId, taskId }) => sessions.stopTask(sessionId, taskId),
       'sessions.taskOutput': ({ sessionId, taskId }) => sessions.taskOutput(sessionId, taskId),
       'sessions.processes': ({ sessionId }) => sessions.processes(sessionId),
+      'sessions.mcp': ({ sessionId }) => sessions.mcp(sessionId),
+      'sessions.mcpAct': ({ sessionId, action, server }) =>
+        sessions.mcpAct(sessionId, action, server),
+      'sessions.mcpLogin': ({ sessionId, server }) => sessions.mcpLogin(sessionId, server),
+      'sessions.reloadPlugins': ({ sessionId }) => sessions.reloadPlugins(sessionId),
       'sessions.toBackground': ({ sessionId, toolCallId }) =>
         sessions.toBackground(sessionId, toolCallId),
       'sessions.cleanTasks': ({ sessionId }) => sessions.cleanTasks(sessionId),
@@ -4294,6 +4330,7 @@ export class AgentHost {
       },
       'sessions.runCommand': (params, { portId, device }) =>
         this.runReplyCommand(params, portId, device),
+      'sessions.launchConfigs': ({ sessionId }) => this.launchConfigs(sessionId),
       'sessions.unqueue': ({ sessionId, itemId }) => sessions.unqueue(sessionId, itemId),
       'sessions.steer': ({ sessionId, itemId }) => sessions.steer(sessionId, itemId),
       'sessions.sendNow': ({ sessionId, itemId }) => sessions.sendNow(sessionId, itemId),

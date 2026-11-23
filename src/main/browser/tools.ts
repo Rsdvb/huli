@@ -19,6 +19,8 @@ import { BrowserCdp, ToolFailure } from './cdp'
 import { listTabs, tabsText } from './tabs'
 import { uploadFiles } from './upload'
 import type { BrowserViews, NavigateResult } from './views'
+import type { SessionPlace } from './place'
+import type { SavedStateTools } from './cdp'
 
 export interface BrowserToolsDeps {
   views: BrowserViews
@@ -33,6 +35,8 @@ export interface BrowserToolsDeps {
   log(level: 'warn' | 'error', message: string): void
   /** A call waits for the user to answer a new origin: its own time limit covers that wait. */
   waiting?(callId: number, waiting: boolean): void
+  /** Huli: saved sign-in states, for browser_storage_state. */
+  states?: SavedStateTools
 }
 
 function isName(value: string): value is BrowserToolName {
@@ -89,6 +93,11 @@ export class BrowserTools {
           wait.waiting?.(false)
         }
       },
+      emulate: (tabId, change) => deps.views.emulate(tabId, change),
+      mayOpen: (sessionId, url) => deps.views.mayOpen(sessionId, url),
+      downloads: (sessionId) => deps.views.downloadsOf(sessionId),
+      saveFile: (sessionId, name, data) => deps.views.saveFile(sessionId, name, data),
+      ...(deps.states ? { states: deps.states } : {}),
     })
   }
 
@@ -98,8 +107,8 @@ export class BrowserTools {
   }
 
   /** A tab's page was made: its debugger's events flow to the tab's buffers from here on. */
-  watch(tabId: string, contents: WebContents): void {
-    this.cdp.watch(tabId, contents)
+  watch(tabId: string, contents: WebContents, sessionId: string | null = null): void {
+    this.cdp.watch(tabId, contents, sessionId)
   }
 
   /** Take over, from the label, the pill or the bubble: the page is the user's until Hand back. */
@@ -151,6 +160,7 @@ export class BrowserTools {
   forget(sessionId: string): void {
     this.controls.forget(sessionId)
     this.opened.delete(sessionId)
+    this.cdp.forgetSession(sessionId)
   }
 
   /**
@@ -165,10 +175,13 @@ export class BrowserTools {
     projectPath = '',
     waiting?: (waiting: boolean) => void,
     allowTab?: string,
+    place?: SessionPlace | null,
   ): Promise<BrowserCallAnswer> {
     if (!isName(tool)) {
       return error('invalid', `Unknown browser tool ${tool}.`)
     }
+    // Huli: where the session works, for its downloads and its own browser data.
+    this.deps.views.setPlace(sessionId, place ?? null)
     // The user's tabs are theirs: the agent host asks them, then sends the call again with the tab.
     if (allowTab) this.deps.views.allowTab(sessionId, allowTab, true)
     const theirs = this.deps.views.userTabFor(sessionId, tool, args)

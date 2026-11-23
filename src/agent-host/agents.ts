@@ -25,6 +25,8 @@ import type {
   ClaudeSettings,
   CodebuddySettings,
   CodebuddySiteChange,
+  CodexSettingChange,
+  CodexSettings,
   HarnessReason,
   InstallOffer,
   InstalledCli,
@@ -168,6 +170,8 @@ import {
 import { DshAccounts, type DshReadReason } from './dsh/account'
 import { clearApiKey as clearDshKey, writeApiKey as writeDshKey } from './dsh/credentials'
 import { readClaudeSettings, writeClaudeSetting, type ListedModel } from './claude/user-settings'
+import { readOutputStyles } from './claude/output-styles'
+import { readCodexSettings, writeCodexSetting } from './codex/settings'
 import { readCodebuddySite, shellOverrides, writeCodebuddySite } from './codebuddy/user-settings'
 import { readAutoCompact, writeAutoCompact, type CompactPlace } from './auto-compact/settings'
 import type { CodexRequest } from './marketplace/codex-plugins'
@@ -6312,7 +6316,13 @@ export class AgentManager {
   async claudeSettings(agentId: AgentId, listed: readonly ListedModel[]): Promise<ClaudeSettings> {
     const slot = this.claudeSlot(agentId)
     await this.detectAll()
-    return readClaudeSettings(this.settingsFile(slot), listed)
+    const file = this.settingsFile(slot)
+    // Huli: and its output styles, the user's own from the folder beside the file, read only.
+    const [settings, outputStyles] = await Promise.all([
+      readClaudeSettings(file, listed),
+      readOutputStyles(path.join(path.dirname(file), 'output-styles')),
+    ])
+    return { ...settings, outputStyles }
   }
 
   /** Writes one of them into the settings file; a session opened later reads it. */
@@ -6369,6 +6379,36 @@ export class AgentManager {
       config,
       codex,
     }
+  }
+
+  // Huli: Codex's own configuration, through its app-server's config API.
+
+  /** A Codex agent's memories, workspace sandbox, permission profile and features in beta. */
+  async codexSettings(
+    agentId: AgentId,
+    codex: () => Promise<CodexRequest>,
+  ): Promise<CodexSettings> {
+    this.codexSlot(agentId)
+    return readCodexSettings(await codex())
+  }
+
+  /** Writes one key of them; a thread started later reads it. */
+  async setCodexSetting(
+    agentId: AgentId,
+    change: CodexSettingChange,
+    codex: () => Promise<CodexRequest>,
+  ): Promise<void> {
+    this.codexSlot(agentId)
+    await writeCodexSetting(await codex(), change)
+    this.deps.diagnostics.event(agentId, 'codex setting', change.setting)
+  }
+
+  private codexSlot(agentId: AgentId): Slot {
+    const slot = this.registeredSlot(agentId)
+    if (slot.def.id !== 'codex') {
+      throw invalidParams(t('agent.noSettings', { agent: slot.def.name }))
+    }
+    return slot
   }
 
   // Codebuddy Code's site.

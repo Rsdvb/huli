@@ -97,6 +97,7 @@ const onHostsChanged = subscribe('hosts:changed')
 const onHostPairing = subscribe('hosts:pairing')
 const onBrowserState = subscribe('browser:state')
 const onBrowserPick = subscribe('browser:pick')
+const onSavedStates = subscribe('browser:saved-states')
 const onHostForwards = subscribe('hosts:forwards')
 const onBrowserOpened = subscribe('browser:opened')
 const onDeviceOpened = subscribe('devices:opened')
@@ -360,6 +361,15 @@ const api: KettuApi = {
     removeAllowedSite: (projectPath, origin) =>
       invoke('browser:remove-allowed-site', projectPath, origin),
     clearData: () => invoke('browser:clear-data'),
+    resetEmulation: (id) => invoke('browser:reset-emulation', id),
+    answerDownload: (id, requestId, allow) =>
+      invoke('browser:answer-download', id, requestId, allow),
+    setWorktree: (id, worktree) => invoke('browser:worktree', id, worktree),
+    savedStates: () => invoke('browser:saved-states'),
+    saveState: (id, name) => invoke('browser:save-state', id, name),
+    restoreState: (id, name) => invoke('browser:restore-state', id, name),
+    deleteSavedState: (name) => invoke('browser:delete-saved-state', name),
+    onSavedStates,
     siteIcons: () => invoke('browser:site-icons'),
     loadSiteIcon: (url) => invoke('browser:load-site-icon', url),
     onSiteIcon,

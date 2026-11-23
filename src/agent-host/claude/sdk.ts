@@ -158,6 +158,28 @@ export interface StdioMcpServer {
 
 export type McpServerConfig = HttpMcpServer | StdioMcpServer
 
+/**
+ * Huli: a server as `mcpServerStatus` reports it, of the fields Kite reads. Its `config` holds the
+ * server's address and headers, which Kite never reads, so the type leaves it out.
+ */
+export interface McpServerStatus {
+  name: string
+  status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'
+  error?: string
+  /** Where its definition came from: sdk, plugin, or a configuration scope; an open set. */
+  source?: string
+  /** The configuration scope, from CLIs older than `source`. */
+  scope?: string
+  tools?: { name: string; description?: string }[]
+}
+
+/** Huli: what `reloadPlugins` answers, of the fields Kite reads. */
+export interface ReloadPluginsAnswer {
+  commands: SlashCommandInfo[]
+  mcpServers: McpServerStatus[]
+  error_count: number
+}
+
 export interface McpSetServersResult {
   added: string[]
   removed: string[]
@@ -187,6 +209,12 @@ export interface QueryOptions {
   promptSuggestions?: boolean
   /** Huli: a running subagent's `task_progress` carries a one-line summary of what it does. */
   agentProgressSummaries?: boolean
+  /**
+   * Huli: how built-in tools present to the host. `previewFormat` lets AskUserQuestion's options
+   * carry a `preview` the host renders, in markdown or an HTML fragment; without it the tool never
+   * asks for previews.
+   */
+  toolConfig?: { askUserQuestion?: { previewFormat?: 'markdown' | 'html' } }
   settingSources?: SettingSource[]
   systemPrompt?: { type: 'preset'; preset: 'claude_code'; append?: string }
   /** The built-in tools, by name; an empty list has none. */
@@ -409,6 +437,9 @@ export interface InitializeAnswer {
   models: ModelInfo[]
   account?: AccountInfo
   fast_mode_state?: string
+  /** Huli: the output style in use, and every one Claude Code can switch to, built-in and custom. */
+  output_style?: string
+  available_output_styles?: string[]
   /** The version of the Claude Code process that runs the session's turns. */
   claude_code_version?: string
 }
@@ -473,6 +504,22 @@ export interface Query extends AsyncIterable<SdkMessage> {
    * over the control channel; the settings files' servers stay.
    */
   setMcpServers(servers: Record<string, McpServerConfig>): Promise<McpSetServersResult>
+  /** Huli: the state of each of the session's MCP servers. */
+  mcpServerStatus?(): Promise<McpServerStatus[]>
+  /** Huli: connects a server again; throws when it cannot. */
+  reconnectMcpServer?(serverName: string): Promise<void>
+  /**
+   * Huli: turns a server of the user's settings off or on. Claude Code keeps the choice in its
+   * own configuration for the folder, so it lasts past the session.
+   */
+  toggleMcpServer?(serverName: string, enabled: boolean): Promise<void>
+  /**
+   * Huli: reads the plugins again from disk. With `refuseIfBusy`, a session at work rejects with
+   * `errorCode` 'reload_plugins_busy', where the CLI honors it.
+   */
+  reloadPlugins?(options?: { refuseIfBusy?: boolean }): Promise<ReloadPluginsAnswer>
+  /** Huli: reads the skills again from disk. */
+  reloadSkills?(): Promise<{ skills: SlashCommandInfo[] }>
   close(): void
   /** Present in the SDK Kettu pins, though not in its published types. */
   generateSessionTitle?(description: string, options: { persist: boolean }): Promise<string | null>

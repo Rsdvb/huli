@@ -77,13 +77,16 @@ import { notesMessage } from '@renderer/features/diff-notes/notes'
 import { pageNoteShots, pageNotesText } from '@renderer/features/page-notes/notes'
 import { HistoryHeader } from './history-header'
 import { RewoundHeader } from './rewound-header'
-import { dialStops, type SelectOption } from './levels'
+import { dialStops, splitName, type SelectOption } from './levels'
 import { shownChoice } from './model-list'
 import { ModelMenu } from './model-menu'
 import { nextChoice, nextMode } from './modes'
 import { HeldStrip, OutsideConfirm } from './held-strip'
 import { outsideConfirmed } from './outside-confirmed'
 import { OutOfCreditStrip } from './out-of-credit-strip'
+import { CacheRestartStrip } from './cache-restart-strip'
+import { ShellStrip } from './shell-strip'
+import { CACHE_PER_MODEL, modelCacheRestarts } from './cache-restart'
 import { useAddMenu } from './add-menu'
 import { PromptBox } from './prompt-box'
 import { CACHE_NOTICE_MIN_TOKENS, CacheNotice } from './cache-notice'
@@ -340,6 +343,9 @@ export function Composer({
   // An agent that is gone takes no settings; the one picked to carry on shows its own.
   const config = pendingConfig ?? (mustSwitch ? [] : session.config)
   const mode = config.find((o): o is SelectOption => o.category === 'mode' && isSelect(o))
+  // Huli: a Codex message of text alone that starts with ! goes as a shell command Codex runs.
+  const codexShell = harnessOf(session.agentId) === 'codex' && !pending && attachments.length === 0
+  const shellTyped = useBoxText(box, (text) => /^\s*!\S/.test(text))
   const model = config.find((o): o is SelectOption => o.category === 'model' && isSelect(o))
   const effort = config.find((o) => o.category === 'thought_level' && isSelect(o))
   // A used-up window of another model does not hold this session back.
@@ -353,26 +359,46 @@ export function Composer({
   const suggestion =
     idle && quota?.kind === 'out' && fallback && !keptQuota ? { quota, fallback } : null
   const switches = config.filter((o) => o.type === 'boolean')
+  // Huli: an option of the session's menu, such as Claude Code's output style, stays out of here.
   const others = config.filter(
-    (o): o is SelectOption => isSelect(o) && o !== mode && o !== model && o !== effort,
+    (o): o is SelectOption =>
+      isSelect(o) && o !== mode && o !== model && o !== effort && o.place !== 'menu',
   )
   const leftOthers = others.filter((o) => o.category === 'other')
   const rightOthers = others.filter((o) => o.category !== 'other')
 
+  // Huli: a model picked mid-session, whose prompt cache starts over: kept until the next request.
+  const [cacheRestart, setCacheRestart] = useState<{ at: number; model: string } | null>(null)
+  const lastRequestAt = session.usage?.cache?.lastRequestAt ?? null
   const set: Select = (optionId, value) => {
     setConfigError(null)
     if (pending) {
       updatePendingSwitch(sessionId, { values: { ...pending.values, [optionId]: value } })
       return Promise.resolve(true)
     }
+    const restarts =
+      model && optionId === model.id && lastRequestAt !== null && modelCacheRestarts(model, value)
+        ? { at: lastRequestAt, choices: model.choices }
+        : null
     return host('sessions.setConfigOption', { sessionId, optionId, value }).then(
-      () => true,
+      () => {
+        if (restarts) {
+          const name = shownChoice(restarts.choices, String(value))?.name ?? String(value)
+          setCacheRestart({ at: restarts.at, model: splitName(name)[1] })
+        } else if (optionId === model?.id) setCacheRestart(null)
+        return true
+      },
       (e: unknown) => {
         setConfigError(errorMessage(e))
         return false
       },
     )
   }
+  const cacheRestartShown =
+    cacheRestart !== null &&
+    cacheRestart.at === lastRequestAt &&
+    !running &&
+    CACHE_PER_MODEL.has(harnessOf(session.agentId))
   const modeControl = useModeControl(mode, set)
 
   // Huli: the API profile the session runs with; a change between turns starts its agent again.
@@ -859,6 +885,20 @@ export function Composer({
                 <CommentList sessionId={sessionId} />
                 {/* Huli: the comments on diff lines and page elements, which also go with Send. */}
                 <NotesTray sessionId={sessionId} place="composer" />
+                <AnimatePresence initial={false}>
+                  {codexShell && shellTyped && (
+                    <ShellStrip key="shell" asks={mode?.value !== 'agent-full-access'} />
+                  )}
+                </AnimatePresence>
+                <AnimatePresence initial={false}>
+                  {cacheRestartShown && (
+                    <CacheRestartStrip
+                      key="cache-restart"
+                      model={cacheRestart.model}
+                      onDismiss={() => setCacheRestart(null)}
+                    />
+                  )}
+                </AnimatePresence>
                 <AnimatePresence initial={false}>
                   {outOfCredit && !starting && (
                     <OutOfCreditStrip

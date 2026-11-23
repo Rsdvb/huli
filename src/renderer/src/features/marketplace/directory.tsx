@@ -44,6 +44,8 @@ import {
   Tabs,
 } from '@renderer/components/affect/app-shell'
 import { useEntry } from '@renderer/lib/features'
+import { toast } from '@renderer/components/ui/toast'
+import { errorMessage } from '@renderer/lib/host'
 import { Button } from '@renderer/components/affect/button'
 import { mediumAgo } from '@renderer/lib/format'
 import { currentLocale } from '@renderer/lib/i18n'
@@ -61,6 +63,7 @@ import {
 } from '@renderer/stores/marketplace'
 import { openMarketplace, setMarketplaceTab, type MarketplaceTab } from '@renderer/stores/view'
 import { useHostName, useNamesHosts, useWindowHost } from '@renderer/stores/window-host'
+import { reloadToast } from '@renderer/features/session/mcp/mcp-panel'
 import { installSkill } from './actions'
 import { CommunityRow, CommunitySignedOut } from './community'
 import { AddMarketplaceDialog, AddServerDialog, AddSkillDialog } from './dialogs'
@@ -790,6 +793,7 @@ export function Directory({ tab: asked }: { tab: MarketplaceTab }) {
             }
           />
           <div className="ui-as-toolbar__right">
+            {!published && <ReloadButton />}
             <SearchField
               placeholder={published ? t('page.searchPublished') : t('page.search')}
               width={230}
@@ -1173,6 +1177,34 @@ function Empty({ tab, query }: { tab: MarketplaceTab; query: string }) {
     <div className="ui-as-rise ui-as-int-empty">
       <EmptyState title={title} text={text} />
     </div>
+  )
+}
+
+/** Huli: newly installed skills and plugins reach the sessions whose agent runs, where it can. */
+function ReloadButton() {
+  const { t } = useTranslation('marketplace')
+  const scope = useHostScope()
+  const [busy, setBusy] = useState(false)
+  return (
+    <Button
+      size="md"
+      variant="ghost"
+      loading={busy}
+      title={t('page.reloadHint')}
+      icon={<Icon icon={RefreshIcon} size={14} />}
+      onClick={() => {
+        setBusy(true)
+        scope
+          .request('sessions.reloadPlugins', {})
+          .then(
+            (result) => reloadToast(result, true),
+            (e: unknown) => toast(errorMessage(e), undefined, { tone: 'warning' }),
+          )
+          .finally(() => setBusy(false))
+      }}
+    >
+      {t('page.reload')}
+    </Button>
   )
 }
 

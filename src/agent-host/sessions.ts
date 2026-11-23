@@ -187,6 +187,14 @@ import {
 import type { SessionProcesses } from '@shared/task-processes'
 import { readTaskProcesses } from './task-processes'
 import {
+  actOnSessionMcp,
+  loginSessionMcp,
+  readSessionMcp,
+  reloadSessions,
+  type McpSession,
+} from './session-mcp/service'
+import type { PluginReload, SessionMcpAction, SessionMcpView } from '@shared/session-mcp'
+import {
   agentEntryBefore,
   gitPatch,
   ReplayKeeper,
@@ -537,6 +545,12 @@ export interface SessionEvents {
   progress?(sessions: Record<string, SessionProgress>): void
   /** A turn of a session the user started themselves ended normally. */
   completed(sessionId: string): void
+  /** Huli: the session's MCP servers changed, to the ports watching it. */
+  mcpChanged?(
+    sessionId: string,
+    login: { server: string; ok: boolean; error: string | null } | undefined,
+    portIds: readonly string[],
+  ): void
 }
 
 /** The artifacts service and the Marketplace's servers, as the sessions pass them to their agents. */
@@ -1492,6 +1506,8 @@ export class SessionManager {
   /** `/context` reports running, by session id. */
   private readonly contextRuns = new Map<string, Promise<ContextBreakdown | null>>()
   private readonly contextEstimateRuns = new WeakMap<Live, Promise<ContextEstimates | null>>()
+  /** Huli: the names of the MCP servers each session's last attach handed its agent. */
+  private readonly handedMcp = new Map<string, string[]>()
   /** The side question each session is answering, stopped through its controller. */
   private readonly sideRuns = new Map<string, AbortController>()
   /** What the last clear of each session's side chat emptied, for its undo. */
@@ -4727,10 +4743,15 @@ export class SessionManager {
     // nor plugins from the computer go in.
     const contained = sandbox?.tier === 'container'
     const folders = this.agentFolders(record)
+    const mcpServers = contained
+      ? []
+      : [...own, ...this.libraryServers(sessionId, record, runtime, own)]
+    this.handedMcp.set(
+      sessionId,
+      mcpServers.map((server) => server.name),
+    )
     return {
-      mcpServers: contained
-        ? []
-        : [...own, ...this.libraryServers(sessionId, record, runtime, own)],
+      mcpServers,
       ...(provider ? { provider } : {}),
       ...(readOnly ? { readOnly: true } : {}),
       ...(sandbox ? { sandbox } : {}),
@@ -5353,6 +5374,9 @@ export class SessionManager {
       case 'scheduled':
         live.scheduled = effect.jobs
         this.refreshRelease(live)
+        break
+      case 'mcp':
+        this.mcpChanged(live.id, effect.login)
         break
       case 'tasks':
         this.update(live, { background: effect.tasks })
@@ -10772,6 +10796,7 @@ export class SessionManager {
                     this.deps.agents.name(live.record.agentId),
                     live.thread.session.config,
                     mapped.message,
+                    providerOfRefusal(mapped),
                   )
                 : {
                     title: chatgpt ? t('notice.chatgptLimit.title') : t('notice.turnFailed'),
@@ -12027,6 +12052,70 @@ export class SessionManager {
     } catch (error) {
       throw agentError(error)
     }
+  }
+
+  // Huli: the session's MCP panel (session-mcp/service.ts).
+
+  mcp(sessionId: string): Promise<SessionMcpView> {
+    return readSessionMcp(this.mcpSession(sessionId))
+  }
+
+  async mcpAct(
+    sessionId: string,
+    action: SessionMcpAction,
+    server: string | null,
+  ): Promise<SessionMcpView> {
+    const view = await actOnSessionMcp(this.mcpSession(sessionId), action, server)
+    this.mcpChanged(sessionId)
+    return view
+  }
+
+  mcpLogin(sessionId: string, server: string): Promise<{ url: string }> {
+    return loginSessionMcp(this.mcpSession(sessionId), server)
+  }
+
+  /** Reloads skills and plugins in the session, or in every session whose agent runs. */
+  async reloadPlugins(sessionId?: string): Promise<PluginReload> {
+    const ids =
+      sessionId !== undefined
+        ? [this.recordOf(sessionId).id]
+        : [...this.live.values()]
+            .filter(
+              (live) =>
+                live.connection &&
+                !live.closing &&
+                !live.prepared &&
+                live.record.origin !== 'subagent' &&
+                !this.isArchived(live.record),
+            )
+            .map((live) => live.id)
+    const result = await reloadSessions(ids.map((id) => this.mcpSession(id)))
+    for (const id of ids) this.mcpChanged(id)
+    return result
+  }
+
+  private mcpSession(sessionId: string): McpSession {
+    const live = this.live.get(sessionId)
+    const record = live?.record ?? this.recordOf(sessionId)
+    return {
+      connection: live && !live.closing ? live.connection : null,
+      agentSessionId: record.acpSessionId,
+      kite: this.handedMcp.get(sessionId) ?? [],
+      startable:
+        harnessOf(record.agentId) === 'claude-code' &&
+        record.origin !== 'subagent' &&
+        !this.isArchived(record) &&
+        this.attachable(live),
+      agent: this.deps.agents.name(record.agentId),
+    }
+  }
+
+  private mcpChanged(
+    sessionId: string,
+    login?: { server: string; ok: boolean; error: string | null },
+  ): void {
+    const ports = this.watchers.get(sessionId)
+    if (ports && ports.size > 0) this.deps.events.mcpChanged?.(sessionId, login, [...ports])
   }
 
   /**
@@ -16210,25 +16299,37 @@ function outOfCreditNotice(
   agent: string,
   config: readonly ConfigOption[],
   message: string,
+  provider: string | null = null,
 ): {
   severity: 'warning'
   title: string
   description: string
   cause: 'out_of_credit'
   model?: string
+  provider?: string
 } {
   const model = modelOf(config)
   const option = config.find((o) => o.category === 'model')
   const name = model && (option?.choices?.find((c) => c.value === model)?.name ?? model)
   return {
     severity: 'warning',
-    title: name
-      ? t('notice.outOfCredit.title', { model: name.slice(name.lastIndexOf('/') + 1) })
-      : t('notice.outOfCredit.titleNoModel', { agent }),
+    title: provider
+      ? t('notice.outOfCredit.titleProvider', { provider })
+      : name
+        ? t('notice.outOfCredit.title', { model: name.slice(name.lastIndexOf('/') + 1) })
+        : t('notice.outOfCredit.titleNoModel', { agent }),
     description: message,
     cause: 'out_of_credit',
     ...(model ? { model } : {}),
+    ...(provider ? { provider } : {}),
   }
+}
+
+/** Huli: the provider a connection names as having refused for want of quota, as Codex's does. */
+function providerOfRefusal(error: { data?: unknown }): string | null {
+  const data = (error.data as { data?: unknown } | undefined)?.data
+  const provider = (data as { providerQuota?: unknown } | undefined)?.providerQuota
+  return typeof provider === 'string' && provider !== '' ? provider : null
 }
 
 // The exit event and the failed prompt race, so both say the same thing. The notice ends the cut

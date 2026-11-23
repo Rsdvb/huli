@@ -264,6 +264,65 @@ export interface ElementPick {
   still: string
   /** The element's visible part in the still's pixels; null when none of it is in view. */
   crop: PageBox | null
+  /** Huli: its key computed styles, by CSS property, those that differ from a plain default. */
+  styles?: Record<string, string>
+  /** Huli: where its source is, as a dev build of the page tells it; absent when none does. */
+  source?: PickSource
+}
+
+/** Huli: a picked element's place in the project's source. */
+export interface PickSource {
+  file: string
+  line: number | null
+  column: number | null
+  from: 'attribute' | 'react' | 'svelte' | 'vue' | 'stack'
+}
+
+/** Huli: the most styles a note keeps, and the longest value of one. */
+export const MAX_PICK_STYLES = 24
+const MAX_STYLE_VALUE = 200
+const MAX_SOURCE_FILE = 500
+const SOURCE_FROM = new Set(['attribute', 'react', 'svelte', 'vue', 'stack'])
+
+/** Huli: a stored note's styles, checked. */
+function isStyles(value: unknown): value is Record<string, string> {
+  if (!isRecord(value)) return false
+  const entries = Object.entries(value)
+  return (
+    entries.length <= MAX_PICK_STYLES &&
+    entries.every(
+      ([name, style]) =>
+        /^[a-z-]{1,40}$/.test(name) && typeof style === 'string' && style.length <= MAX_STYLE_VALUE,
+    )
+  )
+}
+
+const isLine = (value: unknown): boolean =>
+  value === null || (typeof value === 'number' && Number.isInteger(value) && value > 0)
+
+/** Huli: a stored note's source, checked. */
+export function isPickSource(value: unknown): value is PickSource {
+  return (
+    isRecord(value) &&
+    typeof value.file === 'string' &&
+    value.file.length > 0 &&
+    value.file.length <= MAX_SOURCE_FILE &&
+    isLine(value.line) &&
+    isLine(value.column) &&
+    SOURCE_FROM.has(String(value.from))
+  )
+}
+
+/** Huli: a source as `file:line:column`. */
+export function sourceText(source: PickSource): string {
+  return `${source.file}${source.line === null ? '' : `:${source.line}`}${source.line !== null && source.column !== null ? `:${source.column}` : ''}`
+}
+
+/** Huli: styles as one CSS declaration list. */
+export function stylesText(styles: Record<string, string>): string {
+  return Object.entries(styles)
+    .map(([name, value]) => `${name}: ${value}`)
+    .join('; ')
 }
 
 /** The pick mode's outline color, the theme's accent as the pane reads it. */
@@ -296,6 +355,9 @@ export interface PageNote {
   comment: string
   /** When it was written, in ms. */
   at: number
+  /** Huli: the element's key styles and its source, when the pick read them. */
+  styles?: Record<string, string>
+  source?: PickSource
 }
 
 const isSize = (value: unknown): boolean =>
@@ -335,7 +397,9 @@ export function isPageNote(value: unknown): value is PageNote {
     (value.shot === null || isAttachment(value.shot)) &&
     (value.shotHost === undefined || isText(value.shotHost, 64)) &&
     isText(value.comment, MAX_PAGE_NOTE_TEXT) &&
-    typeof value.at === 'number'
+    typeof value.at === 'number' &&
+    (value.styles === undefined || isStyles(value.styles)) &&
+    (value.source === undefined || isPickSource(value.source))
   )
 }
 
@@ -369,6 +433,8 @@ export function newPageNote(
     ...(input.shotHost ? { shotHost: input.shotHost } : {}),
     comment: input.comment.slice(0, MAX_PAGE_NOTE_TEXT),
     at: input.at,
+    ...(pick.styles && isStyles(pick.styles) ? { styles: pick.styles } : {}),
+    ...(pick.source && isPickSource(pick.source) ? { source: pick.source } : {}),
   }
 }
 
@@ -384,6 +450,9 @@ export interface PageNoteLabels {
   box: (box: PageBox, viewport: { width: number; height: number }) => string
   /** The screenshot that goes as the message's `index`th image, from 1. */
   shot: (index: number) => string
+  /** Huli: `Source`, before the file and line, and `Styles`, before the declarations. */
+  source?: string
+  styles?: string
 }
 
 /** A code span that holds `text` whatever backticks it has. */
@@ -414,7 +483,11 @@ export function pageNotesMessage(
       `- ${labels.page}: ${note.url}`,
       `- ${labels.selector}: ${code(note.selector)}`,
       ...(note.text ? [`- ${labels.text}: ${code(note.text)}`] : []),
+      ...(note.source ? [`- ${labels.source ?? 'Source'}: ${code(sourceText(note.source))}`] : []),
       `- ${labels.box(note.box, note.viewport)}`,
+      ...(note.styles && Object.keys(note.styles).length > 0
+        ? [`- ${labels.styles ?? 'Styles'}: ${code(stylesText(note.styles))}`]
+        : []),
       ...(note.shot ? [`- ${labels.shot(image++)}`] : []),
       '',
       note.comment.trim(),

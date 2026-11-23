@@ -49,6 +49,9 @@ import { accountAvatarRequestUrl, Avatars } from './avatars'
 import { applyBadgeTo, setBadgeCount, setBadgeEnabled } from './badge'
 import { RemoteBrowser } from './browser/remote'
 import { BrowserViews } from './browser/views'
+import { placeOf } from './browser/place'
+import { SavedStates, savedStatesFile } from './browser/saved-states'
+import { StateTools } from './browser/state-tools'
 import { BrowserTools } from './browser/tools'
 import { BrowserOriginStore } from './browser/origins'
 import { SiteIcons } from './browser/site-icons'
@@ -75,6 +78,7 @@ import {
   registerSessionExportIpc,
   registerSessionMoveIpc,
   registerSignInIpc,
+  registerBrowserStateIpc,
   registerTrayIpc,
   registerMiniIpc,
   registerCaptureIpc,
@@ -369,6 +373,12 @@ async function start(): Promise<void> {
   // The browser tools need the host to answer them, and the pages need the window, so each takes
   // the other's work through this one late binding.
   let browserTools: BrowserTools | null = null
+  // Huli: the saved sign-in states, which need the system's encryption, made once that is set up.
+  let stateTools: StateTools | null = null
+  const states = (): StateTools => {
+    if (!stateTools) throw new Error('Saved sign-in states are not ready yet.')
+    return stateTools
+  }
   // The host shows a new origin in the session's thread; it is made after the pages.
   const hostRef: { current: AgentHost | null } = { current: null }
   const browserViews = new BrowserViews({
@@ -385,7 +395,7 @@ async function start(): Promise<void> {
     settings: () => settings.get(),
     themes: () => themes.state(),
     systemLocale,
-    created: (tabId, contents) => browserTools?.watch(tabId, contents),
+    created: (tabId, contents, sessionId) => browserTools?.watch(tabId, contents, sessionId),
     closed: (tabId) => browserTools?.forgetTab(tabId),
     ended: (sessionId) => browserTools?.forget(sessionId),
     failed: (sessionId, kind, message) => browserTools?.pageFailed(sessionId, kind, message),
@@ -404,6 +414,8 @@ async function start(): Promise<void> {
       else siteIcons.visited(pageUrl)
     },
     picked: (event) => broadcast('browser:pick', event),
+    profileMode: () => settings.get().browserProfiles.mode,
+    downloadNote: (sessionId, note) => browserTools?.cdp.downloadNote(sessionId, note),
   })
   browserViewsRef.current = browserViews
   browserTools = new BrowserTools({
@@ -417,6 +429,11 @@ async function start(): Promise<void> {
     opened: (sessionId) => broadcast('browser:opened', { sessionId }),
     log: (level, message) => log[level](`browser: ${message}`),
     waiting: (callId, waiting) => hostRef.current?.browserWaiting(callId, waiting),
+    states: {
+      save: (sessionId, tabId, name) => states().save(sessionId, tabId, name),
+      restore: (sessionId, tabId, name) => states().restore(sessionId, tabId, name),
+      list: () => states().list(),
+    },
   })
   // Other hosts' agents drive the pages of the turns this computer sends them.
   const remoteBrowser = new RemoteBrowser({
@@ -455,6 +472,18 @@ async function start(): Promise<void> {
     plainText: () =>
       process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text',
   }
+  stateTools = new StateTools({
+    load: () =>
+      SavedStates.load(
+        savedStatesFile(userDataPath),
+        identityCipher,
+        createLogger('browser-states'),
+      ),
+    partition: (sessionId) => browserViews.partitionSession(sessionId),
+    tabContents: (tabId) => browserViews.tabContents(tabId),
+    changed: (list) => broadcast('browser:saved-states', list),
+  })
+  registerBrowserStateIpc(browserViews, stateTools)
   const marketKeys = await MarketKeys.load({
     file: marketKeysFile(userDataPath),
     cipher: identityCipher,
@@ -655,6 +684,7 @@ async function start(): Promise<void> {
             request.projectPath,
             undefined,
             request.allowTab,
+            placeOf(request),
           )
         : Promise.resolve({
             error: { code: 'no_page', message: t('browserRemote.otherHost') },

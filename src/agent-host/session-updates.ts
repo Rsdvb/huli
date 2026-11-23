@@ -82,6 +82,9 @@ export type MapperEffect =
       progress?: string
     }
   | { kind: 'limit'; limit: PlanLimit }
+  // Huli: the session's MCP servers changed state, so an open panel reads them again; `login` ends
+  // a sign-in the panel started.
+  | { kind: 'mcp'; login?: { server: string; ok: boolean; error: string | null } }
   // Huli: a call the agent's review denied may still be allowed; the host judges its risk.
   | { kind: 'appeal'; entryId: string }
   // The plan accepts requests again, which ends a block a window showed.

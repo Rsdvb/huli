@@ -75,6 +75,10 @@ describe("Claude Code agents' fallback model and budget", () => {
       { budgetUsd: 0.01 },
       { budgetUsd: 10_000 },
       { fallbackModel: 'claude-opus-5-5[1m]' },
+      { outputStyle: null },
+      { outputStyle: 'Explanatory' },
+      { outputStyle: 'My team style' },
+      { outputStyle: '讲解' },
     ]) {
       expect(() =>
         validateSettingsPatch({
@@ -98,6 +102,11 @@ describe("Claude Code agents' fallback model and budget", () => {
       { 'claude-code': { ...run, fallbackModel: 'opus,sonnet' } },
       { 'claude-code': { ...run, fallbackModel: 'x'.repeat(257) } },
       { 'claude-code': { ...run, budgetAllSessions: 'yes' } },
+      { 'claude-code': { ...run, outputStyle: 42 } },
+      { 'claude-code': { ...run, outputStyle: '' } },
+      { 'claude-code': { ...run, outputStyle: ' Explanatory' } },
+      { 'claude-code': { ...run, outputStyle: 'a\nb' } },
+      { 'claude-code': { ...run, outputStyle: 'x'.repeat(101) } },
       { 'claude-code': { fallbackModel: null, budgetUsd: null } },
       { 'claude-code': { ...run, maxTurns: 3 } },
       { 'claude-code': null },

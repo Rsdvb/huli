@@ -15,6 +15,8 @@ import {
   isAgentColor,
   isClaudeBudgetUsd,
   isClaudeFallbackModel,
+  isOutputStyleName,
+  OUTPUT_STYLE_CHARS,
   isClaudeTestEntrypointLabel,
   nextAgentColor,
   isFontFamilyName,
@@ -161,7 +163,7 @@ const isStopShortcutValue: Check = (value, path) =>
     ? null
     : `"${path}" must be empty or two or more modifiers and a key, such as Control+Alt+Command+.`
 
-const CLAUDE_RUN_KEYS = ['fallbackModel', 'budgetUsd', 'budgetAllSessions']
+const CLAUDE_RUN_KEYS = ['fallbackModel', 'budgetUsd', 'budgetAllSessions', 'outputStyle']
 
 /** Each Claude Code agent's fallback model and budget, every field given. */
 const isClaudeRuns: Check = (value, path) => {
@@ -180,6 +182,13 @@ const isClaudeRuns: Check = (value, path) => {
     }
     if (typeof run.budgetAllSessions !== 'boolean') {
       return `"${at}.budgetAllSessions" must be a boolean`
+    }
+    if (
+      run.outputStyle !== undefined &&
+      run.outputStyle !== null &&
+      !isOutputStyleName(run.outputStyle)
+    ) {
+      return `"${at}.outputStyle" must be null or a style name of at most ${OUTPUT_STYLE_CHARS} characters`
     }
   }
   return null
@@ -365,6 +374,7 @@ const SECTION_FIELDS = {
     source: oneOf('auto', 'github'),
   },
   privacy: { hideAccount: isBoolean },
+  browserProfiles: { mode: oneOf('shared', 'worktree', 'session') },
   diagnostics: { verboseUntil: isVerboseUntil },
   usage: {
     fromComputer: isBoolean,

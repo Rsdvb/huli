@@ -57,6 +57,7 @@
     "body": "It stopped this reply on its own, and the API gives no reason. Try the message again, rephrase it, or pick another model in the composer below.",
     "saidBody": "It stopped this reply on its own, and the API gives no reason beyond what it said. Rephrase the message, try it again, or pick another model in the composer below.",
     "again": "Try again",
+    "otherModel": "Try another model",
     "rephrase": "Edit message"
   },
   "stopReason": {
@@ -166,6 +167,16 @@
     "browser_evaluate": "Run script on page",
     "browser_ask_user": "Ask for your help",
     "browser_tabs": "Browser tabs",
+    "browser_upload_file": "Upload file to page",
+    "browser_hover": "Hover on page",
+    "browser_drag": "Drag on page",
+    "browser_click_at": "Click at a point",
+    "browser_emulate": "Emulate in browser",
+    "browser_route": "Mock network",
+    "browser_downloads": "List downloads",
+    "browser_pdf": "Save page as PDF",
+    "browser_trace": "Trace page performance",
+    "browser_storage_state": "Saved sign-in state",
     "device_list": "List devices",
     "device_open": "Open device",
     "device_close": "Close device",
@@ -193,6 +204,13 @@
     "device_alert": "Handle device alert",
     "device_keyboard": "Use device keyboard",
     "device_batch": "Run device steps",
+    "device_record_start": "Record device screen",
+    "device_record_stop": "Stop device recording",
+    "device_screenshot_compare": "Compare device screen",
+    "device_network": "Read app network activity",
+    "device_push": "Send test notification",
+    "device_perf": "Sample app performance",
+    "device_reset_app": "Reset app data",
     "terminal_list": "List terminals",
     "terminal_run": "Run in terminal",
     "terminal_read": "Read terminal",
@@ -1236,6 +1254,11 @@
     "skipped": "Skipped",
     "secret": "Hidden",
     "secretHint": "Hidden as you type, and not kept in the conversation",
+    "preview": {
+      "label": "Preview of the option",
+      "title": "Preview",
+      "none": "This option has no preview"
+    },
     "hint": {
       "one": "Pick one",
       "oneOrOwn": "Pick one, or type your own",
@@ -2357,5 +2380,84 @@
     "hidden_other": "{{count}} steps hidden",
     "show": "Show",
     "findShowsAll": "Find shows every step while it is open."
+  },
+  "mcp": {
+    "title": "MCP servers",
+    "subtitle": "{{agent}} · {{title}}",
+    "refresh": "Refresh",
+    "retry": "Try again",
+    "readFailed": "Couldn't read the MCP servers: {{error}}",
+    "notRunning": "{{agent}} isn't running for this session. Its MCP servers start with the next message.",
+    "notRunningStart": "{{agent}} isn't running for this session. Start it to see the servers it connects.",
+    "start": "Start {{agent}}",
+    "notReported": "{{agent}} doesn't report the state of its MCP servers. These are the servers Kite gave it.",
+    "none": "{{agent}} has no MCP servers in this session.",
+    "noneKnown": "No servers to show until the agent starts.",
+    "tools_one": "{{count}} tool",
+    "tools_other": "{{count}} tools",
+    "toolsOf": "Tools of {{name}}",
+    "more": "More for {{name}}",
+    "reconnect": "Reconnect",
+    "reconnectAll": "Reconnect all",
+    "disable": "Turn off for this session",
+    "disableLasting": "Turn off",
+    "disableLastingHint": "{{agent}} remembers this for the project until you turn it on again.",
+    "enable": "Turn on",
+    "state": {
+      "connected": "Connected",
+      "pending": "Connecting",
+      "failed": "Failed",
+      "needs-auth": "Needs sign-in",
+      "disabled": "Off",
+      "unknown": "State unknown"
+    },
+    "source": {
+      "kite": "Kite",
+      "user": "User",
+      "project": "Project",
+      "local": "Project, yours",
+      "plugin": "Plugin",
+      "pluginNamed": "Plugin {{name}}",
+      "managed": "Managed",
+      "cloud": "Account",
+      "other": "Other"
+    },
+    "login": {
+      "button": "Sign in",
+      "again": "Sign in again",
+      "waiting": "Signing in",
+      "inBrowser": "Finish signing in in your browser. This list updates when it's done.",
+      "elsewhere": "Sign in to it in the agent's own terminal, such as /mcp in Claude Code.",
+      "done": "Signed in to {{name}}",
+      "failed": "Couldn't sign in to {{name}}: {{error}}"
+    },
+    "apps": {
+      "title": "ChatGPT apps",
+      "manage": "Manage on ChatGPT",
+      "none": "This ChatGPT account has no apps connected.",
+      "off": "Off in Codex"
+    },
+    "reload": {
+      "button": "Reload skills and plugins",
+      "hint": "Newly installed skills and plugins apply to this session without restarting it",
+      "done": "Reloaded skills and plugins",
+      "busy": "The agent is at work. Reload once its turn ends.",
+      "unsupported": "This agent can't reload without restarting",
+      "failed": "Couldn't reload: {{error}}",
+      "noneRunning": "No running session to reload",
+      "reloadedSome_one": "Reloaded in {{count}} session",
+      "reloadedSome_other": "Reloaded in {{count}} sessions",
+      "busySome_one": "{{count}} at work, reload it after its turn",
+      "busySome_other": "{{count}} at work, reload them after their turns",
+      "unsupportedSome_one": "{{count}} can't reload without restarting",
+      "unsupportedSome_other": "{{count}} can't reload without restarting",
+      "join": "; "
+    },
+    "failedAll": "Couldn't reconnect the servers: {{error}}",
+    "failed": {
+      "reconnect": "Couldn't reconnect {{name}}: {{error}}",
+      "disable": "Couldn't turn off {{name}}: {{error}}",
+      "enable": "Couldn't turn on {{name}}: {{error}}"
+    }
   }
 }
