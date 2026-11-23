@@ -33,7 +33,7 @@ import type { AgentId, ConfigOption } from '@shared/thread'
 import { HostError } from '../errors'
 import { eventPrompt } from '../github-flow/decide'
 import { currentLocale, t } from '../i18n'
-import type { JsonFile, LogFn, RoutinesFile } from '../storage'
+import type { JsonFile, LogFn, RoutinesFile, StoredRoutine } from '../storage'
 import type { ThreadStore } from '../threads/store'
 import type { RoutineCallName, RoutineCalls, RoutineRunStats } from './calls'
 import { limitDecision } from './fallback'
@@ -59,6 +59,8 @@ export interface RoutineEvents {
   /** A routine, its state or its next run changed. */
   changed(routine: RoutineView): void
   removed(routineId: string): void
+  /** Huli: it went into the recycle bin: gone from every list, its webhook's secret kept. */
+  binned?(routineId: string): void
   /** A run's status changed. */
   run(run: RoutineRun): void
   /** Whether any run is starting or running changed. */
@@ -124,6 +126,8 @@ type RunEnd = {
 
 export class RoutinesManager {
   private readonly routines = new Map<string, Routine>()
+  /** Huli: the routines in the recycle bin, with their runs, kept out of every list and timer. */
+  private readonly binned = new Map<string, StoredRoutine>()
   /** The runs that are queued, starting, running or waiting. */
   private readonly runs = new Map<string, LiveRun>()
   private readonly bySession = new Map<string, string>()
@@ -177,7 +181,10 @@ export class RoutinesManager {
 
   async load(): Promise<void> {
     const file = await this.deps.file.load()
-    for (const routine of file.routines) this.routines.set(routine.id, routine)
+    for (const routine of file.routines) {
+      if (routine.deletedAt !== undefined) this.binned.set(routine.id, routine)
+      else this.routines.set(routine.id, routine)
+    }
     if (this.deps.file.status === 'corrupt') {
       this.problem = { reason: 'corrupt', backup: this.deps.file.backupPath }
     } else if (this.deps.file.status === 'newer') {
@@ -311,51 +318,112 @@ export class RoutinesManager {
     return view
   }
 
+  /**
+   * Huli: moves the routine to the recycle bin with its runs and their sessions, off the schedule
+   * and its triggers, so a restore puts it back as it was; `purge` deletes it for good, as this
+   * did before.
+   */
   async delete(routineId: string): Promise<void> {
     if (!this.loaded) await this.load()
-    this.routineOf(routineId)
+    const routine = this.routineOf(routineId)
     this.deleting.add(routineId)
     try {
-      const sessions: string[] = []
-      let before: number | null = null
-      for (;;) {
-        const page: { runs: RoutineRun[]; older: number | null } = await this.call('page', {
-          routineId,
-          before,
-          limit: RUNS_PAGE,
-        })
-        for (const run of page.runs) if (run.sessionId) sessions.push(run.sessionId)
-        if (page.older === null) break
-        before = page.older
-      }
-      for (const sessionId of sessions) {
+      for (const sessionId of await this.runSessions(routineId)) {
         if (!this.deps.sessions.has(sessionId)) continue
-        await this.deps.sessions.delete(sessionId).catch((error: unknown) => {
-          this.deps.log('warn', `Could not delete the session of a run: ${messageOf(error)}`)
-        })
+        await this.deps.sessions
+          .delete(sessionId, `routine:${routineId}`)
+          .catch((error: unknown) => {
+            this.deps.log('warn', `Could not delete the session of a run: ${messageOf(error)}`)
+          })
       }
-      for (const [runId, live] of [...this.runs]) {
-        if (live.run.routineId !== routineId) continue
-        if (live.timer) clearTimeout(live.timer)
-        this.runs.delete(runId)
-      }
-      this.queued.splice(
-        0,
-        this.queued.length,
-        ...this.queued.filter((runId) => this.runs.has(runId)),
-      )
-      await this.call('remove', { routineId })
+      this.dropRuns(routineId)
       this.routines.delete(routineId)
+      this.binned.set(routineId, { ...routine, deletedAt: this.now() })
       this.lastViews.delete(routineId)
       this.lastSkips.delete(routineId)
       this.save()
       this.setWorking()
-      this.deps.events.removed(routineId)
+      if (this.deps.events.binned) this.deps.events.binned(routineId)
+      else this.deps.events.removed(routineId)
       this.scheduler.refresh()
       this.startNext()
     } finally {
       this.deleting.delete(routineId)
     }
+  }
+
+  // Huli: the recycle bin's routines.
+
+  /** The routines in the recycle bin. */
+  binnedRoutines(): StoredRoutine[] {
+    return [...this.binned.values()]
+  }
+
+  /** The sessions of the routine's runs, every page of them. */
+  async runSessions(routineId: string): Promise<string[]> {
+    const sessions: string[] = []
+    let before: number | null = null
+    for (;;) {
+      const page: { runs: RoutineRun[]; older: number | null } = await this.call('page', {
+        routineId,
+        before,
+        limit: RUNS_PAGE,
+      })
+      for (const run of page.runs) if (run.sessionId) sessions.push(run.sessionId)
+      if (page.older === null) break
+      before = page.older
+    }
+    return sessions
+  }
+
+  /** The runs of the routine in flight let go of, without the sessions they had. */
+  private dropRuns(routineId: string): void {
+    for (const [runId, live] of [...this.runs]) {
+      if (live.run.routineId !== routineId) continue
+      if (live.timer) clearTimeout(live.timer)
+      this.runs.delete(runId)
+    }
+    this.queued.splice(
+      0,
+      this.queued.length,
+      ...this.queued.filter((runId) => this.runs.has(runId)),
+    )
+  }
+
+  /**
+   * Puts a binned routine back as it was, on its schedule from now: the time it spent in the bin
+   * is not caught up. False when it is not in the bin.
+   */
+  async restore(routineId: string): Promise<boolean> {
+    if (!this.loaded) await this.load()
+    const binned = this.binned.get(routineId)
+    if (!binned) return false
+    this.binned.delete(routineId)
+    const next: StoredRoutine = {
+      ...binned,
+      checkedThrough: Math.max(binned.checkedThrough, this.now()),
+    }
+    delete next.deletedAt
+    this.routines.set(routineId, next)
+    this.save()
+    const view = await this.viewOf(next)
+    this.lastViews.set(routineId, JSON.stringify(view))
+    this.deps.events.changed(view)
+    this.scheduler.refresh()
+    return true
+  }
+
+  /** Deletes binned routines' records and runs for good; their sessions go through their own. */
+  async purge(routineIds: readonly string[]): Promise<void> {
+    if (!this.loaded) await this.load()
+    let changed = false
+    for (const routineId of routineIds) {
+      if (!this.binned.has(routineId)) continue
+      await this.call('remove', { routineId })
+      this.binned.delete(routineId)
+      changed = true
+    }
+    if (changed) this.save()
   }
 
   async runNow(routineId: string): Promise<RoutineRun> {
@@ -1321,7 +1389,10 @@ export class RoutinesManager {
   }
 
   private save(): void {
-    this.deps.file.save({ version: 1, routines: [...this.routines.values()] })
+    this.deps.file.save({
+      version: 1,
+      routines: [...this.routines.values(), ...this.binned.values()],
+    })
   }
 
   private persist(run: RoutineRun): void {

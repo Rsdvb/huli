@@ -62,6 +62,8 @@ async function isDirectory(value: string): Promise<boolean> {
 
 export class Projects {
   private records: ProjectRecord[] = []
+  /** Huli: removed projects in the recycle bin, stored with the others, kept out of every lookup. */
+  private binned: ProjectRecord[] = []
   private noProjectPinnedAt: number | undefined
   private noProjectSessionOrder: string[] | undefined
   private newProjectParent: string | undefined
@@ -79,7 +81,8 @@ export class Projects {
 
   async load(): Promise<void> {
     const file = await this.deps.file.load()
-    this.records = file.projects
+    this.records = file.projects.filter((record) => record.deletedAt === undefined)
+    this.binned = file.projects.filter((record) => record.deletedAt !== undefined)
     this.noProjectPinnedAt = file.noProjectPinnedAt
     this.noProjectSessionOrder = file.noProjectSessionOrder
     this.newProjectParent = file.newProjectParent
@@ -193,9 +196,14 @@ export class Projects {
     return canonical
   }
 
-  /** Adds a folder, or marks an existing project as opened now. */
+  /**
+   * Adds a folder, or marks an existing project as opened now. Huli: one whose record waits in the
+   * recycle bin comes back with its settings; the sessions its removal took stay in the bin.
+   */
   async add(value: string): Promise<Project> {
     const canonical = await this.resolveDirectory(value)
+    const binned = this.binnedRecord(canonical)
+    if (binned) this.unbinRecord(binned)
     const existing = this.find(canonical)
     if (existing) {
       existing.lastOpenedAt = this.now()
@@ -335,13 +343,59 @@ export class Projects {
     this.changed()
   }
 
+  /** Huli: into the recycle bin, with its settings; `purge` deletes it for good. */
   remove(record: ProjectRecord): void {
     this.records = this.records.filter((item) => item !== record)
     this.missing.delete(this.key(record.path))
     for (const folder of record.folders ?? []) {
       if (!this.isFolder(folder) && !this.find(folder)) this.missing.delete(this.key(folder))
     }
+    record.deletedAt = this.now()
+    this.binned.push(record)
     this.changed()
+  }
+
+  // Huli: the recycle bin's projects.
+
+  /** The removed projects in the recycle bin. */
+  binnedRecords(): ProjectRecord[] {
+    return [...this.binned]
+  }
+
+  /** The binned record of a folder, matched without realpath; undefined when none is binned. */
+  binnedRecord(value: string): ProjectRecord | undefined {
+    const key = this.key(value)
+    return this.binned.find((record) => this.key(record.path) === key)
+  }
+
+  /** Puts a binned project back in the list as it was; false when it is not in the bin. */
+  restore(value: string): boolean {
+    const record = this.binnedRecord(value)
+    if (!record) return false
+    // A project added again meanwhile is the one listed; the binned one goes.
+    if (this.find(record.path)) {
+      this.binned = this.binned.filter((item) => item !== record)
+      this.changed()
+      return true
+    }
+    this.unbinRecord(record)
+    this.changed()
+    void this.refreshMissing()
+    return true
+  }
+
+  private unbinRecord(record: ProjectRecord): void {
+    this.binned = this.binned.filter((item) => item !== record)
+    delete record.deletedAt
+    this.records.push(record)
+  }
+
+  /** Deletes binned projects for good, as removing one did before the recycle bin. */
+  purge(values: readonly string[]): void {
+    const keys = new Set(values.map((value) => this.key(value)))
+    const before = this.binned.length
+    this.binned = this.binned.filter((record) => !keys.has(this.key(record.path)))
+    if (this.binned.length !== before) this.changed()
   }
 
   touch(record: ProjectRecord): void {
@@ -410,7 +464,7 @@ export class Projects {
   private changed(): void {
     this.deps.file.save({
       version: 1,
-      projects: this.records.map((record) => ({ ...record })),
+      projects: [...this.records, ...this.binned].map((record) => ({ ...record })),
       ...(this.noProjectPinnedAt === undefined
         ? {}
         : { noProjectPinnedAt: this.noProjectPinnedAt }),

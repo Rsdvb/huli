@@ -1,9 +1,10 @@
 // Kettu's memory on the host: global memory about the user and each project's memory, kept as one
 // Markdown file per entry under the host's data folder, with a MEMORY.md index per layer, the undo
-// records of writes, and the text a session starts with.
+// records of writes, and the text a session starts with. Huli: a removed entry waits in the
+// recycle bin as `<id>.<deletedAt>.deleted` beside the others, which no read of a layer takes.
 
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdir, readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { longer } from '@shared/artifacts'
 import { harnessOf, type AgentId } from '@shared/agents'
@@ -45,7 +46,24 @@ export interface MemoryServiceDeps {
   /** Huli: Codex agents of this host and their homes (`CODEX_HOME`), for import. */
   codexAgents?(): { agentId: AgentId; name: string; home: string }[]
   now?(): number
+  /** Huli: what the recycle bin holds of memory changed. */
+  binChanged?(): void
 }
+
+/** Huli: an entry in the recycle bin, by the file it waits in. */
+export interface BinnedMemory {
+  /** Its file under the memory folder: `global/<id>.<at>.deleted`, `projects/<dir>/...`. */
+  binId: string
+  memoryId: string
+  deletedAt: number
+  title: string
+  /** The project it is memory of, as its folder names it; null for global memory. */
+  project: string | null
+  size: number
+}
+
+const BIN_FILE = /^([a-z0-9][a-z0-9-]{0,63})\.(\d{1,16})\.deleted$/
+const BIN_ID = /^(global|projects\/[A-Za-z0-9_][A-Za-z0-9._-]{0,80})\/([^/\\]+)$/
 
 const INDEX_FILE = 'MEMORY.md'
 const SETTINGS_VERSION = 1
@@ -451,14 +469,16 @@ export class MemoryService {
     scope: MemoryScope,
     id: string,
     by: MemorySource,
-  ): Promise<{ undo: string; title: string }> {
+  ): Promise<{ undo: string; title: string; binId: string }> {
     const layer = this.layer(scope)
     return this.exclusive(async () => {
       const file = path.join(layer.dir, `${id}.md`)
       const entry = MEMORY_ID.test(id) ? await this.readEntry(layer, id) : null
       const before = entry ? await readText(file) : null
       if (!entry || before === null) throw this.missing(id)
-      await rm(file, { force: true })
+      // Huli: into the recycle bin, beside the entries, as it was.
+      const binned = `${id}.${this.now()}.deleted`
+      await rename(file, path.join(layer.dir, binned))
       const entries = await this.readLayer(layer)
       await this.writeIndex(layer, entries)
       const undo = await this.recordUndo(layer, id, before, null)
@@ -467,8 +487,125 @@ export class MemoryService {
         `Memory removed ${layer.project ? 'project' : 'global'} entry ${id}${by.agentId ? ` for ${by.agentId}` : ''}`,
       )
       this.changed()
-      return { undo, title: entry.title }
+      this.deps.binChanged?.()
+      const rel = path.relative(this.deps.root, layer.dir).split(path.sep).join('/')
+      return { undo, title: entry.title, binId: `${rel}/${binned}` }
     })
+  }
+
+  // Huli: the recycle bin's entries.
+
+  /** The layer folders under the memory folder, by their path below it. */
+  private async layerFolders(): Promise<string[]> {
+    const projects = await readdir(path.join(this.deps.root, 'projects')).catch(() => [])
+    return ['global', ...projects.map((name) => `projects/${name}`)]
+  }
+
+  /** The entries in the recycle bin, in every layer's folder, a project's gone or not. */
+  async binned(): Promise<BinnedMemory[]> {
+    const out: BinnedMemory[] = []
+    for (const rel of await this.layerFolders()) {
+      const dir = path.join(this.deps.root, rel)
+      const names = await readdir(dir).catch(() => [] as string[])
+      const binned = names.filter((name) => BIN_FILE.test(name))
+      if (binned.length === 0) continue
+      const project = rel === 'global' ? null : await this.layerProject(dir)
+      for (const name of binned) {
+        const [, memoryId, at] = BIN_FILE.exec(name)!
+        const file = path.join(dir, name)
+        try {
+          const text = (await readText(file)) ?? ''
+          out.push({
+            binId: `${rel}/${name}`,
+            memoryId: memoryId!,
+            deletedAt: Number(at),
+            title: parseEntry(memoryId!, text).entry.title,
+            project,
+            size: Buffer.byteLength(text, 'utf8'),
+          })
+        } catch (error) {
+          this.warnOnce(file, (error as Error).message)
+        }
+      }
+    }
+    return out
+  }
+
+  /** The project a layer folder is memory of, from its `project.json`; null when unread. */
+  private async layerProject(dir: string): Promise<string | null> {
+    try {
+      const record = JSON.parse((await readText(path.join(dir, 'project.json'))) ?? '') as unknown
+      const value = (record as { path?: unknown } | null)?.path
+      return typeof value === 'string' ? value : null
+    } catch {
+      return null
+    }
+  }
+
+  /** The binned file a bin id names, under the memory folder; null for one it does not name. */
+  private binFile(binId: string): { dir: string; name: string; memoryId: string } | null {
+    const match = BIN_ID.exec(binId)
+    if (!match) return null
+    const [, rel, name] = match
+    const file = BIN_FILE.exec(name!)
+    if (!file || rel!.split('/').some((part) => part === '.' || part === '..')) return null
+    return { dir: path.join(this.deps.root, rel!), name: name!, memoryId: file[1]! }
+  }
+
+  /**
+   * Puts a binned entry back in its layer, under its id, or a new one when another entry took it
+   * meanwhile. False when it is not in the bin.
+   */
+  restoreBinned(binId: string): Promise<boolean> {
+    return this.exclusive(async () => {
+      const found = this.binFile(binId)
+      if (!found) return false
+      const from = path.join(found.dir, found.name)
+      const text = await readText(from)
+      if (text === null) return false
+      const names = await readdir(found.dir).catch(() => [] as string[])
+      const taken = new Set(names.filter((n) => n.endsWith('.md')).map((n) => n.slice(0, -3)))
+      const id = taken.has(found.memoryId)
+        ? newId(parseEntry(found.memoryId, text).entry.title, taken)
+        : found.memoryId
+      await rename(from, path.join(found.dir, `${id}.md`))
+      const layer = await this.layerOfFolder(found.dir)
+      if (layer) await this.writeIndex(layer, await this.readLayer(layer))
+      this.changed()
+      this.deps.binChanged?.()
+      return true
+    })
+  }
+
+  /** The layer of a folder of the memory folder, while it is global or a project Kettu lists. */
+  private async layerOfFolder(dir: string): Promise<Layer | null> {
+    const global = this.globalLayer()
+    if (dir === global.dir) return global
+    const project = await this.layerProject(dir)
+    const known = project === null ? null : this.knownProject(project)
+    return known ? this.projectLayer(known) : null
+  }
+
+  /** Deletes binned entries for good, as a remove did before the recycle bin. */
+  purgeBinned(binIds: readonly string[]): Promise<void> {
+    return this.exclusive(async () => {
+      let removed = 0
+      for (const binId of binIds) {
+        const found = this.binFile(binId)
+        if (!found) continue
+        await rm(path.join(found.dir, found.name), { force: true })
+        removed++
+      }
+      if (removed > 0) this.deps.binChanged?.()
+    })
+  }
+
+  /** The binned copies of an entry in a layer, which an undo of its removal takes back. */
+  private async dropBinned(layer: Layer, memoryId: string): Promise<void> {
+    const names = await readdir(layer.dir).catch(() => [] as string[])
+    const copies = names.filter((name) => BIN_FILE.exec(name)?.[1] === memoryId)
+    for (const name of copies) await rm(path.join(layer.dir, name), { force: true })
+    if (copies.length > 0) this.deps.binChanged?.()
   }
 
   /** Moves a project's entry to global memory, under its id there if that is free. */
@@ -575,6 +712,8 @@ export class MemoryService {
       else {
         await this.prepare(layer)
         await writeFileAtomic(file, record.before)
+        // Huli: an undone removal takes its entry out of the recycle bin.
+        if (record.after === null) await this.dropBinned(layer, record.memoryId)
       }
       await this.writeIndex(layer, await this.readLayer(layer))
       await rm(path.join(this.undoDir, `${undoId}.json`), { force: true })

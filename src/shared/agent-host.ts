@@ -58,6 +58,7 @@ import type {
   HistorySource,
 } from './agent-history'
 import type { SessionFolder } from './session-folders'
+import type { BinList, BinProjectChoice, BinRestoreResult } from './recycle-bin'
 import type { BoardStatus, SessionBoard } from './session-board'
 import type { SessionSettled, SessionSnooze, SnoozeUntil } from './session-tidy'
 import type { GroupRunStart, KeptRun, RunChanges, SessionGroupRef } from './run-groups'
@@ -2311,6 +2312,16 @@ export interface HostContract {
   // with no sessionId, every one.
   'sessions.takeReturned': { params: { sessionId?: string | null }; result: ReturnedMessage[] }
   'sessions.removeAll': { params: void; result: void }
+  // Huli: the recycle bin (回收站): what a delete moved there, newest first, put back or deleted
+  // for good by key (`binKey`). A session whose project is in the bin or gone is restored only
+  // with `project`, and named in `held` without it.
+  'bin.list': { params: void; result: BinList }
+  'bin.restore': {
+    params: { keys: string[]; project?: BinProjectChoice }
+    result: BinRestoreResult
+  }
+  'bin.purge': { params: { keys: string[] }; result: void }
+  'bin.empty': { params: void; result: void }
   // One of `optionId`, `answers` and `values`: a question's answers go together, only those given;
   // `values` submits an MCP server's form. `note` goes with an option that takes one.
   'permissions.respond': {
@@ -2738,7 +2749,11 @@ export interface HostContract {
     params: { scope: MemoryScope; id: string | null; draft: MemoryDraft }
     result: MemoryEntry
   }
-  'memory.remove': { params: { scope: MemoryScope; id: string }; result: void }
+  // Huli: into the recycle bin; `binKey` names it there for Undo, absent from an older host.
+  'memory.remove': {
+    params: { scope: MemoryScope; id: string }
+    result: { binKey: string } | undefined
+  }
   // Moves a project's entry to global memory; the user asking is the consent global writes need.
   'memory.moveToGlobal': { params: { project: string; id: string }; result: MemoryEntry }
   // Off: no index and no memory tools, and each harness keeps its own memory as it had it.
@@ -3155,6 +3170,10 @@ export const HOST_METHODS = [
   'sessions.removeEmpty',
   'sessions.takeReturned',
   'sessions.removeAll',
+  'bin.list',
+  'bin.restore',
+  'bin.purge',
+  'bin.empty',
   'routines.list',
   'routines.create',
   'routines.update',
@@ -3466,6 +3485,8 @@ export type HostEvent =
   | { type: 'browser.askAnswered'; sessionId: string; outcome: ControlOutcome }
   // Huli: the session folders changed; every one, in the user's order.
   | { type: 'folders.changed'; folders: SessionFolder[] }
+  // Huli: what the recycle bin holds changed; a page showing it reads again.
+  | { type: 'bin.changed' }
   // Huli: the agents' network changed; to this computer's windows only.
   | { type: 'agentNetwork.changed'; status: AgentNetworkStatus }
   // Huli: Moli's download, install or removal moved on; to this computer's windows only.

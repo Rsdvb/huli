@@ -39,6 +39,8 @@ export interface LibraryRecord {
   addedAt: number
   /** The hash the user approved; null until they do. */
   approved: string | null
+  /** Huli: in the recycle bin since then, its file and pins kept; absent while it is listed. */
+  deletedAt?: number
 }
 
 export interface WorkflowsFile {
@@ -120,6 +122,9 @@ export function parseWorkflowsFile(data: Record<string, unknown>): WorkflowsFile
       origin,
       addedAt: raw.addedAt,
       approved: raw.approved,
+      ...(typeof raw.deletedAt === 'number' && Number.isFinite(raw.deletedAt) && raw.deletedAt >= 0
+        ? { deletedAt: raw.deletedAt }
+        : {}),
     }
   }
   const pins: WorkflowsFile['pins'] = {}
@@ -176,6 +181,8 @@ export interface WorkflowLibraryDeps {
   fetch?: typeof fetch
   now?: () => number
   changed?(): void
+  /** Huli: what the recycle bin holds of workflows changed. */
+  binChanged?(): void
 }
 
 /** A workflow a task can lock: what it is and the hash of the file it came from. */
@@ -274,6 +281,7 @@ export class WorkflowLibrary {
   }
 
   async read(workflowId: string): Promise<{ entry: WorkflowEntry; text: string | null }> {
+    this.listed(workflowId)
     const read = await this.readOne(workflowId)
     const source = this.data.entries[workflowId]?.source ?? 'user'
     return { entry: this.entryOf(read, source), text: read.text }
@@ -309,6 +317,7 @@ export class WorkflowLibrary {
   // Changes.
 
   async approve(workflowId: string, hash: string): Promise<WorkflowEntry> {
+    this.listed(workflowId)
     const read = await this.readOne(workflowId)
     if (read.text === null) throw notFound(t('workflow.notFound'))
     // The user approves what they saw: a file changed since then must be looked at again.
@@ -327,13 +336,97 @@ export class WorkflowLibrary {
     return this.entryOf(read, record.source)
   }
 
+  /**
+   * Huli: moves the workflow to the recycle bin: its file and pins stay, its record says when, and
+   * every list and lookup leaves it out until it is restored or purged.
+   */
   async remove(workflowId: string): Promise<void> {
     if (!ID.test(workflowId)) throw notFound(t('workflow.notFound'))
-    await rm(this.fileOf(workflowId), { force: true })
-    delete this.data.entries[workflowId]
-    delete this.data.pins[workflowId]
+    this.listed(workflowId)
+    const read = await this.readOne(workflowId)
+    if (read.text === null && read.problems.length === 0) {
+      // No file to keep: what is left of it goes, as before.
+      await this.purge([workflowId])
+      return
+    }
+    const record = this.data.entries[workflowId] ?? {
+      source: 'user' as const,
+      origin: null,
+      addedAt: this.now(),
+      approved: null,
+    }
+    record.deletedAt = this.now()
+    this.data.entries[workflowId] = record
     this.save()
     this.deps.changed?.()
+    this.deps.binChanged?.()
+  }
+
+  // Huli: the recycle bin's workflows.
+
+  /** Refuses a workflow in the recycle bin as one that is not there. */
+  private listed(workflowId: string): void {
+    if (this.data.entries[workflowId]?.deletedAt !== undefined) {
+      throw notFound(t('workflow.notFound'))
+    }
+  }
+
+  private binnedIds(): string[] {
+    return Object.entries(this.data.entries).flatMap(([id, record]) =>
+      record.deletedAt === undefined ? [] : [id],
+    )
+  }
+
+  /** The workflows in the recycle bin, each with its name and the bytes of its file. */
+  async binned(): Promise<{ id: string; name: string; deletedAt: number; size: number | null }[]> {
+    return Promise.all(
+      this.binnedIds().map(async (id) => {
+        const read = await this.readOne(id)
+        const size = await this.fileSize(id)
+        return {
+          id,
+          name: read.workflow?.name ?? id,
+          deletedAt: this.data.entries[id]!.deletedAt!,
+          size,
+        }
+      }),
+    )
+  }
+
+  private async fileSize(id: string): Promise<number | null> {
+    for (const ext of ['yaml', 'yml']) {
+      try {
+        return (await stat(path.join(this.deps.dir, `${id}.${ext}`))).size
+      } catch {
+        // The other spelling, or none.
+      }
+    }
+    return null
+  }
+
+  /** Puts a binned workflow back as it was; false when it is not in the bin. */
+  restore(workflowId: string): boolean {
+    const record = this.data.entries[workflowId]
+    if (record?.deletedAt === undefined) return false
+    delete record.deletedAt
+    this.save()
+    this.deps.changed?.()
+    this.deps.binChanged?.()
+    return true
+  }
+
+  /** Deletes binned workflows for good: their files, records and pins, as a remove did before. */
+  async purge(workflowIds: readonly string[]): Promise<void> {
+    for (const id of workflowIds) {
+      if (!ID.test(id)) continue
+      await rm(path.join(this.deps.dir, `${id}.yaml`), { force: true })
+      await rm(path.join(this.deps.dir, `${id}.yml`), { force: true })
+      delete this.data.entries[id]
+      delete this.data.pins[id]
+    }
+    this.save()
+    this.deps.changed?.()
+    this.deps.binChanged?.()
   }
 
   async setPin(workflowId: string, stepId: string, pick: StepPick | null): Promise<WorkflowEntry> {
@@ -365,7 +458,9 @@ export class WorkflowLibrary {
   /** The Kettu Marketplace's listings the library has a workflow of. */
   listingIds(): string[] {
     return Object.values(this.data.entries).flatMap((record) =>
-      record.origin?.kind === 'community' ? [record.origin.listingId] : [],
+      record.origin?.kind === 'community' && record.deletedAt === undefined
+        ? [record.origin.listingId]
+        : [],
     )
   }
 
@@ -398,6 +493,11 @@ export class WorkflowLibrary {
     await mkdir(this.deps.dir, { recursive: true })
     await writeFileAtomic(this.fileOf(id), text)
     this.data.entries[id]!.origin = { ...origin }
+    // Huli: installed again from the bin, it is listed again.
+    if (this.data.entries[id]!.deletedAt !== undefined) {
+      delete this.data.entries[id]!.deletedAt
+      this.deps.binChanged?.()
+    }
     this.save()
     this.deps.changed?.()
     return { entry: (await this.read(id)).entry, updated: true }
@@ -408,6 +508,7 @@ export class WorkflowLibrary {
    * to whether it changed.
    */
   async update(workflowId: string): Promise<{ entry: WorkflowEntry; changed: boolean }> {
+    this.listed(workflowId)
     const record = this.data.entries[workflowId]
     if (record?.origin?.kind !== 'github') throw invalidParams(t('workflow.notFromGithub'))
     const raw = githubRawUrl(record.origin.url)
@@ -448,7 +549,8 @@ export class WorkflowLibrary {
     const read = parseWorkflow(text)
     const existing = await this.readLibrary()
     if (existing.length >= MAX_LIBRARY) throw new HostError('restricted', t('workflow.libraryFull'))
-    const taken = new Set(existing.map((r) => r.id))
+    // Huli: a workflow in the recycle bin keeps its id, and its file.
+    const taken = new Set([...existing.map((r) => r.id), ...this.binnedIds()])
     const base = workflowSlug(
       read.workflow?.name ?? path.parse(origin.kind === 'file' ? origin.name : '').name,
     )
@@ -503,6 +605,8 @@ export class WorkflowLibrary {
     }
     const ids = [...new Set(names.map((name) => name.replace(/\.ya?ml$/i, '').toLowerCase()))]
       .filter((id) => ID.test(id) && id.length <= WORKFLOW_ID_CHARS)
+      // Huli: one in the recycle bin is listed nowhere.
+      .filter((id) => this.data.entries[id]?.deletedAt === undefined)
       .sort()
       .slice(0, MAX_LIBRARY)
     return Promise.all(ids.map((id) => this.readOne(id)))

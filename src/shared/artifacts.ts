@@ -97,6 +97,9 @@ export interface ArtifactSummary {
   createdAt: number // when the artifact was made
   updatedAt: number // when the latest version was made
   deletedAt: number | null
+  // Huli: when Recently deleted lets a deleted one go, as the recycle bin's settings say; null
+  // keeps it until the user deletes it. Absent from an older host, which keeps 30 days.
+  purgeAt?: number | null
   editing: string[] // the sessions whose running turn changed it
   type: ArtifactTypeName | null // the type it was made from, shown by the type's viewer
   /**

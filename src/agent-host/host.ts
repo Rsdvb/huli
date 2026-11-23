@@ -300,6 +300,9 @@ import { AgentHistory } from './agent-history'
 import { claudeDesktopFolders } from './claude-desktop'
 import { SessionFolders, sessionFoldersFile } from './session-folders'
 import { DeletedSessions, deletedSessionsFile } from './deleted-sessions'
+import { BIN_DAY_MS, binKey, DEFAULT_RECYCLE_BIN } from '@shared/recycle-bin'
+import { RecycleBin } from './recycle-bin'
+import { binSources, groupBinned } from './recycle-bin-sources'
 import { ProviderProfiles } from './provider-profiles'
 import { removeSessionEnv, sessionEnvFiles } from './secrets/deliver'
 import { SECRET_WAIT_MS, SecretTools } from './secrets/tools'
@@ -557,6 +560,8 @@ export class AgentHost {
   readonly workflowLibrary: WorkflowLibrary
   /** The tasks that run through workflows. */
   readonly tasks: TaskEngine
+  /** Huli: the recycle bin over every kind's store (回收站). */
+  readonly recycleBin: RecycleBin
   private readonly groups: SessionGroups
   /** Huli: the issue inbox, pull requests merged once green or watched, and GitHub triggers. */
   private readonly githubFlow: GithubFlow
@@ -969,7 +974,9 @@ export class AgentHost {
       changed: () => {
         this.hub.broadcast({ type: 'artifacts.changed' })
         this.options.send({ type: 'host:artifacts-changed' })
+        this.recycleBin?.added()
       },
+      keepDeletedMs: () => this.binKeepMs(),
       version: (portIds, id, version) =>
         this.hub.send(portIds, { type: 'artifacts.version', id, version }),
       // Each port hears of the other clients showing the artifact, named as it knows them.
@@ -1075,6 +1082,7 @@ export class AgentHost {
       projects: () => this.projects.list().map(({ path, name }) => ({ path, name })),
       claudeAgents: () => this.claudeAgents(),
       codexAgents: () => this.codexAgents(),
+      binChanged: () => this.recycleBin?.added(),
     })
     this.memory.onChange(() => this.hub.broadcast({ type: 'memory.changed' }))
     this.workflowLibrary = new WorkflowLibrary({
@@ -1088,6 +1096,7 @@ export class AgentHost {
       }),
       log,
       changed: () => this.broadcast({ type: 'workflows.changed' }),
+      binChanged: () => this.recycleBin?.added(),
     })
     this.artifactService = new ArtifactService({
       workflow: {
@@ -1344,6 +1353,8 @@ export class AgentHost {
         log,
       }),
       deleted: new DeletedSessions(deletedSessionsFile(options.userDataPath, log)),
+      binChanged: () => this.recycleBin?.added(),
+      groupBinned: (group) => groupBinned(this, group),
       projectMcp: new ProjectMcpAnswers(projectMcpFile(options.userDataPath, log)),
       projectHooks: new ProjectHooksAnswers(projectHooksFile(options.userDataPath, log)),
       portOpen: (portId) => this.hub.has(portId),
@@ -1582,7 +1593,9 @@ export class AgentHost {
     this.sessionFolders = new SessionFolders({
       file: sessionFoldersFile(options.userDataPath, log),
       isSession: (id) => this.sessions.has(id),
+      isKept: (id) => this.sessions.has(id) || this.sessions.inBin(id),
       changed: (folders) => this.hub.broadcast({ type: 'folders.changed', folders }),
+      binChanged: () => this.recycleBin?.added(),
     })
     this.nodeProxy = new NodeProxy({
       userDataPath: options.userDataPath,
@@ -1672,7 +1685,10 @@ export class AgentHost {
         continueRun: (sessionId, agentId, mode, text) =>
           this.sessions.continueRun(sessionId, agentId, mode, text),
         cancel: (sessionId) => this.sessions.cancel(sessionId),
-        delete: (sessionId) => this.sessions.delete(sessionId),
+        delete: (sessionId, group) =>
+          group === undefined
+            ? this.sessions.deleteNow(sessionId)
+            : this.sessions.delete(sessionId, group),
         has: (sessionId) => this.sessions.has(sessionId),
         summary: (sessionId) =>
           this.sessions.has(sessionId) ? this.sessions.summary(sessionId) : null,
@@ -1704,6 +1720,12 @@ export class AgentHost {
           this.broadcast({ type: 'routine.removed', routineId })
           this.forgetWebhookSecret(routineId)
           this.routineTriggersChanged()
+        },
+        // Huli: in the recycle bin, its webhook's secret stays for a restore.
+        binned: (routineId) => {
+          this.broadcast({ type: 'routine.removed', routineId })
+          this.routineTriggersChanged()
+          this.recycleBin?.added()
         },
         run: (run) => this.broadcast({ type: 'routine.run', run }),
         working: (working) => options.send({ type: 'host:routines-working', working }),
@@ -1749,7 +1771,7 @@ export class AgentHost {
         createStep: (params) => this.sessions.createStep(params),
         send: (sessionId, text, due) => this.sessions.sendFromKettu(sessionId, text, due),
         cancel: (sessionId) => this.sessions.cancel(sessionId),
-        delete: (sessionId) => this.sessions.delete(sessionId),
+        delete: (sessionId, group) => this.sessions.delete(sessionId, group),
         has: (sessionId) => this.sessions.has(sessionId),
       },
       titleTask: (sessionId, text) => this.sessions.titleTask(sessionId, text),
@@ -1786,7 +1808,10 @@ export class AgentHost {
       pickOf: (agentId, values) => pickOfOptions(this.agentOptions.get(agentId), agentId, values),
       events: {
         changed: (task) => this.broadcast({ type: 'task.changed', task }),
-        removed: (taskId) => this.broadcast({ type: 'task.removed', taskId }),
+        removed: (taskId) => {
+          this.broadcast({ type: 'task.removed', taskId })
+          this.recycleBin?.added()
+        },
         attention: (task, kind) => this.taskAttention(task, kind),
         ended: (view, written) => void this.taskEnded(view, written),
       },
@@ -1798,6 +1823,25 @@ export class AgentHost {
       log,
     })
     taskHooks.current = this.tasks
+    this.recycleBin = new RecycleBin({
+      sources: binSources({
+        sessions: this.sessions,
+        projects: this.projects,
+        scratch: this.scratch,
+        folders: this.sessionFolders,
+        tasks: this.tasks,
+        routines: this.routines,
+        library: this.workflowLibrary,
+        memory: this.memory,
+        artifacts: this.artifacts,
+        routinePurged: (routineId) => this.forgetWebhookSecret(routineId),
+      }),
+      settings: () => this.settings.recycleBin ?? DEFAULT_RECYCLE_BIN,
+      changed: () => this.broadcast({ type: 'bin.changed' }),
+      // Kept past its days, an artifact goes with its files no version names any more.
+      swept: () => this.artifacts.purge(),
+      log,
+    })
     const attachments = this.attachments
     this.groups = new SessionGroups({
       sessions: this.sessions,
@@ -1999,7 +2043,8 @@ export class AgentHost {
     host.sendFolders()
     void host.sessions.checkWorktrees()
     host.usage.start()
-    host.artifacts.start()
+    // Huli: the recycle bin's one timer purges deleted artifacts with the rest.
+    host.recycleBin.start()
     host.idleRelease.start()
     host.nodeProxy.start()
     options.send({ type: 'host:service-port', port: host.artifactService.listeningPort })
@@ -2090,6 +2135,12 @@ export class AgentHost {
     if (key === this.sentFolders) return
     this.sentFolders = key
     this.options.send({ type: 'host:projects', paths })
+  }
+
+  /** Huli: how long the recycle bin keeps what it holds; null until the user empties it. */
+  private binKeepMs(): number | null {
+    const { keepDays } = this.settings.recycleBin ?? DEFAULT_RECYCLE_BIN
+    return keepDays === null ? null : keepDays * BIN_DAY_MS
   }
 
   private broadcast(event: HostEvent): void {
@@ -2317,6 +2368,9 @@ export class AgentHost {
       this.sessions.supervisorChanged()
     }
     if (JSON.stringify(previous.tidy) !== JSON.stringify(next.tidy)) this.sessions.tidyChanged()
+    if (JSON.stringify(previous.recycleBin) !== JSON.stringify(next.recycleBin)) {
+      this.recycleBin.settingsChanged()
+    }
     if (previous.webhooks?.port !== next.webhooks?.port) this.syncWebhooks()
     if (previous.workflow.maxWorkingSteps !== next.workflow.maxWorkingSteps) {
       this.tasks.limitChanged()
@@ -3799,6 +3853,7 @@ export class AgentHost {
       this.idleRelease.stop()
       this.usage.stop()
       this.artifacts.stop()
+      this.recycleBin.stop()
       this.execRunner.killAll()
       this.checkpointGit.stop()
       for (const unsubscribe of this.gitUnsubscribe) unsubscribe()
@@ -4255,11 +4310,13 @@ export class AgentHost {
         return projects.list()
       },
       'projects.add': ({ path }) => projects.add(path),
+      // Huli: into the recycle bin with its sessions; its folder on disk was never touched.
       'projects.remove': async ({ path }) => {
         const record = projects.match(path)
-        await sessions.removeProject(record.path)
+        await sessions.removeProject(record.path, binKey('project', record.path))
         projects.remove(record)
         this.options.send({ type: 'host:media-revoke', sessionId: null })
+        this.recycleBin.added()
       },
       'projects.touch': ({ path }) => projects.touch(projects.match(path)),
       'projects.pin': ({ path, pinned }) =>
@@ -4478,6 +4535,17 @@ export class AgentHost {
         this.options.send({ type: 'host:media-revoke', sessionId })
       },
       'sessions.removeEmpty': ({ keep }) => sessions.removeEmptyOnce(keep),
+      // Huli: the recycle bin (回收站).
+      'bin.list': () => this.recycleBin.list(),
+      'bin.restore': async ({ keys, project }) => {
+        const result = await this.recycleBin.restore(keys, project)
+        if (result.restored.length > 0) {
+          this.options.send({ type: 'host:media-revoke', sessionId: null })
+        }
+        return result
+      },
+      'bin.purge': ({ keys }) => this.recycleBin.purge(keys),
+      'bin.empty': () => this.recycleBin.empty(),
       'sessions.takeReturned': ({ sessionId }, { portId }) =>
         sessions.takeReturned(sessionId, portId),
       'routines.list': () => routines.list(),
@@ -4737,11 +4805,17 @@ export class AgentHost {
         if (!this.threads || sessionIds.length === 0) return { sessions: 0, images: 0, bytes: 0 }
         return this.threads.clearImages(sessionIds, dryRun)
       },
-      'artifacts.list': async ({ deleted }) =>
-        (await artifacts.list({ deleted: deleted ?? false })).map((artifact) => ({
+      'artifacts.list': async ({ deleted }) => {
+        const keep = this.binKeepMs()
+        return (await artifacts.list({ deleted: deleted ?? false })).map((artifact) => ({
           ...artifact,
           scratch: this.scratch.contains(artifact.project),
-        })),
+          // Huli: when Recently deleted lets it go, as the recycle bin's settings say.
+          ...(artifact.deletedAt === null
+            ? {}
+            : { purgeAt: keep === null ? null : artifact.deletedAt + keep }),
+        }))
+      },
       'artifacts.read': async ({ id, version }) => {
         const read = await artifacts.read(id, version === undefined ? {} : { version })
         return {
@@ -4922,7 +4996,8 @@ export class AgentHost {
         memoryCall(async () => (await memory.save(scope, id, draft, BY_USER)).entry),
       'memory.remove': ({ scope, id }) =>
         memoryCall(async () => {
-          await memory.remove(scope, id, BY_USER)
+          const { binId } = await memory.remove(scope, id, BY_USER)
+          return { binKey: binKey('memory', binId) }
         }),
       'memory.moveToGlobal': ({ project, id }) =>
         memoryCall(() => memory.moveToGlobal(project, id)),

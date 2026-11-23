@@ -600,6 +600,14 @@ function prepareAll(db: DatabaseSync) {
       SELECT hash, mime FROM media
       WHERE NOT EXISTS (SELECT 1 FROM session_media r WHERE r.media_hash = media.hash)`),
     mediaTotals: sql('SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM media'),
+    // Huli: what a session's thread holds in bytes, for the recycle bin: its entries, its record
+    // and the media it names, each counted once per session.
+    sessionBytes: sql(`
+      SELECT
+        (SELECT COALESCE(SUM(length(CAST(json AS BLOB))), 0) FROM entries WHERE session_id = ?)
+        + COALESCE((SELECT length(CAST(session_json AS BLOB)) FROM threads WHERE session_id = ?), 0)
+        + (SELECT COALESCE(SUM(m.size), 0) FROM session_media r JOIN media m ON m.hash = r.media_hash
+            WHERE r.session_id = ?) AS bytes`),
     // A clear leaves the name with no content, so the thread tells a cleared picture from a lost one.
     putRef: sql(`
       INSERT INTO session_media (session_id, hash, mime, media_hash) VALUES (?, ?, ?, ?)
@@ -1706,6 +1714,18 @@ export class ThreadDb {
       },
       { files: 0, bytes: 0 },
     )
+  }
+
+  /** Huli: the bytes each session's thread keeps, by id; a session without one is left out. */
+  sizes(sessionIds: readonly string[]): Record<string, number> {
+    return this.guard((sql) => {
+      const out: Record<string, number> = {}
+      for (const id of sessionIds) {
+        const bytes = Number(sql.sessionBytes.get(id, id, id)?.bytes ?? 0)
+        if (bytes > 0) out[id] = bytes
+      }
+      return out
+    }, {})
   }
 
   /** What the threads keep: their media files, and the bytes still in the table of version 9. */

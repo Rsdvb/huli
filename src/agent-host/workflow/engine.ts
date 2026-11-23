@@ -82,7 +82,8 @@ export interface TaskSessions {
   send(sessionId: string, text: string, due?: () => boolean): Promise<void>
   /** Stops the session's turn, if one runs. */
   cancel(sessionId: string): Promise<void>
-  delete(sessionId: string): Promise<void>
+  /** Huli: into the recycle bin with `group`, the bin item of the task it worked for. */
+  delete(sessionId: string, group?: string): Promise<void>
   has(sessionId: string): boolean
 }
 
@@ -205,6 +206,8 @@ async function pathExists(file: string): Promise<boolean> {
 
 export class TaskEngine implements TaskSessionHooks {
   private readonly tasks = new Map<string, TaskRecord>()
+  /** Huli: the tasks in the recycle bin, stored with the others, kept out of every lookup. */
+  private readonly binned = new Map<string, TaskRecord>()
   /** Rounds by their session. */
   private readonly bySession = new Map<string, { taskId: string; roundId: string }>()
   private chain: Promise<unknown> = Promise.resolve()
@@ -225,6 +228,10 @@ export class TaskEngine implements TaskSessionHooks {
   async load(): Promise<void> {
     const tasks = await this.deps.store.all()
     for (const task of tasks) {
+      if (task.deletedAt !== undefined) {
+        this.binned.set(task.id, task)
+        continue
+      }
       this.tasks.set(task.id, task)
       for (const round of task.rounds) {
         if (round.sessionId)
@@ -286,7 +293,8 @@ export class TaskEngine implements TaskSessionHooks {
   /** The drafts tasks ran on, which stay as long as their tasks. */
   draftIds(): Set<string> {
     const ids = new Set<string>()
-    for (const task of this.tasks.values())
+    // Huli: one in the recycle bin keeps its draft too, for its restore.
+    for (const task of [...this.tasks.values(), ...this.binned.values()])
       if (task.workflowSource === 'agent') ids.add(task.workflowId)
     return ids
   }
@@ -1463,20 +1471,66 @@ export class TaskEngine implements TaskSessionHooks {
     })
   }
 
+  /**
+   * Huli: moves the task to the recycle bin with its step sessions, which keep their rounds, so a
+   * restore puts it back as it was; `purge` deletes it for good.
+   */
   delete(taskId: string): Promise<void> {
     return this.locked(async () => {
       const task = this.task(taskId)
       if (task.status === 'running') throw new HostError('conflict', t('tasks.stillRunning'))
       this.tasks.delete(taskId)
+      task.deletedAt = this.now()
+      this.binned.set(taskId, task)
       const sessions = new Set(task.rounds.flatMap((r) => (r.sessionId ? [r.sessionId] : [])))
       for (const sessionId of sessions) {
         this.bySession.delete(sessionId)
-        await this.deps.sessions.delete(sessionId).catch((error: unknown) => {
+        if (!this.deps.sessions.has(sessionId)) continue
+        await this.deps.sessions.delete(sessionId, `task:${taskId}`).catch((error: unknown) => {
           this.deps.log('warn', `Could not delete a step's session: ${(error as Error).message}`)
         })
       }
-      await this.deps.store.remove(taskId)
+      await this.deps.store.put(task)
       this.deps.events.removed(taskId)
+    })
+  }
+
+  // Huli: the recycle bin's tasks.
+
+  /** The tasks in the recycle bin. */
+  binnedTasks(): TaskRecord[] {
+    return [...this.binned.values()]
+  }
+
+  /** The step sessions of a task, binned or not. */
+  sessionsOf(task: TaskRecord): string[] {
+    return [...new Set(task.rounds.flatMap((r) => (r.sessionId ? [r.sessionId] : [])))]
+  }
+
+  /** Puts a binned task back as it was; false when it is not in the bin. */
+  restore(taskId: string): Promise<boolean> {
+    return this.locked(async () => {
+      const task = this.binned.get(taskId)
+      if (!task) return false
+      this.binned.delete(taskId)
+      delete task.deletedAt
+      this.tasks.set(taskId, task)
+      for (const round of task.rounds) {
+        if (round.sessionId) this.bySession.set(round.sessionId, { taskId, roundId: round.id })
+      }
+      await this.deps.store.put(task)
+      this.deps.events.changed(this.view(task))
+      return true
+    })
+  }
+
+  /** Deletes binned tasks for good; their sessions go through the sessions' own purge. */
+  purge(taskIds: readonly string[]): Promise<void> {
+    return this.locked(async () => {
+      for (const taskId of taskIds) {
+        if (!this.binned.delete(taskId)) continue
+        await this.deps.store.remove(taskId)
+      }
     })
   }
 

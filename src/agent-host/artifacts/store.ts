@@ -97,6 +97,11 @@ export interface ArtifactStoreDeps {
   canvasQuietMs?: number
   now?: () => number
   purgeEveryMs?: number
+  /**
+   * Huli: how long Recently deleted keeps an artifact, as the recycle bin's settings say; null
+   * keeps it until the user deletes it. 30 days without it.
+   */
+  keepDeletedMs?(): number | null
 }
 
 /**
@@ -238,11 +243,17 @@ export class ArtifactStore {
     this.timer = null
   }
 
-  /** Removes what has been in Recently deleted for 30 days, and the files no version names. */
+  /** How long Recently deleted keeps an artifact; null for as long as the user leaves it. */
+  private keepDeleted(): number | null {
+    return this.deps.keepDeletedMs ? this.deps.keepDeletedMs() : ARTIFACT_KEEP_DELETED_MS
+  }
+
+  /** Removes what has been in Recently deleted its days, and the files no version names. */
   async purge(): Promise<void> {
     if (!this.deps.threads) return
     try {
-      const before = this.now() - ARTIFACT_KEEP_DELETED_MS
+      const keep = this.keepDeleted()
+      const before = keep === null ? 0 : this.now() - keep
       const { artifacts, files } = await this.call('purge', { before })
       if (artifacts > 0 || files > 0) {
         this.deps.log('info', `Purged ${artifacts} artifacts and ${files} content files`)
@@ -508,14 +519,15 @@ export class ArtifactStore {
   async delete(
     id: string,
     { project }: Reach = {},
-  ): Promise<{ deletedAt: number; purgeAt: number }> {
+  ): Promise<{ deletedAt: number; purgeAt: number | null }> {
     const { deletedAt, changed } = await this.call('delete', {
       id,
       project: project ?? null,
       at: this.now(),
     })
     if (changed) this.deps.changed()
-    return { deletedAt, purgeAt: deletedAt + ARTIFACT_KEEP_DELETED_MS }
+    const keep = this.keepDeleted()
+    return { deletedAt, purgeAt: keep === null ? null : deletedAt + keep }
   }
 
   /** Brings the artifact back from Recently deleted; the user's alone. */

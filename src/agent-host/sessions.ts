@@ -216,6 +216,7 @@ import type { ThemeAnswer } from './theme/tools'
 import type { SettingsAnswer, SettingsAsk } from './settings/tools'
 import type { AgentCopies } from './agent-copies'
 import type { DeletedSessions } from './deleted-sessions'
+import { binKey } from '@shared/recycle-bin'
 import { MODE_OPTION as AGY_MODE_OPTION } from './acp/agy-plan'
 import { parseContextReport } from './acp/claude-reports'
 import {
@@ -721,6 +722,13 @@ export interface SessionManagerDeps {
   fileCheckpoints?: FileCheckpoints
   /** Huli: the deleted sessions whose agent keeps a copy, never offered for import again. */
   deleted?: Pick<DeletedSessions, 'load' | 'flush' | 'idsOf' | 'add' | 'forget'>
+  /** Huli: the recycle bin heard that what it holds changed; without it nothing is told. */
+  binChanged?(): void
+  /**
+   * Huli: whether the bin item a session went in with, other than a session's (a project's, a
+   * task's, a routine's), is still in the recycle bin, by its key.
+   */
+  groupBinned?(group: string): boolean
   /** What to watch for changes to the agent's options in a folder; without it nothing is. */
   settingsTargets?: (agentId: AgentId, folder: string) => WatchTarget[]
   /** The host's settings, read as a turn starts for whether a title is to be written. */
@@ -1461,6 +1469,8 @@ function sessionIssue(url: string): SessionIssue | null {
 
 export class SessionManager {
   private readonly records = new Map<string, SessionRecord>()
+  /** Huli: the sessions in the recycle bin, by id; stored with the index, kept out of `records`. */
+  private readonly binned = new Map<string, SessionRecord>()
   /** Huli: manager mode's coordinator. */
   readonly manager: ManagerHub
   /** Huli: snoozed and settled sessions (会话整理), on one timer for the next one due. */
@@ -1640,13 +1650,18 @@ export class SessionManager {
   async load(): Promise<void> {
     const file = await this.deps.file.load()
     for (const record of file.sessions) {
+      // Huli: what is in the recycle bin stays out of every list and lookup.
+      if (record.deletedAt !== undefined) {
+        this.binned.set(record.id, record)
+        continue
+      }
       this.records.set(record.id, record)
       this.atLaunch.add(record.id)
     }
     this.emptySessionsRemovedAt = file.emptySessionsRemovedAt ?? null
     // A pause whose time passed while the host was down goes on once the host has settled.
     const settledAt = this.now() + this.timings.limitResume.startupMs
-    for (const record of file.sessions) {
+    for (const record of this.records.values()) {
       if (record.limitPause)
         this.armLimit(record.id, Math.max(record.limitPause.resumeAt, settledAt))
     }
@@ -1656,7 +1671,9 @@ export class SessionManager {
     this.manager.load()
     // Huli: workers a quit cut go on once the host has settled, which is no startup work.
     if (
-      file.sessions.some((record) => record.worker?.owed !== undefined || record.manager?.digest)
+      [...this.records.values()].some(
+        (record) => record.worker?.owed !== undefined || record.manager?.digest,
+      )
     ) {
       setTimeout(() => {
         // Huli: with manager mode off in Settings > Features, the owed stay owed until it is on.
@@ -1730,11 +1747,25 @@ export class SessionManager {
         ? [...this.records.values()].map((r) => r.projectPath)
         : [projectPath]
     const projects = this.deps.projects.list()
+    const listed = (folder: string): boolean =>
+      projects.some((project) => samePath(project.path, folder, this.deps.platform))
     for (const folder of new Set(folders)) {
       if (!isDesktopScratch(folder)) continue
-      if (projects.some((project) => samePath(project.path, folder, this.deps.platform))) continue
+      if (listed(folder)) continue
       this.deps.scratch.adopt(folder)
     }
+    // Huli: a session restored from the recycle bin without its project is No project too, until
+    // its folder is a project again.
+    if (projectPath !== undefined) return
+    let changed = false
+    for (const record of this.records.values()) {
+      if (!record.noProject) continue
+      if (listed(record.projectPath)) {
+        delete record.noProject
+        changed = true
+      } else this.deps.scratch.adopt(record.projectPath)
+    }
+    if (changed) this.saveIndex()
   }
 
   /**
@@ -5255,7 +5286,7 @@ export class SessionManager {
     // JsonFile serializes when it writes, so the latest records go out without copies here.
     this.deps.file.save({
       version: 1,
-      sessions: [...this.records.values()],
+      sessions: [...this.records.values(), ...this.binned.values()],
       ...(this.emptySessionsRemovedAt === null
         ? {}
         : { emptySessionsRemovedAt: this.emptySessionsRemovedAt }),
@@ -15580,16 +15611,65 @@ export class SessionManager {
     else this.forget(sessionId)
   }
 
-  async delete(sessionId: string): Promise<void> {
+  /**
+   * Huli: moves the session and its sub-sessions to the recycle bin: closed with their threads
+   * stored and marked deleted in the index, off every list and lookup, until a restore puts them
+   * back or a purge deletes them for good as a delete did before (`purgeBinned`). `group` is the
+   * bin item it goes in with, a task's or a routine's, whose restore and purge take it along.
+   */
+  async delete(sessionId: string, group?: string): Promise<void> {
     const record = this.recordOf(sessionId)
     if (record.origin === 'subagent') {
       throw new HostError('restricted', t('session.subagent.deletedWithParent'))
     }
     await this.settled(sessionId)
     const all = [...this.descendants(sessionId), record]
-    await this.closeAll(all, false)
+    await this.closeAll(all, true)
     this.deps.events.ended(all.map((item) => item.id))
     if (record.prFlow) queueMicrotask(() => this.deps.prFlowChanged?.())
+    const at = this.now()
+    const own = binKey('session', record.id)
+    for (const item of all) this.toBin(item, at, item === record ? group : (group ?? own), false)
+    this.saveIndex()
+    this.deps.binChanged?.()
+  }
+
+  /**
+   * Huli: deletes a session for good at once, as a routine does with the runs beyond those it
+   * keeps: into the bin and out again.
+   */
+  async deleteNow(sessionId: string): Promise<void> {
+    await this.delete(sessionId)
+    await this.purgeBinned(this.binGroup(sessionId))
+  }
+
+  /**
+   * Huli: one session into the recycle bin, its record and thread kept as they are. One that never
+   * reached the index has nothing to come back to and is forgotten.
+   */
+  private toBin(
+    record: SessionRecord,
+    at: number,
+    deletedWith: string | undefined,
+    keepsAgent: boolean,
+  ): void {
+    if (!this.records.has(record.id)) return this.forget(record.id)
+    this.forget(record.id, undefined, true)
+    record.deletedAt = at
+    if (deletedWith) record.deletedWith = deletedWith
+    else delete record.deletedWith
+    if (keepsAgent) record.deletedKeepsAgent = true
+    else delete record.deletedKeepsAgent
+    this.binned.set(record.id, record)
+  }
+
+  /**
+   * Huli: deletes binned sessions for good, as a delete did before the recycle bin: their agents'
+   * own sessions (unless they went with a removal that always left those), what agents keep past
+   * their delete, their stored threads and their files.
+   */
+  private async purge(all: readonly SessionRecord[]): Promise<void> {
+    if (all.length === 0) return
     // Huli: `deleted`, the agent's own delete went through.
     const owners: { agentId: AgentId; acpSessionId: string; deleted: boolean }[] = []
     const deleting: {
@@ -15598,7 +15678,7 @@ export class SessionManager {
       runtime: AgentRuntime
     }[] = []
     for (const item of all) {
-      if (item.origin === 'subagent') continue
+      if (item.origin === 'subagent' || item.deletedKeepsAgent) continue
       // Every agent that had the session keeps a session of its own for it.
       const owned = [
         { agentId: item.agentId, acpSessionId: item.acpSessionId },
@@ -15606,6 +15686,10 @@ export class SessionManager {
       ].filter((owner) => owner.acpSessionId !== '')
       for (const { agentId, acpSessionId } of owned) {
         if (!this.deps.agents.has(agentId)) continue
+        // Huli: one a session in the list took up meanwhile, by an import, stays its agent's.
+        if (this.findShared(agentId, acpSessionId) || this.takenEarlier(agentId, acpSessionId)) {
+          continue
+        }
         const owner = { agentId, acpSessionId, deleted: false }
         owners.push(owner)
         try {
@@ -15617,7 +15701,9 @@ export class SessionManager {
       }
     }
     // The agent deletes the session's log too, so what it holds is counted first.
-    await this.deps.usage?.syncAgents([...new Set(owners.map(({ agentId }) => agentId))])
+    if (owners.length > 0) {
+      await this.deps.usage?.syncAgents([...new Set(owners.map(({ agentId }) => agentId))])
+    }
     for (const { item, owner, runtime } of deleting) {
       try {
         await runtime.connection.deleteSession(owner.acpSessionId)
@@ -15637,9 +15723,145 @@ export class SessionManager {
     for (const item of all) void this.deps.envFiles?.remove(item.id).catch(() => {})
     // Huli: the session's file checkpoints go with it.
     for (const item of all) void this.deps.fileCheckpoints?.forget(item.id).catch(() => {})
-    for (const item of all) this.forget(item.id)
+    for (const item of all) {
+      this.binned.delete(item.id)
+      // A routine's run or a workflow step lets go of its session only now, so a restore finds it.
+      if (item.origin === 'routine') this.deps.routine?.current?.sessionGone(item.id)
+      if (item.origin === 'task') this.deps.task?.current?.sessionGone(item.id)
+    }
     this.saveIndex()
     this.removeThreads(all.map((item) => item.id))
+  }
+
+  // Huli: the recycle bin's sessions.
+
+  /**
+   * The bin's own item a binned session belongs to: its top-level session's, or the session itself;
+   * `group` while it went with a project, a task or a routine that is still in the bin.
+   */
+  private binItemOf(record: SessionRecord): SessionRecord | 'group' {
+    const group = record.deletedWith
+    if (group?.startsWith('session:')) {
+      const root = this.binned.get(group.slice('session:'.length))
+      if (root && root.deletedWith === undefined) return root
+    }
+    if (group !== undefined && !group.startsWith('session:')) {
+      if (this.deps.groupBinned?.(group)) return 'group'
+      // What took them came back without them: each top-level one is an item, with its
+      // sub-sessions.
+      let current = record
+      const seen = new Set<string>()
+      while (current.parentId !== null && !seen.has(current.id)) {
+        seen.add(current.id)
+        const parent = this.binned.get(current.parentId)
+        if (!parent || parent.deletedWith !== group) break
+        current = parent
+      }
+      return current
+    }
+    return record
+  }
+
+  /** The sessions the bin lists as items of their own, each with what went in with it. */
+  binnedItems(): { record: SessionRecord; members: SessionRecord[]; title: string | null }[] {
+    const items = new Map<string, { record: SessionRecord; members: SessionRecord[] }>()
+    for (const record of this.binned.values()) {
+      const item = this.binItemOf(record)
+      if (item === 'group') continue
+      const entry = items.get(item.id) ?? { record: item, members: [] }
+      if (item !== record) entry.members.push(record)
+      items.set(item.id, entry)
+    }
+    return [...items.values()].map((entry) => ({
+      ...entry,
+      title: entry.record.customTitle ?? entry.record.title,
+    }))
+  }
+
+  /** The binned session that runs the agent's own session, by any agent sharing its history. */
+  private binnedOf(agentId: AgentId, acpSessionId: string): SessionRecord | undefined {
+    const agents = new Set(this.sharingHistory(agentId))
+    for (const record of this.binned.values()) {
+      if (record.origin === 'subagent') continue
+      if (agents.has(record.agentId) && record.acpSessionId === acpSessionId) return record
+    }
+    return undefined
+  }
+
+  /** Whether the session waits in the recycle bin, so what holds it, as a folder, keeps it. */
+  inBin(sessionId: string): boolean {
+    return this.binned.has(sessionId)
+  }
+
+  /** The binned sessions a project, a task or a routine took along, which go and come back with it. */
+  binnedWith(group: string): SessionRecord[] {
+    return [...this.binned.values()].filter((record) => record.deletedWith === group)
+  }
+
+  /** A binned item's sessions: it and what went in with it; empty when no such item is binned. */
+  binGroup(sessionId: string): SessionRecord[] {
+    const record = this.binned.get(sessionId)
+    if (!record || this.binItemOf(record) !== record) return []
+    return [
+      record,
+      ...[...this.binned.values()].filter(
+        (other) => other !== record && this.binItemOf(other) === record,
+      ),
+    ]
+  }
+
+  /** The earliest deletion still in the bin, for the purge's timer; null while it holds none. */
+  binnedSince(): number | null {
+    let earliest: number | null = null
+    for (const { deletedAt } of this.binned.values()) {
+      if (deletedAt !== undefined && (earliest === null || deletedAt < earliest)) {
+        earliest = deletedAt
+      }
+    }
+    return earliest
+  }
+
+  /** The bytes the stored threads of these sessions keep, by id. */
+  async binnedSizes(ids: readonly string[]): Promise<Record<string, number>> {
+    if (ids.length === 0 || !this.deps.threads) return {}
+    return this.deps.threads.sizes(ids).catch(() => ({}))
+  }
+
+  /**
+   * Puts binned sessions back as they were. `noProject` lists them under No project in the
+   * folder they had, for one whose project went for good.
+   */
+  async unbin(
+    records: readonly SessionRecord[],
+    options: { noProject?: boolean } = {},
+  ): Promise<void> {
+    const back = records.filter((record) => this.binned.get(record.id) === record)
+    if (back.length === 0) return
+    for (const record of back) {
+      this.binned.delete(record.id)
+      delete record.deletedAt
+      delete record.deletedWith
+      delete record.deletedKeepsAgent
+      if (options.noProject && !this.deps.scratch.contains(record.projectPath)) {
+        record.noProject = true
+        this.deps.scratch.adopt(record.projectPath)
+      }
+      this.records.set(record.id, record)
+    }
+    await this.reclaimPorts(back)
+    for (const record of back) {
+      if (record.limitPause) this.armLimit(record.id, record.limitPause.resumeAt)
+    }
+    // A manager and its workers find each other again, as at launch.
+    if (back.some((record) => record.manager || record.worker)) this.manager.load()
+    this.saveIndex()
+    for (const record of back) this.touch(record.id)
+    this.deps.binChanged?.()
+  }
+
+  /** Deletes binned sessions for good; ones no longer in the bin are left alone. */
+  async purgeBinned(records: readonly SessionRecord[]): Promise<void> {
+    await this.purge(records.filter((record) => this.binned.get(record.id) === record))
   }
 
   private deleteFailed(item: SessionRecord, error: unknown): void {
@@ -15659,7 +15881,7 @@ export class SessionManager {
     })
   }
 
-  private forget(sessionId: string, portIds?: readonly string[]): void {
+  private forget(sessionId: string, portIds?: readonly string[], binned = false): void {
     this.endSide([sessionId], true)
     const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
     const known = this.records.delete(sessionId) || this.lastSummaries.has(sessionId)
@@ -15674,30 +15896,63 @@ export class SessionManager {
     this.limitChecks.delete(sessionId)
     this.stallRetries.delete(sessionId)
     this.stalls.turnEnded(sessionId)
-    if (record?.origin === 'routine') this.deps.routine?.current?.sessionGone(sessionId)
-    if (record?.origin === 'task') this.deps.task?.current?.sessionGone(sessionId)
+    if (!binned && record?.origin === 'routine') this.deps.routine?.current?.sessionGone(sessionId)
+    if (!binned && record?.origin === 'task') this.deps.task?.current?.sessionGone(sessionId)
     this.manager.removed(sessionId)
     if (known) this.deps.events.removed(sessionId, portIds)
   }
 
-  /** Clears the index; the agents keep their transcripts. */
+  /**
+   * Huli: moves every session to the recycle bin, each top-level one an item with its
+   * sub-sessions; deleted for good, they leave the agents' transcripts, as clearing the index did.
+   */
   async removeAll(): Promise<void> {
     await Promise.allSettled([...this.reviving.values(), ...this.releasing.values()])
     await Promise.all([...this.live.values()].map((l) => this.dropPrepared(l)))
     const live = [...this.live.values()]
     await this.closeAll(
       live.filter((l) => l.record.origin !== 'subagent').map((l) => l.record),
-      false,
+      true,
     )
     for (const item of live) if (this.live.has(item.id)) this.dropLive(item)
-    const ids = new Set([...this.records.keys(), ...this.lastSummaries.keys()])
-    for (const id of ids) this.forget(id)
+    const records = [...this.records.values()]
+    this.binTogether(records, true)
+    const ids = new Set([...this.lastSummaries.keys()])
+    for (const id of ids) if (!this.binned.has(id)) this.forget(id)
     this.saveIndex()
-    this.removeThreads([...ids])
+    this.deps.binChanged?.()
   }
 
-  /** Removes a project's sessions from the index, closing live ones first. */
-  async removeProject(projectPath: string): Promise<void> {
+  /**
+   * Huli: bins sessions taken together, each under the topmost of them above it, so every
+   * top-level one is an item with its sub-sessions.
+   */
+  private binTogether(records: readonly SessionRecord[], keepsAgent: boolean): void {
+    const ids = new Set(records.map((record) => record.id))
+    const topOf = (record: SessionRecord): SessionRecord => {
+      let current = record
+      const seen = new Set<string>()
+      while (current.parentId !== null && ids.has(current.parentId) && !seen.has(current.id)) {
+        seen.add(current.id)
+        const parent = this.records.get(current.parentId)
+        if (!parent) break
+        current = parent
+      }
+      return current
+    }
+    const tops = new Map(records.map((record) => [record.id, topOf(record)]))
+    const at = this.now()
+    for (const record of records) {
+      const top = tops.get(record.id)!
+      this.toBin(record, at, top === record ? undefined : binKey('session', top.id), keepsAgent)
+    }
+  }
+
+  /**
+   * Huli: moves a project's sessions to the recycle bin with its record, closing live ones first;
+   * they come back and go for good with the project, leaving the agents' transcripts as before.
+   */
+  async removeProject(projectPath: string, group: string): Promise<void> {
     const key = pathKey(projectPath, this.deps.platform)
     await Promise.all(
       [...this.live.values()]
@@ -15706,22 +15961,19 @@ export class SessionManager {
     )
     const inProject = this.list().filter((s) => pathKey(s.projectPath, this.deps.platform) === key)
     await Promise.all(inProject.map((summary) => this.settled(summary.id)))
-    for (const summary of inProject) {
-      const live = this.live.get(summary.id)
-      if (!live) continue
-      live.closing = true
-      live.removing = true
-    }
-    for (const summary of inProject) {
-      if (summary.origin === 'user') await this.closeOne(summary.id, false)
-    }
+    const records = inProject.flatMap((summary) => this.records.get(summary.id) ?? [])
+    await this.closeAll(
+      records.filter((record) => record.origin === 'user'),
+      true,
+    )
     for (const summary of inProject) {
       const live = this.live.get(summary.id)
       if (live) this.dropLive(live)
-      this.forget(summary.id)
     }
+    const at = this.now()
+    for (const record of records) this.toBin(record, at, group, true)
     this.saveIndex()
-    this.removeThreads(inProject.map((summary) => summary.id))
+    this.deps.binChanged?.()
   }
 
   /**
@@ -15782,28 +16034,17 @@ export class SessionManager {
       return yes
     }
     const removed = [...empty].filter(removable)
-    const records = removed.map((id) => this.records.get(id)!)
-    for (const id of removed) this.forget(id)
+    // Huli: into the recycle bin, which keeps their threads; the agents' histories stay as before.
+    this.binTogether(
+      removed.map((id) => this.records.get(id)!),
+      true,
+    )
     this.emptySessionsRemovedAt = this.now()
     this.saveIndex()
-    // While the index on disk still lists a session, its empty thread is what lets a later run
-    // remove it, so the threads go only once the index is written.
-    if (!(await this.deps.file.flushWritten())) {
-      // Undone, so a later write in this run does not drop them with their threads still stored.
-      for (const record of records) this.records.set(record.id, record)
-      this.emptySessionsRemovedAt = null
-      this.saveIndex()
-      for (const record of records) this.touch(record.id)
-      this.deps.diagnostics.log(
-        'warn',
-        `Could not write the index without ${removed.length} sessions that held no message; they stay listed and the next launch tries again`,
-      )
-      return
-    }
-    this.removeThreads(removed)
+    if (removed.length > 0) this.deps.binChanged?.()
     this.deps.diagnostics.log(
       'info',
-      `Removed ${removed.length} session${removed.length === 1 ? '' : 's'} that held no message; this runs once`,
+      `Moved ${removed.length} session${removed.length === 1 ? '' : 's'} that held no message to the recycle bin; this runs once`,
     )
   }
 
@@ -15926,6 +16167,14 @@ export class SessionManager {
     if (!this.deps.agents.has(params.agentId))
       throw invalidParams(t('agent.unknown', { agent: params.agentId }))
     this.deps.agents.assertEnabled(params.agentId)
+    // Huli: one in the recycle bin comes back from there, as it was, rather than twice.
+    if (!params.fork) {
+      const binned = this.binnedOf(params.agentId, params.acpSessionId)
+      if (binned) {
+        await this.unbin(this.binGroup(binned.id).length > 0 ? this.binGroup(binned.id) : [binned])
+        return this.summary(binned.id)
+      }
+    }
     // Huli: one an agent sharing its history runs here is that session.
     const existing = this.findShared(params.agentId, params.acpSessionId)
     if (existing && !params.fork) {

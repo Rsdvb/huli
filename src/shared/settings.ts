@@ -10,6 +10,7 @@ import type { AutoApprove } from './risk'
 import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from './sandbox'
 import { DEFAULT_SUPERVISOR, type SupervisorSettings } from './supervisor'
 import { DEFAULT_TIDY, type TidySettings } from './session-tidy'
+import { DEFAULT_RECYCLE_BIN, type RecycleBinSettings } from './recycle-bin'
 import type { ToolCallView } from './zen-view'
 import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
@@ -147,6 +148,8 @@ export interface SettingsFile {
   supervisor: SupervisorSettings
   // Huli: the rules that settle sessions out of the active list by themselves (会话整理).
   tidy: TidySettings
+  // Huli: how long the recycle bin keeps what was deleted (回收站).
+  recycleBin: RecycleBinSettings
   // Huli: the loopback port routines' webhooks listen on, while one of them uses its webhook.
   webhooks: { port: number }
   // How many workflow step sessions work at once across every task.
@@ -469,6 +472,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   idleSessions: { release: 'auto', outOfView: 5, inView: 30, limit: null },
   supervisor: DEFAULT_SUPERVISOR,
   tidy: { ...DEFAULT_TIDY },
+  recycleBin: { ...DEFAULT_RECYCLE_BIN },
   webhooks: { port: DEFAULT_WEBHOOK_PORT },
   workflow: { maxWorkingSteps: DEFAULT_WORKING_STEPS },
   updates: { automatic: 'download', source: 'auto' },
@@ -582,6 +586,7 @@ export interface SettingsPatch {
   idleSessions?: Partial<SettingsFile['idleSessions']>
   supervisor?: Partial<SettingsFile['supervisor']>
   tidy?: Partial<SettingsFile['tidy']>
+  recycleBin?: Partial<SettingsFile['recycleBin']>
   webhooks?: Partial<SettingsFile['webhooks']>
   workflow?: Partial<SettingsFile['workflow']>
   updates?: Partial<SettingsFile['updates']>
@@ -634,6 +639,8 @@ export interface HostSettings {
   supervisor?: SettingsFile['supervisor']
   // Huli: the rules that settle sessions by themselves; absent from a parent older than them.
   tidy?: SettingsFile['tidy']
+  // Huli: the recycle bin's days; absent from a parent older than it, which keeps 30.
+  recycleBin?: SettingsFile['recycleBin']
   // Huli: routines' webhook port; absent from a parent older than it, which leaves the default.
   webhooks?: SettingsFile['webhooks']
   workflow: SettingsFile['workflow']

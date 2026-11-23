@@ -143,6 +143,8 @@ export interface TaskRecord {
   createdAt: number
   updatedAt: number
   endedAt: number | null
+  /** Huli: in the recycle bin since then, with its step sessions; absent while it is listed. */
+  deletedAt?: number
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -420,7 +422,8 @@ export function taskRecordOf(value: unknown): TaskRecord | null {
     typeof value.unread === 'boolean' &&
     isTime(value.createdAt) &&
     isTime(value.updatedAt) &&
-    isNullableTime(value.endedAt)
+    isNullableTime(value.endedAt) &&
+    (value.deletedAt === undefined || isTime(value.deletedAt))
   return ok ? (structuredClone(value) as unknown as TaskRecord) : null
 }
 

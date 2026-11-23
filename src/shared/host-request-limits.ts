@@ -243,6 +243,11 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'sessions.removeEmpty': AGENT_MS,
   'sessions.takeReturned': HOST_MS,
   'sessions.removeAll': NONE,
+  'bin.list': HOST_MS,
+  'bin.restore': AGENT_MS,
+  // Deleting sessions for good asks their agents to delete their own, one after another.
+  'bin.purge': NONE,
+  'bin.empty': NONE,
   'routines.list': HOST_MS,
   'routines.create': HOST_MS,
   'routines.update': HOST_MS,
