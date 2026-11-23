@@ -19,6 +19,8 @@ import { BOARD_ICON, BOARD_LABEL, boardStatusOf } from '../board'
 import { entryShownOnPhone } from '../host'
 import { planReturns, snoozePresets } from '@shared/session-tidy'
 import { PRESET_LABEL, laterTimes } from '../tidy'
+import { TOOL_CALL_VIEWS } from '@shared/zen-view'
+import { setThreadView, threadViewOf, VIEW_LABEL } from '../threadView'
 import { momentText } from '../ui/session/format'
 
 export interface SessionMenuContext {
@@ -186,6 +188,18 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
                 },
           ]
         : []
+    // Huli: how much of the agent's work the conversation shows (简洁视图), this phone's choice.
+    const view: MenuEntry[] = entryShownOnPhone('phone.zenView')
+      ? [
+          {
+            key: 'zen',
+            label: '工具调用',
+            icon: G.eyeOff,
+            detail: VIEW_LABEL[threadViewOf(summary.id)],
+            page: 'title-zen',
+          },
+        ]
+      : []
     const forks: MenuEntry[] =
       topLevel && ctx.canFork
         ? [
@@ -271,7 +285,7 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
         onPress: () => actions.remove(summary),
       },
     ]
-    return { entries: joined([[headRow(ctx)], state, own, tidy, make, links, ending]) }
+    return { entries: joined([[headRow(ctx)], state, own, view, tidy, make, links, ending]) }
   }
 
   return (id) => {
@@ -287,6 +301,19 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
           checked: status === board,
           onPress: () => actions.setBoard(summary, status),
         })),
+      }
+    }
+    if (id === 'title-zen') {
+      const current = threadViewOf(summary.id)
+      return {
+        title: '工具调用',
+        entries: TOOL_CALL_VIEWS.map((view) => ({
+          key: view,
+          label: VIEW_LABEL[view],
+          checked: view === current,
+          onPress: () => setThreadView(summary.id, view),
+        })),
+        footer: '授权请求和提问一直显示。',
       }
     }
     if (id === 'title-snooze') {

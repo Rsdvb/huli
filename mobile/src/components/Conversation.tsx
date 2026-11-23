@@ -51,6 +51,9 @@ import { RevealContext, type AnchorTarget } from '../ui/session/anchors'
 import { haptic } from '../ui/session/feedback'
 import { useSessionTokens } from '../ui/session/palette'
 import { rowBuilder, type Row } from '../ui/session/turns'
+import { zenRows, type ZenRow } from '../ui/session/zenRows'
+import { useThreadViewOf } from '../threadView'
+import { HiddenSteps } from './HiddenSteps'
 import { observeTools } from '../ui/session/work'
 import { MarksShown, ToBottomButton } from '../ui/session/Working'
 import { SubSessionStart } from './entries/NoteEntries'
@@ -70,16 +73,16 @@ const DRAW_AHEAD = 500
 const ANCHOR_ROOM = 8
 
 const NO_ROWS: Row[] = []
+const NO_TURNS: ReadonlySet<string> = new Set()
 const DEV = devMode()
 // A reply the simulator scripts time apart, in characters.
 const LONG_REPLY = 50_000
 const selectThread = (thread: ThreadState | null) => thread
-const renderRow = ({ item }: { item: Row }) => <ThreadRow row={item} />
 
 /** What a session's list keeps between its visits: the heights Legend List keeps are by `key`. */
 interface ListMemory {
   build: ReturnType<typeof rowBuilder>
-  key: (row: Row) => string
+  key: (row: ZenRow) => string
 }
 
 // As many as the threads the cache keeps in memory (cache.ts).
@@ -87,7 +90,7 @@ const MEMORIES_KEPT = 6
 const memories = new Map<string, ListMemory>()
 
 function listMemory(sessionId: string): ListMemory {
-  const memory = memories.get(sessionId) ?? { build: rowBuilder(), key: (row: Row) => row.key }
+  const memory = memories.get(sessionId) ?? { build: rowBuilder(), key: (row: ZenRow) => row.key }
   memories.delete(sessionId)
   memories.set(sessionId, memory)
   for (const old of memories.keys()) {
@@ -139,11 +142,27 @@ export function Conversation(props: {
   const [fresh, setFresh] = useState(false)
 
   const memory = useMemo(() => listMemory(id), [id])
-  const rows = useMemo(() => {
+  const built = useMemo(() => {
     if (!thread) return NO_ROWS
     observeTools(id, thread)
     return memory.build(thread, running)
   }, [thread, id, running, memory])
+  // Huli: the 简洁视图, a view of the built rows; a turn's hidden steps open with a tap.
+  const shownView = useThreadViewOf(id)
+  const [openTurns, setOpenTurns] = useState<ReadonlySet<string>>(NO_TURNS)
+  const rows = useMemo(() => zenRows(built, shownView, openTurns), [built, shownView, openTurns])
+  const renderRow = useCallback(
+    ({ item }: { item: ZenRow }) =>
+      item.type === 'hidden' ? (
+        <HiddenSteps
+          count={item.count}
+          onOpen={() => setOpenTurns((open) => new Set(open).add(item.turn))}
+        />
+      ) : (
+        <ThreadRow row={item} />
+      ),
+    [],
+  )
   // The list's size before its layout, whose width its kept heights are restored at.
   const screen = useWindowDimensions()
   const listSize = useMemo(
@@ -279,7 +298,7 @@ export function Conversation(props: {
   const onLoad = useCallback(() => keep('conversation-shown'), [keep])
   const longDrawn = useRef(false)
   const onItemSizeChanged = useCallback(
-    ({ itemData }: { itemData: Row }) => {
+    ({ itemData }: { itemData: ZenRow }) => {
       const entry = itemData.type === 'reply' || itemData.type === 'entry' ? itemData.entry : null
       if (longDrawn.current || entry?.kind !== 'agent' || entry.markdown.length < LONG_REPLY) return
       longDrawn.current = true
