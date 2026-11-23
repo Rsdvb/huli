@@ -685,10 +685,19 @@ and is not part of it.
 
 ### Session export
 
-Export… in a session's menus (the row's and the top bar's More) saves the session as Markdown
-with its pictures in a `<name>.assets` folder beside it, the same in a zip, or a PDF; the dialog
-remembers the format and what to include: the agent's thinking, each tool call's full input and
-output, and the sub-agents' sessions. The desktop app's alone (`window.kettu.exportSession`).
+导出 in a session's menus (the row's and the top bar's More) is a submenu: 网页… and Markdown…
+export at once with what the last export included, and 更多格式… opens the dialog, which saves the
+session as one web page, as Markdown with its pictures in a `<name>.assets` folder beside it, the
+same in a zip, or a PDF; it remembers the format and what to include: the agent's thinking, each
+tool call's full input and output, and the sub-agents' sessions. The desktop app's alone
+(`window.kettu.exportSession`). Every format starts with 改动, the files the session's finished
+edits changed with the lines added and removed (an edit that failed or was denied counts not).
+The web page (`html`) is one `.html` file with its pictures as `data:` URLs (no SVG, which shows
+its text), its styles inline, `<details>` folds for each tool call's details, a CSP that allows no
+script and no network, and dark colors when the reader's system is dark. The phone's session menu
+has 分享为 Markdown (`mobile/src/sessionExport.ts`): it reads the whole thread, writes it with the
+same exporter and Chinese words, masks it with the logs' redactor as main does, shows pictures by
+their alt text, and hands the file to the share sheet.
 
 - The page reads the whole thread and its pictures from the session's host, so a session of
   another computer exports too, and builds the Markdown with `src/shared/session-export.ts`
@@ -2007,7 +2016,7 @@ feature already loaded leaves memory at the next launch).
 | 看板 (`board`)                         | the Overview's board view (now lazily loaded), the rows' column mark, the session menus' 看板 ›, `set_board_status`                     |
 | 总管模式 (`manager`)                   | Settings › 总管模式, New session's chip, the 工人 pane, the strip, the menu switch, the manager tools, restart recovery                 |
 | 同时交给几个 Agent (`bestOfN`)         | the way-of-working item, the group page and row (runs list one by one), `groups.*`                                                      |
-| 定时任务 (`routines`)                  | the sidebar row, its pages and palette entries, the schedule's timer and event runs; windows and phones do not read them                |
+| 定时任务 (`routines`)                  | the sidebar row, its pages and palette entries, the schedule's timer, event runs and the webhook listener; windows and phones read none |
 | GitHub 自动化 (`github`)               | the issue inbox, auto-merge and PR watch, the GitHub chips, routine triggers; the flow reads nothing, so no timer                       |
 | 沙箱 (`sandbox`)                       | where a sandbox is chosen (Settings, project menu, New session); see below                                                              |
 | 聊天软件遥控 (`chatBridge`)            | Settings › 聊天软件; the agent host gets no bridge, so its code never loads and a running one disconnects                               |
@@ -2153,6 +2162,92 @@ Huli's own files: `src/shared/web-reader.ts`, `src/agent-host/web-reader/` (`rel
 the `webReader` keys of `locales/*/{settings,host}.json`. Tests: a download refused on a SHA-256 or
 size mismatch, the arguments and addresses, the command line and environment, the cut and the
 untrusted wrapping, and the feature gate (`web-reader.test.ts`, `service.test.ts`).
+
+### Agent notifications (Agent 主动通知)
+
+Kite's MCP server has `notify` (`src/agent-host/notify-tool.ts`): a title and a short body, which
+the host raises as the session's attention of kind `note` (`sessions.noteToUser`). It so goes
+where a finished turn's notice goes: main's desktop notification (under Settings › 通知 › 回复完成,
+`ATTENTION_SETTING.note`), the phones' push (`choices.turnEnded`, each phone's muted sessions, the
+notification extension's `note` with the reply action of a finished turn), the chat bridges and
+the island. The desktop has no mute of a session's own; the phone's list is the session's mute.
+The text is cut to one plain line (80 and 300 characters, control and reordering marks out) and is
+never drawn as Markdown. A session may send 3 a minute and 30 an hour (`WindowLimiter`, which runs
+nothing between calls); a refused call says how long to wait. Kite's instructions say to use it
+only when the user asked to be told or long work finished. Settings › 功能管理 › Agent 主动通知
+turns the tool and its line off. Tests: `notify-tool.test.ts`.
+
+### Routine webhooks (定时任务 Webhook)
+
+A routine's trigger may be `{ kind: 'webhook', schedule }` (the schedule kept for older clients and
+a switch back; the phone keeps the trigger and edits only the schedule). The agent host's
+`WebhookListener` (`src/agent-host/routines/webhooks.ts`) listens on `127.0.0.1` alone, on
+Settings › 高级 › 定时任务 Webhook 端口 (`webhooks.port`, 47811 by default), and only while an enabled
+routine runs on its webhook and routines are on: `routineTriggersChanged` syncs it, so nothing
+polls. A request is `POST /routines/<id>`; it is refused with an `Origin` header (a web page) or a
+`Host` other than the loopback's (a rebound name), and needs the routine's secret in
+`X-Kite-Secret` or `sha256=` and the HMAC-SHA256 of the body in `X-Kite-Signature-256` (or
+GitHub's `X-Hub-Signature-256`), compared in constant time. Bodies are capped at 64 KiB (413),
+each routine takes 6 requests a minute and 60 an hour (429 with `Retry-After`), and 20 wrong
+secrets a minute make every request wait. The run's prompt is the routine's own and then the body
+between `<untrusted-webhook-body boundary="...">` markers with a random boundary, after a line
+that says it is untrusted data (`routines.webhookHeader`); a body that is not UTF-8 shows its size.
+A run already active answers 409.
+
+Each routine's secret is 32 random bytes in base64url, made by the host on
+`routines.webhookSecret` (windows only: `WINDOW_ONLY` in `remote/allow-list.ts`), answered that once
+and shown in the routine page's dialog, then sent to main as `host:webhook-secret`, which keeps it
+in `market-keys.json` (`webhookSecrets`, encrypted by the system, as API keys are) and pushes it
+back with `host:market-keys`; the daemon keeps it in its own key file. A routine deleted or moved
+off its webhook forgets its secret. The routine page shows the address, whether it listens or why
+not, and Make secret / Make new secret.
+
+Out of scope, a follow-up: reaching a webhook from the internet, as through the Kite Cloud relay;
+today only programs on the same computer can.
+
+Tests: `webhooks.test.ts` (secret, signature, the refusals, the limits, the untrusted block and
+the listener), `validate.test.ts`, `allow-list.test.ts`, `market-keys.test.ts`.
+
+### Keyboard shortcuts (快捷键)
+
+Settings › 快捷键 (`features/settings/shortcuts-section.tsx`, controls in `shortcut-rows.tsx`)
+lists the shortcuts in `src/shared/shortcuts.ts` that may be rebound, the global screenshot
+hotkey, and the keys that stay (back and forward, the panes, close, zoom). A recorder takes the
+next keys pressed, ignoring a key while an input method composes; keys are written as the menus
+write them (`Mod+Shift+K`) and follow the physical key (`event.code`), so a layout or an input
+method changes nothing. Keys without Ctrl, Alt or Command (but function keys), keys the app or
+the system keeps (`reserved`) and keys another shortcut has are refused, and main's settings check
+refuses them too (`bindingsProblem`). Reset goes back to the default. `keyboard.shortcuts` holds
+only the rebound ones. `app/shortcuts.ts` runs the rebindable ones by their keys
+(`lib/shortcut-keys.ts`), the macOS menu bar carries them (`menu.ts`), the shortcuts dialog, the
+palette, tooltips and menu hints show them, a terminal keeps passing on the terminal's keys, and
+artifact and browser pages pass rebound keys on to the window (`setReboundShortcuts` in
+`artifacts/guards.ts`). On macOS a key the menu bar holds may still run its item while the
+recorder listens. Tests: the settings check (`settings.test.ts`).
+
+### Screenshot to session and the mini window (截图发到会话、小窗)
+
+The global screenshot hotkey (`keyboard.screenshot`, off until set in Settings › 快捷键, two
+modifiers or a function key) is registered with `globalShortcut` only while set, and never in a
+test copy (`src/main/screen-capture.ts`). A press captures the display under the pointer with
+`desktopCapturer`, freezes it in a window of Kite's own over that display (`capture.html`, plain
+DOM, its own preload `src/preload/capture.ts`, CSP), where the user drags out a region; Esc, a
+right click or leaving the window cancels. Main crops the capture itself (the page only shows a
+JPEG of it), and sends the PNG to the main window (`capture:shot`), which attaches it to the
+session in view, or opens New session and attaches it there
+(`features/session/composer/screenshots.ts`). macOS asks for screen recording the first time; an
+empty capture is logged and dropped.
+
+The mini window (`src/main/mini-window.ts`, page `mini.html` and `features/mini/`) is a small
+always-on-top window that follows one session: its status (working, waiting for you, needs
+attention, done), its last reply's first line, and a box to reply in (`sessions.queue`, so a reply
+during a turn waits; Enter sends, never mid-composition). It opens from a session's menu
+(在小窗中打开) and the tray (小窗, on the latest session), is made only then and destroyed on close.
+Its preload (`src/preload/mini.ts`) exposes settings and themes, three host methods
+(`MINI_HOST_METHODS`) and its own calls; main takes from its page only `MINI_CHANNELS`, by its
+window (`markOwnPage`) or its URL, and from the overlay only `CAPTURE_CHANNELS`; the window's page
+may open the mini window but never send those pages' calls. It reads the session on open and
+then follows `session.summary` events. Tests: `ipc.test.ts`, `capture.test.ts`.
 
 ## Merging Kettu
 
