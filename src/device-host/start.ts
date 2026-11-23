@@ -2,6 +2,7 @@
 // host's out, and each client's port as it connects. index.ts runs it in Electron's utility
 // process, node-main.ts under Node.js.
 
+import { isAbsolute, join } from 'node:path'
 import { CONTROL_WAIT_MS, ControlWait } from '@shared/control'
 import type {
   DeviceAction,
@@ -214,8 +215,8 @@ export function startDeviceHost(
       running.set(request.deviceId, controller)
       try {
         const action = request.action
-        if (action.type === 'install' && request.projectPath && !action.path.startsWith('/')) {
-          action.path = `${request.projectPath}/${action.path}`
+        if (action.type === 'install' && request.projectPath && !isAbsolute(action.path)) {
+          action.path = join(request.projectPath, action.path)
         }
         // A turn made through XCTest is invisible to the stream, which would keep drawing the
         // device upright; a device that streams is turned through its driver instead.
