@@ -4,7 +4,6 @@ import {
   blockedApp,
   refusedMenuItem,
   refusedShortcut,
-  sandboxGate,
   shortcut,
   startsPrograms,
   type SelfApp,
@@ -151,33 +150,5 @@ describe('Huli: startsPrograms', () => {
     }
     expect(startsPrograms('notepad.exe')).toBe(false)
     expect(startsPrograms('hwinfo64.exe')).toBe(false)
-  })
-})
-
-describe('Huli: the gate of administrator use in sandboxed sessions only', () => {
-  const contained = { contained: true, title: 'In a container' }
-  const outside = { contained: false, title: 'Outside' }
-
-  it('lets a session in a container sandbox through while every other running one is too', () => {
-    expect(sandboxGate(contained, [])).toBeNull()
-    expect(
-      sandboxGate(contained, [contained, { contained: true, title: 'Also in one' }]),
-    ).toBeNull()
-  })
-
-  it('refuses a session outside one, and a session that is gone', () => {
-    expect(sandboxGate(outside, [])).toContain('this session is not in one')
-    expect(sandboxGate(null, [])).toContain('this session is not in one')
-  })
-
-  it('refuses while any other running session is outside one, naming it and saying why', () => {
-    const refusal = sandboxGate(contained, [contained, outside])
-    expect(refusal).toContain('“Outside”')
-    expect(refusal).toContain('could take over Windows’ administrator prompt')
-    const many = sandboxGate(
-      contained,
-      ['A', 'B', 'C', 'D', 'E'].map((title) => ({ contained: false, title })),
-    )
-    expect(many).toContain('“A”, “B”, “C” and 2 more')
   })
 })

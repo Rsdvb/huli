@@ -44,7 +44,7 @@ export function ComputerElevatedLink() {
   const mode = useSettingsStore((s) => s.settings.computerUse.elevated)
   return (
     <span className="flex items-center gap-2">
-      <Pill tone={mode === 'always' ? 'warning' : mode === 'sandbox' ? 'attention' : 'neutral'}>
+      <Pill tone={mode === 'always' ? 'warning' : 'neutral'}>
         {t(`computer.elevated.mode.${mode}`)}
       </Pill>
       <SetButton variant="ghost" onClick={() => openSettingsRow('computer-use', null, 'elevated')}>

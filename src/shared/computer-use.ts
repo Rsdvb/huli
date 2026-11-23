@@ -134,16 +134,15 @@ export interface ComputerUseSettings {
    */
   allowForeground: boolean
   /**
-   * Huli: Windows only. Who may ask to drive an app that runs as administrator, which the user
-   * then approves app by app and confirms at the system's administrator prompt: no one (`off`),
-   * only a session in a container sandbox while no other running session is outside one
-   * (`sandbox`), or any session (`always`). Off until the user confirms the risk in Settings.
+   * Huli: Windows only. Whether agents may ask to drive an app that runs as administrator, which
+   * the user then approves app by app and confirms at the system's administrator prompt: no
+   * (`off`) or any session (`always`). Off until the user confirms the risk in Settings.
    */
   elevated: ElevatedMode
 }
 
 /** Huli: the choices of administrator use, narrowest first. */
-export const ELEVATED_MODES = ['off', 'sandbox', 'always'] as const
+export const ELEVATED_MODES = ['off', 'always'] as const
 export type ElevatedMode = (typeof ELEVATED_MODES)[number]
 
 /** Stop from anywhere: Control, Option, Command and period on macOS; with Shift elsewhere. */

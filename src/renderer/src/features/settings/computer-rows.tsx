@@ -34,9 +34,9 @@ import { ControlError, Pill, SetButton, SettingSelect, SettingSwitch } from './c
 import { BlockLine, ItemLine, Thing } from './rows'
 
 /**
- * Huli: who may drive programs run as administrator: off (the default), sandboxed sessions only, or
- * always. Widening it waits on a dialog that says what an agent outside a sandbox could do with it,
- * and nothing changes until the user confirms. The helper's install in Program Files is its own
+ * Huli: whether agents may drive programs run as administrator: off (the default) or always.
+ * Turning it on waits on a dialog that says what an agent outside a sandbox could do with it, and
+ * nothing changes until the user confirms. The helper's install in Program Files is its own
  * step, only when the user chooses Install; with the setting off nothing is asked of the helper.
  */
 export function ElevatedChoice({ text }: { text: ReactNode }) {
@@ -158,7 +158,7 @@ export function ElevatedChoice({ text }: { text: ReactNode }) {
 }
 
 /**
- * Asks before administrator use is widened: an agent outside a sandbox runs as the user, so it can
+ * Asks before administrator use is turned on: an agent outside a sandbox runs as the user, so it can
  * take over the administrator prompt; what the design cannot fix; and that it is the user's call.
  */
 export function ElevatedConfirm({
@@ -176,24 +176,15 @@ export function ElevatedConfirm({
           <AlertDialogTitle>{t('computer.elevated.confirm.title')}</AlertDialogTitle>
           <AlertDialogDescription className="space-y-2">
             <span className="block">{t('computer.elevated.confirm.hijack')}</span>
-            <span className="block">
-              {mode === 'always'
-                ? t('computer.elevated.confirm.always')
-                : t('computer.elevated.confirm.sandbox')}
-            </span>
+            <span className="block">{t('computer.elevated.confirm.always')}</span>
             <span className="block">{t('computer.elevated.confirm.unfixed')}</span>
             <span className="block">{t('computer.elevated.confirm.yours')}</span>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
-          <AlertDialogAction
-            variant={mode === 'always' ? 'destructive' : 'default'}
-            onClick={() => onAnswer(true)}
-          >
-            {mode === 'always'
-              ? t('computer.elevated.confirm.allowAlways')
-              : t('computer.elevated.confirm.allowSandbox')}
+          <AlertDialogAction variant="destructive" onClick={() => onAnswer(true)}>
+            {t('computer.elevated.confirm.allowAlways')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

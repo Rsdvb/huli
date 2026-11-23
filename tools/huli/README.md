@@ -1306,17 +1306,13 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
 - **Administrator use** (操作以管理员身份运行的程序, Windows, `computerUse.elevated`, `access:
 'read'` so agents never change it, a computer setting a paired device cannot change): 关闭
   (`off`, the default, and what any older file reads as; the old `allowElevated` switch is
-  dropped), 仅在沙箱会话中 (`sandbox`) or 始终允许（高风险） (`always`). Widening it opens a dialog
-  that says an agent outside a sandbox runs as the user and could take over the prompt or the
-  helper's windows, that the prompt and those windows sit on the normal desktop, and that it is the
-  user's call; nothing changes until they confirm. Off, computer use is exactly as without the
-  helper: the same refusal and list notes, no helper call from Settings, and the guide unchanged.
-  `sandbox` lets a session through only while it runs in a container sandbox and every other live
-  session whose agent runs or starts does too, New session's prepared ones aside
-  (`computerElevatedRefusal` in `sessions.ts`, `sandboxGate` in `policy.ts`); the refusal names
-  the sessions outside one. It is checked on every call, again after the card, and a running
-  helper ends once it fails. A container's agent gets none of Kite's MCP tools today, so this
-  choice has no session to serve until computer use reaches one. Settings › 功能管理 lists it under
+  dropped) or 始终允许（高风险） (`always`). Turning it on opens a dialog that says an agent outside
+  a sandbox runs as the user and could take over the prompt or the helper's windows, that the
+  prompt and those windows sit on the normal desktop, and that it is the user's call; nothing
+  changes until they confirm. Off, computer use is exactly as without the helper: the same refusal
+  and list notes, no helper call from Settings, and the guide unchanged; turned off, a running
+  helper ends. A choice limited to sandboxed sessions was tried and dropped: a container's agent
+  gets none of Kite's MCP tools, so it had no session to serve. Settings › 功能管理 lists it under
   computer use with a link to its row.
   - The helper is installed only when the user presses Install, never by an update: the warm
     helper stages itself and the driver (hash checked, held open) in a temporary folder and starts

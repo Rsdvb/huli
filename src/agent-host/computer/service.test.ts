@@ -537,10 +537,7 @@ describe('Huli: apps run as administrator', () => {
     }
   }
 
-  function elevatedHarness(
-    declined = false,
-    refusal: (sessionId: string) => string | null = () => null,
-  ) {
+  function elevatedHarness(declined = false) {
     const elevated = new FakeElevated()
     const started: number[] = []
     const stops: string[] = []
@@ -564,7 +561,6 @@ describe('Huli: apps run as administrator', () => {
       stop: () => {},
     }
     const h = harness({
-      elevatedRefusal: refusal,
       platform: 'win32',
       helper,
       elevate: async (pid) => {
@@ -607,33 +603,12 @@ describe('Huli: apps run as administrator', () => {
     expect(started).toEqual([])
   })
 
-  it('in sandboxed sessions only, refuses any session the gate refuses, and ends its helper', async () => {
-    let gate: string | null = 'This session is not in a container sandbox.'
-    const { h, elevated, started } = elevatedHarness(false, () => gate)
-    h.settings.elevated = 'sandbox'
-    const refused = await h.service.call('a', 'computer_click', { ...NOTES, x: 1, y: 1 })
-    expect(code(refused)).toBe('elevated')
-    expect((refused.content[0] as { text: string }).text).toContain('not in a container sandbox')
-    expect(h.asked).toEqual([])
-    expect(started).toEqual([])
-    gate = null
-    await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
-    expect(started).toEqual([12])
-    // Another session came up outside a sandbox: the next call refuses and lets the helper go.
-    gate = 'These run outside one: “Other”.'
-    const later = await h.service.call('a', 'computer_press_key', { ...NOTES, key: 'return' })
-    expect((later.content[0] as { text: string }).text).toContain('“Other”')
-    expect(elevated.running).toBe(false)
-    expect(elevated.calls.map((c) => c.tool)).toEqual(['get_window_state'])
-  })
-
-  it('checks the gate again once the card is answered, before the prompt', async () => {
-    let gate: string | null = null
-    const { h, started } = elevatedHarness(false, () => gate)
-    h.settings.elevated = 'sandbox'
+  it('checks the setting again once the card is answered, before the prompt', async () => {
+    const { h, started } = elevatedHarness()
+    h.settings.elevated = 'always'
     const pending = h.service.call('a', 'computer_get_window_state', NOTES)
     await vi.waitFor(() => expect(h.asked).toHaveLength(1))
-    gate = 'These run outside one: “Other”.'
+    h.settings.elevated = 'off'
     h.service.answer(h.asked[0]!.requestId, 'session')
     expect(code(await pending)).toBe('elevated')
     expect(started).toEqual([])

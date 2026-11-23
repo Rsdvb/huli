@@ -990,7 +990,6 @@ export class AgentHost {
           foreground: (sessionId, app) => this.sessions.computerForeground(sessionId, app),
           elevatedStopped: (sessionId, app) =>
             this.sessions.computerElevatedStopped(sessionId, app),
-          elevatedRefusal: (sessionId) => this.sessions.computerElevatedRefusal(sessionId),
           self: { pids: [computer.selfPid, process.pid], ids: computer.selfIds },
           settings: () => this.settings.computerUse,
           turnRefusal: (sessionId) => this.sessions.computerRefusal(sessionId),

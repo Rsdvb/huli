@@ -174,19 +174,20 @@ describe('administrator use of computer use', () => {
   })
 
   it('keeps a stored choice and drops one it does not know', async () => {
-    await save({ version: 1, computerUse: { elevated: 'sandbox' } })
-    expect((await SettingsStore.load(dir)).get().computerUse.elevated).toBe('sandbox')
-    for (const elevated of ['on', true, 'ALWAYS', null]) {
+    await save({ version: 1, computerUse: { elevated: 'always' } })
+    expect((await SettingsStore.load(dir)).get().computerUse.elevated).toBe('always')
+    // `sandbox` was a choice of an unreleased build only.
+    for (const elevated of ['sandbox', 'on', true, 'ALWAYS', null]) {
       await save({ version: 1, computerUse: { elevated } })
       expect((await SettingsStore.load(dir)).get().computerUse.elevated).toBe('off')
     }
   })
 
-  it('takes only its three choices, and never from a paired device', () => {
-    for (const elevated of ['off', 'sandbox', 'always']) {
+  it('takes only its two choices, and never from a paired device', () => {
+    for (const elevated of ['off', 'always']) {
       expect(() => validateSettingsPatch({ computerUse: { elevated } })).not.toThrow()
     }
-    for (const elevated of ['on', true, 1, null, 'Always', ' always']) {
+    for (const elevated of ['sandbox', 'on', true, 1, null, 'Always', ' always']) {
       expect(() => validateSettingsPatch({ computerUse: { elevated } })).toThrow()
     }
     expect(() => validateSettingsPatch({ computerUse: { allowElevated: true } })).toThrow(

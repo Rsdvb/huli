@@ -622,15 +622,13 @@
     "elevated": {
       "name": "Operate programs run as administrator",
       "description": "Lets agents ask to operate a program you run as administrator. Each time you allow it in the session, then confirm Windows’ prompt (for “Windows Command Processor”) and the helper’s own window; risky steps ask again. Programs that start other programs, such as consoles, Task Manager and Explorer, are never operated this way.",
-      "keywords": "administrator admin elevated uac run as administrator sandbox computer use",
+      "keywords": "administrator admin elevated uac run as administrator computer use",
       "mode": {
         "off": "Off",
-        "sandbox": "Only in sandboxed sessions",
         "always": "Always allow (high risk)"
       },
       "hint": {
         "off": "None can be operated",
-        "sandbox": "Container-sandboxed sessions only",
         "always": "Any session may ask"
       },
       "install": {
@@ -647,11 +645,9 @@
       "confirm": {
         "title": "Let agents operate programs run as administrator?",
         "hijack": "An agent on this computer that is not in a sandbox runs as you. It could take over Windows’ administrator prompt or the helper’s confirmation window, so that what you approve is not what you think.",
-        "sandbox": "With “Only in sandboxed sessions”, Kite allows it only for a session in a container sandbox, and only while no other session outside one is running. Programs an agent started before, and agents in a terminal, are not checked.",
-        "always": "With “Always allow”, any session may ask, sandboxed or not.",
+        "always": "Once it is on, any session may ask, sandboxed or not; each program still asks you in its session, at Windows’ prompt and in the helper’s window.",
         "unfixed": "Some of this cannot be fixed in Kite’s current design: the prompt and the helper’s windows sit on your normal desktop, where other programs can still interfere with them.",
         "yours": "It is your decision, and you can turn it off again at any time.",
-        "allowSandbox": "Allow in sandboxed sessions",
         "allowAlways": "Always allow"
       }
     },

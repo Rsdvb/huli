@@ -136,11 +136,6 @@ export interface ComputerUseDeps {
   foreground?(sessionId: string, app: string): void
   /** Huli: the user ended the elevated helper: the thread says so. */
   elevatedStopped?(sessionId: string, app: string): void
-  /**
-   * Huli: for administrator use in sandboxed sessions only, why this session may not have it (not
-   * in a container sandbox, or another running session outside one), or null when it may.
-   */
-  elevatedRefusal?(sessionId: string): string | null
   log: LogFn
 }
 
@@ -413,10 +408,8 @@ export class ComputerUse {
     if (this.setups.size > 0) void this.check()
     this.syncWatch()
     const settings = this.deps.settings()
-    const mode = this.elevatedMode()
-    for (const sessionId of [...this.elevatedRuns.keys()]) {
-      if (mode === 'off' || this.elevatedGate(sessionId, mode) !== null)
-        void this.endElevated(sessionId)
+    if (this.elevatedMode() === 'off') {
+      for (const sessionId of [...this.elevatedRuns.keys()]) void this.endElevated(sessionId)
     }
     if (settings.enabled) return
     for (const requestId of [...this.waiting.keys()]) this.settle(requestId, 'timeout')
@@ -531,14 +524,8 @@ export class ComputerUse {
     // this is exactly as without the helper.
     const settings = this.deps.settings()
     const elevated = call.tool !== 'computer_list_windows' && (await this.isElevated(call.pid))
-    const mode = this.elevatedMode()
-    const gate = elevated && mode !== 'off' ? this.elevatedGate(sessionId, mode) : null
-    const viaElevated = elevated && mode !== 'off' && gate === null
-    // A session that may no longer use it, as another came up outside a sandbox, lets it go.
-    if (gate !== null && this.elevatedRuns.has(sessionId)) await this.endElevated(sessionId)
-    if (elevated && !viaElevated && call.acts) {
-      throw gate !== null ? new ComputerToolError('elevated', gate) : elevatedError(app)
-    }
+    const viaElevated = elevated && this.elevatedMode() !== 'off'
+    if (elevated && !viaElevated && call.acts) throw elevatedError(app)
     // Their own dialogs start programs, which would run as administrator too.
     if (viaElevated && startsPrograms(app.id)) {
       throw new ComputerToolError(
@@ -1010,17 +997,12 @@ export class ComputerUse {
     )
     const notes = ['Apps marked not available are never used.']
     if (rows.some((row) => row.elevated)) {
-      const mode = this.elevatedMode()
       notes.push(
-        mode !== 'off'
+        this.elevatedMode() !== 'off'
           ? 'Apps marked as administrator run with administrator rights, which computer use ' +
               'lacks; use one only when the task needs it. Your first call asks the user, who ' +
-              'then confirms Windows’ administrator prompt and the helper’s own window' +
-              (mode === 'sandbox'
-                ? '; it works only for a session in a container sandbox while every other ' +
-                  'running session is in one too'
-                : '') +
-              '. It acts in the background only, asks the user before risky steps (a step they ' +
+              'then confirms Windows’ administrator prompt and the helper’s own window. It acts ' +
+              'in the background only, asks the user before risky steps (a step they ' +
               'refuse comes back refused: ask them how to go on) and ends with the turn. Programs ' +
               'that start other programs, such as consoles, Task Manager and Explorer, are never ' +
               'available this way.'
@@ -1039,19 +1021,6 @@ export class ComputerUse {
   /** Huli: who may drive apps run as administrator here; off where there is no elevated helper. */
   private elevatedMode(): ElevatedMode {
     return this.deps.elevate ? this.deps.settings().elevated : 'off'
-  }
-
-  /**
-   * Huli: why the session may not drive apps run as administrator under `mode`, or null when it
-   * may: in `sandbox`, only a session in a container sandbox while no other running session is
-   * outside one, as an agent outside one could take over Windows' administrator prompt.
-   */
-  private elevatedGate(sessionId: string, mode: ElevatedMode): string | null {
-    if (mode === 'always') return null
-    if (mode !== 'sandbox' || !this.deps.elevatedRefusal) {
-      return 'Administrator use is off in Settings › Computer use.'
-    }
-    return this.deps.elevatedRefusal(sessionId)
   }
 
   /** Huli: whether a process runs above Kettu's integrity level, which Windows keeps it from driving. */
@@ -1129,11 +1098,8 @@ export class ComputerUse {
     }
     if (run?.driver?.running) return run.driver
     if (run?.starting) return run.starting
-    // The setting may have narrowed, or another session come up, while the card waited.
-    const mode = this.elevatedMode()
-    if (mode === 'off') throw elevatedError(app)
-    const gate = this.elevatedGate(sessionId, mode)
-    if (gate !== null) throw new ComputerToolError('elevated', gate)
+    // The setting may have gone off while the card waited.
+    if (this.elevatedMode() === 'off') throw elevatedError(app)
     const elevate = this.deps.elevate!
     const starting = elevate(pid).then((driver) => {
       if (driver) return driver
