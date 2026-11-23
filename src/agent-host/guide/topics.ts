@@ -319,6 +319,15 @@ A page you use lays out 1280 by 800, whatever room the user's panel has: the pan
 - \`browser_network_requests\` lists the requests, leaving out static resources that loaded unless \`include_static\`, and \`url\` filters them by address; \`browser_network_request\` gives one's headers, timing and text body, with credentials and secret fields replaced. Both tools take \`since_navigation\` to keep only what the current page did.
 - \`browser_evaluate\` runs a function on the page to inspect it; act with the other tools.
 - \`browser_upload_file\` puts files from this computer into a file input: click the page's upload button first, then call it with absolute paths. The user is asked each time whether those files may go to that site, and nothing is uploaded without their Allow.
+- \`browser_hover\` moves the pointer over an element, \`browser_drag\` drags one element onto another, and \`browser_click_at\` clicks at a point of the visible page, with a reason the user sees, for what has no ref, such as a canvas.
+- \`browser_downloads\` lists what your pages downloaded: the files go under \`.kite/downloads\` in the session's folder, where you can read them, and the user is asked first for one over 50 MB. \`browser_pdf\` saves the page there as a PDF.
+
+## Testing a web app
+
+- \`browser_emulate\` makes your tab a phone or tablet (\`device\`) or another size (\`viewport\`), dark or light, with reduced motion, in a locale or time zone, at a location, or on a slow or offline network; \`off\` turns items back off. The user sees a chip while anything is emulated. Reload after a device or a locale change.
+- \`browser_route\` mocks the network: a rule answers requests whose address matches with a fixed status, headers and body, delays them or fails them, until the session's browser closes. \`browser_network_requests\` marks what a rule answered. A page of a site that needs the user's allow is never mocked itself.
+- \`browser_trace\` records a few seconds of the page (\`reload\` to trace it loading) and sums up long tasks, the longest scripts, style and layout time and the largest contentful paint.
+- \`browser_storage_state\` saves the signed-in state of your tab's site under a name and restores it in another session. In Settings the user may give each worktree or session browser data of its own, so parallel sessions do not share a sign-in: sign in once, save, and restore it elsewhere. Kite keeps saved states encrypted, and you never see their values.
 
 ## Tabs
 

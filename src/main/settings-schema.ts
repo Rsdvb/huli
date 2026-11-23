@@ -350,6 +350,7 @@ const SECTION_FIELDS = {
     source: oneOf('auto', 'github'),
   },
   privacy: { hideAccount: isBoolean },
+  browserProfiles: { mode: oneOf('shared', 'worktree', 'session') },
   diagnostics: { verboseUntil: isVerboseUntil },
   usage: {
     fromComputer: isBoolean,

@@ -55,6 +55,9 @@ import type { BackupService } from './backup/service'
 import type { ChatBridgeStore } from './chat-bridge'
 import { ReportError, type Reports } from './report'
 import type { BrowserViews } from './browser/views'
+import { placeOf } from './browser/place'
+import type { StateTools } from './browser/state-tools'
+import { isStateName } from '@shared/browser-args'
 import type { SiteIcons } from './browser/site-icons'
 import { originOf } from './browser/origins'
 import type { SignIns } from './browser/signins/service'
@@ -1238,6 +1241,48 @@ export function registerSessionExportIpc(): void {
 }
 
 /** Bringing sign-ins from the user's own browsers; nothing these answer holds a cookie's value. */
+/** Huli: the browser's emulation chip, large downloads, worktree profiles and saved states. */
+export function registerBrowserStateIpc(browserViews: BrowserViews, states: StateTools): void {
+  handle('browser:reset-emulation', 1, (_, id) => browserViews.resetEmulation(sessionId(id)))
+  handle('browser:answer-download', 3, (_, id, requestId, allow) => {
+    if (!Number.isSafeInteger(requestId) || typeof allow !== 'boolean') {
+      throw new Error('"browser:answer-download" takes a request id and whether to allow')
+    }
+    browserViews.answerDownload(sessionId(id), requestId as number, allow)
+  })
+  handle('browser:worktree', 2, (_, id, worktree) => {
+    if (worktree !== null && (typeof worktree !== 'string' || !placeOf({ folder: worktree }))) {
+      throw new Error('"browser:worktree" takes an absolute folder or null')
+    }
+    browserViews.setWorktree(sessionId(id), worktree)
+  })
+  handle('browser:saved-states', 0, () => states.list())
+  handle('browser:save-state', 2, async (_, id, name) => {
+    const session = sessionId(id)
+    const tab = browserViews.selectedTabId(session)
+    if (!tab) throw new Error('The browser shows no page to save')
+    await states.save(session, tab, stateName(name))
+    return states.list()
+  })
+  handle('browser:restore-state', 2, async (_, id, name) => {
+    const session = sessionId(id)
+    const restored = await states.restore(
+      session,
+      browserViews.selectedTabId(session),
+      stateName(name),
+    )
+    return { cookies: restored.cookies, storage: restored.storage }
+  })
+  handle('browser:delete-saved-state', 1, async (_, name) => {
+    await states.remove(stateName(name))
+  })
+}
+
+function stateName(value: unknown): string {
+  if (!isStateName(value)) throw new Error('A saved state needs a name of one line')
+  return value
+}
+
 export function registerSignInIpc(signIns: SignIns): void {
   handle('sign-ins:sources', 0, () => signIns.sources())
   handle('sign-ins:sites', 1, (_, choice) => signIns.sites(signInChoice(choice)))

@@ -14,6 +14,20 @@ import {
   type UploadAnswer,
 } from '@shared/browser'
 import {
+  BROWSER_ARGS,
+  BrowserArgsInvalid,
+  clickAtArgs,
+  dragArgs,
+  emulateArgs,
+  isArgsTool,
+  pdfArgs,
+  routeArgs,
+  storageStateArgs,
+  traceArgs,
+  type BrowserEmulation,
+  type EmulationChange,
+} from '@shared/browser-args'
+import {
   ControlWait,
   isControlStep,
   type ControlWaitOptions,
@@ -52,6 +66,9 @@ import { isNeverOpened } from './policy'
 import { elementMet, SEARCH, selectorMet, type FrameSearch } from './page-wait'
 import { diffOutline } from './snapshot-diff'
 import { UploadRefused, type UploadFile } from './upload'
+import { emulationText, emulationValue } from './emulation'
+import { answerFor, mockedLabel, RouteBook, ruleText } from './routes'
+import { summarizeTrace, TRACE_CATEGORIES, traceEvents, traceText } from './trace'
 
 /** How long the network stays quiet before a page counts as settled. */
 export const QUIET_MS = 500
@@ -129,6 +146,42 @@ export interface BrowserCdpDeps {
     ask: Omit<UploadConsent, 'id'>,
     wait: ControlWaitOptions,
   ): Promise<UploadAnswer>
+  /** Huli: changes what a tab emulates, and answers what it emulates then. */
+  emulate?(tabId: string, change: EmulationChange): Promise<BrowserEmulation>
+  /**
+   * Huli: whether a page of the session may show `url` without asking the user; a document of a
+   * site that needs their allow is never mocked, so a rule cannot make a page pass for that site.
+   */
+  mayOpen?(sessionId: string, url: string): boolean
+  /** Huli: the files the session's pages downloaded. */
+  downloads?(sessionId: string): DownloadInfo[]
+  /** Huli: writes a file into the session's downloads; null when it has no folder here. */
+  saveFile?(sessionId: string, name: string, data: Buffer): Promise<string | null>
+  /** Huli: saved sign-in states (browser_storage_state). */
+  states?: SavedStateTools
+}
+
+/** Huli: a download of the session's pages, as `browser_downloads` lists it. */
+export interface DownloadInfo {
+  name: string
+  path: string | null
+  bytes: number
+  state: 'waiting' | 'progressing' | 'completed' | 'cancelled' | 'interrupted'
+}
+
+/** Huli: what `browser_storage_state` asks of the saved states. */
+export interface SavedStateTools {
+  save(
+    sessionId: string,
+    tabId: string,
+    name: string,
+  ): Promise<{ sites: string[]; cookies: number }>
+  restore(
+    sessionId: string,
+    tabId: string | null,
+    name: string,
+  ): Promise<{ sites: string[]; cookies: number; storage: number }>
+  list(): Promise<{ name: string; sites: string[]; savedAt: number }[]>
 }
 
 interface ConsoleMessage extends ConsoleEntry {
@@ -203,6 +256,19 @@ interface PageState {
   frameId: string | null
   /** The file chooser the agent's last action opened, which waits for files; null when none. */
   chooser: FileChooser | null
+  /** Huli: the tab's page, whose debugger the rules' paused requests are answered on. */
+  contents: WebContents
+  /** Huli: the session the tab is in, and whether the agent used it, so its rules apply. */
+  session: string | null
+  agentUsed: boolean
+  /** Huli: the Fetch patterns the tab pauses requests by now, joined; '' while it pauses none. */
+  fetchKey: string
+  /** Huli: the requests a rule answered, by their network id, with what it did. */
+  mocked: Map<string, string>
+  /** Huli: settles with the stream of the trace that ended, or null for none. */
+  trace: ((stream: string | null) => void) | null
+  /** Huli: the data of a drag the page started while drags are intercepted. */
+  drag: Record<string, unknown> | null
 }
 
 interface FileChooser {
@@ -362,6 +428,31 @@ export function checkAgentNavigation(url: string): string {
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms))
 
+/** Huli: the tools that need no page, since they read or change the session's own state. */
+const PAGELESS = new Set<BrowserToolName>([
+  'browser_navigate',
+  'browser_tabs',
+  'browser_route',
+  'browser_downloads',
+  'browser_storage_state',
+])
+
+/** Huli: the most of a trace read back, past which it is cut rather than held in memory. */
+const MAX_TRACE_BYTES = 200 * 1024 * 1024
+
+/** Huli: a PDF's file name, from the page's title or its address. */
+export function pdfName(title: string, url: string): string {
+  const from = title.trim() || siteOf(url) || 'page'
+  const name = from
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+    .replace(/[. ]+$/, '')
+  return `${name || 'page'}.pdf`
+}
+
 function failure(error: unknown): ToolFailure {
   if (error instanceof ToolFailure) return error
   if (error instanceof ControlWait) return waitFailure(error)
@@ -402,11 +493,15 @@ export class BrowserCdp {
    * opens takes over only once the action is done.
    */
   private readonly acting = new Map<string, string>()
+  /** Huli: each session's network mocking rules. */
+  private readonly routes = new RouteBook()
+  /** Huli: what each session's downloads said since the agent's last action, for its result. */
+  private readonly downloadNotes = new Map<string, string[]>()
 
   constructor(private readonly deps: BrowserCdpDeps) {}
 
   /** A tab's debugger starts handing its events here; the debugger stays attached as it was. */
-  watch(tabId: string, contents: WebContents): void {
+  watch(tabId: string, contents: WebContents, sessionId: string | null = null): void {
     if (this.pages.has(tabId)) return
     const page: PageState = {
       nav: 0,
@@ -425,8 +520,17 @@ export class BrowserCdp {
       status: null,
       frameId: null,
       chooser: null,
+      contents,
+      session: sessionId,
+      // A tab made for the agent, or a popup of its call, takes the session's rules at once.
+      agentUsed: sessionId !== null && this.deps.tab(sessionId) === tabId,
+      fetchKey: '',
+      mocked: new Map(),
+      trace: null,
+      drag: null,
     }
     this.pages.set(tabId, page)
+    if (page.agentUsed) void this.syncRoutes(page)
     for (const method of [
       'DOM.enable',
       'Runtime.enable',
@@ -450,7 +554,21 @@ export class BrowserCdp {
 
   /** A tab's page is gone. */
   forget(tabId: string): void {
+    this.pages.get(tabId)?.trace?.(null)
     this.pages.delete(tabId)
+  }
+
+  /** Huli: the session's browser is gone, and its rules with it. */
+  forgetSession(sessionId: string): void {
+    this.downloadNotes.delete(sessionId)
+    if (this.routes.clear(sessionId) > 0) void this.routesChanged(sessionId)
+  }
+
+  /** Huli: a download of the session's page started or ended; the agent's next result says so. */
+  downloadNote(sessionId: string, note: string): void {
+    const notes = this.downloadNotes.get(sessionId) ?? []
+    notes.push(note)
+    this.downloadNotes.set(sessionId, notes.slice(-10))
   }
 
   /** The ids of the page's frames, the main one first, then its same-origin children. */
@@ -490,7 +608,17 @@ export class BrowserCdp {
     wait: ControlWaitOptions,
   ): Promise<BrowserCallResult> {
     if (tool === 'browser_ask_user') return this.askUser(sessionId, args, wait)
-    if (tool !== 'browser_navigate' && tool !== 'browser_tabs') this.pageOf(sessionId)
+    // Huli: main checks the second batch's arguments itself, as another computer's host sends
+    // calls too; each tool reads them again through its parser.
+    if (isArgsTool(tool)) {
+      try {
+        BROWSER_ARGS[tool](args)
+      } catch (error) {
+        if (error instanceof BrowserArgsInvalid) throw new ToolFailure('invalid', error.message)
+        throw error
+      }
+    }
+    if (!PAGELESS.has(tool)) this.pageOf(sessionId)
     let end: () => void
     try {
       end = await this.deps.controls.begin(sessionId, wait)
@@ -501,6 +629,13 @@ export class BrowserCdp {
     const tab = this.deps.tab(sessionId)
     const pinned = !this.acting.has(sessionId) && tab !== null
     if (pinned) this.acting.set(sessionId, tab)
+    // Huli: a tab the agent acts on takes the session's rules from now on.
+    const acted = tab === null ? undefined : this.pages.get(tab)
+    if (acted && (!acted.agentUsed || acted.session !== sessionId)) {
+      acted.agentUsed = true
+      acted.session = sessionId
+      await this.syncRoutes(acted)
+    }
     let stop!: (failure: ToolFailure) => void
     const stopped = new Promise<never>((_, reject) => (stop = reject))
     const running = this.running.get(sessionId) ?? new Set()
@@ -603,6 +738,24 @@ export class BrowserCdp {
         return this.deps.tabs(sessionId, args)
       case 'browser_upload_file':
         return this.upload(sessionId, args)
+      case 'browser_hover':
+        return this.hover(sessionId, args)
+      case 'browser_drag':
+        return this.drag(sessionId, args)
+      case 'browser_click_at':
+        return this.clickAt(sessionId, args)
+      case 'browser_emulate':
+        return this.emulate(sessionId, args)
+      case 'browser_route':
+        return this.route(sessionId, args)
+      case 'browser_downloads':
+        return this.downloadsResult(sessionId)
+      case 'browser_pdf':
+        return this.pdf(sessionId, args)
+      case 'browser_trace':
+        return this.trace(sessionId, args)
+      case 'browser_storage_state':
+        return this.storageState(sessionId, args)
       case 'browser_ask_user':
         throw new ToolFailure('invalid', 'browser_ask_user does not run as a page action.')
     }
@@ -665,7 +818,8 @@ export class BrowserCdp {
     const injecting = method.startsWith('Input.')
     const tab = this.tabOf(sessionId)
     const state = tab === null ? undefined : this.pages.get(tab)
-    if (method === 'Input.dispatchMouseEvent' && tab !== null && this.deps.pointScale) {
+    const pointed = method === 'Input.dispatchMouseEvent' || method === 'Input.dispatchDragEvent'
+    if (pointed && tab !== null && this.deps.pointScale) {
       // The debugger takes the point in the view's pixels, and a page of a fixed size draws
       // scaled there. Nothing runs between reading the scale and sending the event.
       const scale = await this.deps.pointScale(tab)
@@ -843,6 +997,15 @@ export class BrowserCdp {
         page.chooser = null
         break
       }
+      case 'Fetch.requestPaused':
+        void this.paused(page, params)
+        break
+      case 'Tracing.tracingComplete':
+        page.trace?.(typeof params.stream === 'string' ? params.stream : null)
+        break
+      case 'Input.dragIntercepted':
+        page.drag = (params.data as Record<string, unknown> | undefined) ?? null
+        break
       case 'Page.fileChooserOpened': {
         // Reported only while views.ts intercepts choosers, that is while the agent holds the tab.
         const backend = params.backendNodeId
@@ -1043,6 +1206,7 @@ export class BrowserCdp {
         ...dialogs,
         ...chooser,
         ...opened,
+        ...this.takeDownloadNotes(sessionId),
         ...newErrors(current),
         ...(diff ? ['The snapshot shows what changed since your last one.'] : []),
       ].join(' '),
@@ -1165,6 +1329,22 @@ export class BrowserCdp {
     const spot = await this.actionable(sessionId, backend, args, 'click')
     const { x, y } = spot
     this.deps.acted?.(sessionId, { x, y }, true)
+    await this.clickPoint(sessionId, x, y, button, double)
+    return this.afterAction(
+      sessionId,
+      page,
+      `Clicked ${describe(args, 'the element')}${double ? ' twice' : ''}.`,
+    )
+  }
+
+  /** Moves to a point and clicks there, once or twice. */
+  private async clickPoint(
+    sessionId: string,
+    x: number,
+    y: number,
+    button: string,
+    double: boolean,
+  ): Promise<void> {
     await this.send(sessionId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
     const clicks = double ? 2 : 1
     for (let count = 1; count <= clicks; count++) {
@@ -1185,11 +1365,6 @@ export class BrowserCdp {
         clickCount: count,
       })
     }
-    return this.afterAction(
-      sessionId,
-      page,
-      `Clicked ${describe(args, 'the element')}${double ? ' twice' : ''}.`,
-    )
   }
 
   /**
@@ -1858,15 +2033,19 @@ export class BrowserCdp {
         }
         return true
       })
-      .map(({ id, method, url, status, type, size, error }) => ({
-        id,
-        method,
-        url,
-        status,
-        type,
-        size,
-        ...(error === null ? {} : { error }),
-      }))
+      .map(({ id, method, url, status, type, size, error }) => {
+        const mocked = page.mocked.get(id)
+        return {
+          id,
+          method,
+          url,
+          status,
+          type,
+          size,
+          ...(error === null ? {} : { error }),
+          ...(mocked === undefined ? {} : { mocked }),
+        }
+      })
     const count =
       requests.length === 0
         ? 'No network requests'
@@ -1956,7 +2135,7 @@ export class BrowserCdp {
         timing: requestTiming(entry),
         request_body: requestBody?.text ?? null,
         response_body: responseBody?.text ?? null,
-        notes,
+        notes: page.mocked.has(id) ? [`It was ${page.mocked.get(id)!}.`, ...notes] : notes,
       },
     }
   }
@@ -2021,6 +2200,473 @@ export class BrowserCdp {
     return {
       text: `Ran the function on ${contents.getURL() || 'about:blank'}.`,
       value: { value: json },
+    }
+  }
+
+  // --- Huli: the second batch ---------------------------------------------------------------------
+
+  private takeDownloadNotes(sessionId: string): string[] {
+    const notes = this.downloadNotes.get(sessionId) ?? []
+    this.downloadNotes.delete(sessionId)
+    return notes
+  }
+
+  /** What the page says of an element now, without scrolling it; a gone one is not connected. */
+  private async probe(sessionId: string, backend: number, action: ActionKind): Promise<Probe> {
+    const probe = await this.onElement<Probe | null>(sessionId, backend, PROBE, [action]).catch(
+      (error: unknown) => {
+        if (error instanceof ToolFailure || error instanceof ControlWait) throw error
+        return null
+      },
+    )
+    return probe ?? ({ connected: false } as Probe)
+  }
+
+  private async hover(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const page = this.pageOf(sessionId)
+    const backend = this.resolveRef(page, String(args.ref ?? ''))
+    const { x, y } = await this.actionable(sessionId, backend, args, 'click')
+    this.deps.acted?.(sessionId, { x, y }, false)
+    await this.send(sessionId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+    return this.afterAction(sessionId, page, `Hovered over ${describe(args, 'the element')}.`)
+  }
+
+  /**
+   * Drags one element onto another with the mouse held down. A page's own HTML drag and drop is
+   * a drag Chromium starts itself, which the protocol hands back as data to drop; a page that
+   * drags on pointer events alone follows the moves.
+   */
+  private async drag(sessionId: string, args: Record<string, unknown>): Promise<BrowserCallResult> {
+    const given = dragArgs(args)
+    const page = this.pageOf(sessionId)
+    const from = { ref: given.start_ref, element: given.start_element }
+    const to = { ref: given.end_ref, element: given.end_element }
+    const start = this.resolveRef(page, given.start_ref)
+    const end = this.resolveRef(page, given.end_ref)
+    let source = await this.actionable(sessionId, start, from, 'click')
+    let target = await this.probe(sessionId, end, 'select')
+    if (!target.connected) {
+      throw new ToolFailure('stale_ref', `${describe(to, 'The element')} is no longer on the page.`)
+    }
+    if (!target.inside) {
+      target = await this.actionable(sessionId, end, to, 'select')
+      source = await this.probe(sessionId, start, 'select')
+      if (!source.inside) {
+        throw new ToolFailure(
+          'invalid',
+          `${describe(from, 'The element')} and ${describe(to, 'the element')} do not show on the screen at once, so one cannot be dragged onto the other.`,
+        )
+      }
+    }
+    this.deps.acted?.(sessionId, { x: source.x, y: source.y }, true)
+    const mouse = (type: string, at: { x: number; y: number }, extra = {}): Promise<unknown> =>
+      this.send(sessionId, 'Input.dispatchMouseEvent', { type, x: at.x, y: at.y, ...extra })
+    page.drag = null
+    const intercepting = await this.send(sessionId, 'Input.setInterceptDrags', { enabled: true })
+      .then(() => true)
+      .catch(() => false)
+    let dropped = false
+    try {
+      await mouse('mouseMoved', source)
+      await mouse('mousePressed', source, { button: 'left', buttons: 1, clickCount: 1 })
+      const steps = 10
+      for (let step = 1; step <= steps && !page.drag; step++) {
+        const at = {
+          x: source.x + ((target.x - source.x) * step) / steps,
+          y: source.y + ((target.y - source.y) * step) / steps,
+        }
+        await mouse('mouseMoved', at, { button: 'left', buttons: 1 })
+        await sleep(16)
+      }
+      const data = page.drag
+      if (data) {
+        dropped = true
+        for (const type of ['dragEnter', 'dragOver', 'drop']) {
+          await this.send(sessionId, 'Input.dispatchDragEvent', {
+            type,
+            x: target.x,
+            y: target.y,
+            data,
+          })
+        }
+      }
+      await mouse('mouseReleased', target, { button: 'left', buttons: 0, clickCount: 1 })
+    } finally {
+      page.drag = null
+      if (intercepting) {
+        await this.send(sessionId, 'Input.setInterceptDrags', { enabled: false }).catch(() => {})
+      }
+    }
+    return this.afterAction(
+      sessionId,
+      page,
+      `Dragged ${describe(from, 'the element')} onto ${describe(to, 'the element')}${dropped ? ', as a drag and drop the page started' : ''}.`,
+    )
+  }
+
+  /** Clicks at a point inside the visible page, for what no ref names. */
+  private async clickAt(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const { x, y, reason, button, double } = clickAtArgs(args)
+    const page = this.pageOf(sessionId)
+    const view = await this.viewport(sessionId)
+    if (x >= view.width || y >= view.height) {
+      throw new ToolFailure(
+        'invalid',
+        `(${x}, ${y}) lies outside the visible page, which is ${Math.round(view.width)} by ${Math.round(view.height)} CSS pixels. Scroll first, or give a point inside it.`,
+      )
+    }
+    this.deps.acted?.(sessionId, { x, y }, true)
+    await this.clickPoint(sessionId, x, y, button, double)
+    return this.afterAction(
+      sessionId,
+      page,
+      `Clicked${double ? ' twice' : ''} at (${x}, ${y}): ${reason.replace(/[.\s]+$/, '')}.`,
+    )
+  }
+
+  private async emulate(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const change = emulateArgs(args)
+    const tab = this.tabOf(sessionId)
+    if (tab === null || !this.deps.emulate) {
+      throw new ToolFailure('no_page', 'This session has no page yet. Use browser_navigate first.')
+    }
+    const now = await this.deps.emulate(tab, change)
+    const reload =
+      change.set.device !== undefined ||
+      change.set.locale !== undefined ||
+      change.off.includes('device') ||
+      change.off.includes('locale')
+    return {
+      text: `Your tab emulates ${emulationText(now)}.${reload ? ' Reload the page for what it already loaded to follow.' : ''}`,
+      value: { emulation: emulationValue(now) },
+    }
+  }
+
+  /** Points the tab's Fetch domain at the session's rules, or turns it off without any. */
+  private async syncRoutes(page: PageState): Promise<void> {
+    const patterns = page.session && page.agentUsed ? this.routes.patterns(page.session) : []
+    const key = patterns.join('\n')
+    if (key === page.fetchKey) return
+    page.fetchKey = key
+    const command =
+      patterns.length === 0
+        ? page.contents.debugger.sendCommand('Fetch.disable')
+        : page.contents.debugger.sendCommand('Fetch.enable', {
+            patterns: patterns.map((urlPattern) => ({ urlPattern, requestStage: 'Request' })),
+          })
+    await command.catch((error: unknown) => {
+      this.deps.log('warn', `Could not set a tab's network rules: ${(error as Error).message}`)
+    })
+  }
+
+  private async routesChanged(sessionId: string): Promise<void> {
+    await Promise.all(
+      [...this.pages.values()]
+        .filter((page) => page.session === sessionId)
+        .map((page) => this.syncRoutes(page)),
+    )
+  }
+
+  /**
+   * A request a tab paused: the first rule that matches answers it, after its delay; any other
+   * goes on. Every paused request is answered, so a page never hangs on one.
+   */
+  private async paused(page: PageState, params: Record<string, unknown>): Promise<void> {
+    const requestId = String(params.requestId ?? '')
+    const request = (params.request ?? {}) as Record<string, unknown>
+    const url = String(request.url ?? '')
+    const answer = (method: string, extra: Record<string, unknown> = {}): Promise<unknown> =>
+      page.contents.debugger.sendCommand(method, { requestId, ...extra }).catch(() => {})
+    const sessionId = page.session
+    let decided =
+      sessionId === null
+        ? null
+        : answerFor(this.routes.rules(sessionId), {
+            url,
+            method: String(request.method ?? 'GET'),
+            headers: objectOf(request.headers) as Record<string, string>,
+            resourceType: String(params.resourceType ?? ''),
+          })
+    if (
+      decided?.rule &&
+      params.resourceType === 'Document' &&
+      sessionId !== null &&
+      this.deps.mayOpen?.(sessionId, url) === false
+    ) {
+      decided = null
+    }
+    if (!decided?.rule || sessionId === null) {
+      await answer('Fetch.continueRequest')
+      return
+    }
+    const rule = decided.rule
+    if (this.routes.used(sessionId, rule)) void this.routesChanged(sessionId)
+    const label = mockedLabel(decided)
+    const networkId = typeof params.networkId === 'string' ? params.networkId : null
+    if (label && networkId) {
+      page.mocked.set(networkId, label)
+      if (page.mocked.size > MAX_REQUESTS) page.mocked.delete(page.mocked.keys().next().value!)
+    }
+    if (rule.delayMs > 0) await sleep(rule.delayMs)
+    switch (decided.kind) {
+      case 'continue':
+        await answer('Fetch.continueRequest')
+        break
+      case 'fail':
+        await answer('Fetch.failRequest', { errorReason: decided.reason })
+        break
+      case 'fulfill':
+        await answer('Fetch.fulfillRequest', {
+          responseCode: decided.status,
+          responseHeaders: decided.headers,
+          body: Buffer.from(decided.body, 'utf8').toString('base64'),
+        })
+        break
+    }
+  }
+
+  private async route(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const call = routeArgs(args)
+    let done: string
+    switch (call.action) {
+      case 'add': {
+        let rule
+        try {
+          rule = this.routes.add(sessionId, call.rule)
+        } catch (error) {
+          throw new ToolFailure('invalid', (error as Error).message)
+        }
+        await this.routesChanged(sessionId)
+        done = `Added rule ${rule.id}: ${rule.method ?? 'any'} ${rule.pattern} ${ruleText(rule)}.`
+        break
+      }
+      case 'remove':
+        if (!this.routes.remove(sessionId, call.id)) {
+          throw new ToolFailure(
+            'invalid',
+            `There is no rule ${call.id}; list the rules to see theirs.`,
+          )
+        }
+        await this.routesChanged(sessionId)
+        done = `Removed rule ${call.id}.`
+        break
+      case 'clear': {
+        const count = this.routes.clear(sessionId)
+        await this.routesChanged(sessionId)
+        done =
+          count === 0 ? 'There were no rules.' : `Cleared ${count} rule${count === 1 ? '' : 's'}.`
+        break
+      }
+      case 'list':
+        done = 'The rules, the first that matches answering:'
+        break
+    }
+    const rules = this.routes.rules(sessionId).map((rule) => ({
+      id: rule.id,
+      url: rule.pattern,
+      method: rule.method,
+      does: ruleText(rule),
+      used: rule.used,
+    }))
+    const lines = rules.map(
+      (rule) => `- ${rule.id}: ${rule.method ?? 'any'} ${rule.url} ${rule.does}; used ${rule.used}`,
+    )
+    return {
+      text: [done, ...(rules.length === 0 ? ['No rules now.'] : lines)].join('\n'),
+      value: { rules },
+    }
+  }
+
+  private downloadsResult(sessionId: string): BrowserCallResult {
+    const downloads = this.deps.downloads?.(sessionId) ?? []
+    return {
+      text:
+        downloads.length === 0
+          ? 'No downloads in this session.'
+          : downloads
+              .map(
+                (d) => `- ${d.name}: ${d.state}, ${d.bytes} bytes${d.path ? `, at ${d.path}` : ''}`,
+              )
+              .join('\n'),
+      value: { downloads },
+    }
+  }
+
+  private async pdf(sessionId: string, args: Record<string, unknown>): Promise<BrowserCallResult> {
+    const { landscape, background } = pdfArgs(args)
+    const contents = this.contentsOf(sessionId)
+    const printed = await this.send<{ data?: string }>(sessionId, 'Page.printToPDF', {
+      landscape,
+      printBackground: background,
+      preferCSSPageSize: true,
+    })
+    if (typeof printed.data !== 'string')
+      throw new ToolFailure('invalid', 'The page printed nothing.')
+    const data = Buffer.from(printed.data, 'base64')
+    const path = await this.deps.saveFile?.(
+      sessionId,
+      pdfName(contents.getTitle(), contents.getURL()),
+      data,
+    )
+    if (!path) {
+      throw new ToolFailure(
+        'invalid',
+        'This session has no folder on this computer to save the PDF into.',
+      )
+    }
+    return {
+      text: `Saved the page as a PDF of ${Math.max(1, Math.round(data.length / 1024))} KB at ${path}.`,
+      value: { path, bytes: data.length },
+    }
+  }
+
+  /** Records the page for a few seconds over the Tracing domain and sums up what it did. */
+  private async trace(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const { seconds, reload } = traceArgs(args)
+    const page = this.pageOf(sessionId)
+    if (page.trace) throw new ToolFailure('invalid', 'A trace of this tab is already running.')
+    let settle!: (stream: string | null) => void
+    const complete = new Promise<string | null>((resolve) => (settle = resolve))
+    page.trace = settle
+    let stream: string | null
+    try {
+      await this.send(sessionId, 'Tracing.start', {
+        transferMode: 'ReturnAsStream',
+        traceConfig: { recordMode: 'recordAsMuchAsPossible', includedCategories: TRACE_CATEGORIES },
+      })
+      try {
+        if (reload) await this.deps.reload(sessionId)
+        const until = Date.now() + seconds * 1000
+        while (Date.now() < until) {
+          await this.gate(sessionId)
+          await sleep(Math.min(100, Math.max(1, until - Date.now())))
+        }
+      } finally {
+        await this.send(sessionId, 'Tracing.end').catch(() => settle(null))
+      }
+      stream = await Promise.race([complete, sleep(15_000).then(() => null)])
+    } finally {
+      page.trace = null
+    }
+    if (!stream) throw new ToolFailure('timeout', 'The trace did not finish. Try again.')
+    const chunks: Buffer[] = []
+    let read = 0
+    try {
+      for (;;) {
+        const chunk = await this.send<{ data?: string; eof?: boolean; base64Encoded?: boolean }>(
+          sessionId,
+          'IO.read',
+          { handle: stream, size: 4 * 1024 * 1024 },
+        )
+        const bytes = Buffer.from(chunk.data ?? '', chunk.base64Encoded ? 'base64' : 'utf8')
+        read += bytes.length
+        if (read > MAX_TRACE_BYTES)
+          throw new ToolFailure('invalid', 'The trace was too large to read.')
+        chunks.push(bytes)
+        if (chunk.eof) break
+      }
+    } finally {
+      await this.send(sessionId, 'IO.close', { handle: stream }).catch(() => {})
+    }
+    let events
+    try {
+      events = traceEvents(JSON.parse(Buffer.concat(chunks).toString('utf8')))
+    } catch {
+      throw new ToolFailure('invalid', 'The trace could not be read.')
+    }
+    const summary = summarizeTrace(events, await this.pageLcp(sessionId))
+    return { text: traceText(summary), value: { summary } }
+  }
+
+  /** The page's own largest contentful paint, as it reports it; null when it has none. */
+  private async pageLcp(sessionId: string): Promise<{ ms: number; element: string | null } | null> {
+    const answer = await this.send<{ result?: { value?: unknown } }>(
+      sessionId,
+      'Runtime.evaluate',
+      {
+        expression: `new Promise((resolve) => {
+        let last = null
+        try {
+          const observer = new PerformanceObserver((list) => {
+            const entries = list.getEntries()
+            last = entries[entries.length - 1] || last
+          })
+          observer.observe({ type: 'largest-contentful-paint', buffered: true })
+          setTimeout(() => {
+            observer.disconnect()
+            resolve(last ? { ms: last.startTime, element: last.element ? last.element.localName : null } : null)
+          }, 50)
+        } catch (error) {
+          resolve(null)
+        }
+      })`,
+        awaitPromise: true,
+        returnByValue: true,
+      },
+    ).catch(() => null)
+    const value = answer?.result?.value as { ms?: unknown; element?: unknown } | null | undefined
+    if (!value || typeof value.ms !== 'number') return null
+    return { ms: value.ms, element: typeof value.element === 'string' ? value.element : null }
+  }
+
+  private async storageState(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const call = storageStateArgs(args)
+    const states = this.deps.states
+    if (!states) throw new ToolFailure('invalid', 'Saved sign-in states are not available here.')
+    const listed = async (): Promise<Record<string, unknown>[]> =>
+      (await states.list()).map((state) => ({
+        name: state.name,
+        sites: state.sites,
+        saved_at: new Date(state.savedAt).toISOString(),
+      }))
+    try {
+      if (call.action === 'list') {
+        const all = await listed()
+        return {
+          text:
+            all.length === 0
+              ? 'No saved sign-in states.'
+              : all
+                  .map((s) => `- ${String(s.name)}: ${(s.sites as string[]).join(', ')}`)
+                  .join('\n'),
+          value: { states: all },
+        }
+      }
+      if (call.action === 'save') {
+        const tab = this.tabOf(sessionId)
+        this.contentsOf(sessionId)
+        const saved = await states.save(sessionId, tab!, call.name)
+        return {
+          text: `Saved the sign-in state of ${saved.sites.join(', ')} as "${call.name}": ${saved.cookies} cookie${saved.cookies === 1 ? '' : 's'} and the site's local storage, encrypted.`,
+          value: { states: await listed() },
+        }
+      }
+      const restored = await states.restore(sessionId, this.tabOf(sessionId), call.name)
+      return {
+        text: `Restored "${call.name}" into this session's browser: ${restored.cookies} cookie${restored.cookies === 1 ? '' : 's'} for ${restored.sites.join(', ')}${restored.storage > 0 ? ` and the local storage of ${restored.storage} site${restored.storage === 1 ? '' : 's'}` : ''}. Open or reload the site to use it.`,
+        value: { states: await listed() },
+      }
+    } catch (error) {
+      if (error instanceof ToolFailure) throw error
+      throw new ToolFailure('invalid', (error as Error).message)
     }
   }
 }

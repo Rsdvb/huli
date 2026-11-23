@@ -2,22 +2,44 @@
 // web contents; the renderer draws the pane's frame and tab strip and tells main where the page
 // sits.
 
-import { BrowserWindow, session as electronSession, shell, WebContentsView } from 'electron'
-import type { HandlerDetails, Input, WebContents, WindowOpenHandlerResponse } from 'electron'
+import { createHash } from 'node:crypto'
+import { readdir } from 'node:fs/promises'
+import { basename, join, resolve } from 'node:path'
+import { app, BrowserWindow, session as electronSession, shell, WebContentsView } from 'electron'
+import type {
+  DownloadItem,
+  HandlerDetails,
+  Input,
+  Session,
+  WebContents,
+  WindowOpenHandlerResponse,
+} from 'electron'
 import {
   AGENT_VIEWPORT,
   BROWSER_PARTITION,
   fitViewport,
   MAX_SESSION_TABS,
+  ORIGIN_WAIT_MS,
   type BrowserBounds,
+  type BrowserDownloadRequest,
   type BrowserNotice,
   type BrowserOriginAnswer,
   type BrowserOriginDecision,
+  type BrowserProfile,
+  type BrowserProfileMode,
   type BrowserState,
   type BrowserTab,
   type UploadAnswer,
   type BrowserViewport,
 } from '@shared/browser'
+import {
+  changedEmulation,
+  EMULATION_ITEMS,
+  emulating,
+  NO_EMULATION,
+  type BrowserEmulation,
+  type EmulationChange,
+} from '@shared/browser-args'
 import {
   IDLE_CONTROL,
   type ControlAgent,
@@ -36,8 +58,12 @@ import type { PickColor, PickEvent } from '@shared/page-notes'
 import { originOf, BrowserOrigins, type BrowserOriginStore } from './origins'
 import { PageOverlay, type OverlayParent } from './overlay'
 import { PagePicker } from './pick'
-import { BrowserPolicy, isAllowedNavigation, isHttp } from './policy'
+import { BrowserPolicy, isAllowedNavigation, isHttp, stripElectronUserAgent } from './policy'
 import { MAX_LIVE_TABS, TabStrip, tabsToRelease } from './tabs'
+import { applyEmulation } from './emulation'
+import { AgentDownloads } from './downloads'
+import type { DownloadInfo } from './cdp'
+import type { SessionPlace } from './place'
 
 const log = createLogger('browser')
 
@@ -108,6 +134,10 @@ interface Tab {
   scale: number
   /** The latest size or scale its page was told and has not confirmed yet. */
   sizing: Promise<void> | null
+  /** Huli: what it emulates (browser_emulate), which its page gets again when made anew. */
+  emulation: BrowserEmulation
+  /** Huli: the size it kept before a device's took over, back when the device is off. */
+  baseViewport?: BrowserViewport | null
 }
 
 /** A still of a page that its overlay draws over it while its screenshots are taken. */
@@ -138,6 +168,23 @@ interface Browser {
   frozen: boolean
   /** The session's agent, as the pane names it, for the overlay's pill. */
   agent: ControlAgent | null
+  /** Huli: the partition its pages use, chosen with its first page until its last one closes. */
+  profile: (BrowserProfile & { partition: string }) | null
+  /** Huli: a large download of the agent's page that waits for the user. */
+  downloadAsk: { request: BrowserDownloadRequest; settle: (allow: boolean) => void } | null
+}
+
+/** Huli: a short, steady name for a profile's partition, from what it belongs to. */
+function profileId(key: string): string {
+  return createHash('sha256').update(key).digest('hex').slice(0, 16)
+}
+
+/** Huli: a folder as the partition of its worktree is named by, the same however it is written. */
+function folderKey(folder: string): string {
+  const resolved = resolve(folder)
+  return process.platform === 'win32' || process.platform === 'darwin'
+    ? resolved.toLowerCase()
+    : resolved
 }
 
 /**
@@ -188,7 +235,7 @@ export interface BrowserViewsDeps {
   themes?(): ThemesState
   systemLocale?: string
   /** A tab's web contents is ready, before its first navigation starts. */
-  created?(tabId: string, contents: WebContents): void
+  created?(tabId: string, contents: WebContents, sessionId: string): void
   /** A tab's web contents is gone: its next one starts afresh. */
   closed?(tabId: string): void
   /** The agent's tab crashed or stopped responding: a call waiting on it fails with `message`. */
@@ -211,6 +258,10 @@ export interface BrowserViewsDeps {
   picked?(event: PickEvent): void
   /** How long a new origin waits for the user; set only by tests, which cannot wait 2 minutes. */
   originWaitMs?: number
+  /** Huli: Settings' choice of which browser data each session's pages use. */
+  profileMode?(): BrowserProfileMode
+  /** Huli: a download of an agent's page said something for the agent's next result. */
+  downloadNote?(sessionId: string, note: string): void
 }
 
 let nextTab = 1
@@ -218,8 +269,15 @@ let nextTab = 1
 export class BrowserViews {
   private readonly browsers = new Map<string, Browser>()
   private readonly tabs = new Map<string, Tab>()
-  private readonly policy: BrowserPolicy
-  private readonly browserSession = electronSession.fromPartition(BROWSER_PARTITION)
+  /** Huli: the rules of each partition the pages used, installed with its first page. */
+  private readonly policies = new Map<string, BrowserPolicy>()
+  private servicePort: number | null = null
+  /** Huli: where each session works, from its agent's calls. */
+  private readonly places = new Map<string, SessionPlace>()
+  /** Huli: each session's worktree as the pane reports it, before its agent's first call. */
+  private readonly worktrees = new Map<string, string | null>()
+  private readonly downloads: AgentDownloads
+  private nextDownloadAsk = 1
   /** The running call of each session, which an origin wait holds up. */
   private readonly originWaits = new Map<
     string,
@@ -261,10 +319,14 @@ export class BrowserViews {
       },
       log: (message) => log.warn(message),
     })
-    this.policy = new BrowserPolicy(this.browserSession, {
-      downloadDone: (contents, name, saved) => this.downloadDone(contents.id, name, saved),
+    this.downloads = new AgentDownloads({
+      ask: (sessionId, request) => this.askDownload(sessionId, request),
+      note: (sessionId, note) => deps.downloadNote?.(sessionId, note),
+      done: (contentsId, name, path, completed) =>
+        this.downloadDone(contentsId, name, completed, path),
+      log: (message) => log.warn(message),
     })
-    this.policy.install()
+    this.policyFor(BROWSER_PARTITION)
     this.origins = new BrowserOrigins(deps.origins, {
       asked: (request) => deps.originAsked?.(request),
       settled: (request) => deps.originAnswered?.(request),
@@ -291,7 +353,196 @@ export class BrowserViews {
 
   /** The artifacts service's port; a page never reaches it. */
   setServicePort(port: number | null): void {
-    this.policy.setServicePort(port)
+    this.servicePort = port
+    for (const policy of this.policies.values()) policy.setServicePort(port)
+  }
+
+  /** Huli: the partition's session, with the browser's rules installed on it once. */
+  private policyFor(partition: string): Session {
+    const session = electronSession.fromPartition(partition)
+    if (this.policies.has(partition)) return session
+    const policy = new BrowserPolicy(session, {
+      downloadDone: (contents, name, saved) => this.downloadDone(contents.id, name, saved),
+      agentDownload: (contents, item) => this.agentDownload(contents, item),
+      fakeLocation: (contents) => this.fakeLocation(contents),
+    })
+    policy.install()
+    policy.setServicePort(this.servicePort)
+    this.policies.set(partition, policy)
+    return session
+  }
+
+  /** Huli: the tab the pane shows for a session, which the user's saves and restores use. */
+  selectedTabId(sessionId: string): string | null {
+    return this.browsers.get(sessionId)?.strip.selected ?? null
+  }
+
+  /** Huli: where a session works, from its agent's call; downloads and its profile follow it. */
+  setPlace(sessionId: string, place: SessionPlace | null): void {
+    if (!place) return
+    const known = this.places.get(sessionId)
+    if (known?.folder === place.folder && known.worktree === place.worktree) return
+    this.places.set(sessionId, place)
+    this.downloads.know(place.folder)
+  }
+
+  /** Huli: the session's worktree, as the pane knows it before the agent's first call. */
+  setWorktree(sessionId: string, worktree: string | null): void {
+    this.worktrees.set(sessionId, worktree)
+  }
+
+  /** Huli: the partition a session's next first page takes, by Settings' choice. */
+  private profileFor(sessionId: string): BrowserProfile & { partition: string } {
+    const mode = this.deps.profileMode?.() ?? 'shared'
+    if (mode === 'session') {
+      // Held in memory: a session's own data goes when the app quits.
+      return { kind: 'session', label: null, partition: `kite-session-${profileId(sessionId)}` }
+    }
+    if (mode === 'worktree') {
+      const place = this.places.get(sessionId)
+      const worktree = place
+        ? place.worktree
+          ? place.folder
+          : null
+        : this.worktrees.get(sessionId)
+      if (worktree) {
+        return {
+          kind: 'worktree',
+          label: basename(worktree),
+          partition: `persist:kite-wt-${profileId(folderKey(worktree))}`,
+        }
+      }
+    }
+    return { kind: 'shared', label: null, partition: BROWSER_PARTITION }
+  }
+
+  /** Huli: the profile a session's pages use now, or would with their first page. */
+  profileOf(sessionId: string): BrowserProfile & { partition: string } {
+    return this.browsers.get(sessionId)?.profile ?? this.profileFor(sessionId)
+  }
+
+  /** Huli: the Electron session of the partition a session's pages use. */
+  partitionSession(sessionId: string): Session {
+    return this.policyFor(this.profileOf(sessionId).partition)
+  }
+
+  /** Huli: whether a page of the session opens `url` without asking the user first. */
+  mayOpen(sessionId: string, url: string): boolean {
+    return !this.origins.needsAsking(sessionId, url)
+  }
+
+  /** Huli: the session's downloads, for browser_downloads. */
+  downloadsOf(sessionId: string): DownloadInfo[] {
+    return this.downloads.list(sessionId)
+  }
+
+  /** Huli: saves a file the agent asked for into its session's folder; null without one here. */
+  async saveFile(sessionId: string, name: string, data: Buffer): Promise<string | null> {
+    const place = this.places.get(sessionId)
+    if (!place) return null
+    return this.downloads.save(sessionId, place.folder, name, data)
+  }
+
+  /**
+   * Huli: a download of a page an agent drives in its turn goes into the session's folder, which
+   * the agent's calls named; any other, the user's own, opens the system's save dialog.
+   */
+  private agentDownload(contents: WebContents, item: DownloadItem): boolean {
+    const tab = [...this.tabs.values()].find((t) => t.view?.webContents === contents)
+    if (!tab) return false
+    const browser = this.browsers.get(tab.sessionId)
+    const place = this.places.get(tab.sessionId)
+    if (!browser || !place || browser.strip.agent !== tab.id) return false
+    if (!this.agentDrives(tab.sessionId)) return false
+    this.downloads.take(item, contents.id, tab.sessionId, place.folder)
+    return true
+  }
+
+  /** Huli: asks the user in the pane whether a large download may go on; false on no answer. */
+  private askDownload(
+    sessionId: string,
+    request: { name: string; size: number | null },
+  ): Promise<boolean> {
+    const browser = this.browser(sessionId)
+    browser.downloadAsk?.settle(false)
+    const id = this.nextDownloadAsk++
+    return new Promise<boolean>((done) => {
+      const settle = (allow: boolean): void => {
+        clearTimeout(timer)
+        if (browser.downloadAsk?.request.id !== id) return
+        browser.downloadAsk = null
+        this.emit(browser)
+        done(allow)
+      }
+      const timer = setTimeout(() => settle(false), ORIGIN_WAIT_MS)
+      browser.downloadAsk = { request: { id, ...request }, settle }
+      this.emit(browser)
+      this.deps.uploadAsked?.(sessionId)
+    })
+  }
+
+  /** Huli: the pane's Allow or Cancel on a large download. */
+  answerDownload(sessionId: string, id: number, allow: boolean): void {
+    const ask = this.browsers.get(sessionId)?.downloadAsk
+    if (ask?.request.id === id) ask.settle(allow)
+  }
+
+  /** Huli: whether a page emulates a location, which alone lets it ask for the position. */
+  private fakeLocation(contents: WebContents | null): boolean {
+    if (!contents) return false
+    for (const tab of this.tabs.values()) {
+      if (tab.view?.webContents === contents) return tab.emulation.geolocation !== null
+    }
+    return false
+  }
+
+  /**
+   * Huli: changes what a tab emulates. A device's size becomes the size its page lays out at, as
+   * an agent's page keeps 1280 by 800, and the size it had comes back when the device is off.
+   */
+  async emulate(tabId: string, change: EmulationChange): Promise<BrowserEmulation> {
+    const tab = this.tabs.get(tabId)
+    const contents = this.contentsOf(tab)
+    if (!tab || !contents) throw new Error('The tab has no page now.')
+    const before = tab.emulation
+    const after = changedEmulation(before, change)
+    const send = (method: string, params?: Record<string, unknown>): Promise<unknown> =>
+      contents.debugger.sendCommand(method, params)
+    const agent = stripElectronUserAgent(contents.session.getUserAgent())
+    try {
+      await applyEmulation(send, before, after, agent)
+    } catch (error) {
+      // Put back what was applied, so the tab is as it was when the call fails.
+      await applyEmulation(send, after, before, agent).catch(() => {})
+      throw new Error(`The page refused it: ${(error as Error).message}`, { cause: error })
+    }
+    tab.emulation = after
+    if (JSON.stringify(before.device) !== JSON.stringify(after.device)) {
+      if (after.device) {
+        if (tab.baseViewport === undefined) tab.baseViewport = tab.viewport
+        tab.viewport = { width: after.device.width, height: after.device.height }
+      } else if (tab.baseViewport !== undefined) {
+        tab.viewport = tab.baseViewport
+        tab.baseViewport = undefined
+        if (!tab.viewport) {
+          void contents.debugger.sendCommand('Emulation.clearDeviceMetricsOverride').catch(() => {})
+        }
+      }
+      this.size(tab, true)
+      await tab.sizing
+      this.place(tab)
+    }
+    this.emitTab(tab)
+    return after
+  }
+
+  /** Huli: the pane's reset of what the selected tab emulates. */
+  async resetEmulation(sessionId: string): Promise<void> {
+    const tab = this.selected(sessionId)
+    if (!tab || !emulating(tab.emulation)) return
+    await this.emulate(tab.id, { set: {}, off: [...EMULATION_ITEMS] }).catch((error: unknown) => {
+      log.warn(`Could not reset a tab's emulation: ${(error as Error).message}`)
+    })
   }
 
   /** The project a session's browser belongs to, from the agent's call that drives it. */
@@ -407,6 +658,8 @@ export class BrowserViews {
     if (!browser) return
     for (const tab of this.tabsOf(browser)) this.dropTab(tab)
     browser.strip.clear()
+    // Huli: the next first page chooses its profile again, as Settings say then.
+    browser.profile = null
     this.consents.get(sessionId)?.settle('deny')
     this.origins.close(sessionId)
     this.emit(browser)
@@ -531,6 +784,13 @@ export class BrowserViews {
     } else if (tool === 'browser_navigate') {
       // With no tab of its own, the agent opens one.
       id = strip.agent
+    } else if (
+      // Huli: these read or change the session's own state, not a tab's page.
+      tool === 'browser_route' ||
+      tool === 'browser_downloads' ||
+      (tool === 'browser_storage_state' && args.action === 'list')
+    ) {
+      return null
     } else {
       id = strip.agent ?? strip.selected
     }
@@ -767,8 +1027,20 @@ export class BrowserViews {
   }
 
   async clearData(): Promise<void> {
-    await this.browserSession.clearStorageData()
-    await this.browserSession.clearCache()
+    // Huli: every profile's data, the worktrees' of earlier runs too, which lie on disk by name.
+    const partitions = new Set([BROWSER_PARTITION, ...this.policies.keys()])
+    try {
+      for (const name of await readdir(join(app.getPath('userData'), 'Partitions'))) {
+        if (name.startsWith('kite-wt-')) partitions.add(`persist:${name}`)
+      }
+    } catch {
+      // No partition folder yet.
+    }
+    for (const partition of partitions) {
+      const session = electronSession.fromPartition(partition)
+      await session.clearStorageData()
+      await session.clearCache()
+    }
   }
 
   /** Closes the browser of every session that no longer exists in the renderer's list. */
@@ -778,6 +1050,10 @@ export class BrowserViews {
       if (live.has(sessionId)) continue
       for (const tab of this.tabsOf(browser)) this.dropTab(tab)
       this.consents.get(sessionId)?.settle('deny')
+      browser.downloadAsk?.settle(false)
+      this.downloads.forget(sessionId)
+      this.places.delete(sessionId)
+      this.worktrees.delete(sessionId)
       this.origins.close(sessionId)
       this.browsers.delete(sessionId)
       this.deps.ended?.(sessionId)
@@ -797,6 +1073,8 @@ export class BrowserViews {
         shown: false,
         frozen: false,
         agent: null,
+        profile: null,
+        downloadAsk: null,
       }
       this.browsers.set(sessionId, browser)
     }
@@ -854,6 +1132,7 @@ export class BrowserViews {
       viewport: how.agent ? AGENT_VIEWPORT : null,
       scale: 0,
       sizing: null,
+      emulation: NO_EMULATION,
     }
     this.tabs.set(tab.id, tab)
     browser.strip.add(tab.id, how)
@@ -1059,11 +1338,16 @@ export class BrowserViews {
     const window = this.deps.window()
     if (!window) throw new Error('The browser has no window to sit over')
     this.releaseFor(tab)
+    const browser = this.browser(tab.sessionId)
+    // Huli: a session's pages share the profile its first page took.
+    browser.profile ??= this.profileFor(tab.sessionId)
+    const partition = browser.profile.partition
+    this.policyFor(partition)
     const view = adopt
       ? new WebContentsView({ webContents: adopt })
       : new WebContentsView({
           webPreferences: {
-            partition: BROWSER_PARTITION,
+            partition,
             sandbox: true,
             contextIsolation: true,
             nodeIntegration: false,
@@ -1080,7 +1364,20 @@ export class BrowserViews {
     // The page has its size before its first navigation, so it never lays out at another.
     tab.scale = 0
     this.size(tab)
-    this.deps.created?.(tab.id, view.webContents)
+    // Huli: a page made anew, after its tab was released, emulates what the tab did.
+    if (emulating(tab.emulation)) {
+      const contents = view.webContents
+      void applyEmulation(
+        (method, params) => contents.debugger.sendCommand(method, params),
+        NO_EMULATION,
+        tab.emulation,
+        stripElectronUserAgent(contents.session.getUserAgent()),
+        true,
+      ).catch((error: unknown) => {
+        log.warn(`Could not emulate on a page again: ${(error as Error).message}`)
+      })
+    }
+    this.deps.created?.(tab.id, view.webContents, tab.sessionId)
     this.syncOverlay()
     const driving = (this.deps.control?.(tab.sessionId) ?? IDLE_CONTROL).kind !== 'idle'
     view.webContents.setBackgroundThrottling(!driving)
@@ -1174,8 +1471,9 @@ export class BrowserViews {
     const command = contents.debugger
       .sendCommand('Emulation.setDeviceMetricsOverride', {
         ...tab.viewport,
-        deviceScaleFactor: 0,
-        mobile: false,
+        // Huli: an emulated device's pixel ratio and mobile layout.
+        deviceScaleFactor: tab.emulation.device?.scale ?? 0,
+        mobile: tab.emulation.device?.mobile ?? false,
         scale,
         // The view keeps the box the pane has for it.
         dontSetVisibleSize: true,
@@ -1706,10 +2004,13 @@ export class BrowserViews {
     }, OVERLAY_KEEP_MS)
   }
 
-  private downloadDone(contentsId: number, name: string, saved: boolean): void {
+  private downloadDone(contentsId: number, name: string, saved: boolean, path?: string): void {
     for (const tab of this.tabs.values()) {
       if (tab.view?.webContents.id !== contentsId) continue
-      tab.notice = { kind: saved ? 'downloaded' : 'download-failed', name }
+      tab.notice =
+        saved && path !== undefined
+          ? { kind: 'saved', name, path }
+          : { kind: saved ? 'downloaded' : 'download-failed', name }
       this.emitTab(tab)
       return
     }
@@ -1756,6 +2057,9 @@ export class BrowserViews {
       notice: selected?.notice ?? null,
       control: this.deps.control?.(browser.sessionId) ?? IDLE_CONTROL,
       originRequest: this.origins.requestOf(browser.sessionId),
+      emulation: selected && emulating(selected.emulation) ? selected.emulation : null,
+      downloadRequest: browser.downloadAsk?.request ?? null,
+      profile: (({ kind, label }) => ({ kind, label }))(this.profileOf(browser.sessionId)),
     })
   }
 

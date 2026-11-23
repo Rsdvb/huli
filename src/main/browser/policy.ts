@@ -1,9 +1,9 @@
-// What keeps the side panel's browser to plain web pages: one partition for every session, with
-// every permission refused, downloads saved only where the user picks, and requests to Kettu's own
-// surfaces cancelled.
+// What keeps the side panel's browser to plain web pages: the partitions its sessions use, with
+// every permission refused, downloads saved only where the user picks (Huli: an agent's into its
+// session's folder), and requests to Kettu's own surfaces cancelled.
 
 import { basename, join } from 'node:path'
-import { app, type Session, type WebContents } from 'electron'
+import { app, type DownloadItem, type Session, type WebContents } from 'electron'
 import { refuseRequests } from '../request-filter'
 
 /** A request that never leaves the partition: a local file or one of Kettu's own schemes. */
@@ -78,6 +78,16 @@ export function stripElectronUserAgent(userAgent: string): string {
 export interface BrowserPolicyDeps {
   /** A download the user saved, or one that failed; the pane says which, with the file's name. */
   downloadDone(contents: WebContents, name: string, saved: boolean): void
+  /**
+   * Huli: takes a download of a page an agent drives into its session's folder; false leaves it
+   * to the system's save dialog, as the user's own downloads are.
+   */
+  agentDownload?(contents: WebContents, item: DownloadItem): boolean
+  /**
+   * Huli: whether the page emulates a location (browser_emulate). Only then may it ask for the
+   * position, which is the emulated one: the computer's own never reaches a page.
+   */
+  fakeLocation?(contents: WebContents | null): boolean
 }
 
 /** The partition's rules, set once for every page. */
@@ -94,12 +104,18 @@ export class BrowserPolicy {
     if (this.installed) return
     this.installed = true
     this.session.setUserAgent(stripElectronUserAgent(this.session.getUserAgent()))
-    this.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false))
-    this.session.setPermissionCheckHandler(() => false)
+    this.session.setPermissionRequestHandler((contents, permission, callback) =>
+      callback(permission === 'geolocation' && this.deps.fakeLocation?.(contents) === true),
+    )
+    this.session.setPermissionCheckHandler(
+      (contents, permission) =>
+        permission === 'geolocation' && this.deps.fakeLocation?.(contents) === true,
+    )
     this.session.setDevicePermissionHandler(() => false)
     // Huli: with no save path set, Electron asks in the system's save dialog, so a download lands
     // on disk only where the user chooses, whether the user or an agent clicked it.
     this.session.on('will-download', (_event, item, contents) => {
+      if (this.deps.agentDownload?.(contents, item)) return
       item.setSaveDialogOptions({
         defaultPath: join(app.getPath('downloads'), item.getFilename()),
       })
