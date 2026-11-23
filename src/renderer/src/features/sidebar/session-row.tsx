@@ -90,13 +90,7 @@ export const NESTED_STEP = 22
 const fromRow = (event: SyntheticEvent<HTMLElement>): boolean =>
   event.currentTarget.contains(event.target as Node)
 
-export const SessionRow = memo(function SessionRow({
-  node,
-  tabStopId,
-  showHost = false,
-  indent = false,
-  branch,
-}: {
+interface SessionRowProps {
   node: SessionNode
   /** The id of the list's one Tab stop, which the row it names takes. */
   tabStopId: string | null
@@ -106,7 +100,31 @@ export const SessionRow = memo(function SessionRow({
   indent?: boolean
   /** A sub-session's place under its parent, which the tree line follows. */
   branch?: 'middle' | 'last'
-}) {
+}
+
+/** Whether the list's Tab stop is this row or one of its sub-sessions'. */
+const holdsStop = (node: SessionNode, id: string | null): boolean =>
+  id !== null && (node.summary.id === id || node.children.some((child) => holdsStop(child, id)))
+
+/**
+ * The Tab stop follows the session shown, so it moves on every open; only the rows it leaves and
+ * reaches render for it, not all of them.
+ */
+const sameRow = (a: SessionRowProps, b: SessionRowProps): boolean =>
+  a.node === b.node &&
+  a.showHost === b.showHost &&
+  a.indent === b.indent &&
+  a.branch === b.branch &&
+  (a.tabStopId === b.tabStopId ||
+    (!holdsStop(a.node, a.tabStopId) && !holdsStop(b.node, b.tabStopId)))
+
+export const SessionRow = memo(function SessionRow({
+  node,
+  tabStopId,
+  showHost = false,
+  indent = false,
+  branch,
+}: SessionRowProps) {
   const { t } = useTranslation('sidebar')
   const { summary, children } = node
   const hostId = hostOfSession(summary)
@@ -114,13 +132,15 @@ export const SessionRow = memo(function SessionRow({
   // What an offline host's session last said is not known to hold, so it shows no state.
   const away = isAway(otherHost?.connection ?? null)
   const hostName = hostId === null ? t('hosts.thisComputer') : (otherHost?.name ?? '')
-  const shownId = useViewStore((s) =>
-    s.main.kind === 'session' && !s.settings.open ? s.main.sessionId : null,
-  )
-  // A sub-agent has no row, so its parent's stands for it while it shows.
-  const current =
-    shownId !== null &&
-    (shownId === summary.id || node.subagents.some((agent) => agent.id === shownId))
+  // A sub-agent has no row, so its parent's stands for it while it shows. Whether this row is the
+  // one shown, not which is: that would render every row when another one opens.
+  const current = useViewStore((s) => {
+    const shownId = s.main.kind === 'session' && !s.settings.open ? s.main.sessionId : null
+    return (
+      shownId !== null &&
+      (shownId === summary.id || node.subagents.some((agent) => agent.id === shownId))
+    )
+  })
   // The rows of the other panes in view take the current row's fill as well.
   const inSplit = useViewStore(
     (s) =>
@@ -158,7 +178,8 @@ export const SessionRow = memo(function SessionRow({
       expandedParents: { ...s.expandedParents, [summary.id]: value },
     }))
 
-  const [deleting, setDeleting] = useState(false)
+  // Null until Delete is first asked for, so the dialog mounts only then.
+  const [deleting, setDeleting] = useState<boolean | null>(null)
   const variants = useMemo(() => rowVariants(summary.id), [summary.id])
   const [moreOpen, setMoreOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -529,16 +550,18 @@ export const SessionRow = memo(function SessionRow({
           </AnimatePresence>
         </ul>
       )}
-      <DeleteSessionDialog
-        sessionId={summary.id}
-        title={title}
-        ids={picked ?? undefined}
-        open={deleting}
-        onOpenChange={setDeleting}
-      />
+      {deleting !== null && (
+        <DeleteSessionDialog
+          sessionId={summary.id}
+          title={title}
+          ids={picked ?? undefined}
+          open={deleting}
+          onOpenChange={setDeleting}
+        />
+      )}
     </motion.li>
   )
-})
+}, sameRow)
 
 /**
  * The line from a parent down along its sub-sessions, with a tick to each; on the last it turns
