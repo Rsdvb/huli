@@ -9,6 +9,7 @@
       "@shared/*": ["../src/shared/*"],
       "virtual:kettu-page-runtime": ["./src/artifact-view/page-runtime.generated.ts"],
       "@noble/*": ["./node_modules/@noble/*"],
+      "@lezer/*": ["./node_modules/@lezer/*"],
       "i18next": ["./node_modules/i18next"]
     }
   },

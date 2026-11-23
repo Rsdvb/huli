@@ -309,10 +309,12 @@ A page you use lays out 1280 by 800, whatever room the user's panel has: the pan
 
 ## Reading and acting
 
-- \`browser_snapshot\` gives the page as an outline with a ref on each element you can act on. Act by ref with \`browser_click\`, \`browser_type\`, \`browser_select_option\`, \`browser_press_key\` and \`browser_scroll\`; they return the page with a fresh snapshot.
+- \`browser_snapshot\` gives the page as an outline with its text and a ref on each element you can act on, and on the lists, forms and dialogs that hold them; a ref stays the same element's while the page shows it. \`ref\` reads one element alone and \`depth\` fewer levels, which saves reading a long page.
+- Act by ref with \`browser_click\`, \`browser_type\`, \`browser_select_option\`, \`browser_press_key\` and \`browser_scroll\`. They return the page after it settles: on the same page only what changed since your last snapshot, marked + and -, under the elements that hold it; \`browser_snapshot\` gives the whole page again.
 - \`browser_take_screenshot\` shows how the page looks: use it to check layout, colors and images, not to find elements.
-- \`browser_wait_for\` waits for text to show or to go.
-- \`browser_console_messages\` and \`browser_network_requests\` show errors and failed requests; \`since_navigation\` keeps those of the current page.
+- \`browser_wait_for\` waits for text to show or to go, or for an element (a CSS \`selector\` or a \`ref\`) to be visible, hidden, attached or detached, in every frame it can reach. Clicking and typing already wait up to 5 s for their element to be visible, enabled and uncovered, so wait only for what the page loads later.
+- \`browser_console_messages\` shows the console and the errors the page did not catch, with their stack; \`level: "error"\` keeps only errors. An action's result says when the page logged a new error.
+- \`browser_network_requests\` lists the requests, leaving out static resources that loaded unless \`include_static\`, and \`url\` filters them by address; \`browser_network_request\` gives one's headers, timing and text body, with credentials and secret fields replaced. Both tools take \`since_navigation\` to keep only what the current page did.
 - \`browser_evaluate\` runs a function on the page to inspect it; act with the other tools.
 - \`browser_upload_file\` puts files from this computer into a file input: click the page's upload button first, then call it with absolute paths. The user is asked each time whether those files may go to that site, and nothing is uploaded without their Allow.
 
@@ -346,6 +348,8 @@ Use it without being asked when you build or debug a mobile app: after a change,
 4. \`device_launch_app\` starts it by bundle id or Android package, and follows it for later snapshots and logs.
 5. \`device_snapshot\` reads what the screen shows, each element you can act on with a reference such as @e3. Act with \`device_tap\`, \`device_fill\`, \`device_type\`, \`device_scroll\`, \`device_swipe\` and \`device_press_button\`. References change when the screen changes: read it again then.
 6. \`device_screenshot\` shows how the screen looks; find what to tap with the snapshot. \`device_logs\` gives the app's latest log lines.
+
+Check a screen with the tools that read it, not with a screenshot: \`device_wait\` waits for text or an element (by selector, such as \`label="Saved"\`) to show or go, or for the screen to settle; \`device_is\` checks that an element is visible, checked, focused or has a text; \`device_get\` reads an element's text or attributes; \`device_find\` finds one by its words and checks or acts on it. \`device_alert\` reads and answers a system prompt and \`device_keyboard\` hides the keyboard or presses its return key. \`device_batch\` runs several steps in one call. \`level: "digest"\` on the snapshot, tap, fill, find, get and batch answers in fewer tokens.
 
 \`device_open_url\` opens a web address or a deep link. \`device_set_appearance\`, \`device_rotate\`, \`device_set_location\` and \`device_set_permission\` change the device's settings. \`device_terminate_app\` stops the app, and \`device_close\` lets go of the device, with \`shutdown\` to shut a simulator or emulator down.
 

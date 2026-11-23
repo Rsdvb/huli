@@ -251,6 +251,7 @@ export const FEATURE_GROUP: Readonly<Record<FeatureId, FeatureGroup>> = {
   bestOfN: 'work',
   routines: 'work',
   github: 'work',
+  fileCheckpoints: 'work',
   sandbox: 'agents',
   devices: 'agents',
   secrets: 'agents',

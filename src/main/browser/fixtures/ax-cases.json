@@ -1,0 +1,813 @@
+[
+  [
+    {
+      "nodeId": "1",
+      "role": { "value": "RootWebArea" },
+      "name": { "value": "More cases" },
+      "childIds": ["3"],
+      "backendDOMNodeId": 1
+    },
+    {
+      "nodeId": "3",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["6"],
+      "backendDOMNodeId": 3,
+      "parentId": "1"
+    },
+    {
+      "nodeId": "6",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": [
+        "7",
+        "9",
+        "11",
+        "17",
+        "30",
+        "33",
+        "40",
+        "44",
+        "45",
+        "49",
+        "53",
+        "56",
+        "59",
+        "92",
+        "93",
+        "62",
+        "66"
+      ],
+      "backendDOMNodeId": 6,
+      "parentId": "3"
+    },
+    {
+      "nodeId": "7",
+      "role": { "value": "generic" },
+      "value": { "value": "Editable rich text" },
+      "properties": [{ "name": "editable", "value": { "value": "richtext" } }],
+      "childIds": ["72", "73", "74"],
+      "backendDOMNodeId": 7,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "9",
+      "role": { "value": "textbox" },
+      "value": { "value": "Area value" },
+      "properties": [
+        { "name": "invalid", "value": { "value": "false" } },
+        { "name": "editable", "value": { "value": "plaintext" } },
+        { "name": "readonly", "value": { "value": false } }
+      ],
+      "childIds": ["10"],
+      "backendDOMNodeId": 9,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "11",
+      "role": { "value": "searchbox" },
+      "name": { "value": "Search docs" },
+      "properties": [
+        { "name": "invalid", "value": { "value": "false" } },
+        { "name": "editable", "value": { "value": "plaintext" } }
+      ],
+      "childIds": ["12", "13"],
+      "backendDOMNodeId": 11,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "17",
+      "role": { "value": "combobox" },
+      "value": { "value": "Two" },
+      "properties": [
+        { "name": "invalid", "value": { "value": "false" } },
+        { "name": "hasPopup", "value": { "value": "menu" } },
+        { "name": "expanded", "value": { "value": false } }
+      ],
+      "childIds": ["20"],
+      "backendDOMNodeId": 17,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "30",
+      "role": { "value": "log" },
+      "childIds": ["31", "32"],
+      "backendDOMNodeId": 30,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "33",
+      "role": { "value": "group" },
+      "childIds": ["34", "36"],
+      "backendDOMNodeId": 33,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "40",
+      "role": { "value": "image" },
+      "name": { "value": "Company logo" },
+      "backendDOMNodeId": 40,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "44",
+      "role": { "value": "generic" },
+      "name": { "value": "Labelled box" },
+      "childIds": ["81"],
+      "backendDOMNodeId": 44,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "45",
+      "role": { "value": "generic" },
+      "childIds": ["46", "47"],
+      "backendDOMNodeId": 45,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "49",
+      "role": { "value": "dialog" },
+      "name": { "value": "Confirm" },
+      "childIds": ["50", "51", "52"],
+      "backendDOMNodeId": 49,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "53",
+      "role": { "value": "link" },
+      "name": { "value": "Read more" },
+      "childIds": ["87", "88", "89"],
+      "backendDOMNodeId": 53,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "56",
+      "role": { "value": "generic" },
+      "childIds": ["57", "58"],
+      "backendDOMNodeId": 56,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "59",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["60", "91"],
+      "backendDOMNodeId": 59,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "60",
+      "role": { "value": "radio" },
+      "name": { "value": " Option A" },
+      "properties": [
+        { "name": "invalid", "value": { "value": "false" } },
+        { "name": "checked", "value": { "value": "false" } }
+      ],
+      "backendDOMNodeId": 60,
+      "parentId": "59"
+    },
+    {
+      "nodeId": "91",
+      "ignored": true,
+      "role": { "value": "none" },
+      "backendDOMNodeId": 91,
+      "parentId": "59"
+    },
+    {
+      "nodeId": "92",
+      "role": { "value": "StaticText" },
+      "name": { "value": " " },
+      "childIds": ["-1000000022"],
+      "backendDOMNodeId": 92,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "93",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Inline lonely span" },
+      "childIds": ["-1000000023"],
+      "backendDOMNodeId": 93,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "62",
+      "role": { "value": "paragraph" },
+      "childIds": ["94", "63", "64", "96", "65"],
+      "backendDOMNodeId": 62,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "66",
+      "role": { "value": "navigation" },
+      "name": { "value": "Pages" },
+      "childIds": ["67"],
+      "backendDOMNodeId": 66,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "72",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Editable " },
+      "properties": [{ "name": "editable", "value": { "value": "richtext" } }],
+      "childIds": ["-1000000002"],
+      "backendDOMNodeId": 72,
+      "parentId": "7"
+    },
+    {
+      "nodeId": "73",
+      "role": { "value": "StaticText" },
+      "name": { "value": "rich" },
+      "properties": [{ "name": "editable", "value": { "value": "richtext" } }],
+      "childIds": ["-1000000003"],
+      "backendDOMNodeId": 73,
+      "parentId": "7"
+    },
+    {
+      "nodeId": "74",
+      "role": { "value": "StaticText" },
+      "name": { "value": " text" },
+      "properties": [{ "name": "editable", "value": { "value": "richtext" } }],
+      "childIds": ["-1000000004"],
+      "backendDOMNodeId": 74,
+      "parentId": "7"
+    },
+    {
+      "nodeId": "10",
+      "role": { "value": "generic" },
+      "properties": [{ "name": "editable", "value": { "value": "plaintext" } }],
+      "childIds": ["75"],
+      "backendDOMNodeId": 10,
+      "parentId": "9"
+    },
+    {
+      "nodeId": "12",
+      "ignored": true,
+      "role": { "value": "none" },
+      "backendDOMNodeId": 12,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "13",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["15"],
+      "backendDOMNodeId": 13,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "15",
+      "role": { "value": "generic" },
+      "properties": [{ "name": "editable", "value": { "value": "plaintext" } }],
+      "backendDOMNodeId": 15,
+      "parentId": "13"
+    },
+    {
+      "nodeId": "20",
+      "role": { "value": "MenuListPopup" },
+      "childIds": ["24", "27"],
+      "backendDOMNodeId": 20,
+      "parentId": "17"
+    },
+    {
+      "nodeId": "31",
+      "role": { "value": "generic" },
+      "childIds": ["76"],
+      "backendDOMNodeId": 31,
+      "parentId": "30"
+    },
+    {
+      "nodeId": "32",
+      "role": { "value": "generic" },
+      "childIds": ["77"],
+      "backendDOMNodeId": 32,
+      "parentId": "30"
+    },
+    {
+      "nodeId": "34",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["38"],
+      "backendDOMNodeId": 34,
+      "parentId": "33"
+    },
+    {
+      "nodeId": "38",
+      "role": { "value": "DisclosureTriangle" },
+      "name": { "value": "More info" },
+      "properties": [{ "name": "expanded", "value": { "value": true } }],
+      "childIds": ["78", "79"],
+      "backendDOMNodeId": 38,
+      "parentId": "34"
+    },
+    {
+      "nodeId": "36",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["39"],
+      "backendDOMNodeId": 36,
+      "parentId": "33"
+    },
+    {
+      "nodeId": "39",
+      "role": { "value": "paragraph" },
+      "childIds": ["80"],
+      "backendDOMNodeId": 39,
+      "parentId": "36"
+    },
+    {
+      "nodeId": "81",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Inner text" },
+      "childIds": ["-1000000011"],
+      "backendDOMNodeId": 81,
+      "parentId": "44"
+    },
+    {
+      "nodeId": "46",
+      "role": { "value": "paragraph" },
+      "childIds": ["82"],
+      "backendDOMNodeId": 46,
+      "parentId": "45"
+    },
+    {
+      "nodeId": "47",
+      "role": { "value": "button" },
+      "name": { "value": "Shadow button" },
+      "properties": [{ "name": "invalid", "value": { "value": "false" } }],
+      "childIds": ["83"],
+      "backendDOMNodeId": 47,
+      "parentId": "45"
+    },
+    {
+      "nodeId": "50",
+      "role": { "value": "paragraph" },
+      "childIds": ["84"],
+      "backendDOMNodeId": 50,
+      "parentId": "49"
+    },
+    {
+      "nodeId": "51",
+      "role": { "value": "button" },
+      "name": { "value": "Yes" },
+      "properties": [{ "name": "invalid", "value": { "value": "false" } }],
+      "childIds": ["85"],
+      "backendDOMNodeId": 51,
+      "parentId": "49"
+    },
+    {
+      "nodeId": "52",
+      "role": { "value": "button" },
+      "name": { "value": "No" },
+      "properties": [
+        { "name": "disabled", "value": { "value": true } },
+        { "name": "invalid", "value": { "value": "false" } }
+      ],
+      "childIds": ["86"],
+      "backendDOMNodeId": 52,
+      "parentId": "49"
+    },
+    {
+      "nodeId": "87",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Read" },
+      "childIds": ["-1000000017"],
+      "backendDOMNodeId": 87,
+      "parentId": "53"
+    },
+    {
+      "nodeId": "88",
+      "role": { "value": "StaticText" },
+      "name": { "value": " " },
+      "childIds": ["-1000000018"],
+      "backendDOMNodeId": 88,
+      "parentId": "53"
+    },
+    {
+      "nodeId": "89",
+      "role": { "value": "StaticText" },
+      "name": { "value": "more" },
+      "childIds": ["-1000000019"],
+      "backendDOMNodeId": 89,
+      "parentId": "53"
+    },
+    {
+      "nodeId": "57",
+      "role": { "value": "checkbox" },
+      "name": { "value": "Remember me" },
+      "properties": [
+        { "name": "invalid", "value": { "value": "false" } },
+        { "name": "checked", "value": { "value": "false" } }
+      ],
+      "backendDOMNodeId": 57,
+      "parentId": "56"
+    },
+    {
+      "nodeId": "58",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["90"],
+      "backendDOMNodeId": 58,
+      "parentId": "56"
+    },
+    {
+      "nodeId": "90",
+      "ignored": true,
+      "role": { "value": "none" },
+      "backendDOMNodeId": 90,
+      "parentId": "58"
+    },
+    {
+      "nodeId": "-1000000022",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": " " },
+      "parentId": "92"
+    },
+    {
+      "nodeId": "-1000000023",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Inline lonely span" },
+      "parentId": "93"
+    },
+    {
+      "nodeId": "94",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Price: " },
+      "childIds": ["-1000000024"],
+      "backendDOMNodeId": 94,
+      "parentId": "62"
+    },
+    {
+      "nodeId": "63",
+      "role": { "value": "strong" },
+      "childIds": ["95"],
+      "backendDOMNodeId": 63,
+      "parentId": "62"
+    },
+    {
+      "nodeId": "64",
+      "role": { "value": "LineBreak" },
+      "name": { "value": "\n" },
+      "childIds": ["-1000000026"],
+      "backendDOMNodeId": 64,
+      "parentId": "62"
+    },
+    {
+      "nodeId": "96",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Tax: " },
+      "childIds": ["-1000000027"],
+      "backendDOMNodeId": 96,
+      "parentId": "62"
+    },
+    {
+      "nodeId": "65",
+      "role": { "value": "emphasis" },
+      "childIds": ["97"],
+      "backendDOMNodeId": 65,
+      "parentId": "62"
+    },
+    {
+      "nodeId": "67",
+      "role": { "value": "list" },
+      "childIds": ["68", "70"],
+      "backendDOMNodeId": 67,
+      "parentId": "66"
+    },
+    {
+      "nodeId": "-1000000002",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Editable " },
+      "properties": [{ "name": "editable", "value": { "value": "richtext" } }],
+      "parentId": "72"
+    },
+    {
+      "nodeId": "-1000000003",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "rich" },
+      "properties": [{ "name": "editable", "value": { "value": "richtext" } }],
+      "parentId": "73"
+    },
+    {
+      "nodeId": "-1000000004",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": " text" },
+      "properties": [{ "name": "editable", "value": { "value": "richtext" } }],
+      "parentId": "74"
+    },
+    {
+      "nodeId": "75",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Area value" },
+      "properties": [{ "name": "editable", "value": { "value": "plaintext" } }],
+      "childIds": ["-1000000005"],
+      "backendDOMNodeId": 75,
+      "parentId": "10"
+    },
+    {
+      "nodeId": "24",
+      "role": { "value": "option" },
+      "name": { "value": "One" },
+      "properties": [{ "name": "selected", "value": { "value": false } }],
+      "backendDOMNodeId": 24,
+      "parentId": "20"
+    },
+    {
+      "nodeId": "27",
+      "role": { "value": "option" },
+      "name": { "value": "Two" },
+      "properties": [{ "name": "selected", "value": { "value": true } }],
+      "backendDOMNodeId": 27,
+      "parentId": "20"
+    },
+    {
+      "nodeId": "76",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Event A" },
+      "childIds": ["-1000000006"],
+      "backendDOMNodeId": 76,
+      "parentId": "31"
+    },
+    {
+      "nodeId": "77",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Event B" },
+      "childIds": ["-1000000007"],
+      "backendDOMNodeId": 77,
+      "parentId": "32"
+    },
+    {
+      "nodeId": "78",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["-1000000008"],
+      "backendDOMNodeId": 78,
+      "parentId": "38"
+    },
+    { "nodeId": "-1000000008", "ignored": true, "role": { "value": "none" }, "parentId": "78" },
+    {
+      "nodeId": "79",
+      "role": { "value": "StaticText" },
+      "name": { "value": "More info" },
+      "childIds": ["-1000000009"],
+      "backendDOMNodeId": 79,
+      "parentId": "38"
+    },
+    {
+      "nodeId": "80",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Details body" },
+      "childIds": ["-1000000010"],
+      "backendDOMNodeId": 80,
+      "parentId": "39"
+    },
+    {
+      "nodeId": "-1000000011",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Inner text" },
+      "parentId": "81"
+    },
+    {
+      "nodeId": "82",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Shadow text" },
+      "childIds": ["-1000000012"],
+      "backendDOMNodeId": 82,
+      "parentId": "46"
+    },
+    {
+      "nodeId": "83",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Shadow button" },
+      "childIds": ["-1000000013"],
+      "backendDOMNodeId": 83,
+      "parentId": "47"
+    },
+    {
+      "nodeId": "84",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Are you sure?" },
+      "childIds": ["-1000000014"],
+      "backendDOMNodeId": 84,
+      "parentId": "50"
+    },
+    {
+      "nodeId": "85",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Yes" },
+      "childIds": ["-1000000015"],
+      "backendDOMNodeId": 85,
+      "parentId": "51"
+    },
+    {
+      "nodeId": "86",
+      "role": { "value": "StaticText" },
+      "name": { "value": "No" },
+      "childIds": ["-1000000016"],
+      "backendDOMNodeId": 86,
+      "parentId": "52"
+    },
+    {
+      "nodeId": "-1000000017",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Read" },
+      "parentId": "87"
+    },
+    {
+      "nodeId": "-1000000018",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": " " },
+      "parentId": "88"
+    },
+    {
+      "nodeId": "-1000000019",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "more" },
+      "parentId": "89"
+    },
+    {
+      "nodeId": "-1000000024",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Price: " },
+      "parentId": "94"
+    },
+    {
+      "nodeId": "95",
+      "role": { "value": "StaticText" },
+      "name": { "value": "$9" },
+      "childIds": ["-1000000025"],
+      "backendDOMNodeId": 95,
+      "parentId": "63"
+    },
+    {
+      "nodeId": "-1000000026",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "\n" },
+      "parentId": "64"
+    },
+    {
+      "nodeId": "-1000000027",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Tax: " },
+      "parentId": "96"
+    },
+    {
+      "nodeId": "97",
+      "role": { "value": "StaticText" },
+      "name": { "value": "$1" },
+      "childIds": ["-1000000028"],
+      "backendDOMNodeId": 97,
+      "parentId": "65"
+    },
+    {
+      "nodeId": "68",
+      "role": { "value": "listitem" },
+      "properties": [{ "name": "level", "value": { "value": 1 } }],
+      "childIds": ["98", "69"],
+      "backendDOMNodeId": 68,
+      "parentId": "67"
+    },
+    {
+      "nodeId": "70",
+      "role": { "value": "listitem" },
+      "properties": [{ "name": "level", "value": { "value": 1 } }],
+      "childIds": ["100", "71"],
+      "backendDOMNodeId": 70,
+      "parentId": "67"
+    },
+    {
+      "nodeId": "-1000000005",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Area value" },
+      "properties": [{ "name": "editable", "value": { "value": "plaintext" } }],
+      "parentId": "75"
+    },
+    {
+      "nodeId": "-1000000006",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Event A" },
+      "parentId": "76"
+    },
+    {
+      "nodeId": "-1000000007",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Event B" },
+      "parentId": "77"
+    },
+    {
+      "nodeId": "-1000000009",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "More info" },
+      "parentId": "79"
+    },
+    {
+      "nodeId": "-1000000010",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Details body" },
+      "parentId": "80"
+    },
+    {
+      "nodeId": "-1000000012",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Shadow text" },
+      "parentId": "82"
+    },
+    {
+      "nodeId": "-1000000013",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Shadow button" },
+      "parentId": "83"
+    },
+    {
+      "nodeId": "-1000000014",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Are you sure?" },
+      "parentId": "84"
+    },
+    {
+      "nodeId": "-1000000015",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Yes" },
+      "parentId": "85"
+    },
+    {
+      "nodeId": "-1000000016",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "No" },
+      "parentId": "86"
+    },
+    {
+      "nodeId": "-1000000025",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "$9" },
+      "parentId": "95"
+    },
+    {
+      "nodeId": "-1000000028",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "$1" },
+      "parentId": "97"
+    },
+    {
+      "nodeId": "98",
+      "role": { "value": "ListMarker" },
+      "name": { "value": "• " },
+      "childIds": ["-1000000029"],
+      "backendDOMNodeId": 98,
+      "parentId": "68"
+    },
+    {
+      "nodeId": "69",
+      "role": { "value": "link" },
+      "name": { "value": "1" },
+      "childIds": ["99"],
+      "backendDOMNodeId": 69,
+      "parentId": "68"
+    },
+    {
+      "nodeId": "100",
+      "role": { "value": "ListMarker" },
+      "name": { "value": "• " },
+      "childIds": ["-1000000031"],
+      "backendDOMNodeId": 100,
+      "parentId": "70"
+    },
+    {
+      "nodeId": "71",
+      "role": { "value": "link" },
+      "name": { "value": "2" },
+      "childIds": ["101"],
+      "backendDOMNodeId": 71,
+      "parentId": "70"
+    },
+    { "nodeId": "-1000000029", "ignored": true, "role": { "value": "none" }, "parentId": "98" },
+    {
+      "nodeId": "99",
+      "role": { "value": "StaticText" },
+      "name": { "value": "1" },
+      "childIds": ["-1000000030"],
+      "backendDOMNodeId": 99,
+      "parentId": "69"
+    },
+    { "nodeId": "-1000000031", "ignored": true, "role": { "value": "none" }, "parentId": "100" },
+    {
+      "nodeId": "101",
+      "role": { "value": "StaticText" },
+      "name": { "value": "2" },
+      "childIds": ["-1000000032"],
+      "backendDOMNodeId": 101,
+      "parentId": "71"
+    },
+    {
+      "nodeId": "-1000000030",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "1" },
+      "parentId": "99"
+    },
+    {
+      "nodeId": "-1000000032",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "2" },
+      "parentId": "101"
+    }
+  ]
+]

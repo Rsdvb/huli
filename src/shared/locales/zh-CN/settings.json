@@ -3267,6 +3267,10 @@
         "name": "密钥卡片",
         "description": "Agent 要 API 密钥、令牌或密码时，用私密卡片向你要，不经过聊天。"
       },
+      "fileCheckpoints": {
+        "name": "回退时还原文件",
+        "description": "每条消息发出时，纸鸢都保存一份会话文件夹里的文件，回退到这条消息时可以一起还原。"
+      },
       "agentTheme": {
         "name": "Agent 改主题",
         "description": "你让 Agent 改配色时，它能读取和修改纸鸢的主题颜色。"

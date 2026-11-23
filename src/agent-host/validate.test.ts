@@ -2097,6 +2097,32 @@ describe('worktree requests', () => {
     rejects(() => posix['sessions.revert']({ sessionId: 's', entryId: 'x'.repeat(1_025) }))
   })
 
+  it('previews a rewind, and restores files only with a preview token', () => {
+    const token = 'a'.repeat(64)
+    expect(posix['sessions.rewindPreview']({ sessionId: 's', entryId: 'e:4', x: 1 })).toEqual({
+      sessionId: 's',
+      entryId: 'e:4',
+    })
+    rejects(() => posix['sessions.rewindPreview']({ sessionId: 's' }))
+    expect(posix['sessions.restoreFiles']({ sessionId: 's', entryId: 'e:4', token })).toEqual({
+      sessionId: 's',
+      entryId: 'e:4',
+      token,
+    })
+    for (const bad of [undefined, '', 'agent', '../x', 'A'.repeat(64), 7]) {
+      rejects(() => posix['sessions.restoreFiles']({ sessionId: 's', entryId: 'e:4', token: bad }))
+    }
+    expect(
+      posix['sessions.undoRewindFiles']({ sessionId: 's', backup: 'b-1700000000000' }),
+    ).toEqual({
+      sessionId: 's',
+      backup: 'b-1700000000000',
+    })
+    for (const backup of ['e-00', '../b-1', 'b-', 'b-1/2', 3]) {
+      rejects(() => posix['sessions.undoRewindFiles']({ sessionId: 's', backup }))
+    }
+  })
+
   it('removes a worktree only against the state the user was shown', () => {
     const expected = {
       exists: true,

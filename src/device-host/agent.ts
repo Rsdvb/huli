@@ -1,6 +1,7 @@
 // Agents' actions on devices, carried out by agent-device (MIT): one of its sessions per Kettu
 // session and device, its state in Kettu's data folder, its update notice off. Kettu runs only the
-// commands it builds here from checked arguments.
+// commands it builds here from checked arguments, the agent's words after `--`, where
+// agent-device reads no flag.
 
 import { execFile, spawn } from 'node:child_process'
 import { X509Certificate, createHash } from 'node:crypto'
@@ -14,6 +15,8 @@ import { nodeCommand, packageRoot } from './runtime'
 const COMMAND_TIMEOUT_MS = 180_000
 const MAX_OUTPUT = 512 * 1024
 const SPRINGBOARD = 'com.apple.springboard'
+/** agent-device's own quiet window for `wait stable`, given when a timeout follows it. */
+const STABLE_QUIET_MS = 500
 
 export class ActionError extends Error {
   constructor(
@@ -104,16 +107,18 @@ export class AgentActions {
       return { text: this.text(out) }
     }
     await this.ensureSession(session, device, selector, signal)
+    const digest = 'level' in action && action.level === 'digest' ? ['--level', 'digest'] : []
     switch (action.type) {
       case 'snapshot': {
-        let out = await this.cli(['snapshot', '-i', '--session', session], signal, device, true)
+        const read = ['snapshot', '-i', ...digest, '--session', session]
+        let out = await this.cli(read, signal, device, true)
         // An iOS session follows one app; reading the screen with none open reads the home screen.
         if (
           out.code !== 0 &&
           /requires an active app session|No foreground app/.test(out.stdout + out.stderr)
         ) {
           await this.cli(['open', SPRINGBOARD, '--session', session], signal, device)
-          out = await this.cli(['snapshot', '-i', '--session', session], signal, device)
+          out = await this.cli(read, signal, device)
         } else if (out.code !== 0) {
           throw this.failure(out)
         }
@@ -124,7 +129,11 @@ export class AgentActions {
         const verb = action.long ? 'longpress' : 'press'
         return {
           text: this.text(
-            await this.cli([verb, ...target, '--settle', '--session', session], signal, device),
+            await this.cli(
+              [verb, '--settle', ...digest, '--session', session, '--', ...target],
+              signal,
+              device,
+            ),
           ),
         }
       }
@@ -132,7 +141,7 @@ export class AgentActions {
         return {
           text: this.text(
             await this.cli(
-              ['fill', action.ref, action.text, '--settle', '--session', session],
+              ['fill', '--settle', ...digest, '--session', session, '--', action.ref, action.text],
               signal,
               device,
             ),
@@ -141,7 +150,132 @@ export class AgentActions {
       case 'type':
         return {
           text: this.text(
-            await this.cli(['type', action.text, '--session', session], signal, device),
+            await this.cli(['type', '--session', session, '--', action.text], signal, device),
+          ),
+        }
+      case 'wait': {
+        const timeout = action.timeoutMs === undefined ? [] : [String(action.timeoutMs)]
+        const what =
+          action.until === 'text'
+            ? ['text', action.value!]
+            : action.until === 'absent'
+              ? ['absent', action.value!]
+              : action.until === 'selector'
+                ? [action.value!]
+                : // A timeout comes after the quiet window, which then must be given.
+                  [
+                    'stable',
+                    ...(action.quietMs !== undefined || action.timeoutMs !== undefined
+                      ? [String(action.quietMs ?? STABLE_QUIET_MS)]
+                      : []),
+                  ]
+        return {
+          text: this.text(
+            await this.cli(
+              ['wait', '--session', session, '--', ...what, ...timeout],
+              signal,
+              device,
+            ),
+          ),
+        }
+      }
+      case 'find': {
+        const words = [
+          ...(action.locator === 'any' ? [] : [action.locator]),
+          action.query,
+          ...(action.action === 'getText'
+            ? ['get', 'text']
+            : action.action === 'getAttrs'
+              ? ['get', 'attrs']
+              : [action.action]),
+          ...(action.action === 'wait' && action.timeoutMs !== undefined
+            ? [String(action.timeoutMs)]
+            : []),
+          ...(action.value === undefined ? [] : [action.value]),
+        ]
+        const pick = action.pick === undefined ? [] : [`--${action.pick}`]
+        return {
+          text: this.text(
+            await this.cli(
+              ['find', ...pick, ...digest, '--session', session, '--', ...words],
+              signal,
+              device,
+            ),
+          ),
+        }
+      }
+      case 'is': {
+        const out = await this.cli(
+          [
+            'is',
+            '--session',
+            session,
+            '--',
+            action.predicate,
+            action.selector,
+            ...(action.value === undefined ? [] : [action.value]),
+          ],
+          signal,
+          device,
+          true,
+        )
+        if (out.code === 0) return { text: `Yes. ${this.text(out)}` }
+        // A check that does not hold is an answer, not a failure.
+        const failed = this.failure(out)
+        if (/\bis \w+ failed\b/.test(failed.message)) return { text: `No. ${failed.message}` }
+        throw failed
+      }
+      case 'get':
+        return {
+          text: this.text(
+            await this.cli(
+              ['get', ...digest, '--session', session, '--', action.format, action.target],
+              signal,
+              device,
+            ),
+          ),
+        }
+      case 'alert':
+        return {
+          text: this.text(
+            await this.cli(
+              [
+                'alert',
+                '--session',
+                session,
+                '--',
+                action.action,
+                ...(action.timeoutMs === undefined ? [] : [String(action.timeoutMs)]),
+              ],
+              signal,
+              device,
+            ),
+          ),
+        }
+      case 'keyboard':
+        return {
+          text: this.text(
+            await this.cli(['keyboard', '--session', session, '--', action.action], signal, device),
+          ),
+        }
+      case 'batch':
+        return {
+          text: this.text(
+            await this.cli(
+              [
+                'batch',
+                '--steps',
+                JSON.stringify(action.steps),
+                ...(action.stopOnError ? ['--on-error', 'stop'] : []),
+                '--max-steps',
+                String(action.steps.length),
+                ...digest,
+                '--session',
+                session,
+              ],
+              signal,
+              device,
+            ),
           ),
         }
       case 'scroll':

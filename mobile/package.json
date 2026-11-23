@@ -50,6 +50,7 @@
     "react-native-worklets": "0.13.0"
   },
   "devDependencies": {
+    "@lezer/markdown": "1.8.1",
     "@types/react": "~19.3.0",
     "i18next": "26.5.4",
     "typescript": "~6.0.3"

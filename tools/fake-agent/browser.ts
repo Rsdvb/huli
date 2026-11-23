@@ -161,7 +161,15 @@ const CALL_LIMIT_MS = 60_000
  * under the same row, until it goes through; each call gives up after Codex's 60 s, so a long
  * takeover shows that the calls return in time.
  */
-export const browser: Scenario = async (turn) => {
+export const browser: Scenario = (turn) => browserCalls(turn, false)
+
+/**
+ * `/browser-values ...` calls the tools as `/browser` does, and each row also shows the value the
+ * agent's model reads, such as the snapshot, and how long the call took.
+ */
+export const browserValues: Scenario = (turn) => browserCalls(turn, true)
+
+async function browserCalls(turn: Turn, values: boolean): Promise<'end_turn'> {
   const server = kettu(turn.session.mcpServers)
   const plan = steps(turn.text, 'browser_snapshot')
   if (typeof plan === 'string') {
@@ -202,6 +210,8 @@ export const browser: Scenario = async (turn) => {
     let text: string
     let failed: boolean
     let calls = 0
+    let value: unknown
+    const started = Date.now()
     for (;;) {
       calls += 1
       // Stop cancels the call that waits, as an agent's harness does.
@@ -221,15 +231,19 @@ export const browser: Scenario = async (turn) => {
       }
       const content = result.content as { type: string; text?: string }[]
       text = content.find((block) => block.type === 'text')?.text ?? ''
+      value = result.structuredContent
       failed = result.isError === true
       const code = (result.structuredContent as { code?: string } | undefined)?.code
       if (!failed || code !== 'user_has_control' || turn.signal.aborted) break
     }
+    const shown = values
+      ? `${text}\n\n${Date.now() - started} ms\n${JSON.stringify(value, null, 1)}`
+      : text
     await turn.send({
       sessionUpdate: 'tool_call_update',
       toolCallId: callId,
       status: failed ? 'failed' : 'completed',
-      content: [{ type: 'content', content: { type: 'text', text } }],
+      content: [{ type: 'content', content: { type: 'text', text: shown } }],
     })
     replies.push(`${step.name} (${calls} call${calls === 1 ? '' : 's'}): ${text.slice(0, 600)}`)
   }

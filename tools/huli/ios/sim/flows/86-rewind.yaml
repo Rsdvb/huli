@@ -1,0 +1,88 @@
+# Huli: going back to an earlier message from its menu. Three turns of the fake agent write into a
+# file of the session's folder; 回退到这里 on the second opens the dialog with what leaves the
+# conversation and, with 同时还原文件, the file that would be put back, then rewinds. The first
+# message names the session, so the one held is the second, which the title does not repeat.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/write notes.md alpha'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+# The session opens once the agent has started, which on a fresh runner takes a while.
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/write notes.md beta'
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 60000
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/write notes.md gamma'
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 60000
+# The keyboard goes down as the list is dragged, and the second message comes into view.
+- swipe:
+    start: 50%, 35%
+    end: 50%, 85%
+    duration: 700
+- scrollUntilVisible:
+    element: '.*notes.md beta.*'
+    direction: UP
+    timeout: 20000
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- takeScreenshot: r01-three-turns
+- longPressOn:
+    text: '.*notes.md beta.*'
+- waitForAnimationToEnd
+- takeScreenshot: r02-menu
+- tapOn: '回退到这里'
+- extendedWaitUntil:
+    visible: '同时还原文件'
+    timeout: 30000
+- extendedWaitUntil:
+    visible: '会改动 .*'
+    timeout: 30000
+    optional: true
+- takeScreenshot: r03-dialog
+- tapOn: '同时还原文件'
+- takeScreenshot: r04-files
+- tapOn: '回退'
+- extendedWaitUntil:
+    visible: '已回退.*'
+    timeout: 30000
+    optional: true
+- takeScreenshot: r05-done
+- longPressOn:
+    text: '.*notes.md beta.*'
+- waitForAnimationToEnd
+- tapOn: '从这里重新编辑'
+- extendedWaitUntil:
+    visible: '同时还原文件'
+    timeout: 30000
+- takeScreenshot: r06-edit
+- tapOn: '取消'

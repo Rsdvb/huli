@@ -19,10 +19,14 @@ export function isOwnPrompt(entry: ThreadEntry | undefined): entry is UserEntry 
   )
 }
 
-/** Where the latest agent switch is in the thread, -1 for none: an edit goes back no further. */
+/**
+ * Where the latest agent switch is in the thread, -1 for none: an edit goes back no further. Huli:
+ * a new session an edit carried on in is no switch, as it was given the whole conversation kept.
+ */
 export function lastSwitchAt(thread: Thread): number {
   for (let i = thread.order.length - 1; i >= 0; i--) {
-    if (thread.byId[thread.order[i]!]?.kind === 'takeover') return i
+    const entry = thread.byId[thread.order[i]!]
+    if (entry?.kind === 'takeover' && !entry.rewound) return i
   }
   return -1
 }

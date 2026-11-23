@@ -1,6 +1,7 @@
 import { memo, useState } from 'react'
 import {
   ArrowDataTransferHorizontalIcon,
+  ArrowTurnBackwardIcon,
   ArrowRight01Icon,
   TextCheckIcon,
 } from '@hugeicons/core-free-icons'
@@ -37,13 +38,17 @@ export const TakeoverEntry = memo(function TakeoverEntry({ sessionId, entryId }:
   )
   const [open, setOpen] = useState(false)
   if (!entry) return null
-  const text =
-    entry.turns > 0
+  // Huli: a rewind's new session of the same agent says so, rather than that it took over.
+  const text = entry.rewound
+    ? entry.turns > 0
+      ? t('takeover.rewoundCarried', { agent: name, count: entry.turns })
+      : t('takeover.rewound', { agent: name })
+    : entry.turns > 0
       ? t('takeover.carried', { agent: name, count: entry.turns })
       : t('takeover.title', { agent: name })
   const icon = (
     <HugeiconsIcon
-      icon={ArrowDataTransferHorizontalIcon}
+      icon={entry.rewound ? ArrowTurnBackwardIcon : ArrowDataTransferHorizontalIcon}
       strokeWidth={1.9}
       aria-hidden
       className="size-3.5"

@@ -1,0 +1,1020 @@
+[
+  [
+    {
+      "nodeId": "1",
+      "role": { "value": "RootWebArea" },
+      "name": { "value": "Checkout probe" },
+      "childIds": ["3"],
+      "backendDOMNodeId": 1
+    },
+    {
+      "nodeId": "3",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["6"],
+      "backendDOMNodeId": 3,
+      "parentId": "1"
+    },
+    {
+      "nodeId": "6",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["7", "11"],
+      "backendDOMNodeId": 6,
+      "parentId": "3"
+    },
+    {
+      "nodeId": "7",
+      "role": { "value": "banner" },
+      "childIds": ["8"],
+      "backendDOMNodeId": 7,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "11",
+      "role": { "value": "main" },
+      "childIds": [
+        "12",
+        "13",
+        "14",
+        "17",
+        "21",
+        "24",
+        "30",
+        "33",
+        "34",
+        "35",
+        "36",
+        "37",
+        "38",
+        "43",
+        "51",
+        "54",
+        "56",
+        "58"
+      ],
+      "backendDOMNodeId": 11,
+      "parentId": "6"
+    },
+    {
+      "nodeId": "8",
+      "role": { "value": "navigation" },
+      "childIds": ["9", "60", "10"],
+      "backendDOMNodeId": 8,
+      "parentId": "7"
+    },
+    {
+      "nodeId": "12",
+      "role": { "value": "heading" },
+      "name": { "value": "Checkout" },
+      "properties": [{ "name": "level", "value": { "value": 1 } }],
+      "childIds": ["62"],
+      "backendDOMNodeId": 12,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "13",
+      "role": { "value": "paragraph" },
+      "childIds": ["63"],
+      "backendDOMNodeId": 13,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "14",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["15", "16"],
+      "backendDOMNodeId": 14,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "15",
+      "role": { "value": "generic" },
+      "childIds": ["64"],
+      "backendDOMNodeId": 15,
+      "parentId": "14"
+    },
+    {
+      "nodeId": "16",
+      "role": { "value": "generic" },
+      "childIds": ["65"],
+      "backendDOMNodeId": 16,
+      "parentId": "14"
+    },
+    {
+      "nodeId": "17",
+      "role": { "value": "generic" },
+      "childIds": ["66", "67", "68"],
+      "backendDOMNodeId": 17,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "21",
+      "role": { "value": "paragraph" },
+      "childIds": ["69", "70", "71", "72", "73"],
+      "backendDOMNodeId": 21,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "24",
+      "role": { "value": "list" },
+      "childIds": ["25", "26", "28"],
+      "backendDOMNodeId": 24,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "30",
+      "role": { "value": "list" },
+      "childIds": ["31", "32"],
+      "backendDOMNodeId": 30,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "33",
+      "role": { "value": "alert" },
+      "childIds": ["85"],
+      "backendDOMNodeId": 33,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "34",
+      "role": { "value": "status" },
+      "childIds": ["86"],
+      "backendDOMNodeId": 34,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "35",
+      "role": { "value": "generic" },
+      "childIds": ["87"],
+      "backendDOMNodeId": 35,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "36",
+      "role": { "value": "button" },
+      "name": { "value": "Pay now" },
+      "properties": [{ "name": "invalid", "value": { "value": "false" } }],
+      "childIds": ["88"],
+      "backendDOMNodeId": 36,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "37",
+      "role": { "value": "button" },
+      "name": { "value": "Close" },
+      "properties": [{ "name": "invalid", "value": { "value": "false" } }],
+      "childIds": ["89"],
+      "backendDOMNodeId": 37,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "38",
+      "role": { "value": "LabelText" },
+      "childIds": ["90", "39"],
+      "backendDOMNodeId": 38,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "43",
+      "role": { "value": "table" },
+      "childIds": ["44"],
+      "backendDOMNodeId": 43,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "51",
+      "role": { "value": "DescriptionList" },
+      "childIds": ["52", "53"],
+      "backendDOMNodeId": 51,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "54",
+      "role": { "value": "generic" },
+      "childIds": ["100", "55", "101"],
+      "backendDOMNodeId": 54,
+      "parentId": "11"
+    },
+    {
+      "nodeId": "56",
+      "role": { "value": "region" },
+      "name": { "value": "Promo" },
+      "childIds": ["57"],
+      "backendDOMNodeId": 56,
+      "parentId": "11"
+    },
+    { "nodeId": "58", "role": { "value": "Iframe" }, "backendDOMNodeId": 58, "parentId": "11" },
+    {
+      "nodeId": "9",
+      "role": { "value": "link" },
+      "name": { "value": "Home" },
+      "childIds": ["59"],
+      "backendDOMNodeId": 9,
+      "parentId": "8"
+    },
+    {
+      "nodeId": "60",
+      "role": { "value": "StaticText" },
+      "name": { "value": " " },
+      "childIds": ["-1000000003"],
+      "backendDOMNodeId": 60,
+      "parentId": "8"
+    },
+    {
+      "nodeId": "10",
+      "role": { "value": "link" },
+      "name": { "value": "Cart" },
+      "childIds": ["61"],
+      "backendDOMNodeId": 10,
+      "parentId": "8"
+    },
+    {
+      "nodeId": "62",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Checkout" },
+      "childIds": ["-1000000005"],
+      "backendDOMNodeId": 62,
+      "parentId": "12"
+    },
+    {
+      "nodeId": "63",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Review your order before paying." },
+      "childIds": ["-1000000006"],
+      "backendDOMNodeId": 63,
+      "parentId": "13"
+    },
+    {
+      "nodeId": "64",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Subtotal" },
+      "childIds": ["-1000000007"],
+      "backendDOMNodeId": 64,
+      "parentId": "15"
+    },
+    {
+      "nodeId": "65",
+      "role": { "value": "StaticText" },
+      "name": { "value": "$40.00" },
+      "childIds": ["-1000000008"],
+      "backendDOMNodeId": 65,
+      "parentId": "16"
+    },
+    {
+      "nodeId": "66",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Total due" },
+      "childIds": ["-1000000009"],
+      "backendDOMNodeId": 66,
+      "parentId": "17"
+    },
+    {
+      "nodeId": "67",
+      "role": { "value": "StaticText" },
+      "name": { "value": " " },
+      "childIds": ["-1000000010"],
+      "backendDOMNodeId": 67,
+      "parentId": "17"
+    },
+    {
+      "nodeId": "68",
+      "role": { "value": "StaticText" },
+      "name": { "value": "$42.00" },
+      "childIds": ["-1000000011"],
+      "backendDOMNodeId": 68,
+      "parentId": "17"
+    },
+    {
+      "nodeId": "69",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Hello " },
+      "childIds": ["-1000000012"],
+      "backendDOMNodeId": 69,
+      "parentId": "21"
+    },
+    {
+      "nodeId": "70",
+      "role": { "value": "StaticText" },
+      "name": { "value": "world" },
+      "childIds": ["-1000000013"],
+      "backendDOMNodeId": 70,
+      "parentId": "21"
+    },
+    {
+      "nodeId": "71",
+      "role": { "value": "StaticText" },
+      "name": { "value": " and " },
+      "childIds": ["-1000000014"],
+      "backendDOMNodeId": 71,
+      "parentId": "21"
+    },
+    {
+      "nodeId": "72",
+      "role": { "value": "StaticText" },
+      "name": { "value": "more" },
+      "childIds": ["-1000000015"],
+      "backendDOMNodeId": 72,
+      "parentId": "21"
+    },
+    {
+      "nodeId": "73",
+      "role": { "value": "StaticText" },
+      "name": { "value": " text." },
+      "childIds": ["-1000000016"],
+      "backendDOMNodeId": 73,
+      "parentId": "21"
+    },
+    {
+      "nodeId": "25",
+      "role": { "value": "listitem" },
+      "properties": [{ "name": "level", "value": { "value": 1 } }],
+      "childIds": ["74", "75"],
+      "backendDOMNodeId": 25,
+      "parentId": "24"
+    },
+    {
+      "nodeId": "26",
+      "role": { "value": "listitem" },
+      "properties": [{ "name": "level", "value": { "value": 1 } }],
+      "childIds": ["76", "77", "27"],
+      "backendDOMNodeId": 26,
+      "parentId": "24"
+    },
+    {
+      "nodeId": "28",
+      "role": { "value": "listitem" },
+      "properties": [{ "name": "level", "value": { "value": 1 } }],
+      "childIds": ["79", "80"],
+      "backendDOMNodeId": 28,
+      "parentId": "24"
+    },
+    {
+      "nodeId": "31",
+      "role": { "value": "listitem" },
+      "properties": [{ "name": "level", "value": { "value": 1 } }],
+      "childIds": ["81", "82"],
+      "backendDOMNodeId": 31,
+      "parentId": "30"
+    },
+    {
+      "nodeId": "32",
+      "role": { "value": "listitem" },
+      "properties": [{ "name": "level", "value": { "value": 1 } }],
+      "childIds": ["83", "84"],
+      "backendDOMNodeId": 32,
+      "parentId": "30"
+    },
+    {
+      "nodeId": "85",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Network error" },
+      "childIds": ["-1000000028"],
+      "backendDOMNodeId": 85,
+      "parentId": "33"
+    },
+    {
+      "nodeId": "86",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Saving…" },
+      "childIds": ["-1000000029"],
+      "backendDOMNodeId": 86,
+      "parentId": "34"
+    },
+    {
+      "nodeId": "87",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Card declined" },
+      "childIds": ["-1000000030"],
+      "backendDOMNodeId": 87,
+      "parentId": "35"
+    },
+    {
+      "nodeId": "88",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Pay now" },
+      "childIds": ["-1000000031"],
+      "backendDOMNodeId": 88,
+      "parentId": "36"
+    },
+    {
+      "nodeId": "89",
+      "role": { "value": "StaticText" },
+      "name": { "value": "×" },
+      "childIds": ["-1000000032"],
+      "backendDOMNodeId": 89,
+      "parentId": "37"
+    },
+    {
+      "nodeId": "90",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Email " },
+      "childIds": ["-1000000033"],
+      "backendDOMNodeId": 90,
+      "parentId": "38"
+    },
+    {
+      "nodeId": "39",
+      "role": { "value": "textbox" },
+      "name": { "value": "Email " },
+      "value": { "value": "a@b.c" },
+      "properties": [
+        { "name": "invalid", "value": { "value": "false" } },
+        { "name": "editable", "value": { "value": "plaintext" } },
+        { "name": "readonly", "value": { "value": false } }
+      ],
+      "childIds": ["40"],
+      "backendDOMNodeId": 39,
+      "parentId": "38"
+    },
+    {
+      "nodeId": "44",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["45", "48"],
+      "backendDOMNodeId": 44,
+      "parentId": "43"
+    },
+    {
+      "nodeId": "45",
+      "role": { "value": "row" },
+      "childIds": ["46", "47"],
+      "backendDOMNodeId": 45,
+      "parentId": "44"
+    },
+    {
+      "nodeId": "48",
+      "role": { "value": "row" },
+      "childIds": ["49", "50"],
+      "backendDOMNodeId": 48,
+      "parentId": "44"
+    },
+    {
+      "nodeId": "52",
+      "role": { "value": "term" },
+      "name": { "value": "Shipping" },
+      "childIds": ["98"],
+      "backendDOMNodeId": 52,
+      "parentId": "51"
+    },
+    {
+      "nodeId": "53",
+      "role": { "value": "definition" },
+      "childIds": ["99"],
+      "backendDOMNodeId": 53,
+      "parentId": "51"
+    },
+    {
+      "nodeId": "100",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Line one" },
+      "childIds": ["-1000000041"],
+      "backendDOMNodeId": 100,
+      "parentId": "54"
+    },
+    {
+      "nodeId": "55",
+      "role": { "value": "LineBreak" },
+      "name": { "value": "\n" },
+      "childIds": ["-1000000042"],
+      "backendDOMNodeId": 55,
+      "parentId": "54"
+    },
+    {
+      "nodeId": "101",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Line two" },
+      "childIds": ["-1000000043"],
+      "backendDOMNodeId": 101,
+      "parentId": "54"
+    },
+    {
+      "nodeId": "57",
+      "role": { "value": "paragraph" },
+      "childIds": ["102"],
+      "backendDOMNodeId": 57,
+      "parentId": "56"
+    },
+    {
+      "nodeId": "59",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Home" },
+      "childIds": ["-1000000002"],
+      "backendDOMNodeId": 59,
+      "parentId": "9"
+    },
+    {
+      "nodeId": "-1000000003",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": " " },
+      "parentId": "60"
+    },
+    {
+      "nodeId": "61",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Cart" },
+      "childIds": ["-1000000004"],
+      "backendDOMNodeId": 61,
+      "parentId": "10"
+    },
+    {
+      "nodeId": "-1000000005",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Checkout" },
+      "parentId": "62"
+    },
+    {
+      "nodeId": "-1000000006",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Review your order before paying." },
+      "parentId": "63"
+    },
+    {
+      "nodeId": "-1000000007",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Subtotal" },
+      "parentId": "64"
+    },
+    {
+      "nodeId": "-1000000008",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "$40.00" },
+      "parentId": "65"
+    },
+    {
+      "nodeId": "-1000000009",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Total due" },
+      "parentId": "66"
+    },
+    {
+      "nodeId": "-1000000010",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": " " },
+      "parentId": "67"
+    },
+    {
+      "nodeId": "-1000000011",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "$42.00" },
+      "parentId": "68"
+    },
+    {
+      "nodeId": "-1000000012",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Hello " },
+      "parentId": "69"
+    },
+    {
+      "nodeId": "-1000000013",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "world" },
+      "parentId": "70"
+    },
+    {
+      "nodeId": "-1000000014",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": " and " },
+      "parentId": "71"
+    },
+    {
+      "nodeId": "-1000000015",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "more" },
+      "parentId": "72"
+    },
+    {
+      "nodeId": "-1000000016",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": " text." },
+      "parentId": "73"
+    },
+    {
+      "nodeId": "74",
+      "role": { "value": "ListMarker" },
+      "name": { "value": "• " },
+      "childIds": ["-1000000017"],
+      "backendDOMNodeId": 74,
+      "parentId": "25"
+    },
+    {
+      "nodeId": "75",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Apples" },
+      "childIds": ["-1000000018"],
+      "backendDOMNodeId": 75,
+      "parentId": "25"
+    },
+    {
+      "nodeId": "76",
+      "role": { "value": "ListMarker" },
+      "name": { "value": "• " },
+      "childIds": ["-1000000019"],
+      "backendDOMNodeId": 76,
+      "parentId": "26"
+    },
+    {
+      "nodeId": "77",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Bananas " },
+      "childIds": ["-1000000020"],
+      "backendDOMNodeId": 77,
+      "parentId": "26"
+    },
+    {
+      "nodeId": "27",
+      "role": { "value": "link" },
+      "name": { "value": "remove" },
+      "childIds": ["78"],
+      "backendDOMNodeId": 27,
+      "parentId": "26"
+    },
+    {
+      "nodeId": "79",
+      "role": { "value": "ListMarker" },
+      "name": { "value": "• " },
+      "childIds": ["-1000000022"],
+      "backendDOMNodeId": 79,
+      "parentId": "28"
+    },
+    {
+      "nodeId": "80",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Cherries" },
+      "childIds": ["-1000000023"],
+      "backendDOMNodeId": 80,
+      "parentId": "28"
+    },
+    {
+      "nodeId": "81",
+      "role": { "value": "ListMarker" },
+      "name": { "value": "1. " },
+      "childIds": ["-1000000024"],
+      "backendDOMNodeId": 81,
+      "parentId": "31"
+    },
+    {
+      "nodeId": "82",
+      "role": { "value": "StaticText" },
+      "name": { "value": "First step" },
+      "childIds": ["-1000000025"],
+      "backendDOMNodeId": 82,
+      "parentId": "31"
+    },
+    {
+      "nodeId": "83",
+      "role": { "value": "ListMarker" },
+      "name": { "value": "2. " },
+      "childIds": ["-1000000026"],
+      "backendDOMNodeId": 83,
+      "parentId": "32"
+    },
+    {
+      "nodeId": "84",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Second step" },
+      "childIds": ["-1000000027"],
+      "backendDOMNodeId": 84,
+      "parentId": "32"
+    },
+    {
+      "nodeId": "-1000000028",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Network error" },
+      "parentId": "85"
+    },
+    {
+      "nodeId": "-1000000029",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Saving…" },
+      "parentId": "86"
+    },
+    {
+      "nodeId": "-1000000030",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Card declined" },
+      "parentId": "87"
+    },
+    {
+      "nodeId": "-1000000031",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Pay now" },
+      "parentId": "88"
+    },
+    {
+      "nodeId": "-1000000032",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "×" },
+      "parentId": "89"
+    },
+    {
+      "nodeId": "-1000000033",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Email " },
+      "parentId": "90"
+    },
+    {
+      "nodeId": "40",
+      "role": { "value": "generic" },
+      "properties": [{ "name": "editable", "value": { "value": "plaintext" } }],
+      "childIds": ["91"],
+      "backendDOMNodeId": 40,
+      "parentId": "39"
+    },
+    {
+      "nodeId": "46",
+      "role": { "value": "columnheader" },
+      "name": { "value": "Item" },
+      "properties": [{ "name": "readonly", "value": { "value": false } }],
+      "childIds": ["94"],
+      "backendDOMNodeId": 46,
+      "parentId": "45"
+    },
+    {
+      "nodeId": "47",
+      "role": { "value": "columnheader" },
+      "name": { "value": "Qty" },
+      "properties": [{ "name": "readonly", "value": { "value": false } }],
+      "childIds": ["95"],
+      "backendDOMNodeId": 47,
+      "parentId": "45"
+    },
+    {
+      "nodeId": "49",
+      "role": { "value": "cell" },
+      "name": { "value": "Widget" },
+      "childIds": ["96"],
+      "backendDOMNodeId": 49,
+      "parentId": "48"
+    },
+    {
+      "nodeId": "50",
+      "role": { "value": "cell" },
+      "name": { "value": "2" },
+      "childIds": ["97"],
+      "backendDOMNodeId": 50,
+      "parentId": "48"
+    },
+    {
+      "nodeId": "98",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Shipping" },
+      "childIds": ["-1000000039"],
+      "backendDOMNodeId": 98,
+      "parentId": "52"
+    },
+    {
+      "nodeId": "99",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Free" },
+      "childIds": ["-1000000040"],
+      "backendDOMNodeId": 99,
+      "parentId": "53"
+    },
+    {
+      "nodeId": "-1000000041",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Line one" },
+      "parentId": "100"
+    },
+    {
+      "nodeId": "-1000000042",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "\n" },
+      "parentId": "55"
+    },
+    {
+      "nodeId": "-1000000043",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Line two" },
+      "parentId": "101"
+    },
+    {
+      "nodeId": "102",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Use code SAVE10" },
+      "childIds": ["-1000000044"],
+      "backendDOMNodeId": 102,
+      "parentId": "57"
+    },
+    {
+      "nodeId": "-1000000002",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Home" },
+      "parentId": "59"
+    },
+    {
+      "nodeId": "-1000000004",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Cart" },
+      "parentId": "61"
+    },
+    { "nodeId": "-1000000017", "ignored": true, "role": { "value": "none" }, "parentId": "74" },
+    {
+      "nodeId": "-1000000018",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Apples" },
+      "parentId": "75"
+    },
+    { "nodeId": "-1000000019", "ignored": true, "role": { "value": "none" }, "parentId": "76" },
+    {
+      "nodeId": "-1000000020",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Bananas " },
+      "parentId": "77"
+    },
+    {
+      "nodeId": "78",
+      "role": { "value": "StaticText" },
+      "name": { "value": "remove" },
+      "childIds": ["-1000000021"],
+      "backendDOMNodeId": 78,
+      "parentId": "27"
+    },
+    { "nodeId": "-1000000022", "ignored": true, "role": { "value": "none" }, "parentId": "79" },
+    {
+      "nodeId": "-1000000023",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Cherries" },
+      "parentId": "80"
+    },
+    { "nodeId": "-1000000024", "ignored": true, "role": { "value": "none" }, "parentId": "81" },
+    {
+      "nodeId": "-1000000025",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "First step" },
+      "parentId": "82"
+    },
+    { "nodeId": "-1000000026", "ignored": true, "role": { "value": "none" }, "parentId": "83" },
+    {
+      "nodeId": "-1000000027",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Second step" },
+      "parentId": "84"
+    },
+    {
+      "nodeId": "91",
+      "role": { "value": "StaticText" },
+      "name": { "value": "a@b.c" },
+      "properties": [{ "name": "editable", "value": { "value": "plaintext" } }],
+      "childIds": ["-1000000034"],
+      "backendDOMNodeId": 91,
+      "parentId": "40"
+    },
+    {
+      "nodeId": "94",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Item" },
+      "childIds": ["-1000000035"],
+      "backendDOMNodeId": 94,
+      "parentId": "46"
+    },
+    {
+      "nodeId": "95",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Qty" },
+      "childIds": ["-1000000036"],
+      "backendDOMNodeId": 95,
+      "parentId": "47"
+    },
+    {
+      "nodeId": "96",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Widget" },
+      "childIds": ["-1000000037"],
+      "backendDOMNodeId": 96,
+      "parentId": "49"
+    },
+    {
+      "nodeId": "97",
+      "role": { "value": "StaticText" },
+      "name": { "value": "2" },
+      "childIds": ["-1000000038"],
+      "backendDOMNodeId": 97,
+      "parentId": "50"
+    },
+    {
+      "nodeId": "-1000000039",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Shipping" },
+      "parentId": "98"
+    },
+    {
+      "nodeId": "-1000000040",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Free" },
+      "parentId": "99"
+    },
+    {
+      "nodeId": "-1000000044",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Use code SAVE10" },
+      "parentId": "102"
+    },
+    {
+      "nodeId": "-1000000021",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "remove" },
+      "parentId": "78"
+    },
+    {
+      "nodeId": "-1000000034",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "a@b.c" },
+      "properties": [{ "name": "editable", "value": { "value": "plaintext" } }],
+      "parentId": "91"
+    },
+    {
+      "nodeId": "-1000000035",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Item" },
+      "parentId": "94"
+    },
+    {
+      "nodeId": "-1000000036",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Qty" },
+      "parentId": "95"
+    },
+    {
+      "nodeId": "-1000000037",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Widget" },
+      "parentId": "96"
+    },
+    {
+      "nodeId": "-1000000038",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "2" },
+      "parentId": "97"
+    }
+  ],
+  [
+    {
+      "nodeId": "2",
+      "role": { "value": "RootWebArea" },
+      "childIds": ["103"],
+      "backendDOMNodeId": 2
+    },
+    {
+      "nodeId": "103",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["105"],
+      "backendDOMNodeId": 103,
+      "parentId": "2"
+    },
+    {
+      "nodeId": "105",
+      "ignored": true,
+      "role": { "value": "none" },
+      "childIds": ["106", "107"],
+      "backendDOMNodeId": 105,
+      "parentId": "103"
+    },
+    {
+      "nodeId": "106",
+      "role": { "value": "paragraph" },
+      "childIds": ["108"],
+      "backendDOMNodeId": 106,
+      "parentId": "105"
+    },
+    {
+      "nodeId": "107",
+      "role": { "value": "button" },
+      "name": { "value": "Frame button" },
+      "properties": [{ "name": "invalid", "value": { "value": "false" } }],
+      "childIds": ["109"],
+      "backendDOMNodeId": 107,
+      "parentId": "105"
+    },
+    {
+      "nodeId": "108",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Inside frame" },
+      "childIds": ["-1000000045"],
+      "backendDOMNodeId": 108,
+      "parentId": "106"
+    },
+    {
+      "nodeId": "109",
+      "role": { "value": "StaticText" },
+      "name": { "value": "Frame button" },
+      "childIds": ["-1000000046"],
+      "backendDOMNodeId": 109,
+      "parentId": "107"
+    },
+    {
+      "nodeId": "-1000000045",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Inside frame" },
+      "parentId": "108"
+    },
+    {
+      "nodeId": "-1000000046",
+      "role": { "value": "InlineTextBox" },
+      "name": { "value": "Frame button" },
+      "parentId": "109"
+    }
+  ]
+]

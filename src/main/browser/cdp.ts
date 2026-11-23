@@ -4,7 +4,11 @@
 
 import type { WebContents } from 'electron'
 import {
+  BROWSER_CONSOLE_LEVELS,
+  BROWSER_WAIT_STATES,
+  MAX_SNAPSHOT_DEPTH,
   siteOf,
+  type BrowserWaitState,
   type BrowserCallResult,
   type BrowserToolName,
   type UploadAnswer,
@@ -16,11 +20,39 @@ import {
   type SurfaceControls,
   type UploadConsent,
 } from '@shared/control'
+import {
+  actionProblem,
+  AUTO_WAIT_MS,
+  pauseBefore,
+  PROBE,
+  waitedFailure,
+  type ActionKind,
+  type Probe,
+} from './actionability'
+import {
+  consoleCall,
+  exceptionEntry,
+  logEntry,
+  shownAt,
+  type ConsoleEntry,
+  type ConsoleLevel,
+} from './console'
+import {
+  bodyText,
+  isStaticResource,
+  isTextType,
+  MAX_POST_DATA,
+  redactHeaders,
+  requestTiming,
+  type BodyText,
+  type ResourceTiming,
+} from './network'
+import { buildOutline, mergeFrames, outlineText, RefRegistry, type AXNode } from './outline'
 import { isNeverOpened } from './policy'
+import { elementMet, SEARCH, selectorMet, type FrameSearch } from './page-wait'
+import { diffOutline } from './snapshot-diff'
 import { UploadRefused, type UploadFile } from './upload'
 
-/** The outline an agent reads, before its "… N more lines" marker. */
-export const MAX_SNAPSHOT_LINES = 2_000
 /** How long the network stays quiet before a page counts as settled. */
 export const QUIET_MS = 500
 /** The longest a page is waited for after an action. */
@@ -99,13 +131,11 @@ export interface BrowserCdpDeps {
   ): Promise<UploadAnswer>
 }
 
-interface ConsoleMessage {
-  level: string
-  text: string
-  url: string
-  line: number
+interface ConsoleMessage extends ConsoleEntry {
   /** The page's document it was logged under, so `since_navigation` can leave earlier ones out. */
   nav: number
+  /** Its place among everything the page logged, for the errors an action reports. */
+  seq: number
 }
 
 interface NetworkRequest {
@@ -116,25 +146,55 @@ interface NetworkRequest {
   type: string
   size: number | null
   nav: number
+  statusText: string
+  mimeType: string
+  requestHeaders: Record<string, unknown>
+  responseHeaders: Record<string, unknown> | null
+  /** The body the page sent, when short enough to come with the event; `hasPostData` says one went. */
+  postData: string | null
+  hasPostData: boolean
+  /** Why it failed, such as net::ERR_CONNECTION_REFUSED; null when it did not. */
+  error: string | null
+  /** The earlier addresses it was redirected from, each with its status. */
+  redirects: string[]
+  /** The protocol's monotonic seconds when it was sent and when it ended, and the clock then. */
+  sent: number | null
+  ended: number | null
+  wallTime: number | null
+  timing: ResourceTiming | null
+  fromCache: boolean
 }
 
+/**
+ * The last whole outline the agent read of a document, which the next one's changes are from: all
+ * its lines, past the cap too, so a line the cap pushes out does not read as removed.
+ */
 interface Snapshot {
-  /** The document it was taken from; a ref from another one is stale. */
   nav: number
-  refs: Map<string, number>
-  /** The accessibility node behind each backend id, for the covered-centre message. */
-  outline: string
-  url: string
-  title: string
+  lines: string[]
 }
+
+/** A diff is worth reading over the whole outline only when it is this much shorter. */
+const DIFF_SHARE = 0.7
 
 interface PageState {
   nav: number
   loading: boolean
   inFlight: Set<string>
   console: ConsoleMessage[]
+  /** How many messages the page logged, and of them the last the agent was told about. */
+  logged: number
+  reported: number
   requests: NetworkRequest[]
+  /** The same requests by id, and headers whose request came after them. */
+  requestsById: Map<string, NetworkRequest>
+  extraHeaders: Map<
+    string,
+    { request?: Record<string, unknown>; response?: Record<string, unknown> }
+  >
   snapshot: Snapshot | null
+  /** The refs of the document's elements, which keep from one snapshot to the next. */
+  refs: RefRegistry
   dialogs: string[]
   /** Input events injected right now; the page reports them as it reports the user's. */
   injecting: number
@@ -153,211 +213,6 @@ interface FileChooser {
   nav: number
   /** Not yet reported to the agent. */
   fresh: boolean
-}
-
-// Accessibility node, as Accessibility.getFullAXTree reports it.
-interface AXNode {
-  nodeId: string
-  ignored?: boolean
-  role?: { value?: string }
-  name?: { value?: string }
-  description?: { value?: string }
-  value?: { value?: unknown }
-  properties?: { name: string; value?: { value?: unknown } }[]
-  childIds?: string[]
-  backendDOMNodeId?: number
-  parentId?: string
-}
-
-export interface Outline {
-  lines: string[]
-  /** `eN` to the node's backend id, in the order the page holds them. */
-  refs: Map<string, number>
-  /** Lines left out beyond the cap. */
-  more: number
-}
-
-const ROLE_NAMES: Record<string, string> = {
-  RootWebArea: 'page',
-  StaticText: 'text',
-  InlineTextBox: 'text',
-  TextField: 'textbox',
-  SearchBox: 'searchbox',
-  CheckBox: 'checkbox',
-  RadioButton: 'radio',
-  ComboBox: 'combobox',
-  ListBox: 'listbox',
-  ListBoxOption: 'option',
-  MenuListPopup: 'menu',
-  MenuItem: 'menuitem',
-  MenuBar: 'menubar',
-  Menu: 'menu',
-  ToggleButton: 'button',
-  DisclosureTriangle: 'button',
-  PopUpButton: 'button',
-  Slider: 'slider',
-  SpinButton: 'spinbutton',
-  ProgressIndicator: 'progressbar',
-  Image: 'image',
-  Iframe: 'iframe',
-  Heading: 'heading',
-  Paragraph: 'paragraph',
-  ListItem: 'listitem',
-  UnorderedList: 'list',
-  OrderedList: 'list',
-  DescriptionList: 'list',
-  Term: 'term',
-  Description: 'definition',
-  Link: 'link',
-}
-
-const ACTIONABLE = new Set([
-  'link',
-  'button',
-  'textbox',
-  'searchbox',
-  'combobox',
-  'listbox',
-  'checkbox',
-  'radio',
-  'switch',
-  'slider',
-  'spinbutton',
-  'tab',
-  'menuitem',
-  'menuitemcheckbox',
-  'menuitemradio',
-  'option',
-  'treeitem',
-  'textfield',
-])
-
-// Wrappers that add nothing an agent needs; their children take their place.
-const TRANSPARENT = new Set(['none', 'presentation', 'generic', 'ignored', 'paragraph'])
-
-// Roles that hold other elements, so their line ends in a colon.
-const CONTAINERS = new Set([
-  'page',
-  'banner',
-  'main',
-  'navigation',
-  'region',
-  'form',
-  'list',
-  'menu',
-  'menubar',
-  'tablist',
-  'tree',
-  'row',
-  'rowgroup',
-  'table',
-  'listbox',
-  'combobox',
-  'grid',
-  'group',
-  'toolbar',
-  'dialog',
-  'alertdialog',
-  'iframe',
-])
-
-const STATES: Record<string, string> = {
-  checked: 'checked',
-  expanded: 'expanded',
-  selected: 'selected',
-  pressed: 'pressed',
-  level: 'level',
-  invalid: 'invalid',
-  haspopup: 'popup',
-  readonly: 'readonly',
-  multiselectable: 'multiselectable',
-}
-
-function roleOf(node: AXNode): string {
-  const role = node.role?.value ?? ''
-  return ROLE_NAMES[role] ?? role.toLowerCase()
-}
-
-function clean(text: string): string {
-  return text.replace(/\s+/g, ' ').trim()
-}
-
-function quoted(text: string): string {
-  return `"${clean(text).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
-}
-
-/** The outline of a page's accessibility tree, with a ref on every element an agent can act on. */
-export function buildOutline(nodes: readonly AXNode[]): Outline {
-  const byId = new Map<string, AXNode>()
-  for (const node of nodes) byId.set(node.nodeId, node)
-  const roots = nodes.filter((node) => node.parentId === undefined || !byId.has(node.parentId))
-  const refs = new Map<string, number>()
-  const lines: string[] = []
-  const seen = new Set<string>()
-
-  const walk = (node: AXNode, depth: number): void => {
-    if (seen.has(node.nodeId)) return
-    seen.add(node.nodeId)
-    const children = (node.childIds ?? [])
-      .map((id) => byId.get(id))
-      .filter((child): child is AXNode => !!child)
-    const role = roleOf(node)
-    const name = clean(node.name?.value ?? '')
-    if (node.ignored) {
-      for (const child of children) walk(child, depth)
-      return
-    }
-    // The page itself heads the outline, which outlineText writes.
-    if (role === 'page' && node.role?.value === 'RootWebArea') {
-      for (const child of children) walk(child, depth)
-      return
-    }
-    // A text node repeats its container's words; the container already says them.
-    if (node.role?.value === 'StaticText') return
-    if (node.role?.value === 'InlineTextBox') return
-    const transparent = TRANSPARENT.has(role) && name === ''
-    if (transparent && children.length === 1) {
-      walk(children[0]!, depth)
-      return
-    }
-    let line = `${'  '.repeat(depth)}- ${role}`
-    if (name !== '') line += ` ${quoted(name)}`
-    else if (node.description?.value && clean(node.description.value) !== '')
-      line += ` ${quoted(node.description.value)}`
-    const props = new Map((node.properties ?? []).map((p) => [p.name, p.value?.value]))
-    for (const [prop, label] of Object.entries(STATES)) {
-      const value = props.get(prop)
-      if (value === undefined || value === false || value === 'false') continue
-      if (prop === 'level') line += ` [level=${String(value)}]`
-      else if (value === true || value === 'true') line += ` [${label}]`
-      else line += ` [${label}=${String(value)}]`
-    }
-    if (props.get('disabled') === true) line += ' [disabled]'
-    const value = props.get('valuetext') ?? node.value?.value
-    if (typeof value === 'string' && value !== '' && (role === 'textbox' || role === 'combobox'))
-      line += ` [value=${quoted(value.slice(0, 80))}]`
-    if (ACTIONABLE.has(role) && node.backendDOMNodeId !== undefined) {
-      const ref = `e${refs.size + 1}`
-      refs.set(ref, node.backendDOMNodeId)
-      line += ` [ref=${ref}]`
-    }
-    if (CONTAINERS.has(role) && children.length > 0) line += ':'
-    lines.push(line)
-    for (const child of children) walk(child, depth + 1)
-  }
-
-  for (const root of roots) walk(root, 0)
-
-  const more = Math.max(0, lines.length - MAX_SNAPSHOT_LINES)
-  return { lines: more > 0 ? lines.slice(0, MAX_SNAPSHOT_LINES) : lines, refs, more }
-}
-
-/** The text an agent reads for a snapshot: the page's title and address, then the outline. */
-export function outlineText(page: { title: string | null; url: string }, outline: Outline): string {
-  const head = `- Page: ${clean(page.title ?? '') || 'Untitled'} (${page.url || 'about:blank'})`
-  const lines = [head, ...outline.lines]
-  if (outline.more > 0) lines.push(`… ${outline.more} more lines`)
-  return lines.join('\n')
 }
 
 /** Whether a page has settled: nothing loading, nothing in flight, and a quiet network. */
@@ -558,8 +413,13 @@ export class BrowserCdp {
       loading: false,
       inFlight: new Set(),
       console: [],
+      logged: 0,
+      reported: 0,
       requests: [],
+      requestsById: new Map(),
+      extraHeaders: new Map(),
       snapshot: null,
+      refs: new RefRegistry(),
       dialogs: [],
       injecting: 0,
       status: null,
@@ -716,7 +576,7 @@ export class BrowserCdp {
       case 'browser_reload':
         return this.reload(sessionId)
       case 'browser_snapshot':
-        return this.snapshotResult(sessionId)
+        return this.snapshotResult(sessionId, args)
       case 'browser_click':
         return this.click(sessionId, args)
       case 'browser_type':
@@ -735,6 +595,8 @@ export class BrowserCdp {
         return this.consoleMessages(sessionId, args)
       case 'browser_network_requests':
         return this.networkRequests(sessionId, args)
+      case 'browser_network_request':
+        return this.networkRequest(sessionId, args)
       case 'browser_evaluate':
         return this.evaluate(sessionId, args)
       case 'browser_tabs':
@@ -826,39 +688,33 @@ export class BrowserCdp {
 
   private event(page: PageState, method: string, params: Record<string, unknown>): void {
     switch (method) {
-      case 'Runtime.consoleAPICalled': {
-        const args = Array.isArray(params.args) ? (params.args as Record<string, unknown>[]) : []
-        const stack = params.stackTrace as
-          { callFrames?: { url?: string; lineNumber?: number }[] } | undefined
-        const frame = stack?.callFrames?.[0]
-        this.pushConsole(page, {
-          level: consoleLevel(params.type),
-          text: args.map(argumentText).join(' '),
-          url: String(frame?.url ?? ''),
-          line: (frame?.lineNumber ?? 0) + 1,
-          nav: page.nav,
-        })
+      case 'Runtime.consoleAPICalled':
+        this.pushConsole(page, consoleCall(params))
         break
-      }
-      case 'Log.entryAdded': {
-        const entry = (params.entry ?? {}) as Record<string, unknown>
-        this.pushConsole(page, {
-          level: entry.level === 'warning' ? 'warn' : String(entry.level ?? 'info'),
-          text: String(entry.text ?? ''),
-          url: String(entry.url ?? ''),
-          line: Number(entry.lineNumber ?? 0) + 1,
-          nav: page.nav,
-        })
+      case 'Log.entryAdded':
+        this.pushConsole(page, logEntry(params))
         break
-      }
+      case 'Runtime.exceptionThrown':
+        this.pushConsole(page, exceptionEntry(params))
+        break
       case 'Network.requestWillBeSent': {
         const request = (params.request ?? {}) as Record<string, unknown>
         const id = String(params.requestId ?? '')
         if (!id) break
         page.inFlight.add(id)
-        const existing = page.requests.find((entry) => entry.id === id)
-        if (existing) break
-        page.requests.push({
+        const existing = page.requestsById.get(id)
+        const redirect = params.redirectResponse as Record<string, unknown> | undefined
+        if (existing) {
+          // A redirect goes on under the same id, to the address it was sent to.
+          if (redirect) {
+            existing.redirects.push(`${Number(redirect.status ?? 0)} ${existing.url}`)
+            existing.url = String(request.url ?? existing.url)
+            existing.method = String(request.method ?? existing.method)
+            existing.requestHeaders = objectOf(request.headers)
+          }
+          break
+        }
+        const entry: NetworkRequest = {
           id,
           method: String(request.method ?? 'GET'),
           url: String(request.url ?? ''),
@@ -866,17 +722,70 @@ export class BrowserCdp {
           type: String(params.type ?? ''),
           size: null,
           nav: page.nav,
-        })
+          statusText: '',
+          mimeType: '',
+          requestHeaders: objectOf(request.headers),
+          responseHeaders: null,
+          postData:
+            typeof request.postData === 'string' && request.postData.length <= MAX_POST_DATA
+              ? request.postData
+              : null,
+          hasPostData: request.hasPostData === true || typeof request.postData === 'string',
+          error: null,
+          redirects: [],
+          sent: numberOr(params.timestamp),
+          ended: null,
+          wallTime: numberOr(params.wallTime),
+          timing: null,
+          fromCache: false,
+        }
+        page.requests.push(entry)
+        page.requestsById.set(id, entry)
+        const extra = page.extraHeaders.get(id)
+        if (extra) {
+          page.extraHeaders.delete(id)
+          if (extra.request) entry.requestHeaders = { ...entry.requestHeaders, ...extra.request }
+          if (extra.response) entry.responseHeaders = extra.response
+        }
         this.trimRequests(page)
+        break
+      }
+      case 'Network.requestWillBeSentExtraInfo':
+      case 'Network.responseReceivedExtraInfo': {
+        // The headers as they went on the wire, cookies too, which may come before the request.
+        const id = String(params.requestId ?? '')
+        const headers = objectOf(params.headers)
+        const side = method === 'Network.requestWillBeSentExtraInfo' ? 'request' : 'response'
+        const entry = page.requestsById.get(id)
+        if (entry && side === 'request')
+          entry.requestHeaders = { ...entry.requestHeaders, ...headers }
+        else if (entry) entry.responseHeaders = { ...(entry.responseHeaders ?? {}), ...headers }
+        else if (id) {
+          page.extraHeaders.set(id, { ...page.extraHeaders.get(id), [side]: headers })
+          if (page.extraHeaders.size > MAX_REQUESTS) {
+            page.extraHeaders.delete(page.extraHeaders.keys().next().value!)
+          }
+        }
         break
       }
       case 'Network.responseReceived': {
         const id = String(params.requestId ?? '')
         const response = (params.response ?? {}) as Record<string, unknown>
-        const entry = page.requests.find((item) => item.id === id)
+        const entry = page.requestsById.get(id)
         if (entry) {
           entry.status = Number(response.status ?? 0) || null
           if (!entry.type) entry.type = String(params.type ?? '')
+          entry.statusText = String(response.statusText ?? '')
+          entry.mimeType = String(response.mimeType ?? '')
+          entry.responseHeaders = {
+            ...objectOf(response.headers),
+            ...(entry.responseHeaders ?? {}),
+          }
+          entry.timing = (response.timing as ResourceTiming | undefined) ?? null
+          entry.fromCache =
+            response.fromDiskCache === true ||
+            response.fromServiceWorker === true ||
+            response.fromPrefetchCache === true
         }
         if (entry?.type === 'Document' && page.status === null) {
           page.status = Number(response.status ?? 0) || null
@@ -886,12 +795,24 @@ export class BrowserCdp {
       case 'Network.loadingFinished': {
         const id = String(params.requestId ?? '')
         page.inFlight.delete(id)
-        const entry = page.requests.find((item) => item.id === id)
-        if (entry) entry.size = Number(params.encodedDataLength ?? 0)
+        const entry = page.requestsById.get(id)
+        if (entry) {
+          entry.size = Number(params.encodedDataLength ?? 0)
+          entry.ended = numberOr(params.timestamp)
+        }
         break
       }
       case 'Network.loadingFailed': {
-        page.inFlight.delete(String(params.requestId ?? ''))
+        const id = String(params.requestId ?? '')
+        page.inFlight.delete(id)
+        const entry = page.requestsById.get(id)
+        if (entry) {
+          entry.ended = numberOr(params.timestamp)
+          entry.error =
+            params.canceled === true
+              ? 'canceled'
+              : String(params.blockedReason ?? params.errorText ?? 'failed')
+        }
         break
       }
       case 'Page.frameStartedLoading': {
@@ -917,6 +838,7 @@ export class BrowserCdp {
         if (typeof frame.id === 'string') page.frameId = frame.id
         page.nav += 1
         page.snapshot = null
+        page.refs = new RefRegistry()
         page.status = null
         page.chooser = null
         break
@@ -943,15 +865,18 @@ export class BrowserCdp {
     return frameId === undefined || frameId === page.frameId
   }
 
-  private pushConsole(page: PageState, message: ConsoleMessage): void {
-    page.console.push(message)
+  private pushConsole(page: PageState, entry: ConsoleEntry): void {
+    page.logged += 1
+    page.console.push({ ...entry, nav: page.nav, seq: page.logged })
     if (page.console.length > MAX_CONSOLE) page.console.splice(0, page.console.length - MAX_CONSOLE)
   }
 
   private trimRequests(page: PageState): void {
     while (page.requests.length > MAX_REQUESTS) {
       const dropped = page.requests.shift()
-      if (dropped) page.inFlight.delete(dropped.id)
+      if (!dropped) continue
+      page.inFlight.delete(dropped.id)
+      if (page.requestsById.get(dropped.id) === dropped) page.requestsById.delete(dropped.id)
     }
   }
 
@@ -971,43 +896,108 @@ export class BrowserCdp {
     }
   }
 
+  /**
+   * The page's outline: the whole of it, which the agent's next snapshot of the document is told
+   * apart from, or one element's (`root`) to `depth` levels.
+   */
   private async capture(
     sessionId: string,
     page: PageState,
-  ): Promise<{ outline: string; refs: Map<string, number>; nav: number }> {
-    // Each frame has a tree of its own; the same-origin ones sit under their iframe's node.
-    const nodes: AXNode[] = []
+    scope: { root?: number; depth?: number } = {},
+  ): Promise<{ outline: string; head: string; all: string[]; found: boolean }> {
+    // Each frame has a tree of its own, which goes under the element of the frame that holds it.
+    let main: AXNode[] | null = null
+    const frames: { owner: number | null; nodes: AXNode[] }[] = []
     for (const frameId of await this.frameIds(sessionId)) {
-      const tree = await this.send<{ nodes: AXNode[] }>(sessionId, 'Accessibility.getFullAXTree', {
+      const tree = await this.send<{ nodes: AXNode[] }>(
+        sessionId,
+        'Accessibility.getFullAXTree',
+        frameId === '' ? {} : { frameId },
+      ).catch(() => null)
+      if (!tree) continue
+      if (main === null) {
+        main = tree.nodes
+        continue
+      }
+      const owner = await this.send<{ backendNodeId?: number }>(sessionId, 'DOM.getFrameOwner', {
         frameId,
       }).catch(() => null)
-      if (!tree) continue
-      if (nodes.length === 0) nodes.push(...tree.nodes)
-      else nodes.push(...tree.nodes.filter((node) => node.role?.value !== 'RootWebArea'))
+      frames.push({ owner: owner?.backendNodeId ?? null, nodes: tree.nodes })
     }
+    const nodes = mergeFrames(main ?? [], frames)
     const contents = this.contentsOf(sessionId)
-    const built = buildOutline(nodes)
+    const refs = page.refs
+    const built = buildOutline(nodes, { refFor: (backend) => refs.refFor(backend), ...scope })
     const url = contents.getURL()
     const title = contents.getTitle() || null
     const text = outlineText({ title, url }, built)
-    page.snapshot = {
-      nav: page.nav,
-      refs: built.refs,
-      outline: text,
-      url,
-      title: title ?? '',
+    if (scope.root === undefined && scope.depth === undefined) {
+      page.snapshot = { nav: page.nav, lines: built.all }
     }
-    return { outline: text, refs: built.refs, nav: page.nav }
+    const end = text.indexOf('\n')
+    const head = end < 0 ? text : text.slice(0, end)
+    return { outline: text, head, all: built.all, found: built.found }
   }
 
-  private async snapshotResult(sessionId: string): Promise<BrowserCallResult> {
+  /**
+   * The outline an action answers with: what changed since the agent's last snapshot of this
+   * document when that is much shorter, else the whole of it.
+   */
+  private async changedOutline(
+    sessionId: string,
+    page: PageState,
+  ): Promise<{ outline: string; diff: boolean }> {
+    const before = page.snapshot?.nav === page.nav ? page.snapshot : null
+    const { outline, head, all } = await this.capture(sessionId, page)
+    if (!before) return { outline, diff: false }
+    const changes = diffOutline(before.lines, all)
+    if (changes === null) return { outline, diff: false }
+    if (changes.length === 0) {
+      return {
+        outline: `${head}\nNothing changed since your last snapshot (browser_snapshot gives the whole page).`,
+        diff: true,
+      }
+    }
+    const diff = [
+      head,
+      'Changes since your last snapshot: + added, - removed, under the unchanged elements that ' +
+        'hold them; the rest is as it was (browser_snapshot gives the whole page).',
+      ...changes,
+    ].join('\n')
+    if (diff.length > outline.length * DIFF_SHARE) return { outline, diff: false }
+    return { outline: diff, diff: true }
+  }
+
+  private async snapshotResult(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
     const page = this.pageOf(sessionId)
     const contents = this.contentsOf(sessionId)
-    const { outline } = await this.capture(sessionId, page)
+    const scope: { root?: number; depth?: number } = {}
+    if (args.ref !== undefined) scope.root = this.resolveRef(page, String(args.ref))
+    if (args.depth !== undefined) {
+      const depth = Number(args.depth)
+      if (!Number.isInteger(depth) || depth < 0 || depth > MAX_SNAPSHOT_DEPTH) {
+        throw new ToolFailure(
+          'invalid',
+          `depth must be a whole number from 0 to ${MAX_SNAPSHOT_DEPTH}.`,
+        )
+      }
+      scope.depth = depth
+    }
+    const { outline, found } = await this.capture(sessionId, page, scope)
+    if (!found) {
+      throw new ToolFailure(
+        'stale_ref',
+        `${describe(args, 'That element')} is no longer on the page. Take a new snapshot.`,
+      )
+    }
     const url = contents.getURL()
     const title = contents.getTitle()
+    const part = scope.root !== undefined ? ` ${describe(args, 'the element')} of` : ''
     return {
-      text: `Snapshotted the page at ${url || 'about:blank'}${title ? `, "${title}"` : ''}.`,
+      text: `Snapshotted${part} the page at ${url || 'about:blank'}${title ? `, "${title}"` : ''}${scope.depth === undefined ? '' : `, ${scope.depth} level${scope.depth === 1 ? '' : 's'} deep`}.`,
       value: { url, title, snapshot: outline },
     }
   }
@@ -1032,7 +1022,10 @@ export class BrowserCdp {
     const current = this.pageOf(sessionId)
     if (switched) await this.settle(sessionId, current)
     const contents = this.contentsOf(sessionId)
-    const { outline } = await this.capture(sessionId, current)
+    // Another tab's outline is new to the agent, so it reads the whole of it.
+    const { outline, diff } = switched
+      ? { ...(await this.capture(sessionId, current)), diff: false }
+      : await this.changedOutline(sessionId, current)
     const url = contents.getURL()
     const title = contents.getTitle()
     const dialogs = page.dialogs.splice(0)
@@ -1045,7 +1038,14 @@ export class BrowserCdp {
         ? ['It opened a new tab, which is now your current tab.']
         : ['The page closed itself, and the tab that opened it is your current tab again.']
     return {
-      text: [text, ...dialogs, ...chooser, ...opened].join(' '),
+      text: [
+        text,
+        ...dialogs,
+        ...chooser,
+        ...opened,
+        ...newErrors(current),
+        ...(diff ? ['The snapshot shows what changed since your last one.'] : []),
+      ].join(' '),
       value: { url, title, snapshot: outline },
     }
   }
@@ -1076,6 +1076,7 @@ export class BrowserCdp {
       text: [
         `Opened ${shown}${title ? `, "${title}"` : ''}${status === null ? '' : ` (HTTP ${status})`}.`,
         ...dialogs,
+        ...newErrors(page),
       ].join(' '),
       value: { url: shown, title, status, snapshot: outline },
     }
@@ -1105,9 +1106,8 @@ export class BrowserCdp {
   private resolveRef(page: PageState, ref: string): number {
     const match = /^e(\d+)$/.exec(ref)
     if (!match) throw new ToolFailure('invalid', `"${ref}" is not a ref such as e12.`)
-    const snapshot = page.snapshot
-    const backend = snapshot?.refs.get(ref)
-    if (!snapshot || snapshot.nav !== page.nav || backend === undefined) {
+    const backend = page.refs.backendOf(ref)
+    if (backend === undefined) {
       throw new ToolFailure(
         'stale_ref',
         `Ref ${ref} is no longer on the page. Take a new snapshot.`,
@@ -1160,58 +1160,9 @@ export class BrowserCdp {
     const backend = this.resolveRef(page, String(args.ref ?? ''))
     const double = args.double === true
     const button = clickButton(args.button)
-    await this.send(sessionId, 'DOM.scrollIntoViewIfNeeded', { backendNodeId: backend }).catch(
-      () => {},
-    )
-    // The centre in the top frame's viewport, and what covers it there; a shadow root or a frame
-    // is the page's own answer, not a guess from the outline.
-    const spot = await this.onElement<{
-      x: number
-      y: number
-      covered: string | null
-      inside: boolean
-    }>(
-      sessionId,
-      backend,
-      `function () {
-        const rect = this.getBoundingClientRect()
-        if (rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0, covered: null, inside: false }
-        let x = rect.x + rect.width / 2
-        let y = rect.y + rect.height / 2
-        let view = window
-        for (let depth = 0; depth < 8 && view !== window.top; depth++) {
-          const frame = view.frameElement
-          if (!frame) break
-          const box = frame.getBoundingClientRect()
-          x += box.x
-          y += box.y
-          view = frame.ownerDocument.defaultView
-        }
-        const at = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
-        let covered = null
-        if (at && at !== this && !this.contains(at)) {
-          const name = at.tagName ? at.tagName.toLowerCase() : 'element'
-          const id = at.id ? '#' + at.id : ''
-          const text = (at.innerText || at.textContent || '').trim().slice(0, 60)
-          covered = text ? name + id + ' "' + text + '"' : name + id
-        }
-        const inside =
-          x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight
-        return { x, y, covered, inside }
-      }`,
-    )
-    if (!spot.inside) {
-      throw new ToolFailure(
-        'invalid',
-        `${describe(args, 'The element')} is not visible on the page. Scroll it into view, then click again.`,
-      )
-    }
-    if (spot.covered !== null) {
-      throw new ToolFailure(
-        'invalid',
-        `The centre of ${describe(args, 'the element')} is covered by ${spot.covered}. Scroll it or close what covers it, then click again.`,
-      )
-    }
+    // The centre in the top frame's viewport, once nothing covers it there; a shadow root or a
+    // frame is the page's own answer, not a guess from the outline.
+    const spot = await this.actionable(sessionId, backend, args, 'click')
     const { x, y } = spot
     this.deps.acted?.(sessionId, { x, y }, true)
     await this.send(sessionId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
@@ -1241,24 +1192,44 @@ export class BrowserCdp {
     )
   }
 
-  /** Where an element's centre is in the page's viewport, for the agent's pointer; null if unknown. */
-  private async centre(
+  /**
+   * Waits up to AUTO_WAIT_MS for the element to take the action: on the page, visible, enabled,
+   * editable to type, and to click inside the window with nothing over its centre, scrolling it
+   * into view on each try.
+   */
+  private async actionable(
     sessionId: string,
     backend: number,
-  ): Promise<{ x: number; y: number } | null> {
-    try {
-      const spot = await this.onElement<{ x: number; y: number } | null>(
-        sessionId,
-        backend,
-        `function () {
-          const rect = this.getBoundingClientRect()
-          if (rect.width <= 0 || rect.height <= 0) return null
-          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
-        }`,
+    args: Record<string, unknown>,
+    action: ActionKind,
+  ): Promise<Probe> {
+    const started = Date.now()
+    for (let attempt = 0; ; attempt++) {
+      const pause = pauseBefore(attempt)
+      if (pause > 0) {
+        await this.gate(sessionId)
+        await sleep(pause)
+      }
+      await this.send(sessionId, 'DOM.scrollIntoViewIfNeeded', { backendNodeId: backend }).catch(
+        () => {},
       )
-      return spot && Number.isFinite(spot.x) && Number.isFinite(spot.y) ? spot : null
-    } catch {
-      return null
+      // An element the page dropped may be gone from the protocol too.
+      const probe = await this.onElement<Probe | null>(sessionId, backend, PROBE, [action]).catch(
+        (error: unknown) => {
+          if (error instanceof ToolFailure || error instanceof ControlWait) throw error
+          return null
+        },
+      )
+      const problem = probe
+        ? actionProblem(probe, action)
+        : actionProblem({ connected: false } as Probe, action)
+      if (!problem) return probe!
+      if (!problem.retry || Date.now() - started >= AUTO_WAIT_MS) {
+        throw new ToolFailure(
+          problem.code,
+          waitedFailure(describe(args, 'The element'), problem, attempt > 0),
+        )
+      }
     }
   }
 
@@ -1267,7 +1238,8 @@ export class BrowserCdp {
     const backend = this.resolveRef(page, String(args.ref ?? ''))
     const text = String(args.text ?? '')
     const slowly = args.slowly === true
-    this.deps.acted?.(sessionId, await this.centre(sessionId, backend), false)
+    const spot = await this.actionable(sessionId, backend, args, 'type')
+    this.deps.acted?.(sessionId, { x: spot.x, y: spot.y }, false)
     await this.send(sessionId, 'DOM.focus', { backendNodeId: backend })
     const { object } = await this.send<{ object: { objectId?: string } }>(
       sessionId,
@@ -1424,7 +1396,8 @@ export class BrowserCdp {
     const values = Array.isArray(args.values) ? args.values.map(String) : []
     if (values.length === 0)
       throw new ToolFailure('invalid', 'values must list at least one option.')
-    this.deps.acted?.(sessionId, await this.centre(sessionId, backend), true)
+    const spot = await this.actionable(sessionId, backend, args, 'select')
+    this.deps.acted?.(sessionId, { x: spot.x, y: spot.y }, true)
     const { object } = await this.send<{ object: { objectId?: string } }>(
       sessionId,
       'DOM.resolveNode',
@@ -1688,57 +1661,155 @@ export class BrowserCdp {
     const page = this.pageOf(sessionId)
     const text = args.text === undefined ? undefined : String(args.text)
     const gone = args.text_gone === undefined ? undefined : String(args.text_gone)
+    const selector = args.selector === undefined ? undefined : String(args.selector)
+    const ref = args.ref === undefined ? undefined : String(args.ref)
     const seconds = args.time === undefined ? undefined : Number(args.time)
-    if (text === undefined && gone === undefined && seconds === undefined) {
-      throw new ToolFailure('invalid', 'Give text, text_gone or time to wait for.')
+    const state = waitState(args.state)
+    const conditions = [text, gone, selector, ref].filter((given) => given !== undefined)
+    if (conditions.length === 0 && seconds === undefined) {
+      throw new ToolFailure('invalid', 'Give text, text_gone, selector, ref or time to wait for.')
+    }
+    if (conditions.length > 1) {
+      throw new ToolFailure('invalid', 'Give one of text, text_gone, selector and ref.')
     }
     if (seconds !== undefined && (!Number.isFinite(seconds) || seconds < 0 || seconds > 30)) {
       throw new ToolFailure('invalid', 'time must be 0 to 30 seconds.')
     }
-    const deadline = Date.now() + (seconds ?? 30) * 1000
-    if (text !== undefined || gone !== undefined) {
-      let seen: boolean
+    const backend = ref === undefined ? undefined : this.resolveRef(page, ref)
+    const limit = seconds ?? 30
+    const deadline = Date.now() + limit * 1000
+    let said: string
+    if (conditions.length > 0) {
+      // Each frame's own isolated world, which the page's scripts cannot change.
+      const worlds = new Map<string, number | null>()
+      let met: boolean
       for (;;) {
-        const body = await this.pageText(sessionId)
-        seen = text !== undefined ? body.includes(text) : !body.includes(gone!)
-        if (seen || Date.now() >= deadline) break
+        if (backend !== undefined) {
+          const shown = await this.onElement<{ connected: boolean; visible: boolean } | null>(
+            sessionId,
+            backend,
+            `function () {
+              if (!this.isConnected || this.nodeType !== 1) return { connected: false, visible: false }
+              const rect = this.getBoundingClientRect()
+              const visible = rect.width > 0 && rect.height > 0 &&
+                getComputedStyle(this).visibility !== 'hidden' &&
+                (typeof this.checkVisibility !== 'function' || this.checkVisibility({ visibilityProperty: true }))
+              return { connected: true, visible }
+            }`,
+          ).catch(() => null)
+          met = elementMet(state, shown?.connected ?? false, shown?.visible ?? false)
+        } else {
+          const query = selector !== undefined ? { selector } : { text: text ?? gone }
+          const frames = await this.searchFrames(sessionId, worlds, query)
+          const failed = frames.find((frame): frame is { error: string } => 'error' in frame)
+          if (failed) {
+            throw new ToolFailure('invalid', `The page could not use the selector: ${failed.error}`)
+          }
+          if (selector !== undefined) {
+            let matched = 0
+            let visible = 0
+            for (const frame of frames) {
+              if ('matched' in frame) {
+                matched += frame.matched
+                visible += frame.visible
+              }
+            }
+            met = selectorMet(state, matched, visible)
+          } else {
+            const found = frames.some((frame) => 'found' in frame && frame.found)
+            met = text !== undefined ? found : !found
+          }
+        }
+        if (met || Date.now() >= deadline) break
         await this.gate(sessionId)
         await sleep(100)
       }
-      if (!seen) {
+      const what =
+        text !== undefined
+          ? `"${text}"`
+          : gone !== undefined
+            ? `"${gone}"`
+            : selector !== undefined
+              ? `An element matching ${JSON.stringify(selector)}`
+              : describe(args, 'The element')
+      if (!met) {
         throw new ToolFailure(
           'timeout',
           text !== undefined
-            ? `"${text}" did not appear within ${seconds ?? 30} s.`
-            : `"${gone}" was still on the page after ${seconds ?? 30} s.`,
+            ? `${what} did not appear within ${limit} s.`
+            : gone !== undefined
+              ? `${what} was still on the page after ${limit} s.`
+              : `${what} was not ${state} within ${limit} s.`,
         )
       }
+      said =
+        text !== undefined
+          ? `${what} appeared.`
+          : gone !== undefined
+            ? `${what} left the page.`
+            : `${what} is ${state}.`
     } else {
       const until = Date.now() + (seconds ?? 0) * 1000
       while (Date.now() < until) {
         await this.gate(sessionId)
         await sleep(Math.min(100, Math.max(1, until - Date.now())))
       }
+      said = `Waited ${seconds ?? 0} s.`
     }
     const contents = this.contentsOf(sessionId)
-    const { outline } = await this.capture(sessionId, page)
+    const { outline, diff } = await this.changedOutline(sessionId, page)
     return {
-      text:
-        text !== undefined
-          ? `"${text}" appeared.`
-          : gone !== undefined
-            ? `"${gone}" left the page.`
-            : `Waited ${seconds ?? 0} s.`,
+      text: [
+        said,
+        ...newErrors(page),
+        ...(diff ? ['The snapshot shows what changed since your last one.'] : []),
+      ].join(' '),
       value: { url: contents.getURL(), title: contents.getTitle(), snapshot: outline },
     }
   }
 
-  private async pageText(sessionId: string): Promise<string> {
-    const result = await this.send<{ result?: { value?: string } }>(sessionId, 'Runtime.evaluate', {
-      expression: 'document.body ? document.body.innerText : ""',
-      returnByValue: true,
-    })
-    return result.result?.value ?? ''
+  /**
+   * SEARCH in every frame of the page that answers, each in an isolated world of its own, which
+   * `worlds` keeps for the wait; a frame without one is searched in its page's own world.
+   */
+  private async searchFrames(
+    sessionId: string,
+    worlds: Map<string, number | null>,
+    query: { text?: string; selector?: string },
+  ): Promise<FrameSearch[]> {
+    const expression = `(${SEARCH})(${JSON.stringify(query)})`
+    const results: FrameSearch[] = []
+    for (const frameId of await this.frameIds(sessionId)) {
+      let context = worlds.get(frameId)
+      if (context === undefined) {
+        const world =
+          frameId === ''
+            ? null
+            : await this.send<{ executionContextId?: number }>(
+                sessionId,
+                'Page.createIsolatedWorld',
+                { frameId, worldName: 'kite-wait' },
+              ).catch(() => null)
+        context = world?.executionContextId ?? null
+        worlds.set(frameId, context)
+      }
+      const answer = await this.send<{ result?: { value?: FrameSearch } }>(
+        sessionId,
+        'Runtime.evaluate',
+        {
+          expression,
+          returnByValue: true,
+          ...(context === null ? {} : { contextId: context }),
+        },
+      ).catch(() => {
+        // A world goes with its document; the next try makes the frame a new one.
+        worlds.delete(frameId)
+        return null
+      })
+      const value = answer?.result?.value
+      if (value && typeof value === 'object') results.push(value)
+    }
+    return results
   }
 
   private async consoleMessages(
@@ -1747,14 +1818,23 @@ export class BrowserCdp {
   ): Promise<BrowserCallResult> {
     const page = this.pageOf(sessionId)
     const since = args.since_navigation === true
+    const level = consoleFilter(args.level)
     const messages = page.console
-      .filter((message) => !since || message.nav === page.nav)
-      .map(({ level, text, url, line }) => ({ level, text, url, line }))
+      .filter((message) => (!since || message.nav === page.nav) && shownAt(message.level, level))
+      .map(({ level, text, url, line, stack }) => ({
+        level,
+        text,
+        url,
+        line,
+        ...(stack.length > 0 ? { stack: stack.join('\n') } : {}),
+      }))
+    page.reported = page.logged
+    const which = level === 'all' ? 'console message' : `${level} message`
     return {
       text:
         messages.length === 0
-          ? 'No console messages.'
-          : `${messages.length} console message${messages.length === 1 ? '' : 's'}, oldest first.`,
+          ? `No ${which}s.`
+          : `${messages.length} ${which}${messages.length === 1 ? '' : 's'}, oldest first.`,
       value: { messages },
     }
   }
@@ -1765,15 +1845,119 @@ export class BrowserCdp {
   ): Promise<BrowserCallResult> {
     const page = this.pageOf(sessionId)
     const since = args.since_navigation === true
+    const wanted = typeof args.url === 'string' ? args.url.toLowerCase() : ''
+    const statics = args.include_static === true
+    let left = 0
     const requests = page.requests
-      .filter((request) => !since || request.nav === page.nav)
-      .map(({ method, url, status, type, size }) => ({ method, url, status, type, size }))
+      .filter((request) => {
+        if (since && request.nav !== page.nav) return false
+        if (wanted !== '' && !request.url.toLowerCase().includes(wanted)) return false
+        if (!statics && isStaticResource(request)) {
+          left += 1
+          return false
+        }
+        return true
+      })
+      .map(({ id, method, url, status, type, size, error }) => ({
+        id,
+        method,
+        url,
+        status,
+        type,
+        size,
+        ...(error === null ? {} : { error }),
+      }))
+    const count =
+      requests.length === 0
+        ? 'No network requests'
+        : `${requests.length} network request${requests.length === 1 ? '' : 's'}, oldest first`
+    const statement =
+      left === 0
+        ? `${count}.`
+        : `${count}; ${left} loaded image${left === 1 ? '' : 's'}, script${left === 1 ? '' : 's'} and other static resources left out (include_static shows them).`
     return {
-      text:
-        requests.length === 0
-          ? 'No network requests.'
-          : `${requests.length} network request${requests.length === 1 ? '' : 's'}, oldest first.`,
+      text: `${statement}${requests.length > 0 ? ' browser_network_request gives one by its id.' : ''}`,
       value: { requests },
+    }
+  }
+
+  /** One request's headers, status, timing and text bodies, with credentials replaced. */
+  private async networkRequest(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const page = this.pageOf(sessionId)
+    const id = String(args.id ?? '')
+    const entry = page.requestsById.get(id)
+    if (!entry) {
+      throw new ToolFailure(
+        'invalid',
+        `No request ${JSON.stringify(id)} on this page; browser_network_requests lists their ids.`,
+      )
+    }
+    const notes: string[] = []
+    const requestType = headerOf(entry.requestHeaders, 'content-type')
+    let requestBody: BodyText | null = null
+    if (entry.hasPostData) {
+      let sent = entry.postData
+      if (sent === null) {
+        const fetched = await this.send<{ postData?: string }>(
+          sessionId,
+          'Network.getRequestPostData',
+          { requestId: id },
+        ).catch(() => null)
+        sent = fetched?.postData ?? null
+      }
+      requestBody =
+        sent === null
+          ? { text: null, note: 'The browser no longer holds it.' }
+          : bodyText(sent, requestType)
+      if (requestBody.note) notes.push(`Request body: ${requestBody.note}`)
+    }
+    let responseBody: BodyText | null = null
+    if (entry.error !== null) notes.push(`It failed: ${entry.error}.`)
+    else if (entry.ended === null) notes.push('It is still loading, so its body is not here yet.')
+    else if (entry.status !== null && entry.status >= 300 && entry.status < 400) {
+      // A redirect has no body of its own.
+    } else {
+      const type = entry.mimeType || headerOf(entry.responseHeaders ?? {}, 'content-type')
+      const got = await this.send<{ body?: string; base64Encoded?: boolean }>(
+        sessionId,
+        'Network.getResponseBody',
+        { requestId: id },
+      ).catch(() => null)
+      if (!got || typeof got.body !== 'string') {
+        responseBody = { text: null, note: 'The browser no longer holds it.' }
+      } else if (got.base64Encoded) {
+        responseBody = isTextType(type)
+          ? bodyText(Buffer.from(got.body, 'base64').toString('utf8'), type)
+          : bodyText(got.body, type, true)
+      } else responseBody = bodyText(got.body, type)
+      if (responseBody.note) notes.push(`Response body: ${responseBody.note}`)
+    }
+    const status = entry.status === null ? 'no response yet' : `HTTP ${entry.status}`
+    return {
+      text: `${entry.method} ${entry.url}: ${entry.error ?? status}.`,
+      value: {
+        id,
+        method: entry.method,
+        url: entry.url,
+        status: entry.status,
+        status_text: entry.statusText,
+        type: entry.type,
+        mime_type: entry.mimeType,
+        size: entry.size,
+        from_cache: entry.fromCache,
+        error: entry.error,
+        redirects: entry.redirects,
+        request_headers: redactHeaders(entry.requestHeaders),
+        response_headers:
+          entry.responseHeaders === null ? null : redactHeaders(entry.responseHeaders),
+        timing: requestTiming(entry),
+        request_body: requestBody?.text ?? null,
+        response_body: responseBody?.text ?? null,
+        notes,
+      },
     }
   }
 
@@ -1841,33 +2025,50 @@ export class BrowserCdp {
   }
 }
 
-function argumentText(argument: Record<string, unknown>): string {
-  const value = argument.value
-  if (value !== undefined) return typeof value === 'string' ? value : JSON.stringify(value)
-  if (argument.unserializableValue !== undefined) return String(argument.unserializableValue)
-  if (argument.description !== undefined) return String(argument.description)
-  return String(argument.type ?? '')
+function objectOf(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {}
 }
 
-/** A console message's level, in Chrome's words. */
-function consoleLevel(type: unknown): string {
-  switch (type) {
-    case 'warning':
-      return 'warn'
-    case 'startGroup':
-    case 'startGroupCollapsed':
-    case 'endGroup':
-    case 'debug':
-    case 'verbose':
-      return 'debug'
-    case 'error':
-    case 'assert':
-      return 'error'
-    case 'info':
-      return 'info'
-    default:
-      return 'log'
+function headerOf(headers: Record<string, unknown>, name: string): string {
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === name) return String(value)
   }
+  return ''
+}
+
+function numberOr(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function waitState(value: unknown): BrowserWaitState {
+  if (value === undefined) return 'visible'
+  if ((BROWSER_WAIT_STATES as readonly unknown[]).includes(value)) return value as BrowserWaitState
+  throw new ToolFailure('invalid', 'state must be visible, hidden, attached or detached.')
+}
+
+function consoleFilter(value: unknown): ConsoleLevel {
+  if (value === undefined) return 'all'
+  if ((BROWSER_CONSOLE_LEVELS as readonly unknown[]).includes(value)) return value as ConsoleLevel
+  throw new ToolFailure('invalid', 'level must be error, warn, info or all.')
+}
+
+/** The errors the page logged since the agent was last told, for an action's result. */
+function newErrors(page: PageState): string[] {
+  const errors = page.console.filter(
+    (message) =>
+      message.seq > page.reported && message.nav === page.nav && message.level === 'error',
+  )
+  page.reported = page.logged
+  if (errors.length === 0) return []
+  const first = errors[0]!.text.split('\n')[0]!.slice(0, 200)
+  return [
+    errors.length === 1
+      ? `The page logged an error: ${first}.`
+      : `The page logged ${errors.length} errors, the first: ${first}.`,
+    'browser_console_messages shows them.',
+  ]
 }
 
 function describe(args: Record<string, unknown>, fallback: string): string {

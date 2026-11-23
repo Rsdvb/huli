@@ -1,4 +1,4 @@
-// The seventeen browser tools of the `kettu` MCP server: what agents are told, the schemas, the
+// The eighteen browser tools of the `kettu` MCP server: what agents are told, the schemas, the
 // checks, and the forwarding to main, which drives the calling session's page.
 
 import { isAbsolute } from 'node:path'
@@ -10,9 +10,12 @@ import type {
   BrowserToolName,
 } from '@shared/browser'
 import {
+  BROWSER_CONSOLE_LEVELS,
   BROWSER_TAB_ACTIONS,
+  BROWSER_WAIT_STATES,
   BROWSER_TOOL_NAMES,
   MAX_SESSION_TABS,
+  MAX_SNAPSHOT_DEPTH,
   MAX_UPLOAD_BYTES,
   MAX_UPLOAD_FILES,
   ORIGIN_WAIT_MS,
@@ -27,8 +30,8 @@ import type { Caller } from './tools'
 
 /** A navigation and everything that waits on one. */
 export const NAVIGATION_TIMEOUT_MS = 30_000
-/** The other acting tools. */
-export const ACTION_TIMEOUT_MS = 10_000
+/** The other acting tools, which wait up to 5 s for their element and 5 s for the page. */
+export const ACTION_TIMEOUT_MS = 20_000
 /** Above `browser_wait_for`'s own time, so the page answers it before this does. */
 export const WAIT_EXTRA_MS = 5_000
 export const MAX_WAIT_SECONDS = 30
@@ -37,6 +40,11 @@ const MAX_SCRIPT_CHARS = 20_000
 const MAX_VALUES = 50
 const MAX_REASON_CHARS = 500
 const MAX_PATH_CHARS = 4_096
+const MAX_URL_FILTER_CHARS = 2_000
+const MAX_SELECTOR_CHARS = 1_000
+const MAX_REQUEST_ID_CHARS = 200
+/** As main's MAX_BODY_CHARS, in round kilobytes for the description. */
+const MAX_BODY_KB = 32
 
 export type BrowserToolDeps = {
   /** Runs a call on main, which drives the session's page; `caller` is the calling session. */
@@ -115,7 +123,12 @@ const ERROR = object({ code: { type: 'string', enum: ERROR_CODES }, message: { t
 const PAGE = {
   url: { type: 'string', description: 'The address the page shows.' },
   title: { type: ['string', 'null'], description: "The page's title." },
-  snapshot: { type: 'string', description: 'The page outline after the action settled.' },
+  snapshot: {
+    type: 'string',
+    description:
+      'The page outline after the action settled; after an action on the same page, only what ' +
+      'changed since your last snapshot when that is shorter, as it says.',
+  },
 }
 
 function output(properties: Record<string, Schema>): Tool['outputSchema'] {
@@ -134,6 +147,7 @@ export const BROWSER_READ_TOOLS: readonly BrowserToolName[] = [
   'browser_wait_for',
   'browser_console_messages',
   'browser_network_requests',
+  'browser_network_request',
 ]
 
 const TAB = object(
@@ -189,8 +203,21 @@ export const BROWSER_TOOLS: Tool[] = [
     title: 'Snapshot',
     description:
       'Returns the page as an outline of its accessibility tree, with a ref on each element ' +
-      'you can act on: buttons, links, fields, options and the like.',
-    inputSchema: object({}),
+      'you can act on (buttons, links, fields, options and the like) and on the lists, forms, ' +
+      'dialogs and regions that hold them, and the page’s text under the element that holds ' +
+      'it. A ref stays the same element’s while the page shows it. Give a ref to read only that ' +
+      'element, and depth to read fewer levels; acting tools answer with only what changed, and ' +
+      'this gives the whole page again.',
+    inputSchema: object({
+      ref: { ...REF, description: 'Only this element and what it holds.' },
+      depth: {
+        type: 'integer',
+        minimum: 0,
+        maximum: MAX_SNAPSHOT_DEPTH,
+        description:
+          'How many levels under the top elements to show; an element cut off ends in "…".',
+      },
+    }),
     outputSchema: output(PAGE),
     annotations: { ...READ_ONLY },
   },
@@ -198,8 +225,9 @@ export const BROWSER_TOOLS: Tool[] = [
     name: 'browser_click',
     title: 'Click',
     description:
-      'Clicks an element from the snapshot, at its visible centre, after scrolling it into ' +
-      'view. A centre covered by another element fails and names it.',
+      'Clicks an element from the snapshot at its centre, once it is on the page, visible, ' +
+      'enabled, scrolled into view and not covered by another element, waiting up to 5 s for ' +
+      'that; one that stays covered fails and names what covers it.',
     inputSchema: object(
       {
         ref: REF,
@@ -217,7 +245,8 @@ export const BROWSER_TOOLS: Tool[] = [
     title: 'Type',
     description:
       'Focuses a field from the snapshot, replaces what it holds with text, and with submit ' +
-      'presses Enter. Slowly types one key at a time, for fields that react to keys.',
+      'presses Enter. Slowly types one key at a time, for fields that react to keys. Waits up ' +
+      'to 5 s for the field to be visible, enabled and not read-only.',
     inputSchema: object(
       {
         ref: REF,
@@ -322,11 +351,28 @@ export const BROWSER_TOOLS: Tool[] = [
     name: 'browser_wait_for',
     title: 'Wait for',
     description:
-      'Waits for text to appear or to leave the page, or for a number of seconds, then returns ' +
-      'a snapshot.',
+      'Waits for text to appear or to leave the page, for an element (a CSS selector, or a ref ' +
+      'from the snapshot) to be visible, hidden, attached or detached, or for a number of ' +
+      'seconds, then returns the page. It looks in every frame of the page it can reach and in ' +
+      'open shadow roots. Give one of text, text_gone, selector and ref; time is then the ' +
+      'longest it waits.',
     inputSchema: object({
       text: { type: 'string', maxLength: MAX_TEXT_CHARS, description: 'Waits until it shows.' },
       text_gone: { type: 'string', maxLength: MAX_TEXT_CHARS, description: 'Waits until it goes.' },
+      selector: {
+        type: 'string',
+        maxLength: MAX_SELECTOR_CHARS,
+        description: 'A CSS selector, such as "#results li" or "[role=alert]".',
+      },
+      ref: { ...REF, description: 'An element from the snapshot.' },
+      state: {
+        type: 'string',
+        enum: [...BROWSER_WAIT_STATES],
+        default: 'visible',
+        description:
+          'For selector or ref: visible, hidden (not visible or gone), attached (on the page) ' +
+          'or detached (gone).',
+      },
       time: {
         type: 'number',
         minimum: 0,
@@ -341,9 +387,17 @@ export const BROWSER_TOOLS: Tool[] = [
     name: 'browser_console_messages',
     title: 'Console messages',
     description:
-      'Returns the page’s console messages, the last 200, without the values they were given ' +
-      'beyond their text.',
-    inputSchema: object({ since_navigation: SINCE }),
+      'Returns the page’s console messages and the errors it did not catch, thrown or an ' +
+      'unhandled rejection, the last 200, as text. Errors and warnings come with their stack.',
+    inputSchema: object({
+      since_navigation: SINCE,
+      level: {
+        type: 'string',
+        enum: [...BROWSER_CONSOLE_LEVELS],
+        default: 'all',
+        description: 'Only messages at this level or more severe: error, warn, info, or all.',
+      },
+    }),
     outputSchema: output({
       messages: {
         type: 'array',
@@ -353,6 +407,10 @@ export const BROWSER_TOOLS: Tool[] = [
             text: { type: 'string' },
             url: { type: 'string' },
             line: { type: 'integer' },
+            stack: {
+              type: 'string',
+              description: 'Where it was thrown or logged, one call a line, the innermost first.',
+            },
           },
           ['level', 'text', 'url', 'line'],
         ),
@@ -364,22 +422,100 @@ export const BROWSER_TOOLS: Tool[] = [
     name: 'browser_network_requests',
     title: 'Network requests',
     description:
-      'Returns the page’s network requests, the last 300, with their method, address, status, ' +
-      'type and size; no headers or bodies.',
-    inputSchema: object({ since_navigation: SINCE }),
+      'Returns the page’s network requests, the last 300, with their id, method, address, ' +
+      'status, type, size and why one failed. Images, scripts and other static resources that ' +
+      'loaded are left out unless include_static. browser_network_request gives one’s headers, ' +
+      'timing and body.',
+    inputSchema: object({
+      since_navigation: SINCE,
+      url: {
+        type: 'string',
+        maxLength: MAX_URL_FILTER_CHARS,
+        description: 'Only requests whose address holds this text, in any case.',
+      },
+      include_static: {
+        type: 'boolean',
+        default: false,
+        description: 'Also lists images, fonts, style sheets, scripts and media that loaded.',
+      },
+    }),
     outputSchema: output({
       requests: {
         type: 'array',
         items: object(
           {
+            id: { type: 'string' },
             method: { type: 'string' },
             url: { type: 'string' },
             status: { type: ['integer', 'null'] },
             type: { type: 'string' },
             size: { type: ['integer', 'null'] },
+            error: { type: 'string', description: 'Why it failed, such as net::ERR_FAILED.' },
           },
-          ['method', 'url', 'status', 'type', 'size'],
+          ['id', 'method', 'url', 'status', 'type', 'size'],
         ),
+      },
+    }),
+    annotations: { ...READ_ONLY },
+  },
+  {
+    name: 'browser_network_request',
+    title: 'Network request',
+    description:
+      'Returns one request from browser_network_requests: its request and response headers, ' +
+      'status, timing, and its request and response bodies when they are text, at most ' +
+      `${MAX_BODY_KB} KB each. The values of credential headers (Authorization, Cookie, ` +
+      'Set-Cookie and the like) and of password, token and other secret fields are replaced ' +
+      'with [redacted].',
+    inputSchema: object(
+      {
+        id: {
+          type: 'string',
+          maxLength: MAX_REQUEST_ID_CHARS,
+          description: 'The id browser_network_requests gave the request.',
+        },
+      },
+      ['id'],
+    ),
+    outputSchema: output({
+      id: { type: 'string' },
+      method: { type: 'string' },
+      url: { type: 'string' },
+      status: { type: ['integer', 'null'] },
+      status_text: { type: 'string' },
+      type: { type: 'string' },
+      mime_type: { type: 'string' },
+      size: { type: ['integer', 'null'], description: 'Bytes on the wire.' },
+      from_cache: { type: 'boolean' },
+      error: { type: ['string', 'null'] },
+      redirects: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'The addresses it was redirected from, each after its status.',
+      },
+      request_headers: { type: 'object', additionalProperties: { type: 'string' } },
+      response_headers: {
+        type: ['object', 'null'],
+        additionalProperties: { type: 'string' },
+      },
+      timing: object(
+        {
+          started_at: { type: ['string', 'null'] },
+          total_ms: { type: ['number', 'null'] },
+          dns_ms: { type: ['number', 'null'] },
+          connect_ms: { type: ['number', 'null'] },
+          tls_ms: { type: ['number', 'null'] },
+          wait_ms: { type: ['number', 'null'], description: 'From sent to the first headers.' },
+          download_ms: { type: ['number', 'null'] },
+        },
+        ['started_at', 'total_ms', 'dns_ms', 'connect_ms', 'tls_ms', 'wait_ms', 'download_ms'],
+      ),
+      request_body: { type: ['string', 'null'] },
+      response_body: { type: ['string', 'null'] },
+      notes: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Why a body is cut or not shown, and how the request ended.',
       },
     }),
     annotations: { ...READ_ONLY },
@@ -530,16 +666,17 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     browser_navigate: ['url'],
     browser_navigate_back: [],
     browser_reload: [],
-    browser_snapshot: [],
+    browser_snapshot: ['ref', 'depth'],
     browser_click: ['ref', 'element', 'double', 'button'],
     browser_type: ['ref', 'element', 'text', 'submit', 'slowly'],
     browser_press_key: ['key'],
     browser_scroll: ['ref', 'direction', 'amount'],
     browser_select_option: ['ref', 'element', 'values'],
     browser_take_screenshot: ['ref', 'full_page'],
-    browser_wait_for: ['text', 'text_gone', 'time'],
-    browser_console_messages: ['since_navigation'],
-    browser_network_requests: ['since_navigation'],
+    browser_wait_for: ['text', 'text_gone', 'selector', 'ref', 'state', 'time'],
+    browser_console_messages: ['since_navigation', 'level'],
+    browser_network_requests: ['since_navigation', 'url', 'include_static'],
+    browser_network_request: ['id'],
     browser_evaluate: ['function', 'ref'],
     browser_ask_user: ['step', 'reason'],
     browser_tabs: ['action', 'index'],
@@ -582,6 +719,22 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
       const url = text('url', true, 8_192)!
       if (url.trim() === '') throw invalid('url must not be empty.')
       args.url = url
+      break
+    }
+    case 'browser_snapshot': {
+      const element = ref(false)
+      if (element !== undefined) args.ref = element
+      if (o.depth !== undefined) {
+        if (
+          typeof o.depth !== 'number' ||
+          !Number.isInteger(o.depth) ||
+          o.depth < 0 ||
+          o.depth > MAX_SNAPSHOT_DEPTH
+        ) {
+          throw invalid(`depth must be a whole number from 0 to ${MAX_SNAPSHOT_DEPTH}.`)
+        }
+        args.depth = o.depth
+      }
       break
     }
     case 'browser_click': {
@@ -650,23 +803,61 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     case 'browser_wait_for': {
       const waiting = text('text', false)
       const gone = text('text_gone', false)
+      const selector = text('selector', false, MAX_SELECTOR_CHARS)
+      const element = ref(false)
       if (waiting !== undefined) args.text = waiting
       if (gone !== undefined) args.text_gone = gone
+      if (selector !== undefined) {
+        if (selector.trim() === '') throw invalid('selector must not be empty.')
+        args.selector = selector
+      }
+      if (element !== undefined) args.ref = element
+      if (o.state !== undefined) {
+        if (!(BROWSER_WAIT_STATES as readonly unknown[]).includes(o.state)) {
+          throw invalid('state must be visible, hidden, attached or detached.')
+        }
+        if (selector === undefined && element === undefined) {
+          throw invalid('state is for selector or ref.')
+        }
+        args.state = o.state
+      }
       if (o.time !== undefined) {
         if (typeof o.time !== 'number' || !Number.isFinite(o.time) || o.time < 0 || o.time > 30) {
           throw invalid('time must be 0 to 30 seconds.')
         }
         args.time = o.time
       }
-      if (waiting === undefined && gone === undefined && args.time === undefined) {
-        throw invalid('Give text, text_gone or time to wait for.')
+      const conditions = [waiting, gone, selector, element].filter((given) => given !== undefined)
+      if (conditions.length > 1) throw invalid('Give one of text, text_gone, selector and ref.')
+      if (conditions.length === 0 && args.time === undefined) {
+        throw invalid('Give text, text_gone, selector, ref or time to wait for.')
       }
       break
     }
-    case 'browser_console_messages':
+    case 'browser_console_messages': {
+      const since = flag('since_navigation')
+      if (since !== undefined) args.since_navigation = since
+      if (o.level !== undefined) {
+        if (!(BROWSER_CONSOLE_LEVELS as readonly unknown[]).includes(o.level)) {
+          throw invalid('level must be error, warn, info or all.')
+        }
+        args.level = o.level
+      }
+      break
+    }
     case 'browser_network_requests': {
       const since = flag('since_navigation')
       if (since !== undefined) args.since_navigation = since
+      const url = text('url', false, MAX_URL_FILTER_CHARS)
+      if (url !== undefined && url !== '') args.url = url
+      const statics = flag('include_static')
+      if (statics !== undefined) args.include_static = statics
+      break
+    }
+    case 'browser_network_request': {
+      const id = text('id', true, MAX_REQUEST_ID_CHARS)!
+      if (id.trim() === '') throw invalid('id must not be empty.')
+      args.id = id
       break
     }
     case 'browser_ask_user': {

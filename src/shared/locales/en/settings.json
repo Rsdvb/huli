@@ -3313,6 +3313,10 @@
         "name": "Secret cards",
         "description": "Agents ask you for an API key, token or password in a private card, never in the chat."
       },
+      "fileCheckpoints": {
+        "name": "File checkpoints for rewinds",
+        "description": "Kite keeps a copy of the session's files as each message goes, so going back to a message can restore them too."
+      },
       "agentTheme": {
         "name": "Agent theme changes",
         "description": "Agents read and change Kite's theme colors when you ask them to."
