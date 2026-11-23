@@ -486,17 +486,17 @@
     "elsewhere": "只有在智能体使用其应用的那台电脑上才能显示窗口。"
   },
   "computerSetup": {
-    "label": "设置 Computer use",
-    "ask": "{{agent}} 想使用你的电脑，正在等你设置 Computer use。",
+    "label": "设置电脑操控",
+    "ask": "{{agent}} 想使用你的电脑，正在等你设置电脑操控。",
     "wants": "想使用你的电脑",
     "waiting": "等你设置",
     "granting": "等你授权",
     "step": "第 {{n}} 步，共 {{count}} 步",
     "enable": {
-      "title": "打开 Computer use",
+      "title": "打开电脑操控",
       "body": "{{agent}} 会在后台读取应用的窗口、点击和输入，只对你在这台电脑上发的消息生效。",
       "action": "打开",
-      "switch": "Computer use"
+      "switch": "电脑操控"
     },
     "accessibility": {
       "title": "允许辅助功能",
@@ -517,9 +517,9 @@
     "elsewhereBody": "开关和系统权限只能在那台电脑的 Kettu 里打开。设置好后，{{agent}} 会自动继续。",
     "thatComputer": "运行它的那台电脑",
     "outcome": {
-      "ready": "已设置好 Computer use",
-      "declined": "没有设置 Computer use",
-      "timeout": "没有在限定时间内设置好 Computer use"
+      "ready": "已设置好电脑操控",
+      "declined": "没有设置电脑操控",
+      "timeout": "没有在限定时间内设置好电脑操控"
     },
     "declinedNote": "不用了"
   },

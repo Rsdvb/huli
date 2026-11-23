@@ -18,7 +18,7 @@
     "memory": "记忆",
     "hosts": "电脑",
     "devices": "移动设备",
-    "computer-use": "Computer use",
+    "computer-use": "电脑操控",
     "agent-network": "Agent 网络",
     "backup": "备份",
     "chat-bridge": "聊天软件",
@@ -621,7 +621,7 @@
   },
   "computer": {
     "groups": {
-      "use": "Computer use",
+      "use": "电脑操控",
       "permissions": "这台电脑",
       "allowedApps": "始终允许"
     },
@@ -3212,7 +3212,7 @@
     "sandboxHeld": "默认沙箱不是「关闭」时不能关掉，因为新会话还会在里面运行。先到 智能体 › 沙箱 把默认改成关闭。",
     "computerUse": {
       "name": "电脑操控",
-      "description": "让 Agent 操作这台电脑上的应用。它在「Computer use」页里单独开关。",
+      "description": "让 Agent 操作这台电脑上的应用。它在「电脑操控」页里单独开关。",
       "on": "已打开",
       "off": "已关闭",
       "open": "打开"

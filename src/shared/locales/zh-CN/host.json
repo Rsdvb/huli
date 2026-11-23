@@ -241,7 +241,7 @@
     },
     "computerForeground": {
       "title": "已把 {{app}} 切到前台操作",
-      "description": "它在后台不接收这个操作，所以窗口短暂切到前台完成这一步，然后切回。可在设置 › Computer use 里关闭。"
+      "description": "它在后台不接收这个操作，所以窗口短暂切到前台完成这一步，然后切回。可在设置 › 电脑操控 里关闭。"
     },
     "computerElevatedStopped": {
       "title": "已停止以管理员权限操作 {{app}}",
