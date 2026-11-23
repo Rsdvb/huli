@@ -188,3 +188,170 @@ describe('always-allowed devices file', () => {
     expect(typeof parseDeviceAccessFile({ allowed: 'all' })).toBe('string')
   })
 })
+
+describe('the agent-device commands the tools pass on', () => {
+  it('builds waits, finds, checks and reads from checked arguments', () => {
+    expect(actionOf('device_wait', { text: 'Saved', timeoutMs: 5000 })).toEqual({
+      type: 'wait',
+      until: 'text',
+      value: 'Saved',
+      timeoutMs: 5000,
+    })
+    expect(actionOf('device_wait', { absent: 'label="Loading"' })).toEqual({
+      type: 'wait',
+      until: 'absent',
+      value: 'label="Loading"',
+    })
+    expect(actionOf('device_wait', { stable: true, quietMs: 800 })).toEqual({
+      type: 'wait',
+      until: 'stable',
+      quietMs: 800,
+    })
+    expect(actionOf('device_find', { query: 'Sign in' })).toEqual({
+      type: 'find',
+      locator: 'any',
+      query: 'Sign in',
+      action: 'exists',
+    })
+    expect(
+      actionOf('device_find', {
+        query: 'Email',
+        locator: 'label',
+        action: 'fill',
+        value: 'a@b.c',
+        pick: 'first',
+        level: 'digest',
+      }),
+    ).toEqual({
+      type: 'find',
+      locator: 'label',
+      query: 'Email',
+      action: 'fill',
+      value: 'a@b.c',
+      pick: 'first',
+      level: 'digest',
+    })
+    expect(
+      actionOf('device_is', { predicate: 'text', selector: 'id="total"', value: '$42' }),
+    ).toEqual({ type: 'is', predicate: 'text', selector: 'id="total"', value: '$42' })
+    expect(actionOf('device_get', { format: 'text', ref: 'e4' })).toEqual({
+      type: 'get',
+      format: 'text',
+      target: '@e4',
+    })
+    expect(actionOf('device_alert', {})).toEqual({ type: 'alert', action: 'get' })
+    expect(actionOf('device_keyboard', { action: 'dismiss' })).toEqual({
+      type: 'keyboard',
+      action: 'dismiss',
+    })
+    expect(actionOf('device_snapshot', { level: 'digest' })).toEqual({
+      type: 'snapshot',
+      level: 'digest',
+    })
+  })
+
+  it('refuses arguments that do not fit the command', () => {
+    const refused: [Parameters<typeof actionOf>[0], Record<string, unknown>][] = [
+      ['device_wait', {}],
+      ['device_wait', { text: 'a', selector: 'label="b"' }],
+      ['device_wait', { selector: '500' }],
+      ['device_wait', { selector: '@e3' }],
+      ['device_wait', { selector: 'stable' }],
+      ['device_wait', { text: 'a', quietMs: 100 }],
+      ['device_wait', { text: 'a', timeoutMs: 600_000 }],
+      ['device_find', { query: 'label' }],
+      ['device_find', { query: 'x', action: 'delete' }],
+      ['device_find', { query: 'x', action: 'fill' }],
+      ['device_find', { query: 'x', value: 'y' }],
+      ['device_find', { query: 'x', timeoutMs: 1000 }],
+      ['device_is', { predicate: 'gone', selector: 'label="x"' }],
+      ['device_is', { predicate: 'text', selector: 'label="x"' }],
+      ['device_get', { format: 'html', ref: 'e1' }],
+      ['device_get', { format: 'text' }],
+      ['device_get', { format: 'text', ref: 'e1', selector: 'label="x"' }],
+      ['device_alert', { action: 'tap' }],
+      ['device_alert', { action: 'accept', timeoutMs: 1000 }],
+      ['device_keyboard', { action: 'type' }],
+      ['device_snapshot', { level: 'full' }],
+      ['device_is', { predicate: 'visible', selector: 'label="x"\u0007' }],
+    ]
+    for (const [tool, input] of refused) {
+      expect(() => actionOf(tool, input), `${tool} ${JSON.stringify(input)}`).toThrow(
+        DeviceArgsError,
+      )
+    }
+  })
+
+  it('rebuilds each batch step from the keys its command takes', () => {
+    expect(
+      actionOf('device_batch', {
+        steps: [
+          { command: 'press', input: { ref: 'e12', settle: true } },
+          { command: 'fill', input: { selector: 'id="email"', text: 'qa@example.com' } },
+          { command: 'fill', input: { ref: '@e3', text: '' } },
+          { command: 'scroll', input: { direction: 'down', until: 'label="Privacy"' } },
+          { command: 'wait', input: { text: 'Saved', timeoutMs: 3000 } },
+          {
+            command: 'find',
+            input: { query: 'Done', locator: 'label', action: 'click', last: true },
+          },
+          { command: 'is', input: { predicate: 'visible', selector: 'label="Done"' } },
+          { command: 'snapshot', input: { interactiveOnly: true } },
+          { command: 'home' },
+        ],
+        level: 'digest',
+      }),
+    ).toEqual({
+      type: 'batch',
+      stopOnError: true,
+      level: 'digest',
+      steps: [
+        { command: 'press', input: { ref: '@e12', settle: true } },
+        { command: 'fill', input: { selector: 'id="email"', text: 'qa@example.com' } },
+        { command: 'fill', input: { ref: '@e3', text: '' } },
+        { command: 'scroll', input: { direction: 'down', until: 'label="Privacy"' } },
+        { command: 'wait', input: { text: 'Saved', timeoutMs: 3000 } },
+        {
+          command: 'find',
+          input: { query: 'Done', locator: 'label', action: 'click', last: true },
+        },
+        { command: 'is', input: { predicate: 'visible', selector: 'label="Done"' } },
+        { command: 'snapshot', input: { interactiveOnly: true } },
+        { command: 'home', input: {} },
+      ],
+    })
+  })
+
+  it('refuses batch steps outside what it runs', () => {
+    const refused: unknown[] = [
+      [],
+      Array.from({ length: 21 }, () => ({ command: 'home' })),
+      [{ command: 'install', input: { path: '/tmp/evil.app' } }],
+      [{ command: 'open', input: { app: 'com.apple.Preferences' } }],
+      [{ command: 'press', input: { ref: '@e1', session: 'other' } }],
+      [{ command: 'press', input: { ref: '@e1', selector: 'label="x"' } }],
+      [{ command: 'press', input: {} }],
+      [{ command: 'type', input: { text: 'a', out: '/tmp/x' } }],
+      [{ command: 'snapshot', input: { scope: 'a\u0000' } }],
+      [{ command: 'wait', input: { text: 'a', stable: true } }],
+      [{ command: 'home', input: {}, args: ['--help'] }],
+      [{ command: 'press', input: 'ref=@e1' }],
+      ['press @e1'],
+    ]
+    for (const steps of refused) {
+      expect(() => actionOf('device_batch', { steps }), JSON.stringify(steps)).toThrow(
+        DeviceArgsError,
+      )
+    }
+  })
+
+  it('answers a malformed call with invalid_params, before the device sees it', async () => {
+    const { tools: subject, calls } = tools('session')
+    const result = await subject.call(caller, 'device_batch', {
+      deviceId: SIM,
+      steps: [{ command: 'install', input: {} }],
+    })
+    expect(result.structuredContent).toMatchObject({ code: 'invalid_params' })
+    expect(calls.filter((call) => call.kind === 'action')).toHaveLength(0)
+  })
+})

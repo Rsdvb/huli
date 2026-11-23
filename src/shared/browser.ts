@@ -158,6 +158,7 @@ export const BROWSER_TOOL_NAMES = [
   'browser_wait_for',
   'browser_console_messages',
   'browser_network_requests',
+  'browser_network_request',
   'browser_evaluate',
   'browser_ask_user',
   'browser_tabs',
@@ -169,6 +170,17 @@ export const MAX_UPLOAD_FILES = 10
 
 /** The most bytes one `browser_upload_file` call puts into a page, all its files together. */
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
+/** The levels `browser_console_messages` filters by, each with the more severe ones. */
+export const BROWSER_CONSOLE_LEVELS = ['error', 'warn', 'info', 'all'] as const
+export type BrowserConsoleLevel = (typeof BROWSER_CONSOLE_LEVELS)[number]
+
+/** What `browser_wait_for` waits for a selector's or a ref's element to be. */
+export const BROWSER_WAIT_STATES = ['visible', 'hidden', 'attached', 'detached'] as const
+export type BrowserWaitState = (typeof BROWSER_WAIT_STATES)[number]
+
+/** The deepest a `browser_snapshot` with `depth` goes. */
+export const MAX_SNAPSHOT_DEPTH = 100
 
 /** What `browser_tabs` does. */
 export const BROWSER_TAB_ACTIONS = ['list', 'new', 'select', 'close'] as const

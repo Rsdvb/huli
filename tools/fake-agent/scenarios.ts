@@ -43,7 +43,7 @@ import {
   tokenChunks,
 } from './content.ts'
 import { artifacts } from './artifacts.ts'
-import { browser, deviceTool, openSite } from './browser.ts'
+import { browser, browserValues, deviceTool, openSite } from './browser.ts'
 import { computer } from './computer.ts'
 import { documents } from './documents.ts'
 import { write } from './write.ts'
@@ -1762,6 +1762,7 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   tables,
   'open-site': openSite,
   browser,
+  'browser-values': browserValues,
   device: deviceTool,
   computer,
   approvals,
