@@ -87,8 +87,9 @@ export interface GitServiceApi {
   /**
    * What a pull request's title and description are written from: the commits and files of the
    * branch against `base`, the default branch's remote tracking ref while `base` is that branch.
+   * Huli: `diff` adds the branch's diff.
    */
-  pullRequestContext(projectPath: string, base: string): Promise<PullRequestContext>
+  pullRequestContext(projectPath: string, base: string, diff?: boolean): Promise<PullRequestContext>
   incoming(projectPath: string, from: 'upstream' | 'base'): Promise<LogCommit[]>
   fileDiff(
     projectPath: string,

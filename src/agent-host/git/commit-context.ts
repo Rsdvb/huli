@@ -25,7 +25,7 @@ export interface CommitContext {
 }
 
 /** A diff cut at a line before `limit` characters, marked as cut. */
-function clip(diff: string, limit: number): string {
+export function clipDiff(diff: string, limit: number): string {
   if (diff.length <= limit) return diff
   const end = diff.lastIndexOf('\n', limit)
   // Never end on half of a surrogate pair.
@@ -99,7 +99,7 @@ export async function readCommitContext(
     const diffs = await Promise.all(files.slice(i, i + BATCH).map(diffOf))
     for (const diff of diffs) {
       if (diff === '' || used >= DIFF_CHARS) continue
-      const piece = clip(diff, Math.min(FILE_DIFF_CHARS, DIFF_CHARS - used))
+      const piece = clipDiff(diff, Math.min(FILE_DIFF_CHARS, DIFF_CHARS - used))
       parts.push(piece)
       used += piece.length
       shown += 1

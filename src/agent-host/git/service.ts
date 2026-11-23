@@ -1111,7 +1111,7 @@ export function createGitService(
       return readCommitContext(exec, status.repo.root, files, status.head.oid === null)
     },
 
-    async pullRequestContext(projectPath, base) {
+    async pullRequestContext(projectPath, base, diff) {
       const state = projectFor(projectPath)
       const status = await knownStatus(state)
       if (!status.repo || status.head.oid === null) throw new Error(t('git.notRepository'))
@@ -1121,6 +1121,7 @@ export function createGitService(
         branch: status.head.branch ?? status.head.oid.slice(0, 7),
         base,
         baseRef,
+        ...(diff ? { diff } : {}),
       })
     },
 
