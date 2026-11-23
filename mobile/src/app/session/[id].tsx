@@ -1221,6 +1221,8 @@ function Session() {
       case 'agents':
         return agentsPage(agentMenu)
       default:
+        // The title menu's own pages (看板, 工具调用, 稍后提醒 and its times) come from it too.
+        if (page.startsWith('title-')) return titlePages?.(page) ?? null
         if (page.startsWith('option:')) return optionPage(control, page.slice('option:'.length))
         if (page.startsWith('agent:'))
           return agentModelsPage(agentMenu, page.slice('agent:'.length))
