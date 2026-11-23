@@ -303,6 +303,14 @@ async function actedOn(
     case 'launch':
     case 'terminate':
     case 'open_url':
+    case 'keyboard':
+    case 'batch':
+      break
+    case 'find':
+      if (!['click', 'focus', 'fill', 'type'].includes(action.action)) return
+      break
+    case 'alert':
+      if (action.action === 'get' || action.action === 'wait') return
       break
     default:
       // Reading the screen, logs or settings shows nothing on it.

@@ -5,12 +5,22 @@
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js'
 import {
   DEVICE_ACCESS_WAIT_MS,
+  DEVICE_ALERT_ACTIONS,
+  DEVICE_BATCH_COMMANDS,
   DEVICE_CALL_TIMEOUT_MS,
+  DEVICE_FIND_ACTIONS,
+  DEVICE_FIND_LOCATORS,
+  DEVICE_IS_PREDICATES,
+  DEVICE_KEYBOARD_ACTIONS,
   DEVICE_TOOL_NAMES,
+  MAX_DEVICE_BATCH_STEPS,
   type DeviceAccessAnswer,
   type DeviceAction,
+  type DeviceBatchCommand,
+  type DeviceBatchStep,
   type DeviceCall,
   type DeviceCallAnswer,
+  type DeviceLevel,
   type DeviceToolName,
 } from '@shared/device-agent'
 import type { DeviceInfo } from '@shared/device-host'
@@ -30,6 +40,19 @@ const REF: Schema = {
   type: 'string',
   description: 'An element reference from the latest device_snapshot, such as @e3.',
 }
+const SELECTOR: Schema = {
+  type: 'string',
+  description:
+    'An agent-device selector of keys and values, such as label="Sign in", id="email" or ' +
+    'role=button label="OK"; keys are id, role, text, label, value, visible, hidden, editable, ' +
+    'selected, checked, focused, enabled and hittable.',
+}
+const LEVEL: Schema = {
+  type: 'string',
+  enum: ['digest'],
+  description: 'digest answers in a compact form that costs fewer tokens.',
+}
+const TIMEOUT: Schema = { type: 'integer', minimum: 100, maximum: 60_000 }
 const READ_ONLY = { readOnlyHint: true } as const
 const ACTS = { readOnlyHint: false, openWorldHint: false } as const
 
@@ -65,7 +88,7 @@ export const DEVICE_TOOLS: Tool[] = [
     title: 'Read the device screen',
     description:
       'The accessibility tree of what the device shows, each actionable element with a reference such as @e3. References change after the screen changes; read again then.',
-    inputSchema: object({ deviceId: DEVICE_ID }, ['deviceId']),
+    inputSchema: object({ deviceId: DEVICE_ID, level: LEVEL }, ['deviceId']),
     annotations: { ...READ_ONLY },
   },
   {
@@ -80,6 +103,7 @@ export const DEVICE_TOOLS: Tool[] = [
         x: { type: 'number', minimum: 0 },
         y: { type: 'number', minimum: 0 },
         long: { type: 'boolean', default: false },
+        level: LEVEL,
       },
       ['deviceId'],
     ),
@@ -89,7 +113,7 @@ export const DEVICE_TOOLS: Tool[] = [
     name: 'device_fill',
     title: 'Fill a field on the device',
     description: 'Replaces the text of an input element.',
-    inputSchema: object({ deviceId: DEVICE_ID, ref: REF, text: { type: 'string' } }, [
+    inputSchema: object({ deviceId: DEVICE_ID, ref: REF, text: { type: 'string' }, level: LEVEL }, [
       'deviceId',
       'ref',
       'text',
@@ -261,6 +285,160 @@ export const DEVICE_TOOLS: Tool[] = [
     ),
     annotations: { ...ACTS },
   },
+  {
+    name: 'device_wait',
+    title: 'Wait on the device',
+    description:
+      'Waits until text shows on the screen, an element a selector names shows (or with absent, ' +
+      'is gone), or the screen stays still. Use it for what loads late, instead of reading the ' +
+      'screen again and again. Give one of text, selector, absent and stable.',
+    inputSchema: object(
+      {
+        deviceId: DEVICE_ID,
+        text: { type: 'string', description: 'Text to show, matched to a label, id or value.' },
+        selector: SELECTOR,
+        absent: { ...SELECTOR, description: 'A selector whose element must be gone.' },
+        stable: { type: 'boolean', description: 'Waits until the screen stops changing.' },
+        quietMs: {
+          type: 'integer',
+          minimum: 100,
+          maximum: 10_000,
+          description: 'With stable: how long the screen stays still.',
+        },
+        timeoutMs: { ...TIMEOUT, description: 'The longest it waits, in ms.' },
+      },
+      ['deviceId'],
+    ),
+    annotations: { ...READ_ONLY },
+  },
+  {
+    name: 'device_find',
+    title: 'Find an element on the device',
+    description:
+      'Finds an element by its text, label, value, role or id and acts on it. exists, the ' +
+      'default, only checks that one is there; list names the matches; getText and getAttrs ' +
+      'read it; wait waits for it; click, focus, fill and type act on it.',
+    inputSchema: object(
+      {
+        deviceId: DEVICE_ID,
+        query: { type: 'string', description: 'The words to find.' },
+        locator: { type: 'string', enum: [...DEVICE_FIND_LOCATORS], default: 'any' },
+        action: { type: 'string', enum: [...DEVICE_FIND_ACTIONS], default: 'exists' },
+        value: { type: 'string', description: 'The text for fill and type.' },
+        pick: {
+          type: 'string',
+          enum: ['first', 'last'],
+          description: 'Which match to take when several do.',
+        },
+        timeoutMs: { ...TIMEOUT, description: 'With wait: the longest it waits, in ms.' },
+        level: LEVEL,
+      },
+      ['deviceId', 'query'],
+    ),
+    annotations: { ...ACTS },
+  },
+  {
+    name: 'device_is',
+    title: 'Check the device screen',
+    description:
+      'Checks that the element a selector names is visible, hidden, there (exists), gone ' +
+      '(absent), editable, selected, checked or focused, or that its text is value. Answers ' +
+      'yes or no without waiting; device_wait waits.',
+    inputSchema: object(
+      {
+        deviceId: DEVICE_ID,
+        predicate: { type: 'string', enum: [...DEVICE_IS_PREDICATES] },
+        selector: SELECTOR,
+        value: { type: 'string', description: 'With text: the text it should have.' },
+      },
+      ['deviceId', 'predicate', 'selector'],
+    ),
+    annotations: { ...READ_ONLY },
+  },
+  {
+    name: 'device_get',
+    title: 'Read an element on the device',
+    description:
+      'Reads the text or the accessibility attributes of an element, by reference or selector, ' +
+      'without changing anything.',
+    inputSchema: object(
+      {
+        deviceId: DEVICE_ID,
+        format: { type: 'string', enum: ['text', 'attrs'] },
+        ref: REF,
+        selector: SELECTOR,
+        level: LEVEL,
+      },
+      ['deviceId', 'format'],
+    ),
+    annotations: { ...READ_ONLY },
+  },
+  {
+    name: 'device_alert',
+    title: 'Handle a system alert on the device',
+    description:
+      'Reads (get, the default), waits for, accepts or dismisses the system alert the device ' +
+      'shows, such as a permission prompt. Read it first when what it says matters.',
+    inputSchema: object(
+      {
+        deviceId: DEVICE_ID,
+        action: { type: 'string', enum: [...DEVICE_ALERT_ACTIONS], default: 'get' },
+        timeoutMs: { ...TIMEOUT, description: 'With wait: the longest it waits, in ms.' },
+      },
+      ['deviceId'],
+    ),
+    annotations: { ...ACTS },
+  },
+  {
+    name: 'device_keyboard',
+    title: 'Use the device keyboard',
+    description:
+      'Reads whether the on-screen keyboard shows and its return key (status, the default), ' +
+      'hides it (dismiss), or presses its return key (enter).',
+    inputSchema: object(
+      {
+        deviceId: DEVICE_ID,
+        action: { type: 'string', enum: [...DEVICE_KEYBOARD_ACTIONS], default: 'status' },
+      },
+      ['deviceId'],
+    ),
+    annotations: { ...ACTS },
+  },
+  {
+    name: 'device_batch',
+    title: 'Run steps on the device',
+    description:
+      `Runs up to ${MAX_DEVICE_BATCH_STEPS} steps in one call, in order, which saves a round ` +
+      'trip each: snapshot, press, longpress, fill, type, scroll, back, home, wait, is, get, ' +
+      'find, alert and keyboard. Each step is {"command", "input"}, input in agent-device’s ' +
+      'names: a target as ref ("@e3"), selector, or x and y; text, direction, settle (true ' +
+      'waits for the screen and gives what changed), and as the matching tools take them ' +
+      '(predicate, format, query, action, value, timeoutMs). It stops at the first failing ' +
+      'step unless stopOnError is false.',
+    inputSchema: object(
+      {
+        deviceId: DEVICE_ID,
+        steps: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_DEVICE_BATCH_STEPS,
+          items: {
+            type: 'object',
+            properties: {
+              command: { type: 'string', enum: [...DEVICE_BATCH_COMMANDS] },
+              input: { type: 'object' },
+            },
+            required: ['command'],
+            additionalProperties: false,
+          },
+        },
+        stopOnError: { type: 'boolean', default: true },
+        level: LEVEL,
+      },
+      ['deviceId', 'steps'],
+    ),
+    annotations: { ...ACTS },
+  },
 ]
 
 export function isDeviceToolName(name: string): name is DeviceToolName {
@@ -290,6 +468,7 @@ export class DeviceArgsError extends Error {}
 
 const MAX_TEXT = 4096
 const MAX_NAME = 512
+const MAX_SELECTOR = 512
 
 function args(input: unknown): Record<string, unknown> {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) return {}
@@ -319,6 +498,245 @@ function oneOf<T extends string>(value: unknown, key: string, allowed: readonly 
   return value as T
 }
 
+function optionalNumber(value: unknown, key: string, min: number, max: number): number | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new DeviceArgsError(`"${key}" must be a whole number from ${min} to ${max}`)
+  }
+  return number(value, key, min, max)
+}
+
+function flag(value: unknown, key: string): boolean | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'boolean') throw new DeviceArgsError(`"${key}" must be true or false`)
+  return value
+}
+
+/** A reference from a snapshot, as agent-device writes it: @e3, or @e12~s4 pinned to its frame. */
+function deviceRef(value: unknown, key = 'ref'): string {
+  const ref = text(value, key, 32)
+  if (!/^@?e\d+(~s\d+)?$/.test(ref))
+    throw new DeviceArgsError(`"${key}" must be a reference such as @e3`)
+  return ref.startsWith('@') ? ref : `@${ref}`
+}
+
+// Words agent-device reads as a kind of wait, not as a selector.
+const WAIT_WORDS = new Set(['text', 'absent', 'stable'])
+
+/** A selector such as label="OK"; one that would read as a ref, a time or another word is not. */
+function selector(value: unknown, key = 'selector'): string {
+  const given = text(value, key, MAX_SELECTOR)
+  if (
+    given.trim() !== given ||
+    given.startsWith('@') ||
+    /^\d+$/.test(given) ||
+    WAIT_WORDS.has(given)
+  ) {
+    throw new DeviceArgsError(`"${key}" must be a selector such as label="Sign in"`)
+  }
+  return given
+}
+
+function level(value: unknown): { level?: DeviceLevel } {
+  if (value === undefined) return {}
+  return { level: oneOf(value, 'level', ['digest'] as const) }
+}
+
+/** Which keys an input may hold. */
+function only(input: Record<string, unknown>, keys: readonly string[], what: string): void {
+  for (const key of Object.keys(input)) {
+    if (!keys.includes(key)) throw new DeviceArgsError(`${what} takes no "${key}"`)
+  }
+}
+
+/** A step's target: exactly one of a ref, a selector, or a point. */
+function target(input: Record<string, unknown>, what: string): Record<string, string | number> {
+  const forms = [
+    input.ref !== undefined,
+    input.selector !== undefined,
+    input.x !== undefined || input.y !== undefined,
+  ]
+  if (forms.filter(Boolean).length !== 1) {
+    throw new DeviceArgsError(`${what} needs one target: ref, selector, or x and y`)
+  }
+  if (input.ref !== undefined) return { ref: deviceRef(input.ref) }
+  if (input.selector !== undefined) return { selector: selector(input.selector) }
+  return { x: number(input.x, 'x', 0, 100_000), y: number(input.y, 'y', 0, 100_000) }
+}
+
+/** A batch step's input, rebuilt from the keys each command takes, each checked. */
+function batchStep(value: unknown, index: number): DeviceBatchStep {
+  const what = `Step ${index + 1}`
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new DeviceArgsError(`${what} must be {"command", "input"}`)
+  }
+  const step = value as Record<string, unknown>
+  only(step, ['command', 'input'], what)
+  const command = oneOf(step.command, `${what} command`, DEVICE_BATCH_COMMANDS)
+  const raw = step.input === undefined ? {} : step.input
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new DeviceArgsError(`${what} input must be an object`)
+  }
+  const given = raw as Record<string, unknown>
+  const named = `${what} (${command})`
+  const input: Record<string, string | number | boolean> = {}
+  const put = (key: string, checked: string | number | boolean | undefined): void => {
+    if (checked !== undefined) input[key] = checked
+  }
+  const settle = (): void => put('settle', flag(given.settle, 'settle'))
+  switch (command as DeviceBatchCommand) {
+    case 'snapshot':
+      only(given, ['interactiveOnly', 'depth', 'scope'], named)
+      put('interactiveOnly', flag(given.interactiveOnly, 'interactiveOnly'))
+      put('depth', optionalNumber(given.depth, 'depth', 1, 100))
+      if (given.scope !== undefined) put('scope', text(given.scope, 'scope', MAX_SELECTOR))
+      break
+    case 'press':
+      only(given, ['ref', 'selector', 'x', 'y', 'settle', 'doubleTap', 'count'], named)
+      Object.assign(input, target(given, named))
+      settle()
+      put('doubleTap', flag(given.doubleTap, 'doubleTap'))
+      put('count', optionalNumber(given.count, 'count', 1, 10))
+      break
+    case 'longpress':
+      only(given, ['ref', 'selector', 'x', 'y', 'settle', 'durationMs'], named)
+      Object.assign(input, target(given, named))
+      settle()
+      put('durationMs', optionalNumber(given.durationMs, 'durationMs', 100, 10_000))
+      break
+    case 'fill':
+      only(given, ['ref', 'selector', 'x', 'y', 'text', 'settle'], named)
+      Object.assign(input, target(given, named))
+      // An empty text clears the field.
+      if (given.text !== '') put('text', text(given.text, 'text'))
+      else input.text = ''
+      settle()
+      break
+    case 'type':
+      only(given, ['text'], named)
+      input.text = text(given.text, 'text')
+      break
+    case 'scroll':
+      only(given, ['direction', 'amount', 'until', 'settle'], named)
+      input.direction = oneOf(given.direction, 'direction', [
+        'up',
+        'down',
+        'left',
+        'right',
+        'top',
+        'bottom',
+      ] as const)
+      if (given.amount !== undefined) input.amount = number(given.amount, 'amount', 0, 20)
+      if (given.until !== undefined) input.until = selector(given.until, 'until')
+      settle()
+      break
+    case 'back':
+      only(given, ['settle'], named)
+      settle()
+      break
+    case 'home':
+      only(given, [], named)
+      break
+    case 'wait': {
+      only(
+        given,
+        ['text', 'selector', 'absent', 'stable', 'durationMs', 'quietMs', 'timeoutMs'],
+        named,
+      )
+      const kinds = ['text', 'selector', 'absent', 'stable', 'durationMs'].filter(
+        (key) => given[key] !== undefined,
+      )
+      if (kinds.length !== 1) {
+        throw new DeviceArgsError(
+          `${named} needs one of text, selector, absent, stable and durationMs`,
+        )
+      }
+      if (given.text !== undefined) input.text = text(given.text, 'text')
+      if (given.selector !== undefined) input.selector = selector(given.selector)
+      if (given.absent !== undefined) input.absent = selector(given.absent, 'absent')
+      if (given.stable !== undefined) {
+        if (given.stable !== true) throw new DeviceArgsError(`${named} stable must be true`)
+        input.stable = true
+        put('quietMs', optionalNumber(given.quietMs, 'quietMs', 100, 10_000))
+      } else if (given.quietMs !== undefined) {
+        throw new DeviceArgsError(`${named} quietMs is for stable`)
+      }
+      put('durationMs', optionalNumber(given.durationMs, 'durationMs', 1, 30_000))
+      put('timeoutMs', optionalNumber(given.timeoutMs, 'timeoutMs', 100, 60_000))
+      break
+    }
+    case 'is': {
+      only(given, ['predicate', 'selector', 'value'], named)
+      const predicate = oneOf(given.predicate, 'predicate', DEVICE_IS_PREDICATES)
+      input.predicate = predicate
+      input.selector = selector(given.selector)
+      if (predicate === 'text') input.value = text(given.value, 'value')
+      else if (given.value !== undefined) throw new DeviceArgsError(`${named} value is for text`)
+      break
+    }
+    case 'get':
+      only(given, ['format', 'ref', 'selector'], named)
+      input.format = oneOf(given.format, 'format', ['text', 'attrs'] as const)
+      if ((given.ref === undefined) === (given.selector === undefined)) {
+        throw new DeviceArgsError(`${named} needs a ref or a selector`)
+      }
+      if (given.ref !== undefined) input.ref = deviceRef(given.ref)
+      else input.selector = selector(given.selector)
+      break
+    case 'find': {
+      only(given, ['locator', 'query', 'action', 'value', 'first', 'last', 'timeoutMs'], named)
+      const found = findAction(given)
+      input.query = found.query
+      if (found.locator !== 'any') input.locator = found.locator
+      input.action = found.action
+      put('value', found.value)
+      if (found.pick) input[found.pick] = true
+      put('timeoutMs', found.timeoutMs)
+      break
+    }
+    case 'alert':
+      only(given, ['action', 'timeoutMs'], named)
+      if (given.action !== undefined)
+        input.action = oneOf(given.action, 'action', DEVICE_ALERT_ACTIONS)
+      put('timeoutMs', optionalNumber(given.timeoutMs, 'timeoutMs', 100, 60_000))
+      break
+    case 'keyboard':
+      only(given, ['action'], named)
+      if (given.action !== undefined) {
+        input.action = oneOf(given.action, 'action', DEVICE_KEYBOARD_ACTIONS)
+      }
+      break
+  }
+  return { command, input }
+}
+
+/** What `device_find` and a find step ask for, checked. */
+function findAction(input: Record<string, unknown>): Extract<DeviceAction, { type: 'find' }> {
+  const locator =
+    input.locator === undefined ? 'any' : oneOf(input.locator, 'locator', DEVICE_FIND_LOCATORS)
+  const query = text(input.query, 'query', MAX_SELECTOR)
+  // Without a locator, agent-device would read a locator's name as one.
+  if (locator === 'any' && (DEVICE_FIND_LOCATORS as readonly string[]).includes(query)) {
+    throw new DeviceArgsError(`"query" ${JSON.stringify(query)} needs a locator such as text`)
+  }
+  const action =
+    input.action === undefined ? 'exists' : oneOf(input.action, 'action', DEVICE_FIND_ACTIONS)
+  const found: Extract<DeviceAction, { type: 'find' }> = { type: 'find', locator, query, action }
+  if (action === 'fill' || action === 'type') found.value = text(input.value, 'value')
+  else if (input.value !== undefined) throw new DeviceArgsError('"value" is for fill and type')
+  const first = flag(input.first, 'first')
+  const last = flag(input.last, 'last')
+  if (first && last) throw new DeviceArgsError('Give first or last, not both')
+  if (input.pick !== undefined) found.pick = oneOf(input.pick, 'pick', ['first', 'last'] as const)
+  else if (first) found.pick = 'first'
+  else if (last) found.pick = 'last'
+  if (input.timeoutMs !== undefined) {
+    if (action !== 'wait') throw new DeviceArgsError('"timeoutMs" is for wait')
+    found.timeoutMs = optionalNumber(input.timeoutMs, 'timeoutMs', 100, 60_000)
+  }
+  return found
+}
+
 /** An app is named by its bundle id or package, never a path or a flag. */
 function appId(value: unknown): string {
   const app = text(value, 'app', MAX_NAME)
@@ -334,31 +752,27 @@ export function actionOf(
 ): DeviceAction | null {
   switch (tool) {
     case 'device_snapshot':
-      return { type: 'snapshot' }
+      return { type: 'snapshot', ...level(input.level) }
     case 'device_tap': {
       const long = input.long === true
       if (typeof input.ref === 'string') {
-        if (!/^@?e\d+(~s\d+)?$/.test(input.ref))
-          throw new DeviceArgsError('"ref" must be a reference such as @e3')
-        return { type: 'tap', ref: input.ref.startsWith('@') ? input.ref : `@${input.ref}`, long }
+        return { type: 'tap', ref: deviceRef(input.ref), long, ...level(input.level) }
       }
       return {
         type: 'tap',
         x: number(input.x, 'x', 0, 100_000),
         y: number(input.y, 'y', 0, 100_000),
         long,
+        ...level(input.level),
       }
     }
-    case 'device_fill': {
-      const ref = text(input.ref, 'ref', 32)
-      if (!/^@?e\d+(~s\d+)?$/.test(ref))
-        throw new DeviceArgsError('"ref" must be a reference such as @e3')
+    case 'device_fill':
       return {
         type: 'fill',
-        ref: ref.startsWith('@') ? ref : `@${ref}`,
+        ref: deviceRef(input.ref),
         text: text(input.text, 'text'),
+        ...level(input.level),
       }
-    }
     case 'device_type':
       return { type: 'type', text: text(input.text, 'text') }
     case 'device_scroll':
@@ -444,6 +858,91 @@ export function actionOf(
         ]),
         grant: input.grant === true,
       }
+    case 'device_wait': {
+      const kinds = ['text', 'selector', 'absent', 'stable'].filter(
+        (key) => input[key] !== undefined && input[key] !== false,
+      )
+      if (kinds.length !== 1) {
+        throw new DeviceArgsError('Give one of "text", "selector", "absent" and "stable"')
+      }
+      const wait: Extract<DeviceAction, { type: 'wait' }> =
+        input.text !== undefined
+          ? { type: 'wait', until: 'text', value: text(input.text, 'text') }
+          : input.selector !== undefined
+            ? { type: 'wait', until: 'selector', value: selector(input.selector) }
+            : input.absent !== undefined
+              ? { type: 'wait', until: 'absent', value: selector(input.absent, 'absent') }
+              : { type: 'wait', until: 'stable' }
+      if (wait.until === 'stable') {
+        if (input.stable !== true) throw new DeviceArgsError('"stable" must be true')
+        const quiet = optionalNumber(input.quietMs, 'quietMs', 100, 10_000)
+        if (quiet !== undefined) wait.quietMs = quiet
+      } else if (input.quietMs !== undefined) {
+        throw new DeviceArgsError('"quietMs" is for stable')
+      }
+      const timeout = optionalNumber(input.timeoutMs, 'timeoutMs', 100, 60_000)
+      if (timeout !== undefined) wait.timeoutMs = timeout
+      return wait
+    }
+    case 'device_find':
+      return { ...findAction(input), ...level(input.level) }
+    case 'device_is': {
+      const predicate = oneOf(input.predicate, 'predicate', DEVICE_IS_PREDICATES)
+      const checked: Extract<DeviceAction, { type: 'is' }> = {
+        type: 'is',
+        predicate,
+        selector: selector(input.selector),
+      }
+      if (predicate === 'text') checked.value = text(input.value, 'value')
+      else if (input.value !== undefined) throw new DeviceArgsError('"value" is for text')
+      return checked
+    }
+    case 'device_get': {
+      if ((input.ref === undefined) === (input.selector === undefined)) {
+        throw new DeviceArgsError('Give "ref" or "selector"')
+      }
+      return {
+        type: 'get',
+        format: oneOf(input.format, 'format', ['text', 'attrs'] as const),
+        target: input.ref !== undefined ? deviceRef(input.ref) : selector(input.selector),
+        ...level(input.level),
+      }
+    }
+    case 'device_alert': {
+      const action =
+        input.action === undefined ? 'get' : oneOf(input.action, 'action', DEVICE_ALERT_ACTIONS)
+      const alert: Extract<DeviceAction, { type: 'alert' }> = { type: 'alert', action }
+      if (input.timeoutMs !== undefined) {
+        if (action !== 'wait' && action !== 'get') {
+          throw new DeviceArgsError('"timeoutMs" is for wait and get')
+        }
+        alert.timeoutMs = optionalNumber(input.timeoutMs, 'timeoutMs', 100, 60_000)
+      }
+      return alert
+    }
+    case 'device_keyboard':
+      return {
+        type: 'keyboard',
+        action:
+          input.action === undefined
+            ? 'status'
+            : oneOf(input.action, 'action', DEVICE_KEYBOARD_ACTIONS),
+      }
+    case 'device_batch': {
+      if (
+        !Array.isArray(input.steps) ||
+        input.steps.length === 0 ||
+        input.steps.length > MAX_DEVICE_BATCH_STEPS
+      ) {
+        throw new DeviceArgsError(`"steps" must list 1 to ${MAX_DEVICE_BATCH_STEPS} steps`)
+      }
+      return {
+        type: 'batch',
+        steps: input.steps.map(batchStep),
+        stopOnError: flag(input.stopOnError, 'stopOnError') ?? true,
+        ...level(input.level),
+      }
+    }
     default:
       return null
   }

@@ -110,6 +110,13 @@ const OWN_TOOLS: Names = {
   device_set_appearance: ['Set device appearance', '设置设备外观'],
   device_set_location: ['Set device location', '设置设备位置'],
   device_set_permission: ['Set device permission', '设置设备权限'],
+  device_wait: ['Wait on device', '在设备上等待'],
+  device_find: ['Find on device', '在设备上查找'],
+  device_is: ['Check device screen', '检查设备屏幕'],
+  device_get: ['Read device element', '读取设备元素'],
+  device_alert: ['Handle device alert', '处理设备弹窗'],
+  device_keyboard: ['Device keyboard', '设备键盘'],
+  device_batch: ['Run device steps', '在设备上执行多步操作'],
   // Terminals
   terminal_run: ['Run in terminal', '在终端运行'],
   terminal_read: ['Read terminal', '读取终端'],

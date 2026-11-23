@@ -343,6 +343,8 @@ Use it without being asked when you build or debug a mobile app: after a change,
 5. \`device_snapshot\` reads what the screen shows, each element you can act on with a reference such as @e3. Act with \`device_tap\`, \`device_fill\`, \`device_type\`, \`device_scroll\`, \`device_swipe\` and \`device_press_button\`. References change when the screen changes: read it again then.
 6. \`device_screenshot\` shows how the screen looks; find what to tap with the snapshot. \`device_logs\` gives the app's latest log lines.
 
+Check a screen with the tools that read it, not with a screenshot: \`device_wait\` waits for text or an element (by selector, such as \`label="Saved"\`) to show or go, or for the screen to settle; \`device_is\` checks that an element is visible, checked, focused or has a text; \`device_get\` reads an element's text or attributes; \`device_find\` finds one by its words and checks or acts on it. \`device_alert\` reads and answers a system prompt and \`device_keyboard\` hides the keyboard or presses its return key. \`device_batch\` runs several steps in one call. \`level: "digest"\` on the snapshot, tap, fill, find, get and batch answers in fewer tokens.
+
 \`device_open_url\` opens a web address or a deep link. \`device_set_appearance\`, \`device_rotate\`, \`device_set_location\` and \`device_set_permission\` change the device's settings. \`device_terminate_app\` stops the app, and \`device_close\` lets go of the device, with \`shutdown\` to shut a simulator or emulator down.
 
 Tap, type and swipe with these tools rather than with \`simctl\` or \`adb\`, so the user sees each action and can take the device over.
