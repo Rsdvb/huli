@@ -1307,43 +1307,54 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
 'read'` so agents never change it, a computer setting a paired device cannot change): 关闭
   (`off`, the default, and what any older file reads as; the old `allowElevated` switch is
   dropped) or 始终允许（高风险） (`always`). Turning it on opens a short dialog: an agent outside a
-  sandbox runs as the user and could take over the prompt or the helper's windows; once on, any
+  sandbox runs as the user and could imitate the prompt or the helper's windows; once on, any
   session may ask, and the approved program's Open and Save dialogs can change any file as
   administrator; what the design cannot fix (another program can raise an identical prompt for its
   own command, or slip code into the helper while the prompt is open); and that it is the user's
   call, with turning it off leaving the helper installed for Remove. Nothing changes until they
-  confirm. `always` counts as on only while the install in Program Files is current and not
-  remembered as tampered (`ElevatedInstall.ready` in `elevated-install.ts`), so a value written
-  into the settings file does nothing without an install only the user's prompt makes. Off,
-  computer use is exactly as without the helper: the same refusal and list notes and the guide
-  unchanged; turned off, a running helper ends. Settings looks at the install's place on the disk
-  while off and starts the helper only when something is there, so Remove stays reachable. A
+  confirm. `always` counts as on only while the install in Program Files is current
+  (`ElevatedInstall.ready` in `elevated-install.ts`, kept while the installed files' sizes and
+  times stay the same, so the 33 MB driver is not hashed on every call), so a value written into
+  the settings file does nothing without an install only the user's prompt makes. Off, computer use
+  is exactly as without the helper: the same refusal and list notes and the guide unchanged; turned
+  off, a running helper ends. Settings asks the helper how the install stands whatever the setting
+  (it reads the system's Program Files folder, not an environment variable), so Remove stays
+  reachable. A
   choice limited to sandboxed sessions was tried and dropped: a container's agent gets none of
   Kite's MCP tools, so it had no session to serve. Settings › 功能管理 lists it under computer use
   with a link to its row.
   - The helper is installed only when the user presses Install while the setting is on (the host
-    refuses it otherwise), never by an update: the warm helper stages itself, the driver and
-    `install.json` (protocol, the files' SHA-256, Kite's program) in a temporary folder and holds
-    the folder open with no delete sharing and each staged file read-only with read sharing alone,
-    hashing the held handles, until Windows' own `robocopy.exe`, started through the administrator
-    prompt, has copied them into `%ProgramFiles%\Kite Computer Helper`; then it checks what landed
-    against those hashes. A failed check is `tampered`, and the host remembers it (the record's
-    helper hash in `computer-helper.json` in its data folder), so the install stays refused until
-    it is removed or installed again. Remove runs Windows' `cmd.exe` `rd`, whatever the setting and
-    whatever .NET variables are set, as no .NET program runs for it. So no program from the
-    user-writable app folder runs as administrator, and a newer Kite of the same protocol
-    (`Layout.Protocol`) keeps using the installed copy; only a new protocol asks for a new install.
-    Every start checks the installed files against the record and that only administrators, SYSTEM
-    and TrustedInstaller own or may change the folder, its parent and the files.
+    refuses it otherwise), never by an update. The warm helper stages itself and the driver in a
+    temporary folder, holds the folder (no delete sharing) and the files (read-only, read sharing
+    alone) open and hashes the held handles; that only keeps them from changing in passing, as a
+    program of the user's can close another's handles. What holds is the record: the prompt starts
+    Windows' `cmd.exe`, which makes `%ProgramFiles%\Kite Computer Helper`, writes `install.txt`
+    itself (one ASCII line: the protocol, both files' SHA-256 and Kite's program as UTF-8 hex, all
+    fixed in the command line the owner approves) and then runs Windows' `robocopy.exe` to copy the
+    two files. The record is in a folder only administrators write, and the installed files are
+    checked against it at every look and start, whatever robocopy's exit code was: a copy that is
+    not the staged one, or one that failed on a file, reads `tampered` for as long as it is there.
+    Remove runs `cmd.exe` `rd`, whatever the setting and whatever .NET variables are set, as no
+    .NET program runs for it. So no program from the user-writable app folder runs as
+    administrator, and a newer Kite of the same protocol (`Layout.Protocol`) keeps using the
+    installed copy; only a new protocol asks for a new install. Every start also checks that only
+    administrators, SYSTEM and TrustedInstaller own or may change the folder, its parent and the
+    files.
   - Every prompt goes through `ShellExecuteEx` with `SEE_MASK_CLASSKEY` on
     `HKLM\SOFTWARE\Classes\exefile` (`Shell.cs`), so the user's `HKCU\Software\Classes` cannot put
-    a command of its own behind the prompt; a test build asks the same way with the open verb.
+    a command of its own behind the prompt; a test build asks the same way with the open verb. To
+    check this on a test machine (never on the owner's own), remember the guard below refuses first
+    while `HKCU\Software\Classes\exefile\shell` exists, so a plain run tests only the guard:
+    either create the harmless override after the guard passed and before the prompt is asked, or
+    call `Shell.Start` directly from a scratch program compiled with the helper's sources, using
+    csc's `/main` option to pick its entry point, with a harmless override in place, and see that
+    the prompt still runs the program asked for.
   - Before install and every start the warm helper refuses while a variable that makes .NET load
     code (`COR_*`, `COMPlus_*`, `CORECLR_*`, `APPDOMAIN_MANAGER_ASM`/`_TYPE`, `DOTNET_*` but the
     SDK's own) is set in its own environment, in `HKCU\Environment`, in `HKCU\Volatile Environment`
     or any of its per-session subkeys, or in the machine's; while
     `HKCU\Software\Microsoft\.NETFramework` holds a knob that loads code (`AltJit`, `JitName`,
-    `InstallRoot`, ...); while `HKCU\Software\Classes\exefile` or `\.exe` exists; or while the user
+    `InstallRoot`, ...); while `HKCU\Software\Classes\exefile\shell` exists; or while the user
     set their own `SystemRoot` or `windir` (`Guard.cs`). The prompt then starts Windows' `cmd.exe`
     (`/d`, no AutoRun), which is no .NET program; it clears the fixed code-loading names it can name
     and sets `SystemRoot` and `windir` from `GetSystemWindowsDirectory`, `PATH` to System32 and
@@ -1376,19 +1387,26 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
     and range, an element token or a point but not both, keys from a fixed set, `initialize` and
     `_meta` held to what Kite's client sends, `delivery_mode: "background"` on every action, one
     tool call at a time (released only by that call's own answer), scoped to the program's windows,
-    re-serialized; a request that uses an id again ends the session. It confirms every step in its
+    re-serialized; a request whose id is no whole number within ±2^53 or short string, or that
+    uses an id again, ends the session. It confirms every step in its
     own window but plainly harmless ones (`Risk.cs`): a click only on an element of a focusing or
     selecting role from the snapshot that gave its token, with one left click and a label that
     commits nothing; typing only into the edit field the last step clicked (no element token, or
-    that field's), with no line break or tab. Every question shows the whole window with a red box
+    that field's), with no line break or tab. Typed text with any other control character
+    (U+0000-U+001F, U+007F-U+009F), which a field takes as a command such as paste, is refused.
+    Every question shows the whole window with a red box
     at the step (both ends of a drag), typed text in full with control, direction and invisible
     characters made visible, and what went through unasked since the last question; in a window
-    that shows files (one holding `SHELLDLL_DefView`, as Open and Save dialogs do) it says a step
-    there can change any file as administrator, and drags there are refused. Paste is refused by
-    every route it can tell: its shortcuts, a menu item or a click on an element named Paste in
-    English, Chinese, Japanese, Korean, German, French, Spanish or Italian, and a letter, Enter or
-    typed text while a context menu is open (after a right-click, the menu key or Shift+F10), whose
-    items must be clicked so their names are checked. Clicks it cannot place and text longer than
+    that shows files (one holding the shell's folder view or folder tree, as Open, Save and Browse
+    for Folder dialogs do, or a popup menu of a program that has such a window) it says a step there
+    can change any file as administrator, and drags there are refused. Paste is refused on the
+    routes the broker can tell, not every route: its shortcuts, a menu item or a click on an element
+    named Paste in English, Chinese, Japanese, Korean, German, French, Spanish, Italian, Portuguese,
+    Russian, Dutch, Polish, Turkish or Swedish, and, while a context menu or the menu bar is open
+    (after a right-click, a click on a menu item, the menu key with or without Shift, Shift+F10,
+    Alt, F10 or Alt with a letter), a letter, Enter, typed text or a click by a point, so its items
+    are clicked by their element and their names are checked. The clipboard itself is never shown.
+    Clicks it cannot place and text longer than
     1,000 characters are refused too. Its Allow button works only after the window has been in
     front for a second with no other program's window over it, the second starting again after a
     window covered it. No answer in two minutes is a no. The broker ends with the hold (turn end,

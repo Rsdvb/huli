@@ -645,7 +645,7 @@
       "failed": "That did not work (code {{code}}).",
       "confirm": {
         "title": "Let agents operate programs run as administrator?",
-        "hijack": "An agent on this computer that is not in a sandbox runs as you. It could take over Windows’ administrator prompt or the helper’s confirmation window, so that what you approve is not what you think.",
+        "hijack": "An agent on this computer that is not in a sandbox runs as you. It could imitate Windows’ administrator prompt or the helper’s confirmation window, so that what you approve is not what you think.",
         "always": "Once it is on, any session may ask; each program still asks you in its session first. The approved program’s Open and Save dialogs can change any file as administrator.",
         "unfixed": "Some of this cannot be fixed in Kite’s current design: another program can raise an identical Windows prompt for its own command, or slip code into the helper while the prompt is open.",
         "yours": "It is your decision. Turning it off leaves the helper in Program Files, where you can remove it here.",

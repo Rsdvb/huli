@@ -42,18 +42,22 @@ engine whose text reads as its own script. Boxes are in the image's own pixels, 
 `process` gives a process's image path and start time (a FILETIME), which the broker checks.
 `layout` says how the install folder stands for a Kite program: `missing`, `current`, `outdated`
 (another protocol, an install without a record, or another Kite program) or `tampered` (files that
-are not the recorded ones, or rights that let others than administrators change them), with the
-record's helper hash. `install` stages this program, the driver beside it and `install.json` in a
-temporary folder, holds the folder (no delete sharing) and the staged files (read-only, read sharing
-alone) open and hashes the held handles, runs Windows' `robocopy.exe` through the administrator
-prompt to copy them into the install folder, and checks what landed against those hashes before it
-lets go. `uninstall` runs Windows' `cmd.exe` `rd /s /q` the same way, and `elevate` starts the
-installed broker through `cmd.exe` and answers that launcher's pid. Every prompt is `ShellExecuteEx`
-with `SEE_MASK_CLASSKEY` on `HKLMSOFTWAREClassesexefile` (`Shell.cs`), so the user's classes
-cannot change what it runs. Each answers `{ cancelled: true }` when the owner says no at the prompt;
-`install` and `elevate` refuse first while a .NET setting that loads code, or an executable class
-override, is set anywhere the prompt reads from (`Guard.cs`). Removal runs no .NET program, so
-nothing of that stops it.
+are not the recorded ones, or rights that let others than administrators change them). `install`
+stages this program and the driver beside it in a temporary folder, holding the folder (no delete
+sharing) and the files (read-only, read sharing alone) open and hashing the held handles, which only
+keeps them from changing in passing. Through the administrator prompt it starts Windows' `cmd.exe`,
+which makes the install folder, writes `install.txt` itself (one ASCII line: the protocol, both
+SHA-256 and Kite's program as UTF-8 hex, fixed in the command line the owner approves) and runs
+Windows' `robocopy.exe` to copy the two files. The installed files are checked against that record,
+in a folder only administrators write, whatever robocopy's exit code: anything else reads
+`tampered` for as long as it is there. `uninstall` runs `cmd.exe` `rd /s /q` the same way, and
+`elevate` starts the installed broker through `cmd.exe` and answers that launcher's pid. Every
+prompt is `ShellExecuteEx` with `SEE_MASK_CLASSKEY` on `HKLM\SOFTWARE\Classes\exefile`
+(`Shell.cs`), so the user's classes cannot change what it runs. Each answers `{ cancelled: true }`
+when the owner says no at the prompt; `install` and `elevate` refuse first while a .NET setting
+that loads code, or the user's own verbs for programs (`HKCU\Software\Classes\exefile\shell`),
+is set anywhere the prompt reads from (`Guard.cs`). Removal runs no .NET program, so nothing of
+that stops it.
 
 ## The elevated helper (Windows)
 
@@ -68,8 +72,8 @@ kite-computer-helper connect --pipe kite-computer-<32 hex> --launcher <pid>
 ```
 
 - **The install** puts this program, the `cua-driver.exe` beside it (checked against the SHA-256
-  built into this program, `Build.DriverSha256`, which `build.mjs` writes) and `install.json`
-  (`protocol`, both files' SHA-256 and Kite's program) into `%ProgramFiles%\Kite Computer Helper`,
+  built into this program, `Build.DriverSha256`, which `build.mjs` writes) and `install.txt`
+  (protocol, both files' SHA-256 and Kite's program) into `%ProgramFiles%\Kite Computer Helper`,
   which only administrators can write to. No program from the app's folder runs as administrator
   for it, and an update of the same protocol (`Layout.Protocol`) needs none.
 - **broker** (as administrator) starts through `cmd.exe`, which clears the fixed names that make
@@ -91,14 +95,14 @@ kite-computer-helper connect --pipe kite-computer-<32 hex> --launcher <pid>
   and answers `{"ok": true, "pid"}`. It relays MCP: only `initialize`, `ping`, `tools/list`,
   cancellations and the read and input tools Kite uses, with only Kite's arguments and `params`
   keys, each checked for its type and range, `delivery_mode: "background"` on every action, one
-  tool call at a time, a reused request id ending it, scoped to the program's windows, and passes
-  on the message it parsed, re-serialized. Before every step but harmless ones (`Risk.cs`) it asks
-  the owner again, with a picture of the whole window, the typed text in full and what went
-  through unasked; paste by any route it can tell, drags in windows that show files, clicks it
-  cannot place and overlong text are refused. It ends when the client goes, the program or the
-  host exits, `--idle` passes with no request pending, the owner refused three steps, the driver
-  delivered in the foreground or thirty minutes passed; the job limit on the program is lifted
-  then.
+  tool call at a time, a reused id or one that is no whole number ending it, scoped to the
+  program's windows, and passes on the message it parsed, re-serialized. Before every step but
+  harmless ones (`Risk.cs`) it asks the owner again, with a picture of the whole window, the
+  typed text in full and what went through unasked; paste on the routes it can tell, typed
+  control characters, drags in windows that show files, clicks it cannot place and overlong text
+  are refused. It ends when the client goes, the program or the host exits, `--idle` passes with
+  no request pending, the owner refused three steps, the driver delivered in the foreground or
+  thirty minutes passed; the job limit on the program is lifted then.
 - **connect** (without elevation, from that folder) reads the token as its first stdin line,
   checks that the pipe's server is a child of `--launcher` started after it, running this same
   installed program, as administrator, hands the token over, writes the broker's answer as its
