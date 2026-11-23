@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { splitSettingsPatch } from '@shared/remote/host-admin'
-import { FEATURE_IDS } from '@shared/features'
+import { DEFAULT_FEATURES, FEATURE_IDS } from '@shared/features'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import { DEFAULT_PORT_BASE } from '@shared/worktree-ports'
 import { SettingsStore } from './settings'
@@ -932,9 +932,12 @@ describe('manager mode settings', () => {
 })
 
 describe('the feature switches', () => {
-  const allOn = Object.fromEntries(FEATURE_IDS.map((id) => [id, true]))
+  // Every feature on, but those that download a program and so wait for the user's yes.
+  const allOn = { ...DEFAULT_FEATURES }
 
-  it('are all on for a file from before them, and reach the host', async () => {
+  it('are on for a file from before them, but those that start off, and reach the host', async () => {
+    expect(Object.keys(allOn).sort()).toEqual([...FEATURE_IDS].sort())
+    expect(Object.entries(allOn).filter(([, on]) => !on)).toEqual([['webReader', false]])
     await save({ version: 1, general: { language: 'en' } })
     const settings = (await SettingsStore.load(dir)).get()
     expect(settings.features).toEqual(allOn)

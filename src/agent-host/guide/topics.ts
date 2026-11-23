@@ -41,6 +41,8 @@ export interface GuideFlags {
   devices: boolean
   secrets: boolean
   theme: boolean
+  /** Huli: background web reading with Moli (read_web_page), off until the user turns it on. */
+  webReader?: boolean
 }
 
 /** How a text points at another topic: a file or skill beside it, or the guide tool's topic. */

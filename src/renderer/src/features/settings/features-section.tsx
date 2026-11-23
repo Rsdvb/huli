@@ -13,6 +13,7 @@ import {
 } from '@shared/settings-catalog'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { ComputerUseLink, FeatureSwitch } from './features-rows'
+import { WebReaderSwitch } from './web-reader-rows'
 import type { GroupDef, RowDef, SectionDef } from './model'
 import { GroupNote } from './rows'
 
@@ -41,13 +42,16 @@ export function useFeaturesSection(): SectionDef {
       ...(id === 'sandbox' && sandboxHeld && sandboxOn
         ? { description: t('features.sandboxHeld') }
         : {}),
-      render: () => (
-        <FeatureSwitch
-          id={id}
-          label={t(`features.items.${id}.name`)}
-          held={id === 'sandbox' && sandboxHeld}
-        />
-      ),
+      render: () =>
+        id === 'webReader' ? (
+          <WebReaderSwitch label={t(`features.items.${id}.name`)} />
+        ) : (
+          <FeatureSwitch
+            id={id}
+            label={t(`features.items.${id}.name`)}
+            held={id === 'sandbox' && sandboxHeld}
+          />
+        ),
     })),
     ...(group === 'agents'
       ? [

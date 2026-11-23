@@ -2373,5 +2373,16 @@
     "copyPaths": "copy must list paths",
     "copyEntry": "copy: {{entry}} {{reason}}",
     "setupCommand": "setup must be null or a command of at most {{max}} characters"
+  },
+  "webReader": {
+    "busy": "Moli is being downloaded or removed. Wait for it to finish.",
+    "unsupported": "Moli has no build for this computer’s system and processor.",
+    "stopped": "The download of Moli was stopped.",
+    "stalled": "the download stalled",
+    "downloadFailed": "Moli could not be downloaded: {{reason}}. Check the network or the proxy in Settings › Advanced.",
+    "hashMismatch": "{{file}} does not match the SHA-256 Kite pins for it, so it was deleted and not installed.",
+    "extractFailed": "The Moli archive could not be extracted: {{reason}}",
+    "doesNotRun": "Moli was extracted, but it does not run on this computer.",
+    "inUse": "An agent is reading a page with Moli. Try again once it is done."
   }
 }

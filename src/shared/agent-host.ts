@@ -134,6 +134,7 @@ import type { ReportOrigin } from './report'
 import type { AutoApprove } from './risk'
 import type { SessionProcesses } from './task-processes'
 import type { AgentSandboxSupport, ContainerStatus, SandboxChoice } from './sandbox'
+import type { WebReaderStatus } from './web-reader'
 import type {
   ManagerChoices,
   ManagerSummary,
@@ -2660,6 +2661,13 @@ export interface HostContract {
   'sandbox.containerStatus': { params: void; result: ContainerStatus }
   'sandbox.pullImage': { params: void; result: ContainerStatus }
   'sandbox.removeImage': { params: void; result: ContainerStatus }
+  // Huli: background web reading with Moli (shared/web-reader.ts), the windows' alone. `install`
+  // downloads the pinned release, which the window asks the user about first with its size, and
+  // its progress comes in `webReader.changed`; `remove` frees its space.
+  'webReader.status': { params: void; result: WebReaderStatus }
+  'webReader.install': { params: void; result: WebReaderStatus }
+  'webReader.cancel': { params: void; result: void }
+  'webReader.remove': { params: void; result: WebReaderStatus }
   'agentNetwork.addSubscription': { params: { name: string; url: string }; result: { id: string } }
   // A subscription from a file's text, Clash YAML or a list of node links, at most 10 MiB; it is
   // never refreshed, only imported again.
@@ -3118,6 +3126,10 @@ export const HOST_METHODS = [
   'sandbox.containerStatus',
   'sandbox.pullImage',
   'sandbox.removeImage',
+  'webReader.status',
+  'webReader.install',
+  'webReader.cancel',
+  'webReader.remove',
   'agentNetwork.addSubscription',
   'agentNetwork.importSubscription',
   'agentNetwork.reimportSubscription',
@@ -3253,6 +3265,8 @@ export type HostEvent =
   | { type: 'folders.changed'; folders: SessionFolder[] }
   // Huli: the agents' network changed; to this computer's windows only.
   | { type: 'agentNetwork.changed'; status: AgentNetworkStatus }
+  // Huli: Moli's download, install or removal moved on; to this computer's windows only.
+  | { type: 'webReader.changed'; status: WebReaderStatus }
 
 export interface AgentsApi {
   request<M extends HostMethod>(method: M, params: HostParams<M>): Promise<HostResult<M>>

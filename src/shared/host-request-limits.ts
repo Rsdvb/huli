@@ -383,6 +383,11 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   // A pull downloads some 80 MB, whose time is the network's; the window shows it waits.
   'sandbox.pullImage': NONE,
   'sandbox.removeImage': AGENT_MS,
+  'webReader.status': HOST_MS,
+  // A download of some 42 MB, whose time is the network's; the window shows its progress.
+  'webReader.install': NONE,
+  'webReader.cancel': HOST_MS,
+  'webReader.remove': AGENT_MS,
   'agentNetwork.addSubscription': AGENT_MS,
   'agentNetwork.importSubscription': AGENT_MS,
   'agentNetwork.reimportSubscription': AGENT_MS,

@@ -82,6 +82,7 @@ import { ConsentRow, ConsentsState } from './artifacts-section'
 import { EmptyCard, GroupNote } from './rows'
 import { BROUGHT_SHOWN, useBroughtSites } from './brought-sites'
 import { BringSignInsRow, BroughtMoreRow, BroughtSiteRow } from './sign-ins-rows'
+import { WebReaderRow } from './web-reader-rows'
 import { HostPage } from './host-page'
 import { hostLine, platformName, webHostLine } from './host-text'
 import { AccountHostRow, AccountHostsActions, AccountHostsState } from './host-account'
@@ -994,6 +995,18 @@ export function useBrowserSection(): SectionDef {
           } satisfies RowDef,
         ]
       : []),
+    // Huli: Moli runs on this computer, which the web client is not.
+    ...(isWeb
+      ? []
+      : [
+          {
+            id: 'web-reader',
+            setting: 'browser.web-reader',
+            group: group('web-reader', t('browser.groups.webReader')),
+            layout: 'block',
+            render: (text) => <WebReaderRow text={text} />,
+          } satisfies RowDef,
+        ]),
     {
       id: 'clear-data',
       setting: 'browser.clear-data',
