@@ -332,6 +332,8 @@ const SECTION_FIELDS = {
     allowedApps: isComputerApps,
     pauseOnUse: isBoolean,
     stopShortcut: isStopShortcutValue,
+    allowForeground: isBoolean,
+    allowElevated: isBoolean,
   },
   agentNetwork: {
     enabled: isBoolean,

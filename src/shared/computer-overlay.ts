@@ -25,6 +25,10 @@ export interface ComputerOverlayState {
    * Inside draws the light along the window's inner edges, for one that fills its screen.
    */
   frame: { width: number; height: number; pad: number; inside: boolean } | null
+  /** Huli: the app an elevated helper drives as administrator; null for none. */
+  elevated: string | null
+  /** Huli: counts the actions that went to the foreground, each of which the label notes. */
+  foreground: number | null
 }
 
 /** A label button. */

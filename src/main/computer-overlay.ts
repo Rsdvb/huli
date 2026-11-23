@@ -29,6 +29,7 @@ import type { SettingsFile } from '@shared/settings'
 import type { ThemesState } from '@shared/themes'
 import { createLogger } from './log'
 import { loadRenderer, rendererPage } from './renderer'
+import { backgroundPlace, testInBackground } from './test-window'
 import { appFocused, createOverlayWindow } from './window'
 
 const log = createLogger('computer-overlay')
@@ -240,8 +241,10 @@ export class ComputerOverlay {
     const pad = inside ? 0 : LIGHT_PAD
     const page = (this.light ??= this.create('light'))
     if (!page.loaded) return
+    // Huli: a test copy keeps the light off every display, where it still paints for CDP.
+    const away = testInBackground() ? backgroundPlace().x + LIGHT_PAD - bounds.x : 0
     page.window.setBounds({
-      x: Math.round(bounds.x - pad),
+      x: Math.round(bounds.x - pad + away),
       y: Math.round(bounds.y - pad),
       width: Math.round(bounds.width + 2 * pad),
       height: Math.round(bounds.height + 2 * pad),
@@ -265,9 +268,11 @@ export class ComputerOverlay {
       ? screen.getDisplayMatching(bounds)
       : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     const area = display.workArea
+    // Huli: and the label too.
+    const away = testInBackground() ? backgroundPlace().x : null
     page.window.setBounds({
-      x: Math.round(area.x + (area.width - size.width) / 2),
-      y: area.y + LABEL_TOP,
+      x: away ?? Math.round(area.x + (area.width - size.width) / 2),
+      y: away === null ? area.y + LABEL_TOP : 0,
       width: size.width,
       height: size.height,
     })
@@ -291,6 +296,8 @@ export class ComputerOverlay {
       control: hold.control,
       act: hold.act,
       frame,
+      elevated: hold.elevated ?? null,
+      foreground: hold.foreground ?? null,
     }
   }
 
@@ -402,7 +409,9 @@ export class ComputerOverlay {
   /** The stop shortcut, registered while a session holds the computer and only then. */
   private syncShortcut(): void {
     const shortcut = this.deps.settings().computerUse.stopShortcut
-    const wanted = this.hold ? stopAccelerator(shortcut, process.platform) : null
+    // Huli: a test copy takes no global shortcut from the owner.
+    const wanted =
+      this.hold && !testInBackground() ? stopAccelerator(shortcut, process.platform) : null
     if (wanted === this.shortcut) return
     if (this.shortcut) globalShortcut.unregister(this.shortcut)
     this.shortcut = null

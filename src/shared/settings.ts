@@ -413,7 +413,14 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     relay: true,
     discoverable: true,
   },
-  computerUse: { enabled: false, allowedApps: [], pauseOnUse: true, stopShortcut: '' },
+  computerUse: {
+    enabled: false,
+    allowedApps: [],
+    pauseOnUse: true,
+    stopShortcut: '',
+    allowForeground: true,
+    allowElevated: false,
+  },
   agentNetwork: DEFAULT_AGENT_NETWORK,
   // Personal fork: the self-hosted mode, in which nothing reaches Kettu's services; paired devices
   // connect directly over the network or a VPN such as Tailscale.

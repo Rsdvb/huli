@@ -104,7 +104,9 @@
         "critical": "极高风险"
       }
     },
-    "mcp": "{{server}}：{{tool}}"
+    "mcp": "{{server}}：{{tool}}",
+    "toBackground": "转到后台",
+    "toBackgroundTitle": "让这一轮继续，命令转到后台运行"
   },
   "kettuTool": {
     "read_kettu_guide": "读取 Kettu 指南",
@@ -334,7 +336,35 @@
       "deny": "已拒绝",
       "timeout": "未在限定时间内得到答复"
     },
-    "where": "读取它的窗口，在后台点击和输入"
+    "where": "读取它的窗口，在后台点击和输入",
+    "elevated": {
+      "action": "以管理员权限操作 {{app}}",
+      "where": "{{app}} 以管理员身份运行。允许后会通过 Windows 的管理员提示启动纸鸢的管理员助手，需要你亲自确认。它只操作这个程序的窗口、只在后台操作，有风险的步骤会先问你，回合结束就退出。",
+      "allow": "本回合允许",
+      "deny": "不允许",
+      "answer": {
+        "allow": "本回合已允许",
+        "deny": "已拒绝"
+      }
+    },
+    "risky": {
+      "action": "以管理员权限在 {{app}} 里操作一步",
+      "where": "这一步会以管理员权限执行，请确认后再允许。",
+      "allow": "执行这一步",
+      "deny": "不执行",
+      "answer": {
+        "allow": "已允许这一步",
+        "deny": "已拒绝这一步"
+      },
+      "step": {
+        "click": "点击「{{text}}」",
+        "type": "输入「{{text}}」",
+        "key": "按 {{text}}",
+        "drag": "在窗口里拖动",
+        "menu": "选择菜单 {{text}}",
+        "unknown": "点击窗口里的一个位置"
+      }
+    }
   },
   "projectMcp": {
     "where": "来自项目的 .mcp.json；使用后它们在这台电脑上以你的权限运行。",
@@ -420,7 +450,11 @@
   "computerBar": {
     "waiting": "等你允许使用 <app>{{app}}</app>",
     "stopping": "正在收回电脑…",
-    "stopLabel": "这一轮不再使用电脑，回合继续"
+    "stopLabel": "这一轮不再使用电脑，回合继续",
+    "elevated": "正在以管理员权限操作 <app>{{app}}</app>",
+    "elevatedStop": "停止",
+    "elevatedStopLabel": "结束管理员助手，回合继续",
+    "waitingAdmin": "等你回答：以管理员权限操作 <app>{{app}}</app>"
   },
   "computerPane": {
     "title": "Computer",
@@ -482,7 +516,8 @@
   },
   "subagent": {
     "fallbackTitle": "子智能体",
-    "tools_other": "{{count}} 个工具"
+    "tools_other": "{{count}} 个工具",
+    "toBackground": "转到后台"
   },
   "subagentBar": {
     "runsFor": "{{agent}} 正在为 <parent/> 运行这个子智能体",
@@ -643,34 +678,13 @@
       "named": "{{hello}}，{{name}}",
       "first": "你好，我是 Kettu",
       "lines": {
-        "morning": [
-          "今天从哪儿开始？",
-          "先做哪件事？"
-        ],
-        "afternoon": [
-          "接着做点什么？",
-          "适合啃块硬骨头"
-        ],
-        "evening": [
-          "还有要收尾的吗？",
-          "今天辛苦了"
-        ],
-        "late": [
-          "慢慢来",
-          "做完这件就休息"
-        ],
-        "monday": [
-          "新的一周，先做什么？",
-          "周一，慢慢进入状态"
-        ],
-        "friday": [
-          "周五了，收个尾",
-          "这周辛苦了"
-        ],
-        "weekend": [
-          "周末也在忙？",
-          "周末，做点轻松的"
-        ]
+        "morning": ["今天从哪儿开始？", "先做哪件事？"],
+        "afternoon": ["接着做点什么？", "适合啃块硬骨头"],
+        "evening": ["还有要收尾的吗？", "今天辛苦了"],
+        "late": ["慢慢来", "做完这件就休息"],
+        "monday": ["新的一周，先做什么？", "周一，慢慢进入状态"],
+        "friday": ["周五了，收个尾", "这周辛苦了"],
+        "weekend": ["周末也在忙？", "周末，做点轻松的"]
       }
     },
     "branchHint": "会话从这个分支开始",
@@ -2006,6 +2020,16 @@
       "transfer": "传过去",
       "apply": "在 {{name}} 上还原",
       "finish": "完成"
+    }
+  },
+  "recall": {
+    "recalled_other": "回忆了 {{count}} 条记忆",
+    "saved_other": "保存了 {{count}} 条记忆",
+    "summary": "多条记忆的摘要",
+    "scope": {
+      "personal": "个人",
+      "team": "团队",
+      "organization": "组织"
     }
   },
   "zen": {

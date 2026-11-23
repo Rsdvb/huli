@@ -169,6 +169,25 @@ describe('createValidators', () => {
     }
   })
 
+  it('takes a session for its processes and Clean, and a bounded call to move', () => {
+    for (const method of ['sessions.processes', 'sessions.cleanTasks'] as const) {
+      expect(posix[method]({ sessionId: 's', other: 1 })).toEqual({ sessionId: 's' })
+      rejects(() => posix[method]({}))
+      rejects(() => posix[method]({ sessionId: '' }))
+      rejects(() => posix[method]({ sessionId: 'x'.repeat(257) }))
+    }
+    const move = posix['sessions.toBackground']
+    expect(move({ sessionId: 's', toolCallId: 'toolu_1', other: 1 })).toEqual({
+      sessionId: 's',
+      toolCallId: 'toolu_1',
+    })
+    expect(move({ sessionId: 's' })).toEqual({ sessionId: 's' })
+    rejects(() => move({ sessionId: 's', toolCallId: '' }))
+    rejects(() => move({ sessionId: 's', toolCallId: 7 }))
+    rejects(() => move({ sessionId: 's', toolCallId: 'x'.repeat(1025) }))
+    rejects(() => move({ toolCallId: 'toolu_1' }))
+  })
+
   it('takes a side question, its quote and the agent picked to answer it', () => {
     expect(posix['sessions.sideAsk']({ sessionId: 's', question: 'Why?', other: 1 })).toEqual({
       sessionId: 's',

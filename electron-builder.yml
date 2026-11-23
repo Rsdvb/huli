@@ -16,12 +16,15 @@ extraResources:
   - from: out/helpers
     to: helpers
   # Cua Driver's program, which computer use runs, as tools/install/cua-driver.mjs fetched it for
-  # the target; a build without it has no computer use.
+  # the target, and Kite's computer use helper it built beside it; a build without the driver has
+  # no computer use.
   - from: resources/cua-driver
     to: cua-driver
     filter:
       - cua-driver
       - cua-driver.exe
+      - kite-computer-helper
+      - kite-computer-helper.exe
   # mihomo, the separate GPL-3.0 program agents' network can go through, as
   # tools/install/mihomo.mjs fetched it for the target; a build without it has no agent network.
   - from: resources/mihomo

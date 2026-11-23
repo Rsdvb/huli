@@ -598,6 +598,11 @@
       "description": "Your click or key in the app an agent uses takes it over, and the agent waits; Hand back lets it go on.",
       "keywords": "pause take over click same app computer use"
     },
+    "allowForeground": {
+      "name": "Switch to the foreground when needed",
+      "description": "An action an app ignores in the background, as many Electron apps and games do, is tried once with its window brought to the front, which then goes back. The thread and a label on screen say so.",
+      "keywords": "foreground front focus electron background delivery computer use"
+    },
     "stopShortcut": {
       "name": "Stop from anywhere",
       "description": "Stops using the computer from any app, also while Kettu is in the background, where a label shows at the top of the screen.",
@@ -627,7 +632,7 @@
     },
     "windows": {
       "name": "Windows",
-      "description": "Needs no permission. Windows of apps run as administrator cannot be used, and most actions in Electron apps bring the window to the front."
+      "description": "Needs no permission. Programs run as administrator cannot be used, and some actions in Electron apps need the window in front."
     },
     "desktop": {
       "name": "Desktop",
@@ -2895,7 +2900,8 @@
       "discoverable": "Devices signed in to your Kettu account will be able to find this computer and ask to be added.",
       "relay": "Devices will reach this computer through the Kettu relay from any network.",
       "proxy": "Agents, npx and updates will go through this proxy.",
-      "source": "Changes where Kettu downloads its updates from."
+      "source": "Changes where Kettu downloads its updates from.",
+      "computerForeground": "Agents’ actions will be able to bring an app’s window to the front for a moment."
     }
   },
   "chatBridge": {

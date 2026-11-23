@@ -68,6 +68,42 @@ describe('the computer tools', () => {
   })
 })
 
+describe('Huli: delivery and text recognition', () => {
+  it('sends every action in the background unless it names the foreground', () => {
+    const base = { pid: 1, window_id: 2 }
+    const calls = [
+      computerCall('computer_click', { ...base, x: 1, y: 1 }, 'win32'),
+      computerCall('computer_type_text', { ...base, text: 'a' }, 'win32'),
+      computerCall('computer_press_key', { ...base, key: 'a' }, 'win32'),
+      computerCall('computer_hotkey', { ...base, keys: ['ctrl', 'a'] }, 'win32'),
+      computerCall('computer_scroll', { ...base, x: 1, y: 1, direction: 'down' }, 'win32'),
+      computerCall('computer_drag', { ...base, from_x: 1, from_y: 1, to_x: 2, to_y: 2 }, 'win32'),
+      computerCall('computer_invoke_menu', { ...base, path: ['File', 'Open'] }, 'win32'),
+    ]
+    for (const call of calls) expect(call.args.delivery_mode).toBe('background')
+    expect(
+      computerCall(
+        'computer_type_text',
+        { ...base, text: 'a', delivery_mode: 'foreground' },
+        'win32',
+      ).args.delivery_mode,
+    ).toBe('foreground')
+    refused('computer_press_key', { ...base, key: 'a', delivery_mode: 'global' })
+    refused('computer_invoke_menu', { ...base, path: ['File'], delivery_mode: 1 })
+  })
+
+  it('keeps the text recognition flag from the driver', () => {
+    const call = computerCall(
+      'computer_get_window_state',
+      { pid: 1, window_id: 2, ocr: true },
+      'win32',
+    )
+    expect(call.ocr).toBe(true)
+    expect(call.args.ocr).toBeUndefined()
+    refused('computer_get_window_state', { pid: 1, window_id: 2, ocr: 'yes' })
+  })
+})
+
 describe('the driver environment', () => {
   it('keeps the driver embedded, off the network and out of the unrestricted mode', () => {
     const env = driverEnv({

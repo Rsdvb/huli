@@ -23,7 +23,9 @@ import { duration } from '@renderer/lib/format'
 import { isMac } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
+import { useThreadsStore } from '@renderer/stores/threads'
 import { openSession } from '@renderer/stores/view'
+import { useToBackground } from '@renderer/features/board/use-to-background'
 import { useRevealRequest, useRevealScroll } from '../reveal-subagent'
 import { useLoadSubagent, useProgressOf, useSubagentDigest } from '../subagent/progress'
 import { useEntry, useEntryAnimation } from '../use-thread'
@@ -92,6 +94,18 @@ function SubagentBlock({
   }, [highlight])
 
   const { running } = progress
+  // Huli: while it holds up the call that started it, the turn waits; it can go to the background.
+  const held = useThreadsStore((s) => {
+    const parentId = child?.parentId
+    const taskId = child?.acpSessionId
+    if (!parentId || !taskId) return null
+    return (
+      s.replicas[parentId]?.state?.session.foreground?.find((task) => task.taskId === taskId)
+        ?.toolCallId ?? null
+    )
+  })
+  const toBackground = useToBackground(child?.parentId ?? '', held ?? '')
+  const line = running ? (child?.progress ?? null) : null
   const failed = !!child && (child.attention === 'error' || child.status === 'failed')
   const cancelled = !running && !failed && digest?.stopReason === 'cancelled'
   const meta = waiting
@@ -162,6 +176,26 @@ function SubagentBlock({
           className="ks-subagent__chevron size-4 shrink-0"
         />
       </Button>
+      {(line || (held && running)) && (
+        <div className="ks-subagent__now">
+          <span className="ks-subagent__line shimmer">{line}</span>
+          {held && running && (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={toBackground.moving}
+              onClick={toBackground.move}
+            >
+              {t('subagent.toBackground')}
+            </Button>
+          )}
+        </div>
+      )}
+      {toBackground.error && (
+        <p role="alert" className="ks-subagent__error">
+          {toBackground.error}
+        </p>
+      )}
       {highlight > 0 && (
         <span
           key={highlight}

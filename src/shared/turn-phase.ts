@@ -50,6 +50,7 @@ const QUIET = new Set([
   'artifact',
   'subagent',
   'memory',
+  'recall',
   'control_ask',
   'control_note',
 ])

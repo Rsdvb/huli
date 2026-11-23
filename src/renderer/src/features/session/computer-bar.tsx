@@ -1,11 +1,17 @@
 import { useState } from 'react'
-import { ComputerIcon, DashboardSquare01Icon } from '@hugeicons/core-free-icons'
+import {
+  ComputerIcon,
+  DashboardSquare01Icon,
+  Shield01Icon,
+  StopCircleIcon,
+} from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { AnimatePresence } from 'motion/react'
 import { Trans, useTranslation } from 'react-i18next'
 import { computerControl, stopShortcutText } from '@shared/computer-use'
 import type { AgentId, ComputerUseView } from '@shared/thread'
 import { ControlLabel, ControlLabelRow } from '@renderer/components/control/control-label'
+import { Button } from '@renderer/components/ui/button'
 import { useControlAgent } from '@renderer/components/control/use-control-agent'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { errorMessage, host } from '@renderer/lib/host'
@@ -35,18 +41,24 @@ export function AppMark({ icon, app }: { icon: string | null; app: string | null
   )
 }
 
-/** The name of the app a card in the session waits on the user to allow, if one does. */
-function useWaitingApp(sessionId: string): string | null {
-  return useThreadsStore((s) => {
+/**
+ * The name of the app a card in the session waits on the user to allow, if one does, and (Huli)
+ * whether it asks for administrator use or a risky step there.
+ */
+function useWaitingApp(sessionId: string): { app: string; admin: boolean } | null {
+  const found = useThreadsStore((s) => {
     const state = s.replicas[sessionId]?.state
     if (!state) return null
     const { order, byId } = state
     for (let i = order.length - 1; i >= Math.max(0, order.length - WAITING_LOOKBACK); i--) {
       const entry = byId[order[i]!]
-      if (entry?.kind === 'computer_app' && entry.decision === null) return entry.appName
+      if (entry?.kind === 'computer_app' && entry.decision === null) {
+        return `${entry.ask ? '1' : '0'}${entry.appName}`
+      }
     }
     return null
   })
+  return found === null ? null : { app: found.slice(1), admin: found[0] === '1' }
 }
 
 /**
@@ -116,15 +128,21 @@ export function ComputerLabel({
         key="computer"
         surface="computer"
         kind="waiting"
-        title={waiting}
+        title={waiting.app}
         mark={
-          <HugeiconsIcon icon={DashboardSquare01Icon} strokeWidth={1.9} className="size-3.75" />
+          <HugeiconsIcon
+            icon={waiting.admin ? Shield01Icon : DashboardSquare01Icon}
+            strokeWidth={1.9}
+            className="size-3.75"
+          />
         }
         text={
           <Trans
             t={t}
-            i18nKey="session:computerBar.waiting"
-            values={{ app: waiting }}
+            i18nKey={
+              waiting.admin ? 'session:computerBar.waitingAdmin' : 'session:computerBar.waiting'
+            }
+            values={{ app: waiting.app }}
             components={{ app: <b dir="auto" /> }}
           />
         }
@@ -150,5 +168,46 @@ export function ComputerLabel({
       />
     )
   }
-  return <AnimatePresence>{label}</AnimatePresence>
+  // Huli: while an elevated helper drives an app for the session, a badge says so above the label,
+  // with a Stop of its own that ends the helper and not the turn.
+  const elevated = view?.elevated ?? null
+  const badge = elevated ? (
+    <ControlLabelRow
+      key="elevated"
+      surface="computer"
+      kind="elevated"
+      title={elevated}
+      mark={<HugeiconsIcon icon={Shield01Icon} strokeWidth={1.9} className="size-3.75" />}
+      text={
+        <Trans
+          t={t}
+          i18nKey="session:computerBar.elevated"
+          values={{ app: elevated }}
+          components={{ app: <b dir="auto" /> }}
+        />
+      }
+    >
+      <Button
+        variant="destructive"
+        size="dialog"
+        className="h-6"
+        title={t('session:computerBar.elevatedStopLabel')}
+        onClick={() => {
+          onError(null)
+          host('computer.stopElevated', { sessionId }).catch((caught: unknown) =>
+            onError(errorMessage(caught)),
+          )
+        }}
+      >
+        <HugeiconsIcon icon={StopCircleIcon} strokeWidth={1.9} aria-hidden />
+        {t('session:computerBar.elevatedStop')}
+      </Button>
+    </ControlLabelRow>
+  ) : null
+  return (
+    <AnimatePresence>
+      {badge}
+      {label}
+    </AnimatePresence>
+  )
 }
