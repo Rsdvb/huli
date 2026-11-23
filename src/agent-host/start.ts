@@ -17,8 +17,12 @@ import { recordedSecretStore } from './agent-reset/secrets'
 import { createGitService } from './git'
 import { AgentHost } from './host'
 import { processPriority } from './priority'
+import { resolveShellEnvironment } from './shell-env'
 import { nodeThreadWorker } from './threads/store'
 import { nodeUsageWorker } from './usage/store'
+
+/** Windows' registry as a test copy reads it: naming no PATH, so its own PATH stays. */
+const NO_REGISTRY = { system: [], user: [] }
 
 export interface StartedAgentHost {
   /**
@@ -89,7 +93,13 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
       // Huli: a copy an agent runs to test a change resets no real keychain or Credential Manager
       // entry, only names in a file of its own (tools/huli/README.md, Agent reset).
       ...(!message.isPackaged && process.env.KITE_TEST_WINDOW === 'background'
-        ? { secretStore: recordedSecretStore(join(message.userDataPath, 'test-secrets.json')) }
+        ? {
+            secretStore: recordedSecretStore(join(message.userDataPath, 'test-secrets.json')),
+            // Nor does it read Windows' PATH again after an install, which would bring back the
+            // owner's programs, such as their own claude, that its starting PATH left out.
+            resolveEnv: (options) =>
+              resolveShellEnvironment({ ...options, readRegistry: async () => NO_REGISTRY }),
+          }
         : {}),
       threadWorker: (data) =>
         nodeThreadWorker(new Worker(message.threadWorkerPath, { workerData: data })),
