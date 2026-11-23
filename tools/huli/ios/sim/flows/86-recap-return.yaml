@@ -1,11 +1,12 @@
-# The recap of time away as the user comes and goes (the developer build's huliRecapAwayMs launch
-# argument shortens the half hour to fifteen seconds). A session left while tool calls run greets
-# the user, opened again, with a solid bar of what happened meanwhile, whose jump brings that to
-# the top and puts the bar away. Work that goes on while the app is in the background for less
-# than the threshold shows nothing on return; back after the threshold, the bar counts only what
-# came while away, and closed, it goes. Of a run of tool calls every seventh is a command (30 calls
-# hold 4, 12 hold 2). Maestro waits for the running turn's motion to settle before a tap, which
-# would leave the session only once the work is done, so the taps that leave keep that wait short.
+# The recap of time away as the user comes and goes. The developer build's huliRecapAwayMs launch
+# argument shortens the half hour to 45 seconds, past Maestro's own pauses: its Home key and
+# relaunch alone took some 17. A session left while tool calls run greets the user, opened again,
+# with a solid bar of what happened meanwhile, whose jump brings that to the top and puts the bar
+# away. Work that goes on while the app is in the background for less than the threshold shows
+# nothing on return; back after the threshold, the bar counts only what came while away, and
+# closed, it goes. Of a run of tool calls every seventh is a command (30 calls hold 4). Maestro
+# waits for the running turn's motion to settle after a tap, which would leave the session only
+# once the work is done, so the taps that lead to leaving keep that wait short.
 # Ends: both appearances
 appId: io.github.rsdvb.huli
 ---
@@ -14,7 +15,7 @@ appId: io.github.rsdvb.huli
     arguments:
       huliNoAsk: 'YES'
       huliDev: 'YES'
-      huliRecapAwayMs: '15000'
+      huliRecapAwayMs: '45000'
 - tapOn:
     text: '允许'
     optional: true
@@ -35,7 +36,7 @@ appId: io.github.rsdvb.huli
 # 1. Left while 40 tool calls run, opened again after the threshold: the bar under the header.
 - tapOn:
     text: '给 .* 发消息.*'
-- inputText: '/tool-storm --count 40 --pace 400'
+- inputText: '/tool-storm --count 40 --pace 800'
 - tapOn:
     text: '发送'
     waitToSettleTimeoutMs: 500
@@ -44,7 +45,7 @@ appId: io.github.rsdvb.huli
     waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
-    timeout: 18000
+    timeout: 48000
     optional: true
 - tapOn:
     text: '.*Fix the flaky login test.*'
@@ -96,14 +97,14 @@ appId: io.github.rsdvb.huli
     timeout: 90000
 - tapOn:
     text: '给 .* 发消息.*'
-- inputText: '/tool-storm --count 30 --pace 400'
+- inputText: '/tool-storm --count 30 --pace 700'
 - tapOn:
     text: '发送'
     waitToSettleTimeoutMs: 500
 - pressKey: home
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
-    timeout: 24000
+    timeout: 50000
     optional: true
 - launchApp:
     stopApp: false
@@ -132,14 +133,14 @@ appId: io.github.rsdvb.huli
     timeout: 90000
 - tapOn:
     text: '给 .* 发消息.*'
-- inputText: '/tool-storm --count 12 --pace 500'
+- inputText: '/tool-storm --count 12 --pace 1000'
 - tapOn:
     text: '发送'
     waitToSettleTimeoutMs: 500
 - pressKey: home
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
-    timeout: 18000
+    timeout: 50000
     optional: true
 - launchApp:
     stopApp: false
