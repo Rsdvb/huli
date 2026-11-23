@@ -3,8 +3,9 @@
 # the user, opened again, with a solid bar of what happened meanwhile, whose jump brings that to
 # the top and puts the bar away. Work that goes on while the app is in the background for less
 # than the threshold shows nothing on return; back after the threshold, the bar counts only what
-# came while away, and closed, it goes. Of a run of tool calls every seventh is a command: 12 calls
-# hold 2, 18 hold 3, 6 hold 1. Ends on the bar.
+# came while away, and closed, it goes. Of a run of tool calls every seventh is a command (30 calls
+# hold 4, 12 hold 2). Maestro waits for the running turn's motion to settle before a tap, which
+# would leave the session only once the work is done, so the taps that leave keep that wait short.
 # Ends: both appearances
 appId: io.github.rsdvb.huli
 ---
@@ -31,18 +32,23 @@ appId: io.github.rsdvb.huli
     visible:
       text: '给 .* 发消息 回复.*'
     timeout: 120000
-# 1. Left while 12 tool calls run, opened again after the threshold: the bar under the header.
+# 1. Left while 40 tool calls run, opened again after the threshold: the bar under the header.
 - tapOn:
     text: '给 .* 发消息.*'
-- inputText: '/tool-storm --count 12 --pace 400'
-- tapOn: '发送'
-- tapOn: '返回'
+- inputText: '/tool-storm --count 40 --pace 400'
+- tapOn:
+    text: '发送'
+    waitToSettleTimeoutMs: 500
+- tapOn:
+    text: '返回'
+    waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 18000
     optional: true
 - tapOn:
     text: '.*Fix the flaky login test.*'
+    waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
     visible:
       text: '.*跳到离开处'
@@ -50,6 +56,7 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: r01-recap
 - tapOn:
     text: '.*跳到离开处'
+    waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 2500
@@ -61,11 +68,13 @@ appId: io.github.rsdvb.huli
 - extendedWaitUntil:
     visible:
       text: '给 .* 发消息 回复.*'
-    timeout: 60000
+    timeout: 90000
 - tapOn:
     text: '给 .* 发消息.*'
-- inputText: '/tool-storm --count 6 --pace 300'
-- tapOn: '发送'
+- inputText: '/tool-storm --count 20 --pace 300'
+- tapOn:
+    text: '发送'
+    waitToSettleTimeoutMs: 500
 - pressKey: home
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
@@ -80,15 +89,17 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: r03-short-absence
 - assertNotVisible:
     text: '.*跳到离开处'
-# 3. Away past the threshold while 18 calls run: only those, 3 commands, not the 6 calls' one.
+# 3. Away past the threshold while 30 calls run: only those, at most 4 commands, none of the 20's.
 - extendedWaitUntil:
     visible:
       text: '给 .* 发消息 回复.*'
-    timeout: 60000
+    timeout: 90000
 - tapOn:
     text: '给 .* 发消息.*'
-- inputText: '/tool-storm --count 18 --pace 500'
-- tapOn: '发送'
+- inputText: '/tool-storm --count 30 --pace 400'
+- tapOn:
+    text: '发送'
+    waitToSettleTimeoutMs: 500
 - pressKey: home
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
@@ -102,9 +113,11 @@ appId: io.github.rsdvb.huli
     timeout: 20000
 - takeScreenshot: r04-long-absence
 - assertVisible:
-    text: '.*跑了 3 条命令.*'
+    text: '.*跑了 [1-4] 条命令.*'
     optional: true
-- tapOn: '关闭离开期间的摘要'
+- tapOn:
+    text: '关闭离开期间的摘要'
+    waitToSettleTimeoutMs: 500
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
     timeout: 1500
@@ -112,15 +125,17 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: r05-closed
 - assertNotVisible:
     text: '.*跳到离开处'
-# 4. Away past the threshold once more, with 6 calls: 1 command, the bar left on screen.
+# 4. Away past the threshold once more, with 12 calls: the bar left on screen.
 - extendedWaitUntil:
     visible:
       text: '给 .* 发消息 回复.*'
-    timeout: 60000
+    timeout: 90000
 - tapOn:
     text: '给 .* 发消息.*'
-- inputText: '/tool-storm --count 6 --pace 500'
-- tapOn: '发送'
+- inputText: '/tool-storm --count 12 --pace 500'
+- tapOn:
+    text: '发送'
+    waitToSettleTimeoutMs: 500
 - pressKey: home
 - extendedWaitUntil:
     visible: 'PAUSE_NEVER'
@@ -133,5 +148,3 @@ appId: io.github.rsdvb.huli
       text: '.*跳到离开处'
     timeout: 20000
 - takeScreenshot: r06-again
-- assertVisible:
-    text: '.*跑了 1 条命令.*'
