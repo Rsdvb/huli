@@ -377,7 +377,7 @@ export default function ArtifactViewer(place: ViewerPlace) {
     pill = (
       <Pill
         lead={t('viewer.inTrash')}
-        rest={<DaysLeft deletedAt={summary.deletedAt} />}
+        rest={<DaysLeft deletedAt={summary.deletedAt} purgeAt={summary.purgeAt} />}
         actions={[
           {
             label: t('menu.restore'),
@@ -890,10 +890,10 @@ function EarlierRest({ createdAt, note }: { createdAt: number; note: string | nu
   return <span>{` · ${longAgo(createdAt, now)}${note ? ` · ${note}` : ''}`}</span>
 }
 
-function DaysLeft({ deletedAt }: { deletedAt: number }) {
+function DaysLeft({ deletedAt, purgeAt }: { deletedAt: number; purgeAt?: number | null }) {
   const { t } = useTranslation('artifacts')
-  const now = useNow()
-  return <span>{t('viewer.daysLeft', { count: daysLeft(deletedAt, now) })}</span>
+  const left = daysLeft(deletedAt, useNow(), purgeAt)
+  return left === null ? null : <span>{t('viewer.daysLeft', { count: left })}</span>
 }
 
 /** A canvas of one file's dock: its zoom on the overview, or the pages around the one in focus. */

@@ -82,7 +82,7 @@
     "dismiss": "Dismiss",
     "recentlyDeleted": "Recently deleted",
     "backToArtifacts": "Back to Artifacts",
-    "deletedDescription": "Deleted artifacts stay here for 30 days, then they and every version of them are removed for good.",
+    "deletedDescription": "Deleted artifacts go to the recycle bin with everything else you delete and stay for the days Settings › General sets, then they and every version of them are removed for good.",
     "nothingDeleted": "Nothing in Recently deleted",
     "description": "Documents, slide decks, pages and canvases the agents made, in every project.",
     "descriptionOn": "Documents, slide decks, pages and canvases the agents made on {{host}}, in every project.",

@@ -82,7 +82,7 @@
     "dismiss": "关闭",
     "recentlyDeleted": "最近删除",
     "backToArtifacts": "返回产物",
-    "deletedDescription": "删除的产物会在这里保留 30 天，之后它和它的所有版本都会被永久移除。",
+    "deletedDescription": "删除的产物和其他删掉的东西一样先进回收站，按 设置 › 通用 里的天数保留，之后它和它的所有版本都会被永久移除。",
     "nothingDeleted": "最近删除中没有内容",
     "description": "智能体在各个项目里做的文档、幻灯片、网页和画布。",
     "descriptionOn": "智能体在 {{host}} 上各个项目里做的文档、幻灯片、网页和画布。",
