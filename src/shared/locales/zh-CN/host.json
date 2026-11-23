@@ -2346,5 +2346,16 @@
     "copyPaths": "要复制的文件必须写成路径",
     "copyEntry": "复制 {{entry}}：{{reason}}",
     "setupCommand": "初始化命令最多 {{max}} 个字符"
+  },
+  "webReader": {
+    "busy": "正在下载或删除 Moli，请等它完成。",
+    "unsupported": "Moli 没有适合这台电脑系统和处理器的版本。",
+    "stopped": "Moli 的下载已停止。",
+    "stalled": "下载卡住了",
+    "downloadFailed": "Moli 下载失败：{{reason}}。请检查网络，或设置 › 高级里的代理。",
+    "hashMismatch": "{{file}} 和纸鸢内置的 SHA-256 不符，已删除，没有安装。",
+    "extractFailed": "Moli 的压缩包解压失败：{{reason}}",
+    "doesNotRun": "Moli 已解压，但在这台电脑上运行不起来。",
+    "inUse": "有 Agent 正在用 Moli 读网页，等它读完再试。"
   }
 }

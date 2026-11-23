@@ -13155,6 +13155,21 @@ export class SessionManager {
     return record ? this.deps.agents.name(record.agentId) : ''
   }
 
+  /**
+   * Huli: what decides where read_web_page may read for the session: its sandbox and its
+   * worktree's ports. Null for a session Kite does not hold, or one whose sandbox it cannot read.
+   */
+  webReadPlace(
+    sessionId: string,
+  ): { sandbox: SandboxChoice | null; ports: PortBlock | null } | null {
+    const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
+    if (!record || record.sandboxUnknown) return null
+    return {
+      sandbox: record.sandbox ? { ...record.sandbox } : null,
+      ports: this.portsOf(record),
+    }
+  }
+
   /** The session's agent now, null for a session Kettu does not hold. */
   sessionAgent(sessionId: string): AgentId | null {
     return (this.live.get(sessionId)?.record ?? this.records.get(sessionId))?.agentId ?? null

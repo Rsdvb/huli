@@ -40,6 +40,11 @@ const WINDOW_ONLY: ReadonlySet<string> = new Set<HostMethod>([
   'sandbox.containerStatus',
   'sandbox.pullImage',
   'sandbox.removeImage',
+  // Huli: so is Moli's download for background web reading, whose size the window shows first.
+  'webReader.status',
+  'webReader.install',
+  'webReader.cancel',
+  'webReader.remove',
   // Huli: Agent sync rewrites the agents' own files, their instructions among them, from this
   // computer's window alone.
   'sync.read',

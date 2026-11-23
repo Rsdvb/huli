@@ -2226,6 +2226,10 @@ export function createValidators(platform: Platform): Validators {
     'sandbox.containerStatus': none,
     'sandbox.pullImage': none,
     'sandbox.removeImage': none,
+    'webReader.status': none,
+    'webReader.install': none,
+    'webReader.cancel': none,
+    'webReader.remove': none,
     'sessions.setProfile': (params) => {
       const o = fields(params)
       const profileId = optionalProfile(o)

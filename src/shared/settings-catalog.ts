@@ -254,6 +254,7 @@ export const FEATURE_GROUP: Readonly<Record<FeatureId, FeatureGroup>> = {
   devices: 'agents',
   secrets: 'agents',
   agentTheme: 'agents',
+  webReader: 'agents',
   chatBridge: 'connections',
   portForwarding: 'connections',
   devPreview: 'connections',
@@ -873,6 +874,17 @@ const ENTRIES = {
     part: 'desktop',
     kind: 'list',
     get: (file) => Object.keys(file.thread.alwaysOpenIn).length,
+  },
+  // Huli: Moli for background web reading, downloaded only from here or its feature's switch.
+  'browser.web-reader': {
+    section: 'browser',
+    row: 'web-reader',
+    group: 'browser.groups.webReader',
+    name: 'browser.webReader.name',
+    description: 'browser.webReader.description',
+    keywords: 'browser.webReader.keywords',
+    part: 'desktop',
+    kind: 'action',
   },
   'browser.clear-data': {
     section: 'browser',

@@ -562,7 +562,8 @@
       "signIns": "Sign-ins",
       "links": "Links from agents",
       "siteData": "Site data",
-      "allowedSites": "Always allowed"
+      "allowedSites": "Always allowed",
+      "webReader": "Background web reading"
     },
     "openLinksIn": {
       "name": "Open links in",
@@ -596,6 +597,29 @@
       "removeFailed": "Couldn’t remove {{origin}}: {{reason}}",
       "in": "Allowed in {{projects}}",
       "note": "Agents open these without asking. A site is added here when you choose “Always for this project” on its card."
+    },
+    "webReader": {
+      "name": "Moli headless browser",
+      "description": "For agents: reads public pages that need JavaScript as text, in the background, with no window and no sign-ins, when their own fetch fails. To check your own app or a page you are signed in to, agents use the browser here, which you watch.",
+      "keywords": "moli headless browser read web page fetch javascript background agents download",
+      "unsupported": "Moli has no build for this computer.",
+      "missing": "Not downloaded: Moli {{version}}, {{mb}} MB to download.",
+      "present": "Moli {{version}}, about {{mb}} MB on disk.",
+      "off": "Agents are not offered it while Background web reading is off in Features.",
+      "turnOn": "Turn on",
+      "downloading": "Downloading… {{percent}}%",
+      "verifying": "Checking the download…",
+      "extracting": "Unpacking…",
+      "removing": "Removing…",
+      "download": "Download…",
+      "stop": "Stop",
+      "retry": "Try again",
+      "remove": "Remove Moli, freeing {{mb}} MB",
+      "confirm": {
+        "title": "Download Moli?",
+        "body": "Kite downloads Moli {{version}} from GitHub once: {{mb}} MB, checked against the SHA-256 it pins, into its own data folder. Moli is an open-source headless browser (Apache-2.0 or MIT); it runs only while an agent reads a page and exits when the read is done. Background web reading turns on with it.",
+        "action": "Download {{mb}} MB"
+      }
     }
   },
   "computer": {
@@ -3295,6 +3319,10 @@
       "agentSync": {
         "name": "Agent sync",
         "description": "The Marketplace's Sync tab: sync MCP servers, skills and instructions across your agents."
+      },
+      "webReader": {
+        "name": "Background web reading (Moli)",
+        "description": "When an agent’s own fetch cannot read a page that needs JavaScript, it reads the page in the background with Moli, a headless browser. Turning it on downloads Moli (about 42 MB) from GitHub."
       }
     }
   },
