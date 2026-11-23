@@ -303,7 +303,9 @@ function HarnessState({ status }: { status: AgentStatus }) {
                 ? 'harnesses.versionOut'
                 : status.package?.isSdk
                   ? 'agents.update.sdkReleased'
-                  : 'agents.update.adapterReleased',
+                  : packageIsProgram(status)
+                    ? 'agents.update.released'
+                    : 'agents.update.adapterReleased',
               { version: offer.to },
             )}
           </Pill>
@@ -356,6 +358,14 @@ function HarnessState({ status }: { status: AgentStatus }) {
   return showsCurrent(status) && status.state !== 'failed' ? (
     <StateDot label={t('agents.update.upToDate')} />
   ) : null
+}
+
+/**
+ * Kettu's package is the harness's program itself, as DeepSeek Harness's is, not an adapter; an
+ * older host says it of no package, but DeepSeek Harness's always is.
+ */
+function packageIsProgram(status: AgentStatus): boolean {
+  return !!status.package?.isCli || status.harnessId === 'deepseek'
 }
 
 /** A state in the success color's dot, such as Up to date. */
@@ -784,7 +794,7 @@ function VersionGroup({ status }: { status: AgentStatus }) {
             ? t(
                 status.package?.isSdk
                   ? 'agents.update.sdkReleased'
-                  : status.package
+                  : status.package && !packageIsProgram(status)
                     ? 'agents.update.adapterReleased'
                     : 'agents.update.released',
                 {
@@ -1565,7 +1575,7 @@ function PackageGroup({ status }: { status: AgentStatus }) {
       <p className="ui-sg-hint">
         {pkg.isSdk
           ? t('harnesses.sdkNote', { name: status.harnessName, range })
-          : status.harnessId === 'deepseek'
+          : packageIsProgram(status)
             ? t('harnesses.programNote', { name: status.harnessName })
             : t('harnesses.adapterNote', { name: status.harnessName })}
       </p>

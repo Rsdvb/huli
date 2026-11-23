@@ -6904,6 +6904,7 @@ export class AgentManager {
               // An install below the floor runs too, when the floor cannot be installed.
               installed: !!(adapter?.current ?? adapter?.fallback),
               ...(launch.library ? { isSdk: true as const } : {}),
+              ...(launch.command && !slot.def.cli ? { isCli: true as const } : {}),
             }
           : null,
       release: installed
