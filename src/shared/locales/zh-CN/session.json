@@ -984,6 +984,11 @@
     "label": "对话",
     "olderFailed": "无法加载更早的消息",
     "tokens_other": "{{tokens}} token",
+    "stale": {
+      "label": "离线前在运行",
+      "running": "离线前在运行 {{elapsed}}",
+      "lastSeen": "最后在线 {{time}}"
+    },
     "phase": {
       "thinking": "正在思考",
       "execute_other": "正在运行 {{count}} 条命令",
