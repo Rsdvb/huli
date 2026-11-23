@@ -5,7 +5,7 @@ import { useShallow } from 'zustand/react/shallow'
 import type { AgentStatus } from '@shared/agent-host'
 import { limitHolds } from '@shared/plan-limits'
 import { planQuota, type PlanQuota } from '@shared/plan-quota'
-import type { AgentId, ConfigOption } from '@shared/thread'
+import { booleanConfigValue, type AgentId, type ConfigOption } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { AgentMarkHost } from '@renderer/components/agents/agent-mark-host'
 import { Button } from '@renderer/components/ui/button'
@@ -28,13 +28,30 @@ import { Skeleton } from '@renderer/components/ui/skeleton'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
-import { ConfigSwitchRow } from '@renderer/features/session/composer/config-switch'
-import { ChoiceName, EffortSegments } from '@renderer/features/session/composer/control-row'
-import { levelsOf, splitName, type SelectOption } from '@renderer/features/session/composer/levels'
-import { shownChoice, shownValue } from '@renderer/features/session/composer/model-list'
-import { cliOutdated, listedInstalled } from '@renderer/features/agents/readiness'
+import { ChoiceName } from '@renderer/features/session/composer/control-row'
+import { EffortDial } from '@renderer/features/session/composer/effort-dial'
+import {
+  dialStops,
+  shownLevel,
+  splitName,
+  type SelectOption,
+} from '@renderer/features/session/composer/levels'
+import {
+  defaultUses,
+  shownChoice,
+  shownValue,
+} from '@renderer/features/session/composer/model-list'
+import { ModelMark } from '@renderer/features/session/composer/model-mark'
+import { SwitchRows } from '@renderer/features/session/composer/switch-rows'
+import { harnessProblem, shortLabel } from '@renderer/features/agents/harness-problem'
+import { FixButton } from '@renderer/features/agents/fix-button'
+import { fixAction } from '@renderer/features/agents/problem-fix'
+import { listedInstalled } from '@renderer/features/agents/readiness'
 import { Ring } from '@renderer/features/session/composer/usage'
-import { planReset, tightestLimit } from '@renderer/features/sidebar/plan-usage'
+import { planReset } from '@renderer/features/sidebar/plan-usage'
+import { confirmCliUpdate } from '@renderer/features/updates/command-confirm-model'
+import { limitsForModel } from '@shared/plan-limits'
+import { tightestLimit } from '@shared/session-groups'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
 import { backTime, limitLabel } from '@renderer/lib/format'
 import { errorMessage, hostAt } from '@renderer/lib/host'
@@ -62,13 +79,13 @@ import { refreshLimits } from '@renderer/stores/usage'
 import { useHostLabel } from '@renderer/features/sidebar/host-label'
 import { openAgentSettings, openHarnessSettings } from '@renderer/stores/view'
 import {
+  agentLists,
   agentNeed,
   canStart,
   isMoreKey,
   itemKey,
   menuAgents,
   menuGroups,
-  menuModels,
   moreKey,
   parseItemKey,
   preparedConfig,
@@ -76,6 +93,7 @@ import {
   type MenuAgent,
   type MenuGroup,
 } from './start-options'
+import { limitsOf } from './agent-tag'
 import { readFirstOptions, refreshOnMenu, retryPrepare, setOption } from './prepared'
 import { useStartConfig } from './use-start-config'
 import { quotaText } from '../plan-quota'
@@ -182,10 +200,12 @@ export function AgentMenu({
   }, [statuses, entries, picks, prepared, values, agentId, hostId])
   const agents: MenuAgent[] = statuses.map((status) => {
     const model = configs.get(status.id)?.find((o) => o.category === 'model')
+    const entry = entries[status.id]
     return {
       agentId: status.id,
       name: status.name,
       model: isSelect(model) ? model : null,
+      kept: { pinned: entry?.pinned, recent: entry?.recent },
       choosable: canStart(status),
     }
   })
@@ -194,25 +214,22 @@ export function AgentMenu({
   const allGroups = useMemo<MenuGroup[]>(
     () =>
       agents.map((a) => {
-        if (!a.model?.choices?.length)
-          return { agentId: a.agentId, items: [itemKey(a.agentId, null)] }
-        const { current, older } = menuModels(a.model.choices)
+        const lists = agentLists(a)
+        if (!lists) return { agentId: a.agentId, items: [itemKey(a.agentId, null)] }
         return {
           agentId: a.agentId,
           items: [
-            ...current.map((c) => itemKey(a.agentId, c.value)),
-            ...(older.length > 0 ? [moreKey(a.agentId)] : []),
-            ...older.map((c) => itemKey(a.agentId, c.value)),
+            ...lists.all.map((r) => itemKey(a.agentId, r.value)),
+            ...(lists.more.length > 0 ? [moreKey(a.agentId)] : []),
           ],
         }
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- agents is derived from these
     [statuses, configs],
   )
-  const chosenModel = agentId ? agents.find((a) => a.agentId === agentId)?.model : null
-  const chosenChoice = chosenModel?.choices
-    ? shownChoice(chosenModel.choices, String(chosenModel.value))
-    : undefined
+  const chosenAgent = agentId ? agents.find((a) => a.agentId === agentId) : undefined
+  const chosenModel = chosenAgent?.model
+  const chosenLists = chosenAgent ? agentLists(chosenAgent) : null
   const value = agentId
     ? itemKey(
         agentId,
@@ -232,6 +249,7 @@ export function AgentMenu({
     // Only this computer's agents are read without a folder.
     if (!open || !folderless || hostId !== null || !shown || !loaded) return
     if (shownNeed === 'sign-in' || shownNeed === 'failed' || shownNeed === 'update') return
+    if (shownNeed === 'blocked') return
     void readFirstOptions(hostId, shown)
   }, [open, folderless, hostId, shown, loaded, shownNeed])
 
@@ -251,7 +269,9 @@ export function AgentMenu({
       return
     }
     setShown(agentsRead ? firstShown(statuses, agentId) : null)
-    setExpanded(chosenChoice?.older ? agentId : null)
+    // A chosen model the main list leaves out shows under More models, opened.
+    const hidden = !!chosenLists?.chosen && !chosenLists.main.includes(chosenLists.chosen)
+    setExpanded(hidden ? agentId : null)
     for (const status of statuses) {
       if (status.state !== 'ready' || !status.capabilities.reports) continue
       refreshLimits(status.id, hostId).catch((error: unknown) =>
@@ -416,7 +436,11 @@ export function AgentMenu({
                     className="max-h-[min(--spacing(96),calc(var(--available-height)---spacing(12)))] w-auto min-w-49 shrink-0 scroll-fade-y justify-start overflow-y-auto overscroll-contain pr-1.5"
                   >
                     {visibleRail.map((status) => (
-                      <RailRow key={status.id} status={status} />
+                      <RailRow
+                        key={status.id}
+                        status={status}
+                        model={agents.find((a) => a.agentId === status.id)?.model ?? undefined}
+                      />
                     ))}
                   </TabsList>
                 )}
@@ -528,10 +552,7 @@ function AgentButtonLabel({
   const modelName = isSelect(model)
     ? (shownChoice(model.choices, String(model.value))?.name ?? String(model.value))
     : null
-  const level = isSelect(effort)
-    ? levelsOf(effort, String(effort.value), isSelect(model) ? String(model.value) : undefined)
-    : null
-  const levelName = level?.levels.find((c) => c.value === level.shown)?.name
+  const levelName = isSelect(effort) ? shownLevel(effort, String(effort.value)) : null
   return (
     <>
       <AgentMark agent={agentId} size={14} />
@@ -566,10 +587,7 @@ function ModelButtonLabel({
   const modelName = isSelect(model)
     ? (shownChoice(model.choices, String(model.value))?.name ?? String(model.value))
     : null
-  const level = isSelect(effort)
-    ? levelsOf(effort, String(effort.value), isSelect(model) ? String(model.value) : undefined)
-    : null
-  const levelName = level?.levels.find((c) => c.value === level.shown)?.name
+  const levelName = isSelect(effort) ? shownLevel(effort, String(effort.value)) : null
   return (
     <>
       <span className="min-w-0 truncate text-secondary" title={modelName ?? undefined}>
@@ -580,19 +598,25 @@ function ModelButtonLabel({
   )
 }
 
-/** One agent on the rail: its mark and name, then its plan usage or what it needs. */
-function RailRow({ status }: { status: AgentStatus }) {
+/**
+ * One agent on the rail: its mark and name, then its plan usage or what it needs. Only the
+ * windows that hold back `model`, the one the menu has the agent on, count; every window does
+ * while it is not known.
+ */
+function RailRow({ status, model }: { status: AgentStatus; model: ConfigOption | undefined }) {
   const { t } = useTranslation('session')
   const now = useNow()
-  const limits = newestLimits(usePlanReadings(), status)
+  const readings = usePlanReadings()
+  const limits = limitsForModel(limitsOf(status, newestLimits(readings, status), model), model)
   const limit = tightestLimit(limits, now)
   const quota = planQuota(status, now, limits)
   const need = agentNeed(status)
+  const reason = need === 'update' || need === 'blocked' ? harnessProblem(status)?.reason : null
   const trailing =
     need === 'setup'
       ? t('newSession.agentMenu.setsUp')
-      : need === 'update'
-        ? t('newSession.agentMenu.needsUpdate')
+      : reason
+        ? shortLabel(reason)
         : need === 'installing'
           ? t('newSession.agentMenu.installing')
           : need === 'failed'
@@ -615,7 +639,7 @@ function RailRow({ status }: { status: AgentStatus }) {
             'shrink-0 pl-2 text-xs',
             need === 'sign-in' || need === 'update'
               ? 'text-warning'
-              : need === 'failed'
+              : need === 'failed' || need === 'blocked'
                 ? 'text-danger'
                 : 'text-muted-foreground',
           )}
@@ -787,6 +811,15 @@ function Pane({
       notice = (
         <UpdateNotice status={status} hostId={hostId} hostLabel={hostLabel} onLeave={onLeave} />
       )
+    } else if (need === 'blocked') {
+      const problem = harnessProblem(status)
+      notice = problem && (
+        <Notice text={problem.text} tone="danger">
+          {hostId === null && problem.fix && (
+            <FixButton action={fixAction(status, problem.fix, hostId, onLeave)} />
+          )}
+        </Notice>
+      )
     } else if (status.versionWarning) {
       notice = (
         <VersionNotice status={status} hostId={hostId} hostLabel={hostLabel} onLeave={onLeave} />
@@ -871,7 +904,9 @@ function Pane({
           />
           <span className="truncate shimmer">
             {status.state === 'installing'
-              ? t('agentStart.installing', { agent: name })
+              ? status.package?.isSdk
+                ? t('agentStart.installingSdk')
+                : t('agentStart.installing', { agent: name })
               : status.state === 'starting'
                 ? t('agentStart.starting', { agent: name })
                 : t('newSession.agentMenu.checking', { agent: name })}
@@ -918,34 +953,36 @@ function Pane({
         </p>
       )}
       {!searching && config && (isSelect(effort) || switches.length > 0) && (
-        <div className="flex flex-col">
+        <div className="kettu-am-settings">
+          {isSelect(model) && <ComboboxSeparator />}
           {isSelect(effort) && (
-            <>
-              {isSelect(model) && <ComboboxSeparator />}
-              <EffortSegments
-                effort={effort}
-                value={String(effort.value)}
-                model={isSelect(model) ? String(model.value) : undefined}
-                onPick={(v) => onOption(status.id, effort.id, v)}
-                plain
-              />
-            </>
+            <PaneDial effort={effort} onPick={(v) => onOption(status.id, effort.id, v)} />
           )}
-          {switches.length > 0 && (
-            <>
-              <ComboboxSeparator />
-              {switches.map((o) => (
-                <ConfigSwitchRow
-                  key={o.id}
-                  option={o}
-                  onSelect={(value) => onOption(status.id, o.id, value)}
-                />
-              ))}
-            </>
-          )}
+          <SwitchRows
+            options={switches}
+            agent={status.harnessName}
+            valueOf={(o) => booleanConfigValue(o) === true}
+            onFlip={(o, on) => onOption(status.id, o.id, on)}
+            className="kettu-am-switches"
+          />
         </div>
       )}
     </>
+  )
+}
+
+/** The shown agent's effort on the dial, as the composer's model menu has it. */
+function PaneDial({ effort, onPick }: { effort: SelectOption; onPick: (value: string) => void }) {
+  const { t } = useTranslation('composer')
+  const { stops, shown } = dialStops(effort, String(effort.value))
+  return (
+    <EffortDial
+      label={effort.name || t('controls.effort')}
+      stops={stops}
+      value={shown}
+      onChange={onPick}
+      className="kettu-am-dial"
+    />
   )
 }
 
@@ -958,13 +995,13 @@ function ModelGroup({
   group: MenuGroup
   agent: MenuAgent | undefined
   searching: boolean
-  /** Whether the agent's older models are shown under More models. */
+  /** Whether the models the main list leaves out are shown under More models. */
   expanded: boolean
 }) {
   const { t } = useTranslation('session')
+  const { t: tc } = useTranslation('composer')
   if (!agent) return null
-  const choices = agent.model?.choices ?? []
-  const older = menuModels(choices).older
+  const lists = agentLists(agent)
   return (
     <ComboboxGroup items={group.items}>
       {searching ? (
@@ -978,25 +1015,34 @@ function ModelGroup({
       <ComboboxCollection>
         {(key: string) => {
           if (isMoreKey(key)) {
-            return <MoreRow key={key} value={key} count={older.length} expanded={expanded} />
+            return (
+              <MoreRow key={key} value={key} count={lists?.more.length ?? 0} expanded={expanded} />
+            )
           }
           const { model } = parseItemKey(key)
-          const choice = choices.find((c) => c.value === model)
-          return choice ? (
+          const read = lists?.all.find((r) => r.value === model)
+          if (!read || !lists) {
+            return (
+              <ComboboxItem key={key} value={key} className="items-center">
+                <span className="min-w-0 flex-1 truncate font-medium">
+                  {t('newSession.agentMenu.useAgent', { agent: agent.name })}
+                </span>
+              </ComboboxItem>
+            )
+          }
+          const uses = read.isDefault ? defaultUses(read, lists.all) : null
+          const tip = uses ? tc('controls.defaultUses', { model: uses }) : read.choice.description
+          return (
             <Tooltip key={key}>
               <TooltipTrigger render={<ComboboxItem value={key} className="items-center" />}>
-                <ChoiceName name={choice.name} className="flex-1 font-normal" />
+                <ModelMark read={read} agentId={agent.agentId} size={14} />
+                <ChoiceName name={read.choice.name} className="flex-1 font-normal" />
+                {read.value === lists.defaultValue && (
+                  <span className="kettu-model-tag">{tc('controls.defaultTag')}</span>
+                )}
               </TooltipTrigger>
-              {choice.description && (
-                <TooltipContent side="right">{choice.description}</TooltipContent>
-              )}
+              {tip && <TooltipContent side="right">{tip}</TooltipContent>}
             </Tooltip>
-          ) : (
-            <ComboboxItem key={key} value={key} className="items-center">
-              <span className="min-w-0 flex-1 truncate font-medium">
-                {t('newSession.agentMenu.useAgent', { agent: agent.name })}
-              </span>
-            </ComboboxItem>
           )
         }}
       </ComboboxCollection>
@@ -1077,14 +1123,7 @@ function UpdateNotice({
   const failure = task?.state === 'failed' ? (task.error ?? null) : null
   return (
     <Notice
-      text={
-        failure ??
-        t('newSession.agentMenu.updateLong', {
-          command: status.cli?.command,
-          current: status.cli?.installed?.version ?? '',
-          minimum: cliOutdated(status) ?? '',
-        })
-      }
+      text={failure ?? harnessProblem(status)?.text ?? ''}
       tone={failure ? 'danger' : 'warning'}
     >
       <Button
@@ -1093,7 +1132,7 @@ function UpdateNotice({
         disabled={running}
         onClick={() => {
           if (update) {
-            void useAgentsStore.getState().updateCli(status.id)
+            void confirmCliUpdate(status)
             return
           }
           onLeave()
@@ -1164,7 +1203,7 @@ function VersionNotice({
         disabled={running}
         onClick={() => {
           if (update) {
-            void useAgentsStore.getState().updateCli(status.id)
+            void confirmCliUpdate(status)
             return
           }
           onLeave()

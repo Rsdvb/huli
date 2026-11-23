@@ -2,7 +2,9 @@
 // replaces, what a click opens, and its text held to what a notification shows. The desktop app's
 // notifications and the web client's both follow it.
 
+import type { HostToMain } from './host-control'
 import type { AppCommand } from './ipc'
+import type { PlanLimitNoticeLevel } from './plan-limits'
 import type { HostAttention } from './remote/host-admin'
 import type { SettingsFile } from './settings'
 
@@ -13,9 +15,11 @@ export const ATTENTION_SETTING = {
   error: 'error',
   'routine-ended': 'routines',
   'routine-paused': 'routines',
-  'plan-limit': 'limits',
-  'limit-resumed': 'limits',
+  'plan-limit': 'planLimits',
+  'limit-resumed': 'planLimits',
   stalled: 'error',
+  'task-needs-you': 'permission',
+  'task-ended': 'turnEnded',
 } as const satisfies Record<HostAttention['kind'], keyof SettingsFile['notifications']>
 
 const MAX_TITLE = 120
@@ -29,29 +33,67 @@ function isId(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 200
 }
 
+const PLAN_LIMIT_LEVELS: readonly PlanLimitNoticeLevel[] = ['near', 'reached', 'reset']
+
 /**
  * What a well-formed attention message stands for, which a newer one of the same replaces, and
- * what a click opens: its session, the Routines page for a pause, or Usage for a plan limit. Null
- * for a malformed one.
+ * what a click opens: its session, the Routines page for a pause, a workflow task, or the Usage
+ * page for a plan limit that names no session. Null for a malformed one.
  */
 export function attentionTarget(
   message: HostAttention,
 ): { key: string; command: AppCommand } | null {
-  if (!(message.kind in ATTENTION_SETTING)) return null
+  if (typeof message.kind !== 'string' || !Object.hasOwn(ATTENTION_SETTING, message.kind)) {
+    return null
+  }
   if (typeof message.title !== 'string' || typeof message.body !== 'string') return null
+  if (message.kind === 'plan-limit') {
+    if (!isId(message.agentId) || !isId(message.key)) return null
+    if (!PLAN_LIMIT_LEVELS.includes(message.level)) return null
+    if (message.sessionId !== undefined) {
+      return isId(message.sessionId)
+        ? {
+            key: message.sessionId,
+            command: { kind: 'open-session', sessionId: message.sessionId },
+          }
+        : null
+    }
+    return { key: `limit:${message.key}`, command: { kind: 'open-usage' } }
+  }
   if (message.kind === 'routine-paused') {
     return isId(message.agentId)
       ? { key: `routines:${message.agentId}`, command: { kind: 'open-routines' } }
       : null
   }
-  if (message.kind === 'plan-limit') {
-    return isId(message.agentId) && isId(message.window)
-      ? { key: `limits:${message.agentId}:${message.window}`, command: { kind: 'open-usage' } }
+  if (message.kind === 'task-needs-you' || message.kind === 'task-ended') {
+    return isId(message.taskId)
+      ? { key: `task:${message.taskId}`, command: { kind: 'open-task', taskId: message.taskId } }
       : null
   }
-  return isId(message.sessionId)
+  return 'sessionId' in message && isId(message.sessionId)
     ? { key: message.sessionId, command: { kind: 'open-session', sessionId: message.sessionId } }
     : null
+}
+
+type AttentionMessage = Extract<HostToMain, { type: 'host:attention' }>
+
+/**
+ * What devices are pushed for an attention message: a workflow task's goes as its step's session,
+ * which is what they open, and not at all when no step has a session. Huli: a plan limit at 90%
+ * or used up is pushed too, as the phone shows it (its window from the key); a reset is not.
+ */
+export function pushedAttention(message: AttentionMessage): AttentionMessage | null {
+  if (message.kind === 'plan-limit') return message.level === 'reset' ? null : message
+  if (!('taskId' in message)) return message
+  if (message.sessionId === undefined) return null
+  return {
+    type: 'host:attention',
+    kind: message.kind === 'task-needs-you' ? 'permission' : 'turn-ended',
+    sessionId: message.sessionId,
+    title: message.title,
+    body: message.body,
+    ...(message.front ? { front: message.front } : {}),
+  }
 }
 
 /** The title and body as a notification shows them. */

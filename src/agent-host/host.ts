@@ -13,9 +13,10 @@ import {
 import { DeviceAccessStore } from './devices/access'
 import os from 'node:os'
 import path from 'node:path'
-import { cp, mkdir, rename, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import type {
   AgentOptions,
+  AgentStatus,
   DiagnosticsBundle,
   HostEvent,
   HostParams,
@@ -64,10 +65,19 @@ import type { MemorySource } from '@shared/memory'
 import { DEFAULT_AGENT_NETWORK } from '@shared/agent-network'
 import { featureOfMethod, featureOn, type FeatureId } from '@shared/features'
 import type { HostSettings } from '@shared/settings'
-import { serverFor, type MarketConnection, type MarketServer } from '@shared/marketplace'
+import {
+  serverFor,
+  serverName,
+  specInputs,
+  type CatalogServer,
+  type MarketConnection,
+  type MarketServer,
+  type MarketSkill,
+} from '@shared/marketplace'
 import { listingIdOf } from '@shared/market-community'
 import {
   HANDLE,
+  MARKET_WAIT_MS,
   type MarketAccount,
   type MarketCall,
   type MarketCallAnswer,
@@ -127,11 +137,12 @@ import {
 } from './device-browser'
 import { BrowserTurns } from './browser-turns'
 import { writeCommitMessage } from './commit-message'
+import { writePullRequestDraft } from './pull-request-draft'
 import { lightTarget } from './light-model'
 import { reportDraftPrompt, writeReportDraft } from './report-draft'
 import { Diagnostics } from './diagnostics'
 import type { ContainerSandbox } from './sandbox/container'
-import { HostError, invalidParams, isHostError } from './errors'
+import { HostError, invalidParams, isHostError, notFound } from './errors'
 import { setLocale, t, tSettings, tSettingsEnglish } from './i18n'
 import { FilesService } from './files'
 import { MediaService } from './media'
@@ -141,13 +152,14 @@ import { catalogFile, MarketCatalogService } from './marketplace/catalog'
 import { bundlesFile, MarketBundlesService } from './marketplace/bundles'
 import { communityFile, MarketCommunityService } from './marketplace/community'
 import { MarketConnectionsService } from './marketplace/connections'
+import { logText } from './localized-error'
 import { parseSignIns } from './marketplace/oauth'
 import { McpProxy } from './marketplace/proxy'
 import type { CodexRequest } from './marketplace/codex-plugins'
 import { MarketPluginsService, pluginsFile } from './marketplace/plugins'
 import { MarketSkillsService, skillFor, skillsCatalogFile } from './marketplace/skills'
 import { PublishDrafts } from './marketplace/publish-drafts'
-import { MARKET_WAIT_MS, MarketCallError, MarketTools } from './marketplace/publish-tools'
+import { MarketCallError, MarketTools } from './marketplace/publish-tools'
 import {
   SETTINGS_WAIT_MS,
   SettingsTools,
@@ -191,7 +203,14 @@ import { Attachments, toArrayBuffer } from './attachments'
 import { storageUsage } from './data-usage'
 import { RoutinesManager, type RoutineTimings } from './routines/manager'
 import { TaskEngine, type TaskSessionHooksRef, type WrittenDocument } from './workflow/engine'
-import type { WorkflowSettings, TaskSummary } from '@shared/workflow'
+import {
+  keptTool,
+  type SuggestedTool,
+  type WorkflowSettings,
+  type TaskSummary,
+  type TaskView,
+  type WorkflowEntry,
+} from '@shared/workflow'
 import { STEP_HARNESSES } from './workflow/picks'
 import { createTaskGit } from './workflow/git'
 import { createGroupGit } from './groups/git'
@@ -200,6 +219,9 @@ import { managerGit } from './manager/git'
 import { GithubFlow } from './github-flow/flow'
 import { optionsOfPick, pickOfOptions, workflowAgents } from './workflow/host-agents'
 import { WorkflowLibrary, workflowsFile } from './workflow/library'
+import { WorkflowSuggestions, suggestionsFile } from './workflow/suggestions'
+import { publishWorkflowPrompt } from './workflow/prompts'
+import { deliveryOf } from './workflow/views'
 import type { RoutineSessionHooksRef } from './routines/hooks'
 import type { RoutineClock } from './routines/scheduler'
 import { ScratchFolders } from './scratch'
@@ -242,7 +264,6 @@ import {
   type HarnessManifestFile,
 } from './storage'
 import { GitHubStar, gitHubStarFile } from './github-star'
-import { alertText } from './limit-text'
 import { PlanAlerts, planAlertsFile } from './plan-alerts'
 import { digestEntries } from './threads/digest'
 import type { ImageMode } from './threads/model'
@@ -250,6 +271,7 @@ import { ThreadStore, type ThreadWorkerFactory } from './threads/store'
 import { watchMigration } from './migration-watch'
 import { UsageManager, type UsageTimings } from './usage/manager'
 import type { LogReader } from './usage/model'
+import { LimitNotices, limitNoticeText, type LimitNotice } from './limit-notices'
 import { LOG_READERS } from './usage/readers'
 import { UsageStore, type UsageWorkerFactory } from './usage/store'
 import { createValidators } from './validate'
@@ -267,6 +289,10 @@ import type { ChatBridgeService } from './chat-bridge/service'
 
 // The agent menu reads a running agent's options again once they are older than this.
 const OPTIONS_FRESH_MS = 5 * 60_000
+/** How long a used-up window's notice waits for the turn it stopped to fail. */
+const LIMIT_MERGE_MS = 2_000
+/** A turn that failed this long before its window was used up counts as stopped by it. */
+const LIMIT_FAILED_WITHIN_MS = 15_000
 /** The harnesses whose connection answers a page's question in a session with no tools at all. */
 const QUESTION_HARNESSES: ReadonlySet<HarnessId> = new Set(['claude-code'])
 
@@ -466,6 +492,11 @@ export class AgentHost {
   readonly diagnostics: Diagnostics
   /** What each ACP session sent and received since the host started, for the Requests pane. */
   private readonly acpMessages = new AcpMessages()
+  private readonly limitNotices = new LimitNotices()
+  /** Each agent's session whose turn failed last, which a used-up window's notice may stand for. */
+  private readonly lastFailed = new Map<AgentId, { sessionId: string; at: number }>()
+  /** The session a used-up window stopped, by the window's key, which its reset opens. */
+  private readonly stoppedBy = new Map<string, string>()
   readonly env: EnvironmentService
   readonly projects: Projects
   readonly scratch: ScratchFolders
@@ -506,6 +537,8 @@ export class AgentHost {
   private readonly githubFlow: GithubFlow
   /** The routines' GitHub triggers the flow last planned for. */
   private flowTriggers = ''
+  /** The cards the workflow tools leave in sessions, their answers and Start. */
+  readonly workflowSuggestions: WorkflowSuggestions
   /** The attachments of drafts and queued prompts, until sent or removed. */
   readonly attachments: Attachments
   /** Every session's thread, read a page at a time, in a worker of its own. */
@@ -677,10 +710,29 @@ export class AgentHost {
       ask: (sessionId, ask) => this.sessions.marketAsked(sessionId, ask, MARKET_WAIT_MS),
       settle: (sessionId, entryId, outcome) =>
         this.sessions.marketSettled(sessionId, entryId, outcome),
+      tell: (sessionId, text) => {
+        this.sessions.sendCardAnswer(sessionId, text).catch((error: unknown) => {
+          log('warn', `Could not tell a session about its card: ${(error as Error).message}`)
+        })
+      },
       drafts: this.publishDrafts,
       changed: () => this.hub.broadcast({ type: 'market.publishedChanged' }),
       agentOf: (sessionId) => this.sessions.sessionAgent(sessionId),
       sessionTitle: (sessionId) => this.sessions.title(sessionId),
+      taskWorkflow: async (taskId) => {
+        const draft = this.tasks.writtenDraft(taskId)
+        if (!draft) return null
+        const text = await this.workflowSuggestions.draftText(draft)
+        return { title: this.tasks.get(taskId).title, text }
+      },
+      taskWorkflowFolder: (taskId) => {
+        try {
+          return this.tasks.writtenDraft(taskId) ? this.taskPublishFolder(taskId) : null
+        } catch (error) {
+          if (error instanceof HostError && error.code === 'not_found') return null
+          throw error
+        }
+      },
       home: options.homeDir ?? os.homedir(),
     })
     this.settingsTools = new SettingsTools({
@@ -746,16 +798,8 @@ export class AgentHost {
     this.planAlerts = new PlanAlerts({
       file: planAlertsFile(options.userDataPath, log),
       alert: (alert) => {
+        // Huli: the toast and the phone's alert; upstream's LimitNotices sends the notification.
         this.broadcast({ type: 'agents.limitAlert', alert })
-        const { title, body } = alertText(alert, Date.now())
-        options.send({
-          type: 'host:attention',
-          kind: 'plan-limit',
-          agentId: alert.agentId,
-          window: alert.provider === undefined ? alert.window : `${alert.provider}/${alert.window}`,
-          title,
-          body,
-        })
       },
       log,
     })
@@ -899,6 +943,7 @@ export class AgentHost {
         }
       },
       comments: (portIds, id) => this.hub.send(portIds, { type: 'artifacts.comments', id }),
+      seen: (id, version) => this.hub.broadcast({ type: 'artifacts.seen', id, version }),
       canvas: (portIds, event) => this.hub.send(portIds, { type: 'artifacts.canvas', ...event }),
       unwatched: (id) => this.consents.unwatched(id),
     })
@@ -958,8 +1003,10 @@ export class AgentHost {
       dir: path.join(options.userDataPath, 'workflows'),
       file: workflowsFile(options.userDataPath, log),
       knownTools: () => ({
-        mcp: new Set(this.settings.marketplace.mcp.map((server) => server.name)),
-        skills: new Set(this.settings.marketplace.skills.map((skill) => skill.name)),
+        mcp: new Set(this.settings.marketplace.mcp.flatMap((server) => [server.name, server.id])),
+        skills: new Set(
+          this.settings.marketplace.skills.flatMap((skill) => [skill.name, skill.id]),
+        ),
       }),
       log,
       changed: () => this.broadcast({ type: 'workflows.changed' }),
@@ -967,8 +1014,14 @@ export class AgentHost {
     this.artifactService = new ArtifactService({
       workflow: {
         library: this.workflowLibrary,
+        marketplace: this.marketCommunity,
         report: (sessionId, input) => this.tasks.report(sessionId, input),
         pick: (sessionId, picks) => this.tasks.pick(sessionId, picks),
+        suggestions: {
+          suggest: (sessionId, input) => this.workflowSuggestions.suggest(sessionId, input),
+          draft: (sessionId, text) => this.workflowSuggestions.draft(sessionId, text),
+          keep: (sessionId, text) => this.workflowSuggestions.keep(sessionId, text),
+        },
         isStep: (sessionId) => this.tasks.refOf(sessionId) !== null,
         agentOf: (sessionId) => this.sessions.sessionAgent(sessionId),
       },
@@ -1124,6 +1177,7 @@ export class AgentHost {
       status: (status) => {
         this.hub.broadcast({ type: 'agent.status', status })
         this.planAlerts.observe(status)
+        this.limitsNoticed(status)
         this.routines.limitsChanged(status.id)
         this.tasks?.recheck()
       },
@@ -1229,10 +1283,12 @@ export class AgentHost {
       reportsDir: path.join(options.userDataPath, 'agent-reports'),
       attachments: this.attachments,
       mcp: {
-        servers: (sessionId, record, connection) =>
-          this.agents.mcpServersByName(record.agentId)
-            ? this.artifactService.folderServers(connection, record.projectPath, sessionId)
-            : this.artifactService.servers(sessionId, record.projectPath),
+        servers: (sessionId, record, connection) => {
+          const gateway = this.agents.toolGateway(record.agentId)
+          return this.agents.mcpServersByName(record.agentId)
+            ? this.artifactService.folderServers(connection, record.projectPath, sessionId, gateway)
+            : this.artifactService.servers(sessionId, record.projectPath, gateway)
+        },
         library: (sessionId, record, connection, transports, taken) =>
           libraryServers(
             this.settings.marketplace.mcp,
@@ -1243,6 +1299,7 @@ export class AgentHost {
               platform,
               taken,
               node: options.nodeRuntime,
+              also: record.task ? (this.tasks.toolsOf(record.task)?.mcp ?? []) : [],
               oauth: {
                 access: (server) => this.marketConnections.access(server),
                 bearer: () =>
@@ -1261,7 +1318,10 @@ export class AgentHost {
           this.browserSites.delete(sessionId)
         },
         guide: (agentId) =>
-          this.artifactService.guidePrompt(this.marketSkills.takesSkills(agentId)),
+          this.artifactService.guidePrompt(
+            this.marketSkills.takesSkills(agentId),
+            this.agents.toolGateway(agentId),
+          ),
         turnEnded: (sessionId) => {
           this.artifacts.stopUsing(sessionId)
           this.computer?.turnEnded(sessionId)
@@ -1278,7 +1338,12 @@ export class AgentHost {
           }
         },
       },
-      skills: (agentId, kettu) => this.marketSkills.sessionOptions(agentId, kettu),
+      skills: (record, kettu) =>
+        this.marketSkills.sessionOptions(
+          record.agentId,
+          kettu,
+          record.task ? (this.tasks.toolsOf(record.task)?.skills ?? []) : [],
+        ),
       memory: this.memory,
       usage: this.usage,
       cacheTtl:
@@ -1353,6 +1418,10 @@ export class AgentHost {
         ),
       routine: routineHooks,
       task: taskHooks,
+      cards: {
+        waiting: (sessionId) => this.workflowSuggestions.waitingCount(sessionId),
+        turnStarted: (sessionId) => void this.workflowSuggestions.turnStarted(sessionId),
+      },
       events: {
         patches: (batch, portIds) => this.hub.send(portIds, { type: 'session.patches', batch }),
         summary: (summary, portIds) => {
@@ -1382,7 +1451,8 @@ export class AgentHost {
             this.hub.send([portId], { type: 'session.viewers', sessionId, viewers })
           }
         },
-        attention: (sessionId, kind, title, body, request) =>
+        attention: (sessionId, kind, title, body, request) => {
+          if (kind === 'error') this.sessionFailed(sessionId)
           options.send({
             type: 'host:attention',
             sessionId,
@@ -1394,7 +1464,8 @@ export class AgentHost {
               : {}),
             ...(request ? { request } : {}),
             front: this.front(sessionId),
-          }),
+          })
+        },
         badge: (count) => options.send({ type: 'host:badge', count }),
         waiting: (sessions) => options.send({ type: 'host:waiting', sessions }),
         progress: (sessions) => options.send({ type: 'host:progress', sessions }),
@@ -1528,13 +1599,17 @@ export class AgentHost {
       library: this.workflowLibrary,
       sessions: {
         createStep: (params) => this.sessions.createStep(params),
-        send: (sessionId, text) => this.sessions.sendFromKettu(sessionId, text),
+        send: (sessionId, text, due) => this.sessions.sendFromKettu(sessionId, text, due),
         cancel: (sessionId) => this.sessions.cancel(sessionId),
         delete: (sessionId) => this.sessions.delete(sessionId),
         has: (sessionId) => this.sessions.has(sessionId),
       },
+      titleTask: (sessionId, text) => this.sessions.titleTask(sessionId, text),
       worktrees: {
-        create: (projectPath, request) => this.worktrees.create(projectPath, request),
+        create: (projectPath, request, first) =>
+          first
+            ? this.sessions.createTaskWorktree(projectPath, request, first)
+            : this.worktrees.create(projectPath, request),
         remove: async (projectPath, record, branch) => {
           const expected = await this.worktrees.inspect(projectPath, record)
           // Nothing the user was not shown is thrown away: a dirty worktree stays.
@@ -1565,7 +1640,13 @@ export class AgentHost {
         changed: (task) => this.broadcast({ type: 'task.changed', task }),
         removed: (taskId) => this.broadcast({ type: 'task.removed', taskId }),
         attention: (task, kind) => this.taskAttention(task, kind),
+        ended: (view, written) => void this.taskEnded(view, written),
       },
+      workingLimit: () => this.settings.workflow.maxWorkingSteps,
+      pullRequests: (sessionIds) =>
+        sessionIds.flatMap((id) =>
+          this.sessions.has(id) ? (this.sessions.summary(id).prs ?? []).map((pr) => pr.url) : [],
+        ),
       log,
     })
     taskHooks.current = this.tasks
@@ -1609,6 +1690,40 @@ export class AgentHost {
       file: githubFlowFile(options.userDataPath, log),
       log: (level, message) => log(level, message),
     })
+    const taskGit = createTaskGit(this.execRunner.exec)
+    this.workflowSuggestions = new WorkflowSuggestions({
+      file: suggestionsFile(options.userDataPath, log),
+      dir: path.join(options.userDataPath, 'workflow-cards'),
+      library: this.workflowLibrary,
+      market: {
+        workflows: () => this.marketCommunity.publicWorkflows(),
+        text: (listingId, version) => this.marketCommunity.workflowText(listingId, version),
+        add: (listing, text) => this.marketCommunity.addWorkflowVersion(listing, text),
+      },
+      tools: {
+        kept: () => this.settings.marketplace,
+        connected: (serverId) => this.marketConnections.view()[serverId]?.state === 'connected',
+        resolve: (kind, ref) => this.marketTool(kind, ref),
+        install: (tool) => this.installMarketTool(tool),
+      },
+      tasks: {
+        start: (params, from, given) => this.tasks.start(params, from, given),
+        pastRuns: (workflowId) => this.tasks.pastRuns(workflowId),
+        draftIds: () => this.tasks.draftIds(),
+      },
+      sessions: {
+        agentOf: (sessionId) => this.sessions.sessionAgent(sessionId),
+        projectOf: (sessionId) => this.sessions.sessionProject(sessionId),
+        tell: (sessionId, text) => this.sessions.sendCardAnswer(sessionId, text),
+      },
+      isRepo: (projectPath) => taskGit.isRepo(projectPath),
+      changed: (suggestion) => {
+        this.broadcast({ type: 'workflows.suggestion', suggestion })
+        if (this.sessions.has(suggestion.sessionId))
+          this.sessions.cardsChanged(suggestion.sessionId)
+      },
+      log,
+    })
     this.consents = new ArtifactConsents({
       store: this.artifacts,
       isDevice: (portId) => this.hub.deviceOf(portId) !== null,
@@ -1644,8 +1759,8 @@ export class AgentHost {
       closed: (portId) => this.portClosed(portId),
       log,
     })
-    this.projects.onChange((projects) => {
-      this.broadcast({ type: 'projects.changed', projects })
+    this.projects.onChange((projects, noProject) => {
+      this.broadcast({ type: 'projects.changed', projects, noProject })
       this.sendFolders()
     })
     this.env.onChange((info) => {
@@ -1684,8 +1799,8 @@ export class AgentHost {
       ...options,
       send: (message) => {
         options.send(message)
-        if (message.type === 'host:attention' && 'sessionId' in message) {
-          started?.chatBridge?.attention(message)
+        if (message.type === 'host:attention' && 'sessionId' in message && message.sessionId) {
+          started?.chatBridge?.attention({ ...message, sessionId: message.sessionId })
         }
       },
     })
@@ -1715,11 +1830,14 @@ export class AgentHost {
         .catch((error: unknown) =>
           writeLog('warn', 'host', `Kite's Node.js: ${(error as Error).message}`),
         ),
+      host.workflowSuggestions.load(),
     ])
     // Huli: once both the projects and the sessions are in.
     host.sessions.adoptOutsideScratch()
     // After the sessions, whose step sessions it messages when it resumes.
     await host.tasks.load()
+    // After the tasks, whose drafts keep their texts.
+    await host.workflowSuggestions.sweep()
     host.agents.restore(remembered)
     host.agents.restoreRegistry(listing)
     host.agents.restoreManifest(manifest)
@@ -1862,32 +1980,133 @@ export class AgentHost {
     return { ok: true, version: found.version.version, title: found.artifact.title }
   }
 
-  /** A task's notification: through its latest step's session, which opens the task from there. */
+  /**
+   * A task's notification, which opens the task whether or not any step has a session; devices,
+   * which open sessions, get it through its latest step's session.
+   */
   private taskAttention(task: TaskSummary, kind: 'needs-you' | 'ended'): void {
-    const step =
-      [...task.steps].reverse().find((s) => s.state === 'needs_you' || s.state === 'error') ??
-      [...task.steps].reverse().find((s) => s.sessionId !== null)
-    const sessionId =
-      step?.sessionId ?? [...task.steps].reverse().find((s) => s.sessionId)?.sessionId
-    if (!sessionId) return
+    const steps = [...task.steps].reverse()
+    const step = steps.find((s) => s.state === 'needs_you' || s.state === 'error')
+    const sessionId = step?.sessionId ?? steps.find((s) => s.sessionId !== null)?.sessionId
     const title =
       kind === 'needs-you'
         ? t('tasks.needsYou', { title: task.title })
-        : task.end === 'done'
-          ? t('tasks.done', { title: task.title })
-          : t('tasks.dropped', { title: task.title })
+        : task.status === 'cancelled'
+          ? t('tasks.cancelled', { title: task.title })
+          : task.end === 'done'
+            ? t('tasks.done', { title: task.title })
+            : t('tasks.dropped', { title: task.title })
     const body =
       kind === 'needs-you'
         ? t('tasks.needsYouBody', { step: step?.name ?? '', workflow: task.workflowName })
         : t('tasks.endedBody', { workflow: task.workflowName, steps: task.steps.length })
     this.options.send({
       type: 'host:attention',
-      sessionId,
-      kind: kind === 'needs-you' ? 'permission' : 'turn-ended',
+      kind: kind === 'needs-you' ? 'task-needs-you' : 'task-ended',
+      taskId: task.id,
       title,
       body,
-      front: this.front(sessionId),
+      ...(sessionId ? { sessionId, front: this.front(sessionId) } : {}),
     })
+  }
+
+  /** What a status changed in the agent's plan limit windows, said as notices. */
+  private limitsNoticed(status: AgentStatus): void {
+    for (const notice of this.limitNotices.observe(status, Date.now())) {
+      // A used-up window waits a moment for the turn it stopped to fail, so the two say it once.
+      if (notice.level === 'reached') setTimeout(() => this.sendLimitNotice(notice), LIMIT_MERGE_MS)
+      else this.sendLimitNotice(notice)
+    }
+  }
+
+  private sessionFailed(sessionId: string): void {
+    if (!this.sessions.has(sessionId)) return
+    this.lastFailed.set(this.sessions.summary(sessionId).agentId, { sessionId, at: Date.now() })
+  }
+
+  private sendLimitNotice(notice: LimitNotice): void {
+    const now = Date.now()
+    let sessionId: string | undefined
+    if (notice.level === 'reached') {
+      const failed = this.lastFailed.get(notice.agentId)
+      if (failed && now - failed.at < LIMIT_FAILED_WITHIN_MS) {
+        sessionId = failed.sessionId
+        this.stoppedBy.set(notice.key, sessionId)
+        if (this.sessions.has(sessionId)) {
+          this.sessions.turnLimited(sessionId, this.agents.status(notice.agentId), notice.limit)
+        }
+      }
+    } else if (notice.level === 'reset') {
+      sessionId = this.stoppedBy.get(notice.key)
+      this.stoppedBy.delete(notice.key)
+    }
+    const summary =
+      sessionId && this.sessions.has(sessionId) ? this.sessions.summary(sessionId) : null
+    const { title, body } = limitNoticeText(notice, summary?.title ?? null, now)
+    this.options.send({
+      type: 'host:attention',
+      kind: 'plan-limit',
+      agentId: notice.agentId,
+      level: notice.level,
+      key: notice.key,
+      usedPercent: notice.limit.usedPercent,
+      ...(summary ? { sessionId: summary.id } : {}),
+      title,
+      body,
+    })
+  }
+
+  /** A task that ended tells the conversation it started from what it delivered. */
+  private async taskEnded(view: TaskView, written: boolean): Promise<void> {
+    const from = view.from
+    if (!from) return
+    const writtenBy = written
+      ? (this.workflowSuggestions.draftAgent(view.workflowId) ??
+        this.sessions.sessionAgent(from.sessionId))
+      : null
+    try {
+      await this.sessions.taskDelivered(from.sessionId, deliveryOf(view, writtenBy, Date.now()))
+    } catch (error) {
+      this.diagnostics.log('warn', `Could not deliver task ${view.id}: ${(error as Error).message}`)
+    }
+  }
+
+  /** Save as my workflow, on a task that ran on a workflow its agent wrote for it and ended done. */
+  private async saveTaskWorkflow(taskId: string): Promise<WorkflowEntry> {
+    const draft = this.tasks.writtenDraft(taskId)
+    if (!draft) throw new HostError('conflict', t('tasks.notWritten'))
+    return this.workflowSuggestions.saveDraft(draft)
+  }
+
+  /** Where a task's workflow is kept while it is published, as the Marketplace tools write it. */
+  private taskPublishFolder(taskId: string): string {
+    return path.join(this.options.userDataPath, 'workflows-to-publish', taskId)
+  }
+
+  /**
+   * Publish to the Marketplace: the agent of the conversation the task started from gets the
+   * task's workflow and is asked to make it general and publish it, handing the text back to the
+   * Marketplace tools, so it writes no file of its own.
+   */
+  private async publishTaskWorkflow(taskId: string): Promise<void> {
+    const draft = this.tasks.writtenDraft(taskId)
+    if (!draft) throw new HostError('conflict', t('tasks.notWritten'))
+    const view = this.tasks.get(taskId)
+    const sessionId = view.from?.sessionId
+    if (!sessionId || !this.sessions.has(sessionId)) throw notFound(t('tasks.noOrigin'))
+    // The agent's general version is kept when the user asks again.
+    const kept = await readFile(
+      path.join(this.taskPublishFolder(taskId), 'workflow.yaml'),
+      'utf8',
+    ).catch(() => null)
+    const own = await this.workflowSuggestions.draftText(draft)
+    const general = kept !== null && kept !== own
+    await this.sessions.sendCardAnswer(
+      sessionId,
+      publishWorkflowPrompt(view, general ? kept : own, general),
+    )
+    const entry = await this.sessions.taskDelivery(sessionId, taskId)
+    if (entry) this.sessions.taskPublishAsked(sessionId, entry.id)
   }
 
   /** Who shows a session in front now: any window or device, and which devices. */
@@ -1948,6 +2167,13 @@ export class AgentHost {
     }
     if (JSON.stringify(previous.supervisor) !== JSON.stringify(next.supervisor)) {
       this.sessions.supervisorChanged()
+    }
+    if (previous.workflow.maxWorkingSteps !== next.workflow.maxWorkingSteps) {
+      this.tasks.limitChanged()
+    }
+    // A step held for a tool the host lacked may start once it is installed and on.
+    if (JSON.stringify(previous.marketplace) !== JSON.stringify(next.marketplace)) {
+      this.tasks.recheck()
     }
     this.marketChanged(previous.marketplace.mcp, this.marketKeys)
     if (JSON.stringify(previous.marketplace.mcp) !== JSON.stringify(next.marketplace.mcp)) {
@@ -2079,6 +2305,113 @@ export class AgentHost {
   private async ownSkillsChanged(): Promise<void> {
     await this.marketSkills.sync()
     this.sessions.libraryChanged(() => true)
+  }
+
+  /**
+   * The Marketplace entry a workflow names a tool by, as its card shows it: a Kettu Marketplace
+   * listing, an MCP Registry server or a skill of the catalog; null when there is none.
+   */
+  private async marketTool(kind: 'mcp' | 'skill', ref: string): Promise<SuggestedTool | null> {
+    const listing = listingIdOf(ref)
+    if (kind === 'mcp') {
+      let server: CatalogServer | null
+      if (listing) {
+        const found = await this.marketCommunity.listing(listing)
+        server =
+          found.state === 'listed' && found.listing.kind === 'mcp-server' ? found.server : null
+      } else {
+        server = (await this.marketCatalog.search(ref)).items.find((s) => s.id === ref) ?? null
+      }
+      if (!server) return null
+      const setup =
+        server.spec.type === 'http' && server.spec.oauth
+          ? 'sign-in'
+          : specInputs(server.spec).some((input) => input.required)
+            ? 'keys'
+            : 'none'
+      return {
+        kind,
+        ref,
+        title: server.title,
+        description: server.description || null,
+        server,
+        skill: null,
+        setup,
+      }
+    }
+    if (listing) {
+      const found = await this.marketCommunity.listing(listing)
+      if (found.state !== 'listed' || found.listing.kind !== 'skill') return null
+      return {
+        kind,
+        ref,
+        title: found.listing.name,
+        description: found.listing.description || null,
+        server: null,
+        skill: { kind: 'kettu', id: listing },
+        setup: 'none',
+      }
+    }
+    const skill = (await this.marketSkills.skills()).catalog.find((s) => s.id === ref)
+    if (!skill) return null
+    return {
+      kind,
+      ref,
+      title: skill.name,
+      description: skill.description || null,
+      server: null,
+      skill: { kind: 'catalog', id: ref },
+      setup: 'none',
+    }
+  }
+
+  /**
+   * Installs a tool a workflow card's Start names, for every agent as the Marketplace installs by
+   * default, or turns on the one Kettu keeps off. The change is an edit of the list its owner
+   * holds, so it never writes over another install made meanwhile.
+   */
+  private async installMarketTool(tool: SuggestedTool): Promise<void> {
+    const { marketplace } = (await this.settingsCall({ kind: 'read' })).file
+    if (tool.kind === 'skill') {
+      const own = keptTool(marketplace.skills, tool.ref)
+      if (own?.on) return
+      let entry: MarketSkill
+      if (own) {
+        entry = { ...own, on: true }
+      } else {
+        if (!tool.skill) throw notFound(t('workflow.toolGone', { name: tool.title }))
+        entry = { ...(await this.marketSkills.add(tool.skill)), agents: 'all', on: true }
+      }
+      await this.settingsCall({
+        kind: 'change',
+        patch: { marketplace: { skillsEdit: { put: [entry] } } },
+      })
+      return
+    }
+    const own = keptTool(marketplace.mcp, tool.ref)
+    if (own?.on) return
+    let entry: MarketServer
+    if (own) {
+      entry = { ...own, on: true }
+    } else {
+      const server = tool.server
+      if (!server) throw notFound(t('workflow.toolGone', { name: tool.title }))
+      const kettu = listingIdOf(server.id) !== null
+      entry = {
+        id: server.id,
+        name: serverName(kettu ? server.title : server.id, marketplace.mcp),
+        title: server.title,
+        source: kettu ? 'kettu' : 'registry',
+        version: server.version,
+        spec: server.spec,
+        agents: 'all',
+        on: true,
+      }
+    }
+    await this.settingsCall({
+      kind: 'change',
+      patch: { marketplace: { mcpEdit: { put: [entry] } } },
+    })
   }
 
   /** Makes a Marketplace API call through main or the daemon, which hold the access token. */
@@ -2515,7 +2848,7 @@ export class AgentHost {
   private async appServer(agentId: AgentId): Promise<CodexRequest> {
     const { connection } = await this.agents.ensureReady(agentId)
     const request = connection.request?.bind(connection)
-    if (!request) throw new HostError('agent_unavailable', 'The agent takes no such request')
+    if (!request) throw new HostError('agent_unavailable', t('hostError.agentNoRequest'))
     return request
   }
 
@@ -2739,8 +3072,37 @@ export class AgentHost {
       })
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      this.diagnostics.log('warn', `${agent}: could not write a commit message: ${reason}`)
+      this.diagnostics.log('warn', `${agent}: could not write a commit message: ${logText(error)}`)
       throw new HostError('agent_error', t('git.commitMessageFailed', { agent, reason }))
+    }
+  }
+
+  /**
+   * A title and description for a pull request of the branch into `base`, from the project's
+   * preferred agent or the one the lightweight tasks' model is pinned to.
+   */
+  private async pullRequestDraft(
+    projectPath: string,
+    base: string,
+  ): Promise<{ title: string; body: string }> {
+    const context = await this.gitProjectCall(projectPath, (g, p) => g.pullRequestContext(p, base))
+    const target = lightTarget(this.settings.lightModel, this.preferredAgent(projectPath), null)
+    if (target === null) throw new HostError('agent_error', t('git.draftNoAgent'))
+    const agent = this.agents.name(target.agentId)
+    try {
+      const runtime = await this.agents.ensureReady(target.agentId)
+      const dir = path.join(this.options.userDataPath, 'agent-reports')
+      await mkdir(dir, { recursive: true })
+      return await writePullRequestDraft(runtime, {
+        dir,
+        context,
+        model: target.model,
+        log: (line) => this.diagnostics.log('warn', line),
+      })
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      this.diagnostics.log('warn', `${agent}: could not write a pull request: ${logText(error)}`)
+      throw new HostError('agent_error', t('git.draftFailed', { agent, reason }))
     }
   }
 
@@ -2794,7 +3156,7 @@ export class AgentHost {
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       // Info: the report this draft is for must not read its own failure as part of the problem.
-      this.diagnostics.log('info', `${agent}: could not draft a problem report: ${reason}`)
+      this.diagnostics.log('info', `${agent}: could not draft a problem report: ${logText(error)}`)
       throw new HostError('agent_error', t('report.draftFailed', { agent, reason }))
     }
   }
@@ -3017,9 +3379,9 @@ export class AgentHost {
   ): Promise<{ terminalId: string; notified: boolean }> {
     const sessionId = this.sessions.browserSession(params.sessionId)
     const agentId = sessionId ? this.sessions.sessionAgent(sessionId) : null
-    if (!sessionId || !agentId) throw new HostError('not_found', `No session ${params.sessionId}`)
+    if (!sessionId || !agentId) throw new HostError('not_found', t('session.notFound'))
     const folder = this.sessions.sessionFolder(sessionId) ?? this.sessions.sessionProject(sessionId)
-    if (!folder) throw new HostError('restricted', 'This session has no folder to run in')
+    if (!folder) throw new HostError('restricted', t('hostError.noFolder'))
     const answer = await this.terminalCall({
       kind: 'reply',
       sessionId,
@@ -3190,6 +3552,7 @@ export class AgentHost {
         this.sessionFolders.flush(),
         this.nodeRuntime.flush(),
         this.copies.flush(),
+        this.workflowSuggestions.flush(),
         this.threads?.close(),
         this.usage.close(),
       ])
@@ -3453,6 +3816,7 @@ export class AgentHost {
       'agents.install': ({ agentId, method }) => agents.install(agentId, method),
       'agents.uninstall': ({ agentId, removeProgram }) =>
         agents.uninstall(agentId, removeProgram === true),
+      'agents.installOffer': ({ agentId }) => agents.installOffer(agentId),
       'agents.cancelTask': ({ agentId }) => agents.cancelTask(agentId),
       'agents.readOptions': async ({ agentId, projectPath }) => {
         const entry = this.agentOptions.get(agentId)
@@ -3476,11 +3840,19 @@ export class AgentHost {
       'agents.claudeSettings': ({ agentId }) =>
         agents.claudeSettings(agentId, listedModels(this.agentOptions.get(agentId)?.config)),
       'agents.setClaudeSetting': ({ agentId, change }) => agents.setClaudeSetting(agentId, change),
+      'agents.autoCompact': ({ agentId }) =>
+        agents.autoCompact(agentId, this.agentOptions.get(agentId)?.config, () =>
+          this.appServer(agentId),
+        ),
+      'agents.setAutoCompact': ({ agentId, change }) =>
+        agents.setAutoCompact(agentId, change, () => this.appServer(agentId)),
       'agents.codebuddySettings': ({ agentId }) => agents.codebuddySettings(agentId),
       'agents.setCodebuddySite': ({ agentId, change }) => agents.setCodebuddySite(agentId, change),
       'agents.refreshAccount': ({ agentId, force }) => agents.refreshAccount(agentId, { force }),
       'agents.readSignIn': ({ agentId, watch }) => agents.readSignIn(agentId, { watch }),
       'agents.options': () => this.agentOptions.list().map((o) => this.withStartMode(o)),
+      'agents.pinModel': ({ agentId, model, pinned }) =>
+        this.agentOptions.pin(agentId, model, pinned),
       'agents.lightAgents': () => ({ agents: this.sessions.lightAgents() }),
       'agents.draftReport': (params) => this.draftReport(params),
       'mcp.status': () => this.mcpStatus(),
@@ -3602,7 +3974,11 @@ export class AgentHost {
         this.options.send({ type: 'host:media-revoke', sessionId: null })
       },
       'projects.touch': ({ path }) => projects.touch(projects.match(path)),
-      'projects.pin': ({ path, pinned }) => projects.pin(projects.match(path), pinned),
+      'projects.pin': ({ path, pinned }) =>
+        path === null ? projects.pinNoProject(pinned) : projects.pin(projects.match(path), pinned),
+      'projects.move': ({ path, before }) =>
+        projects.move(projects.match(path), before === null ? null : projects.match(before)),
+      'projects.noProject': () => projects.noProject(),
       'projects.setSandbox': ({ path, sandbox }) =>
         projects.setSandbox(projects.match(path), sandbox),
       'projects.addFolder': ({ path, folder }) => projects.addFolder(projects.match(path), folder),
@@ -3656,8 +4032,10 @@ export class AgentHost {
         digestsFor(device, await sessions.page(sessionId, before, from, imagesFor(device))),
       'sessions.entry': ({ sessionId, entryId }, { device }) =>
         sessions.entry(sessionId, entryId, imagesFor(device)),
-      'sessions.requests': ({ sessionId }, { device }) =>
-        sessions.requests(sessionId, imagesFor(device)),
+      'sessions.requests': async ({ sessionId }, { device }) => ({
+        ...(await sessions.requests(sessionId, imagesFor(device))),
+        suggestions: await this.workflowSuggestions.waitingFor(sessionId),
+      }),
       'sessions.outline': ({ sessionId }) => sessions.outline(sessionId),
       'sessions.modelRequests': ({ sessionId, before }) =>
         sessions.modelRequests(sessionId, before ?? null),
@@ -3682,7 +4060,14 @@ export class AgentHost {
       'sessions.idleRelease': () => this.idleRelease.state(),
       'sessions.stopTask': ({ sessionId, taskId }) => sessions.stopTask(sessionId, taskId),
       'sessions.taskOutput': ({ sessionId, taskId }) => sessions.taskOutput(sessionId, taskId),
+      'sessions.processes': ({ sessionId }) => sessions.processes(sessionId),
+      'sessions.toBackground': ({ sessionId, toolCallId }) =>
+        sessions.toBackground(sessionId, toolCallId),
+      'sessions.cleanTasks': ({ sessionId }) => sessions.cleanTasks(sessionId),
       'sessions.retry': ({ sessionId }, { portId }) => sessions.retry(sessionId, portId),
+      'sessions.rewind': ({ sessionId, entryId, draft }) =>
+        sessions.rewind(sessionId, entryId, draft),
+      'sessions.putBack': ({ sessionId }) => sessions.putBack(sessionId),
       'sessions.sideAsk': ({ sessionId, question, quote, agentId }) =>
         sessions.sideAsk(sessionId, question, quote ?? null, agentId ?? null),
       'sessions.sideStop': ({ sessionId }) => sessions.sideStop(sessionId),
@@ -3715,9 +4100,9 @@ export class AgentHost {
       },
       'sessions.context': ({ sessionId }) => sessions.context(sessionId),
       'sessions.contextEstimates': ({ sessionId }) => sessions.contextEstimates(sessionId),
-      'sessions.queue': ({ sessionId, content }, { portId, device }) => {
+      'sessions.queue': ({ sessionId, content, comments }, { portId, device }) => {
         this.shareSurfaces(sessionId, content)
-        return sessions.queue(sessionId, content, portId, fromDevice(device))
+        return sessions.queue(sessionId, content, portId, fromDevice(device), comments)
       },
       'sessions.runCommand': (params, { portId, device }) =>
         this.runReplyCommand(params, portId, device),
@@ -3784,6 +4169,38 @@ export class AgentHost {
       'workflows.update': ({ workflowId }) => this.workflowLibrary.update(workflowId),
       'workflows.approve': ({ workflowId, hash }) => this.workflowLibrary.approve(workflowId, hash),
       'workflows.remove': ({ workflowId }) => this.workflowLibrary.remove(workflowId),
+      'workflows.suggestions': ({ sessionId }) => this.workflowSuggestions.forSession(sessionId),
+      'workflows.suggestionFile': async ({ id }) => ({
+        text: await this.workflowSuggestions.file(id),
+      }),
+      'workflows.answerSuggestion': async ({ id, answer, agentId, options }, { device }) => {
+        const from = fromDevice(device)
+        switch (answer) {
+          case 'start': {
+            const first = {
+              ...(agentId ? { agentId } : {}),
+              ...(options ? { options } : {}),
+            }
+            const { view, done } = await this.workflowSuggestions.start(id, first, from)
+            void done.catch((error: unknown) =>
+              this.diagnostics.log(
+                'warn',
+                `Workflow card ${id} stopped: ${(error as Error).message}`,
+              ),
+            )
+            return view
+          }
+          case 'decline':
+          case 'another':
+            return this.workflowSuggestions.decline(id, from, answer === 'another')
+          case 'reconsider':
+            return this.workflowSuggestions.reconsider(id)
+          case 'save':
+            return this.workflowSuggestions.save(id, from)
+          case 'not_save':
+            return this.workflowSuggestions.notSave(id, from)
+        }
+      },
       'workflows.pin': async ({ workflowId, stepId, pick }) => {
         const entry = await this.workflowLibrary.setPin(workflowId, stepId, pick)
         this.tasks.recheck()
@@ -3814,6 +4231,8 @@ export class AgentHost {
       'tasks.note': ({ taskId, text }) => this.tasks.note(taskId, text),
       'tasks.pin': ({ taskId, stepId, pick }) => this.tasks.pinStep(taskId, stepId, pick),
       'tasks.update': ({ taskId, ...change }) => this.tasks.update(taskId, change),
+      'tasks.saveWorkflow': ({ taskId }) => this.saveTaskWorkflow(taskId),
+      'tasks.publishWorkflow': ({ taskId }) => this.publishTaskWorkflow(taskId),
       'sessions.removeAll': async () => {
         await sessions.removeAll()
         this.options.send({ type: 'host:media-revoke', sessionId: null })
@@ -3865,6 +4284,7 @@ export class AgentHost {
         this.gitProjectCall(projectPath, (g, p) => g.commit(p, oid)),
       'git.changes': ({ projectPath }) => this.gitProjectCall(projectPath, (g, p) => g.changes(p)),
       'git.commitMessage': ({ projectPath, paths }) => this.commitMessage(projectPath, paths),
+      'git.pullRequestDraft': ({ projectPath, base }) => this.pullRequestDraft(projectPath, base),
       'git.incoming': ({ projectPath, from }) =>
         this.gitProjectCall(projectPath, (g, p) => g.incoming(p, from)),
       'git.fileDiff': ({ projectPath, path, oldPath, ref }) =>
@@ -4005,6 +4425,7 @@ export class AgentHost {
               ? ''
               : await artifacts.entryText(read),
           type: read.type,
+          seen: read.artifact.seen,
           files: read.files.map((file) => ({
             path: file.path,
             size: file.size,
@@ -4016,7 +4437,7 @@ export class AgentHost {
       'artifacts.file': async ({ id, version, path }) => {
         const found = await artifacts.read(id, { version })
         const file = found.files.find((f) => f.path === path)
-        if (!file) throw new HostError('not_found', `${id} version ${version} has no file ${path}`)
+        if (!file) throw new HostError('not_found', t('hostError.noArtifactFile', { path }))
         return {
           type: artifactFileType(path),
           bytes: toArrayBuffer(await artifacts.bytes(found, file)),
@@ -4030,6 +4451,9 @@ export class AgentHost {
         return artifacts.content(id, version)
       },
       'artifacts.versions': async ({ id }) => (await artifacts.versions(id)).map(versionSummary),
+      'artifacts.changes': async ({ id, from, to }) => ({
+        changes: await artifacts.changes(id, from, to),
+      }),
       'artifacts.rename': ({ id, title }) => artifacts.rename(id, title),
       'artifacts.delete': async ({ id, permanently }) => {
         if (permanently) await artifacts.erase(id)
@@ -4071,6 +4495,7 @@ export class AgentHost {
       'artifacts.editElement': ({ id, baseVersion, path, offset, style, text }) =>
         artifacts.editElement({ id, baseVersion, path, offset, change: { style, text } }),
       'artifacts.view': ({ id, page }, { portId }) => artifacts.view(id, portId, page),
+      'artifacts.seen': async ({ id, version }) => ({ seen: await artifacts.see(id, version) }),
       'artifacts.setParams': ({ id, baseVersion, path, values }) =>
         artifacts.setParams({ id, baseVersion, path, values }),
       'artifacts.canvas': ({ id }) => artifacts.canvases.state(id),
@@ -4147,7 +4572,7 @@ export class AgentHost {
           fromDevice(device),
         )
         if (!this.computer?.answer(requestId, decision)) {
-          throw new HostError('not_found', `No app waits in ${entryId}`)
+          throw new HostError('not_found', t('session.waiting.app.gone'))
         }
       },
       'sessions.answerProjectMcp': ({ sessionId, entryId, decision }, { device }) => {
@@ -4194,13 +4619,13 @@ export class AgentHost {
       },
       'computer.show': async ({ sessionId }, { device }) => {
         // The window comes forward on this computer, for someone in front of it.
-        if (device) throw new HostError('forbidden', 'Show app works only on this computer.')
+        if (device) throw new HostError('forbidden', t('hostError.showHere'))
         await this.computer?.show(sessionId)
       },
       'computer.declineSetup': ({ sessionId, entryId }, { device }) => {
         const requestId = sessions.declineComputerSetup(sessionId, entryId, fromDevice(device))
         if (!this.computer?.declineSetup(requestId)) {
-          throw new HostError('not_found', `No setup waits in ${entryId}`)
+          throw new HostError('not_found', t('session.waiting.setup.gone'))
         }
       },
       'agentHistory.list': ({ agentId, cursor, folder, source }) =>

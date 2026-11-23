@@ -165,7 +165,10 @@ function HarnessBody({ status }: { status: AgentStatus }) {
     if (task.kind === 'update') {
       if (task.method) updateCli()
       else update()
-    } else install(task.method)
+    } else {
+      const method = task.method
+      install(method === 'pnpm' || method === 'bun' || method === 'yarn' ? null : method)
+    }
   }
 
   const reloadEnvironment = () =>

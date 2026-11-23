@@ -5,7 +5,7 @@
 // cmd.exe.
 
 import path from 'node:path'
-import type { AgentInstallMethod } from '@shared/agent-host'
+import type { AgentInstallMethod, ProgramMethod } from '@shared/agent-host'
 import type { Platform } from '@shared/platform'
 import type { AgentId } from '@shared/thread'
 import { findCommand, type Env } from './find-command'
@@ -57,6 +57,11 @@ export interface BinaryInstalls {
   winget?: string
   /** The npm package, installed globally. */
   npm?: string
+  /**
+   * The dist-tag the vendor's install names, such as `prerelease`, which installs and updates take
+   * in place of `latest`. Removing and finding the program use the bare package.
+   */
+  npmTag?: string
   /** The npm route skips the package's install scripts, as the vendor's own command does. */
   ignoreScripts?: true
   /**
@@ -82,6 +87,11 @@ function scriptFlags(installs: BinaryInstalls, name: string): string[] {
   if (installs.ignoreScripts) return ['--ignore-scripts']
   if (installs.allowScripts) return [`--allow-scripts=${name}`]
   return []
+}
+
+/** The package at `at`, the vendor's dist-tag by default, or the bare name when there is none. */
+function npmSpec(installs: BinaryInstalls, at = installs.npmTag): string {
+  return at ? `${installs.npm}@${at}` : (installs.npm ?? '')
 }
 
 /** The registry's key for a platform and architecture, such as `darwin-aarch64`. */
@@ -241,7 +251,7 @@ export async function installPlans(
     })
   }
   if (installs.npm) {
-    const npmArgs = ['install', '-g', ...scriptFlags(installs, installs.npm), installs.npm]
+    const npmArgs = ['install', '-g', ...scriptFlags(installs, installs.npm), npmSpec(installs)]
     const command = formatCommand({ command: 'npm', args: npmArgs }, platform)
     plans.push({
       id: 'npm',
@@ -270,7 +280,20 @@ export async function installedFolder(
   installs: BinaryInstalls,
   ctx: { platform: Platform; home: string; npmPrefix(): Promise<string | null> },
 ): Promise<string | null> {
-  const p = ctx.platform === 'win32' ? path.win32 : path.posix
+  const npmPrefix = plan.id === 'npm' ? await ctx.npmPrefix() : null
+  return routeFolder(plan, installs, { ...ctx, npmPrefix })
+}
+
+/**
+ * The folder a route puts the program into, as far as Kettu can tell before it runs; `npmPrefix`
+ * is npm's global prefix, which only the npm route needs.
+ */
+export function routeFolder(
+  plan: InstallPlan,
+  installs: BinaryInstalls,
+  ctx: { platform: Platform; home: string; npmPrefix: string | null },
+): string | null {
+  const p = platformPath(ctx.platform)
   switch (plan.id) {
     case 'archive':
       return plan.archive?.folder ?? null
@@ -279,12 +302,10 @@ export async function installedFolder(
       return plan.tool ? p.dirname(plan.tool) : null
     case 'script':
       return installs.scriptBin ? p.join(ctx.home, ...installs.scriptBin) : null
-    case 'npm': {
-      const prefix = await ctx.npmPrefix()
-      if (!prefix) return null
+    case 'npm':
+      if (!ctx.npmPrefix) return null
       // npm links global programs into the prefix itself on Windows, and into its bin elsewhere.
-      return ctx.platform === 'win32' ? prefix : p.join(prefix, 'bin')
-    }
+      return ctx.platform === 'win32' ? ctx.npmPrefix : p.join(ctx.npmPrefix, 'bin')
     case 'winget':
       return null
   }
@@ -298,7 +319,7 @@ export function installMethodOf(
   installs: BinaryInstalls,
   realPath: string,
   ctx: { platform: Platform; home: string },
-): AgentInstallMethod['id'] | null {
+): ProgramMethod | null {
   const p = platformPath(ctx.platform)
   const file = ctx.platform === 'win32' ? realPath.toLowerCase().replaceAll('\\', '/') : realPath
   const under = (folder: string): boolean => {
@@ -306,13 +327,69 @@ export function installMethodOf(
     return file.startsWith(base.endsWith('/') ? base : `${base}/`)
   }
   if (installs.scriptHome && under(p.join(ctx.home, ...installs.scriptHome))) return 'script'
-  if (installs.npm && file.includes(`/node_modules/${installs.npm}/`)) return 'npm'
+  const global = installs.npm ? globalInstallOf(realPath, installs.npm, ctx.platform) : null
+  if (global) return global.manager
   // A formula's keg is named for it, which tells OpenCode 2's formula from OpenCode 1's.
   const formula = installs.brew?.split('/').pop()
   if (formula && file.includes(`/Cellar/${formula}/`)) return 'brew'
   if (installs.brewCask && file.includes('/Caskroom/')) return 'brew'
   if (installs.winget && file.includes('/winget/')) return 'winget'
   return null
+}
+
+/** A package manager whose global installs Kettu tells apart. */
+export type PackageManager = Extract<ProgramMethod, 'npm' | 'pnpm' | 'bun' | 'yarn'>
+
+/** A program a package manager installed globally, and the folder its commands name. */
+export interface GlobalInstall {
+  manager: PackageManager
+  /**
+   * npm's prefix, pnpm's global dir or yarn's global folder; null for bun, which takes its folder
+   * from `BUN_INSTALL`, and for a copy npm installed outside a global prefix, as into a project.
+   */
+  dir: string | null
+}
+
+/**
+ * The global install `file`, a file of the npm package `npmPackage`, lies in, told by the folders
+ * above the package: bun's `install/global`, yarn's `global` folder, pnpm's `global/<layout>`, or
+ * else npm's prefix. Null when the file is not in the package.
+ */
+export function globalInstallOf(
+  file: string,
+  npmPackage: string,
+  platform: Platform,
+): GlobalInstall | null {
+  const windows = platform === 'win32'
+  const slashed = windows ? file.replaceAll('\\', '/') : file
+  const folded = windows ? slashed.toLowerCase() : slashed
+  const marker = `/node_modules/${windows ? npmPackage.toLowerCase() : npmPackage}/`
+  const at = folded.lastIndexOf(marker)
+  if (at <= 0) return null
+  const above = folded.slice(0, at)
+  // The original spelling, with the platform's own separators.
+  const original = (end: number): string => file.slice(0, end)
+  if (above.endsWith('/install/global')) return { manager: 'bun', dir: null }
+  // `~/.config/yarn/global`, or `%LOCALAPPDATA%\Yarn\Data\global` on Windows.
+  if (/\/yarn(?:\/data)?\/global$/i.test(above)) return { manager: 'yarn', dir: original(at) }
+  // npm keeps global packages in `<prefix>/lib/node_modules` off Windows.
+  if (!windows && above.endsWith('/lib')) return { manager: 'npm', dir: original(at - 4) }
+  // pnpm keeps them under `<global-dir>/5` until pnpm 10 and `<global-dir>/v11` since.
+  const pnpm = /^(.*\/global)\/(?:5|v\d+)(?:\/|$)/.exec(above)
+  if (pnpm?.[1]) return { manager: 'pnpm', dir: original(pnpm[1].length) }
+  return { manager: 'npm', dir: windows ? npmPrefixOf(file, npmPackage, platform) : null }
+}
+
+/**
+ * The file a shell shim starts, as pnpm writes one for each global command: the last path it
+ * quotes after `$basedir/`, other than Node.js itself, taken from the shim's folder. Null for any
+ * other file.
+ */
+export function shellShimTarget(text: string, shim: string): string | null {
+  if (!text.startsWith('#!/bin/sh')) return null
+  const quoted = [...text.matchAll(/"\$basedir\/([^"$]+)"/g)].map((match) => match[1] ?? '')
+  const target = quoted.filter((file) => path.posix.basename(file) !== 'node').at(-1)
+  return target ? path.posix.resolve(path.posix.dirname(shim), target) : null
 }
 
 /**
@@ -343,15 +420,20 @@ export interface UpdatePlan {
 
 /**
  * The update for the way the program was installed: its own update command or the install script
- * again, `brew upgrade`, `winget upgrade`, or `npm install -g` at the latest version.
+ * again, `brew upgrade`, `winget upgrade`, or the package manager's global install at the latest
+ * version.
  */
 export async function updatePlan(
   installs: BinaryInstalls,
-  method: AgentInstallMethod['id'],
+  method: ProgramMethod,
   ctx: Pick<PlanContext, 'platform' | 'env' | 'npm' | 'isExecutable'> & {
     program: string
     /** The npm prefix the program was installed under, which may not be the PATH npm's own. */
     npmPrefix?: string | null
+    /** pnpm's global dir or yarn's global folder the program was installed under. */
+    globalDir?: string | null
+    /** The version a package manager installs; its newest when not given. */
+    version?: string
   },
 ): Promise<UpdatePlan | null> {
   const { platform } = ctx
@@ -405,14 +487,61 @@ export async function updatePlan(
         '-g',
         ...(ctx.npmPrefix ? ['--prefix', ctx.npmPrefix] : []),
         ...scriptFlags(installs, installs.npm),
-        `${installs.npm}@latest`,
+        npmSpec(installs, ctx.version ?? installs.npmTag ?? 'latest'),
       ]
       return {
         command: formatCommand({ command: 'npm', args }, platform),
         run: ctx.npm ? { program: ctx.npm, args: [...args, ...NPM_GLOBAL_FLAGS] } : null,
       }
     }
+    case 'pnpm':
+    case 'bun':
+    case 'yarn': {
+      if (!installs.npm) return null
+      const args = [
+        ...GLOBAL_ADD[method],
+        ...(ctx.globalDir && method !== 'bun' ? [DIR_FLAG[method], ctx.globalDir] : []),
+        ...(installs.ignoreScripts ? ['--ignore-scripts'] : []),
+        npmSpec(installs, ctx.version ?? installs.npmTag ?? 'latest'),
+      ]
+      const tool = await findCommand(method, ctx)
+      return {
+        command: formatCommand({ command: method, args }, platform),
+        run: tool ? { program: tool, args } : null,
+      }
+    }
     case 'archive':
       return null
   }
+}
+
+/** How pnpm, bun and yarn add and remove a global package. */
+const GLOBAL_ADD = { pnpm: ['add', '-g'], bun: ['add', '-g'], yarn: ['global', 'add'] } as const
+const GLOBAL_REMOVE = {
+  npm: ['uninstall', '-g'],
+  pnpm: ['remove', '-g'],
+  bun: ['remove', '-g'],
+  yarn: ['global', 'remove'],
+} as const
+/** The flag that names the folder a global install is in; bun has none. */
+const DIR_FLAG = { npm: '--prefix', pnpm: '--global-dir', yarn: '--global-folder' } as const
+
+/**
+ * What removes a global package, with the tool that installed it, from the folder it was found
+ * in; `tool` is the tool's name, looked up when it runs. Null for npm without its prefix, since
+ * the PATH npm's own prefix may hold another copy.
+ */
+export function uninstallPlan(
+  manager: PackageManager,
+  npmPackage: string,
+  dir: string | null,
+  platform: Platform,
+): { command: string; tool: PackageManager; args: string[] } | null {
+  if (manager === 'npm' && !dir) return null
+  const args = [
+    ...GLOBAL_REMOVE[manager],
+    ...(dir && manager !== 'bun' ? [DIR_FLAG[manager], dir] : []),
+    npmPackage,
+  ]
+  return { command: formatCommand({ command: manager, args }, platform), tool: manager, args }
 }

@@ -4,6 +4,8 @@ import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import {
   app,
+  BrowserWindow,
+  nativeTheme,
   powerMonitor,
   powerSaveBlocker,
   protocol,
@@ -13,6 +15,7 @@ import {
   systemPreferences,
   webContents,
 } from 'electron'
+import { ATTENTION_SETTING } from '@shared/attention'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { ARTIFACT_ID, parseArtifactRef } from '@shared/artifacts'
 import { BROWSER_PARTITION } from '@shared/browser'
@@ -20,6 +23,8 @@ import { IDLE_CONTROL } from '@shared/control'
 import { guardKettuFetch } from '@shared/kettu-hosts'
 import { matchLocale, resolveLocale, type Locale } from '@shared/locale'
 import type { MarketAccount } from '@shared/market-publish'
+import { ARTIFACT_RECORDS, type HostAttention } from '@shared/remote/host-admin'
+import type { UpdateStatus } from '@shared/updates'
 import { HOSTS_FILE, type HostsStatus } from '@shared/remote/hosts'
 import { PUSH_URL, PUSH_URL_ENV, pushUrlFrom } from '@shared/remote/push'
 import { RELAY_TOKENS_FEATURE, RELAY_URL, RELAY_URL_ENV, relayUrlFrom } from '@shared/remote/relay'
@@ -55,7 +60,11 @@ import { HostAdmin } from './host-admin'
 import { HostMedia } from './host-media'
 import { HostSessions } from './host-sessions'
 import { PortForwards } from './port-forwards'
-import { locale as currentLocale, setLocale, t } from './i18n'
+import { locale as currentLocale, islandHelperStrings, islandT, setLocale, t } from './i18n'
+import { IslandBridge } from './island/bridge'
+import { appUpdate } from './island/notices'
+import { spawnIslandHelper } from './island/helper'
+import { IslandHostPort } from './island/host-port'
 import { mainDiagnostics } from './diagnostics'
 import {
   appInfo,
@@ -74,7 +83,7 @@ import { createLogger } from './log'
 import { SessionMover } from './session-move'
 import { installMenu } from './menu'
 import { isOpenedAtLogin, startMode, syncLoginItem } from './login-item'
-import { notifyAttention, notifyDiscovery } from './notifications'
+import { notifyAttention, notifyDiscovery, notifyNotice, RepeatedNotices } from './notifications'
 import { KeepAwake } from './power-save'
 import { sessionProxy } from './proxy'
 import { Sharing } from './sharing'
@@ -461,6 +470,68 @@ async function start(): Promise<void> {
     changed: (view) => broadcast('chat-bridge:changed', view),
     log: createLogger('chat-bridge'),
   })
+  // Made with the updater, further down; the island reads it only once it runs.
+  let updaterMade: Updater | null = null
+  const islandLog = createLogger('island')
+  // Every host signed in to an account says its plan limit notices; this computer says each once.
+  const repeatedNotices = new RepeatedNotices()
+  // The notch island: macOS only, started once the first window shows. Huli: never for an
+  // agent's test copy, which would draw over the owner's notch.
+  const island = new IslandBridge({
+    enabled: () =>
+      process.platform === 'darwin' && settings.get().notifications.island && !testInBackground(),
+    allowed: (kind) =>
+      kind === 'update'
+        ? settings.get().notifications.updates
+        : settings.get().notifications[ATTENTION_SETTING[kind]],
+    windowFocused: () => BrowserWindow.getFocusedWindow() !== null,
+    colorMode: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
+    version: app.getVersion(),
+    locale: () => currentLocale(),
+    strings: () => islandHelperStrings(),
+    spawn: () => spawnIslandHelper(),
+    connectLocal: (onEvent, onClose) => {
+      const port = agentHost.connectMain()
+      if (!port) return null
+      const client = new IslandHostPort(port, onEvent, onClose)
+      return {
+        request: (method, params) => client.request(method, params),
+        close: () => client.close(),
+      }
+    },
+    // Another host's session is read and answered through the relay the windows use.
+    callRemote: (hostId, method, params) => hostSessions.call(hostId, method, params),
+    openRemotes: () => hostSessions.openHosts(),
+    open: (target) => {
+      if (target?.kind === 'task') {
+        sendCommand({ kind: 'open-task', taskId: target.taskId })
+        return
+      }
+      openTrayTarget(
+        target === null
+          ? { kind: 'app' }
+          : target.kind === 'new-session'
+            ? { kind: 'new-session' }
+            : { kind: 'session', sessionId: target.sessionId },
+      )
+    },
+    updateStatus: () => updaterMade?.getStatus() ?? null,
+    noticeAction: (action) => {
+      if (action !== 'restart') {
+        sendCommand({ kind: action === 'usage' ? 'open-usage' : 'open-updates' })
+        return
+      }
+      try {
+        updaterMade?.restart()
+      } catch (error) {
+        islandLog.warn(`Could not restart to update: ${String(error)}`)
+      }
+    },
+    status: (state) => broadcast('island:changed', state),
+    log: islandLog,
+  })
+  nativeTheme.on('updated', () => island.appearanceChanged())
+  app.on('will-quit', () => island.quit())
   const agentHost = new AgentHost({
     settings: () => hostSettings(settings.get(), systemLocale),
     marketKeys: () => marketKeys.contentsForHost(),
@@ -474,9 +545,16 @@ async function start(): Promise<void> {
       }),
     onFirstStart: (harnesses) => settings.firstStart(harnesses),
     onAttention: (message) => {
-      notifyAttention(message, settings.get(), (sessionId, requestId, optionId) =>
-        agentHost.answerPermission(sessionId, requestId, optionId),
-      )
+      // While the island runs, it shows what needs the user in place of a notification.
+      if (!repeatedNotices.repeated(message)) {
+        island.attention(message)
+        if (!island.shows(message)) {
+          notifyAttention(message, settings.get(), (sessionId, requestId, optionId) => {
+            agentHost.answerPermission(sessionId, requestId, optionId)
+            return true
+          })
+        }
+      }
       hostAdmin?.attention(message)
       remoteHost.attention(message)
     },
@@ -501,10 +579,12 @@ async function start(): Promise<void> {
     onReady: () => {
       tray.setConnected(true)
       reconcileSharing?.()
+      island.localHostReady()
     },
     onDown: () => {
       tray.setConnected(false)
       chatBridge.hostDown()
+      island.localHostDown()
       // No turn of this computer's host runs now; another host's turns go on with their pages.
       browserTools?.endTurns(
         browserTools.controls.keys().filter((sessionId) => !remoteBrowser.isRemote(sessionId)),
@@ -541,7 +621,7 @@ async function start(): Promise<void> {
             request.allowTab,
           )
         : Promise.resolve({
-            error: { code: 'no_page', message: 'Another host’s session has this page.' },
+            error: { code: 'no_page', message: t('browserRemote.otherHost') },
           }),
     themeCall: (call) => answerThemeCall(call, { themes, settings }),
     settingsCall: (call) =>
@@ -722,13 +802,32 @@ async function start(): Promise<void> {
     browserCall: (hostId, call) => void remoteBrowser.call(hostId, call),
     originDecided: (hostId, event) => remoteBrowser.originDecided(hostId, event),
     browserEvent: (hostId, event) => remoteBrowser.browserEvent(hostId, event),
+    attention: (hostId, attention) => {
+      const host = remoteHost.hosts?.find((known) => known.id === hostId)
+      if (!host || typeof attention !== 'object' || attention === null) return
+      if (repeatedNotices.repeated(attention as HostAttention)) return
+      // While the island runs, it shows another host's too in place of a notification.
+      island.remoteAttention(hostId, attention)
+      if (island.shows(attention as HostAttention)) return
+      notifyAttention(
+        attention as HostAttention,
+        settings.get(),
+        (sessionId, requestId, optionId) =>
+          hostSessions.request(hostId, 'permissions.respond', { sessionId, requestId, optionId }),
+        { id: hostId, name: host.name },
+      )
+    },
     ended: (hostId) => {
       // The host's turns that used this computer's pages end with its session.
       browserTools?.endTurns(remoteBrowser.sessionsOf(hostId))
       remoteBrowser.hostClosed(hostId)
       remoteArtifacts.ended(hostId)
       portForwards.hostEnded(hostId)
+      island.remoteClosed(hostId)
     },
+    opened: (hostId) => island.remoteOpened(hostId),
+    event: (hostId, event) => island.remoteEvent(hostId, event),
+    resync: (hostId) => island.remoteResync(hostId),
     artifactEvent: (hostId, event) => {
       if (event.type === 'artifacts.runtime') remoteArtifacts.streamed(hostId, event)
       else if (event.type === 'artifacts.changed' || event.type === 'artifacts.version') {
@@ -767,6 +866,11 @@ async function start(): Promise<void> {
   }
   const hostsChanged = (): void => {
     hostSessions.connections(remoteHost.hosts)
+    island.remoteHosts(
+      (remoteHost.hosts ?? [])
+        .filter((host) => !host.removed)
+        .map((host) => ({ id: host.id, name: host.name })),
+    )
     broadcast('hosts:changed', hostsStatus())
     relayToken.update()
   }
@@ -813,7 +917,7 @@ async function start(): Promise<void> {
     admin: async (deviceId, method, params) =>
       hostAdmin
         ? hostAdmin.answer(deviceId, method, params)
-        : { error: { code: 'unavailable', message: 'Kettu is starting' } },
+        : { error: { code: 'unavailable', message: t('hostAdmin.starting') } },
     changed: remoteChanged,
     hostsChanged,
     hostOpened: (hostId, port) => hostSessions.opened(hostId, port),
@@ -910,8 +1014,29 @@ async function start(): Promise<void> {
     settings: () => settings.get(),
     requestRestart: () => quit?.request('update'),
     requestMove: () => quit?.request('move'),
-    changed: (status) => hostAdmin?.updatesChanged(status),
+    changed: (status) => {
+      hostAdmin?.updatesChanged(status)
+      island.updatesChanged()
+      announceUpdate(status)
+    },
   })
+  updaterMade = updater
+  /** Kettu's update is said once a version: on the island while it runs, else as a notification. */
+  function announceUpdate(status: UpdateStatus): void {
+    const update = appUpdate(status)
+    if (!update || appState.get().notifiedUpdate === update.version) return
+    appState.update({ notifiedUpdate: update.version })
+    const { version, ready } = update
+    const words = {
+      title: islandT(ready ? 'pop.appReady' : 'pop.appAvailable', { version }),
+      body: islandT(ready ? 'pop.appReadyBody' : 'pop.appAvailableBody'),
+    }
+    if (island.updatePopped(ready, words)) return
+    if (!settings.get().notifications.updates) return
+    notifyNotice(`update:${version}`, words, settings.get(), () =>
+      sendCommand({ kind: 'open-updates' }),
+    )
+  }
   quit = new QuitFlow({
     settings: () => settings.get(),
     busySessions: (timeoutMs) => agentHost.busy(timeoutMs),
@@ -1005,6 +1130,8 @@ async function start(): Promise<void> {
       remoteSwitch: true,
       remoteReset: true,
       thumbnails: true,
+      partThumbnails: true,
+      artifactRecords: [...ARTIFACT_RECORDS],
     }),
     restart: (which) => (which === 'agent' ? agentHost.restart() : terminalHost.restart()),
     sharing,
@@ -1012,6 +1139,7 @@ async function start(): Promise<void> {
     themes,
     marketKeys,
     thumbnail: (id, version, layout) => artifacts.thumbnail(ownArtifact(id), version, layout),
+    partThumbnail: (id, version, part) => artifacts.partThumbnail(ownArtifact(id), version, part),
     png: (id, version, page, size) => artifacts.png(ownArtifact(id), version, page, size),
     printPdf: (id, version) => artifacts.printPdf(ownArtifact(id), version),
     report: (request) => reports.forDevice(request),
@@ -1047,7 +1175,11 @@ async function start(): Promise<void> {
       setLocale(localeOf(next))
       installMenu(menuDeps)
       tray.updateMenu()
+      remoteHost.localeChanged()
+      terminalHost.localeChanged()
+      deviceHost.localeChanged()
     }
+    island.settingsChanged()
     // The agent host reads `general.sessionTitles` and `general.lightModel`, which `reachesHost`
     // cannot single out.
     if (reachesHost(changed) || localeChanged || changed.has('general')) {
@@ -1140,6 +1272,7 @@ async function start(): Promise<void> {
     updater,
     quit: quitFlow,
     reports,
+    island,
   })
   registerBackupIpc(backup)
   registerChatBridgeIpc(chatBridge)
@@ -1207,7 +1340,10 @@ async function start(): Promise<void> {
   void remoteHost.setEnabled(settings.get().remote.enabled)
   watchPresence((present) => remoteHost.setPresent(present))
   const window = createMainWindow(start)
-  window.once('show', () => updater.start())
+  window.once('show', () => {
+    updater.start()
+    island.firstWindowShown()
+  })
   ready = true
 
   app.on('activate', () => {

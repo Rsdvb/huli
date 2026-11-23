@@ -14,7 +14,9 @@
     "searchField": "Search…",
     "projects": "Projects",
     "openProject": "Open project…",
-    "resize": "Resize sidebar"
+    "resize": "Resize sidebar",
+    "hidePage": "Hide from sidebar",
+    "customize": "Customize sidebar…"
   },
   "search": {
     "placeholder": "Search sessions, artifacts, routines and more",
@@ -41,6 +43,7 @@
     "action": {
       "newSession": "New session",
       "openProject": "Open project…",
+      "openOverview": "Open Overview",
       "openUsage": "Open Usage",
       "openArtifacts": "Open Artifacts",
       "openRoutines": "Open Routines",
@@ -106,6 +109,8 @@
       "newSession": "New session",
       "pin": "Pin project",
       "unpin": "Unpin project",
+      "pinNoProject": "Pin",
+      "unpinNoProject": "Unpin",
       "openInTerminal": "Open in terminal",
       "startAgent": "Start agent in terminal",
       "startAgentLabel": "Its own CLI, in this folder",
@@ -162,6 +167,7 @@
     "autoResume": "Go on when the plan resets",
     "renameTitle": "Rename session",
     "newSubSession": "New sub-session",
+    "subagents": "Sub-agents",
     "delete": "Delete",
     "deleteMenu": "Delete…",
     "deleteTitle": "Delete “{{title}}”?",
@@ -427,9 +433,11 @@
     "limits": "Plan limits",
     "limitUsed": "{{window}}: {{percent}}% used",
     "limitLeft": "{{window}}: {{percent}}% left",
-    "ring": "{{account}} · {{window}} {{percent}}% used",
-    "ringLeft": "{{account}} · {{window}} {{percent}}% left",
-    "ringNone": "{{agent}} reports no plan limits",
+    "ring": "{{account}} · {{windows}}",
+    "ringWindow": "{{window}} {{percent}}% used",
+    "ringWindowLeft": "{{window}} {{percent}}% left",
+    "ringBalance": "{{account}} · Balance {{amount}}",
+    "ringBalanceWallets": "{{account}} · Balance {{amount}} ({{wallets}})",
     "ringButton": "Plan limits: {{limit}}",
     "reorderCards": "Drag to reorder, or hold Alt and press an arrow key.",
     "cardMoved": "Moved {{name}} to position {{position}}.",
@@ -483,7 +491,10 @@
     "done": "Done",
     "took": "took {{time}}",
     "moreReferences_one": "{{count}} more issue or pull request",
-    "moreReferences_other": "{{count}} more issues and pull requests"
+    "moreReferences_other": "{{count}} more issues and pull requests",
+    "moreArtifacts_one": "{{count}} more artifact",
+    "moreArtifacts_other": "{{count}} more artifacts",
+    "artifactFacts": "v{{version}} · {{time}}"
   },
   "subagents": {
     "title": "Sub-agents of this session",

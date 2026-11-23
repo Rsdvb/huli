@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import type { GitStatus } from '@shared/git'
-import type { RunChanges } from '@shared/session-groups'
+import type { RunChanges } from '@shared/run-groups'
 import { errorMessage, host } from '@renderer/lib/host'
 import { useGitStore } from '@renderer/stores/git'
 

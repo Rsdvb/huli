@@ -4,12 +4,14 @@
 import type {
   AgentAccount,
   ContextBreakdown,
+  ModelProvider,
   PlanLimit,
   PromptCapabilities,
   ProviderBalance,
 } from '@shared/agent-host'
 import type { ContextEstimates } from '@shared/context'
 import type {
+  BackgroundTaskView,
   ConfigOption,
   DeclaredHook,
   DeclaredMcpServer,
@@ -27,6 +29,13 @@ import type {
 import type { RiskSubject } from './risk/classify'
 import type { SessionSandbox } from './sandbox/native'
 import type { MapperContext, MapperOutput } from './session-updates'
+
+/** Huli: an agent's own reading of a session's background processes. */
+export interface AgentProcesses {
+  tasks: BackgroundTaskView[]
+  /** What the agent read of each one's process, by task id. */
+  processes: { taskId: string; pid: number | null; cpu: number | null; memory: number | null }[]
+}
 
 export interface PermissionRequest {
   toolCallId: string
@@ -98,6 +107,8 @@ export interface SessionTarget {
 export interface ConnectionHooks {
   traffic(direction: 'in' | 'out', message: unknown): void
   account(account: AgentAccount): void
+  /** The providers an agent that signs in to each one itself lists models from (Pi). */
+  modelProviders?(providers: ModelProvider[]): void
   /**
    * The sign-in method an answer shows, for an agent that names it only that way, such as Google
    * Antigravity by its plan; null when the answer shows none.
@@ -171,6 +182,8 @@ export interface AgentInit {
     authStatus?: boolean
     /** Messages sent into a running turn. */
     steering: boolean
+    /** Cuts a session's conversation before a turn, for an edit from a message. */
+    rewind?: boolean
     /** MCP servers over HTTP, which the artifacts service needs. */
     mcpHttp: boolean
     /** MCP servers over the older SSE transport. */
@@ -273,6 +286,24 @@ export class LimitsReadFailed extends Error {
     super(message)
     this.name = 'LimitsReadFailed'
   }
+}
+
+/** Where an edit from a message cuts the agent's own session: before the prompt of the message. */
+export interface RewindPoint {
+  /** The agent's own id for the prompt, as `prompt` reported it; null for one sent before that. */
+  ref: string | null
+  /** The message's text, which an agent falls back to when it cannot find the id. */
+  text: string
+  /** 1-based, among the session's user messages up to it whose text holds the same. */
+  occurrence: number
+}
+
+/** The agent's session an edit from a message carries on in. */
+export interface RewoundSession {
+  /** The same one, a new one holding only what came before, or '' when nothing came before. */
+  sessionId: string
+  /** The ids of the prompts kept, by the ids they had, where the cut gave them new ones. */
+  refs?: Record<string, string>
 }
 
 /** The agent message a fork ends at. */
@@ -564,6 +595,24 @@ export interface AgentConnection {
   ): Promise<{ sessions: ListedEverywhere[]; nextCursor: string | null }>
   /** A copy of a session under a new id, written from the original without opening it. */
   copySession?(sessionId: string, cwd: string): Promise<string>
+  /**
+   * Whether the session's conversation can be cut, for an agent with `rewind` whose older sessions
+   * may not take it. Asked without opening the session.
+   */
+  canRewind?(sessionId: string, cwd: string): Promise<boolean>
+  /** `rewindSession` cuts only a session that is open. */
+  readonly rewindsOpen?: boolean
+  /**
+   * Cuts the conversation of a session before the prompt `point` names, for an agent with
+   * `rewind`: one that is not open, or with `rewindsOpen` one opened with its options first;
+   * `title` is the session's, for a new one the cut makes.
+   */
+  rewindSession?(
+    sessionId: string,
+    cwd: string,
+    point: RewindPoint,
+    title: string | null,
+  ): Promise<RewoundSession>
 
   /** Routes a session's updates to `target`, first replaying any that arrived early. */
   register(sessionId: string, target: SessionTarget): void
@@ -574,7 +623,12 @@ export interface AgentConnection {
   /** The session `id` runs under: its own if Kettu has it, else the one the agent named. */
   rootOf(id: string): string
 
-  prompt(sessionId: string, prompt: readonly PromptBlock[]): Promise<PromptResult>
+  /** `sent` hears the agent's own id for the prompt, for an agent with `rewind`. */
+  prompt(
+    sessionId: string,
+    prompt: readonly PromptBlock[],
+    sent?: (ref: string) => void,
+  ): Promise<PromptResult>
   /**
    * Prompts a session no thread shows, such as one made for a report, with `text`, and returns
    * the text of each agent message of the turn, in order. Its other updates are dropped.
@@ -590,6 +644,21 @@ export interface AgentConnection {
   stopTask?(sessionId: string, taskId: string): Promise<void>
   /** The end of a background task's output, at most 8 KiB. */
   taskOutput?(sessionId: string, taskId: string): Promise<{ output: string; truncated: boolean }>
+  /**
+   * Huli: moves the command or subagent that holds up the tool call `toolCallId` to the
+   * background, or without it every one; false when none matched. Absent where the agent cannot.
+   */
+  toBackground?(sessionId: string, toolCallId?: string): Promise<boolean>
+  /** Huli: forgets the session's background tasks that ended. Absent where the agent cannot. */
+  cleanTasks?(sessionId: string): Promise<void>
+  /**
+   * Huli: the agent's own reading of the session's background processes, for an agent whose
+   * tasks no event lists, as Codex's background terminals; null when this agent version has
+   * none. Its Clean then stops them all.
+   */
+  backgroundProcesses?(sessionId: string): Promise<AgentProcesses | null>
+  /** Huli: the process that runs the session's tools, whose descendants are its commands. */
+  toolProcess?(sessionId: string): number | null
   /**
    * Huli: tells the agent the user allowed a call its automatic review denied, with `event`, the
    * agent's own record of the denial a tool entry's appeal keeps. Absent where it takes none.

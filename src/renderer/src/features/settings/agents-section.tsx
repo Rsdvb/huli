@@ -2,7 +2,15 @@
 // folder and a name, with its account, sign-in, API key, usage and configuration. Installs and
 // updates are Settings > Harnesses'.
 
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 import {
   Add01Icon,
   CommandLineIcon,
@@ -25,6 +33,7 @@ import {
   takesStartMode,
   type CodebuddySite,
 } from '@shared/agents'
+import { takesAutoCompact } from '@shared/auto-compact'
 import {
   AGENT_COLORS,
   AGENT_NAME_CHARS,
@@ -55,6 +64,7 @@ import { signInTerminal as openSignInTerminal } from '@renderer/features/agents/
 import { AgentStateLine } from '@renderer/features/agents/agent-state'
 import { startAgentInTerminal, useStartsInTerminal } from '@renderer/features/agents/agent-terminal'
 import { NodeInstallAction } from '@renderer/features/agents/node-install'
+import { programCopy } from '@renderer/features/agents/harness-problem'
 import { readiness, type AgentReadiness } from '@renderer/features/agents/readiness'
 import { errorMessage } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
@@ -86,16 +96,17 @@ import {
   Fact,
   ListMeter,
   MovedAccountsNotice,
+  ProblemFixButton,
   SignInNotice,
-  SpendGroup,
   UsageGroup,
+  WithCode,
 } from './agent-parts'
 import { NetworkChoiceRow } from './agent-network-rows'
 import { RemoveAgentDialog } from './agent-remove'
 import { ResetRow } from './agent-reset'
 import { BalanceGroup } from './agent-balance'
 import { ProfilesGroup } from './agent-profiles'
-import { AgentProviders } from './agent-providers'
+import { AgentProviders, ModelProviders } from './agent-providers'
 import {
   currentLimits,
   FOLLOW_AGENT,
@@ -120,6 +131,7 @@ import {
   Skel,
   Spin,
 } from './controls'
+import { AutoCompactRows } from './auto-compact-rows'
 import { ClaudeSettingsRows } from './claude-settings-rows'
 import { CodebuddySettingsRows } from './codebuddy-settings-rows'
 import { PlaceRow } from './places'
@@ -226,16 +238,16 @@ function useAddable(): AgentStatus[] {
 
 /**
  * What the account line says. A missing program or a failed start comes first. An email is shown
- * as itself; an API key, which has none, is named by how it signs in. Otherwise the line says
- * which of the three empty states this is.
+ * as itself; an account without one is named by how it signs in or its plan, and an agent that
+ * signs in to each provider itself by those providers. Null when Kettu knows none of these.
  */
 function accountIdentity(
   status: AgentStatus,
   account: AgentAccount | null,
   ready: AgentReadiness,
   reading: boolean,
-  text: (key: 'agents.needsSignInLine' | 'agents.readingAccount' | 'agents.noAccount') => string,
-): { tone: 'clear' | 'quiet' | 'failed'; text: string } {
+  text: (key: 'agents.needsSignInLine' | 'agents.readingAccount') => string,
+): { tone: 'clear' | 'quiet' | 'failed'; text: string } | null {
   if (ready.kind === 'failed') return { tone: 'failed', text: ready.message }
   if (ready.kind === 'missing') return { tone: 'clear', text: ready.message }
   const email = account?.email?.trim()
@@ -243,51 +255,39 @@ function accountIdentity(
   const label = account?.label.trim()
   if (label) return { tone: 'clear', text: joinPlanTier(label, account?.tier) }
   if (ready.kind === 'sign-in') return { tone: 'quiet', text: text('agents.needsSignInLine') }
+  const providers = status.modelProviders?.map((provider) => provider.id) ?? []
+  if (providers.length > 0) return { tone: 'clear', text: providers.join(' · ') }
   if (reading && status.capabilities.account)
     return { tone: 'quiet', text: text('agents.readingAccount') }
-  return { tone: 'quiet', text: text('agents.noAccount') }
+  return null
 }
 
-/** One agent in the list: its name, the account it is signed in as, then its harness and plan. */
+/** One agent in the list: its name, then its account and plan, and its plan usage at the end. */
 export function AgentListItem({ status }: { status: AgentStatus }) {
-  const { useAgentsStore } = useHostScope()
   const { t } = useTranslation('settings')
   const dot = useScopedDot(status)
   const hasOthers = useHasOtherAgents(status)
-  const details = useAgentsStore((s) => s.details[status.id])
   const now = useNow()
   const ready = readiness(status)
   const reading = useAgentReads(status)
   const account = status.account?.kind === 'none' ? null : status.account
   const limits = currentLimits(newestLimits(usePlanReadings(), status), now)
-  const folder = details?.config.find((item) => item.id === 'folder')?.path
   const off = status.disabled === true
   const identity = accountIdentity(status, account, ready, reading, (key) => t(key))
   const blocked = ready.kind === 'missing' || ready.kind === 'failed'
   const email = account?.email?.trim() ?? ''
   const label = account?.label.trim() ?? ''
-  // The plan sits with the harness when the email is the account line. An API key has no email,
-  // so its login is that line and the folder it keeps takes the plan's place.
+  // The plan follows the email; without one, the plan or sign-in method is the account itself.
   const plan = !blocked && email && label ? joinPlanTier(label, account?.tier) : ''
-  const showFolder = !blocked && account?.kind === 'api_key' && !email && folder
+  const line = [identity?.text, plan].filter(Boolean).join(' · ')
   const end: ReactNode =
     ready.kind === 'sign-in' ? (
       <Pill tone="attention">{t('agents.signInPill')}</Pill>
     ) : limits.length > 0 ? (
       <ListMeter limits={limits} />
     ) : status.capabilities.reports ? (
-      <span className="k-meter">
-        {t(reading ? 'agents.readingUsage' : 'agents.usageOnceRunning')}
-      </span>
-    ) : (
-      <span className="k-meter">{t('agents.noUsage')}</span>
-    )
-  // The line under the name: what it runs on when its name says otherwise, the plan and the account.
-  const line = [
-    status.name === status.harnessName ? null : status.harnessName,
-    plan || null,
-    identity.text,
-  ].filter(Boolean)
+      <ListMeter limits={[]} reading={reading} />
+    ) : null
   return (
     <ItemRow
       item={status.id}
@@ -307,13 +307,11 @@ export function AgentListItem({ status }: { status: AgentStatus }) {
       }
       right={off ? null : end}
     >
-      <small
-        title={[...line, showFolder && folder ? folder : null].filter(Boolean).join(' · ')}
-        className={identity.tone === 'failed' ? 'k-error' : undefined}
-      >
-        {line.join(' · ')}
-        {showFolder && folder && ` · ${folder}`}
-      </small>
+      {line && (
+        <small title={line} className={identity?.tone === 'failed' ? 'k-error' : undefined}>
+          {line}
+        </small>
+      )}
     </ItemRow>
   )
 }
@@ -327,6 +325,7 @@ export function AgentsGroupActions() {
 function AddAgentButton({ primary = false }: { primary?: boolean }) {
   const { t } = useTranslation('settings')
   const [open, setOpen] = useState(false)
+  const trigger = useRef<HTMLButtonElement>(null)
   const addable = useAddable()
   const add = (): void => {
     if (addable.length === 0) openHarnessSettings(null)
@@ -335,13 +334,14 @@ function AddAgentButton({ primary = false }: { primary?: boolean }) {
   return (
     <>
       <SetButton
+        ref={trigger}
         variant={primary ? 'primary' : 'ghost'}
         icon={<Icon icon={Add01Icon} size={14} />}
         onClick={add}
       >
         {t('agents.add.button')}
       </SetButton>
-      <AddAgentDialog open={open} onOpenChange={setOpen} harnesses={addable} />
+      <AddAgentDialog open={open} onOpenChange={setOpen} harnesses={addable} finalFocus={trigger} />
     </>
   )
 }
@@ -391,10 +391,13 @@ function AddAgentDialog({
   open,
   onOpenChange,
   harnesses,
+  finalFocus,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   harnesses: AgentStatus[]
+  /** Takes focus on close: the dialog's autofocused field is taken for the opener otherwise. */
+  finalFocus: RefObject<HTMLElement | null>
 }) {
   const { api, request, useAgentsStore, useSettingsStore } = useHostScope()
   const { t } = useTranslation(['settings', 'common'])
@@ -513,7 +516,7 @@ function AddAgentDialog({
         if (!next) reset()
       }}
     >
-      <SettingsDialogContent className="sm:max-w-135">
+      <SettingsDialogContent className="sm:max-w-135" finalFocus={finalFocus}>
         <form className="contents" onSubmit={(event) => void submit(event)}>
           <SettingsDialogHeader title={t('agents.add.title')}>
             {t('agents.add.description')}
@@ -850,6 +853,11 @@ export function AgentPage({ agentId }: { agentId: AgentId }) {
 function AgentPageHeader({ status, actions }: { status: AgentStatus | null; actions?: ReactNode }) {
   const { t } = useTranslation('settings')
   const dot = useScopedDot(status ?? null)
+  const hasOthers = useHasOtherAgents(status)
+  const named = status?.account?.kind === 'none' ? '' : (status?.account?.label ?? '')
+  // An agent named after its harness, with no account to name and no badge, adds no line.
+  const subtitle =
+    !!status && (status.name !== status.harnessName || !!named || !status.isDefault || hasOthers)
   return (
     <ItemPageHeader
       back={t('sections.agents')}
@@ -857,7 +865,7 @@ function AgentPageHeader({ status, actions }: { status: AgentStatus | null; acti
       item={status?.id ?? 'agent'}
       icon={status && <AgentTile agent={status.id} size={42} dot={dot} />}
       title={status?.name ?? null}
-      subtitle={status && <AgentSubtitle status={status} />}
+      subtitle={status && subtitle && <AgentSubtitle status={status} />}
       actions={actions}
     >
       {status && <AgentPageLine status={status} />}
@@ -877,8 +885,9 @@ function AgentSubtitle({ status }: { status: AgentStatus }) {
     <>
       {/* As tall as the rename button, whether or not it shows. */}
       <span className="k-name k-tall">
-        {status.harnessName}
-        {account && ` · ${account.label}`}
+        {[status.name === status.harnessName ? '' : status.harnessName, account?.label ?? '']
+          .filter(Boolean)
+          .join(' · ')}
       </span>
       {status.isDefault ? (
         hasOthers && <Pill>{t('agents.default')}</Pill>
@@ -901,9 +910,15 @@ function AgentPageLine({ status }: { status: AgentStatus }) {
   const { t } = useTranslation(['settings', 'agents'])
   const ready = readiness(status).kind === 'ready'
   const version = harnessVersion(status)
-  const harness = t('agents.onHarness', {
-    harness: version ? `${status.harnessName} ${version}` : status.harnessName,
-  })
+  const copy = programCopy(status)
+  const harness = [
+    t('agents.onHarness', {
+      harness: version ? `${status.harnessName} ${version}` : status.harnessName,
+    }),
+    copy,
+  ]
+    .filter(Boolean)
+    .join(' · ')
   if (status.disabled) {
     return (
       <>
@@ -1017,9 +1032,13 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
   const running = status.state === 'ready'
   const providerMode = status.providers !== undefined
   const off = status.disabled === true
+  const modelProviderMode = status.modelProviders !== undefined
+  // A DeepSeek account is billed by use like an API key, with no plan limits.
+  const dshAccount = status.harnessId === 'deepseek' && status.account?.kind === 'account'
   const terminalSignIn = status.authMethods.find(
     (m) => m.type === 'terminal' && m.command && !asksForKey(status, m),
   )
+  const accountLabel = status.account?.kind === 'none' ? '' : (status.account?.label ?? '')
   const signInPage = useSignInPage(hostId, status.id)
   const signInImage = useSignInImage(hostId, status.id)
   const signInStarted = useSignInStarted(hostId, status.id)
@@ -1042,6 +1061,16 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
   // Huli: an agent that signs in only through its own page or picture has no terminal to name.
   const signsInItself =
     !terminalSignIn && status.authMethods.some((m) => m.type === 'agent' || m.type === 'env')
+  // Only what the agent reported: the group goes when none of its rows has anything to show.
+  const hasAccountRows =
+    !!accountLabel ||
+    readingMethods ||
+    status.signIn === 'required' ||
+    !!status.account?.email ||
+    !!status.apiKey ||
+    status.authMethods.some((m) => m.type === 'env' && (m.envVars?.length ?? 0) > 0) ||
+    (!off && ((!!terminalSignIn && hostId === null) || pageSignIns.length > 0)) ||
+    (status.canLogout && status.signIn === 'signed-in')
   const askSignOut = () => setSigningOut(true)
   const startsInTerminal = useStartsInTerminal(status, hostId)
 
@@ -1065,6 +1094,10 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
           {t('common:actions.retry')}
         </SetButton>
       )}
+      {/* Huli: Kite's own Node.js install shows under the message instead. */}
+      {r.kind === 'missing' && r.problem.fix && !r.node && (
+        <ProblemFixButton status={status} fix={r.problem.fix} />
+      )}
     </>
   )
 
@@ -1080,7 +1113,7 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
             data-wrap=""
             data-selectable=""
           >
-            {r.message}{' '}
+            <WithCode text={r.message} />{' '}
             {r.kind === 'missing' && !r.node && (
               <button
                 type="button"
@@ -1133,7 +1166,13 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
             running={running}
             onSignIn={(command) => signInTerminal(status, command)}
           />
-        ) : (
+        ) : modelProviderMode ? (
+          <ModelProviders
+            status={status}
+            reading={reading}
+            onSignIn={hostId === null ? (command) => signInTerminal(status, command) : null}
+          />
+        ) : hasAccountRows ? (
           <section className="k-group" aria-label={t('agents.account')}>
             <GroupLabel
               group={{
@@ -1162,23 +1201,26 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
               </p>
             )}
             <RowGroup>
-              {/* A subscription's label is its plan; the other kinds name how the agent signs in. */}
-              <Fact
-                name={t(
-                  status.account?.kind === 'account' && !readingMethods
-                    ? 'agents.plan'
-                    : 'agents.loginMethod',
-                )}
-                pending={
-                  readingMethods
-                    ? t('agents.readingSignIn')
-                    : status.signIn === 'required'
-                      ? t('agents.notSignedIn')
-                      : null
-                }
-              >
-                {status.account?.kind === 'none' || readingMethods ? null : status.account?.label}
-              </Fact>
+              {/* A subscription's label is its plan; the other kinds, and a DeepSeek account,
+                  which has none, name how the agent signs in. */}
+              {(accountLabel || readingMethods || status.signIn === 'required') && (
+                <Fact
+                  name={t(
+                    status.account?.kind === 'account' && !dshAccount && !readingMethods
+                      ? 'agents.plan'
+                      : 'agents.loginMethod',
+                  )}
+                  pending={
+                    readingMethods
+                      ? t('agents.readingSignIn')
+                      : status.signIn === 'required'
+                        ? t('agents.notSignedIn')
+                        : null
+                  }
+                >
+                  {readingMethods ? null : accountLabel || null}
+                </Fact>
+              )}
               {status.account?.email && !readingMethods && (
                 <Fact
                   name={t(status.account.email.includes('@') ? 'agents.email' : 'agents.phone')}
@@ -1252,20 +1294,19 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
                 )}
             </RowGroup>
           </section>
-        )}
+        ) : null}
 
         {!providerMode && status.profiles && <ProfilesGroup status={status} />}
 
-        {status.disabled ? null : providerMode ? (
-          <SpendGroup status={status} providers />
-        ) : status.balance !== undefined ? (
-          <>
-            <BalanceGroup status={status} reading={reading} />
-            {status.account?.kind === 'api_key' && <SpendGroup status={status} />}
-          </>
-        ) : status.account?.kind === 'api_key' ? (
-          <SpendGroup status={status} />
-        ) : (
+        {/* Spending is a usage statistic, shown on the Usage page; what is billed by use, as an
+            API key, a provider or a DeepSeek account, has no plan limits to show here. Huli: a
+            DeepSeek balance shows in its own group. */}
+        {status.disabled ? null : status.balance !== undefined ? (
+          <BalanceGroup status={status} reading={reading} />
+        ) : providerMode ||
+          modelProviderMode ||
+          status.account?.kind === 'api_key' ||
+          dshAccount ? null : (
           <UsageGroup status={status} reading={reading} running={running} />
         )}
 
@@ -1608,6 +1649,7 @@ function ConfigurationGroup({ status }: { status: AgentStatus }) {
           </SetButton>
         </RowFrame>
         {takesStartMode(status.id) && <StartModeRow key={status.id} status={status} />}
+        {takesAutoCompact(status.id) && <AutoCompactRows key={status.id} status={status} />}
         {takesClaudeSettings(status.id) && <ClaudeSettingsRows key={status.id} status={status} />}
         {takesCodebuddySettings(status.id) && (
           <CodebuddySettingsRows key={status.id} status={status} />

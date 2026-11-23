@@ -1,6 +1,7 @@
 // Pure parsers for the machine-readable output of git and the text of gh.
 
 import type { ChangedFile, ChangeStatus, PushTarget } from '@shared/git'
+import { LocalizedError } from '../localized-error'
 
 export interface PorcelainStatus {
   /** Null on an unborn branch. */
@@ -96,7 +97,11 @@ export function parseShortstat(output: string): { insertions: number; deletions:
 /** Parses `git rev-list --left-right --count A...B`: commits only in A, then only in B. */
 export function parseLeftRightCount(output: string): { left: number; right: number } {
   const match = /^(\d+)\s+(\d+)\s*$/.exec(output)
-  if (!match) throw new Error(`Unexpected rev-list count output: ${JSON.stringify(output)}`)
+  if (!match)
+    throw new LocalizedError({
+      key: 'git.unexpected.revList',
+      params: { output: JSON.stringify(output) },
+    })
   return { left: Number(match[1]), right: Number(match[2]) }
 }
 
@@ -425,6 +430,50 @@ export function parsePorcelainFiles(output: string): PorcelainFiles {
     }
   }
   return { files, submodules }
+}
+
+export interface PorcelainEntries {
+  /** The git records of the changed tracked paths, each with the original path of a rename. */
+  records: string[]
+  /** The paths of those records, relative to the repository root. */
+  paths: string[]
+  /** The untracked files git lists, and the untracked folders it lists as one entry each. */
+  untrackedPaths: string[]
+  folders: string[]
+}
+
+/**
+ * Splits `git status --porcelain=v2 -z` into what tells an edit from another: the records of
+ * tracked changes, which carry the status, modes and blob ids, and the paths to look at.
+ */
+export function parsePorcelainEntries(output: string): PorcelainEntries {
+  const records = output.split('\0')
+  const result: PorcelainEntries = { records: [], paths: [], untrackedPaths: [], folders: [] }
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i]!
+    switch (record[0]) {
+      case '1':
+      case 'u': {
+        const path = fieldsAfter(record, record[0] === '1' ? 8 : 10)
+        result.records.push(record)
+        if (path) result.paths.push(path)
+        break
+      }
+      case '2': {
+        const path = fieldsAfter(record, 9)
+        result.records.push(record, records[++i] ?? '')
+        if (path) result.paths.push(path)
+        break
+      }
+      case '?': {
+        const path = record.slice(2)
+        if (path.endsWith('/')) result.folders.push(path)
+        else if (path) result.untrackedPaths.push(path)
+        break
+      }
+    }
+  }
+  return result
 }
 
 // The rest of a record after `count` space-separated fields; a path may hold spaces.

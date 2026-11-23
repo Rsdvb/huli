@@ -33,9 +33,10 @@ export function rowInSight(row: SidebarRow, shownId: string | null): boolean {
   if (row.kind === 'group') {
     return row.id === shownId || row.runs.some((run) => keepInSight(run, shownId))
   }
-  const { task } = row
+  const { task, origin } = row
   return (
     task.id === shownId ||
+    (origin !== undefined && keepInSight(origin, shownId)) ||
     (task.status === 'running' && (task.needsYou || task.running)) ||
     task.steps.some((step) => step.sessionId !== null && step.sessionId === shownId)
   )

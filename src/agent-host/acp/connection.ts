@@ -30,6 +30,7 @@ import {
   type ToolCallUpdate,
 } from '@agentclientprotocol/sdk/unstable'
 import type { AgentId, ConfigOption, PermissionOption, ToolEntry } from '@shared/thread'
+import { kiteTasks, KITE_TASKS, KITE_TASKS_META } from './kite-tasks'
 import {
   AgentRequestError,
   optionAnswer,
@@ -112,6 +113,7 @@ import {
   fromAgy,
   inWholeFile,
   onAgyOwnFiles,
+  throughGateway,
 } from './agy-tools'
 import { fromCodeMode } from './code-mode'
 import { forkPointMeta, forksAtMessage } from './fork-point'
@@ -162,6 +164,16 @@ export function inProcessTransport(app: AgentApp): AcpTransport & MessageTranspo
     stream: { readable: toClient.readable, writable: toAgent.writable },
     close: () => agentConnection.close(),
   }
+}
+
+/** The words for what the session router reports with a `data.reason`; the agent's own otherwise. */
+function routerText(error: RequestError): string {
+  const data = error.data as { reason?: unknown; folder?: unknown } | null
+  if (data?.reason === 'folder_missing') {
+    return t('agent.sessionFolderMissing', { folder: String(data.folder ?? '(none)') })
+  }
+  if (data?.reason === 'no_session_flag') return t('agent.noSessionFlag')
+  return error.message
 }
 
 /** The ACP messages over what the launcher gave the driver. */
@@ -384,6 +396,11 @@ export function mcpServers(servers: readonly McpServer[] | undefined): AcpMcpSer
 }
 
 export class AcpConnection implements AgentConnection {
+  // Huli: Kite's own extension for background tasks, set for an agent that declares it.
+  stopTask?: AgentConnection['stopTask']
+  taskOutput?: AgentConnection['taskOutput']
+  toBackground?: AgentConnection['toBackground']
+  cleanTasks?: AgentConnection['cleanTasks']
   private readonly connection: ClientConnection
   private readonly targets = new Map<string, SessionTarget>()
   private readonly pending = new Map<string, { at: number; updates: SessionUpdate[] }>()
@@ -455,10 +472,12 @@ export class AcpConnection implements AgentConnection {
           hooks.log('warn', `Permission request for unknown session ${ctx.params.sessionId}`)
           return { outcome: { outcome: 'cancelled' } }
         }
+        // A call through Kettu's gateway asks and shows as the tool it runs.
+        const asked = this.agy ? throughGateway(ctx.params.toolCall) : ctx.params.toolCall
         if (this.agy) {
           // agy asks for every MCP tool; Kettu's own run without asking, as Claude Code's do.
           const optionId = agyAllowOnce(
-            ctx.params.toolCall,
+            asked,
             ctx.params.options,
             this.autoAllowed.get(ctx.params.sessionId),
           )
@@ -466,7 +485,7 @@ export class AcpConnection implements AgentConnection {
         }
         const shaped = this.agy
           ? await inWholeFile(
-              fromAgy(ctx.params.toolCall),
+              fromAgy(asked),
               (file) => target.readProjectFile?.(file) ?? Promise.resolve(null),
             )
           : ctx.params.toolCall
@@ -527,6 +546,19 @@ export class AcpConnection implements AgentConnection {
           const account = mapAuthStatus(ctx.params)
           if (account) hooks.account(account)
           else hooks.ignored(null, '_auth/status_update with an unknown shape')
+        },
+      )
+      .onNotification(
+        KITE_TASKS.list,
+        (params: unknown) => params,
+        (ctx) => {
+          const listed = kiteTasks(ctx.params)
+          const target = listed ? this.targets.get(listed.sessionId) : undefined
+          if (!listed || !target) {
+            hooks.ignored(listed?.sessionId ?? null, `${KITE_TASKS.list} for no session`)
+            return
+          }
+          target.apply({ patches: [], effects: listed.effects })
         },
       )
       .onNotification('*', (ctx) => {
@@ -748,7 +780,7 @@ export class AcpConnection implements AgentConnection {
     if (subagent) return this.subagents!.callOutput(sessionId, update, subagent)
     if (this.agy && onAgyOwnFiles(update, ctx)) return { patches: [], effects: [] }
     const shaped = this.agy
-      ? fromAgy(update, (id) => this.subagents?.nameOf(id) ?? null)
+      ? fromAgy(throughGateway(update), (id) => this.subagents?.nameOf(id) ?? null)
       : this.naming === 'code'
         ? fromCodeMode(update)
         : update
@@ -926,7 +958,7 @@ export class AcpConnection implements AgentConnection {
       if (error.code === AUTH_REQUIRED) {
         return new AgentRequestError('auth_required', error.message, error.code, error.data)
       }
-      return new AgentRequestError('agent_error', error.message, error.code, error.data)
+      return new AgentRequestError('agent_error', routerText(error), error.code, error.data)
     }
     if (this.connection.signal.aborted) {
       return new AgentRequestError('closed', 'The agent connection closed')
@@ -948,7 +980,10 @@ export class AcpConnection implements AgentConnection {
     )
     if (init.protocolVersion !== 1) {
       throw new Error(
-        `${this.hooks.name ?? 'The agent'} speaks an unsupported protocol version (${init.protocolVersion}).`,
+        t('agent.protocolVersion', {
+          agent: this.hooks.name ?? t('agent.theAgent'),
+          version: String(init.protocolVersion),
+        }),
       )
     }
     const caps = init.agentCapabilities ?? {}
@@ -995,7 +1030,37 @@ export class AcpConnection implements AgentConnection {
       'string'
     this.naming = mcpNaming(init.agentInfo)
     this.removal = hiddenRemoval(this.hooks.agentId, result.capabilities, result.version)
+    if ((caps._meta as Record<string, unknown> | null | undefined)?.[KITE_TASKS_META] === true) {
+      this.takeTasks()
+    }
     return result
+  }
+
+  /** Huli: the calls of Kite's task extension, for an agent that declared it. */
+  private takeTasks(): void {
+    const request = <T>(method: string, params: Record<string, unknown>) =>
+      this.call(() => this.connection.agent.request<T>(method, params))
+    this.stopTask = async (sessionId, taskId) => {
+      await request(KITE_TASKS.stop, { sessionId, taskId })
+    }
+    this.taskOutput = async (sessionId, taskId) => {
+      const answer = await request<{ output?: unknown; truncated?: unknown }>(KITE_TASKS.output, {
+        sessionId,
+        taskId,
+      })
+      const output = typeof answer?.output === 'string' ? answer.output.slice(-8 * 1024) : ''
+      return { output, truncated: answer?.truncated === true }
+    }
+    this.toBackground = async (sessionId, toolCallId) => {
+      const answer = await request<{ moved?: unknown }>(KITE_TASKS.background, {
+        sessionId,
+        ...(toolCallId !== undefined ? { toolCallId } : {}),
+      })
+      return answer?.moved === true
+    }
+    this.cleanTasks = async (sessionId) => {
+      await request(KITE_TASKS.clean, { sessionId })
+    }
   }
 
   private meta(options: SessionOptions): Record<string, unknown> | undefined {
@@ -1642,7 +1707,7 @@ export class AcpConnection implements AgentConnection {
       // Mistral Vibe: `start` answers with the page and an attempt; `complete` waits for the
       // browser to finish it.
       const started = delegatedSignInStart(await request({ action: 'start' }))
-      if (!started) throw new AgentRequestError('agent_error', 'The agent gave no sign-in page')
+      if (!started) throw new AgentRequestError('agent_error', t('agent.noSignInPage'))
       client.openLink(started.url)
       await request({ action: 'complete', attemptId: started.attemptId })
     } finally {

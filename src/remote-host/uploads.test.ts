@@ -66,7 +66,14 @@ describe('uploads', () => {
     expect(u.open(1, 5000)).toBe(true)
     expect(u.open(3, 5001)).toBe(true)
     expect(cancelled).toEqual([
-      { stream: 3, error: { code: 'invalid_params', message: 'An upload is at most 5000 bytes' } },
+      {
+        stream: 3,
+        error: {
+          code: 'invalid_params',
+          message: 'An upload is at most 5000 bytes',
+          log: 'An upload is at most 5000 bytes',
+        },
+      },
     ])
     u.closeAll()
   })

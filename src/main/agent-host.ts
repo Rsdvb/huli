@@ -281,7 +281,10 @@ function isExportResult(value: unknown): value is ArtifactExportResult {
   )
 }
 
-const FAILED_EXPORT: ArtifactExportResult = { kind: 'failed', message: 'The agent host is down' }
+/** Built when needed, so its words follow the interface language. */
+function failedExport(message = t('agentHost.down')): ArtifactExportResult {
+  return { kind: 'failed', message }
+}
 
 function isBrief(value: unknown): value is ArtifactBrief {
   if (typeof value !== 'object' || value === null) return false
@@ -464,6 +467,19 @@ export class AgentHost {
     if (this.host.state !== 'ready') return null
     const { port1, port2 } = new MessageChannelMain()
     if (this.host.post({ type: 'host:connect', device }, [port1])) return port2
+    port1.close()
+    port2.close()
+    return null
+  }
+
+  /**
+   * A port of main's own, served as a window's, for the notch island; null while the host is not
+   * running. Main calls only the island's methods on it.
+   */
+  connectMain(): MessagePortMain | null {
+    if (this.host.state !== 'ready') return null
+    const { port1, port2 } = new MessageChannelMain()
+    if (this.host.post({ type: 'host:connect', windowId: -1 }, [port1])) return port2
     port1.close()
     port2.close()
     return null
@@ -772,13 +788,13 @@ export class AgentHost {
     version: number,
     format: ArtifactExportFormat,
   ): Promise<ArtifactExportResult> {
-    if (this.host.state !== 'ready') return Promise.resolve(FAILED_EXPORT)
+    if (this.host.state !== 'ready') return Promise.resolve(failedExport())
     const requestId = this.nextExportId++
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.exportRequests.delete(requestId)
         log.warn(`No artifact export answer within ${EXPORT_TIMEOUT_MS} ms`)
-        resolve(FAILED_EXPORT)
+        resolve(failedExport(t('agentHost.silent')))
       }, EXPORT_TIMEOUT_MS)
       this.exportRequests.set(requestId, (result) => {
         clearTimeout(timer)
@@ -787,7 +803,7 @@ export class AgentHost {
       if (
         !this.host.post({ type: 'host:artifact-export-request', requestId, id, version, format })
       ) {
-        this.exportRequests.get(requestId)?.(FAILED_EXPORT)
+        this.exportRequests.get(requestId)?.(failedExport())
         this.exportRequests.delete(requestId)
       }
     })
@@ -1009,7 +1025,7 @@ export class AgentHost {
         const resolve = this.exportRequests.get(message.requestId)
         if (!resolve) break
         this.exportRequests.delete(message.requestId)
-        resolve(isExportResult(message.result) ? message.result : FAILED_EXPORT)
+        resolve(isExportResult(message.result) ? message.result : failedExport())
         break
       }
       case 'host:artifact-import': {
@@ -1137,7 +1153,7 @@ export class AgentHost {
     this.contents.clear()
     for (const resolve of this.importRequests.values()) resolve(UNAVAILABLE)
     this.importRequests.clear()
-    for (const resolve of this.exportRequests.values()) resolve(FAILED_EXPORT)
+    for (const resolve of this.exportRequests.values()) resolve(failedExport())
     this.exportRequests.clear()
     for (const resolve of this.listRequests.values()) resolve(null)
     this.listRequests.clear()

@@ -3,14 +3,18 @@
 // session, which Kettu shows as a session of its own; everything else to the session it came on.
 
 import path from 'node:path'
-import type {
-  BackgroundTaskView,
-  PlanItem,
-  SlashCommand,
-  ToolDenial,
-  ToolEntry,
-  TurnRefusal,
-  UserContent,
+import {
+  RECALL_CONTENT_CHARS,
+  RECALL_MEMORIES_MAX,
+  type BackgroundTaskView,
+  type ForegroundTaskView,
+  type PlanItem,
+  type RecalledMemory,
+  type SlashCommand,
+  type ToolDenial,
+  type ToolEntry,
+  type TurnRefusal,
+  type UserContent,
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
 import { hasMessage, t } from '../i18n'
@@ -181,6 +185,9 @@ const ENDED_TASKS_KEPT = 20
 const TASK_TITLE_LIMIT = 300
 const TASK_SUMMARY_LIMIT = 1000
 const TASK_COMMAND_LIMIT = 2000
+/** Huli: the longest one-line progress summary a task or subagent shows. */
+const TASK_PROGRESS_LIMIT = 300
+const GOAL_REASON_LIMIT = 1000
 
 /** The board's kind for a Claude Code task type, or null for a subagent, which is a session. */
 function backgroundKind(taskType: unknown): BackgroundTaskView['kind'] | null {
@@ -225,8 +232,13 @@ export class ClaudeMapper {
   /** What the session was last told about `working`; null before anything ran. */
   private told: { running: boolean; listed: boolean } | null = null
   private compacting: string | null = null
-  /** Huli: the compaction whose summary has not come yet. */
+  /**
+   * The compaction whose `compact_result` came before its `compact_boundary`, which the boundary
+   * still ends: one compaction is one entry whichever of the two comes first.
+   */
   private compacted: string | null = null
+  /** Huli: the compaction whose summary has not come yet. */
+  private summaryDue: string | null = null
   /** In a replay: the subagents its history started, whose own histories follow. */
   readonly replayed: ReplayedSubagent[] = []
   /** In a subagent's replay: its parent, whose prompt its first message is. */
@@ -241,6 +253,12 @@ export class ClaudeMapper {
   private readonly mcpStates = new Map<string, string>()
   /** Huli: the request Claude Code retries now, and the notice that says so. */
   private retry: { id: string; attempts: number; reason: string } | null = null
+  /** Huli: commands and subagents that hold up their tool call, by task id, oldest first. */
+  private readonly blocking = new Map<string, ForegroundTaskView>()
+  /** Huli: the entry of the memories the running turn saved, with their files. */
+  private saved: { id: string; memories: RecalledMemory[] } | null = null
+  /** Huli: the goal Claude Code pursues, and the notice that shows it. */
+  private goal: { id: string; condition: string } | null = null
 
   constructor(
     /** The session's own id, Claude Code's. */
@@ -288,6 +306,8 @@ export class ClaudeMapper {
       }
       case 'tool_use_summary':
         return this.toolUseSummary(message as ToolUseSummaryMessage)
+      case 'active_goal':
+        return this.activeGoal(message as { value?: unknown; uuid?: unknown })
       case 'tool_progress': {
         const id = (message as { tool_use_id?: unknown }).tool_use_id
         const tool = typeof id === 'string' ? this.tools.get(id) : undefined
@@ -812,13 +832,13 @@ export class ClaudeMapper {
    * conversation goes on from: the row of that compaction shows it, as a replayed one does.
    */
   private liveSummary(blocks: readonly ContentBlock[]): Delivery[] {
-    const id = this.compacted
+    const id = this.summaryDue
     if (id === null) return []
     const text = blocks
       .flatMap((block) => (block.type === 'text' ? [(block as { text: string }).text] : []))
       .join('\n')
     if (!COMPACT_SUMMARY.test(text)) return []
-    this.compacted = null
+    this.summaryDue = null
     const summary = toLf(text)
     return [
       {
@@ -852,6 +872,15 @@ export class ClaudeMapper {
     if (PLAN_TOOLS.has(name)) {
       if (name !== 'TodoWrite') this.taskResult(ctx, out, block, structured, name)
       return out
+    }
+    if (
+      FILE_WRITES.has(name) &&
+      block.is_error !== true &&
+      !ctx.replaying &&
+      tool?.sessionId === this.sessionId
+    ) {
+      const memory = this.memoryFile(tool.input)
+      if (memory !== null) this.memoryWrite(ctx, out, memory)
     }
     if (SUBAGENT_TOOLS.has(name) && !this.subagents.has(block.tool_use_id)) {
       this.subagentResult(ctx, out, block, structured, tool!)
@@ -1131,6 +1160,7 @@ export class ClaudeMapper {
         if (status === 'compacting' && !this.compacting) {
           const id = `c:${String(message.uuid ?? Date.now())}`
           this.compacting = id
+          this.compacted = null
           deliveries.push({
             sessionId: parent,
             map: (ctx) => {
@@ -1145,6 +1175,7 @@ export class ClaudeMapper {
           const id = this.compacting
           this.compacting = null
           const failed = message.compact_result === 'failed'
+          this.compacted = failed ? null : id
           const error = typeof message.compact_error === 'string' ? message.compact_error : ''
           deliveries.push({
             sessionId: parent,
@@ -1163,16 +1194,20 @@ export class ClaudeMapper {
         return deliveries
       }
       case 'compact_boundary': {
-        const id = this.compacting ?? `c:${String(message.uuid ?? Date.now())}`
+        const id = this.compacting ?? this.compacted ?? `c:${String(message.uuid ?? Date.now())}`
         this.compacting = null
-        this.compacted = id
+        this.compacted = null
+        this.summaryDue = id
         return [
           {
             sessionId: parent,
             map: (ctx) => {
               const out = output()
-              if (ctx.thread.byId[id]?.kind === 'compaction') {
-                out.patches.push({ op: 'entry.update', id, changes: { status: 'completed' } })
+              const entry = ctx.thread.byId[id]
+              if (entry?.kind === 'compaction') {
+                if (entry.status !== 'completed') {
+                  out.patches.push({ op: 'entry.update', id, changes: { status: 'completed' } })
+                }
               } else {
                 addEntry(ctx, out, { kind: 'compaction', id, status: 'completed', summary: '' })
               }
@@ -1205,6 +1240,9 @@ export class ClaudeMapper {
       case 'background_tasks_changed':
         return this.backgroundChanged(message)
       case 'task_progress':
+        return this.taskProgress(message)
+      case 'memory_recall':
+        return this.memoryRecall(message)
       case 'commands_changed':
         return []
       default:
@@ -1427,6 +1465,7 @@ export class ClaudeMapper {
     const work = counts && message.is_backgrounded === true ? this.workStarted(taskId) : []
     const subagent =
       message.task_type === 'local_agent' || typeof message.subagent_type === 'string'
+    const held = counts ? this.blocked(message, taskId, subagent) : []
     if (!subagent) {
       // A command that still blocks its call is no background work, and sends no list or end that
       // would take it back; one moved there later is counted by its update.
@@ -1440,7 +1479,7 @@ export class ClaudeMapper {
               },
             ]
           : []
-      return [...started, ...this.backgroundStarted(message, taskId), ...work]
+      return [...started, ...this.backgroundStarted(message, taskId), ...work, ...held]
     }
     const toolUseId = typeof message.tool_use_id === 'string' ? message.tool_use_id : null
     if (toolUseId) this.subagents.set(toolUseId, taskId)
@@ -1486,7 +1525,171 @@ export class ClaudeMapper {
         },
       })
     }
-    return [...deliveries, ...work]
+    return [...deliveries, ...work, ...held]
+  }
+
+  /**
+   * Huli: a command or subagent that holds up its tool call, which a move to the background lets
+   * the turn go on from. A task Claude Code does not say this of is none.
+   */
+  private blocked(message: SystemMessage, taskId: string, subagent: boolean): Delivery[] {
+    const toolCallId = typeof message.tool_use_id === 'string' ? message.tool_use_id : null
+    if (message.is_backgrounded !== false || toolCallId === null) return []
+    if (!subagent && backgroundKind(message.task_type) !== 'shell') return []
+    const tool = this.tools.get(toolCallId)
+    const title = taskTitle(message.description, inputOf(tool?.input).command, message.prompt)
+    this.blocking.set(taskId, {
+      toolCallId,
+      taskId,
+      kind: subagent ? 'subagent' : 'shell',
+      title,
+      startedAt: Date.now(),
+    })
+    return this.foregroundDelivery()
+  }
+
+  /** Huli: a task no longer holds up its tool call: it moved to the background, or ended. */
+  private unblocked(taskId: string): Delivery[] {
+    return this.blocking.delete(taskId) ? this.foregroundDelivery() : []
+  }
+
+  private foregroundDelivery(): Delivery[] {
+    const tasks = [...this.blocking.values()].map((task) => ({ ...task }))
+    return [
+      {
+        sessionId: this.sessionId,
+        map: () => ({ patches: [], effects: [{ kind: 'foreground', tasks }] }),
+      },
+    ]
+  }
+
+  /**
+   * Huli: a task's one-line status: a subagent's summary of what it does, for an agent that writes
+   * them, or a background MCP task's own word on how far it got.
+   */
+  private taskProgress(message: SystemMessage): Delivery[] {
+    const taskId = typeof message.task_id === 'string' ? message.task_id : null
+    const summary =
+      typeof message.summary === 'string' ? message.summary.replace(/\s+/g, ' ').trim() : ''
+    if (taskId === null || summary === '') return []
+    const line = clip(summary, TASK_PROGRESS_LIMIT)
+    const parent = this.running.get(taskId)
+    if (parent !== undefined) {
+      const effect: MapperEffect = { kind: 'subagent', sessionId: taskId, progress: line }
+      return [{ sessionId: parent, map: () => ({ patches: [], effects: [effect] }) }]
+    }
+    const held = this.foreground.get(taskId)
+    if (held) {
+      this.foreground.set(taskId, { ...held, progress: line })
+      return []
+    }
+    const task = this.background.get(taskId)
+    if (task?.status !== 'running' || task.progress === line) return []
+    this.background.set(taskId, { ...task, progress: line })
+    return this.backgroundDelivery()
+  }
+
+  /**
+   * Huli: Claude Code surfaced memories into the turn: one quiet line says how many, and opens on
+   * which. A memory of a file comes without its text.
+   */
+  private memoryRecall(message: SystemMessage): Delivery[] {
+    if (message.agent_id || message.parent_tool_use_id) return []
+    const memories = recalledMemories(message.memories)
+    if (memories.length === 0) return []
+    const id = `mr:${String(message.uuid ?? Date.now())}`
+    return [
+      {
+        sessionId: this.sessionId,
+        map: (ctx) => {
+          const out = output()
+          if (!ctx.thread.byId[id]) {
+            addEntry(ctx, out, { kind: 'recall', id, action: 'recalled', memories })
+          }
+          return out
+        },
+      },
+    ]
+  }
+
+  /**
+   * Huli: a write of the main thread to a file of Claude Code's own memory, which one line of the
+   * turn counts.
+   */
+  private memoryWrite(ctx: MapperContext, out: MapperOutput, file: string): void {
+    const saved = (this.saved ??= { id: `mr:saved:${ctx.nextId()}`, memories: [] })
+    if (saved.memories.some((memory) => memory.path === file)) return
+    if (saved.memories.length >= RECALL_MEMORIES_MAX) return
+    saved.memories = [...saved.memories, { path: file, scope: 'personal' }]
+    if (ctx.thread.byId[saved.id]?.kind === 'recall') {
+      out.patches.push({ op: 'entry.update', id: saved.id, changes: { memories: saved.memories } })
+    } else {
+      addEntry(ctx, out, {
+        kind: 'recall',
+        id: saved.id,
+        action: 'saved',
+        memories: saved.memories,
+      })
+    }
+  }
+
+  /**
+   * Huli: the file when it lies in a project's memory folder of Claude Code's own, which makes it
+   * a memory; the folder's index is none.
+   */
+  private memoryFile(input: unknown): string | null {
+    const file = (input as { file_path?: unknown } | null)?.file_path
+    if (this.plans === null || typeof file !== 'string' || !path.isAbsolute(file)) return null
+    const projects = path.join(path.dirname(path.resolve(this.plans)), 'projects')
+    const relative = path.relative(projects, path.resolve(file))
+    const parts = relative.split(path.sep)
+    if (relative.startsWith('..') || path.isAbsolute(relative) || parts.length < 3) return null
+    const named = (part: string | undefined, name: string) =>
+      process.platform === 'win32' ? part?.toLowerCase() === name.toLowerCase() : part === name
+    if (!named(parts[1], 'memory') || !/\.md$/i.test(file) || named(parts.at(-1), 'MEMORY.md')) {
+      return null
+    }
+    return file
+  }
+
+  /**
+   * Huli: the goal of the user's `/goal` as Claude Code checks it after each turn: one notice
+   * names it and keeps how many checks it took and why the last found it unmet; another says
+   * once it ended, met or cleared.
+   */
+  private activeGoal(message: { value?: unknown; uuid?: unknown }): Delivery[] {
+    if (message.value === null) {
+      const ended = this.goal
+      this.goal = null
+      if (!ended) return []
+      return [
+        noticeDelivery(
+          this.sessionId,
+          `n:goal:${String(message.uuid ?? Date.now())}`,
+          'info',
+          t('claude.goal.ended', { objective: oneLine(ended.condition) }),
+        ),
+      ]
+    }
+    const value = inputOf(message.value)
+    if (typeof value.condition !== 'string' || value.condition.trim() === '') return []
+    if (this.goal?.condition !== value.condition) {
+      this.goal = { id: `n:goal:${String(message.uuid ?? Date.now())}`, condition: value.condition }
+    }
+    const iterations = typeof value.iterations === 'number' ? value.iterations : 0
+    const reason =
+      typeof value.last_reason === 'string' ? clip(value.last_reason.trim(), GOAL_REASON_LIMIT) : ''
+    const checks = t('claude.goal.checks', { count: iterations })
+    const description = reason === '' ? checks : t('claude.goal.unmet', { checks, reason })
+    return [
+      noticeDelivery(
+        this.sessionId,
+        this.goal.id,
+        'info',
+        t('claude.goal.active', { objective: oneLine(value.condition) }),
+        iterations > 0 || reason !== '' ? description : undefined,
+      ),
+    ]
   }
 
   /** A task Claude Code started in the background, or moved there: work that still runs. */
@@ -1506,7 +1709,7 @@ export class ClaudeMapper {
       summary,
       typeof usage.duration_ms === 'number' ? usage.duration_ms : null,
     )
-    const work = this.workEnded(taskId)
+    const work = [...this.workEnded(taskId), ...this.unblocked(taskId)]
     switch (message.status) {
       case 'completed':
         return [...this.end(taskId, 'end_turn'), ...board, ...work]
@@ -1525,7 +1728,7 @@ export class ClaudeMapper {
     const endTime = typeof patch.end_time === 'number' ? patch.end_time : null
     const backgrounded =
       patch.is_backgrounded === true
-        ? [...this.backgroundMoved(taskId), ...this.workStarted(taskId)]
+        ? [...this.backgroundMoved(taskId), ...this.workStarted(taskId), ...this.unblocked(taskId)]
         : []
     switch (patch.status) {
       case 'completed':
@@ -1534,6 +1737,7 @@ export class ClaudeMapper {
           ...this.end(taskId, 'end_turn'),
           ...this.backgroundEnded(taskId, 'completed', '', null, endTime),
           ...this.workEnded(taskId),
+          ...this.unblocked(taskId),
         ]
       case 'killed':
         return [
@@ -1541,6 +1745,7 @@ export class ClaudeMapper {
           ...this.end(taskId, 'cancelled'),
           ...this.backgroundEnded(taskId, 'stopped', '', null, endTime),
           ...this.workEnded(taskId),
+          ...this.unblocked(taskId),
         ]
       case 'failed': {
         const error = typeof patch.error === 'string' ? patch.error : ''
@@ -1549,6 +1754,7 @@ export class ClaudeMapper {
           ...this.end(taskId, 'error', error),
           ...this.backgroundEnded(taskId, 'failed', error, null, endTime),
           ...this.workEnded(taskId),
+          ...this.unblocked(taskId),
         ]
       }
       default:
@@ -1689,8 +1895,29 @@ export class ClaudeMapper {
    * Claude Code that has reported no task at all, which may be one that never reports them.
    */
   workSettled(): Delivery[] {
-    if (!this.listed && this.told === null) return []
-    return this.workChanged(true)
+    this.saved = null
+    const held = this.endBlocking()
+    if (!this.listed && this.told === null) return held
+    return [...this.workChanged(true), ...held]
+  }
+
+  /** Huli: the turn ended, and nothing holds up its tool calls any more. */
+  private endBlocking(): Delivery[] {
+    if (this.blocking.size === 0) return []
+    this.blocking.clear()
+    return this.foregroundDelivery()
+  }
+
+  /**
+   * Huli: forgets the tasks that ended, as the board's Clean asks; the running ones stay.
+   * Nothing changes when none ended.
+   */
+  cleanEnded(): Delivery[] {
+    let changed = false
+    for (const [id, task] of this.background) {
+      if (task.status !== 'running') changed = this.background.delete(id) || changed
+    }
+    return changed ? this.backgroundDelivery() : []
   }
 
   /** A task that ended leaves the work still running. */
@@ -1716,8 +1943,10 @@ export class ClaudeMapper {
       return this.backgroundDelivery()
     }
     const endedAt = endTime ?? Date.now()
+    const ended: BackgroundTaskView = { ...task }
+    delete ended.progress
     this.background.set(taskId, {
-      ...task,
+      ...ended,
       status,
       endedAt,
       startedAt: duration === null ? task.startedAt : Math.min(task.startedAt, endedAt - duration),
@@ -1746,6 +1975,8 @@ export class ClaudeMapper {
   /** The query that ran the tasks ended, and its Claude Code process with them. */
   endBackground(): Delivery[] {
     this.foreground.clear()
+    this.saved = null
+    const held = this.endBlocking()
     this.working.clear()
     this.unreported.clear()
     this.listed = false
@@ -1762,9 +1993,9 @@ export class ClaudeMapper {
           },
         ]
       : []
-    if (this.background.size === 0) return work
+    if (this.background.size === 0) return [...work, ...held]
     this.background.clear()
-    return [...this.backgroundDelivery(), ...work]
+    return [...this.backgroundDelivery(), ...work, ...held]
   }
 
   /** Ends a running subagent, once: its first terminal message says how. */
@@ -1932,6 +2163,29 @@ function noticeDelivery(
       return out
     },
   }
+}
+
+/** Huli: the memories of a `memory_recall`, checked and cut to size. */
+function recalledMemories(value: unknown): RecalledMemory[] {
+  if (!Array.isArray(value)) return []
+  const memories: RecalledMemory[] = []
+  for (const item of value) {
+    if (memories.length >= RECALL_MEMORIES_MAX) break
+    const memory = inputOf(item)
+    if (typeof memory.path !== 'string' || memory.path === '') continue
+    const scope =
+      memory.scope === 'team' || memory.scope === 'organization' ? memory.scope : 'personal'
+    const content =
+      typeof memory.content === 'string' && memory.content.trim() !== ''
+        ? clip(toLf(memory.content).trim(), RECALL_CONTENT_CHARS)
+        : null
+    memories.push({ path: memory.path, scope, ...(content !== null ? { content } : {}) })
+  }
+  return memories
+}
+
+function oneLine(text: string): string {
+  return clip(text.replace(/\s+/g, ' ').trim(), TASK_TITLE_LIMIT)
 }
 
 /** What a task is called: its description, else the command or workflow it runs. */

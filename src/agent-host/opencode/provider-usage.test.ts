@@ -9,7 +9,6 @@ import {
   parseSiliconFlowUser,
   readProviderUsage,
   unsupportedUsage,
-  USAGE_ERROR,
 } from './provider-usage'
 
 function json(body: unknown, status = 200): Response {
@@ -75,7 +74,7 @@ describe('readProviderUsage', () => {
   })
 
   it('uses one generic error text', () => {
-    expect(USAGE_ERROR).toBe('Usage could not be read.')
+    expect(failedUsage(1).error).toBe('Usage could not be read.')
   })
 })
 

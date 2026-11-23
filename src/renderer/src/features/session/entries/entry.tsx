@@ -21,6 +21,7 @@ import { SettingsChangeEntry } from './settings-change-entry'
 import { SecretRequestEntry } from './secret-request-entry'
 import { ThemeChangeEntry } from './theme-change-entry'
 import { MemoryEntry } from './memory-entry'
+import { RecallEntry } from './recall-entry'
 import { ComputerAppEntry } from './computer-app-entry'
 import { ProblemReportEntry } from './problem-report-entry'
 import { ProjectHooksEntry } from './project-hooks-entry'
@@ -29,6 +30,7 @@ import { ComputerSetupEntry } from './computer-setup-entry'
 import { SessionStartedEntry } from './session-started-entry'
 import { SubagentCard } from './subagent-card'
 import { TakeoverEntry } from './takeover-entry'
+import { TaskDeliveryEntry } from './task-delivery-entry'
 import { ToolCard } from './tool-card'
 
 /** One thread entry, by its kind. */
@@ -65,6 +67,8 @@ export const Entry = memo(function Entry({
       return <SessionMessageEntry {...props} />
     case 'plan':
       return null
+    case 'recall':
+      return <RecallEntry {...props} />
     case 'notice':
       return <NoticeEntry {...props} />
     case 'compaction':
@@ -107,6 +111,8 @@ export const Entry = memo(function Entry({
       return <ControlAskEntry {...props} agentName={agentName} />
     case 'control_note':
       return <ControlNoteEntry {...props} />
+    case 'task_delivery':
+      return <TaskDeliveryEntry {...props} />
     default:
       return null
   }

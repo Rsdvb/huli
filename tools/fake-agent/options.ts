@@ -14,6 +14,7 @@ export const SCENARIOS = [
   'out-of-credit',
   'plan-limit',
   'refusal',
+  'limit-stop',
   'large-history',
   'slow-start',
   'all-updates',
@@ -26,6 +27,7 @@ export const SCENARIOS = [
   'svg',
   'shell',
   'usage',
+  'extra-usage',
   'status',
   'context',
   'recall',
@@ -46,6 +48,8 @@ export const SCENARIOS = [
   'documents',
   'write',
   'anchors',
+  // Huli: background tasks through Kite's own extension, for the session board.
+  'processes',
   // Huli: manager mode's manager, worker and reviewer.
   'manager-demo',
   'work',
@@ -106,6 +110,9 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
     description: 'The model declines to go on, as Claude ends a turn with stop_reason refusal',
     hint: '--plain: without a word of its own first',
   },
+  'limit-stop': {
+    description: 'Uses up the 5-hour window, then fails the turn as Claude Code does at a limit',
+  },
   'large-history': {
     description: 'Makes reopening this session replay 1,000 entries',
     hint: '--entries <n>',
@@ -123,6 +130,10 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   background: {
     description: 'Starts a command in the background, as Claude Code does with run_in_background',
   },
+  processes: {
+    description:
+      'Starts dev servers and a watcher listed on the session board, then a test run that waits to be moved to the background',
+  },
   requests: {
     description: "Reports a request's usage as claude-agent-acp does, then the result's",
     hint: '--hold <ms before the turn ends> --then <ms until it answers by itself> --at-end',
@@ -139,6 +150,11 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   usage: {
     description: "The plan limits, as Claude Code's /usage reports them",
     hint: '--plain --unreadable',
+  },
+  'extra-usage': {
+    description:
+      'The 5-hour window used up while extra usage lets requests through, as Claude Code reports it',
+    hint: 'off: the window reset; refused: still used up and extra usage no longer covers it',
   },
   status: { description: "The plan limits, as Codex's /status reports them" },
   context: { description: "What fills the context, as Claude Code's /context reports it" },

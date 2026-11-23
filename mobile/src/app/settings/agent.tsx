@@ -15,12 +15,8 @@ import type {
   PlanLimit,
   ResetSpendCode,
 } from '@shared/agent-host'
-import {
-  AUTO_COMPACT_STEPS,
-  KNOWN_CLAUDE_MODELS,
-  signsInWithKeyOnly,
-  takesClaudeSettings,
-} from '@shared/agents'
+import { KNOWN_CLAUDE_MODELS, signsInWithKeyOnly, takesClaudeSettings } from '@shared/agents'
+import { compactSpec, compactSteps } from '@shared/auto-compact'
 import { AGENT_NAME_CHARS } from '@shared/settings'
 import type { AgentId } from '@shared/thread'
 import { admin } from '../../admin'
@@ -121,6 +117,9 @@ export default function AgentScreen() {
   }
   return <AgentBody status={status} />
 }
+
+// The windows Claude Code compacts at that the phone offers, as Settings on the computer does.
+const AUTO_COMPACT_STEPS = compactSteps(compactSpec('claude-code')!)
 
 // Huli: uninstalling the agent's program and deleting its data list each folder and command with
 // sizes, which the computer's Settings shows; the phone only removes the agent.

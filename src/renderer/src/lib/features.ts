@@ -2,6 +2,7 @@
 // computer. See src/shared/features.ts.
 
 import { entryOn, featureOn, type FeatureEntry, type FeatureId } from '@shared/features'
+import type { SidebarPage } from '@shared/settings'
 import { useSettingsStore } from '@renderer/stores/settings'
 
 /** Whether the entry point shows; it renders again only when its feature is switched. */
@@ -33,4 +34,27 @@ export function whenEntryOn(entry: FeatureEntry, start: () => unknown): void {
     stop()
     start()
   })
+}
+
+/**
+ * Huli: the entry point a sidebar page belongs to, for a page of an optional feature. A page
+ * whose feature is off never shows in the sidebar; hiding one in Settings › Appearance only takes
+ * it out of the sidebar, and its feature keeps running.
+ */
+export const PAGE_ENTRY: Partial<Record<SidebarPage, FeatureEntry>> = {
+  routines: 'sidebar.routines',
+}
+
+/** Huli: whether the page's feature is on; pages of Kite's core always are. */
+export function pageFeatureOn(
+  features: Partial<Record<string, boolean>> | null | undefined,
+  page: SidebarPage,
+): boolean {
+  const entry = PAGE_ENTRY[page]
+  return entry === undefined || entryOn(features, entry)
+}
+
+/** Huli: the same in React; it renders again only when the page's feature is switched. */
+export function usePageFeatureOn(page: SidebarPage): boolean {
+  return useSettingsStore((s) => pageFeatureOn(s.settings.features, page))
 }

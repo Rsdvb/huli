@@ -37,7 +37,8 @@ import {
 import type { MediaFile, MediaGrant } from '@shared/media'
 import type { Platform } from '@shared/platform'
 import { HostError, invalidParams, notFound } from './errors'
-import { describeFailure, GIT_TIMEOUT_MS, type Exec, type ExecResult } from './git/exec'
+import { commandFailureText, GIT_TIMEOUT_MS, type Exec, type ExecResult } from './git/exec'
+import { t } from './i18n'
 import { isAbsolutePath, pathKey } from './paths'
 
 export interface FilesLimits {
@@ -116,9 +117,8 @@ function sortedUnique(paths: string[]): string[] {
  */
 function gitOutput(label: string, result: ExecResult): string | null {
   if (result.failure === 'not-found') return null
-  if (result.failure === 'cwd-missing') throw notFound('The project folder does not exist')
-  if (result.failure !== null)
-    throw new HostError('git_error', `${label}: ${describeFailure(result)}`)
+  if (result.failure === 'cwd-missing') throw notFound(t('files.projectMissing'))
+  if (result.failure !== null) throw new HostError('git_error', commandFailureText(label, result))
   return result.code === 0 ? result.stdout : null
 }
 
@@ -451,7 +451,7 @@ export class FilesService {
       throw this.fsError(error, relative)
     }
     if (!info.isFile() && !info.isDirectory()) {
-      throw invalidParams(`${relative} is not a file or a folder`)
+      throw invalidParams(t('files.notFileOrFolder', { path: relative }))
     }
     return {
       path: this.paths.join(root, ...relative.split('/')),
@@ -470,17 +470,18 @@ export class FilesService {
     version: string | null,
   ): Promise<FileWritten> {
     const relative = this.normalize(relativePath)
-    if (relative.split('/').includes('.git')) throw invalidParams(`${relative} is inside .git`)
+    if (relative.split('/').includes('.git'))
+      throw invalidParams(t('files.insideGit', { path: relative }))
     const bytes = Buffer.from(text, 'utf8')
     if (bytes.length > this.limits.read) {
-      throw invalidParams(`The text is larger than ${this.limits.read} bytes`)
+      throw invalidParams(t('files.textTooLarge', { bytes: this.limits.read }))
     }
     const real = await this.resolveInside(root, relative)
     const info = await this.fileStat(real, relative)
     if (version !== null) {
       const current = info.size > this.limits.read ? null : await this.readFile(real, info.size)
       if (current === null || versionOf(current) !== version) {
-        throw new HostError('conflict', `${relative} changed since it was read`)
+        throw new HostError('conflict', t('files.changedSinceRead', { path: relative }))
       }
     }
     // A rename would leave the other names of a hard-linked file with the old text.
@@ -513,11 +514,11 @@ export class FilesService {
     const real = await this.entry(root, source)
     const info = await this.entryStat(real, source)
     if (info.isDirectory() && target.startsWith(`${source}/`)) {
-      throw invalidParams(`${source} cannot move into itself`)
+      throw invalidParams(t('files.moveIntoItself', { path: source }))
     }
     const parent = await this.makeFolders(root, folderOf(target))
     if (info.isDirectory() && this.within(real, parent)) {
-      throw invalidParams(`${source} cannot move into itself`)
+      throw invalidParams(t('files.moveIntoItself', { path: source }))
     }
     const destination = this.paths.join(parent, nameOf(target))
     const there = await lstat(destination).catch((error: unknown) => {
@@ -530,7 +531,8 @@ export class FilesService {
       there.ino === info.ino &&
       there.dev === info.dev &&
       nameOf(source).toLowerCase() === nameOf(target).toLowerCase()
-    if (there && !itself) throw new HostError('conflict', `${target} already exists`)
+    if (there && !itself)
+      throw new HostError('conflict', t('files.alreadyExists', { path: target }))
     await rename(real, destination)
   }
 
@@ -540,7 +542,7 @@ export class FilesService {
    */
   async copy(root: string, relativePaths: string[], folder: string): Promise<string[]> {
     const into = this.normalizeFolder(folder)
-    if (into.split('/').includes('.git')) throw invalidParams(`${into} is inside .git`)
+    if (into.split('/').includes('.git')) throw invalidParams(t('files.insideGit', { path: into }))
     const parent = await this.folder(root, into)
     const copies: string[] = []
     for (const relativePath of relativePaths) {
@@ -548,7 +550,7 @@ export class FilesService {
       const real = await this.entry(root, source)
       const info = await this.entryStat(real, source)
       if (info.isDirectory() && this.within(real, parent)) {
-        throw invalidParams(`${source} cannot be copied into itself`)
+        throw invalidParams(t('files.copyIntoItself', { path: source }))
       }
       const name = await this.freeName(parent, nameOf(source), info.isDirectory())
       const destination = this.paths.join(parent, name)
@@ -734,28 +736,29 @@ export class FilesService {
   /** The path as `/`-separated segments, or `invalid_params` when it could leave the project. */
   private normalize(value: string): string {
     const windows = this.deps.platform === 'win32'
-    if (value.includes('\0')) throw invalidParams('path contains a NUL character')
+    if (value.includes('\0')) throw invalidParams(t('files.pathNul'))
     if (
       isAbsolutePath(value, this.deps.platform) ||
       value.startsWith('/') ||
       (windows && value.startsWith('\\'))
     ) {
-      throw invalidParams('path must be relative to the project')
+      throw invalidParams(t('files.pathNotRelative'))
     }
     const segments = value.split(windows ? /[\\/]/ : '/').filter((s) => s !== '' && s !== '.')
-    if (segments.includes('..')) throw invalidParams('path must not contain ..')
+    if (segments.includes('..')) throw invalidParams(t('files.pathDotDot'))
     // A colon on Windows is a drive or an alternate data stream.
     if (windows && segments.some((segment) => segment.includes(':'))) {
-      throw invalidParams('path must be relative to the project')
+      throw invalidParams(t('files.pathNotRelative'))
     }
-    if (segments.length === 0) throw invalidParams('path must name a file')
+    if (segments.length === 0) throw invalidParams(t('files.pathNoName'))
     return segments.join('/')
   }
 
   /** A path an operation may change: not the project itself and nothing in `.git`. */
   private editable(value: string): string {
     const relative = this.normalize(value)
-    if (relative.split('/').includes('.git')) throw invalidParams(`${relative} is inside .git`)
+    if (relative.split('/').includes('.git'))
+      throw invalidParams(t('files.insideGit', { path: relative }))
     return relative
   }
 
@@ -771,7 +774,7 @@ export class FilesService {
     const info = await stat(real).catch((error: unknown) => {
       throw this.fsError(error, relative)
     })
-    if (!info.isDirectory()) throw invalidParams(`${relative} is not a folder`)
+    if (!info.isDirectory()) throw invalidParams(t('files.notFolder', { path: relative }))
     return real
   }
 
@@ -812,8 +815,10 @@ export class FilesService {
       }
       // What was there may be a link: it must lead to a folder in the project.
       real = await realpath(next)
-      if (!this.within(top, real)) throw invalidParams(`${relative} is outside the project`)
-      if (!(await stat(real)).isDirectory()) throw invalidParams(`${relative} is not a folder`)
+      if (!this.within(top, real))
+        throw invalidParams(t('files.outsideProject', { path: relative }))
+      if (!(await stat(real)).isDirectory())
+        throw invalidParams(t('files.notFolder', { path: relative }))
     }
     return real
   }
@@ -829,7 +834,7 @@ export class FilesService {
         throw error
       }
     }
-    throw new HostError('conflict', `Too many copies of ${name}`)
+    throw new HostError('conflict', t('files.tooManyCopies', { name }))
   }
 
   /** Whether the real path `inner` is `outer` or inside it. */
@@ -842,7 +847,7 @@ export class FilesService {
 
   private taken(error: unknown, relative: string): Error {
     if ((error as NodeJS.ErrnoException | undefined)?.code === 'EEXIST') {
-      return new HostError('conflict', `${relative} already exists`)
+      return new HostError('conflict', t('files.alreadyExists', { path: relative }))
     }
     return error instanceof Error ? error : new Error(String(error))
   }
@@ -858,7 +863,7 @@ export class FilesService {
     const rootKey = pathKey(root, this.deps.platform)
     const prefix = rootKey.endsWith(this.paths.sep) ? rootKey : rootKey + this.paths.sep
     if (!pathKey(real, this.deps.platform).startsWith(prefix)) {
-      throw invalidParams(`${relative} is outside the project`)
+      throw invalidParams(t('files.outsideProject', { path: relative }))
     }
     return real
   }
@@ -870,7 +875,7 @@ export class FilesService {
     } catch (error) {
       throw this.fsError(error, relative)
     }
-    if (!info.isFile()) throw invalidParams(`${relative} is not a file`)
+    if (!info.isFile()) throw invalidParams(t('files.notFile', { path: relative }))
     return info
   }
 
@@ -924,7 +929,8 @@ export class FilesService {
 
   private fsError(error: unknown, subject: string): Error {
     const code = (error as NodeJS.ErrnoException | undefined)?.code
-    if (code === 'ENOENT' || code === 'ENOTDIR') return notFound(`${subject} does not exist`)
+    if (code === 'ENOENT' || code === 'ENOTDIR')
+      return notFound(t('files.notExist', { path: subject }))
     return error instanceof Error ? error : new Error(String(error))
   }
 }

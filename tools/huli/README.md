@@ -241,7 +241,7 @@ and setup command run as for any worktree session), and its record names its gro
 (`group: { id, title, size, kept? }`, which every run carries alike), so no store of its own
 exists: the session list, its events and the phone get the groups for free.
 
-- `src/shared/session-groups.ts`: the group reference, `RunChanges`, `runPhase` (working,
+- `src/shared/run-groups.ts`: the group reference, `RunChanges`, `runPhase` (working,
   waiting, done, failed) shared by the desktop and the phone.
 - `src/agent-host/groups/`: `groups.start` (the runs at once, each with its own copy of the
   prompt's attachments, whose records a sent message releases; worktrees are made one at a time
@@ -422,6 +422,52 @@ none.
 - Tests: `worktrees/ports.test.ts` (no overlap, steps past ports in use, a block back once let go,
   the probe), `sessions.test.ts` (sessions started together, the setup command's and the agent's
   variables, archive, restart and restore), `storage.test.ts` (the stored block and column).
+
+### Background processes on the session board (后台进程、转到后台)
+
+The session's board (the rail beside its thread, `features/board/`) lists what the agent left
+running with its process, CPU, memory and ports, moves what holds up a tool call to the
+background so the turn goes on (转到后台), and cleans the list.
+
+- Reading: `sessions.processes` (`processes` in `sessions.ts`, `src/agent-host/task-processes.ts`)
+  runs one process listing (`ps`, or CIM through PowerShell on Windows, with command lines,
+  working sets and CPU time) and one port listing (`listListeningPorts` of the remote host's port
+  forwarding) for every running task of the session. The board asks when it opens, when a task
+  starts or ends or something comes to hold up a call, when a turn ends, and on its refresh
+  button; never on a timer. A task's process is the one its agent names (Codex's `osPid`, the fake
+  agent's `pid`), else, for Claude Code, the process among the descendants of its Claude Code
+  process whose command line holds the task's command. CPU is the system's percentage where `ps`
+  gives one, else the CPU time used since the last reading (since the start on the first one).
+- Ports: each task's ports are those its process tree listens on; one outside the session's
+  block (KITE_PORT) is marked, and one inside another live session's block marked as colliding.
+  A port of the session's block that a program outside the session holds shows as a warning at
+  the board's top.
+- Claude Code: `task_started` with `is_backgrounded: false` lists the command or subagent in the
+  session's `foreground` until it moves (`task_updated` `is_backgrounded`), ends or the turn
+  ends; 转到后台 (on its board row, its Bash row in the thread and the subagent's card) is
+  `Query.backgroundTasks(toolUseId)` through `sessions.toBackground`. Clean (`sessions.cleanTasks`)
+  forgets the ended tasks in the mapper. `agentProgressSummaries` is on, and `task_progress`'s
+  `summary` becomes the subagent's `progress` on its summary (its card in the thread, its board
+  row, the phone's rows) or a background MCP task's line. `memory_recall` is a quiet `recall`
+  line (回忆了 N 条记忆) that opens on which, and the main thread's writes to a project's memory
+  folder of Claude Code's own (`<config>/projects/<project>/memory/*.md`, the index left out) one
+  `saved` line a turn (保存了 N 条记忆). `active_goal` is a notice like Codex's goal: 目标：…,
+  how many checks it took and why the last found it unmet, and 目标已结束 once it is null.
+- Codex: `thread/backgroundTerminals/list` gives the board its tasks with their process, CPU and
+  memory (read only with the processes, as no notification lists them), `/terminate` stops one
+  and `/clean`, Codex's own `/clean`, stops them all, so Clean reads 全部停止 there. A Codex
+  without them answers that it has no such method, and the board says the version cannot.
+  Output is what the command's row printed.
+- The fake agent's `/processes` scenario speaks Kite's own ACP extension (`acp/kite-tasks.ts`):
+  declared as `_meta: { 'kite/tasks': true }` in its capabilities, `_kite/tasks` carries the task
+  list, what holds up a call and subagents' summaries, and `_kite/tasks/stop`, `/output`,
+  `/background` and `/clean` are its requests. It starts real Node servers and a watcher.
+- Phone: 后台任务 in the session's ⋯ menu (`mobile/src/app/background/[id].tsx`), read on open,
+  on a pull and after an action: what holds up the turn with 转到后台, running tasks with their
+  stats, ports, output and 停止, ended ones, and Clean.
+- Tests: `claude/connection.test.ts` (foreground, moves, progress, Clean, recalls, saves, goals),
+  `codex/connection.test.ts` (terminals listed, ended, missing), `acp/kite-tasks.test.ts`,
+  `validate.test.ts`.
 
 ### Risk levels and auto-approve (风险等级、自动批准低风险操作)
 
@@ -609,7 +655,9 @@ output, and the sub-agents' sessions. The desktop app's alone (`window.kettu.exp
   `‹redacted›` for the mark, which a Markdown viewer would hide as a tag), points the pictures'
   links at where they land, and writes. The PDF is `html.ts`'s page, every piece of text escaped
   but the export's own folds, links to http(s) only and pictures only the export's own, printed
-  by Chromium in a hidden window with no script, in light colors whatever the theme.
+  by Chromium in a hidden window with no script, in light colors whatever the theme. Its maths
+  follow the app's rule (`fenceBracketMath` and the single-`$` test from
+  `features/session/markdown/maths.ts`), so `$5 to $10` stays text in both.
 - Tests: `src/main/session-export/session-export.test.ts`.
 
 ### Agent reset
@@ -944,8 +992,9 @@ the diff screen, for a working-tree or commit diff and for a turn's or a tool's 
   lines in a `diff` fence, the comment. The desktop words it in the interface's language
   (`files:notes.message.*`), the phone in Chinese.
 - Kept in the session's draft beside its text and attachments (`notes`): the desktop's
-  `composer/drafts.ts` (`draft:<session id>` in localStorage), whose `clearDraft` on a send now
-  leaves them and `forgetDraft` drops them with a deleted session, and the phone's `drafts.ts`,
+  `composer/drafts.ts` (`draft:<session id>` in localStorage), which the composer's Send sends
+  after its message (their screenshots numbered after its own pictures) and drops once the send
+  went, and `forgetDraft` drops them with a deleted session, and the phone's `drafts.ts`,
   whose composer writes leave them. At most 50 a session.
 - Desktop (`features/diff-notes/`): a + by the line number the pointer rests on (120 ms), or
   Comment for lines picked by their numbers, opens a box under the lines; comments mark their rows'
@@ -1708,6 +1757,55 @@ since most loaded lazily; what the switches save shows once one is used: the dev
 starts once Settings › 移动设备 or the devices pane opens and polls for simulators every 5 s, holds
 about 60 MB and never starts with 移动设备 off.
 
+## Merging Kettu
+
+What every merge of Kettu's main follows, whether the nightly `huli-sync.yml` makes it or, after a
+conflict, someone on a branch:
+
+- `src/main/update-keys.json` keeps Kite's `release` and `sources` keys and takes Kettu's
+  `harnesses`.
+- `git grep` for Kettu's domain (`kettu` dot `sh`) must find no more lines than
+  before: 185 after the 2026-11-23 merge, its dot also matching the code's `window.kettu` shell
+  calls. New code that calls Kettu's services points at Kite Cloud or stays off.
+- `node tools/huli/rebrand.mjs --no-update-path`, then the tree put back: a `no longer holds …`
+  warning means upstream changed a spelling `CODE` lists; add the new one there.
+- Kettu's scheduled workflows run only in `KettuAI/Kettu` (`if: github.repository == ...`).
+- Test `HostSettings` objects carry every field of both sides (Kite's `claudeTestEntrypoint`,
+  `claudeRuns`, `promptSuggestions`, `agentNetwork`, …).
+- The thread database: Kite's schema 10 is `MEDIA`, so each of Kettu's migrations takes the next
+  number up, and `SCHEMA_VERSION` with them (Kettu's 10–12 are Kite's 11–13: `ORIGINS`,
+  `SET_ASIDE`, `ARTIFACT_SEEN`). Never renumber a migration an installed Kite has run.
+
+Where both had built the same thing, as the 2026-11-23 merge settled it:
+
+- `src/shared/run-groups.ts` is best of N's; `src/shared/session-groups.ts` is Kettu's (the menu
+  bar panel and the notch island). `src/agent-host/claude/mapper-huli.test.ts` is Kite's beside
+  Kettu's `mapper.test.ts`.
+- `src/shared/turn-phase.ts` serves both: `TurnPhase` has `question`, while `TurnWork`, the
+  summary's `working` that phones read, keeps `approval`.
+- Plan limits: Kettu's `notifications.planLimits` is the one switch (a file's old
+  `notifications.limits` carries into it). Kettu's `LimitNotices` send the notification and the
+  island's pop; Kite's `PlanAlerts` only broadcast `agents.limitAlert`, the window's toast with
+  View usage and Switch agent and the phone's alert. `pushedAttention` pushes a limit at 90% or
+  used up to phones (Kettu's pushes none), its window read from the notice's key.
+- DeepSeek Harness's balance is Kite's (see its section); Kettu's `dsh/balance.ts` and its rows
+  are left out.
+- A file chip's menu is Kite's `FileLinkMenu`; Kettu's `FileChip` menu is left out.
+- A session's sign-in notice is Kite's, gone once the session no longer waits; Kettu's "Signed in
+  to …" notice is left out.
+- The Git pane of a project with further folders shows one repository, picked at its top
+  (`git/pane/git-repos.tsx`, `useViewStore.gitRoot`); a further folder's branch link opens it.
+- Sidebar pages: a hidden page only leaves the sidebar and stays in search; a page whose feature
+  is off (`sidebar.routines`) is never listed, and Settings › Appearance holds its switch off with
+  a link to 功能管理 (`lib/features.ts` `pageFeatureOn`).
+- Comments: Kettu's passage comments and Kite's diff and page notes are separate lists over the
+  composer, and its Send sends both.
+- Maths: the app's rule (Kettu's single `$`, `\(` and `\[`) is the PDF export's too.
+- Edit from here is Kettu's; Kite's Undo (reverting the latest turn) stays beside it, and a refused
+  turn's Edit message uses it.
+- The notch island (macOS) never runs in a test copy (`KITE_TEST_WINDOW`).
+- `.github/ISSUE_TEMPLATE` leaves out Kettu's lines on earning points with a Kettu account.
+
 ## Tests
 
 `pnpm test` passes on Linux, as CI runs it, and on Windows. Tests of what Huli changes read the
@@ -1803,7 +1901,13 @@ disables every other workflow after each merge, new ones included.
   newer push to the same branch cancels the run before it. It stands in for Kettu's `ci.yml`,
   which only runs on pull requests.
 - `huli-sync.yml`, every night at 03:23 Beijing time: merges Kettu's main, checks it, pushes and
-  starts `huli-build.yml`; a conflict or failed check opens an issue instead.
+  starts `huli-build.yml`. A conflict or failed check pushes nothing and opens one issue,
+  `上游同步失败`, with the conflicting files (or what failed), upstream's commit, how far main is
+  behind and the run's log; while it is open each failed night replaces its body and comments only
+  when what failed changed. The first sync that merges, or finds main already holding Kettu's (a
+  merge made by hand), closes it, and the one-a-night issues older syncs opened
+  (`合并官方 Kettu 更新…`). `tools/huli/sync-issue.sh` does the issue side with the workflow's own
+  token (`issues: write`).
 - `huli-build.yml`, by hand, from a sync that merged, and every night at 03:41 Beijing time. The
   night's run first compares main with the commit of the latest release and builds only when they
   differ, and not while a sync is running (the sync starts its own build) nor for a commit whose

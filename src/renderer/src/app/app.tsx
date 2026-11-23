@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 're
 import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { AppShell } from '@renderer/components/affect/app-shell'
-import { Toaster } from '@renderer/components/ui/toast'
+import { Toaster, useToastArea } from '@renderer/components/ui/toast'
 import { TooltipProvider } from '@renderer/components/ui/tooltip'
 import { ArtifactDialogs } from '@renderer/features/artifacts/artifact-dialogs'
 import { AutoPublishNotice } from '@renderer/features/artifacts/auto-publish-notice'
@@ -25,6 +25,8 @@ import {
 } from '@renderer/features/shell/top-bar'
 import { useSidebarPeek } from '@renderer/features/shell/sidebar-peek'
 import { QuitConfirm } from '@renderer/features/updates/quit-confirm'
+import { CommandConfirmDialog } from '@renderer/features/updates/command-confirm'
+import { useInstallWindow } from '@renderer/features/settings/harness-install'
 import { UpdateDialog } from '@renderer/features/updates/update-dialog'
 import { useAccountShell } from '@renderer/features/account/account-row'
 import { SidebarList, SidebarNotices } from '@renderer/features/sidebar/app-sidebar'
@@ -61,6 +63,8 @@ const SessionMoveDialog = lazy(() =>
     default: m.SessionMoveDialog,
   })),
 )
+// What an install of a harness brings, shown before it runs; loaded once an Install first opens it.
+const InstallWindow = lazy(() => import('@renderer/features/settings/install-window'))
 
 export function App() {
   const settingsOpen = useViewStore((s) => s.settings.open)
@@ -78,6 +82,7 @@ export function App() {
   const [settingsLoaded, setSettingsLoaded] = useState(false)
   if (settingsOpen && !settingsLoaded) setSettingsLoaded(true)
   const pathAsked = usePathRequest((s) => s.asked !== null)
+  const installMounted = useInstallWindow((s) => s.mounted)
   const [pathPicker, setPathPicker] = useState(false)
   // Huli: the move dialog stays mounted once loaded, so it closes with its own exit.
   const moveAsked = useMoveStore((s) => s.summary !== null)
@@ -130,6 +135,12 @@ export function App() {
         <LaunchCover />
         <QuitConfirm />
         <UpdateDialog />
+        <CommandConfirmDialog />
+        {installMounted && (
+          <Suspense fallback={null}>
+            <InstallWindow />
+          </Suspense>
+        )}
         <DebugRestartDialog />
         <ArtifactDialogs />
         <ArtifactConsentDialog />
@@ -265,6 +276,7 @@ function MainFrame() {
   const content = useRef<HTMLDivElement>(null)
   const wing = useRef<HTMLSpanElement>(null)
   const was = useRef(collapsed)
+  useToastArea('main', content)
 
   useLayoutEffect(() => {
     if (was.current === collapsed) return

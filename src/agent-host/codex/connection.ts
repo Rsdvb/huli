@@ -6,7 +6,13 @@ import os from 'node:os'
 import type { AgentAccount, PlanLimit, ProviderBalance } from '@shared/agent-host'
 import type { ContextEstimates } from '@shared/context'
 import type { Platform } from '@shared/platform'
-import type { ConfigOption, PermissionOption, SideChatStep, TokenTotals } from '@shared/thread'
+import type {
+  BackgroundTaskView,
+  ConfigOption,
+  PermissionOption,
+  SideChatStep,
+  TokenTotals,
+} from '@shared/thread'
 import {
   programFailure,
   runProgram,
@@ -18,6 +24,7 @@ import {
   AgentRequestError,
   optionAnswer,
   type AgentConnection,
+  type AgentProcesses,
   type AgentInit,
   type AuthMethodInfo,
   type ConnectionHooks,
@@ -31,6 +38,8 @@ import {
   type PromptBlock,
   type PromptResult,
   type RevertPoint,
+  type RewindPoint,
+  type RewoundSession,
   type SessionOptions,
   type SessionSetup,
   type SessionTarget,
@@ -113,9 +122,12 @@ import type {
   ThreadItem,
   ThreadItemsListResponse,
   ThreadListResponse,
+  ThreadReadResponse,
   ThreadResponse,
+  ThreadRevertResponse,
   ThreadStatus,
   ThreadTokenUsage,
+  ThreadTurnsListResponse,
   TokenUsageBreakdown,
   Turn,
   TurnError,
@@ -138,6 +150,22 @@ const INVALID_REQUEST = -32600
 const METHOD_NOT_FOUND = -32601
 /** Huli: the first Codex whose app-server was checked to take a denied action back. */
 const APPEALS_VERSION = '0.171.0'
+
+/** Huli: the most background terminals of a thread one listing reads, and its page's size. */
+const MAX_TERMINALS = 100
+const TERMINAL_PAGE = 50
+const TERMINAL_TITLE_CHARS = 300
+const TERMINAL_COMMAND_CHARS = 2_000
+
+/** Huli: one of `thread/backgroundTerminals/list`'s terminals, as far as Kite reads it. */
+interface BackgroundTerminal {
+  processId?: unknown
+  itemId?: unknown
+  command?: unknown
+  osPid?: unknown
+  cpuPercent?: unknown
+  rssKb?: unknown
+}
 
 // Updates for a thread nobody registered yet wait here, as ACP's do.
 const PENDING_THREADS = 32
@@ -696,6 +724,7 @@ export class CodexConnection implements AgentConnection {
         ownTitles: null,
         logout: this.launch !== null,
         steering: true,
+        rewind: true,
         mcpHttp: true,
         // Codex speaks streamable HTTP and stdio to MCP servers; it has no SSE client.
         mcpSse: false,
@@ -734,7 +763,7 @@ export class CodexConnection implements AgentConnection {
   /** `codex logout`, with the program and environment the agent runs with. */
   async logout(): Promise<void> {
     const launch = this.launch
-    if (!launch) throw new AgentRequestError('agent_error', 'Codex cannot sign out here')
+    if (!launch) throw new AgentRequestError('agent_error', t('codex.cannotSignOut'))
     const timeoutMs = 30_000
     const run = await (launch.run ?? runProgram)({
       program: launch.spec.command,
@@ -1069,6 +1098,64 @@ export class CodexConnection implements AgentConnection {
     throw new AgentRequestError('agent_error', t('codex.noForkPoint'))
   }
 
+  // `thread/revert` finds only a thread the app-server has loaded; one it loaded itself would keep
+  // the options it last ran with, without Kettu's MCP server.
+  readonly rewindsOpen = true
+
+  /** Only a paginated thread's history can be cut; a legacy one keeps it in one rollout. */
+  async canRewind(sessionId: string): Promise<boolean> {
+    const { thread } = await this.call<ThreadReadResponse>('thread/read', { threadId: sessionId })
+    return thread.historyMode === 'paginated'
+  }
+
+  /** `thread/revert` before the turn the prompt `point` names started; the thread keeps its id. */
+  async rewindSession(
+    sessionId: string,
+    _cwd: string,
+    point: RewindPoint,
+  ): Promise<RewoundSession> {
+    await this.requireSignIn()
+    if (!(await this.canRewind(sessionId))) {
+      throw new AgentRequestError('agent_error', t('rewind.olderThread'))
+    }
+    const beforeTurnId = await this.turnStartedBy(sessionId, point)
+    await this.call<ThreadRevertResponse>('thread/revert', { threadId: sessionId, beforeTurnId })
+    return { sessionId }
+  }
+
+  /**
+   * The turn a prompt started: the one `turn/start` answered with, when the thread still has it,
+   * else the turn of the nth user message with the prompt's text.
+   */
+  private async turnStartedBy(threadId: string, point: RewindPoint): Promise<string> {
+    if (point.ref !== null && (await this.turnIds(threadId)).has(point.ref)) return point.ref
+    const text = point.text.trim()
+    const same = text
+      ? (await this.items(threadId)).filter(
+          ({ item }) =>
+            item.type === 'userMessage' &&
+            item.content.some((input) => input.type === 'text' && input.text.includes(text)),
+        )
+      : []
+    const found = same[point.occurrence - 1]
+    if (found) return found.turnId
+    throw new AgentRequestError('agent_error', t('rewind.noPoint'))
+  }
+
+  private async turnIds(threadId: string): Promise<Set<string>> {
+    const ids = new Set<string>()
+    let cursor: string | null = null
+    do {
+      const page: ThreadTurnsListResponse = await this.call<ThreadTurnsListResponse>(
+        'thread/turns/list',
+        { threadId, cursor, limit: 200, itemsView: 'notLoaded' },
+      )
+      for (const turn of page.data) ids.add(turn.id)
+      cursor = page.nextCursor
+    } while (cursor)
+    return ids
+  }
+
   /**
    * `thread/revert` before the first turn `point` takes out. Codex leaves the files as they are,
    * and reverts only a thread with paginated history, which a thread an older Codex started lacks.
@@ -1106,7 +1193,9 @@ export class CodexConnection implements AgentConnection {
   ): Promise<SideAnswer> {
     await this.requireSignIn()
     const parent = this.threads.get(sessionId)
-    if (!parent?.cwd) throw new AgentRequestError('agent_error', 'The Codex session is not open')
+    if (!parent?.cwd) {
+      throw new AgentRequestError('agent_error', t('agentRun.notOpen', { id: sessionId }))
+    }
     const cwd = parent.cwd
     signal.throwIfAborted()
     const source = parent.known ? parent.settings : undefined
@@ -1736,10 +1825,14 @@ export class CodexConnection implements AgentConnection {
     return model ? tierFor(model, settings.tier) : settings.tier
   }
 
-  async prompt(sessionId: string, prompt: readonly PromptBlock[]): Promise<PromptResult> {
+  async prompt(
+    sessionId: string,
+    prompt: readonly PromptBlock[],
+    sent?: (ref: string) => void,
+  ): Promise<PromptResult> {
     const record = this.thread(sessionId)
     if (record.prompting || record.command) {
-      throw new AgentRequestError('agent_error', 'A turn is already running in this session')
+      throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
     }
     const command = parseCommand(prompt)
     if (command) return this.runCommand(record, command)
@@ -1749,6 +1842,7 @@ export class CodexConnection implements AgentConnection {
         'turn/start',
         this.turnParams(record, userInputs(prompt)),
       )
+      sent?.(response.turn.id)
       return response.turn.id
     })
   }
@@ -1804,6 +1898,103 @@ export class CodexConnection implements AgentConnection {
 
   private newMapper(): ThreadMapper {
     return new ThreadMapper({ appeals: this.appeals })
+  }
+
+  /** Huli: when Kite first saw each background terminal listed, by its process id. */
+  private readonly terminalsSeen = new Map<string, number>()
+
+  /**
+   * Huli: the thread's background terminals (Codex's `/ps`), each a running task with its
+   * process, CPU and memory as Codex reads them; null for a Codex that lists none.
+   */
+  async backgroundProcesses(sessionId: string): Promise<AgentProcesses | null> {
+    const record = this.thread(sessionId)
+    const terminals: BackgroundTerminal[] = []
+    let cursor: string | null = null
+    try {
+      do {
+        const page: { data?: unknown; nextCursor?: unknown } = await this.rpc.request(
+          'thread/backgroundTerminals/list',
+          { threadId: record.id, limit: TERMINAL_PAGE, ...(cursor ? { cursor } : {}) },
+        )
+        if (Array.isArray(page.data)) terminals.push(...(page.data as BackgroundTerminal[]))
+        cursor = typeof page.nextCursor === 'string' && page.nextCursor ? page.nextCursor : null
+      } while (cursor && terminals.length < MAX_TERMINALS)
+    } catch (error) {
+      if (lacksMethod(error)) return null
+      throw this.toError(error)
+    }
+    const now = Date.now()
+    const listed = new Set<string>()
+    const tasks: BackgroundTaskView[] = []
+    const processes: AgentProcesses['processes'] = []
+    for (const terminal of terminals.slice(0, MAX_TERMINALS)) {
+      if (typeof terminal.processId !== 'string' || terminal.processId === '') continue
+      const id = terminal.processId
+      if (listed.has(id)) continue
+      listed.add(id)
+      const command = typeof terminal.command === 'string' ? terminal.command : ''
+      const pid = wholeOrNull(terminal.osPid)
+      const startedAt = this.terminalsSeen.get(id) ?? now
+      this.terminalsSeen.set(id, startedAt)
+      tasks.push({
+        id,
+        kind: 'shell',
+        title: clipText(
+          command
+            .split('\n')
+            .find((line) => line.trim() !== '')
+            ?.trim() ?? id,
+          TERMINAL_TITLE_CHARS,
+        ),
+        ...(command !== '' ? { command: clipText(command, TERMINAL_COMMAND_CHARS) } : {}),
+        status: 'running',
+        startedAt,
+        endedAt: null,
+        summary: null,
+        ...(pid !== null ? { pid } : {}),
+        ...(typeof terminal.itemId === 'string' && terminal.itemId !== ''
+          ? { toolCallId: terminal.itemId }
+          : {}),
+      })
+      const cpu =
+        typeof terminal.cpuPercent === 'number' && terminal.cpuPercent >= 0
+          ? terminal.cpuPercent
+          : null
+      const rss = wholeOrNull(terminal.rssKb)
+      processes.push({ taskId: id, pid, cpu, memory: rss === null ? null : rss * 1024 })
+    }
+    for (const id of this.terminalsSeen.keys()) if (!listed.has(id)) this.terminalsSeen.delete(id)
+    return { tasks, processes }
+  }
+
+  /** Huli: ends one background terminal of the thread. */
+  async stopTask(sessionId: string, taskId: string): Promise<void> {
+    const record = this.thread(sessionId)
+    try {
+      await this.rpc.request('thread/backgroundTerminals/terminate', {
+        threadId: record.id,
+        processId: taskId,
+      })
+    } catch (error) {
+      if (lacksMethod(error)) {
+        throw new AgentRequestError('agent_error', t('codex.background.unsupported'))
+      }
+      throw this.toError(error)
+    }
+  }
+
+  /** Huli: Codex's `/clean`: ends every background terminal of the thread. */
+  async cleanTasks(sessionId: string): Promise<void> {
+    const record = this.thread(sessionId)
+    try {
+      await this.rpc.request('thread/backgroundTerminals/clean', { threadId: record.id })
+    } catch (error) {
+      if (lacksMethod(error)) {
+        throw new AgentRequestError('agent_error', t('codex.background.unsupported'))
+      }
+      throw this.toError(error)
+    }
   }
 
   /**
@@ -1918,7 +2109,9 @@ export class CodexConnection implements AgentConnection {
     value: string | boolean,
   ): Promise<ConfigOption[]> {
     const record = this.threads.get(sessionId)
-    if (!record) throw new AgentRequestError('agent_error', `Codex has no session ${sessionId}`)
+    if (!record) {
+      throw new AgentRequestError('agent_error', t('agentRun.noSession', { id: sessionId }))
+    }
     const models = await this.listModels()
     // Huli: full access runs in no sandbox, so a sandboxed session never takes it.
     if (record.sandbox && optionId === MODE_ID && value === FULL_ACCESS_MODE) {
@@ -2352,4 +2545,20 @@ export function revertedTurn(
     if (turnId !== undefined) return turns[turns.indexOf(turnId) + 1] ?? null
   }
   throw new AgentRequestError('agent_error', t('codex.noRevertPoint'))
+}
+
+/** Huli: an app-server older than the method answers that it has no such method or variant. */
+function lacksMethod(error: unknown): boolean {
+  return (
+    error instanceof RpcError &&
+    (error.code === METHOD_NOT_FOUND || /unknown variant|unknown method/i.test(error.message))
+  )
+}
+
+function wholeOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
+function clipText(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
 }

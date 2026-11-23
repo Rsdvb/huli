@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto'
 import type { SessionSummary } from '@shared/agent-host'
 import type { FileDiff } from '@shared/git'
-import type { GroupRunStart, KeptRun, RunChanges } from '@shared/session-groups'
+import type { GroupRunStart, KeptRun, RunChanges } from '@shared/run-groups'
 import type { AgentId, UserContent } from '@shared/thread'
 import { readChangesSince, readFileDiffSince } from '../git/details'
 import type { Exec } from '../git/exec'

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,6 +12,7 @@ import {
   type SessionView,
   type ThreadEntry,
   type ThreadState,
+  type ToolEntry,
 } from '@shared/thread'
 import type { LaunchSpec } from '../catalog'
 import { CLAUDE_CODE } from '../catalog'
@@ -27,6 +28,7 @@ import {
   type ProjectMcpGate,
 } from '../connection'
 import type { HostedContext, HostedSpawnOptions } from '../driver'
+import { planMarkdown } from '../plan-revision'
 import {
   newTurnScope,
   type MapperContext,
@@ -2586,6 +2588,31 @@ describe('permissions', () => {
     expect(config.find((option) => option.id === 'mode')?.value).toBe('plan')
   })
 
+  it('keeps a plan sent back as its first Markdown, for the next plan to compare with', async () => {
+    const plan = '# Plan\n\n1. Edit'
+    s.sdk.script = (query) => {
+      query.running()
+      query.emit(
+        assistant(query, 'msg_1', [
+          { type: 'tool_use', id: 'toolu_p1', name: 'ExitPlanMode', input: { plan } },
+        ]),
+      )
+      query.emit(
+        toolResult(
+          query,
+          'toolu_p1',
+          'The user wants you to keep planning and revise the plan. Their note: Keep the old API',
+          true,
+        ),
+      )
+      query.finish()
+    }
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
+    const entry = target.entries().find((e) => e.id === 't:toolu_p1')
+    expect(entry).toMatchObject({ kind: 'tool', status: 'failed' })
+    expect(planMarkdown(entry as ToolEntry)).toBe(plan)
+  })
+
   function elicit(request: Record<string, unknown>) {
     return s.sdk.last.options.onElicitation!(
       { serverName: 'linear', message: 'Sign in to Linear', ...request },
@@ -2952,6 +2979,64 @@ describe('sessions', () => {
     })
     await s.connection.deleteSession('a')
     expect(s.sdk.calls.find((call) => call.method === 'deleteSession')?.args[0]).toBe('a')
+  })
+
+  it('reports the uuid of each prompt, which the transcript keeps', async () => {
+    const s = await setup()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, new Target())
+    const refs: string[] = []
+    await s.connection.prompt(sessionId, [{ type: 'text', text: 'Hi' }], (ref) => refs.push(ref))
+    expect(refs).toEqual([s.sdk.last.inputs[0]!.uuid])
+  })
+
+  it('cuts a session for an edit with a fork that ends before the prompt', async () => {
+    const config = await mkdtemp(path.join(os.tmpdir(), 'kettu-claude-rewind-'))
+    dirs.push(config)
+    const s = await setup({ CLAUDE_CONFIG_DIR: config })
+    const folder = path.join(config, 'projects', '-repo')
+    await mkdir(folder, { recursive: true })
+    const lines = (records: unknown[]) => records.map((r) => JSON.stringify(r)).join('\n')
+    const said = (uuid: string, parentUuid: string | null, text: string) => ({
+      type: 'user',
+      uuid,
+      parentUuid,
+      message: { role: 'user', content: [{ type: 'text', text }] },
+    })
+    const done = (uuid: string, parentUuid: string) => ({
+      type: 'assistant',
+      uuid,
+      parentUuid,
+      message: { content: [{ type: 'text', text: 'Done.' }] },
+    })
+    await writeFile(
+      path.join(folder, 's1.jsonl'),
+      lines([said('u1', null, 'One'), done('a1', 'u1'), said('u2', 'a1', 'Two')]),
+    )
+    await writeFile(
+      path.join(folder, 'fork-of-s1.jsonl'),
+      lines([
+        { ...said('f1', null, 'One'), forkedFrom: { sessionId: 's1', messageUuid: 'u1' } },
+        { ...done('f2', 'f1'), forkedFrom: { sessionId: 's1', messageUuid: 'a1' } },
+      ]),
+    )
+    const point = { ref: 'u2', text: 'Two', occurrence: 1 }
+    expect(await s.connection.rewindSession!('s1', '/repo', point, 'Docs')).toEqual({
+      sessionId: 'fork-of-s1',
+      refs: { u1: 'f1', a1: 'f2' },
+    })
+    expect(s.sdk.calls.find((call) => call.method === 'forkSession')?.args).toEqual([
+      's1',
+      { dir: '/repo', upToMessageId: 'a1', title: 'Docs' },
+    ])
+    // Nothing came before the first prompt: the host starts a session of its own.
+    const first = { ref: 'u1', text: 'One', occurrence: 1 }
+    expect(await s.connection.rewindSession!('s1', '/repo', first, null)).toEqual({ sessionId: '' })
+    expect(s.sdk.calls.filter((call) => call.method === 'forkSession')).toHaveLength(1)
+    const missing = { ref: null, text: 'Three', occurrence: 1 }
+    await expect(s.connection.rewindSession!('s1', '/repo', missing, null)).rejects.toBeInstanceOf(
+      AgentRequestError,
+    )
   })
 
   it('copies a session under a new id without opening it', async () => {
@@ -4295,5 +4380,302 @@ describe('the native sandbox', () => {
     await expect(
       s.connection.newSession('/repo', { sandbox: { ...sandbox, network: 'agent' } }),
     ).rejects.toThrow()
+  })
+})
+
+describe('Huli: background moves, progress, memory and goals', () => {
+  const system = (query: FakeQuery, fields: Record<string, unknown>): SdkMessage =>
+    ({ type: 'system', session_id: query.sessionId, ...fields }) as SdkMessage
+  const held = (target: Target) =>
+    target.effects.flatMap((effect) => (effect.kind === 'foreground' ? [effect.tasks] : []))
+  const lists = (target: Target) =>
+    target.effects.flatMap((effect) => (effect.kind === 'tasks' ? [effect.tasks] : []))
+
+  async function open(env: Record<string, string> = {}) {
+    const s = await setup(env)
+    const target = new Target()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, target)
+    s.sdk.script = (q) => q.running()
+    const turn = s.connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
+    await settle()
+    return { s, target, sessionId, query: s.sdk.last, turn }
+  }
+
+  it('asks for the progress summaries of subagents', async () => {
+    const { query, turn } = await open()
+    expect(query.options.agentProgressSummaries).toBe(true)
+    query.finish()
+    await turn
+  })
+
+  it('lists what holds up its call until it moves to the background or ends', async () => {
+    const { s, target, sessionId, query, turn } = await open()
+    query.emit(
+      assistant(query, 'msg_t', [
+        { type: 'tool_use', id: 'toolu_t', name: 'Bash', input: { command: 'npm test' } },
+      ]),
+      system(query, {
+        subtype: 'task_started',
+        task_id: 'b1',
+        tool_use_id: 'toolu_t',
+        description: 'Run the tests',
+        task_type: 'local_bash',
+        is_backgrounded: false,
+      }),
+      system(query, {
+        subtype: 'task_started',
+        task_id: 'agent-1',
+        tool_use_id: 'toolu_a',
+        description: 'Explore',
+        subagent_type: 'Explore',
+        task_type: 'local_agent',
+        is_backgrounded: false,
+      }),
+      // One registered in the background, or by a CLI that does not say, holds up nothing.
+      system(query, {
+        subtype: 'task_started',
+        task_id: 'b2',
+        tool_use_id: 'toolu_u',
+        description: 'Serve',
+        task_type: 'local_bash',
+      }),
+    )
+    await settle()
+    expect(held(target).at(-1)).toMatchObject([
+      { toolCallId: 'toolu_t', taskId: 'b1', kind: 'shell', title: 'Run the tests' },
+      { toolCallId: 'toolu_a', taskId: 'agent-1', kind: 'subagent', title: 'Explore' },
+    ])
+    expect(await s.connection.toBackground!(sessionId, 'toolu_t')).toBe(true)
+    expect(query.calls).toContainEqual({ method: 'backgroundTasks', args: ['toolu_t'] })
+    query.emit(
+      system(query, { subtype: 'task_updated', task_id: 'b1', patch: { is_backgrounded: true } }),
+      system(query, {
+        subtype: 'task_notification',
+        task_id: 'agent-1',
+        status: 'completed',
+        summary: 'done',
+        output_file: '',
+      }),
+    )
+    await settle()
+    expect(held(target).at(-1)).toEqual([])
+    s.sdk.backgrounded = false
+    expect(await s.connection.toBackground!(sessionId)).toBe(false)
+    expect(query.calls).toContainEqual({ method: 'backgroundTasks', args: [undefined] })
+    query.finish()
+    await turn
+  })
+
+  it('lets go of what holds up a call once the turn ends', async () => {
+    const { target, query, turn } = await open()
+    query.emit(
+      system(query, {
+        subtype: 'task_started',
+        task_id: 'b1',
+        tool_use_id: 'toolu_t',
+        description: 'Build',
+        task_type: 'local_bash',
+        is_backgrounded: false,
+      }),
+    )
+    await settle()
+    expect(held(target).at(-1)).toHaveLength(1)
+    query.finish()
+    await turn
+    expect(held(target).at(-1)).toEqual([])
+  })
+
+  it('puts the progress summary of a subagent on its row, and of a task on its line', async () => {
+    const { target, query, turn } = await open()
+    query.emit(
+      system(query, {
+        subtype: 'task_started',
+        task_id: 'agent-1',
+        tool_use_id: 'toolu_a',
+        description: 'Explore',
+        subagent_type: 'Explore',
+        task_type: 'local_agent',
+      }),
+      system(query, {
+        subtype: 'task_progress',
+        task_id: 'agent-1',
+        description: 'Explore',
+        usage: { total_tokens: 1, tool_uses: 1, duration_ms: 1 },
+        summary: '  Reading the\nauth module  ',
+      }),
+      system(query, {
+        subtype: 'background_tasks_changed',
+        tasks: [{ task_id: 'm1', task_type: 'mcp_task', description: 'Index' }],
+      }),
+      system(query, {
+        subtype: 'task_progress',
+        task_id: 'm1',
+        description: 'Index',
+        usage: { total_tokens: 0, tool_uses: 0, duration_ms: 1 },
+        summary: '40 of 90 files',
+      }),
+      // No summary, as without the option: nothing changes.
+      system(query, {
+        subtype: 'task_progress',
+        task_id: 'agent-1',
+        description: 'Explore',
+        usage: { total_tokens: 2, tool_uses: 2, duration_ms: 2 },
+      }),
+    )
+    await settle()
+    const progress = target.effects.flatMap((effect) =>
+      effect.kind === 'subagent' && effect.progress !== undefined ? [effect] : [],
+    )
+    expect(progress).toEqual([
+      { kind: 'subagent', sessionId: 'agent-1', progress: 'Reading the auth module' },
+    ])
+    expect(lists(target).at(-1)).toMatchObject([{ id: 'm1', progress: '40 of 90 files' }])
+    query.emit(
+      system(query, {
+        subtype: 'task_notification',
+        task_id: 'm1',
+        status: 'completed',
+        summary: 'Indexed',
+        output_file: '',
+      }),
+    )
+    await settle()
+    expect(lists(target).at(-1)![0]).not.toHaveProperty('progress')
+    query.finish()
+    await turn
+  })
+
+  it('forgets the ended tasks on Clean and keeps the running ones', async () => {
+    const { s, target, sessionId, query, turn } = await open()
+    query.emit(
+      system(query, {
+        subtype: 'background_tasks_changed',
+        tasks: [
+          { task_id: 'b1', task_type: 'local_bash', description: 'Serve' },
+          { task_id: 'b2', task_type: 'local_bash', description: 'Lint' },
+        ],
+      }),
+      system(query, {
+        subtype: 'background_tasks_changed',
+        tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'Serve' }],
+      }),
+    )
+    await settle()
+    expect(lists(target).at(-1)).toHaveLength(2)
+    await s.connection.cleanTasks!(sessionId)
+    expect(lists(target).at(-1)).toMatchObject([{ id: 'b1', status: 'running' }])
+    const count = lists(target).length
+    await s.connection.cleanTasks!(sessionId)
+    expect(lists(target)).toHaveLength(count)
+    query.finish()
+    await turn
+  })
+
+  it('shows the memories Claude Code recalled into the turn, cut to size', async () => {
+    const { target, query, turn } = await open()
+    query.emit(
+      system(query, {
+        subtype: 'memory_recall',
+        uuid: 'u1',
+        mode: 'select',
+        memories: [
+          { path: '/home/ada/.claude/projects/-repo/memory/testing.md', scope: 'personal' },
+          {
+            path: '<synthesis:/home/ada/.claude/projects/-repo/memory>',
+            scope: 'team',
+            content: 'x'.repeat(5000),
+          },
+          { path: '', scope: 'personal' },
+          { path: 'https://example.com/m/1', scope: 'odd' },
+        ],
+      }),
+      // A subagent's recall is its own, not the session's.
+      system(query, {
+        subtype: 'memory_recall',
+        uuid: 'u2',
+        agent_id: 'agent-1',
+        mode: 'select',
+        memories: [{ path: '/a.md', scope: 'personal' }],
+      }),
+    )
+    await settle()
+    const recalls = target.entries().filter((entry) => entry.kind === 'recall')
+    expect(recalls).toHaveLength(1)
+    const entry = recalls[0]!
+    expect(entry).toMatchObject({ id: 'mr:u1', action: 'recalled' })
+    if (entry.kind !== 'recall') throw new Error('not a recall')
+    expect(entry.memories.map((memory) => memory.path)).toEqual([
+      '/home/ada/.claude/projects/-repo/memory/testing.md',
+      '<synthesis:/home/ada/.claude/projects/-repo/memory>',
+      'https://example.com/m/1',
+    ])
+    expect(entry.memories[1]!.content).toHaveLength(4000)
+    expect(entry.memories[2]!.scope).toBe('personal')
+    query.finish()
+    await turn
+  })
+
+  it('counts the writes of a turn to the own memory of Claude Code in one line', async () => {
+    const { target, query, turn } = await open({ CLAUDE_CONFIG_DIR: '/home/ada/.claude-work' })
+    const memory = '/home/ada/.claude-work/projects/-repo/memory'
+    const write = (id: string, file: string) => ({
+      type: 'tool_use',
+      id,
+      name: 'Write',
+      input: { file_path: file, content: 'A' },
+    })
+    query.emit(
+      assistant(query, 'msg_m', [
+        write('toolu_1', `${memory}/a.md`),
+        write('toolu_2', `${memory}/MEMORY.md`),
+        write('toolu_3', `${memory}/b.md`),
+        write('toolu_4', '/repo/memory/c.md'),
+        write('toolu_5', `${memory}/d.md`),
+      ]),
+      toolResult(query, 'toolu_1', 'File created.'),
+      toolResult(query, 'toolu_2', 'Updated.'),
+      toolResult(query, 'toolu_3', 'File created.'),
+      toolResult(query, 'toolu_4', 'File created.'),
+      toolResult(query, 'toolu_5', 'Denied.', true),
+    )
+    await settle()
+    const saved = target.entries().filter((entry) => entry.kind === 'recall')
+    expect(saved).toHaveLength(1)
+    expect(saved[0]).toMatchObject({
+      action: 'saved',
+      memories: [
+        { path: `${memory}/a.md`, scope: 'personal' },
+        { path: `${memory}/b.md`, scope: 'personal' },
+      ],
+    })
+    query.finish()
+    await turn
+  })
+
+  it('shows the goal Claude Code checks, how often it checked, and its end', async () => {
+    const { target, query, turn } = await open()
+    const goal = (value: unknown, uuid: string) =>
+      ({ type: 'active_goal', value, uuid, session_id: query.sessionId }) as unknown as SdkMessage
+    const condition = 'All tests\npass'
+    query.emit(
+      goal({ condition, iterations: 0, set_at: 1, tokens_at_start: 0 }, 'g1'),
+      goal(
+        { condition, iterations: 2, set_at: 1, tokens_at_start: 0, last_reason: 'Two fail' },
+        'g2',
+      ),
+    )
+    await settle()
+    const notices = () => target.entries().filter((entry) => entry.kind === 'notice')
+    expect(notices()).toHaveLength(1)
+    expect(notices()[0]).toMatchObject({ id: 'n:goal:g1', severity: 'info' })
+    expect(JSON.stringify(notices()[0])).toContain('All tests pass')
+    expect(JSON.stringify(notices()[0])).toContain('Two fail')
+    query.emit(goal(null, 'g3'), goal(null, 'g4'))
+    await settle()
+    expect(notices()).toHaveLength(2)
+    expect(notices()[1]).toMatchObject({ id: 'n:goal:g3' })
+    query.finish()
+    await turn
   })
 })

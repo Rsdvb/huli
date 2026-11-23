@@ -8,6 +8,7 @@ import {
   UserGroupIcon,
   DashboardSquare02Icon,
   File01Icon,
+  GitCompareIcon,
   MoreHorizontalIcon,
   SidebarRightIcon,
 } from '@hugeicons/core-free-icons'
@@ -58,6 +59,7 @@ import { REQUESTS_ICON } from '@renderer/features/requests/icon'
 import { readsModelRequests } from '@renderer/features/requests/support'
 import { usePhoneWindow } from './narrow'
 import { openSurfaces } from './open-surfaces'
+import { requestSurfaceListFocus } from './surface-rows'
 import { PaneIcon } from './panel-button'
 import { NoDrag } from './top-bar'
 
@@ -157,6 +159,7 @@ export function HeaderTools({
     ...(terminal || browser || (sessionId && devices) ? (['surfaces'] as const) : []),
     ...(requests ? (['requests'] as const) : []),
     'files',
+    'git',
   ]
   const phone = usePhoneWindow()
   const more =
@@ -191,7 +194,6 @@ export function HeaderTools({
       board={board}
       available={available}
       news={{ browser: dot, devices: deviceDot }}
-      deviceHeld={deviceHeld}
     >
       {more}
     </DesktopTools>
@@ -250,20 +252,14 @@ function useToolSlots(ref: RefObject<HTMLElement | null>): number {
 /** The bar's tools in the order it draws them: the board, side chat and the panes. */
 function useBarTools({
   panel,
-  projectPath,
   sessionId,
   board,
   available,
-  news,
-  deviceHeld,
 }: {
   panel: string
-  projectPath: string
   sessionId: string | null
   board: boolean
   available: Pane[]
-  news: { browser: boolean; devices: boolean }
-  deviceHeld: boolean
 }): Tool[] {
   const { t } = useTranslation('shell')
   const { t: tb } = useTranslation('board')
@@ -351,40 +347,9 @@ function useBarTools({
   }
   // The computer's window exists only while an agent uses the computer, so it is always in use.
   pane('computer', t('headerTools.computer'), ComputerIcon, 6, { common: false, held: true })
-  // Terminals, browser pages and devices share one row of tabs, which one button opens on the
-  // kind shown last; it folds the panel while the row shows.
-  if (available.includes('surfaces')) {
-    const open = isSurfacePane(shownPane)
-    const rowNews = news.browser || news.devices
-    tools.push({
-      id: 'surfaces',
-      label: t('headerTools.surfaces'),
-      name: t('headerTools.surfaces'),
-      icon: BrowserIcon,
-      open,
-      dot: rowNews && !open ? 'news' : undefined,
-      common: true,
-      pinned: open || rowNews || deviceHeld,
-      rank: 2,
-      onSelect: () => {
-        if (outOfFocus) focusPane(context.paneId)
-        if (open && !outOfFocus) toggleSidePane(panel, shownPane, false)
-        else openSurfaces(panel, projectPath, lastSurface(panel))
-      },
-    })
-  }
-  pane('requests', t('headerTools.requests'), REQUESTS_ICON, 8, { common: false })
   pane('workers', t('headerTools.workers'), UserGroupIcon, 0, { common: true })
   pane('files', t('headerTools.files'), File01Icon, 1, { common: true })
-  const order: Tool['id'][] = [
-    'workers',
-    'board',
-    'sideChat',
-    'computer',
-    'surfaces',
-    'requests',
-    'files',
-  ]
+  const order: Tool['id'][] = ['workers', 'board', 'sideChat', 'computer', 'files']
   return tools.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
 }
 
@@ -408,7 +373,6 @@ function DesktopTools({
   board,
   available,
   news,
-  deviceHeld,
   children,
 }: {
   panel: string
@@ -417,21 +381,12 @@ function DesktopTools({
   board: boolean
   available: Pane[]
   news: { browser: boolean; devices: boolean }
-  deviceHeld: boolean
   /** The session's More menu, which leads the bar's own. */
   children?: ReactNode
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const slots = useToolSlots(ref)
-  const tools = useBarTools({
-    panel,
-    projectPath,
-    sessionId,
-    board,
-    available,
-    news,
-    deviceHeld,
-  })
+  const tools = useBarTools({ panel, sessionId, board, available })
   const buttons = toolsWithButtons(tools, slots)
   return (
     <NoDrag ref={ref} className="kp-bar-tools">
@@ -448,7 +403,12 @@ function DesktopTools({
           {tool.dot && <span aria-hidden className={dotClass(tool.dot)} />}
         </BarButton>
       ))}
-      <SidePanelButton panel={panel} projectPath={projectPath} available={available} />
+      <SidePanelButton
+        panel={panel}
+        projectPath={projectPath}
+        available={available}
+        news={news.browser || news.devices}
+      />
       <MoreToolsMenu tools={tools.filter((tool) => !buttons.includes(tool))} />
     </NoDrag>
   )
@@ -462,6 +422,7 @@ const PANE_ITEMS = {
   surfaces: { icon: BrowserIcon, label: 'headerTools.surfaces' },
   requests: { icon: REQUESTS_ICON, label: 'headerTools.requests' },
   files: { icon: File01Icon, label: 'headerTools.files' },
+  git: { icon: GitCompareIcon, label: 'headerTools.git' },
 } as const
 
 /**
@@ -679,33 +640,45 @@ function BarButton({
   )
 }
 
-/** While the panel shows nothing, it opens again on the pane it showed last. */
+/**
+ * The side panel's button, always on the bar: pressed while the panel shows, when it folds the
+ * panel away; otherwise it opens the pane shown last, or the side panel's list when there is none.
+ */
 function SidePanelButton({
   panel,
   projectPath,
   available,
+  news,
 }: {
   panel: string
   projectPath: string
   available: Pane[]
+  /** An agent opened a page or a device while another pane showed. */
+  news: boolean
 }) {
   const { t } = useTranslation('common')
   const context = usePane()
   trackLastPanes()
-  const shown = useViewStore((s) => shownPanel(s) === panel && !!s.sidePane[panel])
-  if (shown) return null
-  const last = lastPanes.get(panel)
-  const pane = last && available.includes(last) ? last : 'files'
+  const shownPane = useViewStore((s) => (shownPanel(s) === panel ? s.sidePane[panel] : undefined))
   return (
     <BarButton
-      label={t('pane.open')}
+      label={shownPane ? t('pane.collapse') : t('pane.open')}
+      pressed={!!shownPane}
       onClick={() => {
         if (context && !context.focused) focusPane(context.paneId)
+        if (shownPane) {
+          toggleSidePane(panel, shownPane, false)
+          return
+        }
+        const last = lastPanes.get(panel)
+        const pane = last && (last === 'surfaces' || available.includes(last)) ? last : 'surfaces'
         if (isSurfacePane(pane)) openSurfaces(panel, projectPath, lastSurface(panel))
         else toggleSidePane(panel, pane, true)
+        if (useViewStore.getState().sidePane[panel] === 'surfaces') requestSurfaceListFocus(panel)
       }}
     >
       <PaneIcon icon={SidebarRightIcon} size={16} />
+      {news && !isSurfacePane(shownPane) && <span aria-hidden className="kp-bar-dot" />}
     </BarButton>
   )
 }

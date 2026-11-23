@@ -2,15 +2,22 @@
 // with @lezer/markdown, as the document type's Word export does, and every piece of text is
 // escaped: raw HTML shows as text, but for the folds the export writes itself and a few plain
 // inline tags. Links go to http(s) only, and pictures only to the export's own files, so the
-// page, which runs no script, reaches nothing outside. Maths is drawn by KaTeX into HTML, as the
-// conversation draws it: `$$...$$` in a line, on lines of its own for a display, and ```math
-// fences; a single `$` stays text, as replies quote prices far more often than formulas.
+// page, which runs no script, reaches nothing outside. Maths is drawn by KaTeX into HTML, by the
+// conversation's rules (the renderer's markdown/remark.ts and maths.ts): `$$...$$` in a line, on
+// lines of its own for a display, and ```math fences; a single `$` by Pandoc's rule, so prices stay
+// text; `\(...\)` and `\[...\]` within a line; a `\[...\]` on lines of its own as a display.
 
 import { GFM, parser, type InlineContext, type MarkdownConfig } from '@lezer/markdown'
 import katex from 'katex'
 import { EXPORT_IMAGE_NAME } from '@shared/session-export'
+// The conversation's own pass, pure text to text, so a `\[...\]` display reads the same here.
+import { fenceBracketMath } from '../../renderer/src/features/session/markdown/maths'
 
 const DOLLAR = 36
+const BACKSLASH = 92
+const BACKTICK = 96
+const isSpace = (code: number): boolean => code === 32 || code === 9 || code === 10 || code === 13
+const isDigit = (code: number): boolean => code >= 48 && code <= 57
 
 /** `$$...$$`, the conversation's maths (remark-math without its single dollar). */
 const MathSyntax: MarkdownConfig = {
@@ -32,6 +39,77 @@ const MathSyntax: MarkdownConfig = {
             cx.elt('MathMark', end, end + 2),
           ]),
         )
+      },
+    },
+    {
+      // `$tex$` by Pandoc's rule, as the conversation reads it: the opening `$` before a non-space,
+      // the closing one after a non-space and before no digit, and no code span in between.
+      name: 'SingleMath',
+      before: 'InlineCode',
+      parse(cx: InlineContext, next: number, pos: number): number {
+        if (next !== DOLLAR) return -1
+        const first = cx.char(pos + 1)
+        if (first === DOLLAR || first === BACKTICK || first < 0 || isSpace(first)) return -1
+        let afterSpace = false
+        for (let i = pos + 1; i < cx.end; i++) {
+          const code = cx.char(i)
+          if (code === BACKTICK) return -1
+          if (code === BACKSLASH) {
+            const escaped = cx.char(i + 1)
+            if (escaped === BACKTICK) return -1
+            afterSpace = false
+            if (escaped !== 10 && escaped !== 13) i++
+            continue
+          }
+          if (code === DOLLAR) {
+            if (afterSpace || isDigit(cx.char(i + 1))) return -1
+            return cx.addElement(
+              cx.elt('InlineMath', pos, i + 1, [
+                cx.elt('MathMark', pos, pos + 1),
+                cx.elt('MathMark', i, i + 1),
+              ]),
+            )
+          }
+          // A line may not start with the `$` that would close it.
+          if (code === 10 && cx.char(i + 1) === DOLLAR) return -1
+          afterSpace = isSpace(code)
+        }
+        return -1
+      },
+    },
+    {
+      // `\(tex\)` or `\[tex\]` within a line, read before `\(` would be an escaped parenthesis.
+      name: 'BracketMath',
+      before: 'Escape',
+      parse(cx: InlineContext, next: number, pos: number): number {
+        if (next !== BACKSLASH) return -1
+        const opener = cx.char(pos + 1)
+        if (opener !== 40 && opener !== 91) return -1
+        const closer = opener === 40 ? 41 : 93
+        let empty = true
+        for (let i = pos + 2; i < cx.end; i++) {
+          const code = cx.char(i)
+          if (code === BACKTICK) return -1
+          if (code === 10 || code === 13) continue
+          if (code === BACKSLASH) {
+            const after = cx.char(i + 1)
+            if (after === closer) {
+              if (empty) return -1
+              return cx.addElement(
+                cx.elt('InlineMath', pos, i + 2, [
+                  cx.elt('MathMark', pos, pos + 2),
+                  cx.elt('MathMark', i, i + 2),
+                ]),
+              )
+            }
+            // Not the end: the backslash and what it escapes are part of the formula.
+            empty = false
+            if (after !== BACKTICK && after !== 10 && after !== 13 && after >= 0) i++
+            continue
+          }
+          empty = false
+        }
+        return -1
       },
     },
   ],
@@ -185,16 +263,20 @@ class Renderer {
         return href ? `<a href="${escape(href)}">${escape(target)}</a>` : escape(target)
       }
       case 'InlineMath': {
-        // The source between the marks, a quote's marks on its lines left out.
+        // The source between the marks, a quote's marks on its lines left out. Only `$$` on lines
+        // of their own make a display; a `\[...\]` on lines of its own was made one before parsing.
+        const parts = children(node)
+        const open = parts[0]!
+        const close = parts.at(-1)!
         let tex = ''
-        let at = node.from + 2
-        for (const child of children(node)) {
-          if (child.name === 'MathMark') continue
+        let at = open.to
+        for (const child of parts.slice(1, -1)) {
           tex += this.slice(at, child.from)
           at = child.to
         }
-        tex += this.slice(at, node.to - 2)
-        return this.tex(tex, OPENS_LINE.test(tex) && CLOSES_LINE.test(tex))
+        tex += this.slice(at, close.from)
+        const fenced = this.slice(open.from, open.to) === '$$'
+        return this.tex(tex, fenced && OPENS_LINE.test(tex) && CLOSES_LINE.test(tex))
       }
       case 'Escape':
         return escape(this.slice(node.from + 1, node.to))
@@ -358,7 +440,7 @@ class Renderer {
 
 /** The Markdown's body as HTML, and whether it draws a formula. */
 export function renderMarkdown(text: string): { html: string; math: boolean } {
-  const renderer = new Renderer(text)
+  const renderer = new Renderer(fenceBracketMath(text, false))
   const html = renderer.render()
   return { html, math: renderer.math }
 }
