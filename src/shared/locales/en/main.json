@@ -68,7 +68,8 @@
     "exportFilter": {
       "md": "Markdown",
       "zip": "Zip archive",
-      "pdf": "PDF"
+      "pdf": "PDF",
+      "html": "Web page"
     }
   },
   "backup": {
@@ -135,7 +136,8 @@
     "quit": "Quit {{name}}",
     "remoteAccess": "Remote access",
     "checkForUpdates": "Check for updates…",
-    "debugMode": "Debug mode is on"
+    "debugMode": "Debug mode is on",
+    "mini": "Mini window"
   },
   "agents": {
     "folderTaken": "This folder already belongs to {{agent}}. Choose another one, or let Kettu make a new one."

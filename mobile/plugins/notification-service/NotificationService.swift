@@ -180,7 +180,7 @@ private enum Notice {
             category = made
           }
         }
-      case "turn-ended":
+      case "turn-ended", "note":
         result.categoryIdentifier = Categories.turnEnded
       case "stalled":
         result.categoryIdentifier = Categories.stalled
@@ -212,6 +212,8 @@ private enum Notice {
       return ("额度已恢复", "\(hostName) 上的会话正在自动继续")
     case "stalled":
       return ("可能卡住了", "\(hostName) 上的会话很久没有输出了")
+    case "note":
+      return ("Agent 发来通知", "\(hostName) 上的 Agent 有事告诉你")
     default:
       return ("纸鸢", "纸鸢有新动态")
     }

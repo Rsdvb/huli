@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { HOST_METHODS } from '../agent-host'
 import { forbiddenToDevices } from './allow-list'
 
+describe("Huli: a routine's webhook secret from a paired device", () => {
+  it('is made at the computer alone, where it is shown once', () => {
+    expect(HOST_METHODS).toContain('routines.webhookSecret')
+    expect(forbiddenToDevices('routines.webhookSecret', { routineId: 'r-0123456789ab' })).toBe(true)
+  })
+})
+
 describe("Huli: manager mode's requests from a paired device", () => {
   it("keeps a project's roster and the manager switch to the computer's windows", () => {
     for (const method of ['projects.setManager', 'manager.set']) {

@@ -30,6 +30,8 @@ import { SETTLE_DAYS } from './session-tidy'
 import { TOOL_CALL_VIEWS } from './zen-view'
 import type { AgentId, HarnessId } from './thread'
 import { PORT_BASE_MAX, PORT_BASE_MIN } from './worktree-ports'
+import { WEBHOOK_PORT_MAX, WEBHOOK_PORT_MIN } from './routines'
+import { DEFAULT_SHORTCUTS, SHORTCUT_GROUPS, SHORTCUT_IDS, type ShortcutId } from './shortcuts'
 import { WORKING_STEP_LIMITS } from './workflow'
 
 export const SETTINGS_SECTIONS = [
@@ -59,6 +61,8 @@ export const SETTINGS_SECTIONS = [
   'chat-bridge',
   // Huli: the switches of Kite's optional features.
   'features',
+  // Huli: the keys of Kite's shortcuts, and the global screenshot hotkey.
+  'shortcuts',
   'advanced',
   'about',
 ] as const
@@ -261,6 +265,7 @@ export const FEATURE_GROUP: Readonly<Record<FeatureId, FeatureGroup>> = {
   devices: 'agents',
   secrets: 'agents',
   agentTheme: 'agents',
+  agentNotify: 'agents',
   webReader: 'agents',
   chatBridge: 'connections',
   portForwarding: 'connections',
@@ -268,6 +273,23 @@ export const FEATURE_GROUP: Readonly<Record<FeatureId, FeatureGroup>> = {
   pickElement: 'connections',
   agentSync: 'connections',
 }
+
+/** Huli: each shortcut the user may rebind, which agents read but never change. */
+const SHORTCUT_ENTRIES = Object.fromEntries(
+  SHORTCUT_IDS.map((id) => [
+    `shortcuts.${id}`,
+    {
+      section: 'shortcuts',
+      row: id,
+      group: `shell:shortcuts.groups.${SHORTCUT_GROUPS[id]}`,
+      name: `shell:shortcuts.${id}`,
+      keywords: 'shortcuts.keywords',
+      part: 'desktop',
+      kind: 'info',
+      get: (file) => file.keyboard?.shortcuts[id] ?? DEFAULT_SHORTCUTS[id],
+    } satisfies CatalogEntry,
+  ]),
+) as unknown as Record<`shortcuts.${ShortcutId}`, CatalogEntry>
 
 /** Huli: the sections a feature switch hides whole. */
 const SECTION_FEATURES: Partial<Record<SettingsSection, FeatureId>> = {
@@ -1976,6 +1998,22 @@ const ENTRIES = {
       return { proxy: { mode: 'custom', url, noProxy } }
     },
   },
+  // Huli: the loopback port routines' webhooks listen on.
+  'advanced.webhook-port': {
+    section: 'advanced',
+    row: 'webhook-port',
+    group: 'advanced.groups.network',
+    name: 'advanced.webhookPort.name',
+    description: 'advanced.webhookPort.description',
+    keywords: 'advanced.webhookPort.keywords',
+    part: 'host',
+    access: 'ask',
+    kind: 'number',
+    min: WEBHOOK_PORT_MIN,
+    max: WEBHOOK_PORT_MAX,
+    get: (file) => file.webhooks.port,
+    patch: (value) => ({ webhooks: { port: Number(value) } }),
+  },
   'advanced.report': {
     section: 'advanced',
     row: 'report',
@@ -2502,6 +2540,28 @@ const ENTRIES = {
     kind: 'list',
   },
   ...FEATURE_ENTRIES,
+  ...SHORTCUT_ENTRIES,
+  'shortcuts.screenshot': {
+    section: 'shortcuts',
+    row: 'screenshot',
+    group: 'shortcuts.groups.global',
+    name: 'shortcuts.screenshot.name',
+    description: 'shortcuts.screenshot.description',
+    keywords: 'shortcuts.screenshot.keywords',
+    part: 'desktop',
+    kind: 'info',
+    get: (file) => file.keyboard?.screenshot ?? null,
+  },
+  'shortcuts.fixed': {
+    section: 'shortcuts',
+    row: 'fixed',
+    group: 'shortcuts.groups.fixed',
+    name: 'shortcuts.fixed.name',
+    description: 'shortcuts.fixed.description',
+    keywords: 'shortcuts.keywords',
+    part: 'desktop',
+    kind: 'info',
+  },
   'features.computer-use': {
     section: 'features',
     row: 'computer-use',

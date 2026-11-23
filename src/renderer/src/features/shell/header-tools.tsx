@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 import type { IconSvgElement } from '@hugeicons/react'
 import {
   BrowserIcon,
@@ -301,7 +302,7 @@ function useBarTools({
         ? `${t('headerTools.sideChat')} \u00b7 ${t('headerTools.sideChatNews')}`
         : t('headerTools.sideChat'),
       name: t('headerTools.sideChat'),
-      shortcut: 'Mod+J',
+      shortcut: shortcutKeysOf('sideChat'),
       icon: BubbleChatQuestionIcon,
       open: chatOpen,
       dot: chatNews ? 'news' : undefined,

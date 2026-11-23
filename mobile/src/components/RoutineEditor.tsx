@@ -189,11 +189,12 @@ export function RoutineEditor(props: {
           name: name.trim(),
           prompt: prompt.trim(),
           projectPath,
-          // Huli: one that runs on a GitHub event keeps it; the phone edits only its schedule.
+          // Huli: one that runs on a GitHub event or its webhook keeps it; the phone edits only
+          // its schedule.
           trigger:
-            props.routine.trigger.kind === 'github'
-              ? { ...props.routine.trigger, schedule }
-              : { kind: 'schedule', schedule },
+            props.routine.trigger.kind === 'schedule'
+              ? { kind: 'schedule', schedule }
+              : { ...props.routine.trigger, schedule },
           scope,
           onLimit,
           ...(agentId !== props.routine.agentId ? { agentId, options: [] } : {}),

@@ -896,6 +896,13 @@ export class ChatController {
           undefined,
           attention.sessionId,
         )
+      case 'note':
+        return this.say(
+          chat,
+          `**${plain(title)}**\n${plain(attention.body)}`,
+          this.selectButton(chat, attention.sessionId),
+          attention.sessionId,
+        )
       default:
         return
     }

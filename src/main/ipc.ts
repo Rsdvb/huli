@@ -1,4 +1,7 @@
 import { homedir } from 'node:os'
+import { isMiniSessionId } from '@shared/mini-window'
+import type { MiniWindow } from './mini-window'
+import type { ScreenCapture } from './screen-capture'
 import { isAbsolute, join } from 'node:path'
 import {
   app,
@@ -98,7 +101,7 @@ import { exportThemeFile, installThemeFile, revealThemeFile } from './theme-dial
 import type { ThemeStore } from './themes'
 import type { HuliAccountDevices } from './huli-account'
 import type { Updater } from './updater'
-import { isComputerOverlay, isOverlay, isPanel } from './window'
+import { isComputerOverlay, isOverlay, isPanel, ownPageOf } from './window'
 import { parsePickColor } from './browser/pick'
 import { folderArgs, forwardArgs, type PortForwards } from './port-forwards'
 
@@ -185,6 +188,18 @@ const PANEL_CHANNELS = new Set<string>([
   'tray:resize',
 ])
 
+// Huli: what the mini window's page may call: the reads it shares, its host port and its own calls.
+const MINI_CHANNELS = new Set<string>([
+  'settings:get',
+  'themes:get',
+  'agent-host:connect',
+  'mini:show-session',
+  'mini:close',
+])
+
+// Huli: what the screenshot overlay's page may send: the region it was dragged over, or Cancel.
+const CAPTURE_CHANNELS = new Set<string>(['capture:done', 'capture:cancel'])
+
 /**
  * Whether the sender may use `channel`: any for the window's page, the panel's few for its own.
  * The panel is told by its window, since a page can change its URL with history.pushState.
@@ -194,6 +209,13 @@ export function mayUse(event: IpcMainInvokeEvent | IpcMainEvent, channel: string
   const page = rendererPage(event.senderFrame?.url)
   if (isOverlay(event.sender) || isComputerOverlay(event.sender)) return false
   if (page === 'overlay' || page === 'computer-overlay') return false
+  // Huli: the mini window's and the screenshot overlay's pages, by their window or their URL.
+  const own = ownPageOf(event.sender) ?? (page === 'mini' || page === 'capture' ? page : null)
+  if (own === 'mini') return MINI_CHANNELS.has(channel)
+  if (own === 'capture') return CAPTURE_CHANNELS.has(channel)
+  // Only those pages send their own calls.
+  if (channel === 'mini:show-session' || channel === 'mini:close') return false
+  if (CAPTURE_CHANNELS.has(channel)) return false
   const panel = isPanel(event.sender) || page === 'tray'
   return !panel || PANEL_CHANNELS.has(channel)
 }
@@ -1127,6 +1149,29 @@ export function registerIpcHandlers({
     } else {
       log.info(`perf:interactive again (a reload) at ${ms} ms`)
     }
+  })
+}
+
+/** Huli: the mini window: opened by the window's page, its own calls from its own page alone. */
+export function registerMiniIpc(mini: MiniWindow): void {
+  on('mini:open', (_event, sessionId) => {
+    if (isMiniSessionId(sessionId)) mini.open(sessionId)
+  })
+  on('mini:show-session', (event) => {
+    if (mini.owns(event.sender)) mini.showSession()
+  })
+  on('mini:close', (event) => {
+    if (mini.owns(event.sender)) mini.close()
+  })
+}
+
+/** Huli: the screenshot overlay's answer, from its own page alone. */
+export function registerCaptureIpc(capture: ScreenCapture): void {
+  on('capture:done', (event, region) => {
+    if (capture.owns(event.sender)) capture.done(region)
+  })
+  on('capture:cancel', (event) => {
+    if (capture.owns(event.sender)) capture.cancel()
   })
 }
 

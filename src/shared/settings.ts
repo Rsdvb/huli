@@ -15,6 +15,8 @@ import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
 import { DEFAULT_PORT_BASE } from './worktree-ports'
 import { DEFAULT_WORKING_STEPS, type WorkingStepLimit } from './workflow'
+import { DEFAULT_WEBHOOK_PORT } from './routines'
+import type { ShortcutBindings } from './shortcuts'
 
 /** Whether a host's first start has run, so it runs once. */
 export interface InitialSetup {
@@ -145,6 +147,8 @@ export interface SettingsFile {
   supervisor: SupervisorSettings
   // Huli: the rules that settle sessions out of the active list by themselves (会话整理).
   tidy: TidySettings
+  // Huli: the loopback port routines' webhooks listen on, while one of them uses its webhook.
+  webhooks: { port: number }
   // How many workflow step sessions work at once across every task.
   workflow: { maxWorkingSteps: WorkingStepLimit }
   // source: where updates come from; GitHub only never reaches Kettu's download service.
@@ -181,6 +185,9 @@ export interface SettingsFile {
   onboarding: OnboardingState
   // Huli: the daily backup of this computer's data folder; see tools/huli/README.md.
   backup: BackupSettings
+  // Huli: this computer's keys: the shortcuts the user rebound, each one left out at its default,
+  // and the global screenshot hotkey (off while null); see shared/shortcuts.ts.
+  keyboard: { shortcuts: ShortcutBindings; screenshot: string | null }
   // Huli: which permission requests the host allows once by itself, for a project that keeps the
   // default; a project may choose its own. Agents never change it.
   permissions: { autoApprove: AutoApprove }
@@ -462,6 +469,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   idleSessions: { release: 'auto', outOfView: 5, inView: 30, limit: null },
   supervisor: DEFAULT_SUPERVISOR,
   tidy: { ...DEFAULT_TIDY },
+  webhooks: { port: DEFAULT_WEBHOOK_PORT },
   workflow: { maxWorkingSteps: DEFAULT_WORKING_STEPS },
   updates: { automatic: 'download', source: 'auto' },
   privacy: { hideAccount: false },
@@ -492,6 +500,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   cloud: { enabled: false },
   onboarding: { done: false, step: 'welcome' },
   backup: { enabled: true, time: '03:00', keep: 7, folder: null },
+  keyboard: { shortcuts: {}, screenshot: null },
   permissions: { autoApprove: 'off' },
   manager: DEFAULT_MANAGER_SETTINGS,
   sandbox: { ...DEFAULT_SANDBOX_SETTINGS },
@@ -573,6 +582,7 @@ export interface SettingsPatch {
   idleSessions?: Partial<SettingsFile['idleSessions']>
   supervisor?: Partial<SettingsFile['supervisor']>
   tidy?: Partial<SettingsFile['tidy']>
+  webhooks?: Partial<SettingsFile['webhooks']>
   workflow?: Partial<SettingsFile['workflow']>
   updates?: Partial<SettingsFile['updates']>
   privacy?: Partial<SettingsFile['privacy']>
@@ -596,6 +606,8 @@ export interface SettingsPatch {
   manager?: ManagerSettings // replaced whole
   sandbox?: Partial<SandboxSettings>
   features?: Partial<FeatureSettings>
+  // Huli: the shortcuts replaced whole.
+  keyboard?: Partial<SettingsFile['keyboard']>
   // Huli: the folder can only be cleared here, back to the default; one is picked in main's dialog.
   backup?: {
     enabled?: boolean
@@ -622,6 +634,8 @@ export interface HostSettings {
   supervisor?: SettingsFile['supervisor']
   // Huli: the rules that settle sessions by themselves; absent from a parent older than them.
   tidy?: SettingsFile['tidy']
+  // Huli: routines' webhook port; absent from a parent older than it, which leaves the default.
+  webhooks?: SettingsFile['webhooks']
   workflow: SettingsFile['workflow']
   usage: { fromComputer: boolean }
   sessionTitles: boolean // write a title for a session its agent leaves untitled

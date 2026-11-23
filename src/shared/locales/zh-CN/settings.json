@@ -23,7 +23,8 @@
     "backup": "备份",
     "chat-bridge": "聊天软件",
     "manager": "总管模式",
-    "features": "功能管理"
+    "features": "功能管理",
+    "shortcuts": "快捷键"
   },
   "page": {
     "title": "设置",
@@ -871,6 +872,12 @@
       "name": "备份",
       "description": "每天把 Kettu 的数据在这台电脑上备份一份，也可以从备份恢复。",
       "open": "备份设置…"
+    },
+    "webhookPort": {
+      "name": "定时任务 Webhook 端口",
+      "description": "由 Webhook 触发的定时任务在这台电脑上接收请求的端口。只有这类定时任务开启时纸鸢才监听。",
+      "keywords": "webhook 定时任务 端口 监听 http 触发 本机",
+      "invalid": "请输入 {{min}} 到 {{max}} 之间的整数。"
     }
   },
   "agents": {
@@ -1839,7 +1846,8 @@
     "backup": "每天把 Kettu 自己的数据备份一份，存在这台电脑上，丢失后可以恢复。",
     "chat-bridge": "在飞书、钉钉、企业微信、QQ 或 Telegram 里看会话、回答请求、给 Agent 发消息。",
     "manager": "一个总管拆分任务、派给别的智能体当工人去改代码，你只和总管说话。",
-    "features": "关掉不用的功能：它的入口会藏起来，代码也不再加载和运行。"
+    "features": "关掉不用的功能：它的入口会藏起来，代码也不再加载和运行。",
+    "shortcuts": "修改纸鸢在这台电脑上的快捷键。按键按键盘上的实际位置算，跟输入法无关。"
   },
   "archived": {
     "description": "{{project}} · {{when}}归档",
@@ -3368,6 +3376,10 @@
         "name": "Agent 改主题",
         "description": "你让 Agent 改配色时，它能读取和修改纸鸢的主题颜色。"
       },
+      "agentNotify": {
+        "name": "Agent 主动通知",
+        "description": "你让 Agent 做完告诉你，或长任务完成时，它会发桌面通知和手机推送。通知设置和手机上静音的会话照样生效。"
+      },
       "chatBridge": {
         "name": "聊天软件遥控",
         "description": "用飞书、钉钉、企业微信、QQ 或 Telegram 的机器人遥控 Agent。关掉后机器人全部断开。"
@@ -3413,5 +3425,36 @@
     "noMonospaceMatch": "没有匹配的等宽字体。",
     "loading": "正在读取已安装的字体…",
     "unavailable": "这个浏览器列不出字体，输入字体名即可使用。"
+  },
+  "shortcuts": {
+    "keywords": "快捷键 键盘 按键 热键 绑定 修改 改键",
+    "groups": {
+      "global": "在电脑任何地方",
+      "fixed": "固定按键"
+    },
+    "change": "修改",
+    "changeLabel": "修改「{{name}}」的按键",
+    "reset": "恢复默认",
+    "recording": "请按下新的按键…（Esc 取消）",
+    "recordLabel": "为「{{name}}」按下新的按键",
+    "problem": {
+      "invalid": "这组按键不能用作快捷键。",
+      "modifier": "请同时按住 {{keys}} 中的一个。",
+      "twoModifiers": "请同时按住 Ctrl、Alt、Shift、⌘ 中的两个，或用功能键。",
+      "reserved": "这组按键由纸鸢或系统保留。",
+      "taken": "已被「{{name}}」使用。"
+    },
+    "screenshot": {
+      "name": "截图发到会话",
+      "description": "框选屏幕上的一块区域，附到当前会话的输入框里；没有打开的会话就新建一个。纸鸢在后台时也能用。",
+      "keywords": "截图 截屏 屏幕 区域 全局 热键",
+      "off": "关闭",
+      "set": "设置按键",
+      "turnOff": "关闭"
+    },
+    "fixed": {
+      "name": "不能修改的按键",
+      "description": "后退、前进、切换窗格、关闭和缩放的按键保持不变。"
+    }
   }
 }

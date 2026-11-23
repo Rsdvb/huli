@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next'
 import type { SlashCommand } from '@shared/thread'
 import type { ComposerAddSection } from '@renderer/components/affect/chat-composer'
 import { formatShortcut, isWeb } from '@renderer/lib/platform'
+import { shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 import { useBrowserStore } from '@renderer/stores/browser'
 import { shownSidePane, useViewStore } from '@renderer/stores/view'
 import { Glyph } from '@renderer/features/shell/glyph'
@@ -120,7 +121,7 @@ export function useAddMenu({
                 id: 'side-chat',
                 label: t('attachments.sideChat'),
                 icon: <Glyph icon={BubbleChatQuestionIcon} />,
-                shortcut: formatShortcut('Mod+J'),
+                shortcut: formatShortcut(shortcutKeysOf('sideChat')),
               },
             ],
           },

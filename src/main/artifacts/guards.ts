@@ -6,6 +6,14 @@ import type { ArtifactBlockedEvent, ArtifactStoppedEvent, ForwardedKey } from '@
 import { ARTIFACT_SCHEME, artifactHost } from './origins'
 import { refuseRequests } from '../request-filter'
 import { mayRequest } from './policy'
+import {
+  canonicalKeys,
+  DEFAULT_SHORTCUTS,
+  keysOfEvent,
+  MENU_SHORTCUTS,
+  SHORTCUT_IDS,
+  type ShortcutBindings,
+} from '@shared/shortcuts'
 
 /** How often main looks for an artifact frame whose process stopped; Electron reports none. */
 const STOPPED_POLL_MS = 1_000
@@ -66,6 +74,26 @@ export function mayNavigate(host: string, url: string, branch: boolean): boolean
 }
 
 /** Whether a key in a page's frame is an app shortcut main passes on to the app's page. */
+/** Huli: the keys the user bound the app's shortcuts to, which a page passes on as well. */
+let reboundKeys: ReadonlySet<string> = new Set()
+
+/**
+ * Huli: the user's bindings in Settings › Keyboard shortcuts; the ones that differ from their
+ * defaults reach the window from a page too, but for those macOS's menu bar carries.
+ */
+export function setReboundShortcuts(bindings: ShortcutBindings, platform: NodeJS.Platform): void {
+  const mac = platform === 'darwin'
+  reboundKeys = new Set(
+    SHORTCUT_IDS.flatMap((id) => {
+      const keys = bindings[id]
+      if (keys === undefined || keys === DEFAULT_SHORTCUTS[id]) return []
+      if (mac && MENU_SHORTCUTS.includes(id)) return []
+      const canonical = canonicalKeys(keys, mac)
+      return canonical ? [canonical] : []
+    }),
+  )
+}
+
 export function forwardedKey(input: Input, platform: NodeJS.Platform): ForwardedKey | null {
   if (input.type !== 'keyDown' || input.isComposing) return null
   const key: ForwardedKey = {
@@ -77,6 +105,19 @@ export function forwardedKey(input: Input, platform: NodeJS.Platform): Forwarded
     altKey: input.alt,
   }
   const mac = platform === 'darwin'
+  if (reboundKeys.size > 0) {
+    const pressed = keysOfEvent(
+      {
+        code: input.code,
+        metaKey: input.meta,
+        ctrlKey: input.control,
+        altKey: input.alt,
+        shiftKey: input.shift,
+      },
+      mac,
+    )
+    if (pressed !== null && reboundKeys.has(pressed)) return key
+  }
   // Back and forward outside macOS, Alt and an arrow; Alt with anything else stays the page's.
   if (input.alt) {
     const arrow = input.code === 'ArrowLeft' || input.code === 'ArrowRight'

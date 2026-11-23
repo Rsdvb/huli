@@ -68,7 +68,8 @@
     "exportFilter": {
       "md": "Markdown",
       "zip": "Zip 压缩包",
-      "pdf": "PDF"
+      "pdf": "PDF",
+      "html": "网页"
     }
   },
   "backup": {
@@ -129,7 +130,8 @@
     "quit": "退出 {{name}}",
     "remoteAccess": "远程访问",
     "checkForUpdates": "检查更新…",
-    "debugMode": "调试模式已打开"
+    "debugMode": "调试模式已打开",
+    "mini": "小窗"
   },
   "agents": {
     "folderTaken": "这个目录已经属于 {{agent}}。请换一个，或者让 Kettu 新建一个。"

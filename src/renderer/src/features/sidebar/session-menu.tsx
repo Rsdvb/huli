@@ -13,6 +13,7 @@ import {
   Copy01Icon,
   Delete02Icon,
   FileExportIcon,
+  PictureInPictureOnIcon,
   FolderOpenIcon,
   GitBranchIcon,
   GitMergeIcon,
@@ -79,6 +80,7 @@ import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath, hostPath } from '@renderer/lib/host-paths'
 import { currentLocale, i18n } from '@renderer/lib/i18n'
 import { fileManagerName, formatShortcut, isMac, isWeb } from '@renderer/lib/platform'
+import { shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 import { cn } from '@renderer/lib/utils'
 import { agentsOn, isInstalled, usableAgents, useAgentsStore } from '@renderer/stores/agents'
 import { useGitStore } from '@renderer/stores/git'
@@ -140,7 +142,7 @@ import { MoveToFolderMenu } from '@renderer/features/session-folders/move-menu'
 import { RowOrderItems } from './group-order-menu'
 import { BoardStatusMenu } from '@renderer/features/task-board/status'
 import { ManagerMenu } from '@renderer/features/manager/manager-menu'
-import { askExport, canExport } from '@renderer/features/session/export/export'
+import { askExport, canExport, exportAs } from '@renderer/features/session/export/export'
 import { askMove, canMove } from '@renderer/features/session/move/move'
 import { askMcpPanel } from '@renderer/features/session/mcp/mcp-panel'
 import {
@@ -248,7 +250,7 @@ export function SessionMenuItems({
   /** The row's sub-agents, which the menu lists as its badge does; left out where it has none. */
   subagents?: readonly SessionSummary[]
 }) {
-  const { t } = useTranslation(['sidebar', 'common'])
+  const { t } = useTranslation(['sidebar', 'common', 'session'])
   // The agents of the session's host that can run one now; More options opens New session with
   // every agent.
   const hostId = hostOfSession(summary)
@@ -282,7 +284,9 @@ export function SessionMenuItems({
   const menuOptions = useMenuOptions(summary.id)
 
   const item = (name: SessionMenuItem) => {
-    const accelerator = ACCELERATORS[name]
+    // Huli: the terminal's item carries the terminal's keys as the user bound them.
+    const accelerator =
+      name === 'openTerminal' ? shortcutKeysOf('toggleTerminal') : ACCELERATORS[name]
     const shortcut = accelerator && (
       <DropdownMenuShortcut>{shortcutLabel(accelerator)}</DropdownMenuShortcut>
     )
@@ -599,12 +603,38 @@ export function SessionMenuItems({
             {t('row.copySessionId')}
           </DropdownMenuItem>
         )
+      case 'mini':
+        return (
+          <DropdownMenuItem
+            key={name}
+            {...props}
+            onClick={() => window.kettu.mini?.open(summary.id)}
+          >
+            <MenuGlyph icon={PictureInPictureOnIcon} />
+            {t('row.mini')}
+          </DropdownMenuItem>
+        )
+      // Huli: Export › Web page… and Markdown… at once, and the dialog for the rest.
       case 'export':
         return (
-          <DropdownMenuItem key={name} {...props} onClick={() => askExport(summary)}>
-            <MenuGlyph icon={FileExportIcon} />
-            {t('row.export')}
-          </DropdownMenuItem>
+          <DropdownMenuSub key={name}>
+            <DropdownMenuSubTrigger>
+              <MenuGlyph icon={FileExportIcon} />
+              {t('session:export.menu')}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem onClick={() => exportAs(summary, 'html')}>
+                {t('session:export.asHtml')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportAs(summary, 'md')}>
+                {t('session:export.asMarkdown')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => askExport(summary)}>
+                {t('session:export.more')}
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         )
       case 'mcp':
         return (
@@ -702,6 +732,7 @@ export function SessionMenuItems({
     removeWorktree: canRemoveWorktree(summary),
     exportable: canExport(),
     movable: canMove() && !summary.scratch && summary.origin !== 'subagent',
+    mini: local && window.kettu.mini !== undefined,
     prFlow: prTarget !== null,
     subagents: listed.length > 0,
     menuOptions: menuOptions.length > 0,

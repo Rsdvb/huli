@@ -29,25 +29,30 @@ function eventOf(kind: GithubEventKind, from: GithubEvent | null): GithubEvent {
 }
 
 /**
- * Huli: when a routine runs: on its schedule, which the schedule card below sets, or on a GitHub
- * event in its project's repository, with the label or branch the event takes.
+ * Huli: when a routine runs: on its schedule, which the schedule card below sets, on a GitHub
+ * event in its project's repository, with the label or branch the event takes, or on a request
+ * to its webhook, which the webhook card below sets up.
  */
 export function TriggerField({
   trigger,
   onTrigger,
   noProject,
+  github,
 }: {
   trigger: RoutineTrigger
   onTrigger: (trigger: RoutineTrigger) => void
   /** The routine works in no project, which a GitHub event needs. */
   noProject: boolean
+  /** GitHub events are offered: GitHub automation is on, or the routine runs on one. */
+  github: boolean
 }) {
   const { t } = useTranslation('routines')
   const schedule: Schedule = trigger.schedule
   const event = trigger.kind === 'github' ? trigger.event : null
   const kindOptions: { value: Kind; label: string }[] = [
     { value: 'schedule', label: t('on.schedule') },
-    { value: 'github', label: t('on.github') },
+    ...(github ? [{ value: 'github' as const, label: t('on.github') }] : []),
+    { value: 'webhook', label: t('on.webhook') },
   ]
   const eventOptions = GITHUB_EVENT_KINDS.map((kind) => ({
     value: kind,
@@ -56,7 +61,10 @@ export function TriggerField({
 
   return (
     <div className="ui-sg-card">
-      <Row title={t('on.kind')} note={event ? t('on.hint') : undefined}>
+      <Row
+        title={t('on.kind')}
+        note={event ? t('on.hint') : trigger.kind === 'webhook' ? t('on.webhookHint') : undefined}
+      >
         <Select
           label={t('on.kind')}
           value={trigger.kind}
@@ -65,7 +73,9 @@ export function TriggerField({
             onTrigger(
               kind === 'github'
                 ? { kind, event: { kind: 'issue_opened', label: null }, schedule }
-                : { kind, schedule },
+                : kind === 'webhook'
+                  ? { kind, schedule }
+                  : { kind, schedule },
             )
           }
         />

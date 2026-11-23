@@ -95,6 +95,7 @@ import { routineMenu } from './menu-items'
 import { RunAnnouncements, RunHistory, RunsCard, RunsEmpty } from './run-history'
 import { ScheduleField } from './schedule-field'
 import { TriggerField } from './trigger-field'
+import { WebhookCard } from './webhook-card'
 
 export default function RoutinePage({
   routineId,
@@ -408,6 +409,7 @@ function RoutineBody({ routine }: { routine: RoutineView }) {
             onOnLimit={(onLimit) => save({ onLimit })}
             scope={routine.scope}
             onScope={(scope) => save({ scope })}
+            routine={routine}
             trigger={routine.trigger}
             onTrigger={(trigger) => save({ trigger })}
             schedule={routine.trigger.schedule}
@@ -510,11 +512,14 @@ function NewRoutine({ example }: { example: RoutineExampleId | null }) {
   const [scope, setScope] = useState<PermissionScope>(seed?.scope ?? DEFAULT_SCOPE)
   const [schedule, setSchedule] = useState<Schedule>(seed?.schedule ?? DEFAULT_SCHEDULE)
   const [scheduleProblem, setScheduleProblem] = useState<ScheduleProblem | null>(null)
-  // Huli: the GitHub event it runs on instead of its schedule, when chosen.
+  // Huli: the GitHub event it runs on instead of its schedule, or its webhook, when chosen.
   const [event, setEvent] = useState<GithubEvent | null>(null)
+  const [webhook, setWebhook] = useState(false)
   const trigger: RoutineTrigger = event
     ? { kind: 'github', event, schedule }
-    : { kind: 'schedule', schedule }
+    : webhook
+      ? { kind: 'webhook', schedule }
+      : { kind: 'schedule', schedule }
   const now = useNow()
 
   useBackOnEscape()
@@ -668,6 +673,7 @@ function NewRoutine({ example }: { example: RoutineExampleId | null }) {
             onTrigger={(next) => {
               setSchedule(next.schedule)
               setEvent(next.kind === 'github' ? next.event : null)
+              setWebhook(next.kind === 'webhook')
             }}
             schedule={schedule}
             savedSchedule={null}
@@ -675,7 +681,11 @@ function NewRoutine({ example }: { example: RoutineExampleId | null }) {
             onScheduleProblem={setScheduleProblem}
           />
           <RunsCard>
-            <RunsEmpty hint={event ? t('on.hint') : firstRunHint(schedule, now)} />
+            <RunsEmpty
+              hint={
+                event ? t('on.hint') : webhook ? t('on.webhookHint') : firstRunHint(schedule, now)
+              }
+            />
           </RunsCard>
         </div>
       </AwayContent>
@@ -745,6 +755,7 @@ function RoutineFields({
   done = false,
   onSchedule,
   onScheduleProblem,
+  routine,
 }: {
   /** The host the routine is on, whose agents it runs, null being this computer. */
   hostId: string | null
@@ -771,7 +782,7 @@ function RoutineFields({
   onOnLimit: (onLimit: OnLimit) => void
   scope: PermissionScope
   onScope: (scope: PermissionScope) => void
-  /** Huli: on its schedule or on a GitHub event. */
+  /** Huli: on its schedule, on a GitHub event or on its webhook. */
   trigger: RoutineTrigger
   onTrigger: (trigger: RoutineTrigger) => void
   schedule: Schedule
@@ -780,6 +791,8 @@ function RoutineFields({
   done?: boolean
   onSchedule: (schedule: Schedule) => void
   onScheduleProblem?: (problem: ScheduleProblem | null) => void
+  /** Huli: the saved routine, whose webhook card shows its address; absent while it is new. */
+  routine?: RoutineView
 }) {
   const { t } = useTranslation('routines')
   const triggerOn = useEntry('routine.trigger')
@@ -847,11 +860,18 @@ function RoutineFields({
           </span>
         </Row>
       </div>
-      {/* Huli: GitHub events, while GitHub automation is on or the routine still runs on one. */}
-      {(triggerOn || trigger.kind === 'github') && (
+      {/* Huli: GitHub events while GitHub automation is on or it runs on one, and the webhook. */}
+      <Head title={t('on.title')} />
+      <TriggerField
+        trigger={trigger}
+        onTrigger={onTrigger}
+        noProject={noProject}
+        github={triggerOn || trigger.kind === 'github'}
+      />
+      {trigger.kind === 'webhook' && (
         <>
-          <Head title={t('on.title')} />
-          <TriggerField trigger={trigger} onTrigger={onTrigger} noProject={noProject} />
+          <Head title={t('webhook.title')} note={t('webhook.titleHint')} />
+          <WebhookCard routine={routine ?? null} />
         </>
       )}
       {trigger.kind === 'schedule' && (

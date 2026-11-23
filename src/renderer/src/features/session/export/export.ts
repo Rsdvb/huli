@@ -14,7 +14,9 @@ import {
 } from '@shared/session-export'
 import type { ConfigOption, ThreadEntry } from '@shared/thread'
 import { fullTime } from '@renderer/lib/format'
-import { host } from '@renderer/lib/host'
+import { FileExportIcon } from '@hugeicons/core-free-icons'
+import { toast } from '@renderer/components/ui/toast'
+import { errorMessage, host } from '@renderer/lib/host'
 import { hostPath } from '@renderer/lib/host-paths'
 import { i18n } from '@renderer/lib/i18n'
 import { readJson, writeJson } from '@renderer/lib/storage'
@@ -35,7 +37,7 @@ const DEFAULT_CHOICE: ExportChoice = {
 /** The choice last exported with, kept for the next export. */
 export function lastChoice(): ExportChoice {
   const kept = readJson<Partial<ExportChoice> | null>(CHOICE_KEY, null)
-  const format = (['md', 'zip', 'pdf'] as const).find((f) => f === kept?.format)
+  const format = (['md', 'zip', 'pdf', 'html'] as const).find((f) => f === kept?.format)
   return {
     format: format ?? DEFAULT_CHOICE.format,
     options: { ...DEFAULT_CHOICE.options, ...kept?.options },
@@ -56,6 +58,21 @@ export const useExportStore = create<ExportStore>()(() => ({ summary: null }))
 /** Opens the dialog for the session, as its menu's Export… does. */
 export function askExport(summary: SessionSummary): void {
   useExportStore.setState({ summary })
+}
+
+/**
+ * Huli: the menu's Export › Web page… and Markdown…: the format at once, with what the last export
+ * included, then main's save dialog; a toast says it was saved, or why it was not.
+ */
+export function exportAs(summary: SessionSummary, format: ExportFormat): void {
+  const choice = { ...lastChoice(), format }
+  const t = i18n.getFixedT(null, 'session')
+  exportSession(summary, choice).then(
+    (saved) => {
+      if (saved) toast(t('export.saved'), undefined, { icon: FileExportIcon })
+    },
+    (error: unknown) => toast(errorMessage(error), undefined, { tone: 'warning' }),
+  )
 }
 
 /** Whether this window can save an export: the desktop app's, which has main. */

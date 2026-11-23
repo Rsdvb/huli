@@ -106,6 +106,13 @@ import {
   ReportTools,
   type ReportToolsDeps,
 } from '../report-tool'
+import {
+  isNotifyToolName,
+  NOTIFY_TOOL,
+  NOTIFY_TOOLS,
+  NotifyTools,
+  type NotifyToolsDeps,
+} from '../notify-tool'
 import { COMPUTER_TOOLS } from '../computer/tools'
 import {
   isMemoryToolName,
@@ -145,6 +152,7 @@ const SERVICE_TOOLS: Tool[] = [
   ...SESSION_TOOLS,
   ...PLAN_TOOLS,
   ...REPORT_TOOLS,
+  ...NOTIFY_TOOLS,
   ...BROWSER_TOOLS,
   ...DEVICE_TOOLS,
   ...TERMINAL_TOOLS,
@@ -157,6 +165,7 @@ const TOOL_GROUPS: ReadonlyMap<string, McpToolGroup> = new Map(
       [MARKET_TOOLS, 'marketplace'],
       [SESSION_TOOLS, 'sessions'],
       [PLAN_TOOLS, 'sessions'],
+      [NOTIFY_TOOLS, 'sessions'],
       [TOOLS, 'artifacts'],
       [DATA_TOOLS, 'artifacts'],
       [BROWSER_TOOLS, 'browser'],
@@ -257,6 +266,8 @@ export interface ArtifactServiceDeps extends ArtifactToolsDeps {
   plan: PlanToolsDeps
   /** Where the problem report tool adds its drafts. */
   report: ReportToolsDeps
+  /** Huli: where the notify tool raises its notes; without it every call fails. */
+  notify?: NotifyToolsDeps
   /** Kettu's memory behind the memory tools, listed only while it is on; without it none. */
   memory?: MemoryToolsDeps
   /** Whether the agent's session `id` is a subagent that runs under a session of its own. */
@@ -397,6 +408,7 @@ export class ArtifactService {
   private readonly sessionTools: SessionTools
   private readonly planTools: PlanTools
   private readonly reportTools: ReportTools
+  private readonly notifyTools: NotifyTools
   private readonly memoryTools: MemoryTools | null
   private readonly browserTools: BrowserTools
   private readonly deviceTools: DeviceTools | null
@@ -415,6 +427,7 @@ export class ArtifactService {
     this.sessionTools = new SessionTools(deps.sessions)
     this.planTools = new PlanTools(deps.plan)
     this.reportTools = new ReportTools(deps.report)
+    this.notifyTools = new NotifyTools(deps.notify ?? { notify: () => 'none' })
     this.memoryTools = deps.memory ? new MemoryTools(deps.memory) : null
     this.workflowTools = deps.workflow ? new WorkflowTools(deps.workflow) : null
     this.managerTools = deps.manager ? new ManagerTools(deps.manager) : null
@@ -547,6 +560,7 @@ export class ArtifactService {
       secrets: this.deps.secrets !== undefined && this.featureOn('secrets'),
       theme: this.deps.theme !== undefined && this.featureOn('agentTheme'),
       webReader: this.deps.webReader !== undefined && this.featureOn('webReader'),
+      notify: this.deps.notify !== undefined && this.featureOn('agentNotify'),
     }
   }
 
@@ -990,6 +1004,17 @@ export class ArtifactService {
         throw new McpError(
           ErrorCode.InternalError,
           `${REPORT_TOOL} failed: ${(error as Error).message}`,
+        )
+      }
+    }
+    if (isNotifyToolName(name)) {
+      try {
+        return this.notifyTools.call(caller, name, input)
+      } catch (error) {
+        this.deps.log('error', `${NOTIFY_TOOL} failed: ${(error as Error).message}`)
+        throw new McpError(
+          ErrorCode.InternalError,
+          `${NOTIFY_TOOL} failed: ${(error as Error).message}`,
         )
       }
     }

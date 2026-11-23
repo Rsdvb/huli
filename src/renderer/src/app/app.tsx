@@ -42,7 +42,8 @@ import { ReportDialog } from '@renderer/features/report/report-dialog'
 import { SignInsDialog } from '@renderer/features/browser/sign-ins-dialog'
 import { DiscoveryRequestDialog } from '@renderer/features/settings/discovery-request'
 import { useReportNotices } from '@renderer/features/report/report-notices'
-import { formatShortcut, hasBand, isWeb } from '@renderer/lib/platform'
+import { hasBand, isWeb } from '@renderer/lib/platform'
+import { useShortcutLabel } from '@renderer/lib/shortcut-keys'
 import { readJson, writeJson } from '@renderer/lib/storage'
 import { cn } from '@renderer/lib/utils'
 import { prefersReducedMotion, useSettingsStore } from '@renderer/stores/settings'
@@ -230,6 +231,7 @@ const CORNER = <CornerControls />
  */
 function Workbench() {
   const { t } = useTranslation('sidebar')
+  const searchKey = useShortcutLabel('searchSessions')
   const collapsed = useViewStore((s) => s.sidebarCollapsed)
   const drawer = useViewStore((s) => s.sidebarDrawer)
   const nav = useSidebarNav()
@@ -287,7 +289,7 @@ function Workbench() {
         corner={CORNER}
         labels={{
           search: t('nav.searchField'),
-          searchKey: formatShortcut('Mod+K'),
+          searchKey,
           menu: t('nav.label'),
           resize: t('nav.resize'),
           account: t('account.signedOut'),

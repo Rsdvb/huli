@@ -80,6 +80,7 @@ import {
 import { useComputerUseSection } from './computer-section'
 import { useAgentNetworkSection } from './agent-network-section'
 import { useBackupSection } from './backup-section'
+import { useShortcutsSection } from './shortcuts-section'
 import { useChatBridgeSection } from './chat-bridge-section'
 import { useFeaturesSection } from './features-section'
 import { useManagerSection } from './manager-section'
@@ -178,11 +179,14 @@ export function SettingsContent({ titleId }: { titleId?: string }) {
   const account = useAccountSection()
   const devices = useDevicesSection()
   const chatBridge = useChatBridgeSection()
+  // Huli: this computer's keys, which a browser's page has none of.
+  const shortcuts = useShortcutsSection()
   const devicesOn = useEntry('settings.devices')
   const chatBridgeOn = useEntry('settings.chatBridge')
   const client = [
     useGeneralSection(),
     useAppearanceSection(),
+    ...(isWeb ? [] : [shortcuts]),
     useNotificationsSection(),
     ...(cloudOff ? [] : [account]),
     useHostsSection(),

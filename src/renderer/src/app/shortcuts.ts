@@ -29,6 +29,8 @@ import { closeCurrent } from './close'
 import { emitAppEvent } from './events'
 import { back, forward, historyKey, toggleHistory } from './history'
 import { usedPane } from './used-pane'
+import type { ShortcutId } from '@shared/shortcuts'
+import { pressedShortcut, shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 
 const client = window.kettu.client
 
@@ -63,19 +65,23 @@ export function useKeyboardShortcuts(): void {
         if (keepHistoryKey(event, platform)) event.preventDefault()
         return
       }
+      // Huli: Settings' key recorder takes the keys it is shown.
+      if ((event.target as HTMLElement | null)?.closest?.('[data-key-recorder]')) return
       const view = useViewStore.getState()
       const inTerminal = !!(document.activeElement as HTMLElement | null)?.closest(
         '[data-terminal]',
       )
 
-      if (event.ctrlKey && !event.metaKey && !event.altKey && event.code === 'Backquote') {
+      // Huli: the shortcuts the user may rebind, by their keys in Settings.
+      const bound = pressedShortcut(event)
+      if (bound === 'toggleTerminal' || bound === 'newTerminal') {
         // A session's More menu opens its own session's terminal on this key.
-        if (document.querySelector(MENU_OPENS_TERMINAL)) return
+        if (document.querySelector(menuOpensTerminal())) return
         event.preventDefault()
         // The terminal of the side panel in view: its session's, or New session's in a project.
         const panel = sessionsShown(view.main) ? shownPanel(view) : null
         if (!panel || view.settings.open) return
-        if (event.shiftKey) emitAppEvent({ kind: 'new-terminal' })
+        if (bound === 'newTerminal') emitAppEvent({ kind: 'new-terminal' })
         else toggleTerminal(panel)
         return
       }
@@ -86,18 +92,14 @@ export function useKeyboardShortcuts(): void {
         return run(event, step === 'back' ? back : forward)
       }
 
+      if (bound && runBound(event, bound, inTerminal)) return
+
       if (!isMod(event) || event.altKey) return
       const zoom = pageHandlesZoomKeys(platform, client) ? zoomStep(event.key) : null
       if (zoom !== null) return run(event, () => zoomBy(zoom))
-      if (inTerminal && !isMac) {
-        const selection = window.getSelection()?.toString() ?? ''
-        if (!(event.key.toLowerCase() === 'l' && !event.shiftKey && selection)) return
-      }
-
-      // The Files pane's editor keeps this key, which comments the selected lines there.
-      if (event.key === '/' && !inCodeEditor(event.target)) {
-        return run(event, () => toggleShortcuts(popupOpen()))
-      }
+      // A terminal on Windows and Linux keeps the rest: Ctrl+B, Ctrl+H and Ctrl+N mean something
+      // to the shell.
+      if (inTerminal && !isMac) return
 
       // Mod+1 to Mod+9 focus a pane of the split, unless Settings covers it, no pane is there, or a
       // menu is open, such as the account menu, where they pick a host.
@@ -120,76 +122,13 @@ export function useKeyboardShortcuts(): void {
       if (key === 't' && !event.shiftKey && usedPane()?.kind === 'browser' && !layerOpen()) {
         return run(event, () => emitAppEvent({ kind: 'new-browser-tab' }))
       }
-      // A terminal on Windows and Linux never reaches here: Ctrl+K deletes to the end of the line.
-      if (key === 'k' && !event.shiftKey && !event.repeat) {
-        return run(event, () => toggleSearch(layerOpen()))
-      }
       if (pageHandlesMenuKeys(platform, client) && !event.shiftKey) {
-        if (key === 'o') return run(event, () => void openProjectDialog())
-        if (key === 'n') return run(event, newSession)
-        if (key === ',') return run(event, () => openSettings())
-        if (key === 'b') return run(event, toggleSidebar)
         if (key === historyKey(platform)) return run(event, () => toggleHistory(layerOpen()))
         // A tab or the session; with none to close the key is the window's, or the browser's.
         if (key === 'w') {
           if (closeCurrent()) event.preventDefault()
           return
         }
-      }
-      // The Files pane's editor keeps Mod+U and Mod+Shift+[ and ], as it does Mod+/ above.
-      const editing = inCodeEditor(event.target)
-      if (
-        key === 'u' &&
-        !event.shiftKey &&
-        !editing &&
-        sessionsShown(view.main) &&
-        !view.settings.open
-      ) {
-        return run(event, () => emitAppEvent({ kind: 'add-attachments' }))
-      }
-      // Finding in the session on screen; the Files pane's editor, a terminal and the browser keep
-      // the key when they were used last, and Settings has its own search.
-      if (
-        key === 'f' &&
-        !event.shiftKey &&
-        !editing &&
-        !inTerminal &&
-        view.main.kind === 'session' &&
-        !view.settings.open &&
-        !usedPane() &&
-        !layerOpen()
-      ) {
-        return run(event, () => emitAppEvent({ kind: 'find-in-session' }))
-      }
-      if (
-        key === 'a' &&
-        event.shiftKey &&
-        !editing &&
-        sessionsShown(view.main) &&
-        !view.settings.open
-      ) {
-        return run(event, () => emitAppEvent({ kind: 'open-add-menu' }))
-      }
-      if (key === 'l' && !event.shiftKey) {
-        return run(event, () =>
-          emitAppEvent({ kind: inTerminal ? 'ask-selection' : 'focus-composer' }),
-        )
-      }
-      // The side chat of the session in focus; a sub-agent's page has none.
-      if (key === 'j' && !event.shiftKey && view.main.kind === 'session' && !view.settings.open) {
-        const { sessionId } = view.main
-        const origin = useSessionsStore.getState().byId[sessionId]?.origin
-        if (origin !== undefined && origin !== 'subagent') {
-          const inside = !!(document.activeElement as HTMLElement | null)?.closest('.kc-rail')
-          return run(event, () => toggleSideChatFocus(sessionId, inside))
-        }
-      }
-      if (
-        event.shiftKey &&
-        !editing &&
-        (event.code === 'BracketLeft' || event.code === 'BracketRight')
-      ) {
-        return run(event, () => stepSession(event.code === 'BracketLeft' ? -1 : 1))
       }
     }
     // In the bubble phase, once the Files pane's editor has used the key or left it.
@@ -272,6 +211,84 @@ function historyKeys(event: HistoryKeyEvent, platform: string): 'back' | 'forwar
   return (mac ? BRACKETS : ARROWS)[event.code] ?? null
 }
 
+/**
+ * Huli: runs a shortcut the user may rebind, where it applies now; false leaves the key to the
+ * page, as one the Files pane's editor or a terminal keeps.
+ */
+function runBound(event: KeyboardEvent, id: ShortcutId, inTerminal: boolean): boolean {
+  const view = useViewStore.getState()
+  const editing = inCodeEditor(event.target)
+  const go = (action: () => void): true => {
+    run(event, action)
+    return true
+  }
+  // A terminal on Windows and Linux keeps the keys but for the selection's Ask.
+  if (inTerminal && !isMac) {
+    const selection = window.getSelection()?.toString() ?? ''
+    if (!(id === 'focusComposer' && selection)) return false
+  }
+  switch (id) {
+    // The Files pane's editor keeps Mod+/, which comments the selected lines there.
+    case 'showShortcuts':
+      return !editing && go(() => toggleShortcuts(popupOpen()))
+    case 'searchSessions':
+      return !event.repeat && go(() => toggleSearch(layerOpen()))
+    // macOS's menu bar has these, and runs them as app commands.
+    case 'openProject':
+      return pageHandlesMenuKeys(platform, client) && go(() => void openProjectDialog())
+    case 'newSession':
+      return pageHandlesMenuKeys(platform, client) && go(newSession)
+    case 'settings':
+      return pageHandlesMenuKeys(platform, client) && go(() => openSettings())
+    case 'toggleSidebar':
+      return pageHandlesMenuKeys(platform, client) && go(toggleSidebar)
+    // The Files pane's editor keeps Mod+U and Mod+Shift+[ and ], as it does Mod+/ above.
+    case 'addFiles':
+      return (
+        !editing &&
+        sessionsShown(view.main) &&
+        !view.settings.open &&
+        go(() => emitAppEvent({ kind: 'add-attachments' }))
+      )
+    // Finding in the session on screen; the Files pane's editor, a terminal and the browser keep
+    // the key when they were used last, and Settings has its own search.
+    case 'findInSession':
+      return (
+        !editing &&
+        !inTerminal &&
+        view.main.kind === 'session' &&
+        !view.settings.open &&
+        !usedPane() &&
+        !layerOpen() &&
+        go(() => emitAppEvent({ kind: 'find-in-session' }))
+      )
+    case 'addMenu':
+      return (
+        !editing &&
+        sessionsShown(view.main) &&
+        !view.settings.open &&
+        go(() => emitAppEvent({ kind: 'open-add-menu' }))
+      )
+    case 'focusComposer':
+      return go(() => emitAppEvent({ kind: inTerminal ? 'ask-selection' : 'focus-composer' }))
+    // The side chat of the session in focus; a sub-agent's page has none.
+    case 'sideChat': {
+      if (view.main.kind !== 'session' || view.settings.open) return false
+      const { sessionId } = view.main
+      const origin = useSessionsStore.getState().byId[sessionId]?.origin
+      if (origin === undefined || origin === 'subagent') return false
+      const inside = !!(document.activeElement as HTMLElement | null)?.closest('.kc-rail')
+      return go(() => toggleSideChatFocus(sessionId, inside))
+    }
+    case 'previousSession':
+    case 'nextSession':
+      return !editing && go(() => stepSession(id === 'previousSession' ? -1 : 1))
+    case 'toggleTerminal':
+    case 'newTerminal':
+      return false
+  }
+}
+
 function run(event: KeyboardEvent, action: () => void): void {
   event.preventDefault()
   event.stopPropagation()
@@ -320,7 +337,11 @@ function inCodeEditor(target: EventTarget | null): boolean {
   return !!(target as HTMLElement | null)?.closest('[data-code-editor]')
 }
 
-const MENU_OPENS_TERMINAL = '[role=menu] [data-accelerator="Ctrl+`"]:not([data-disabled])'
+/** A menu whose item opens its session's terminal on the terminal's keys. */
+function menuOpensTerminal(): string {
+  const keys = CSS.escape(shortcutKeysOf('toggleTerminal'))
+  return `[role=menu] [data-accelerator="${keys}"]:not([data-disabled])`
+}
 
 /**
  * Whether a dialog or menu is open, closing included: Esc is its own, and Base UI leaves the event

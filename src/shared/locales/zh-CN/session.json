@@ -138,6 +138,7 @@
     "send_message": "发送消息",
     "set_plan": "更新计划",
     "report_problem": "起草问题报告",
+    "notify": "发送通知",
     "browser_navigate": "打开网页",
     "browser_navigate_back": "返回上一页",
     "browser_reload": "重新载入网页",
@@ -1783,6 +1784,10 @@
       "pdf": {
         "name": "PDF",
         "hint": "便于阅读和打印，使用浅色。"
+      },
+      "html": {
+        "name": "网页",
+        "hint": "一个 .html 文件，图片都在里面，离线也能看；工具调用折叠显示。"
       }
     },
     "include": "包含",
@@ -1837,8 +1842,15 @@
       "takeover": "{{agent}} 接手了会话",
       "linesMore": "还有 {{count}} 行",
       "image": "图片",
-      "media": "媒体：{{name}}"
-    }
+      "media": "媒体：{{name}}",
+      "changes": "改动",
+      "changesTotal_one": "{{count}} 个文件，+{{added}} −{{removed}} 行",
+      "changesTotal_other": "{{count}} 个文件，+{{added}} −{{removed}} 行"
+    },
+    "menu": "导出",
+    "asHtml": "网页…",
+    "asMarkdown": "Markdown…",
+    "more": "更多格式…"
   },
   "settingsChange": {
     "title_other": "修改 {{count}} 项设置",

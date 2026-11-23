@@ -305,7 +305,8 @@
     "manual": "立即运行",
     "catchUp": "补运行",
     "schedule": "按计划",
-    "event": "GitHub 事件"
+    "event": "GitHub 事件",
+    "webhook": "Webhook"
   },
   "run": {
     "starting": "启动中",
@@ -354,6 +355,33 @@
       "pushed": "推送到 {{branch}} 时",
       "behind": "{{branch}} 落后时"
     },
-    "kind": "触发方式"
+    "kind": "触发方式",
+    "webhook": "收到 Webhook 请求时",
+    "webhookHint": "定时任务开启时，每个带密钥的请求会启动一次运行，请求正文作为不可信数据附在提示词后面。",
+    "webhookSummary": "收到 Webhook 请求时"
+  },
+  "webhook": {
+    "title": "Webhook",
+    "titleHint": "只有这台电脑上的程序能访问：它只监听 127.0.0.1。端口在 设置 › 高级 里改。",
+    "address": "地址",
+    "afterSave": "保存定时任务后显示地址。",
+    "otherComputer": "此定时任务在另一台电脑上，请在那台电脑上设置 Webhook。",
+    "off": "定时任务已关闭，Webhook 不接收请求。",
+    "starting": "正在开始监听…",
+    "listening": "正在监听 127.0.0.1:{{port}}。",
+    "cannotListen": "无法监听端口 {{port}}（{{error}}）。请在 设置 › 高级 里换一个端口。",
+    "copyAddress": "复制地址",
+    "secret": "密钥",
+    "secretHint": "请求要在 {{header}} 请求头里带上它，或用它给正文签名。密钥只在生成时显示一次。",
+    "secretSet": "已设置",
+    "secretNone": "还没有",
+    "generate": "生成密钥",
+    "replace": "重新生成",
+    "shownTitle": "Webhook 密钥",
+    "shownOnce": "请现在复制：纸鸢只显示这一次。重新生成后，这个密钥就会失效。",
+    "copySecret": "复制密钥",
+    "example": "在 {{header}} 请求头里带上它，或在 {{signature}} 请求头里写 sha256= 加正文的 HMAC-SHA256（十六进制）。例如：",
+    "copyExample": "复制带密钥的命令",
+    "done": "完成"
   }
 }

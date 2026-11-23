@@ -21,6 +21,7 @@ import {
 } from '@renderer/components/ui/context-menu'
 import { PaneIcon } from '@renderer/features/shell/panel-button'
 import { formatShortcut, isMac } from '@renderer/lib/platform'
+import { shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 import { agentName } from '@renderer/stores/agents'
 import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
 import {
@@ -172,7 +173,7 @@ export function TerminalView({
             >
               {ask.agentId && <AgentMark agent={ask.agentId} size={13} hostId={ask.hostId} />}
               {ask.label}
-              <kbd>{formatShortcut('Mod+L')}</kbd>
+              <kbd>{formatShortcut(shortcutKeysOf('focusComposer'))}</kbd>
             </button>
           )}
         </ContextMenuTrigger>
@@ -205,7 +206,9 @@ export function TerminalView({
           >
             <PaneIcon icon={BubbleChatIcon} size={16} />
             {ask.label}
-            <ContextMenuShortcut>{formatShortcut('Mod+L')}</ContextMenuShortcut>
+            <ContextMenuShortcut>
+              {formatShortcut(shortcutKeysOf('focusComposer'))}
+            </ContextMenuShortcut>
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>

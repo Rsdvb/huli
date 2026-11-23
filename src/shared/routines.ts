@@ -5,8 +5,11 @@ import { isAgentId } from './agents'
 import { isRunCause, type GithubEvent, type RunCause } from './github-flow'
 import type { AgentId, StopReason, TokenTotals } from './thread'
 
-/** A run's trigger. Chaining adds kinds of its own later; Huli: `event`, a GitHub event. */
-export type RunTrigger = 'schedule' | 'catch-up' | 'manual' | 'event'
+/**
+ * A run's trigger. Chaining adds kinds of its own later; Huli: `event`, a GitHub event, and
+ * `webhook`, a request to the routine's webhook.
+ */
+export type RunTrigger = 'schedule' | 'catch-up' | 'manual' | 'event' | 'webhook'
 
 /** When a routine runs. Only `schedule` exists until chaining's triggers do. */
 export type Schedule =
@@ -54,12 +57,14 @@ export interface Routine {
 }
 
 /**
- * When a routine runs: on its schedule, or Huli: on a GitHub event in its project's repository,
- * which keeps the schedule it had for clients that know only schedules and for a switch back.
+ * When a routine runs: on its schedule, or Huli: on a GitHub event in its project's repository, or
+ * on a request to its webhook, each of which keeps the schedule it had for clients that know only
+ * schedules and for a switch back.
  */
 export type RoutineTrigger =
   | { kind: 'schedule'; schedule: Schedule }
   | { kind: 'github'; event: GithubEvent; schedule: Schedule }
+  | { kind: 'webhook'; schedule: Schedule }
 
 /** The schedule a routine runs on; null for one that runs on an event. */
 export function scheduleOf(trigger: RoutineTrigger): Schedule | null {
@@ -191,7 +196,43 @@ export interface RoutineView extends Routine {
   unseen: { failed: number; ended: number } // runs not seen since they ended
   runs: number // every run on record, for the runs' count
   sessions: number // runs that still have a session, for the delete confirmation
+  /** Huli: a routine that runs on its webhook: whether it has a secret, and where it listens. */
+  webhook?: WebhookState
 }
+
+/** Huli: the loopback port the webhooks of routines listen on, chosen in Settings › Advanced. */
+export const DEFAULT_WEBHOOK_PORT = 47811
+export const WEBHOOK_PORT_MIN = 1024
+export const WEBHOOK_PORT_MAX = 65535
+
+export function isWebhookPort(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= WEBHOOK_PORT_MIN &&
+    value <= WEBHOOK_PORT_MAX
+  )
+}
+
+/**
+ * Huli: a webhook routine's state as its page shows it: a secret was made (it is shown once, when
+ * made), and the port the listener holds, or why it could not listen.
+ */
+export interface WebhookState {
+  secret: boolean
+  /** The port it listens on now; null while it does not. */
+  port: number | null
+  error: string | null
+}
+
+/** Huli: where a routine's webhook takes requests, on a port it listens on. */
+export function webhookUrl(port: number, routineId: string): string {
+  return `http://127.0.0.1:${port}/routines/${routineId}`
+}
+
+/** Huli: the header a request carries the secret in, or its body's signature. */
+export const WEBHOOK_SECRET_HEADER = 'X-Kite-Secret'
+export const WEBHOOK_SIGNATURE_HEADER = 'X-Kite-Signature-256'
 
 export interface RunView extends RoutineRun {
   session: SessionSummary | null
@@ -288,7 +329,13 @@ export function isRunStatus(value: unknown): value is RunStatus {
 }
 
 export function isRunTrigger(value: unknown): value is RunTrigger {
-  return value === 'schedule' || value === 'catch-up' || value === 'manual' || value === 'event'
+  return (
+    value === 'schedule' ||
+    value === 'catch-up' ||
+    value === 'manual' ||
+    value === 'event' ||
+    value === 'webhook'
+  )
 }
 
 /** Whether a run record read from storage has every field, as its own type needs. */

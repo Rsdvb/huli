@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@renderer/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@renderer/components/ui/dialog'
 import { Kbd } from '@renderer/components/ui/kbd'
+import { shortcutBindings } from '@shared/shortcuts'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { showShortcuts, useViewStore } from '@renderer/stores/view'
 import { keyCaps, shortcutList, type Shortcut, type ShortcutGroupName } from './shortcuts'
@@ -14,16 +15,18 @@ export function ShortcutsDialog() {
   const { t } = useTranslation(['shell', 'common'])
   const open = useViewStore((s) => s.shortcutsOpen)
   const sendKey = useSettingsStore((s) => s.settings.general.sendKey)
+  const bound = useSettingsStore((s) => s.settings.keyboard?.shortcuts)
   const [query, setQuery] = useState('')
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    return shortcutList(sendKey).filter(
+    const keys = shortcutBindings(bound)
+    return shortcutList(sendKey, (id) => keys[id]).filter(
       (row) =>
         needle === '' ||
         t(`shortcuts.${row.action}`).toLowerCase().includes(needle) ||
         keyCaps(row.keys).join(' ').toLowerCase().includes(needle),
     )
-  }, [query, sendKey, t])
+  }, [query, sendKey, bound, t])
 
   return (
     <Dialog

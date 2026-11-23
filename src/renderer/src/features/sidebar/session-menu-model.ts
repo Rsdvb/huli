@@ -29,6 +29,7 @@ export type SessionMenuItem =
   | 'openInEditor'
   | 'showInFolder'
   | 'openTerminal'
+  | 'mini'
   | 'resumeInTerminal'
   | 'copyResume'
   | 'copySessionId'
@@ -100,6 +101,8 @@ export interface SessionMenuContext {
   exportable?: boolean
   /** Huli: this window can move it to another computer, as the desktop app's can. */
   movable?: boolean
+  /** Huli: this window can follow it in the mini window, as the desktop app's can. */
+  mini?: boolean
   /** Huli: it has an open pull request to merge once green or to watch. */
   prFlow?: boolean
   /** Its row's badge lists sub-agents, which the menu lists too. */
@@ -128,6 +131,7 @@ export function sessionMenuGroups(
     removeWorktree = false,
     exportable = false,
     movable = false,
+    mini = false,
     prFlow = false,
     subagents = false,
     menuOptions = false,
@@ -196,7 +200,7 @@ export function sessionMenuGroups(
           tidy,
           own,
           flow,
-          ['openInEditor', 'showInFolder', 'openTerminal', 'resumeInTerminal'],
+          ['openInEditor', 'showInFolder', 'openTerminal', 'mini', 'resumeInTerminal'],
           ['copyResume', 'copySessionId', 'export', ...(topLevel ? (['move'] as const) : [])],
           ending,
         ]
@@ -209,6 +213,7 @@ export function sessionMenuGroups(
           [...forks, 'newSubSession', ...(subagents ? (['subagents'] as const) : [])],
           [
             ...(shown ? [] : (['openInSplit'] as const)),
+            'mini',
             ...((summary.prs?.length ?? (summary.pr ? 1 : 0)) > 0
               ? (['pullRequest'] as const)
               : []),
@@ -228,6 +233,7 @@ export function sessionMenuGroups(
     ...(rename ? [] : (['rename'] as const)),
     ...(exportable ? [] : (['export'] as const)),
     ...(movable ? [] : (['move'] as const)),
+    ...(mini ? [] : (['mini'] as const)),
     ...(menuOptions ? [] : (['menuOptions'] as const)),
   ])
   return groups

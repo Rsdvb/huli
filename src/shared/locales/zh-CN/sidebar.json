@@ -245,7 +245,8 @@
     "manager": "总管会话",
     "managerBadge": "总管",
     "suggestTitle": "根据对话重新生成标题",
-    "suggestingTitle": "正在写标题…"
+    "suggestingTitle": "正在写标题…",
+    "mini": "在小窗中打开"
   },
   "work": {
     "turn": "当前这一轮",

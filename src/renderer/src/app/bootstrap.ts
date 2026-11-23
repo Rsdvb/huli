@@ -1,4 +1,5 @@
 import type { HostEvent } from '@shared/agent-host'
+import { followScreenshots } from '@renderer/features/session/composer/screenshots'
 import type { AgentId } from '@shared/agents'
 import {
   closeUnlistedPanes,
@@ -454,6 +455,7 @@ export function bootstrap(): Promise<unknown> {
   })
   // What the desktop app's main does for its windows; the web client has none of it.
   if (!isWeb) {
+    followScreenshots()
     initDebug().catch((error: unknown) => console.error('Could not read debug mode', error))
     initHosts()
     void loadHosts()

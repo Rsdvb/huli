@@ -54,6 +54,21 @@ export function isPanel(contents: WebContents): boolean {
   return window !== null && panels.has(window) && !computerOverlays.has(window)
 }
 
+// Huli: the mini window's and the screenshot overlay's windows, whose pages may use only their
+// own channels; they are panels to the rest of the app too.
+const ownPages = new WeakMap<BrowserWindow, 'mini' | 'capture'>()
+
+export function markOwnPage(window: BrowserWindow, page: 'mini' | 'capture'): void {
+  ownPages.set(window, page)
+  panels.add(window)
+}
+
+/** Huli: which of those pages `contents` is, told by its window; null for any other. */
+export function ownPageOf(contents: WebContents): 'mini' | 'capture' | null {
+  const window = BrowserWindow.fromWebContents(contents)
+  return (window && ownPages.get(window)) ?? null
+}
+
 // Computer use's windows over the desktop: never the one to talk to, and none of the app's.
 const computerOverlays = new WeakSet<BrowserWindow>()
 let creatingOverlay = false

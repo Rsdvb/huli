@@ -55,6 +55,7 @@ const KINDS: readonly string[] = [
   'plan-limit',
   'limit-resumed',
   'stalled',
+  'note',
 ] satisfies AttentionKind[]
 
 const MAX_TEXT = 4000

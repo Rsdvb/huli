@@ -531,3 +531,31 @@ describe('values saved from secret cards', () => {
     expect(keys.contentsForHost().projectSecrets).toBeUndefined()
   })
 })
+
+describe("Huli: webhook routines' secrets", () => {
+  const SECRET = 'SECRETabcdefghijklmnopqrstuvwxyz0123456789_'
+
+  it('keeps one encrypted by routine, and forgets it with null', async () => {
+    const keys = await load()
+    await keys.setWebhookSecret('r-0123456789ab', SECRET)
+    expect(keys.contentsForHost().webhookSecrets).toEqual({ 'r-0123456789ab': SECRET })
+    expect(await fileText()).not.toContain('SECRET')
+    expect((await load()).contentsForHost().webhookSecrets).toEqual({
+      'r-0123456789ab': SECRET,
+    })
+    await keys.setWebhookSecret('r-0123456789ab', null)
+    expect(keys.contentsForHost().webhookSecrets).toBeUndefined()
+  })
+
+  it.each([
+    ['no routine', 'routine', SECRET],
+    ['a secret of another shape', 'r-0123456789ab', `${SECRET}x`],
+    ['a secret that is no text', 'r-0123456789ab', 7],
+  ])('refuses %s without naming the value', async (_, routineId, secret) => {
+    const keys = await load()
+    const refused = keys.setWebhookSecret(routineId, secret)
+    await expect(refused).rejects.toThrow(MarketKeysError)
+    await refused.catch((error: Error) => expect(error.message).not.toContain('SECRET'))
+    expect(keys.contentsForHost().webhookSecrets).toBeUndefined()
+  })
+})

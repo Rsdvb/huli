@@ -84,5 +84,22 @@
     "minutes": "{{count}} min ago",
     "hours": "{{count}} h ago",
     "yesterday": "Yesterday"
+  },
+  "mini": {
+    "untitled": "Untitled session",
+    "open": "Open in Kite",
+    "close": "Close",
+    "loading": "Reading the session…",
+    "gone": "This session is gone.",
+    "working": "Working…",
+    "workingOn": "Working: {{what}}",
+    "waiting": "Waiting for you",
+    "failed": "Needs attention",
+    "done": "Done",
+    "ready": "Ready",
+    "noReply": "No reply yet.",
+    "reply": "Reply…",
+    "sent": "Sent.",
+    "queued": "Queued: it goes once this turn ends."
   }
 }

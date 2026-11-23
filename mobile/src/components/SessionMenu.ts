@@ -255,6 +255,12 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
         icon: G.copy,
         onPress: () => actions.copySessionId(summary),
       },
+      {
+        key: 'share-md',
+        label: '分享为 Markdown',
+        icon: G.share,
+        onPress: () => actions.shareMarkdown(summary),
+      },
     ]
     const ending: MenuEntry[] = [
       ...(topLevel

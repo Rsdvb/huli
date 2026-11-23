@@ -131,6 +131,7 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
           h.setMarketKeys(message.values, message.oauth, message.agentEnv)
           h.setProfiles(message.profiles)
           h.setProjectSecrets(message.projectSecrets)
+          h.setWebhookSecrets(message.webhookSecrets)
         })
         break
       case 'host:chat-bridge':

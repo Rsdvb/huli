@@ -26,6 +26,7 @@ import {
   type RunPage,
   type RunStatus,
   type RunView,
+  type WebhookState,
 } from '@shared/routines'
 import { limitsForModel, resetTimeText, windowParts } from '@shared/plan-limits'
 import type { AgentId, ConfigOption } from '@shared/thread'
@@ -99,6 +100,8 @@ export interface RoutinesDeps {
   /** The scheduler's clock and timer; the system's by default, or a test's. */
   clock?: RoutineClock
   timings?: Partial<RoutineTimings>
+  /** Huli: a webhook routine's secret and listener, for its view; without it none listens. */
+  webhook?(routine: Routine): WebhookState
 }
 
 /** A run in flight: its record, the clock of its time limit, and how it is being stopped. */
@@ -412,6 +415,60 @@ export class RoutinesManager {
     this.deps.log('info', `Run ${run.id} of ${routine.name}: ${run.status} (${cause.kind})`)
   }
 
+  /** Huli: the enabled routines that run on their webhook, while routines are on. */
+  webhookRoutines(): string[] {
+    if (!this.loaded || this.stopped || this.off) return []
+    return [...this.routines.values()].flatMap((routine) =>
+      routine.enabled && routine.trigger.kind === 'webhook' ? [routine.id] : [],
+    )
+  }
+
+  /** Huli: whether the routine is one whose trigger is its webhook, on or off. */
+  isWebhookRoutine(routineId: string): boolean {
+    return this.routines.get(routineId)?.trigger.kind === 'webhook'
+  }
+
+  /** Huli: whether the routine runs on its webhook now: enabled, and routines on. */
+  takesWebhook(routineId: string): boolean {
+    const routine = this.routines.get(routineId)
+    return (
+      !!routine &&
+      routine.enabled &&
+      routine.trigger.kind === 'webhook' &&
+      !this.stopped &&
+      !this.off &&
+      !this.deleting.has(routineId)
+    )
+  }
+
+  /**
+   * Huli: a request to the routine's webhook came with its secret: a run starts with the routine's
+   * prompt and the request's body, as a scheduled one would, unless one is active already.
+   */
+  runOnWebhook(
+    routineId: string,
+    prompt: (own: string) => string,
+  ): { status: 'started'; runId: string } | { status: 'busy' } | { status: 'skipped' } {
+    const routine = this.routines.get(routineId)
+    if (!routine || !this.takesWebhook(routineId)) return { status: 'skipped' }
+    if (this.activeOf(routineId)) return { status: 'busy' }
+    if (this.held(routine) && !this.fallbackOf(routine)) {
+      this.announceWait(routine)
+      this.skip(routine, this.now(), 1, 'plan_limit')
+      return { status: 'skipped' }
+    }
+    const run = this.launch(routine, 'webhook', null, 1, { prompt: prompt(routine.prompt) })
+    this.deps.log('info', `Run ${run.id} of ${routine.name}: ${run.status} (webhook)`)
+    return { status: 'started', runId: run.id }
+  }
+
+  /** Huli: the webhook's listener or secrets changed: the views of webhook routines follow. */
+  webhooksChanged(): void {
+    for (const routine of this.routines.values()) {
+      if (routine.trigger.kind === 'webhook') void this.publish(routine.id)
+    }
+  }
+
   async cancelRun(runId: string): Promise<void> {
     const live = this.runs.get(runId)
     if (!live) throw new HostError('not_found', t('routines.noRun'))
@@ -712,7 +769,7 @@ export class RoutinesManager {
     trigger: RoutineRun['trigger'],
     scheduledFor: number | null,
     count: number,
-    event?: { cause: RunCause; prompt: string },
+    event?: { cause?: RunCause; prompt: string },
   ): RoutineRun {
     const working = this.workingCount()
     const run: RoutineRun = {
@@ -733,7 +790,7 @@ export class RoutinesManager {
       usage: null,
       changedFiles: [],
       seen: false,
-      ...(event ? { cause: event.cause } : {}),
+      ...(event?.cause ? { cause: event.cause } : {}),
     }
     const live: LiveRun = {
       run,
@@ -1221,6 +1278,9 @@ export class RoutinesManager {
       unseen: { failed: stats.unseenFailed, ended: stats.unseenEnded },
       runs: stats.runs,
       sessions: stats.sessions,
+      ...(routine.trigger.kind === 'webhook'
+        ? { webhook: this.deps.webhook?.(routine) ?? { secret: false, port: null, error: null } }
+        : {}),
     }
   }
 

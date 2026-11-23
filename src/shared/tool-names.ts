@@ -41,6 +41,7 @@ const OWN_TOOLS: Names = {
   start_session: ['Start session', '开始会话'],
   send_message: ['Send message', '发送消息'],
   set_plan: ['Update plan', '更新计划'],
+  notify: ['Notify you', '通知你'],
   // Workflows
   list_workflows: ['List workflows', '列出工作流'],
   create_workflow: ['Create workflow', '创建工作流'],

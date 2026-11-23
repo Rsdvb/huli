@@ -10,9 +10,17 @@ export type RendererEntry = { kind: 'dev-server'; url: string } | { kind: 'file'
  * The renderer's pages: the main window's, the menu bar panel's, the page overlay's, and computer
  * use's overlay, the light and the label drawn over the desktop while Kettu is in the background.
  */
-export type RendererPage = 'index' | 'tray' | 'overlay' | 'computer-overlay'
+// Huli: `mini`, the mini window's page, and `capture`, the screenshot overlay's.
+export type RendererPage = 'index' | 'tray' | 'overlay' | 'computer-overlay' | 'mini' | 'capture'
 
-const PAGES: readonly RendererPage[] = ['index', 'tray', 'overlay', 'computer-overlay']
+const PAGES: readonly RendererPage[] = [
+  'index',
+  'tray',
+  'overlay',
+  'computer-overlay',
+  'mini',
+  'capture',
+]
 
 const devServerUrl = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
 
@@ -27,6 +35,8 @@ const entries: Record<RendererPage, RendererEntry> = {
   tray: entryOf('tray'),
   overlay: entryOf('overlay'),
   'computer-overlay': entryOf('computer-overlay'),
+  mini: entryOf('mini'),
+  capture: entryOf('capture'),
 }
 
 /** The page the overlay over a browser page loads, and its address once loaded. */
@@ -52,7 +62,7 @@ export function loadRenderer(
  */
 export function isRendererUrl(url: string | undefined): boolean {
   const page = rendererPage(url)
-  return page === 'index' || page === 'tray'
+  return page === 'index' || page === 'tray' || page === 'mini' || page === 'capture'
 }
 
 /**

@@ -354,7 +354,9 @@ export class IslandBridge {
         ? 'limit-reset'
         : message.kind === 'stalled'
           ? 'error'
-          : message.kind
+          : message.kind === 'note'
+            ? 'turn-ended'
+            : message.kind
     this.send({ type: 'pop', row, kind, title, body })
   }
 

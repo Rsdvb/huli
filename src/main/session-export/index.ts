@@ -19,7 +19,15 @@ import { parseExportRequest, pointAssets } from './request'
 
 const log = createLogger('session-export')
 
-const EXTENSION: Record<ExportFormat, string> = { md: 'md', zip: 'zip', pdf: 'pdf' }
+const EXTENSION: Record<ExportFormat, string> = { md: 'md', zip: 'zip', pdf: 'pdf', html: 'html' }
+const IMAGE_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  bmp: 'image/bmp',
+}
 const LOAD_TIMEOUT_MS = 60_000
 // An in-memory profile of its own, so the page shares nothing with the app's.
 const PRINT_PARTITION = 'kite-session-export'
@@ -55,6 +63,9 @@ export async function exportSession(window: BrowserWindow | null, raw: unknown):
       break
     case 'pdf':
       await writePdf(file, masked)
+      break
+    case 'html':
+      await writeWebPage(file, masked)
       break
   }
   log.info(`Exported a session as ${request.format}, ${request.images.length} pictures`)
@@ -98,6 +109,22 @@ async function writePdf(file: string, request: SessionExportRequest): Promise<vo
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {})
   }
+}
+
+/**
+ * Huli: one web page that holds everything, readable offline: its pictures as data, its styles
+ * inline, its folds closed. An SVG picture, which could carry a script elsewhere, shows its text.
+ */
+async function writeWebPage(file: string, request: SessionExportRequest): Promise<void> {
+  const images: Record<string, string> = {}
+  for (const image of request.images) {
+    const type = IMAGE_TYPES[image.name.slice(image.name.lastIndexOf('.') + 1)]
+    if (type)
+      images[image.name] = `data:${type};base64,${Buffer.from(image.data).toString('base64')}`
+  }
+  const markdown = pointAssets(request.markdown, Object.keys(images), '')
+  const page = await renderPage({ title: request.title, markdown, mode: { kind: 'web', images } })
+  await writeFile(file, page, 'utf8')
 }
 
 /** The page to print, written by a worker of its own, so main never parses nor draws maths. */

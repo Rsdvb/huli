@@ -18,6 +18,8 @@ export const ATTENTION_SETTING = {
   'plan-limit': 'planLimits',
   'limit-resumed': 'planLimits',
   stalled: 'error',
+  // Huli: an agent's own note, which tells of work it finished or of what the user asked to hear.
+  note: 'turnEnded',
   'task-needs-you': 'permission',
   'task-ended': 'turnEnded',
 } as const satisfies Record<HostAttention['kind'], keyof SettingsFile['notifications']>

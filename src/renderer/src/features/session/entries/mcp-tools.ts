@@ -52,6 +52,7 @@ const TARGETS = {
   send_message: [{ session: 'id' }],
   set_plan: [],
   report_problem: ['title'],
+  notify: ['title'],
   browser_navigate: ['url'],
   browser_navigate_back: [],
   browser_reload: [],

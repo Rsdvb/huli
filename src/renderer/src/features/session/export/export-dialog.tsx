@@ -23,7 +23,7 @@ import { errorMessage } from '@renderer/lib/host'
 import { sessionTitle } from '@renderer/stores/sessions'
 import { exportSession, keepChoice, lastChoice, useExportStore, type ExportChoice } from './export'
 
-const FORMATS: ExportFormat[] = ['md', 'zip', 'pdf']
+const FORMATS: ExportFormat[] = ['html', 'md', 'zip', 'pdf']
 const OPTIONS: (keyof ExportOptions)[] = ['thoughts', 'tools', 'subagents']
 
 export function SessionExportDialog() {

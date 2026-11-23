@@ -306,7 +306,8 @@
     "manual": "Run now",
     "catchUp": "Catch-up",
     "schedule": "Scheduled",
-    "event": "GitHub event"
+    "event": "GitHub event",
+    "webhook": "Webhook"
   },
   "run": {
     "starting": "Starting",
@@ -355,6 +356,33 @@
       "pushed": "On pushes to {{branch}}",
       "behind": "When {{branch}} falls behind"
     },
-    "kind": "Trigger"
+    "kind": "Trigger",
+    "webhook": "On a webhook request",
+    "webhookHint": "While the routine is on, each request with its secret starts one run, with the request's body added to the prompt as untrusted data.",
+    "webhookSummary": "On webhook requests"
+  },
+  "webhook": {
+    "title": "Webhook",
+    "titleHint": "Only programs on this computer can reach it: it listens on 127.0.0.1. Change its port in Settings › Advanced.",
+    "address": "Address",
+    "afterSave": "The address shows once the routine is saved.",
+    "otherComputer": "This routine is on another computer; set up its webhook there.",
+    "off": "The routine is off, so its webhook takes no requests.",
+    "starting": "Starting to listen…",
+    "listening": "Listening on 127.0.0.1:{{port}}.",
+    "cannotListen": "Could not listen on port {{port}} ({{error}}). Choose another port in Settings › Advanced.",
+    "copyAddress": "Copy address",
+    "secret": "Secret",
+    "secretHint": "Requests send it in the {{header}} header, or sign their body with it. It shows only once, when made.",
+    "secretSet": "Set",
+    "secretNone": "None yet",
+    "generate": "Make secret",
+    "replace": "Make new secret",
+    "shownTitle": "The webhook's secret",
+    "shownOnce": "Copy it now: Kite shows it only this once. A new secret stops this one working.",
+    "copySecret": "Copy secret",
+    "example": "Send it in the {{header}} header, or send {{signature}} with sha256= and the HMAC-SHA256 of the body in hex. For example:",
+    "copyExample": "Copy command with the secret",
+    "done": "Done"
   }
 }

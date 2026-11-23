@@ -265,7 +265,8 @@
     "manager": "Manager session",
     "managerBadge": "Manager",
     "suggestTitle": "Regenerate the title from the conversation",
-    "suggestingTitle": "Writing a title…"
+    "suggestingTitle": "Writing a title…",
+    "mini": "Open in mini window"
   },
   "work": {
     "turn": "Current turn",

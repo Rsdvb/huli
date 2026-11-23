@@ -149,6 +149,7 @@
     "send_message": "Send message",
     "set_plan": "Update plan",
     "report_problem": "Draft problem report",
+    "notify": "Notify you",
     "browser_navigate": "Open page",
     "browser_navigate_back": "Go back",
     "browser_reload": "Reload page",
@@ -1856,6 +1857,10 @@
       "pdf": {
         "name": "PDF",
         "hint": "For reading and printing, in light colors."
+      },
+      "html": {
+        "name": "Web page",
+        "hint": "One .html file with its pictures, readable offline; tool calls fold."
       }
     },
     "include": "Include",
@@ -1910,8 +1915,15 @@
       "takeover": "{{agent}} took the session over",
       "linesMore": "{{count}} more lines",
       "image": "Picture",
-      "media": "Media: {{name}}"
-    }
+      "media": "Media: {{name}}",
+      "changes": "Changes",
+      "changesTotal_one": "{{count}} file, +{{added}} −{{removed}} lines",
+      "changesTotal_other": "{{count}} files, +{{added}} −{{removed}} lines"
+    },
+    "menu": "Export",
+    "asHtml": "Web page…",
+    "asMarkdown": "Markdown…",
+    "more": "More formats…"
   },
   "settingsChange": {
     "title_one": "Change {{count}} setting",

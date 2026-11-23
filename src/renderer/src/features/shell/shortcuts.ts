@@ -1,5 +1,6 @@
 // The keyboard shortcuts the dialog lists, and their key caps.
 
+import { isShortcutId, type ShortcutId } from '@shared/shortcuts'
 import { HISTORY_SHORTCUTS } from '@renderer/app/history'
 import { formatShortcut, shortcutKeys } from '@renderer/lib/platform'
 
@@ -43,9 +44,15 @@ export interface Shortcut {
   keys: string
 }
 
-/** Every shortcut the app has, in the dialog's order; the composer's follow the send key setting. */
-export function shortcutList(sendKey: 'enter' | 'mod-enter'): Shortcut[] {
-  return [
+/**
+ * Every shortcut the app has, in the dialog's order; the composer's follow the send key setting,
+ * and Huli: the ones the user may rebind, `keysOf` (their keys in Settings).
+ */
+export function shortcutList(
+  sendKey: 'enter' | 'mod-enter',
+  keysOf?: (id: ShortcutId) => string,
+): Shortcut[] {
+  const list: Shortcut[] = [
     { group: 'general', action: 'newSession', keys: 'Mod+N' },
     { group: 'general', action: 'searchSessions', keys: 'Mod+K' },
     { group: 'general', action: 'openProject', keys: 'Mod+O' },
@@ -80,6 +87,11 @@ export function shortcutList(sendKey: 'enter' | 'mod-enter'): Shortcut[] {
     { group: 'terminal', action: 'newTerminal', keys: 'Ctrl+Shift+`' },
     { group: 'terminal', action: 'askSelection', keys: 'Mod+L' },
   ]
+  if (!keysOf) return list
+  return list.map((shortcut) => {
+    const id = shortcut.action === 'askSelection' ? 'focusComposer' : shortcut.action
+    return isShortcutId(id) ? { ...shortcut, keys: keysOf(id) } : shortcut
+  })
 }
 
 const KEY_RANGE = /^(\d)-(\d)$/

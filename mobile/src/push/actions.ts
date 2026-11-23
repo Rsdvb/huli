@@ -122,7 +122,8 @@ function answerOf(action: string, typed: string, data: NotificationData): Answer
   const { sessionId, requestId, actions, question } = data
   if (!sessionId) return null
   const words = typed.trim()
-  if (data.kind === 'turn-ended') {
+  // An agent's own note (the notify tool) takes a reply as a finished turn does.
+  if (data.kind === 'turn-ended' || data.kind === 'note') {
     if (action !== ACTION.reply || !words) return null
     return {
       method: 'sessions.queue',

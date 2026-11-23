@@ -983,6 +983,7 @@ function routineTrigger(value: unknown): import('@shared/routines').RoutineTrigg
     if (!isGithubEvent(value.event)) throw invalidParams('trigger.event is not a GitHub event')
     return { kind: 'github', event: value.event, schedule: value.schedule }
   }
+  if (value.kind === 'webhook') return { kind: 'webhook', schedule: value.schedule }
   if (value.kind !== 'schedule') throw invalidParams('trigger must be a schedule')
   return { kind: 'schedule', schedule: value.schedule }
 }
@@ -2795,6 +2796,13 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'routines.markSeen': (params) => ({ routineId: routineId(fields(params)) }),
+    'routines.webhookSecret': (params) => {
+      const o = fields(params)
+      if (Object.keys(o).some((key) => key !== 'routineId')) {
+        throw invalidParams('routines.webhookSecret takes only routineId')
+      }
+      return { routineId: routineId(o) }
+    },
     'workflows.list': none,
     'workflows.read': (params) => ({ workflowId: workflowId(fields(params)) }),
     'workflows.add': workflowAddSource,

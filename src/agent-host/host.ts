@@ -25,6 +25,7 @@ import type {
   McpStatus,
 } from '@shared/agent-host'
 import { OWNER } from '@shared/artifact-comments'
+import { DEFAULT_WEBHOOK_PORT, ROUTINE_ID } from '@shared/routines'
 import { flushLog, logFolder, redactLogText, writeLog } from '@shared/log/process-log'
 import { writeReport } from '@shared/log/report-bundle'
 import { parseReportRequest } from '@shared/report'
@@ -210,6 +211,12 @@ import type { SessionMoves } from './session-move/service'
 import { Attachments, toArrayBuffer } from './attachments'
 import { storageUsage } from './data-usage'
 import { RoutinesManager, type RoutineTimings } from './routines/manager'
+import {
+  isWebhookSecret,
+  newWebhookSecret,
+  WebhookListener,
+  webhookPrompt,
+} from './routines/webhooks'
 import { TaskEngine, type TaskSessionHooksRef, type WrittenDocument } from './workflow/engine'
 import {
   keptTool,
@@ -555,6 +562,10 @@ export class AgentHost {
   private readonly githubFlow: GithubFlow
   /** The routines' GitHub triggers the flow last planned for. */
   private flowTriggers = ''
+  /** Huli: routines' webhooks, listening while one of them uses its webhook. */
+  private readonly webhooks: WebhookListener
+  /** Huli: each webhook routine's secret, kept encrypted by main and sent here; host only. */
+  private webhookSecrets = new Map<string, string>()
   /** The cards the workflow tools leave in sessions, their answers and Start. */
   readonly workflowSuggestions: WorkflowSuggestions
   /** The attachments of drafts and queued prompts, until sent or removed. */
@@ -1101,6 +1112,7 @@ export class AgentHost {
       subagentCall: (process, id) => this.sessions.isSubagentCall(process, id),
       plan: { set: (sessionId, items) => this.sessions.planSet(sessionId, items) },
       report: { add: (sessionId, draft) => this.sessions.reportDrafted(sessionId, draft) },
+      notify: { notify: (sessionId, note) => this.sessions.noteToUser(sessionId, note) },
       memory: {
         service: this.memory,
         projectOf: (caller) => this.projects.find(caller.project)?.path ?? null,
@@ -1677,13 +1689,20 @@ export class AgentHost {
       resolveProject: (value) => this.projects.resolveDirectory(value),
       timings: options.routineTimings,
       ...(options.routineClock ? { clock: options.routineClock } : {}),
+      webhook: (routine) => ({
+        secret: this.webhookSecrets.has(routine.id),
+        port: this.webhooks.port,
+        error: this.webhooks.error,
+      }),
       events: {
         changed: (routine) => {
           this.broadcast({ type: 'routine.changed', routine })
+          if (routine.trigger.kind !== 'webhook') this.forgetWebhookSecret(routine.id)
           this.routineTriggersChanged()
         },
         removed: (routineId) => {
           this.broadcast({ type: 'routine.removed', routineId })
+          this.forgetWebhookSecret(routineId)
           this.routineTriggersChanged()
         },
         run: (run) => this.broadcast({ type: 'routine.run', run }),
@@ -1702,6 +1721,20 @@ export class AgentHost {
       },
     })
     routineHooks.current = this.routines.hooks
+    this.webhooks = new WebhookListener({
+      log,
+      secret: (routineId) =>
+        this.routines.takesWebhook(routineId) ? this.webhookSecrets.get(routineId) : undefined,
+      run: (routineId, body) =>
+        this.routines.runOnWebhook(routineId, (prompt) =>
+          webhookPrompt(prompt, body, {
+            header: t('routines.webhookHeader'),
+            binary: t('routines.webhookBinary', { bytes: body.bytes }),
+            empty: t('routines.webhookEmpty'),
+          }),
+        ),
+      changed: () => this.routines.webhooksChanged(),
+    })
     const threads = this.threads
     this.tasks = new TaskEngine({
       store: threads
@@ -2284,6 +2317,7 @@ export class AgentHost {
       this.sessions.supervisorChanged()
     }
     if (JSON.stringify(previous.tidy) !== JSON.stringify(next.tidy)) this.sessions.tidyChanged()
+    if (previous.webhooks?.port !== next.webhooks?.port) this.syncWebhooks()
     if (previous.workflow.maxWorkingSteps !== next.workflow.maxWorkingSteps) {
       this.tasks.limitChanged()
     }
@@ -2334,7 +2368,9 @@ export class AgentHost {
     if (changed('sessionTidy')) this.sessions.tidyChanged()
     if (changed('board') || changed('devices')) void this.ownSkillsChanged()
     else if (
-      ['manager', 'secrets', 'agentTheme', 'webReader'].some((id) => changed(id as FeatureId))
+      ['manager', 'secrets', 'agentTheme', 'webReader', 'agentNotify'].some((id) =>
+        changed(id as FeatureId),
+      )
     ) {
       this.sessions.libraryChanged(() => true)
     }
@@ -2795,6 +2831,50 @@ export class AgentHost {
     this.hub.broadcast({ type: 'market.keysChanged' })
   }
 
+  /**
+   * Huli: routines' webhook listener: on the port Settings gives while a routine runs on its
+   * webhook and routines are on, else closed.
+   */
+  private syncWebhooks(): void {
+    const on = this.routines.webhookRoutines().length > 0
+    this.webhooks.sync(on ? (this.settings.webhooks?.port ?? DEFAULT_WEBHOOK_PORT) : null)
+  }
+
+  /**
+   * Huli: a new secret for a webhook routine, in place of its old one: kept here at once and sent
+   * to main to keep encrypted. It is answered this once, never again.
+   */
+  newWebhookSecret(routineId: string): { secret: string } {
+    if (!this.routines.isWebhookRoutine(routineId)) {
+      throw invalidParams(t('routines.webhookOnly'))
+    }
+    const secret = newWebhookSecret()
+    this.webhookSecrets.set(routineId, secret)
+    this.options.send({ type: 'host:webhook-secret', routineId, secret })
+    this.routines.webhooksChanged()
+    return { secret }
+  }
+
+  private forgetWebhookSecret(routineId: string): void {
+    if (!this.webhookSecrets.delete(routineId)) return
+    this.options.send({ type: 'host:webhook-secret', routineId, secret: null })
+  }
+
+  /** Huli: the webhook routines' secrets main keeps; one that does not read as one is left out. */
+  setWebhookSecrets(raw: unknown): void {
+    const kept = new Map<string, string>()
+    if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+      for (const [routineId, secret] of Object.entries(raw)) {
+        if (ROUTINE_ID.test(routineId) && isWebhookSecret(secret)) kept.set(routineId, secret)
+      }
+    }
+    const changed =
+      kept.size !== this.webhookSecrets.size ||
+      [...kept].some(([id, secret]) => this.webhookSecrets.get(id) !== secret)
+    this.webhookSecrets = kept
+    if (changed) this.routines.webhooksChanged()
+  }
+
   /** Huli: the values saved from secret cards, in place of those before; a bad message keeps none. */
   setProjectSecrets(raw: unknown): void {
     const kept: Record<string, Record<string, string>> = {}
@@ -3006,6 +3086,7 @@ export class AgentHost {
 
   /** Huli: the routines' GitHub triggers changed, so the flow plans its reads again. */
   private routineTriggersChanged(): void {
+    this.syncWebhooks()
     const triggers = JSON.stringify(this.routines.eventTriggers())
     if (triggers === this.flowTriggers) return
     this.flowTriggers = triggers
@@ -3710,6 +3791,7 @@ export class AgentHost {
   /** Stops every agent with the documented sequence, flushes the state files, then reports. */
   shutdown(): Promise<void> {
     this.stopping ??= (async () => {
+      this.webhooks.close()
       this.chatBridge?.stop()
       await this.routines.shutdown()
       this.githubFlow.stop()
@@ -4406,6 +4488,7 @@ export class AgentHost {
       'routines.cancelRun': ({ runId }) => routines.cancelRun(runId),
       'routines.runs': ({ routineId, before }) => routines.runsOf(routineId, before),
       'routines.markSeen': ({ routineId }) => routines.markSeen(routineId),
+      'routines.webhookSecret': ({ routineId }) => this.newWebhookSecret(routineId),
       'workflows.list': () => this.workflowLibrary.list(),
       'workflows.read': ({ workflowId }) => this.workflowLibrary.read(workflowId),
       'workflows.add': (source) => this.workflowLibrary.add(source),

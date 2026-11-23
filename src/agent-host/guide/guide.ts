@@ -244,6 +244,12 @@ export function serviceInstructions(flags: GuideFlags): string {
             'result says how your commands get the values; never print them.',
         ]
       : []),
+    ...(flags.notify
+      ? [
+          'Notify: notify shows the user a desktop notification and a phone push; use it only ' +
+            'when the user asked to be told, or when long work they wait for finishes.',
+        ]
+      : []),
     ...(flags.theme
       ? [
           "Theme: read_theme and set_theme_colors read and change Kettu's colors, only when the " +

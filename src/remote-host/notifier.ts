@@ -34,6 +34,7 @@ export type AttentionKind =
   | 'plan-limit'
   | 'limit-resumed'
   | 'stalled'
+  | 'note'
 
 /** What the agent host says needs the user, as the remote host hears it from its parent. */
 export interface Attention {
@@ -224,6 +225,8 @@ function wants(choices: NotificationChoices, kind: AttentionKind): boolean {
       return choices.limits
     case 'stalled':
       return choices.errors
+    case 'note':
+      return choices.turnEnded
   }
 }
 
