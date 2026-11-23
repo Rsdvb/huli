@@ -540,7 +540,7 @@
     "reset": "额度恢复后",
     "resetUnknown": "额度没用完",
     "custom": "自定义…",
-    "wake": "现在提醒",
+    "wake": "取消推迟",
     "settle": "收起",
     "settleCount_other": "收起 {{count}} 个会话",
     "unsettle": "移回列表",
