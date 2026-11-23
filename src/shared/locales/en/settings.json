@@ -432,6 +432,11 @@
       "name": "Turn finished",
       "description": "An agent finished and is waiting for your next message."
     },
+    "agentNotes": {
+      "name": "Agent notifications",
+      "description": "An agent tells you something you asked to hear about, or that long work finished.",
+      "keywords": "notify agent note"
+    },
     "routines": {
       "name": "Routine runs",
       "description": "A run ended, or paused near a plan limit.",

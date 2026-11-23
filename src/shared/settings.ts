@@ -99,6 +99,7 @@ export interface SettingsFile {
   notifications: {
     permission: boolean
     turnEnded: boolean
+    agentNotes: boolean // Huli: an agent's own notification (the notify tool)
     error: boolean
     routines: boolean // a routine's run ended, or its routines paused at a plan limit
     updates: boolean // Kettu's new version downloaded, or waiting for a step of the user's
@@ -449,6 +450,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   notifications: {
     permission: true,
     turnEnded: true,
+    agentNotes: true,
     error: true,
     routines: true,
     updates: true,

@@ -655,6 +655,18 @@ const ENTRIES = {
     access: 'change',
     ...flag('notifications', 'turnEnded', (file) => file.notifications.turnEnded),
   },
+  'notifications.agent-notes': {
+    section: 'notifications',
+    feature: 'agentNotify',
+    row: 'agent-notes',
+    group: 'notifications.groups.when',
+    name: 'notifications.agentNotes.name',
+    description: 'notifications.agentNotes.description',
+    keywords: 'notifications.agentNotes.keywords',
+    part: 'desktop',
+    access: 'change',
+    ...flag('notifications', 'agentNotes', (file) => file.notifications.agentNotes),
+  },
   'notifications.routines': {
     section: 'notifications',
     feature: 'routines',
