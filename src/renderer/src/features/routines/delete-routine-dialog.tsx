@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { binKey } from '@shared/recycle-bin'
 import type { RoutineView } from '@shared/routines'
 import {
   AlertDialog,
@@ -13,7 +14,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@renderer/components/ui/alert-dialog'
-import { errorMessage } from '@renderer/lib/host'
+import { binnedToast, movedTitle } from '@renderer/features/recycle-bin/undo'
+import { useHostHasBin } from '@renderer/features/recycle-bin/support'
+import { errorMessage, routineHost } from '@renderer/lib/host'
 import { useRoutinesStore } from '@renderer/stores/routines'
 
 export function DeleteRoutineDialog({
@@ -28,6 +31,7 @@ export function DeleteRoutineDialog({
   onDeleted?: () => void
 }) {
   const { t } = useTranslation('routines')
+  const binOn = useHostHasBin(routineHost(routine.id))
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -35,9 +39,12 @@ export function DeleteRoutineDialog({
     setDeleting(true)
     setError(null)
     try {
+      const hostId = routineHost(routine.id)
       await useRoutinesStore.getState().remove(routine.id)
       onOpenChange(false)
       onDeleted?.()
+      // Huli: it waits in the recycle bin with its runs; Undo puts it back.
+      binnedToast(movedTitle(routine.name), [binKey('routine', routine.id)], hostId)
     } catch (failure) {
       setError(errorMessage(failure))
     } finally {
@@ -58,9 +65,13 @@ export function DeleteRoutineDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{t('routine.deleteTitle', { name: routine.name })}</AlertDialogTitle>
           <AlertDialogDescription>
-            {routine.sessions > 0
-              ? t('routine.deleteWithSessions', { count: routine.sessions })
-              : t('routine.deleteNoSessions')}
+            {binOn
+              ? routine.sessions > 0
+                ? t('routine.deleteWithSessions', { count: routine.sessions })
+                : t('routine.deleteNoSessions')
+              : routine.sessions > 0
+                ? t('routine.deleteWithSessionsForGood', { count: routine.sessions })
+                : t('routine.deleteNoSessionsForGood')}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error && (

@@ -97,6 +97,13 @@ export interface ArtifactStoreDeps {
   canvasQuietMs?: number
   now?: () => number
   purgeEveryMs?: number
+  /**
+   * Huli: how long Recently deleted keeps an artifact, as the recycle bin's settings say; null
+   * keeps it until the user deletes it. 30 days without it.
+   */
+  keepDeletedMs?(): number | null
+  /** Huli: Recently deleted gained or lost an artifact, for the recycle bin that lists it. */
+  binChanged?(): void
 }
 
 /**
@@ -238,16 +245,25 @@ export class ArtifactStore {
     this.timer = null
   }
 
-  /** Removes what has been in Recently deleted for 30 days, and the files no version names. */
+  /** How long Recently deleted keeps an artifact; null for as long as the user leaves it. */
+  private keepDeleted(): number | null {
+    return this.deps.keepDeletedMs ? this.deps.keepDeletedMs() : ARTIFACT_KEEP_DELETED_MS
+  }
+
+  /** Removes what has been in Recently deleted its days, and the files no version names. */
   async purge(): Promise<void> {
     if (!this.deps.threads) return
     try {
-      const before = this.now() - ARTIFACT_KEEP_DELETED_MS
+      const keep = this.keepDeleted()
+      const before = keep === null ? 0 : this.now() - keep
       const { artifacts, files } = await this.call('purge', { before })
       if (artifacts > 0 || files > 0) {
         this.deps.log('info', `Purged ${artifacts} artifacts and ${files} content files`)
       }
-      if (artifacts > 0) this.deps.changed()
+      if (artifacts > 0) {
+        this.deps.changed()
+        this.deps.binChanged?.()
+      }
     } catch (error) {
       this.deps.log('warn', `The artifact purge failed: ${(error as Error).message}`)
     }
@@ -508,26 +524,33 @@ export class ArtifactStore {
   async delete(
     id: string,
     { project }: Reach = {},
-  ): Promise<{ deletedAt: number; purgeAt: number }> {
+  ): Promise<{ deletedAt: number; purgeAt: number | null }> {
     const { deletedAt, changed } = await this.call('delete', {
       id,
       project: project ?? null,
       at: this.now(),
     })
-    if (changed) this.deps.changed()
-    return { deletedAt, purgeAt: deletedAt + ARTIFACT_KEEP_DELETED_MS }
+    if (changed) {
+      this.deps.changed()
+      this.deps.binChanged?.()
+    }
+    const keep = this.keepDeleted()
+    return { deletedAt, purgeAt: keep === null ? null : deletedAt + keep }
   }
 
   /** Brings the artifact back from Recently deleted; the user's alone. */
   async undelete(id: string): Promise<void> {
     const { changed } = await this.call('undelete', { id })
-    if (changed) this.deps.changed()
+    if (!changed) return
+    this.deps.changed()
+    this.deps.binChanged?.()
   }
 
   /** Removes an artifact in Recently deleted for good; the user's alone. */
   async erase(id: string): Promise<void> {
     await this.call('erase', { id })
     this.deps.changed()
+    this.deps.binChanged?.()
   }
 
   // Comments.

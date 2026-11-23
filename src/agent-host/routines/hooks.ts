@@ -56,7 +56,11 @@ export interface RoutineSessions {
    */
   continueRun(sessionId: string, agentId: AgentId, mode: string | null, text: string): Promise<void>
   cancel(sessionId: string): Promise<void>
-  delete(sessionId: string): Promise<void>
+  /**
+   * Huli: with `group`, the routine's bin item, into the recycle bin with the routine; without it
+   * for good, as a run beyond those the routine keeps is.
+   */
+  delete(sessionId: string, group?: string): Promise<void>
   has(sessionId: string): boolean
   summary(sessionId: string): SessionSummary | null
 }

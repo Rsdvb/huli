@@ -46,10 +46,20 @@ export function artifactKind(a: Pick<ArtifactSummary, 'type' | 'pages' | 'canvas
 
 export const KEEP_DELETED_DAYS = 30
 
-/** Whole days before Recently deleted removes it for good. */
-export function daysLeft(deletedAt: number, now = Date.now()): number {
+/**
+ * Whole days before Recently deleted removes it for good, as the host's `purgeAt` says (Huli: the
+ * recycle bin's days) or 30 from an older host; null while it keeps it.
+ */
+export function daysLeft(
+  deletedAt: number,
+  now = Date.now(),
+  purgeAt?: number | null,
+): number | null {
+  if (purgeAt === null) return null
   const day = 86_400_000
-  return Math.max(1, Math.ceil((KEEP_DELETED_DAYS * day - Math.max(0, now - deletedAt)) / day))
+  const left =
+    purgeAt === undefined ? KEEP_DELETED_DAYS * day - Math.max(0, now - deletedAt) : purgeAt - now
+  return Math.max(1, Math.ceil(left / day))
 }
 
 export type Thumbnail = { state: 'loading' } | { state: 'ready'; uri: string } | { state: 'none' }

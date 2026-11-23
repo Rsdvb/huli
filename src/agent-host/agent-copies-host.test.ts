@@ -49,7 +49,7 @@ async function agyHost(home: string): Promise<TestHost> {
   return host
 }
 
-it("deletes agy's own copy with the session, past a part it cannot remove", async () => {
+it("deletes agy's own copy with the session from the recycle bin, past a part it cannot remove", async () => {
   const home = await tempFolder('kite-agy-home-')
   const host = await agyHost(home)
   const window = host.connect()
@@ -75,6 +75,11 @@ it("deletes agy's own copy with the session, past a part it cannot remove", asyn
 
   const sessions = await window.request('sessions.list', {})
   expect(sessions.some((session) => session.id === id)).toBe(false)
+  // Huli: in the recycle bin, agy's own copy stays until it is deleted for good.
+  const bin = await window.request('bin.list', undefined)
+  expect(bin.items.map((item) => item.key)).toContain(`session:${id}`)
+  expect(await exists(path.join(folder, 'conversations', `${conversation}.db`))).toBe(true)
+  await window.request('bin.purge', { keys: [`session:${id}`] })
   expect(await exists(path.join(folder, 'conversations', `${conversation}.db`))).toBe(false)
   expect(await exists(path.join(folder, 'brain', conversation!))).toBe(false)
   expect(await exists(path.join(folder, 'annotations', `${conversation}.pbtxt`))).toBe(false)

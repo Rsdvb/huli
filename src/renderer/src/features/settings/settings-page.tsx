@@ -62,6 +62,7 @@ import {
   useAboutSection,
   useAccountSection,
   useArchivedSection,
+  useRecycleBinSection,
   useArtifactsSection,
   useAdvancedSection,
   useAgentsSection,
@@ -250,7 +251,13 @@ function SettingsLayout({
       useUsageSection(),
       useGitSection(),
     ],
-    [useArchivedSection(), useArtifactsSection(), useSharingSection(), useTerminalSection()],
+    [
+      useArchivedSection(),
+      useRecycleBinSection(),
+      useArtifactsSection(),
+      useSharingSection(),
+      useTerminalSection(),
+    ],
     [useRemoteSection(), useAdvancedSection()],
     [about],
   ]

@@ -11,6 +11,9 @@ APP=$(ls -d "$OUT"/dd/Build/Products/Release-iphonesimulator/Huli.app)
 export JAVA_HOME="$HOME/.huli-tools/jdk/Contents/Home"
 export MAESTRO_CLI_NO_ANALYTICS=1 MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED=true
 MAESTRO="$HOME/.huli-tools/maestro/bin/maestro"
+# The driver can take longer than its 2 minutes to start on a loaded runner, as long-reply.sh and
+# measure.sh found; a run that times out there tests nothing.
+export MAESTRO_DRIVER_STARTUP_TIMEOUT=300000
 
 # The newest iOS runtime, on the newest Pro Max it offers.
 RUNTIME=$(xcrun simctl list runtimes -j | node -e '

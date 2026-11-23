@@ -1702,8 +1702,10 @@ export class ArtifactTools {
       this.deps.store.delete(artifactId, { project: caller.project }),
     )
     return result(
-      `Moved ${artifactId} to Recently deleted; the user can restore it until ${iso(purgeAt)}.`,
-      { id: artifactId, purge_at: iso(purgeAt) },
+      purgeAt === null
+        ? `Moved ${artifactId} to Recently deleted; the user can restore it.`
+        : `Moved ${artifactId} to Recently deleted; the user can restore it until ${iso(purgeAt)}.`,
+      { id: artifactId, purge_at: purgeAt === null ? null : iso(purgeAt) },
     )
   }
 

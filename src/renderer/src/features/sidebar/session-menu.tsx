@@ -131,6 +131,8 @@ import { ZenMenu } from '@renderer/features/session/zen-menu'
 import { MenuOptions } from '@renderer/features/session/menu-options'
 import { useMenuOptions } from '@renderer/features/session/menu-options-model'
 import { undoToast } from './undo'
+import { binnedSessionsToast } from '@renderer/features/recycle-bin/undo'
+import { hostHasBin, useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { workAtStake, type WorkItem } from './running-work'
 import { RunningWorkList } from './running-work-list'
 import { dissolveRows } from './row-dust'
@@ -1291,19 +1293,22 @@ function useWorkAtStake(ids: readonly string[], open: boolean): WorkItem[] | nul
  */
 async function deleteAll(ids: readonly string[]): Promise<void> {
   const { byId } = useSessionsStore.getState()
-  await offerWorktreeRemoval(
-    ids.flatMap((id) => (byId[id] ? [byId[id]] : [])),
-    'deleting',
-  )
+  const summaries = ids.flatMap((id) => (byId[id] ? [byId[id]] : []))
+  await offerWorktreeRemoval(summaries, 'deleting')
   const dust = await dissolveRows(ids)
   for (const [i, id] of ids.entries()) {
     try {
       await deleteSession(id)
     } catch (error) {
       dust.restore(ids.slice(i))
+      // Huli: the ones already gone wait in the recycle bin, with Undo.
+      const done = new Set(ids.slice(0, i))
+      binnedSessionsToast(summaries.filter((summary) => done.has(summary.id)))
       throw error
     }
   }
+  // Huli: they wait in the recycle bin; Undo puts them back.
+  binnedSessionsToast(summaries)
 }
 
 /**
@@ -1363,6 +1368,10 @@ export function DeleteSessionDialog({
     ),
   )
   const several = targets.length > 1
+  // Huli: a host older than the recycle bin deletes for good, and the dialog says so.
+  const firstHost = targets[0] ? hostOfSession(targets[0]) : null
+  const binOn =
+    useHostHasBin(firstHost) && targets.every((target) => hostHasBin(hostOfSession(target)))
   const count = open ? targets.reduce((sum, s) => sum + descendantCount(s.id), 0) : 0
   const stake = useAtStake(
     targets.flatMap((s) => stakeFolder(s) ?? []),
@@ -1463,13 +1472,19 @@ export function DeleteSessionDialog({
           </div>
         )}
         <AlertDialogDescription className="text-small text-tertiary">
-          {count > 0
-            ? t('row.deleteBodyWithSub', { count })
-            : several
-              ? t('row.deleteBodyCount')
-              : t('row.deleteBody')}
+          {binOn
+            ? count > 0
+              ? t('row.deleteBodyWithSub', { count })
+              : several
+                ? t('row.deleteBodyCount')
+                : t('row.deleteBody')
+            : count > 0
+              ? t('row.deleteBodyWithSubForGood', { count })
+              : several
+                ? t('row.deleteBodyCountForGood')
+                : t('row.deleteBodyForGood')}
           {copies.removed &&
-            ` ${t('row.deleteRemovesAgentCopy', {
+            ` ${t(binOn ? 'row.deleteRemovesAgentCopy' : 'row.deleteRemovesAgentCopyNow', {
               agent: names(copies.removed),
               count: targets.length,
             })}`}

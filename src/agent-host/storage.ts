@@ -319,6 +319,8 @@ export interface ProjectRecord {
   // Huli: the user's order of its sidebar rows by id (shared/session-order.ts); absent while they
   // go by latest activity.
   sessionOrder?: string[]
+  // Huli: removed into the recycle bin then, with its settings; off every list until restored.
+  deletedAt?: number
 }
 
 /**
@@ -459,6 +461,17 @@ export interface SessionRecord {
   memorySentAt?: string
   /** Its agent said the conversation cannot be cut, as for an older Codex thread. */
   noRewind?: true
+  /** Huli: in the recycle bin since then, off every list and lookup until restored. */
+  deletedAt?: number
+  /**
+   * Huli: the bin item it went in with, when not its own: its top-level session's, or the
+   * project's whose removal took it.
+   */
+  deletedWith?: string
+  /** Huli: a delete for good leaves its agent's own copy, as removing it from the list always did. */
+  deletedKeepsAgent?: true
+  /** Huli: restored with its project gone, so it is listed under No project in its folder. */
+  noProject?: true
 }
 
 /** An edit from a message, until the next send cuts the agent's own session or Put back undoes it. */
@@ -644,9 +657,12 @@ export interface RegistryListingFile {
   agents: unknown[]
 }
 
+/** Huli: a routine as the file keeps it; one in the recycle bin has `deletedAt`. */
+export type StoredRoutine = Routine & { deletedAt?: number }
+
 export interface RoutinesFile {
   version: 1
-  routines: Routine[]
+  routines: StoredRoutine[]
 }
 
 /** Reads a routine, or null when a field is missing or out of range. */
@@ -730,11 +746,12 @@ function routineOf(value: unknown): Routine | null {
 /** A routine that does not parse fails the file, which is then moved aside. */
 export function parseRoutinesFile(data: Record<string, unknown>): RoutinesFile | string {
   if (!Array.isArray(data.routines)) return 'routines is not a list'
-  const routines: Routine[] = []
+  const routines: StoredRoutine[] = []
   for (const [index, item] of data.routines.entries()) {
     const routine = routineOf(item)
     if (!routine) return `routine ${index} is malformed`
-    routines.push(routine)
+    const deletedAt = (item as Record<string, unknown>).deletedAt
+    routines.push(isTime(deletedAt) ? { ...routine, deletedAt } : routine)
   }
   return { version: 1, routines }
 }
@@ -838,6 +855,7 @@ export function parseProjectsFile(
       ...sandboxField(item.sandbox),
       ...projectFoldersOf(item.folders, item.path, platform),
       ...sessionOrderOf('sessionOrder', item.sessionOrder),
+      ...(isTime(item.deletedAt) ? { deletedAt: item.deletedAt } : {}),
     })
   }
   return {
@@ -1310,6 +1328,22 @@ function limitPauseField(value: unknown): { limitPause?: LimitPause } {
   return pause ? { limitPause: pause } : {}
 }
 
+/** Huli: a session's place in the recycle bin; the rest is dropped without a time. */
+function binnedOf(
+  item: Record<string, unknown>,
+): Pick<SessionRecord, 'deletedAt' | 'deletedWith' | 'deletedKeepsAgent' | 'noProject'> {
+  const noProject = item.noProject === true ? { noProject: true as const } : {}
+  if (!isTime(item.deletedAt)) return noProject
+  return {
+    ...noProject,
+    deletedAt: item.deletedAt,
+    ...(isString(item.deletedWith) && item.deletedWith !== '' && item.deletedWith.length <= 5_000
+      ? { deletedWith: item.deletedWith }
+      : {}),
+    ...(item.deletedKeepsAgent === true ? { deletedKeepsAgent: true as const } : {}),
+  }
+}
+
 export function parseSessionsFile(data: Record<string, unknown>): SessionsFile | string {
   if (!Array.isArray(data.sessions)) return 'sessions is not a list'
   const sessions: SessionRecord[] = []
@@ -1403,6 +1437,7 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
         ? { memorySentAt: item.memorySentAt }
         : {}),
       ...(item.noRewind === true ? { noRewind: true as const } : {}),
+      ...binnedOf(item),
     })
   }
   return {

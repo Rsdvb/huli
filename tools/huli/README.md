@@ -2136,6 +2136,74 @@ Archive, settle and snooze show Undo for five seconds (`features/sidebar/undo.ts
 notice too, and its archive); Ctrl/Cmd+Z runs the latest while it shows, unless a text field with
 text has the key for its own undo.
 
+### Recycle bin (回收站)
+
+Deleting a session (with its sub-sessions), a session folder, a project (Kite's record and
+settings; its folder on disk was never touched), a task, a routine, a workflow or a memory entry
+moves it to the recycle bin instead, and so do Remove all sessions and the one-time removal of
+empty sessions. Archive is not delete and stays as it was. Each delete shows 「已移到回收站」 with
+撤销 for five seconds, as archive does (`features/recycle-bin/undo.ts`, the phone's
+`mobile/src/recycleBin.ts`). Artifacts keep their own Recently deleted, which the bin lists as one
+more kind and whose days now follow the bin's.
+
+- The page: Settings › 回收站 on the desktop (beside 已归档, also from the project menus' 打开回收站)
+  and 设置 › 回收站 on the phone. Newest first, a kind filter, search, when each went and when it
+  goes for good, its size on disk where known (a session's stored thread, a memory or workflow
+  file, an artifact's latest version); 恢复, 彻底删除 with a confirmation, several at once, and
+  清空回收站. The phone asks twice before deleting for good. It reads `bin.list` only while it
+  shows, and again on `bin.changed`.
+- A restore puts each thing back where it was. A session whose project is in the bin or gone is
+  held back (`held` in the result) until the user picks: bring the project back too (or add its
+  folder again), or list the session under No project in the folder it had (`noProject` on its
+  record, which adopts that folder as a scratch one until it is a project again).
+- Retention: Settings › 通用 › 回收站 keeps 7, 30 (default) or 90 days, or never empties
+  (`recycleBin.keepDays`). The host purges once it has settled after its start (30 s), then on one
+  timer for the next item due; a shorter keep applies a minute after it is chosen. A purge deletes
+  what a delete did before the bin: for a session, its agent's own session (`session/delete`) and
+  what agents keep past it (`AgentCopies`), its thread, files and checkpoints, except for sessions
+  that went with Remove all, a project's removal or the empty-session removal, which always left
+  the agents their copies (`deletedKeepsAgent`). A session another listed session took up meanwhile
+  keeps its agent's copy. Routines' runs past the sessions they keep are still deleted for good.
+- Stored data, marked rather than moved: `deletedAt` on the record in its own file
+  (`sessions.json` with `deletedWith`, the bin item a session went in with: its top-level
+  session's, `project:<folder>`, `task:<id>` or `routine:<id>`; `projects.json`;
+  `session-folders.json`, the folder kept in its place holding its sessions; `routines.json`;
+  `workflows.json`, the YAML file and pins kept; a task's JSON row in the thread database). A memory
+  entry is renamed in its layer to `<id>.<deletedAt>.deleted`, which no read of a layer takes. No
+  thread database migration. An older Kite reading these files ignores the marks.
+- Out of every list and lookup: each store keeps binned items in a map of their own from load, so
+  list, search, `read_session_history` and the session tools, the board, unread counts, session
+  moves, routine schedules and triggers, the memory index and tools, `list_workflows`, folders and
+  project matching never see them; the phone hears `session.removed`, `routine.removed`,
+  `task.removed` and the rest as for a delete. A binned session's id stays in its folder, and both
+  imports leave out a binned agent session, which an import by its id restores.
+- Older hosts: a host says it has the bin in its `HostInfo` (`recycleBin: true`, from the desktop
+  app and the daemon), which `binSupported` reads. Another computer whose Kite is older says
+  nothing, deletes for good, and gets the old words everywhere: the delete dialogs say it cannot be
+  undone, no 撤销 toast or notice follows, and the bin page (desktop and phone) names that host
+  as having no bin instead of asking for its items. While a host's info is unknown it counts as
+  older. This computer's desktop app always has it (`features/recycle-bin/support.ts`, the phone's
+  `linkHasBin` asking `host.info`).
+- Requests: `bin.list`, `bin.restore` (`keys`, optional `project`), `bin.purge`, `bin.empty`,
+  validated in `validate.ts` (keys `kind:id`, at most `MAX_BIN_KEYS`), open to paired devices;
+  `memory.remove` now answers its `binKey`.
+
+Huli's own files: `src/shared/recycle-bin.ts`, `src/agent-host/recycle-bin.ts` (the bin and its
+timer), `recycle-bin-sources.ts` (each kind), their tests (`recycle-bin*.test.ts`),
+`features/settings/recycle-bin-section.tsx`, `features/recycle-bin/`, `mobile/src/app/recycle-bin.tsx`,
+`mobile/src/recycleBin.ts`, `tools/huli/ios/sim/flows/89-recycle-bin.yaml`.
+
+Hooks into upstream files: `src/agent-host/{sessions,projects,storage,host,validate}.ts`,
+`session-folders.ts`, `artifacts/{store,tools}.ts`, `memory/service.ts`,
+`workflow/{library,engine,model}.ts`, `routines/{manager,hooks}.ts`, `threads/{db,store,service,
+protocol}.ts` (`sizes`), `src/shared/{agent-host,artifacts,settings,settings-catalog,
+host-request-limits}.ts`, `src/main/settings-schema.ts`, `src/remote-host/outbox.ts`, the delete
+dialogs and toasts (`session-menu.tsx`, `folder-dialogs.tsx`, `task-menu.tsx`,
+`delete-routine-dialog.tsx`, `workflow-listing.tsx`, `memory-page.tsx`, `remove-project.tsx`,
+`sections.tsx`), `section-defs.tsx`, `settings-page.tsx`, `project-menu.tsx`, `bootstrap.ts`, the
+artifacts' days (`features/artifacts/{model.ts,artifact-card.tsx,artifact-viewer.tsx}`) and the
+phone's delete sites.
+
 ### Mentioning another session (@ 会话)
 
 Typing `@` and part of a title in the composer lists the user's sessions of the box's host (not

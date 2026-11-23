@@ -317,6 +317,13 @@ export default function Settings() {
             chevron
             onPress={() => router.push('/archived')}
           />
+          <ListRow
+            title="回收站"
+            icon="trash"
+            plainIcon
+            chevron
+            onPress={() => router.push('/recycle-bin')}
+          />
         </ListGroup>
 
         <ListGroup

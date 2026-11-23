@@ -610,3 +610,54 @@ describe('MemoryService import of Codex memory', () => {
     ).toBe('not_found')
   })
 })
+
+describe('Huli: memory and the recycle bin', () => {
+  it('keeps a removed entry beside the others, out of every read, until it is restored', async () => {
+    const memory = service()
+    const saved = await memory.save(scopeOf(), null, draft('Ports', 'Port 3000.'), BY)
+    const removed = await memory.remove(scopeOf(), 'ports', USER)
+    expect(removed.binId).toBe(`projects/${projectDirName(project)}/ports.${now}.deleted`)
+    expect(await memory.list(scopeOf())).toEqual([])
+    expect(await memory.get(scopeOf(), 'ports')).toBeNull()
+    expect(await memory.index(project, true)).not.toContain('Ports')
+    expect((await memory.overview()).projects[0]!.count).toBe(0)
+    expect(await memory.binned()).toEqual([
+      {
+        binId: removed.binId,
+        memoryId: 'ports',
+        deletedAt: now,
+        title: 'Ports',
+        project,
+        size: expect.any(Number),
+      },
+    ])
+    expect(await memory.restoreBinned(removed.binId)).toBe(true)
+    expect(await memory.restoreBinned(removed.binId)).toBe(false)
+    expect(await memory.get(scopeOf(), 'ports')).toEqual(saved.entry)
+    expect(await memory.binned()).toEqual([])
+  })
+
+  it('restores under a new id when another entry took its id meanwhile', async () => {
+    const memory = service()
+    await memory.save(GLOBAL, null, draft('Ports', 'Old.'), BY)
+    const removed = await memory.remove(GLOBAL, 'ports', USER)
+    await memory.save(GLOBAL, null, draft('Ports', 'New.'), BY)
+    expect(await memory.restoreBinned(removed.binId)).toBe(true)
+    const bodies = (await memory.list(GLOBAL)).map((entry) => entry.body).sort()
+    expect(bodies).toEqual(['New.', 'Old.'])
+  })
+
+  it('deletes a binned entry for good, and takes it out of the bin on an undo', async () => {
+    const memory = service()
+    await memory.save(GLOBAL, null, draft('Hosts'), BY)
+    const first = await memory.remove(GLOBAL, 'hosts', USER)
+    await memory.purgeBinned([first.binId, 'global/../../escape.1.deleted'])
+    expect(await memory.binned()).toEqual([])
+    await memory.save(GLOBAL, null, draft('Hosts'), BY)
+    now += 1000
+    const second = await memory.remove(GLOBAL, 'hosts', BY)
+    expect(await memory.undo(second.undo)).toBe('undone')
+    expect(await memory.binned()).toEqual([])
+    expect(await memory.get(GLOBAL, 'hosts')).not.toBeNull()
+  })
+})

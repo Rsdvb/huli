@@ -42,8 +42,10 @@
     "cancelBodyBranch": "The steps at work stop. Their sessions, the task’s worktree and its branch stay.",
     "cancelConfirm": "Cancel task",
     "keepRunning": "Keep running",
-    "deleteBody": "The task and its steps’ sessions can’t be restored. Archive keeps them.",
-    "deleteBodyBranch": "The task and its steps’ sessions can’t be restored. The branch {{branch}} and its worktree stay.",
+    "deleteBody": "The task and its steps’ sessions move to the recycle bin, where you can restore them from Settings › Recycle bin.",
+    "deleteBodyForGood": "The task and its steps’ sessions can’t be restored. Archive keeps them.",
+    "deleteBodyBranch": "The task and its steps’ sessions move to the recycle bin, where you can restore them from Settings › Recycle bin. The branch {{branch}} and its worktree stay.",
+    "deleteBodyBranchForGood": "The task and its steps’ sessions can’t be restored. The branch {{branch}} and its worktree stay.",
     "renameTitle": "Rename task",
     "archived": "Archived “{{title}}”"
   },

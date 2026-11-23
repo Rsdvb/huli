@@ -1,3 +1,4 @@
+import { binChanged } from '@renderer/features/recycle-bin/events'
 import type { HostEvent } from '@shared/agent-host'
 import { followScreenshots } from '@renderer/features/session/composer/screenshots'
 import type { AgentId } from '@shared/agents'
@@ -212,6 +213,9 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
       return
     case 'folders.changed':
       receiveFolders(event.folders, hostId)
+      return
+    case 'bin.changed':
+      binChanged(hostId)
       return
     case 'agentNetwork.changed':
       // Only this computer's host sends it; another's would be no business of this window.

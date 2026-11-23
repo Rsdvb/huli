@@ -4,6 +4,7 @@
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FOLDER_NAME_CHARS } from '@shared/session-folders'
+import { binKey } from '@shared/recycle-bin'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +27,8 @@ import {
 } from '@renderer/components/ui/dialog'
 import { Field, FieldError, FieldLabel } from '@renderer/components/ui/field'
 import { Input } from '@renderer/components/ui/input'
+import { binnedToast, movedTitle } from '@renderer/features/recycle-bin/undo'
+import { useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { errorMessage } from '@renderer/lib/host'
 import {
   askFolderDialog,
@@ -140,13 +143,14 @@ function NameForm({
 
 function DeleteBody({ dialog }: { dialog: Extract<FolderDialog, { kind: 'delete' }> }) {
   const { t } = useTranslation(['sessionFolders', 'common'])
+  const binOn = useHostHasBin(dialog.hostId)
   return (
     <>
       <AlertDialogHeader>
         <AlertDialogTitle>{t('dialog.deleteTitle', { name: dialog.folder.name })}</AlertDialogTitle>
       </AlertDialogHeader>
       <AlertDialogDescription className="text-small text-tertiary">
-        {t('dialog.deleteBody')}
+        {binOn ? t('dialog.deleteBody') : t('dialog.deleteBodyForGood')}
       </AlertDialogDescription>
       <AlertDialogFooter className="pt-1">
         <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
@@ -154,7 +158,11 @@ function DeleteBody({ dialog }: { dialog: Extract<FolderDialog, { kind: 'delete'
           variant="destructive"
           onClick={() => {
             askFolderDialog(null)
-            void deleteFolder(dialog.hostId, dialog.folder.id)
+            const { hostId, folder } = dialog
+            void deleteFolder(hostId, folder.id).then((done) => {
+              // Huli: it waits in the recycle bin with what it held; Undo puts it back.
+              if (done) binnedToast(movedTitle(folder.name), [binKey('folder', folder.id)], hostId)
+            })
           }}
         >
           {t('dialog.delete')}

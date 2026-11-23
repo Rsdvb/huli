@@ -374,6 +374,11 @@ export class ThreadStore {
     return this.read({ op: 'blob', sessionId, hash }, sessionId)
   }
 
+  /** Huli: the bytes each session's stored thread keeps, by id, for the recycle bin. */
+  sizes(sessionIds: readonly string[]): Promise<Record<string, number>> {
+    return this.readAll({ op: 'sizes', sessionIds: [...sessionIds] })
+  }
+
   /** How many media files the threads keep and their bytes, and what is not moved into files yet. */
   mediaTotals(): Promise<{ files: number; bytes: number; legacy: number }> {
     return this.readAll({ op: 'mediaTotals' })

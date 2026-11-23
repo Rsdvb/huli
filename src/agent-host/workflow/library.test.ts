@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -148,5 +149,36 @@ describe('the workflow library', () => {
     expect(githubRawUrl('http://github.com/o/r/blob/main/dev.yaml')).toBeNull()
     expect(githubRawUrl('https://example.com/o/r/blob/main/dev.yaml')).toBeNull()
     expect(githubRawUrl('https://user:pw@github.com/o/r/blob/main/dev.yaml')).toBeNull()
+  })
+})
+
+describe('Huli: the workflow library and the recycle bin', () => {
+  it('keeps a removed workflow, its file and pins, out of every list until it is restored', async () => {
+    const { lib, dir, saved } = library()
+    await lib.load()
+    const added = await lib.add({ kind: 'file', name: 'quick.yaml', text: TEXT })
+    await lib.approve(added.id, added.hash)
+    await lib.remove(added.id)
+    expect(await lib.list()).toEqual([])
+    await expect(lib.read(added.id)).rejects.toThrow(HostError)
+    await expect(lib.resolve(added.id)).rejects.toThrow(HostError)
+    await expect(lib.remove(added.id)).rejects.toThrow(HostError)
+    expect(saved().entries[added.id]).toMatchObject({ deletedAt: expect.any(Number) })
+    const binned = await lib.binned()
+    expect(binned).toEqual([
+      { id: added.id, name: 'Quick fix', deletedAt: expect.any(Number), size: TEXT.length },
+    ])
+    // A new workflow by the same name takes another id, leaving the binned one's file alone.
+    const again = await lib.add({ kind: 'file', name: 'quick.yaml', text: TEXT })
+    expect(again.id).not.toBe(added.id)
+    expect(lib.restore(added.id)).toBe(true)
+    expect(lib.restore(added.id)).toBe(false)
+    const back = await lib.read(added.id)
+    expect(back.entry).toMatchObject({ id: added.id, approval: 'approved' })
+    expect(back.text).toBe(TEXT)
+    await lib.remove(added.id)
+    await lib.purge([added.id])
+    expect(saved().entries[added.id]).toBeUndefined()
+    await expect(stat(path.join(dir, `${added.id}.yaml`))).rejects.toThrow()
   })
 })

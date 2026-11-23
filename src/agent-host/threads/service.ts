@@ -115,6 +115,8 @@ function run(
       return db.blob(request.sessionId, request.hash)
     case 'mediaTotals':
       return db.mediaTotals()
+    case 'sizes':
+      return db.sizes(request.sessionIds)
     case 'clearImages':
       return db.clearImages(request.sessionIds, request.dryRun)
     case 'mentions':

@@ -8,6 +8,7 @@
 // light link (`linkFor`); what needs the active computer's full link, deleting and forking, is
 // left out of its menu.
 
+import { binnedOne } from '../recycleBin'
 import { shareSessionMarkdown } from '../sessionExport'
 import { useState, type ReactNode } from 'react'
 import { Alert } from 'react-native'
@@ -632,7 +633,11 @@ export function useSessionActions(
               s,
               '没能删除',
               (link) => link.request('sessions.delete', { sessionId: s.id }),
-              onGone,
+              () => {
+                onGone?.()
+                // Huli: it waits in the recycle bin; 撤销 puts it back.
+                binnedOne(linkOf(s), 'session', s.id, sessionTitle(s))
+              },
             )
           }
         }}

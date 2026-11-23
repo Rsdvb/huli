@@ -4,6 +4,7 @@ import {
   Archive01Icon,
   ComputerTerminal01Icon,
   DashboardSquare02Icon,
+  Delete02Icon,
   GitBranchIcon,
   Globe02Icon,
   InformationCircleIcon,
@@ -76,6 +77,8 @@ import {
   HarnessPage,
 } from './harness-section'
 import { ArchivedRow } from './archived-section'
+import { BinKeepDays, RecycleBinPage } from './recycle-bin-section'
+import { useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { CloudSwitchRow, OtherConnections } from './cloud-section'
 import { useCloudOffHere } from './use-cloud-off-here'
 import { DebugModeRow } from './debug-mode'
@@ -197,6 +200,7 @@ export function useGeneralSection(): SectionDef {
     noteFor: 'background',
   })
   const thread = group('thread', t('general.groups.thread'))
+  const bin = group('recycleBin', t('general.groups.recycleBin'))
   const startup = group('startup', t('general.groups.startup'))
   const cloud = group('cloud', t('general.groups.cloud'), {
     note: <GroupNote>{t('general.cloud.note')}</GroupNote>,
@@ -330,6 +334,13 @@ export function useGeneralSection(): SectionDef {
         setting: 'general.keep-awake',
         group: sessions,
         render: () => <GeneralSwitch field="keepAwake" label={t('general.keepAwake.name')} />,
+      },
+      // Huli: how long the recycle bin keeps what was deleted.
+      {
+        id: 'bin-keep-days',
+        setting: 'general.bin-keep-days',
+        group: bin,
+        render: () => <BinKeepDays label={t('general.binKeepDays.name')} />,
       },
       {
         id: 'outline-summaries',
@@ -1140,6 +1151,8 @@ export function useAdvancedSection(): SectionDef {
   const debugOn = useDebugStore((s) => s.status.on)
   const data = group('data', t('advanced.groups.data'))
   const webhooksOn = useEntry('settings.webhookPort')
+  // Huli: a host older than the recycle bin clears its list for good.
+  const binOn = useHostHasBin(hostId)
   return {
     id: 'advanced',
     title: t('sections.advanced'),
@@ -1231,6 +1244,7 @@ export function useAdvancedSection(): SectionDef {
       {
         id: 'remove-sessions',
         setting: 'advanced.remove-sessions',
+        ...(binOn ? {} : { description: t('advanced.removeSessions.descriptionForGood') }),
         group: group('danger', t('advanced.groups.danger')),
         render: () => <RemoveAll />,
       },
@@ -1316,6 +1330,32 @@ export function useArchivedSection(): SectionDef {
     footer: archived.length === 0 && (
       <EmptyCard title={t('archived.emptyTitle')} hint={t('archived.emptyHint')} />
     ),
+  }
+}
+
+/** Huli: Settings › 回收站, the recycle bin, which reads it only while it shows. */
+export function useRecycleBinSection(): SectionDef {
+  const { t } = useTranslation('settings')
+  const list: GroupDef = {
+    id: 'recycle-bin',
+    label: t('recycleBin.group'),
+    unlabeled: true,
+    plain: true,
+  }
+  return {
+    id: 'recycle-bin',
+    title: t('sections.recycle-bin'),
+    description: t('pages.recycle-bin'),
+    icon: Delete02Icon,
+    rows: [
+      {
+        id: 'recycle-bin',
+        setting: 'recycle-bin.items',
+        group: list,
+        layout: 'bare',
+        render: () => <RecycleBinPage />,
+      },
+    ],
   }
 }
 

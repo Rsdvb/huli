@@ -4,6 +4,7 @@
 // the desktop's (src/renderer/src/features/tasks/model.ts, src/shared/locales/zh-CN/tasks.json),
 // where a task is a 需求.
 
+import { binnedOne, linkHasBin } from './recycleBin'
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Alert } from 'react-native'
 import type { HostEvent, HostParams } from '@shared/agent-host'
@@ -500,11 +501,22 @@ export function confirmCancel(link: HostLink, task: TaskSummary): void {
 /** Asks, then deletes an ended task with its steps' sessions. */
 export function confirmDelete(link: HostLink, task: TaskSummary, done?: () => void): void {
   haptic.warning()
+  void linkHasBin(link).then((binOn) => askDeleteTask(link, task, binOn, done))
+}
+
+/** Huli: a computer whose Kite is older than the recycle bin deletes for good, as this says. */
+function askDeleteTask(
+  link: HostLink,
+  task: TaskSummary,
+  binOn: boolean,
+  done: (() => void) | undefined,
+): void {
+  const what = binOn
+    ? '需求和它各步骤的会话会移到回收站，可以在 设置 › 回收站 里恢复。'
+    : '需求和它各步骤的会话删除后无法恢复。'
   Alert.alert(
     `删除“${task.title}”？`,
-    task.branch
-      ? `需求和它各步骤的会话删除后无法恢复。分支 ${task.branch} 和它的工作树会留着。`
-      : '需求和它各步骤的会话删除后无法恢复。',
+    task.branch ? `${what}分支 ${task.branch} 和它的工作树会留着。` : what,
     [
       { text: '取消', style: 'cancel' },
       {
@@ -516,6 +528,7 @@ export function confirmDelete(link: HostLink, task: TaskSummary, done?: () => vo
               drop(storeFor(link), task.id)
               haptic.success()
               done?.()
+              binnedOne(link, 'task', task.id, task.title)
             },
             (failure: unknown) => Alert.alert('没能删除', errorText(failure)),
           )

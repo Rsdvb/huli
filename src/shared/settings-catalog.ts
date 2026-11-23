@@ -27,6 +27,7 @@ import { AUTO_APPROVE_LEVELS } from './risk'
 import { SANDBOX_NETWORKS, SANDBOX_TIERS } from './sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from './supervisor'
 import { SETTLE_DAYS } from './session-tidy'
+import { BIN_KEEP_DAYS } from './recycle-bin'
 import { TOOL_CALL_VIEWS } from './zen-view'
 import type { AgentId, HarnessId } from './thread'
 import { PORT_BASE_MAX, PORT_BASE_MIN } from './worktree-ports'
@@ -48,6 +49,8 @@ export const SETTINGS_SECTIONS = [
   'account',
   'usage',
   'archived',
+  // Huli: the recycle bin (回收站).
+  'recycle-bin',
   'artifacts',
   'sharing',
   'remote',
@@ -1722,6 +1725,18 @@ const ENTRIES = {
     kind: 'list',
   },
 
+  // ---- Recycle bin
+  'recycle-bin.items': {
+    section: 'recycle-bin',
+    row: 'recycle-bin',
+    group: 'recycleBin.group',
+    name: 'sections.recycle-bin',
+    description: 'pages.recycle-bin',
+    keywords: 'recycleBin.keywords',
+    part: 'host',
+    kind: 'list',
+  },
+
   // ---- Artifacts
   'artifacts.page-permissions': {
     section: 'artifacts',
@@ -2263,6 +2278,24 @@ const ENTRIES = {
     access: 'change',
     feature: 'sessionTidy',
     ...flag('tidy', 'merged', (file) => file.tidy.merged),
+  },
+  // Huli: how long the recycle bin keeps what was deleted; a shorter keep asks, as it loses data.
+  'general.bin-keep-days': {
+    section: 'general',
+    row: 'bin-keep-days',
+    group: 'general.groups.recycleBin',
+    name: 'general.binKeepDays.name',
+    description: 'general.binKeepDays.description',
+    keywords: 'general.binKeepDays.keywords',
+    part: 'host',
+    access: 'ask',
+    ...pick('recycleBin', 'keepDays', (file) => file.recycleBin.keepDays, [
+      ...BIN_KEEP_DAYS.map((days) => ({
+        value: days,
+        label: { key: 'general.binKeepDays.days', params: { count: String(days) } },
+      })),
+      { value: null, label: { key: 'general.binKeepDays.never' } },
+    ]),
   },
   'account.huli-this-computer': {
     section: 'account',

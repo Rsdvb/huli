@@ -153,6 +153,7 @@ export async function startDaemonAdmin({
       thumbnails: false,
       partThumbnails: false,
       artifactRecords: [...ARTIFACT_RECORDS],
+      recycleBin: true,
     }),
     restart: (which) => void hosts.restart(which),
     sharing: null,

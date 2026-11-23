@@ -90,6 +90,7 @@ import {
   projectNameProblem,
 } from '@shared/project-create'
 import { isProfileId } from '@shared/provider-profiles'
+import { BIN_KEY_CHARS, MAX_BIN_KEYS, parseBinKey } from '@shared/recycle-bin'
 import { AUTO_APPROVE_LEVELS, isAutoApprove } from '@shared/risk'
 import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
 import { GROUP_RUNS_MAX, GROUP_RUNS_MIN, type GroupRunStart } from '@shared/run-groups'
@@ -233,6 +234,29 @@ function orderIds(o: Fields, key: string): string[] {
           throw invalidParams(`${key}[${index}] must be an id of 1 to ${ORDER_ID_CHARS} characters`)
         }
         return item
+      }),
+    ),
+  ]
+}
+
+/** Huli: the recycle bin's keys of a request, each naming a kind, once each. */
+function binKeys(o: Fields): string[] {
+  const keys = o.keys
+  if (!Array.isArray(keys) || keys.length === 0 || keys.length > MAX_BIN_KEYS) {
+    throw invalidParams(`keys must be an array of 1 to ${MAX_BIN_KEYS} recycle bin keys`)
+  }
+  return [
+    ...new Set(
+      keys.map((key: unknown, index) => {
+        if (
+          typeof key !== 'string' ||
+          key.length > BIN_KEY_CHARS ||
+          key.includes(' ') ||
+          parseBinKey(key) === null
+        ) {
+          throw invalidParams(`keys[${index}] must be a recycle bin key`)
+        }
+        return key
       }),
     ),
   ]
@@ -2793,6 +2817,17 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'sessions.removeAll': none,
+    'bin.list': none,
+    'bin.restore': (params) => {
+      const o = fields(params)
+      const project = o.project
+      if (project !== undefined && project !== 'restore' && project !== 'noProject') {
+        throw invalidParams('project must be restore or noProject')
+      }
+      return { keys: binKeys(o), ...(project === undefined ? {} : { project }) }
+    },
+    'bin.purge': (params) => ({ keys: binKeys(fields(params)) }),
+    'bin.empty': none,
     'routines.list': none,
     'routines.create': (params) => routineDraft(params, platform),
     'routines.update': (params) => {

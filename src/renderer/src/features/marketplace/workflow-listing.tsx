@@ -27,6 +27,7 @@ import {
   type WorkflowStep,
   type StepPick,
 } from '@shared/workflow'
+import { binKey } from '@shared/recycle-bin'
 import type { AgentId } from '@shared/thread'
 import { ApprovalCard } from '@renderer/components/affect/approval-card'
 import { Dropdown, Icon } from '@renderer/components/affect/app-shell'
@@ -34,6 +35,8 @@ import { Button } from '@renderer/components/affect/button'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { toast } from '@renderer/components/ui/toast'
+import { binnedToast, movedTitle } from '@renderer/features/recycle-bin/undo'
+import { useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { IconAction } from '@renderer/features/settings/controls'
 import { PlaceAction } from '@renderer/features/settings/places'
 import { splitName } from '@renderer/features/session/composer/levels'
@@ -315,16 +318,19 @@ function RemoveDialog({
 }) {
   const { t } = useTranslation('marketplace')
   const scope = useHostScope()
+  const binOn = useHostHasBin(scope.hostId)
   return (
     <ConfirmDialog
       open={open}
       onOpenChange={onOpenChange}
       title={t('workflow.remove.title', { name })}
-      body={t('workflow.remove.body')}
+      body={binOn ? t('workflow.remove.body') : t('workflow.remove.bodyForGood')}
       confirm={t('workflow.remove.confirm')}
       action={async () => {
         await scope.request('workflows.remove', { workflowId: entry.id })
         onRemoved()
+        // Huli: it waits in the recycle bin with its file and pins; Undo puts it back.
+        binnedToast(movedTitle(name), [binKey('workflow', entry.id)], scope.hostId)
         await retryWorkflows(scope)
       }}
     />

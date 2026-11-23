@@ -80,7 +80,7 @@ describe('SessionFolders', () => {
     expect(folders.list()[0]!.id).toBe(one.id)
   })
 
-  it('deletes a folder without touching its sessions', async () => {
+  it('deletes a folder into the recycle bin without touching its sessions', async () => {
     const sessions = new Set(['a', 'b'])
     const { folders } = store(sessions)
     await folders.load()
@@ -88,8 +88,98 @@ describe('SessionFolders', () => {
     folders.delete(one.id)
     expect(folders.list()).toEqual([])
     expect(sessions).toEqual(new Set(['a', 'b']))
+    expect(() => folders.rename(one.id, 'Two')).toThrow(HostError)
     await folders.flush()
-    expect(await saved()).toEqual({ version: 1, folders: [] })
+    expect(await saved()).toEqual({
+      version: 1,
+      folders: [
+        {
+          id: one.id,
+          name: 'One',
+          pinned: false,
+          collapsed: false,
+          createdAt: 1_000,
+          sessionIds: ['a', 'b'],
+          deletedAt: 1_000,
+        },
+      ],
+    })
+    // Across a restart it stays in the bin, holding what it held.
+    const again = store(sessions).folders
+    await again.load()
+    expect(again.list()).toEqual([])
+    expect(again.binned()).toEqual([
+      { folder: expect.objectContaining({ id: one.id, sessionIds: ['a', 'b'] }), count: 2 },
+    ])
+  })
+
+  it('restores a binned folder in its place with what it held, but for sessions moved on', async () => {
+    const sessions = new Set(['a', 'b', 'c'])
+    const { folders } = store(sessions)
+    await folders.load()
+    const one = folders.create('One', ['a', 'b'])
+    const two = folders.create('Two')
+    folders.delete(one.id)
+    folders.move(['b'], two.id)
+    expect(folders.restore(one.id)).toBe(true)
+    expect(folders.restore(one.id)).toBe(false)
+    expect(folders.list().map((f) => [f.id, f.sessionIds])).toEqual([
+      [one.id, ['a']],
+      [two.id, ['b']],
+    ])
+  })
+
+  it('keeps a binned session in its folder when other sessions move, for its restore', async () => {
+    const sessions = new Set(['a', 'b'])
+    const binned = new Set(['gone'])
+    let next = 0
+    const folders = new SessionFolders({
+      file: sessionFoldersFile(root, log),
+      isSession: (id) => sessions.has(id),
+      isKept: (id) => sessions.has(id) || binned.has(id),
+      changed: () => {},
+      now: () => 1_000,
+      newId: () => `f${++next}`,
+    })
+    await folders.load()
+    sessions.add('gone')
+    const one = folders.create('One', ['gone', 'a'])
+    sessions.delete('gone')
+    folders.move(['b'], one.id)
+    expect(folders.list()[0]!.sessionIds).toEqual(['b', 'a'])
+    sessions.add('gone')
+    expect(folders.list()[0]!.sessionIds).toEqual(['b', 'gone', 'a'])
+  })
+
+  it('deletes a binned folder for good, and only a binned one', async () => {
+    const { folders } = store(new Set(['a']))
+    await folders.load()
+    const one = folders.create('One', ['a'])
+    const two = folders.create('Two')
+    folders.purge([two.id])
+    expect(folders.list().map((f) => f.id)).toEqual([one.id, two.id])
+    folders.delete(one.id)
+    folders.purge([one.id])
+    expect(folders.binned()).toEqual([])
+    await folders.flush()
+    expect((await saved()) as { folders: { id: string }[] }).toMatchObject({
+      folders: [{ id: two.id }],
+    })
+  })
+
+  it('reads a binned folder that holds sessions a listed one holds too', () => {
+    const parsed = parseSessionFoldersFile({
+      folders: [
+        { id: 'old', name: 'Old', sessionIds: ['a'], deletedAt: 5 },
+        { id: 'new', name: 'New', sessionIds: ['a'] },
+      ],
+    })
+    expect(parsed).toMatchObject({
+      folders: [
+        { id: 'old', sessionIds: ['a'], deletedAt: 5 },
+        { id: 'new', sessionIds: ['a'] },
+      ],
+    })
   })
 
   it('renames, pins, collapses and reorders', async () => {

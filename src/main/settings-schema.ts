@@ -72,6 +72,7 @@ import { AUTO_APPROVE_LEVELS } from '@shared/risk'
 import { SANDBOX_NETWORKS, SANDBOX_TIERS } from '@shared/sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
 import { SETTLE_DAYS } from '@shared/session-tidy'
+import { BIN_KEEP_DAYS } from '@shared/recycle-bin'
 import { isWebhookPort, WEBHOOK_PORT_MAX, WEBHOOK_PORT_MIN } from '@shared/routines'
 import { bindingsProblem, screenshotKeysProblem } from '@shared/shortcuts'
 import { TOOL_CALL_VIEWS } from '@shared/zen-view'
@@ -398,6 +399,7 @@ const SECTION_FIELDS = {
     idleDays: oneOf(...SETTLE_DAYS),
     merged: isBoolean,
   },
+  recycleBin: { keepDays: oneOf(...BIN_KEEP_DAYS, null) },
   webhooks: { port: isWebhookPortValue },
   keyboard: { shortcuts: isShortcutBindingsValue, screenshot: isScreenshotKeysValue },
   workflow: { maxWorkingSteps: oneOf(...WORKING_STEP_LIMITS) },
@@ -1994,6 +1996,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     idleSessions: { ...settings.idleSessions },
     supervisor: { ...settings.supervisor },
     tidy: { ...settings.tidy },
+    recycleBin: { ...settings.recycleBin },
     webhooks: { ...settings.webhooks },
     workflow: { ...settings.workflow },
     usage: { fromComputer: settings.usage.fromComputer },
@@ -2042,6 +2045,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'idleSessions',
   'supervisor',
   'tidy',
+  'recycleBin',
   'webhooks',
   'workflow',
   'usage',

@@ -1,6 +1,8 @@
 // Huli: the user's folders of sessions, kept in `state/session-folders.json` and told to every
 // port when they change. A session is in one folder at most (clients move top-level ones);
-// sessions that went away are dropped from it as it is read. Huli's own; see tools/huli/README.md.
+// sessions that went away are dropped from it as it is read. A deleted folder stays in its place
+// in the file with `deletedAt`, holding its sessions, until the recycle bin restores or purges it.
+// Huli's own; see tools/huli/README.md.
 
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -15,9 +17,12 @@ import { HostError, invalidParams, notFound } from './errors'
 import type { Validators } from './rpc'
 import { JsonFile, type LogFn } from './storage'
 
+/** A folder as the file keeps it; one in the recycle bin has `deletedAt`. */
+export type StoredFolder = SessionFolder & { deletedAt?: number }
+
 export interface SessionFoldersFile {
   version: 1
-  folders: SessionFolder[]
+  folders: StoredFolder[]
 }
 
 export const SESSION_FOLDERS_VERSION = 1
@@ -28,7 +33,7 @@ function cleanName(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
 
-function folderRecord(item: unknown): SessionFolder | null {
+function folderRecord(item: unknown): StoredFolder | null {
   if (typeof item !== 'object' || item === null) return null
   const o = item as Record<string, unknown>
   if (typeof o.id !== 'string' || o.id.length === 0 || o.id.length > ID_CHARS) return null
@@ -48,6 +53,9 @@ function folderRecord(item: unknown): SessionFolder | null {
     createdAt: typeof o.createdAt === 'number' && Number.isFinite(o.createdAt) ? o.createdAt : 0,
     sessionIds: [...new Set(ids)],
     ...(o.manual === true ? { manual: true } : {}),
+    ...(typeof o.deletedAt === 'number' && Number.isFinite(o.deletedAt) && o.deletedAt >= 0
+      ? { deletedAt: o.deletedAt }
+      : {}),
   }
 }
 
@@ -58,11 +66,16 @@ export function parseSessionFoldersFile(
   if (!Array.isArray(data.folders)) return 'folders is not a list'
   const seenFolders = new Set<string>()
   const seenSessions = new Set<string>()
-  const folders: SessionFolder[] = []
+  const folders: StoredFolder[] = []
   for (const item of data.folders) {
     const folder = folderRecord(item)
     if (!folder || seenFolders.has(folder.id)) continue
     seenFolders.add(folder.id)
+    // A binned folder keeps what it held, which a folder in the list may hold too meanwhile.
+    if (folder.deletedAt !== undefined) {
+      folders.push(folder)
+      continue
+    }
     folder.sessionIds = folder.sessionIds.filter((id) => {
       if (seenSessions.has(id)) return false
       seenSessions.add(id)
@@ -89,13 +102,17 @@ export interface SessionFoldersDeps {
   file: JsonFile<SessionFoldersFile>
   /** Whether a session by this id is on the host. */
   isSession(sessionId: string): boolean
+  /** Huli: whether it is on the host or waits in the recycle bin, so a folder keeps it. */
+  isKept?(sessionId: string): boolean
   changed(folders: SessionFolder[]): void
+  /** Huli: what the recycle bin holds of folders changed. */
+  binChanged?(): void
   now?: () => number
   newId?: () => string
 }
 
 export class SessionFolders {
-  private folders: SessionFolder[] = []
+  private folders: StoredFolder[] = []
 
   constructor(private readonly deps: SessionFoldersDeps) {}
 
@@ -112,15 +129,24 @@ export class SessionFolders {
    * always there, so a client tells this host from one that cannot keep a folder's order.
    */
   list(): SessionFolder[] {
-    return this.folders.map((folder) => ({
-      ...folder,
+    return this.listed().map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      pinned: folder.pinned,
+      collapsed: folder.collapsed,
+      createdAt: folder.createdAt,
       sessionIds: folder.sessionIds.filter((id) => this.deps.isSession(id)),
       manual: folder.manual === true,
     }))
   }
 
+  /** The folders outside the recycle bin, in the user's order. */
+  private listed(): StoredFolder[] {
+    return this.folders.filter((folder) => folder.deletedAt === undefined)
+  }
+
   create(name: string, sessionIds: readonly string[] = []): SessionFolder {
-    if (this.folders.length >= MAX_FOLDERS) {
+    if (this.listed().length >= MAX_FOLDERS) {
       throw new HostError('conflict', `There are ${MAX_FOLDERS} folders already`)
     }
     const folder: SessionFolder = {
@@ -159,11 +185,53 @@ export class SessionFolders {
     if (changed) this.commit()
   }
 
-  /** Removes the folder; its sessions are not touched, only ungrouped. */
+  /**
+   * Huli: moves the folder to the recycle bin, holding its sessions, which are not touched, only
+   * ungrouped until it is restored.
+   */
   delete(folderId: string): void {
-    this.find(folderId)
-    this.folders = this.folders.filter((folder) => folder.id !== folderId)
+    const folder = this.find(folderId)
+    folder.deletedAt = (this.deps.now ?? Date.now)()
     this.commit()
+    this.deps.binChanged?.()
+  }
+
+  // Huli: the recycle bin's folders.
+
+  /** The folders in the recycle bin, each with how many of its sessions are still kept. */
+  binned(): { folder: StoredFolder; count: number }[] {
+    const kept = this.deps.isKept ?? this.deps.isSession
+    return this.folders.flatMap((folder) =>
+      folder.deletedAt === undefined
+        ? []
+        : [{ folder, count: folder.sessionIds.filter((id) => kept(id)).length }],
+    )
+  }
+
+  /**
+   * Puts a binned folder back in its place with the sessions it held, but for ones another folder
+   * took meanwhile, since a session is in one folder at most. False when it is not in the bin.
+   */
+  restore(folderId: string): boolean {
+    const folder = this.folders.find((f) => f.id === folderId && f.deletedAt !== undefined)
+    if (!folder) return false
+    const held = new Set(this.listed().flatMap((other) => other.sessionIds))
+    const kept = this.deps.isKept ?? this.deps.isSession
+    folder.sessionIds = folder.sessionIds.filter((id) => !held.has(id) && kept(id))
+    delete folder.deletedAt
+    this.commit()
+    this.deps.binChanged?.()
+    return true
+  }
+
+  /** Deletes binned folders for good; their sessions are not touched. */
+  purge(folderIds: readonly string[]): void {
+    const ids = new Set(folderIds)
+    const before = this.folders.length
+    this.folders = this.folders.filter((f) => !(f.deletedAt !== undefined && ids.has(f.id)))
+    if (this.folders.length === before) return
+    this.deps.file.save({ version: 1, folders: this.folders })
+    this.deps.binChanged?.()
   }
 
   reorder(folderIds: readonly string[]): void {
@@ -175,6 +243,7 @@ export class SessionFolders {
       byId.delete(id)
       first.push(folder)
     }
+    // Binned folders are never named, so they keep their order after those that are.
     const next = [...first, ...this.folders.filter((folder) => byId.has(folder.id))]
     if (next.every((folder, index) => folder === this.folders[index])) return
     this.folders = next
@@ -214,14 +283,16 @@ export class SessionFolders {
   private place(sessionIds: readonly string[], folder: SessionFolder | null): void {
     const moving = new Set(sessionIds.filter((id) => this.deps.isSession(id)))
     if (moving.size === 0) return
-    for (const other of this.folders) {
-      other.sessionIds = other.sessionIds.filter((id) => !moving.has(id) && this.deps.isSession(id))
+    // Huli: a session in the recycle bin keeps its folder, and a binned folder what it held.
+    const kept = this.deps.isKept ?? this.deps.isSession
+    for (const other of this.listed()) {
+      other.sessionIds = other.sessionIds.filter((id) => !moving.has(id) && kept(id))
     }
     if (folder) folder.sessionIds = [...moving, ...folder.sessionIds]
   }
 
-  private find(folderId: string): SessionFolder {
-    const folder = this.folders.find((f) => f.id === folderId)
+  private find(folderId: string): StoredFolder {
+    const folder = this.folders.find((f) => f.id === folderId && f.deletedAt === undefined)
     if (!folder) throw notFound(`No folder ${folderId}`)
     return folder
   }

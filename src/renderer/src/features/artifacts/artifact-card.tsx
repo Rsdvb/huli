@@ -154,9 +154,9 @@ export const ArtifactCard = memo(function ArtifactCard({
   }
   if (standing === 'deleted' && summary?.deletedAt != null) {
     time = deletion ? (
-      <DaysToRestore deletedAt={summary.deletedAt} />
+      <DaysToRestore deletedAt={summary.deletedAt} purgeAt={summary.purgeAt} />
     ) : (
-      <DaysLeft deletedAt={summary.deletedAt} />
+      <DaysLeft deletedAt={summary.deletedAt} purgeAt={summary.purgeAt} />
     )
   } else if (deletion) {
     // Only once the lists hold it again; before they are read nothing is known.
@@ -430,17 +430,23 @@ function Ago({ at }: { at: number }) {
   return <>{longAgo(at, useNow())}</>
 }
 
-function DaysLeft({ deletedAt }: { deletedAt: number }) {
+function DaysLeft({ deletedAt, purgeAt }: { deletedAt: number; purgeAt?: number | null }) {
   const { t } = useTranslation('artifacts')
-  return <>{t('card.daysLeft', { count: daysLeft(deletedAt, useNow()) })}</>
+  const left = daysLeft(deletedAt, useNow(), purgeAt)
+  return left === null ? null : <>{t('card.daysLeft', { count: left })}</>
 }
 
 /** A deletion's line: how long it can still be restored, and when it was deleted. */
-function DaysToRestore({ deletedAt }: { deletedAt: number }) {
+function DaysToRestore({ deletedAt, purgeAt }: { deletedAt: number; purgeAt?: number | null }) {
   const { t } = useTranslation('artifacts')
   const now = useNow()
+  const left = daysLeft(deletedAt, now, purgeAt)
   return (
-    <>{`${t('card.daysToRestore', { count: daysLeft(deletedAt, now) })} · ${longAgo(deletedAt, now)}`}</>
+    <>
+      {left === null
+        ? longAgo(deletedAt, now)
+        : `${t('card.daysToRestore', { count: left })} · ${longAgo(deletedAt, now)}`}
+    </>
   )
 }
 
