@@ -595,7 +595,7 @@ function MenuRow({
 }
 
 function Limits() {
-  const { t } = useTranslation('tray')
+  const { t } = useTranslation(['tray', 'composer'])
   const agents = useTrayPanelStore((s) => s.agents)
   const view = useLimitView()
   const now = useNow()
