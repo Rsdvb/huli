@@ -2370,6 +2370,36 @@
       "failed": "登录没有完成。可以关掉这个标签页，回到 Kettu 重试。"
     }
   },
+  "newProject": {
+    "parentMissing": "{{path}} 不是这台电脑上的文件夹",
+    "parentNotOffered": "只能选这台电脑列出的位置",
+    "targetTaken": "{{name}} 已经存在，不是能用的文件夹",
+    "targetNotEmpty": "已经有一个叫 {{name}} 的文件夹，里面有东西",
+    "cloneRunning": "这个克隆已经在进行了",
+    "tooManyClones": "已经有 4 个克隆在进行，等一个完成再试",
+    "noGit": "这台电脑没有安装 Git",
+    "initFailed": "git init 失败：{{detail}}",
+    "cloneFailed": "克隆失败：{{detail}}",
+    "cloneTimedOut": "克隆超过 30 分钟，已停止",
+    "cancelled": "已取消克隆",
+    "url": {
+      "empty": "填写仓库地址",
+      "tooLong": "地址太长了",
+      "malformed": "这不像是一个仓库地址",
+      "option": "地址不能以 - 开头",
+      "local": "这里只能克隆远程仓库，不能用文件夹或 file:// 地址",
+      "scheme": "请用 https://、ssh:// 或 git@主机:路径 形式的地址",
+      "password": "地址里别写密码，会用这台电脑上 Git 自己的登录"
+    },
+    "name": {
+      "empty": "填写文件夹名",
+      "tooLong": "文件夹名太长了",
+      "chars": "文件夹名不能包含 / \\ : * ? \" < > | 或控制字符",
+      "dots": "文件夹名不能是 . 或 ..",
+      "edge": "文件夹名开头结尾不能是空格，结尾不能是句点",
+      "reserved": "这个名字被 Windows 留给设备用了，换一个吧"
+    }
+  },
   "project": {
     "notAbsolute": "项目路径必须是绝对路径",
     "notExist": "{{path}} 不存在",

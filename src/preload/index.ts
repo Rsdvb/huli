@@ -280,6 +280,8 @@ const api: KettuApi = {
     chooseShell: () => invoke('dialog:choose-shell'),
     chooseHistoryFolder: () => invoke('dialog:choose-history-folder'),
     chooseProjectFolder: () => invoke('dialog:choose-project-folder'),
+    chooseNewProjectParent: (defaultPath) =>
+      invoke('dialog:choose-new-project-parent', defaultPath),
   },
   debug: {
     get: () => invoke('debug:get'),

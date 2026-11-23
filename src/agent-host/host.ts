@@ -180,6 +180,7 @@ import {
 import { findCommand, isExecutableFile, type Env } from './find-command'
 import type { GitServiceApi, GitServiceDeps } from './git/api'
 import { createExec, type ExecRunner } from './git/exec'
+import { findExecutable } from './git/executable'
 import { createGitRunner, type GitRunner } from './file-checkpoints/git'
 import { FileCheckpoints } from './file-checkpoints/store'
 import { GitRetains } from './git/retains'
@@ -188,6 +189,7 @@ import { completePath } from './path-completion'
 import { pathKey } from './paths'
 import { PreparedRecords, preparedFile, settingsTargets } from './prepared'
 import { processControl, type ProcessControl } from './process-tree'
+import { ProjectCreate } from './project-create'
 import { ProjectHooksAnswers } from './project-hooks'
 import { ProjectMcpAnswers } from './project-mcp'
 import { Projects } from './projects'
@@ -509,6 +511,8 @@ export class AgentHost {
   private readonly stoppedBy = new Map<string, string>()
   readonly env: EnvironmentService
   readonly projects: Projects
+  /** Huli: Add project's clones and new empty projects. */
+  private readonly projectCreate: ProjectCreate
   readonly scratch: ScratchFolders
   private readonly worktrees: WorktreeManager
   readonly agents: AgentManager
@@ -800,6 +804,23 @@ export class AgentHost {
       platform,
       home: options.homeDir ?? os.homedir(),
       dataDir: options.userDataPath,
+    })
+    this.projectCreate = new ProjectCreate({
+      platform,
+      home: options.homeDir ?? os.homedir(),
+      dataDir: options.userDataPath,
+      projects: this.projects,
+      // git is found, and goes out through Kite's proxy, as the rest of its git does.
+      env: async () => {
+        await this.env.ready()
+        return this.env.agentEnv() as NodeJS.ProcessEnv
+      },
+      findGit: (env) => findExecutable('git', platform, env),
+      exec: (file, args, execOptions) => this.execRunner.exec(file, args, execOptions),
+      control: options.processControl ?? processControl(platform),
+      progress: (portId, progress) =>
+        this.hub.send([portId], { type: 'projects.cloneProgress', progress }),
+      log,
     })
     this.scratch = new ScratchFolders(path.join(options.userDataPath, 'scratch'), platform)
     this.remembered = agentsFile(options.userDataPath, log)
@@ -4135,6 +4156,12 @@ export class AgentHost {
         projects.worktreeSettings(projects.match(path).path),
       'projects.setWorktreeSettings': ({ path, settings }) =>
         projects.setWorktreeSettings(projects.match(path).path, settings),
+      'projects.places': () => this.projectCreate.places(),
+      'projects.clone': (params, ctx) =>
+        this.projectCreate.clone(params, { portId: ctx.portId, device: ctx.device !== null }),
+      'projects.cancelClone': ({ cloneId }) => this.projectCreate.cancelClone(cloneId),
+      'projects.create': (params, ctx) =>
+        this.projectCreate.create(params, { portId: ctx.portId, device: ctx.device !== null }),
       'paths.complete': ({ path }) =>
         completePath(path, this.options.platform, this.options.homeDir ?? os.homedir()),
       'sessions.list': ({ projectPath }) => sessions.list(projectPath),

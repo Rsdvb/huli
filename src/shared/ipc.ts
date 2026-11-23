@@ -283,6 +283,9 @@ export interface IpcInvokeContract {
   'dialog:choose-history-folder': { args: []; result: string | null }
   // Huli: a further folder for a project; null when cancelled. The host checks it once added.
   'dialog:choose-project-folder': { args: []; result: string | null }
+  // Huli: the folder a new project is cloned or made in, opening at `defaultPath`; null when
+  // cancelled. The host resolves and checks it.
+  'dialog:choose-new-project-parent': { args: [defaultPath: string | null]; result: string | null }
   // `defaultPath`: the folder the dialog opens in, the session's; an empty list when cancelled.
   'dialog:add-attachments': {
     args: [kind: 'files' | 'folder', defaultPath: string | null]
@@ -1028,6 +1031,8 @@ export interface KettuApi {
     chooseHistoryFolder(): Promise<string | null>
     /** Huli: a further folder for a project; null when cancelled. */
     chooseProjectFolder(): Promise<string | null>
+    /** Huli: the folder a new project goes in; null when cancelled. */
+    chooseNewProjectParent(defaultPath: string | null): Promise<string | null>
   }
   /** Debug mode: this run's ports, and restarting into it or out of it. */
   debug: {

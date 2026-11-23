@@ -768,6 +768,25 @@ describe('the host files', () => {
     })
   })
 
+  it('Huli: keeps the folder new projects last went in only when it is absolute', () => {
+    expect(
+      parseProjectsFile({ projects: [], newProjectParent: '/Users/me/code' }, 'darwin'),
+    ).toEqual({
+      version: 1,
+      projects: [],
+      newProjectParent: '/Users/me/code',
+    })
+    expect(
+      parseProjectsFile({ projects: [], newProjectParent: 'C:\\code' }, 'win32'),
+    ).toMatchObject({ newProjectParent: 'C:\\code' })
+    for (const value of ['code', '~/code', 'C:\\code', '/a\0b', 3, `/${'x'.repeat(5000)}`]) {
+      expect(parseProjectsFile({ projects: [], newProjectParent: value }, 'darwin')).toEqual({
+        version: 1,
+        projects: [],
+      })
+    }
+  })
+
   it("keeps a project's worktree settings key by key", () => {
     const project = { path: '/repo', name: 'repo', addedAt: 1, lastOpenedAt: 2 }
     const worktree = {

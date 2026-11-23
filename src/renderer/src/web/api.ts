@@ -436,6 +436,8 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
         const { useProjectsStore } = await import('@renderer/stores/projects')
         return askPath('project', useProjectsStore.getState().projects[0]?.path ?? null)
       },
+      // Huli: a browser picks among the folders the host offers instead; see new-project-dialog.
+      chooseNewProjectParent: (defaultPath) => askPath('project', defaultPath),
       chooseAgentBinary: (harnessId) =>
         askPath(
           'agentProgram',

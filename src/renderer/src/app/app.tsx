@@ -11,6 +11,7 @@ import { GitDialogsHost } from '@renderer/features/git/git-dialogs'
 import { MediaViewer } from '@renderer/features/session/media/media-viewer'
 import { SessionExportDialog } from '@renderer/features/session/export/export-dialog'
 import { useMoveStore } from '@renderer/features/session/move/move'
+import { useNewProjectStore } from '@renderer/features/new-project/store'
 import { HostBanner } from '@renderer/features/shell/host-banner'
 import { LaunchCover } from '@renderer/features/shell/launch-cover'
 import { SplitDragProvider } from '@renderer/features/split/session-drag'
@@ -71,6 +72,8 @@ const SessionMcpDialog = lazy(() =>
     default: m.SessionMcpDialog,
   })),
 )
+// Huli: Add project's Clone from Git and New empty project, loaded once first asked for.
+const NewProjectDialogHost = lazy(() => import('@renderer/features/new-project/new-project-dialog'))
 // What an install of a harness brings, shown before it runs; loaded once an Install first opens it.
 const InstallWindow = lazy(() => import('@renderer/features/settings/install-window'))
 
@@ -104,6 +107,10 @@ export function App() {
   // Huli: so does the MCP panel, once first asked for.
   const mcpLoaded = useMcpPanelStore((s) => s.loaded)
   const snoozeAsked = useSnoozeAsk((s) => s.asked)
+  // Huli: the new project dialog stays mounted once loaded, so it closes with its own exit.
+  const newProjectAsked = useNewProjectStore((s) => s.dialog !== null)
+  const [newProjectLoaded, setNewProjectLoaded] = useState(false)
+  if (newProjectAsked && !newProjectLoaded) setNewProjectLoaded(true)
   if (pathAsked && !pathPicker) setPathPicker(true)
   useKeyboardShortcuts()
   useAppCommands()
@@ -190,6 +197,11 @@ export function App() {
         {mcpLoaded && (
           <Suspense fallback={null}>
             <SessionMcpDialog />
+          </Suspense>
+        )}
+        {newProjectLoaded && (
+          <Suspense fallback={null}>
+            <NewProjectDialogHost />
           </Suspense>
         )}
         {snoozeAsked && (

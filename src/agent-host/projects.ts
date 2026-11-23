@@ -64,6 +64,7 @@ export class Projects {
   private records: ProjectRecord[] = []
   private noProjectPinnedAt: number | undefined
   private noProjectSessionOrder: string[] | undefined
+  private newProjectParent: string | undefined
   private missing = new Map<string, boolean>()
   private listeners = new Set<(projects: Project[], noProject: NoProject) => void>()
   private readonly now: () => number
@@ -81,6 +82,7 @@ export class Projects {
     this.records = file.projects
     this.noProjectPinnedAt = file.noProjectPinnedAt
     this.noProjectSessionOrder = file.noProjectSessionOrder
+    this.newProjectParent = file.newProjectParent
     await this.refreshMissing(false)
   }
 
@@ -129,6 +131,24 @@ export class Projects {
 
   paths(): string[] {
     return this.records.map((record) => record.path)
+  }
+
+  /** Huli: the projects' folders, the latest opened first. */
+  recentPaths(): string[] {
+    return [...this.records]
+      .sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
+      .map((record) => record.path)
+  }
+
+  /** Huli: the folder the user last cloned or made a new project in. */
+  lastNewProjectParent(): string | undefined {
+    return this.newProjectParent
+  }
+
+  setNewProjectParent(value: string): void {
+    if (this.newProjectParent === value) return
+    this.newProjectParent = value
+    this.changed()
   }
 
   find(value: string): ProjectRecord | undefined {
@@ -397,6 +417,7 @@ export class Projects {
       ...(this.noProjectSessionOrder === undefined
         ? {}
         : { noProjectSessionOrder: [...this.noProjectSessionOrder] }),
+      ...(this.newProjectParent === undefined ? {} : { newProjectParent: this.newProjectParent }),
     })
     this.notify()
   }

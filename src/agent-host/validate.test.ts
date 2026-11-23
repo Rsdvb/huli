@@ -116,6 +116,62 @@ describe('createValidators', () => {
     rejects(() => remove({ agentId: 'nobody', steps, trash: false }))
   })
 
+  it('Huli: takes a new project’s clone only with an address git may be given', () => {
+    const id = 'b'.repeat(32)
+    expect(
+      posix['projects.clone']({
+        cloneId: id,
+        url: 'https://github.com/o/r.git',
+        parent: '/Users/me/code',
+        name: 'r',
+        extra: 1,
+      }),
+    ).toEqual({
+      cloneId: id,
+      url: 'https://github.com/o/r.git',
+      parent: '/Users/me/code',
+      name: 'r',
+    })
+    const base = { cloneId: id, url: 'git@github.com:o/r.git', parent: 'C:\\code', name: 'r' }
+    expect(windows['projects.clone'](base)).toEqual(base)
+    for (const url of [
+      'ext::sh -c id',
+      'fd::3',
+      '-uhttps://x/y',
+      'file:///etc',
+      '/srv/repo',
+      'C:\\repo',
+      'http://host/r',
+      'https://u:p@host/r',
+      42,
+    ]) {
+      rejects(() => posix['projects.clone']({ ...base, parent: '/code', url }))
+    }
+    for (const name of ['', '..', 'a/b', 'a\\b', ' x', 'nul', 7]) {
+      rejects(() => posix['projects.clone']({ ...base, parent: '/code', name }))
+    }
+    rejects(() => posix['projects.clone']({ ...base, parent: 'code' }))
+    rejects(() => posix['projects.clone']({ ...base, parent: '/code', cloneId: 'x' }))
+    expect(posix['projects.cancelClone']({ cloneId: id })).toEqual({ cloneId: id })
+    rejects(() => posix['projects.cancelClone']({ cloneId: '../x' }))
+  })
+
+  it('Huli: takes a new empty project’s folder, name and presets', () => {
+    expect(
+      posix['projects.create']({ parent: '/code', name: 'app', readme: true, gitignore: 'node' }),
+    ).toEqual({ parent: '/code', name: 'app', readme: true, gitignore: 'node' })
+    expect(
+      posix['projects.create']({ parent: '/code', name: 'app', readme: false, gitignore: null }),
+    ).toEqual({ parent: '/code', name: 'app', readme: false, gitignore: null })
+    const base = { parent: '/code', name: 'app', readme: false, gitignore: null }
+    rejects(() => posix['projects.create']({ ...base, gitignore: '../../etc/passwd' }))
+    rejects(() => posix['projects.create']({ ...base, readme: 'yes' }))
+    rejects(() => posix['projects.create']({ ...base, name: '../x' }))
+    rejects(() => posix['projects.create']({ ...base, parent: '~/code' }))
+    expect(posix['projects.places']({})).toBeUndefined()
+    rejects(() => posix['projects.places']({ parent: '/' }))
+  })
+
   it('takes a fork for an import only when asked', () => {
     const base = { agentId: 'claude-code', projectPath: '/p', acpSessionId: 'id' }
     expect(posix['sessions.import']({ ...base, fork: true })).toEqual({ ...base, fork: true })

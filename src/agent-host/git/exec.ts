@@ -68,7 +68,7 @@ export interface CreateExecOptions {
  * its descendants, listed while it still runs, since its children lose it as their parent once
  * it is gone. They share the agent host's process group, so the group is not signalled.
  */
-async function stopTree(control: ProcessControl, pid: number): Promise<void> {
+export async function stopTree(control: ProcessControl, pid: number): Promise<void> {
   if (control.platform === 'win32') {
     await control.taskkill([pid]).catch(() => {})
     return
