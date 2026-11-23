@@ -32,6 +32,8 @@ export interface Outline {
   refs: Map<string, number>
   /** Lines left out beyond the cap. */
   more: number
+  /** Every line, the ones beyond the cap too, which a later outline's changes are found from. */
+  all: string[]
   /** False when the element `root` names is not in the tree. */
   found: boolean
 }
@@ -395,7 +397,7 @@ export function buildOutline(nodes: readonly AXNode[], options: OutlineOptions =
   const top: Item[] = []
   if (options.root !== undefined) {
     const scope = nodes.find((node) => node.backendDOMNodeId === options.root)
-    if (!scope) return { lines: [], refs, more: 0, found: false }
+    if (!scope) return { lines: [], refs, more: 0, all: [], found: false }
     collect(scope, top)
   } else {
     for (const node of nodes) {
@@ -450,6 +452,7 @@ function cap(
     lines: kept < lines.length ? lines.slice(0, kept) : lines,
     refs,
     more: lines.length - kept,
+    all: lines,
   }
 }
 

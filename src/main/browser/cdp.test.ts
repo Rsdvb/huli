@@ -266,6 +266,17 @@ describe('snapshots', () => {
     expect(whole.value.snapshot).toMatch(/- paragraph: Card declined$/)
   })
 
+  it('tell a change on a long page from a line its cap pushed out', async () => {
+    const { call, show } = pageHarness()
+    const items = Array.from({ length: 2_100 }, (_, i) => `Order ${i}`)
+    show(page(items))
+    expect((await call('browser_snapshot')).value.snapshot).toMatch(/more lines$/)
+    show(page(['Card declined', ...items]))
+    const pressed = await call('browser_press_key', { key: 'Enter' })
+    const lines = (pressed.value.snapshot as string).split('\n')
+    expect(lines.slice(2)).toEqual(['  - main [ref=e1]:', '+   - paragraph: Card declined'])
+  })
+
   it('answer with the whole page when it is as short as the changes', async () => {
     const { call, show } = pageHarness()
     await call('browser_snapshot')

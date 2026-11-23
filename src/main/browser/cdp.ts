@@ -161,7 +161,10 @@ interface NetworkRequest {
   fromCache: boolean
 }
 
-/** The last whole outline the agent read of a document, which the next one's changes are from. */
+/**
+ * The last whole outline the agent read of a document, which the next one's changes are from: all
+ * its lines, past the cap too, so a line the cap pushes out does not read as removed.
+ */
 interface Snapshot {
   nav: number
   lines: string[]
@@ -889,7 +892,7 @@ export class BrowserCdp {
     sessionId: string,
     page: PageState,
     scope: { root?: number; depth?: number } = {},
-  ): Promise<{ outline: string; lines: string[]; found: boolean }> {
+  ): Promise<{ outline: string; head: string; all: string[]; found: boolean }> {
     // Each frame has a tree of its own, which goes under the element of the frame that holds it.
     let main: AXNode[] | null = null
     const frames: { owner: number | null; nodes: AXNode[] }[] = []
@@ -916,12 +919,12 @@ export class BrowserCdp {
     const url = contents.getURL()
     const title = contents.getTitle() || null
     const text = outlineText({ title, url }, built)
-    // The page's line first, then the outline and its "more" line, as the agent read them.
-    const lines = text.split('\n')
     if (scope.root === undefined && scope.depth === undefined) {
-      page.snapshot = { nav: page.nav, lines }
+      page.snapshot = { nav: page.nav, lines: built.all }
     }
-    return { outline: text, lines, found: built.found }
+    const end = text.indexOf('\n')
+    const head = end < 0 ? text : text.slice(0, end)
+    return { outline: text, head, all: built.all, found: built.found }
   }
 
   /**
@@ -933,18 +936,18 @@ export class BrowserCdp {
     page: PageState,
   ): Promise<{ outline: string; diff: boolean }> {
     const before = page.snapshot?.nav === page.nav ? page.snapshot : null
-    const { outline, lines } = await this.capture(sessionId, page)
+    const { outline, head, all } = await this.capture(sessionId, page)
     if (!before) return { outline, diff: false }
-    const changes = diffOutline(before.lines.slice(1), lines.slice(1))
+    const changes = diffOutline(before.lines, all)
     if (changes === null) return { outline, diff: false }
     if (changes.length === 0) {
       return {
-        outline: `${lines[0]}\nNothing changed since your last snapshot (browser_snapshot gives the whole page).`,
+        outline: `${head}\nNothing changed since your last snapshot (browser_snapshot gives the whole page).`,
         diff: true,
       }
     }
     const diff = [
-      lines[0]!,
+      head,
       'Changes since your last snapshot: + added, - removed, under the unchanged elements that ' +
         'hold them; the rest is as it was (browser_snapshot gives the whole page).',
       ...changes,
