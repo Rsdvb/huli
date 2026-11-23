@@ -264,6 +264,10 @@ function introText(t: SettingsT, status: AgentStatus, offer: InstallOffer | null
   const vendor = VENDORS[status.harnessId]
   // With one route there is nothing to pick.
   const one = offer ? offer.routes.length === 1 : status.installMethods.length === 1
+  // Claude Code's SDK installs right after the program, as part of the same Install.
+  if (pkg?.isSdk && vendor) {
+    return t(one ? 'harnesses.install.bodyOneSdk' : 'harnesses.install.bodySdk', { name, vendor })
+  }
   if (one) {
     return t(vendor ? 'harnesses.install.bodyOne' : 'harnesses.install.bodyOnePlain', {
       name,

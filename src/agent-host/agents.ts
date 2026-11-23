@@ -3613,8 +3613,8 @@ export class AgentManager {
   /**
    * Installs a harness that is missing: the user's own program by one of its routes, or a package
    * harness's pinned adapter now, without starting it. A package harness's vendor route, when one
-   * is picked, installs the user's own program, which then runs in place of Kettu's. Resolves when
-   * done or cancelled.
+   * is picked, installs the user's own program, which then runs in place of Kettu's; Claude Code's
+   * SDK follows its program. Resolves when done or cancelled.
    */
   async install(agentId: AgentId, method?: AgentInstallMethod['id']): Promise<void> {
     const { h } = this.slot(agentId)
@@ -3622,7 +3622,13 @@ export class AgentManager {
     // The user's program an SDK runs is installed first; one found too old is updated instead.
     const cliMissing = h.detection?.state === 'not-installed' && !h.detection.cli
     if (h.def.cli && h.def.launch.kind === 'package' && cliMissing) {
-      return this.installProgram(h, method)
+      await this.installProgram(h, method)
+      // The SDK it runs with follows at once, so one Install readies the harness and its first
+      // session waits for nothing.
+      if (this.stopped || h.detection?.state !== 'available' || h.detection.adapter?.installed) {
+        return
+      }
+      return this.installNow(h)
     }
     switch (h.def.launch.kind) {
       case 'package':

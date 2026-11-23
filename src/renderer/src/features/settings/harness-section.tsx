@@ -523,9 +523,10 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
   const packageMissing = !!pkg && !pkg.installed && !pkg.isSdk
   const onMachine = hasProgram(status) && !packageMissing
   const kind = installKind(status)
-  // Its first install runs from this page too, which no install kind covers while it runs.
+  // Its first install runs from this page too, which no install kind covers while it runs, as
+  // Claude Code's SDK does right after its program.
   const notice: InstallKind | null =
-    kind ?? (packageMissing && status.state === 'installing' ? 'package' : null)
+    kind ?? (pkg && !pkg.installed && status.state === 'installing' ? 'package' : null)
   // Installing fixes a missing harness, and the version notices a program too old.
   const ownNotice =
     problem && problem.fix !== 'install' && problem.reason.kind !== 'too-old' ? problem : null
@@ -1356,7 +1357,10 @@ function InstallNotice({ status, kind }: { status: AgentStatus; kind: InstallKin
       }
     >
       {status.cli
-        ? t('harnesses.install.cliBody', { name, command: status.cli.command })
+        ? t(status.package?.isSdk ? 'harnesses.install.cliBodySdk' : 'harnesses.install.cliBody', {
+            name,
+            command: status.cli.command,
+          })
         : t('agents.install.body')}
     </Notice>
   )
