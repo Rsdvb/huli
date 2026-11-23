@@ -136,6 +136,8 @@ export interface ComputerUseDeps {
   foreground?(sessionId: string, app: string): void
   /** Huli: the user ended the elevated helper: the thread says so. */
   elevatedStopped?(sessionId: string, app: string): void
+  /** Huli: whether the elevated helper is installed and current, without which it never runs. */
+  elevatedReady?(): Promise<boolean>
   log: LogFn
 }
 
@@ -524,7 +526,7 @@ export class ComputerUse {
     // this is exactly as without the helper.
     const settings = this.deps.settings()
     const elevated = call.tool !== 'computer_list_windows' && (await this.isElevated(call.pid))
-    const viaElevated = elevated && this.elevatedMode() !== 'off'
+    const viaElevated = elevated && (await this.elevatedOn())
     if (elevated && !viaElevated && call.acts) throw elevatedError(app)
     // Their own dialogs start programs, which would run as administrator too.
     if (viaElevated && startsPrograms(app.id)) {
@@ -997,8 +999,9 @@ export class ComputerUse {
     )
     const notes = ['Apps marked not available are never used.']
     if (rows.some((row) => row.elevated)) {
+      const on = await this.elevatedOn()
       notes.push(
-        this.elevatedMode() !== 'off'
+        on
           ? 'Apps marked as administrator run with administrator rights, which computer use ' +
               'lacks; use one only when the task needs it. Your first call asks the user, who ' +
               'then confirms Windows’ administrator prompt and the helper’s own window. It acts ' +
@@ -1021,6 +1024,16 @@ export class ComputerUse {
   /** Huli: who may drive apps run as administrator here; off where there is no elevated helper. */
   private elevatedMode(): ElevatedMode {
     return this.deps.elevate ? this.deps.settings().elevated : 'off'
+  }
+
+  /**
+   * Huli: whether administrator use runs now: allowed, and the helper installed in Program Files,
+   * current. A setting written into the file by something other than Settings' dialog does nothing
+   * without the install, which only the user's administrator prompt makes.
+   */
+  private async elevatedOn(): Promise<boolean> {
+    if (this.elevatedMode() === 'off') return false
+    return this.deps.elevatedReady ? this.deps.elevatedReady() : true
   }
 
   /** Huli: whether a process runs above Kettu's integrity level, which Windows keeps it from driving. */
@@ -1099,7 +1112,7 @@ export class ComputerUse {
     if (run?.driver?.running) return run.driver
     if (run?.starting) return run.starting
     // The setting may have gone off while the card waited.
-    if (this.elevatedMode() === 'off') throw elevatedError(app)
+    if (!(await this.elevatedOn())) throw elevatedError(app)
     const elevate = this.deps.elevate!
     const starting = elevate(pid).then((driver) => {
       if (driver) return driver

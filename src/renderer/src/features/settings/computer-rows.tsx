@@ -37,7 +37,9 @@ import { BlockLine, ItemLine, Thing } from './rows'
  * Huli: whether agents may drive programs run as administrator: off (the default) or always.
  * Turning it on waits on a dialog that says what an agent outside a sandbox could do with it, and
  * nothing changes until the user confirms. The helper's install in Program Files is its own
- * step, only when the user chooses Install; with the setting off nothing is asked of the helper.
+ * step, only when the user chooses Install while it is on; Remove stays here whatever the setting,
+ * since turning it off leaves the helper installed. With the setting off and nothing installed,
+ * the host only looks at the installed program's place and starts no helper.
  */
 export function ElevatedChoice({ text }: { text: ReactNode }) {
   const { t } = useTranslation('settings')
@@ -46,10 +48,9 @@ export function ElevatedChoice({ text }: { text: ReactNode }) {
   const [state, setState] = useState<ElevatedHelperState | null>(null)
   const [busy, setBusy] = useState<'install' | 'remove' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // Off, the helper is not asked how it stands, unless the user changed the setting here.
-  const [looked, setLooked] = useState(mode !== 'off')
+  // Asked again after each change of the setting, so turning it off offers removal.
+  const [looked, setLooked] = useState(0)
   useEffect(() => {
-    if (!looked) return
     let gone = false
     host('computer.elevatedStatus', undefined).then(
       (answer) => !gone && setState(answer.state),
@@ -64,7 +65,7 @@ export function ElevatedChoice({ text }: { text: ReactNode }) {
     useSettingsStore
       .getState()
       .update({ computerUse: { elevated: next } })
-      .then(() => setLooked(true))
+      .then(() => setLooked((n) => n + 1))
       .catch((caught: unknown) => setError(errorMessage(caught)))
   }
   const choose = (next: ElevatedMode) => {
@@ -97,11 +98,13 @@ export function ElevatedChoice({ text }: { text: ReactNode }) {
   const note =
     state === 'tampered'
       ? t('computer.elevated.tampered')
-      : state === 'outdated'
-        ? t('computer.elevated.outdated')
-        : state === 'missing' && mode !== 'off'
-          ? t('computer.elevated.install.note')
-          : null
+      : mode === 'off' && installed
+        ? t('computer.elevated.leftInstalled')
+        : state === 'outdated'
+          ? t('computer.elevated.outdated')
+          : state === 'missing' && mode !== 'off'
+            ? t('computer.elevated.install.note')
+            : null
   return (
     <>
       <BlockLine text={text}>

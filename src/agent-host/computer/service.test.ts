@@ -537,7 +537,7 @@ describe('Huli: apps run as administrator', () => {
     }
   }
 
-  function elevatedHarness(declined = false) {
+  function elevatedHarness(declined = false, ready = { value: true }) {
     const elevated = new FakeElevated()
     const started: number[] = []
     const stops: string[] = []
@@ -563,6 +563,7 @@ describe('Huli: apps run as administrator', () => {
     const h = harness({
       platform: 'win32',
       helper,
+      elevatedReady: async () => ready.value,
       elevate: async (pid) => {
         started.push(pid)
         return declined ? null : elevated
@@ -601,6 +602,21 @@ describe('Huli: apps run as administrator', () => {
     ).toBeFalsy()
     expect(h.asked.map((a) => a.ask)).toEqual([undefined])
     expect(started).toEqual([])
+  })
+
+  it('counts always as on only while the helper is installed and current', async () => {
+    const ready = { value: false }
+    const { h, started, helper } = elevatedHarness(false, ready)
+    h.settings.elevated = 'always'
+    const refused = await h.service.call('a', 'computer_click', { ...NOTES, x: 1, y: 1 })
+    const off = harness({ platform: 'win32', helper, elevate: null })
+    const bare = await off.service.call('a', 'computer_click', { ...NOTES, x: 1, y: 1 })
+    expect(refused.content).toEqual(bare.content)
+    expect(h.asked).toEqual([])
+    expect(started).toEqual([])
+    ready.value = true
+    await answered(h, 'a', 'computer_get_window_state', NOTES, 'session')
+    expect(started).toEqual([12])
   })
 
   it('checks the setting again once the card is answered, before the prompt', async () => {

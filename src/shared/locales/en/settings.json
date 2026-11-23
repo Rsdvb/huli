@@ -621,7 +621,7 @@
     },
     "elevated": {
       "name": "Operate programs run as administrator",
-      "description": "Lets agents ask to operate a program you run as administrator. Each time you allow it in the session, then confirm Windows’ prompt (for “Windows Command Processor”) and the helper’s own window; risky steps ask again. Programs that start other programs, such as consoles, Task Manager and Explorer, are never operated this way.",
+      "description": "Lets agents ask to operate a program you run as administrator. Each time you allow it in the session, then confirm Windows’ prompt (for “Windows Command Processor”, which starts Kite’s helper) and the helper’s own window; risky steps ask again. Programs that start other programs, such as consoles, Task Manager and Explorer, are never operated this way.",
       "keywords": "administrator admin elevated uac run as administrator computer use",
       "mode": {
         "off": "Off",
@@ -633,10 +633,11 @@
       },
       "install": {
         "action": "Install helper",
-        "note": "The administrator helper goes into Program Files once. Windows asks you to let Robocopy, its own copy program, put it there."
+        "note": "The administrator helper goes into Program Files once. Windows then asks you to let Robocopy, its own copy program, put it there: approve that prompt only right after you pressed Install, and under Show more details it should name …\\Kite Computer Helper."
       },
       "outdated": "The installed helper is from an older version of Kite. Install it again to use it.",
       "tampered": "The installed helper changed after it was installed, so Kite no longer uses it. Remove it, then install it again.",
+      "leftInstalled": "The administrator helper is still installed in Program Files.",
       "waiting": "Waiting for Windows’ administrator prompt…",
       "reinstall": "Install again",
       "remove": "Remove helper",
@@ -645,9 +646,9 @@
       "confirm": {
         "title": "Let agents operate programs run as administrator?",
         "hijack": "An agent on this computer that is not in a sandbox runs as you. It could take over Windows’ administrator prompt or the helper’s confirmation window, so that what you approve is not what you think.",
-        "always": "Once it is on, any session may ask, sandboxed or not; each program still asks you in its session, at Windows’ prompt and in the helper’s window.",
-        "unfixed": "Some of this cannot be fixed in Kite’s current design: the prompt and the helper’s windows sit on your normal desktop, where other programs can still interfere with them.",
-        "yours": "It is your decision, and you can turn it off again at any time.",
+        "always": "Once it is on, any session may ask; each program still asks you in its session first. The approved program’s Open and Save dialogs can change any file as administrator.",
+        "unfixed": "Some of this cannot be fixed in Kite’s current design: another program can raise an identical Windows prompt for its own command, or slip code into the helper while the prompt is open.",
+        "yours": "It is your decision. Turning it off leaves the helper in Program Files, where you can remove it here.",
         "allowAlways": "Always allow"
       }
     },

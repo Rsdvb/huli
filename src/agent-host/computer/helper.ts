@@ -58,6 +58,8 @@ export interface ProcessInfo {
 export interface InstallState {
   installDir: string
   state: 'missing' | 'current' | 'outdated' | 'tampered'
+  /** The installed record's helper hash, which a host keeps for an install it found tampered. */
+  helperSha256?: string
   exitCode?: number
 }
 

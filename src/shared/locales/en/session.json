@@ -359,7 +359,7 @@
     "where": "Reads its windows and clicks and types in them, in the background",
     "elevated": {
       "action": "operate {{app}} as administrator",
-      "where": "{{app}} runs as administrator. Allowing starts Kite’s administrator helper: Windows asks first (for “Windows Command Processor”, which starts the helper with a clean environment), then the helper’s own window names the program for you to confirm. It drives only this program’s windows, in the background, keeps it from starting other programs directly, asks again before risky steps and ends with the turn.",
+      "where": "{{app}} runs as administrator. Allowing starts Kite’s administrator helper: Windows asks first (for “Windows Command Processor”, which starts the helper), then the helper’s own window names the program for you to confirm. It drives only this program’s windows, in the background, keeps it from starting other programs directly, asks again before risky steps and ends with the turn. Allow it only if you asked for this: the program’s Open and Save dialogs can change any file as administrator.",
       "allow": "Allow this turn",
       "deny": "Don’t allow",
       "answer": {
