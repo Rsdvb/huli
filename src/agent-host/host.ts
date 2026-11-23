@@ -208,6 +208,7 @@ import { ScratchFolders } from './scratch'
 import { createWorktreeGit } from './worktrees/git'
 import { WorktreeManager } from './worktrees/manager'
 import { ComputerDriver, probePermissions } from './computer/driver'
+import { ComputerHelper } from './computer/helper'
 import { networkStateFile, subscriptionsFile } from './node-proxy/files'
 import { NodeProxy, type NodeProxyDeps } from './node-proxy/service'
 import { routeFor, type ProxyVariables } from './node-proxy/download'
@@ -401,6 +402,8 @@ export interface HostOptions {
 export interface ComputerHostOptions {
   /** The `cua-driver` program in the app's resources, which may be missing in a checkout. */
   driverPath: string
+  /** Huli: Kite's computer use helper beside it, on Windows and macOS; absent elsewhere. */
+  helperPath?: string | null
   /** Kettu's own process and app ids, which computer use never touches. */
   selfPid: number
   selfIds: string[]
@@ -907,16 +910,26 @@ export class AgentHost {
     this.artifactData = new ArtifactData({ store: this.artifacts })
     registerContentCapability({ store: this.artifacts, types: this.artifactTypes })
     const computer = options.computer ?? null
+    // Huli: the helper starts only when a session's call needs it.
+    const helper = computer?.helperPath
+      ? new ComputerHelper({ path: computer.helperPath, log })
+      : null
     this.computer = computer
       ? new ComputerUse({
           platform,
           driver: new ComputerDriver({ path: computer.driverPath, log }),
+          helper,
+          // Huli: no elevated helper yet; apps run as administrator stay refused.
+          elevate: null,
+          foreground: (sessionId, app) => this.sessions.computerForeground(sessionId, app),
+          elevatedStopped: (sessionId, app) =>
+            this.sessions.computerElevatedStopped(sessionId, app),
           self: { pids: [computer.selfPid, process.pid], ids: computer.selfIds },
           settings: () => this.settings.computerUse,
           turnRefusal: (sessionId) => this.sessions.computerRefusal(sessionId),
           sessionTitle: (sessionId) => this.sessions.title(sessionId) ?? 'Untitled',
-          asked: (sessionId, requestId, app) =>
-            this.sessions.computerAppAsked(sessionId, requestId, app),
+          asked: (sessionId, requestId, app, ask) =>
+            this.sessions.computerAppAsked(sessionId, requestId, app, ask),
           settled: (requestId, answer) => this.sessions.computerAppSettled(requestId, answer),
           allowAlways: (app) => options.send({ type: 'host:computer-app-allow', app }),
           using: (sessionId, view) => this.sessions.computerUsing(sessionId, view),
@@ -3681,6 +3694,10 @@ export class AgentHost {
       'sessions.idleRelease': () => this.idleRelease.state(),
       'sessions.stopTask': ({ sessionId, taskId }) => sessions.stopTask(sessionId, taskId),
       'sessions.taskOutput': ({ sessionId, taskId }) => sessions.taskOutput(sessionId, taskId),
+      'sessions.processes': ({ sessionId }) => sessions.processes(sessionId),
+      'sessions.toBackground': ({ sessionId, toolCallId }) =>
+        sessions.toBackground(sessionId, toolCallId),
+      'sessions.cleanTasks': ({ sessionId }) => sessions.cleanTasks(sessionId),
       'sessions.retry': ({ sessionId }, { portId }) => sessions.retry(sessionId, portId),
       'sessions.sideAsk': ({ sessionId, question, quote, agentId }) =>
         sessions.sideAsk(sessionId, question, quote ?? null, agentId ?? null),
@@ -4141,6 +4158,11 @@ export class AgentHost {
         }
       },
       'computer.answerApp': ({ sessionId, entryId, decision }, { device }) => {
+        // Huli: administrator use and its risky steps are answered by someone at this computer,
+        // where the administrator prompt and the app are.
+        if (device && sessions.computerAppAsks(sessionId, entryId)) {
+          throw new HostError('forbidden', 'This answer is given only on this computer.')
+        }
         const requestId = sessions.answerComputerApp(
           sessionId,
           entryId,
@@ -4183,6 +4205,9 @@ export class AgentHost {
       'memory.import': ({ sources, global }) => memoryCall(() => memory.import(sources, global)),
       'computer.stop': ({ sessionId }) => {
         this.computer?.stop(sessionId)
+      },
+      'computer.stopElevated': ({ sessionId }) => {
+        this.computer?.stopElevated(sessionId)
       },
       'computer.takeOver': ({ sessionId }) => {
         this.computer?.takeOver(sessionId)

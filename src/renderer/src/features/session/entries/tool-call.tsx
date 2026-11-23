@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next'
 import type { ThreadEntry } from '@shared/thread'
 import { ToolCallCard, type ToolCallLabels } from '@renderer/components/affect/tool-call-card'
 import { cn } from '@renderer/lib/utils'
-import { isFresh } from '@renderer/stores/threads'
+import { isFresh, useThreadsStore } from '@renderer/stores/threads'
+import { ToBackgroundButton } from '@renderer/features/board/process-parts'
 import { thoughtTitle, toolLabel } from './helpers'
 import { MemoryStep } from './memory-entry'
 import { entryPictures } from './row-pictures'
@@ -57,6 +58,14 @@ export function StepCard({
   // A step that arrived while shown draws its part of a run's timeline in (session.css).
   const [fresh] = useState(() => isFresh(sessionId, entry.id))
   const [opened, onOpenChange, opening] = useOpenedOnce(status)
+  // Huli: a command that holds up its call, and the turn with it, can go to the background.
+  const held = useThreadsStore((s) =>
+    entry.kind === 'tool' && status === 'running'
+      ? (s.replicas[sessionId]?.state?.session.foreground?.some(
+          (task) => task.kind === 'shell' && `t:${task.toolCallId}` === entry.id,
+        ) ?? false)
+      : false,
+  )
   const facts = {
     status,
     startedAt,
@@ -132,7 +141,11 @@ export function StepCard({
           )
         }
         trail={
-          pictures.length > 0 ? <RowThumbs sessionId={sessionId} pictures={pictures} /> : undefined
+          held ? (
+            <ToBackgroundButton sessionId={sessionId} toolCallId={entry.id.slice(2)} />
+          ) : pictures.length > 0 ? (
+            <RowThumbs sessionId={sessionId} pictures={pictures} />
+          ) : undefined
         }
       >
         {toolHasBody(entry, projectPath) ? (

@@ -164,6 +164,44 @@ export function SubSessionStart(props: { sessionId: string }) {
   )
 }
 
+const SCOPE = { personal: '个人', team: '团队', organization: '组织' } as const
+
+/** Huli: the agent's own memory at work in a turn: how many it recalled or saved, and which. */
+export function RecallEntry(props: { entry: Of<'recall'> }) {
+  const { entry } = props
+  const { c } = useSessionTokens()
+  const [open, setOpen] = useDisclosure(`recall:${entry.id}`)
+  const count = entry.memories.length
+  const text = entry.action === 'saved' ? `保存了 ${count} 条记忆` : `回忆了 ${count} 条记忆`
+  return (
+    <View>
+      <QuietLine icon={G.thought} text={text} onPress={() => setOpen((v) => !v)} />
+      {open && (
+        <View style={[styles.panel, { backgroundColor: c.fill }]}>
+          {entry.memories.map((memory) => {
+            const name = memory.path.startsWith('<synthesis:')
+              ? '多条记忆的摘要'
+              : (memory.path.split(/[\\/]/).pop() ?? memory.path).replace(/\.md$/i, '')
+            return (
+              <View key={memory.path} style={{ gap: 2 }}>
+                <Text style={[styles.small, { color: c.text }]} numberOfLines={1}>
+                  {name}
+                  <Text style={{ color: c.textTertiary }}>{`  ${SCOPE[memory.scope]}`}</Text>
+                </Text>
+                {memory.content ? (
+                  <Text selectable style={[styles.carried, { color: c.textSecondary }]}>
+                    {memory.content}
+                  </Text>
+                ) : null}
+              </View>
+            )
+          })}
+        </View>
+      )}
+    </View>
+  )
+}
+
 /** How long a running sub-agent has run, ticking each second. */
 function Elapsed(props: { since: number; color: string }) {
   const now = useSecond()
@@ -264,6 +302,11 @@ export function ChildEntry(props: { entry: Of<'subagent'> | Of<'session_started'
               ) : null}
             </Text>
           </View>
+          {running && child?.progress ? (
+            <Text style={[styles.small, { color: c.textSecondary }]} numberOfLines={1}>
+              {child.progress}
+            </Text>
+          ) : null}
         </View>
         <Icon icon={G.right} size={12} color={c.textTertiary} weight="semibold" />
       </Pressable>

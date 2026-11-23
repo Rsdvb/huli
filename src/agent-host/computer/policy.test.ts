@@ -4,6 +4,7 @@ import {
   blockedApp,
   refusedMenuItem,
   refusedShortcut,
+  riskyStep,
   shortcut,
   type SelfApp,
 } from './policy'
@@ -124,5 +125,51 @@ describe('refused menu items', () => {
     expect(refusedMenuItem(['Format', 'Make Plain Text'])).toBe(false)
     expect(refusedMenuItem(['File', 'Export as PDF…'])).toBe(false)
     expect(refusedMenuItem([])).toBe(false)
+  })
+})
+
+describe('Huli: riskyStep', () => {
+  const click = (label: string | null, token = true) =>
+    riskyStep(
+      { tool: 'computer_click', args: {}, ...(token ? { elementToken: 's00000001:3' } : {}) },
+      label,
+    )
+
+  it('asks before a click that commits, or at a point it cannot name', () => {
+    expect(click('Delete')).toEqual({ kind: 'click', text: 'Delete' })
+    expect(click('确定')).toEqual({ kind: 'click', text: '确定' })
+    expect(click('是')).toEqual({ kind: 'click', text: '是' })
+    expect(click('&Apply')).toEqual({ kind: 'click', text: '&Apply' })
+    expect(click(null, false)).toEqual({ kind: 'click', text: null })
+    expect(click(null)).toEqual({ kind: 'click', text: null })
+    expect(click('Details')).toBeNull()
+    expect(click('Token')).toBeNull()
+    expect(click('是否显示')).toBeNull()
+  })
+
+  it('asks before keys, shortcuts, line breaks, drags and menus, but not reading or moving', () => {
+    const key = (keys: string[]) => riskyStep({ tool: 'computer_press_key', args: {}, keys }, null)
+    expect(key(['tab'])).toBeNull()
+    expect(key(['down'])).toBeNull()
+    expect(key(['return'])).toEqual({ kind: 'key', text: 'return' })
+    expect(key(['shift', 'tab'])).toEqual({ kind: 'key', text: 'shift+tab' })
+    expect(riskyStep({ tool: 'computer_hotkey', args: {}, keys: ['ctrl', 'c'] }, null)).toEqual({
+      kind: 'key',
+      text: 'ctrl+c',
+    })
+    expect(riskyStep({ tool: 'computer_type_text', args: { text: 'name' } }, null)).toBeNull()
+    expect(riskyStep({ tool: 'computer_type_text', args: { text: 'del x\n' } }, null)).toEqual({
+      kind: 'type',
+      text: 'del x\n',
+    })
+    expect(riskyStep({ tool: 'computer_drag', args: {} }, null)).toEqual({
+      kind: 'drag',
+      text: null,
+    })
+    expect(
+      riskyStep({ tool: 'computer_invoke_menu', args: {}, menuPath: ['File', 'Save'] }, null),
+    ).toEqual({ kind: 'menu', text: 'File › Save' })
+    expect(riskyStep({ tool: 'computer_scroll', args: {} }, null)).toBeNull()
+    expect(riskyStep({ tool: 'computer_get_window_state', args: {} }, null)).toBeNull()
   })
 })

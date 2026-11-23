@@ -35,7 +35,11 @@
     "copy": "复制",
     "copied": "已复制",
     "openTitle": "打开 {{title}}",
-    "close": "关闭"
+    "close": "关闭",
+    "toBackground": "转到后台",
+    "clean": "清除已结束",
+    "stopAll": "全部停止",
+    "refresh": "重新读取进程"
   },
   "detail": {
     "command": "命令",
@@ -49,5 +53,20 @@
   },
   "artifact": {
     "version": "v{{version}}"
+  },
+  "held": {
+    "command": "在前台运行，这一轮在等它",
+    "subagent": "在前台运行，这一轮在等它",
+    "notMoved": "它已经不在占着这一轮了。"
+  },
+  "process": {
+    "pid": "PID {{pid}}",
+    "cpu": "CPU {{cpu}}",
+    "listens": "监听端口 {{port}}",
+    "outside": "端口 {{port}} 不在本会话的端口段（{{range}}）内",
+    "collides": "端口 {{port}} 不在本会话的端口段（{{range}}）内，且落在另一个会话的端口段里",
+    "taken_other": "本会话端口段（{{range}}）里的 {{ports}} 被会话外的程序占用",
+    "takenBy": ":{{port}}（{{process}}）",
+    "separator": "、"
   }
 }

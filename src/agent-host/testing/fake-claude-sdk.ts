@@ -191,6 +191,11 @@ export class FakeQuery implements Query {
     return this.sdk.taskOutput
   }
 
+  async backgroundTasks(toolUseId?: string): Promise<boolean> {
+    this.record('backgroundTasks', toolUseId)
+    return this.sdk.backgrounded
+  }
+
   get askSideQuestion() {
     if (this.sdk.sideAnswer === undefined) return undefined
     return async (
@@ -274,6 +279,8 @@ export class FakeClaudeSdk implements ClaudeSdk {
   rewind: RewindFilesResult = { canRewind: true, filesChanged: [], insertions: 0, deletions: 0 }
   /** What a query's `getTaskOutput` answers. */
   taskOutput = { output: '', total_bytes: 0, truncated: false }
+  /** What `backgroundTasks` answers: whether a task was moved. */
+  backgrounded = true
   /** What a query's `askSideQuestion` answers; undefined for an SDK without it. */
   sideAnswer: { response: string; synthetic: boolean } | null | undefined = undefined
   context: ContextUsageAnswer = {

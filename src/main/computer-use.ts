@@ -4,7 +4,7 @@
 
 import { app, desktopCapturer, shell, systemPreferences, type Session } from 'electron'
 import { access, constants } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type {
   ComputerHold,
   ComputerPermission,
@@ -32,10 +32,23 @@ export function mihomoPath(): string {
   return join(dir, 'mihomo', file)
 }
 
+/** Huli: Kite's computer use helper, built beside the driver on Windows and macOS. */
+export function computerHelperPath(): string | null {
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return null
+  const file = process.platform === 'win32' ? 'kite-computer-helper.exe' : 'kite-computer-helper'
+  return join(dirname(computerDriverPath()), file)
+}
+
 /** What the agent host's `host:init` carries for computer use. */
-export function computerHostOptions(): { driverPath: string; selfPid: number; selfIds: string[] } {
+export function computerHostOptions(): {
+  driverPath: string
+  helperPath: string | null
+  selfPid: number
+  selfIds: string[]
+} {
   return {
     driverPath: computerDriverPath(),
+    helperPath: computerHelperPath(),
     selfPid: process.pid,
     // The bundle id on macOS, the executable's name elsewhere, as the host names apps.
     selfIds: ['local.huli.app', basename(process.execPath).toLowerCase()],

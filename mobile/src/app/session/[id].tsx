@@ -1061,6 +1061,9 @@ function Session() {
 
   const moreMenu = (): MenuPage => {
     const repo = !!changes.folder && changes.repo !== false
+    const backgroundCount =
+      (session?.background?.filter((task) => task.status === 'running').length ?? 0) +
+      (session?.foreground?.length ?? 0)
     return {
       entries: [
         ...(filesFolder
@@ -1102,6 +1105,13 @@ function Session() {
               : {}
             : { detail: '未开放', disabled: true }),
           onPress: () => router.push({ pathname: '/terminals/[id]', params: { id } }),
+        },
+        {
+          key: 'background',
+          label: '后台任务',
+          icon: G.terminal,
+          ...(backgroundCount > 0 ? { detail: `${backgroundCount} 个运行中` } : {}),
+          onPress: () => router.push({ pathname: '/background/[id]', params: { id } }),
         },
         ...(devServers
           ? [

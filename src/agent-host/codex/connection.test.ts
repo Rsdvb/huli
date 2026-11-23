@@ -2332,3 +2332,73 @@ describe('the native sandbox', () => {
     expect(plain.server.sent('windowsSandbox/readiness')).toEqual([])
   })
 })
+
+describe('Huli: background terminals', () => {
+  it('lists the thread’s terminals page by page as running tasks with their processes', async () => {
+    const { server, connection } = await connect()
+    await connection.newSession('/project')
+    server.on('thread/backgroundTerminals/list', (params) => {
+      const { cursor } = params as { cursor?: string }
+      return cursor
+        ? {
+            data: [{ processId: 'p2', itemId: 'exec-2', command: 'tsc --watch', cwd: '/project' }],
+            nextCursor: null,
+          }
+        : {
+            data: [
+              {
+                processId: 'p1',
+                itemId: 'exec-1',
+                command: 'npm run dev\n# and the API',
+                cwd: '/project',
+                osPid: 4321,
+                cpuPercent: 3.5,
+                rssKb: 2048,
+              },
+              { processId: '', command: 'no id' },
+              { processId: 'p1', command: 'twice' },
+            ],
+            nextCursor: 'next',
+          }
+    })
+    const read = await connection.backgroundProcesses('thread-1')
+    expect(server.sent('thread/backgroundTerminals/list')).toEqual([
+      { threadId: 'thread-1', limit: 50 },
+      { threadId: 'thread-1', limit: 50, cursor: 'next' },
+    ])
+    expect(read?.tasks).toMatchObject([
+      {
+        id: 'p1',
+        kind: 'shell',
+        title: 'npm run dev',
+        command: 'npm run dev\n# and the API',
+        status: 'running',
+        pid: 4321,
+        toolCallId: 'exec-1',
+      },
+      { id: 'p2', title: 'tsc --watch', toolCallId: 'exec-2' },
+    ])
+    expect(read?.tasks[1]).not.toHaveProperty('pid')
+    expect(read?.processes).toEqual([
+      { taskId: 'p1', pid: 4321, cpu: 3.5, memory: 2048 * 1024 },
+      { taskId: 'p2', pid: null, cpu: null, memory: null },
+    ])
+  })
+
+  it('ends one terminal or all of them, and lists none on a Codex without them', async () => {
+    const { server, connection } = await connect()
+    await connection.newSession('/project')
+    expect(await connection.backgroundProcesses('thread-1')).toBeNull()
+    await expect(connection.stopTask('thread-1', 'p1')).rejects.toThrow()
+    await expect(connection.cleanTasks('thread-1')).rejects.toThrow()
+    server.on('thread/backgroundTerminals/terminate', () => ({ terminated: true }))
+    server.on('thread/backgroundTerminals/clean', () => ({}))
+    await connection.stopTask('thread-1', 'p1')
+    await connection.cleanTasks('thread-1')
+    expect(server.sent('thread/backgroundTerminals/terminate').at(-1)).toEqual({
+      threadId: 'thread-1',
+      processId: 'p1',
+    })
+    expect(server.sent('thread/backgroundTerminals/clean').at(-1)).toEqual({ threadId: 'thread-1' })
+  })
+})

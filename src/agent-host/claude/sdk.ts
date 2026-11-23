@@ -184,6 +184,8 @@ export interface QueryOptions {
   perTaskStopAffordance?: boolean
   /** After each turn but the first, a `prompt_suggestion` follows the result. */
   promptSuggestions?: boolean
+  /** Huli: a running subagent's `task_progress` carries a one-line summary of what it does. */
+  agentProgressSummaries?: boolean
   settingSources?: SettingSource[]
   systemPrompt?: { type: 'preset'; preset: 'claude_code'; append?: string }
   /** The built-in tools, by name; an empty list has none. */
@@ -455,6 +457,12 @@ export interface Query extends AsyncIterable<SdkMessage> {
   getContextUsage(options?: { detail?: 'summary' | 'full' }): Promise<ContextUsageAnswer>
   accountInfo(): Promise<AccountInfo>
   stopTask(taskId: string): Promise<void>
+  /**
+   * Huli: moves the command or subagent the tool call started to the background, or every one
+   * that holds up its call, as Ctrl+B does; false when the call matched none. Throws when the
+   * session's background tasks are turned off. Absent from older SDKs.
+   */
+  backgroundTasks?(toolUseId?: string): Promise<boolean>
   /** Present in the SDK Kettu pins, though not in its published types. */
   getTaskOutput?(taskId: string): Promise<{
     output: string
