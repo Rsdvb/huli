@@ -8548,3 +8548,66 @@ body:has(.ui-mdpc[data-open], .ui-ccc__menu[data-open='true']) .kettu-toasts {
 .ui-as-side__group + .kettu-side-hosts {
   margin-top: 10px;
 }
+
+/* Huli: a session row dragged to a new place in its group (features/sidebar/row-drag.ts). The rows
+   it passes make room by `translate` alone; its own row becomes the room it would take, a line
+   across it; the other picked rows it carries fade. Reduce motion drops the slide. */
+.kettu-side-list [data-row-group] > li[data-sort-source] {
+  position: relative;
+}
+.kettu-side-list [data-row-group][data-sorting] > li {
+  transition: translate var(--duration-fast) var(--ease-standard);
+}
+.kettu-side-list [data-row-group] > li[data-sort-source] > * {
+  visibility: hidden;
+}
+.kettu-side-list [data-row-group] > li[data-sort-source]::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  left: 24px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--focus);
+  translate: 0 -50%;
+}
+.kettu-side-list [data-row-group] > li[data-sort-source]::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 20px;
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--focus);
+  border-radius: 50%;
+  background: var(--bg-sidebar);
+  translate: 0 -50%;
+}
+.kettu-side-list [data-row-group] > li[data-sort-carried] > * {
+  opacity: 0.45;
+}
+/* Over the sidebar the drag's chip stands off the pointer (row-drag.ts placeChip). */
+[data-dnd-overlay] > * {
+  transition: translate var(--duration-fast) var(--ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kettu-side-list [data-row-group][data-sorting] > li,
+  [data-dnd-overlay] > * {
+    transition: none;
+  }
+}
+:root[data-reduce-motion='always']
+  :is(.kettu-side-list [data-row-group][data-sorting] > li, [data-dnd-overlay] > *) {
+  transition: none;
+}
+/* Another project a dragged session can move to: its header as a drop target, its rows tinted. */
+.kettu-side-list .ui-as-chat-folder-row[data-move-target] > .ui-as-side__item {
+  background: var(--hover);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1.5px var(--focus-ring-color);
+}
+.kettu-side-list [data-row-group][data-move-target] {
+  border-radius: var(--radius-code);
+  background: color-mix(in srgb, var(--focus) 6%, transparent);
+}

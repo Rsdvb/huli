@@ -255,6 +255,33 @@ export function moveToFolder(
   )
 }
 
+/**
+ * The folder's sessions in the user's order (see shared/session-order.ts), as its host keeps it:
+ * ones it holds that are not named first; null goes back to latest activity.
+ */
+export function orderFolder(
+  hostId: string | null,
+  folderId: string,
+  sessionIds: readonly string[] | null,
+): Promise<boolean> {
+  return change(
+    hostId,
+    (folders) =>
+      folders.map((folder) => {
+        if (folder.id !== folderId) return folder
+        if (sessionIds === null) return { ...folder, manual: false }
+        const naming = new Set(sessionIds)
+        const named = sessionIds.filter((id) => folder.sessionIds.includes(id))
+        return {
+          ...folder,
+          sessionIds: [...folder.sessionIds.filter((id) => !naming.has(id)), ...named],
+          manual: true,
+        }
+      }),
+    () => hostAt(hostId, 'folders.order', { folderId, sessionIds: sessionIds && [...sessionIds] }),
+  )
+}
+
 export function setFolderPlace(place: FolderPlace): void {
   useSessionFoldersStore.setState({ place })
   writeJson(PLACE_KEY, place)

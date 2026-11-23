@@ -129,6 +129,7 @@ import { sessionFolder } from '@renderer/lib/session-folder'
 import { prFlowActive, prFlowTarget, setPrFlow } from '@renderer/features/git/flow-model'
 import { copyResumeCommand, resumeInTerminal } from '@renderer/features/agents/agent-terminal'
 import { MoveToFolderMenu } from '@renderer/features/session-folders/move-menu'
+import { RowOrderItems } from './group-order-menu'
 import { BoardStatusMenu } from '@renderer/features/task-board/status'
 import { ManagerMenu } from '@renderer/features/manager/manager-menu'
 import { askExport, canExport } from '@renderer/features/session/export/export'
@@ -685,6 +686,7 @@ export function SessionMenuItems({
       {index > 0 && <DropdownMenuSeparator />}
       {group.map(item)}
       {group.includes('pin') && <MoveToFolderMenu ids={[id]} />}
+      {group.includes('pin') && place === 'row' && <RowOrderItems sessionId={id} />}
     </DropdownMenuGroup>
   ))
 }

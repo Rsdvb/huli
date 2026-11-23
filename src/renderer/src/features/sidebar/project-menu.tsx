@@ -12,6 +12,7 @@ import {
   PinOffIcon,
   RadioButtonIcon,
 } from '@hugeicons/core-free-icons'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { Project } from '@shared/agent-host'
@@ -53,12 +54,15 @@ export function ProjectMenuItems({
   onPin,
   onImport,
   onRemove,
+  orderItems,
 }: {
   project: Project
   pinDisabled: boolean
   onPin: (pinned: boolean) => Promise<void>
   onImport: () => void
   onRemove: () => void
+  /** Huli: how its sessions go, after the pin (group-order-menu.tsx). */
+  orderItems?: ReactNode
 }) {
   const { t } = useTranslation('sidebar')
   const terminal = useTerminalAllowed(project.path)
@@ -81,7 +85,14 @@ export function ProjectMenuItems({
       {t(pinned ? 'project.menu.unpin' : 'project.menu.pin')}
     </DropdownMenuItem>
   )
-  if (!local) return <DropdownMenuGroup>{pinItem}</DropdownMenuGroup>
+  if (!local) {
+    return (
+      <>
+        <DropdownMenuGroup>{pinItem}</DropdownMenuGroup>
+        {orderItems}
+      </>
+    )
+  }
 
   return (
     <>
@@ -93,6 +104,7 @@ export function ProjectMenuItems({
         </DropdownMenuItem>
         {pinItem}
       </DropdownMenuGroup>
+      {orderItems}
       <DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={gone} onClick={onImport}>
@@ -210,11 +222,14 @@ export function NoProjectMenuItems({
   pinned,
   pinDisabled,
   onPin,
+  orderItems,
 }: {
   local: boolean
   pinned: boolean | undefined
   pinDisabled: boolean
   onPin: (pinned: boolean) => Promise<void>
+  /** Huli: how its sessions go, after the pin (group-order-menu.tsx). */
+  orderItems?: ReactNode
 }) {
   const { t } = useTranslation('sidebar')
   const pinItem = pinned !== undefined && (
@@ -223,7 +238,14 @@ export function NoProjectMenuItems({
       {t(pinned ? 'project.menu.unpinNoProject' : 'project.menu.pinNoProject')}
     </DropdownMenuItem>
   )
-  if (!local) return <DropdownMenuGroup>{pinItem}</DropdownMenuGroup>
+  if (!local) {
+    return (
+      <>
+        <DropdownMenuGroup>{pinItem}</DropdownMenuGroup>
+        {orderItems}
+      </>
+    )
+  }
 
   return (
     <>
@@ -235,6 +257,7 @@ export function NoProjectMenuItems({
         </DropdownMenuItem>
         {pinItem}
       </DropdownMenuGroup>
+      {orderItems}
       <DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => openSettings('archived')}>

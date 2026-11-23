@@ -38,7 +38,9 @@ import {
   DropdownMenuTrigger,
 } from '@renderer/components/ui/dropdown-menu'
 import { useEntry } from '@renderer/lib/features'
+import { GroupOrderItems } from '@renderer/features/sidebar/group-order-menu'
 import { GroupRenameHints } from '@renderer/features/sidebar/rename-hints'
+import { useRowGroup, type RowGroup } from '@renderer/features/sidebar/row-drag'
 import { RenameScope } from '@renderer/features/sidebar/rename-scope'
 import { limitRows, rowInSight, ROWS_SHOWN } from '@renderer/features/sidebar/row-limit'
 import { INDENT_PAD, SessionRow } from '@renderer/features/sidebar/session-row'
@@ -46,7 +48,7 @@ import { RunGroupRow } from '@renderer/features/sidebar/run-group-row'
 import { Glyph, MenuGlyph } from '@renderer/features/shell/glyph'
 import { cn } from '@renderer/lib/utils'
 import {
-  byActivity,
+  byGroupOrder,
   hostOfSession,
   keepSameNodes,
   listedOrigin,
@@ -238,7 +240,34 @@ function FolderGroup({
     ),
   )
   const fold = useEntry('sidebar.runGroup')
-  const rows = useMemo(() => sidebarRows(nodes, [], byActivity, fold), [nodes, fold])
+  // Huli: the user's own order once a row was dragged (shared/session-order.ts), else activity.
+  const order = folderOrder(folder)
+  const rows = useMemo(
+    () => sidebarRows(nodes, [], byGroupOrder(order), fold),
+    [nodes, order, fold],
+  )
+  useRowGroup(
+    useMemo(
+      (): RowGroup => ({
+        key,
+        kind: 'folder',
+        hostId,
+        path: null,
+        folderId: folder.id,
+        name: folder.name,
+        rows: rows.map((row) => row.id),
+        sessions: new Map(
+          rows.flatMap((row) =>
+            row.kind === 'group' ? [[row.id, row.runs.map((run) => run.summary.id)]] : [],
+          ),
+        ),
+        order,
+        away: false,
+        missing: false,
+      }),
+      [key, hostId, folder.id, folder.name, rows, order],
+    ),
+  )
   const limited = limitRows(rows, allShown, (row) => rowInSight(row, shownId))
   const tabStopId = stop?.kind === 'session' ? stop.id : null
   const toggle = () => void updateFolder(hostId, folder.id, { collapsed: open })
@@ -307,7 +336,7 @@ function FolderGroup({
         </span>
       </div>
       {open && (
-        <ul className="ui-as-chat-folder__chats">
+        <ul className="ui-as-chat-folder__chats" data-row-group={key}>
           {rows.length === 0 && (
             <li className="ui-as-side__empty" style={{ paddingLeft: INDENT_PAD }}>
               {t('folderEmpty')}
@@ -371,6 +400,10 @@ function FolderMenuItems({ folder, hostId }: { folder: SessionFolder; hostId: st
           {folder.pinned ? t('actions.unpin') : t('actions.pin')}
         </DropdownMenuItem>
       </DropdownMenuGroup>
+      <GroupOrderItems
+        groupKey={`huli-folder:${hostKey(hostId)}:${folder.id}`}
+        order={folderOrder(folder)}
+      />
       <DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem
@@ -392,6 +425,11 @@ function FolderMenuItems({ folder, hostId }: { folder: SessionFolder; hostId: st
       </DropdownMenuGroup>
     </>
   )
+}
+
+/** The folder's order as a group's: its sessions once manual, null by activity, none on an old host. */
+function folderOrder(folder: SessionFolder): readonly string[] | null | undefined {
+  return folder.manual === undefined ? undefined : folder.manual ? folder.sessionIds : null
 }
 
 /** `next`, with the nodes of rows that did not change kept from before, so those rows skip a render. */
