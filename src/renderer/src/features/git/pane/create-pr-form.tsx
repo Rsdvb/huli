@@ -17,6 +17,8 @@ import { Spinner } from '@renderer/components/ui/spinner'
 import { Textarea } from '@renderer/components/ui/textarea'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { errorMessage, host } from '@renderer/lib/host'
+import { useSessionsStore } from '@renderer/stores/sessions'
+import { panelSession } from '@renderer/stores/view'
 import {
   clearPullRequestForm,
   createPullRequest,
@@ -46,6 +48,51 @@ export function CreatePullRequest({ status, panel }: { status: GitStatus; panel:
   const { drafting, draftError } = form
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Huli: the session whose side panel this is, whose diff and conversation a rewrite draws on.
+  const sessionId = useSessionsStore((s) => {
+    const id = panelSession(panel)
+    return id !== null && s.byId[id] ? id : null
+  })
+  const [writing, setWriting] = useState<'title' | 'body' | null>(null)
+
+  // Writes one part again; the user sees and can change it before anything goes to GitHub.
+  const rewrite = async (part: 'title' | 'body'): Promise<void> => {
+    if (writing || base === '' || base === headBranch) return
+    setWriting(part)
+    updatePullRequestForm(projectPath, { draftError: null })
+    try {
+      const draft = await host('git.pullRequestDraft', {
+        projectPath,
+        base,
+        part,
+        ...(sessionId ? { sessionId } : {}),
+      })
+      updatePullRequestForm(
+        projectPath,
+        part === 'title'
+          ? { title: draft.title, titleEdited: true }
+          : { body: draft.body, bodyEdited: true },
+      )
+    } catch (failure) {
+      updatePullRequestForm(projectPath, { draftError: errorMessage(failure) })
+    } finally {
+      setWriting(null)
+    }
+  }
+  const rewriteButton = (part: 'title' | 'body') => (
+    <Button
+      type="button"
+      variant="quiet"
+      size="xs"
+      className="h-5 text-hint text-tertiary"
+      disabled={writing !== null || drafting || base === '' || base === headBranch}
+      title={part === 'title' ? t('pane.pr.regenerateTitle') : t('pane.pr.aiWriteTitle')}
+      onClick={() => void rewrite(part)}
+    >
+      {writing === part ? <Spinner className="size-3" /> : <Glyph icon={SparklesIcon} size={12} />}
+      {part === 'title' ? t('pane.pr.regenerate') : t('pane.pr.aiWrite')}
+    </Button>
+  )
 
   useEffect(() => {
     let live = true
@@ -179,23 +226,29 @@ export function CreatePullRequest({ status, panel }: { status: GitStatus; panel:
             )}
           </span>
         </div>
-        <Field label={t('dialog.createPr.titleField')} htmlFor="pr-title">
+        <Field
+          label={t('dialog.createPr.titleField')}
+          htmlFor="pr-title"
+          action={rewriteButton('title')}
+        >
           <Input
             id="pr-title"
             value={form.title}
-            placeholder={drafting ? t('pane.pr.drafting') : undefined}
+            placeholder={drafting || writing === 'title' ? t('pane.pr.drafting') : undefined}
+            readOnly={writing === 'title'}
             className="h-8.5 text-control"
             onChange={(event) =>
               updatePullRequestForm(projectPath, { title: event.target.value, titleEdited: true })
             }
           />
         </Field>
-        <Field label={t('dialog.createPr.body')} htmlFor="pr-body">
+        <Field label={t('dialog.createPr.body')} htmlFor="pr-body" action={rewriteButton('body')}>
           <Textarea
             id="pr-body"
             value={form.body}
             rows={6}
-            placeholder={drafting ? t('pane.pr.drafting') : undefined}
+            placeholder={drafting || writing === 'body' ? t('pane.pr.drafting') : undefined}
+            readOnly={writing === 'body'}
             className="max-h-72 min-h-32 resize-none text-control leading-[1.55]"
             onChange={(event) =>
               updatePullRequestForm(projectPath, { body: event.target.value, bodyEdited: true })

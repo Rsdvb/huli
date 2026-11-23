@@ -86,17 +86,23 @@ export const PAGE_PAD = 'px-0.5 pb-3'
 export function Field({
   label,
   htmlFor,
+  action,
   children,
 }: {
   label: string
   htmlFor: string
+  /** Huli: a small action at the end of the label's row, such as writing the text again. */
+  action?: ReactNode
   children: ReactNode
 }) {
   return (
     <div className="mt-3 flex flex-col gap-1.5">
-      <label htmlFor={htmlFor} className="text-small font-medium text-secondary">
-        {label}
-      </label>
+      <div className="flex min-h-5 items-center gap-2">
+        <label htmlFor={htmlFor} className="text-small font-medium text-secondary">
+          {label}
+        </label>
+        {action && <span className="ml-auto flex items-center">{action}</span>}
+      </div>
       {children}
     </div>
   )

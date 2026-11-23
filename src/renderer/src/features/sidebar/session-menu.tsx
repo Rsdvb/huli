@@ -25,6 +25,7 @@ import {
   SidebarBottomIcon,
   SidebarRightIcon,
   SlidersHorizontalIcon,
+  SparklesIcon,
   StopCircleIcon,
   Tick02Icon,
   ViewIcon,
@@ -57,6 +58,7 @@ import {
   AlertDialogTitle,
 } from '@renderer/components/ui/alert-dialog'
 import { Button } from '@renderer/components/ui/button'
+import { Spinner } from '@renderer/components/ui/spinner'
 import {
   DropdownMenuCheckboxItem,
   DropdownMenuGroup,
@@ -1048,23 +1050,46 @@ function OpenInSplitItem({
 /**
  * The session's title as a text field. Enter or a blur saves, Esc cancels, and an empty title
  * returns to the agent's. The field stays until the host has the new title, so the old one never
- * flashes back.
+ * flashes back. Huli: `suggest` adds Regenerate, which puts a title the session's agent writes
+ * from its conversation in the field, for the user to edit before it is saved.
  */
 export function SessionTitleField({
   summary,
   onDone,
   className,
   style,
+  suggest = false,
 }: {
   summary: SessionSummary
   onDone: (restoreFocus: boolean) => void
   className?: string
   style?: CSSProperties
+  suggest?: boolean
 }) {
   const { t } = useTranslation('sidebar')
   const current = sessionTitle(summary)
   const [error, setError] = useState<string | null>(null)
+  const [writing, setWriting] = useState(false)
   const field = useRef<HTMLInputElement>(null)
+
+  const regenerate = async (): Promise<void> => {
+    if (writing) return
+    setWriting(true)
+    setError(null)
+    try {
+      const { title } = await host('sessions.suggestTitle', { sessionId: summary.id })
+      const input = field.current
+      if (!input) return
+      input.value = title
+      input.focus()
+      input.select()
+    } catch (err) {
+      setError(errorMessage(err))
+      field.current?.focus()
+    } finally {
+      setWriting(false)
+    }
+  }
   // Enter, Esc and the blur that follows can all land on one edit; only the first counts.
   const settled = useRef(false)
 
@@ -1083,7 +1108,7 @@ export function SessionTitleField({
     }
   }
 
-  return (
+  const input = (
     <input
       ref={field}
       autoFocus
@@ -1111,6 +1136,26 @@ export function SessionTitleField({
         }
       }}
     />
+  )
+  if (!suggest) return input
+  return (
+    <>
+      {input}
+      <Button
+        type="button"
+        variant="quiet"
+        size="icon-xs"
+        className="shrink-0 text-tertiary"
+        aria-label={writing ? t('row.suggestingTitle') : t('row.suggestTitle')}
+        title={writing ? t('row.suggestingTitle') : t('row.suggestTitle')}
+        disabled={writing}
+        // Pressed without taking the field's focus, whose blur would save the title as it is.
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => void regenerate()}
+      >
+        {writing ? <Spinner className="size-3.5" /> : <Glyph icon={SparklesIcon} size={14} />}
+      </Button>
+    </>
   )
 }
 

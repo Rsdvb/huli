@@ -242,7 +242,9 @@
     "watchPr": "盯着这个 PR",
     "issue": "议题 #{{number}}",
     "manager": "总管会话",
-    "managerBadge": "总管"
+    "managerBadge": "总管",
+    "suggestTitle": "根据对话重新生成标题",
+    "suggestingTitle": "正在写标题…"
   },
   "work": {
     "turn": "当前这一轮",
