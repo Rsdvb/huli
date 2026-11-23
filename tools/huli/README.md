@@ -2659,6 +2659,19 @@ signed in, Huli Cloud's relay from any network, which the hosted web client at
 - The phone (`mobile/src/relay.ts`) falls back to the relay when no direct address answers, with
   the token `relayTokens()` is given by the phone's Huli Cloud sign-in.
 - `tools/huli/deploy-cloud.ps1` builds the service and the hosted web client and installs both.
+- The desktop tries a host it cannot reach again with backoff, 1 s doubling to a minute, give or
+  take a fifth (`retryDelay` in `src/remote-host/client.ts`); the relay only answers a dial and says
+  nothing when a host comes back. `HostLink.nudge` also tries one not connected at once when a
+  window of the app is focused (`browser-window-focus` in `src/main/index.ts`), when the user comes
+  back to the computer (`remote-host:presence` turning true: unlocked, or input after two idle
+  minutes) and when this computer signs in to a relay region again (`RelayHost`'s `connected`),
+  unless a try began in the last 5 s; a nudge keeps the backoff's count, so a host that stays away
+  is tried no more often (`src/remote-host/host-nudge.test.ts`). Waking from sleep and a change of
+  the network's addresses start the backoff over, as upstream.
+- While a host is away, a session on it shows what was last seen: the turn's status holds the time
+  it had run when the host was last online, says so and when that was, with no clock running
+  (`features/session/turn-status.tsx`, `useAwaySince` in `stores/hosts.ts`); the queued messages
+  only show, under the offline notice, which lies over their tab as the composer does.
 
 ## Account and computers
 
