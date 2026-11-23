@@ -2672,6 +2672,12 @@ one once upstream fixes the same thing:
   (`$DSH_HOME/sessions/--<folder>--/<id>/session.v4.jsonl.zstd`; format 3 lifted, others left
   out), and an import replays the user's messages, replies, thoughts, tool calls with their
   results, the plan and subagents' sessions before it resumes in dsh.
+- `src/agent-host/agents.ts` (`freshVersion`, `checkBeforeInstall`, `install`): a first install of a
+  vendor's own package outside the Registry (Claude Code's SDK, DeepSeek Harness, Autohand, Qoder
+  CN) takes the newest version in its range that the update check found, asking npm first when no
+  check found one within a day, rather than the bundled version, which an update at once offered to
+  replace; Claude Code's SDK installs right after its program from the same Install, its progress
+  on the Harness page, rather than on the first session's start.
 - `src/renderer/src/app/crash-screen.tsx`: a render error shows a recoverable screen.
 - `features/files/change-badge.tsx` (U for untracked), `features/routines/routines.css` (the
   state column's width).

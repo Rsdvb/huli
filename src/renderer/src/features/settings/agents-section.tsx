@@ -67,6 +67,7 @@ import { startAgentInTerminal, useStartsInTerminal } from '@renderer/features/ag
 import { NodeInstallAction } from '@renderer/features/agents/node-install'
 import { programCopy } from '@renderer/features/agents/harness-problem'
 import { readiness, type AgentReadiness } from '@renderer/features/agents/readiness'
+import { useHostLabel } from '@renderer/features/sidebar/host-label'
 import { errorMessage } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
 import { i18n } from '@renderer/lib/i18n'
@@ -1022,6 +1023,7 @@ function AgentEnvKeyRow({
 function AgentPageBody({ status }: { status: AgentStatus }) {
   const { hostId, request } = useHostScope()
   const { t } = useTranslation(['settings', 'common'])
+  const hostLabel = useHostLabel(hostId)
   const [act, busy, error, clearError] = useAction()
   const r = readiness(status)
   const reading = useAgentReads(status, { force: status.signIn === 'required' })
@@ -1115,7 +1117,14 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
             data-wrap=""
             data-selectable=""
           >
-            <WithCode text={r.message} />{' '}
+            {/* Another computer's agent says which one needs the fix. */}
+            <WithCode
+              text={
+                r.kind === 'missing' && hostId !== null
+                  ? t('agents.missingOnHost', { host: hostLabel, message: r.message })
+                  : r.message
+              }
+            />{' '}
             {r.kind === 'missing' && !r.node && (
               <button
                 type="button"

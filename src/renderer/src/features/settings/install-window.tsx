@@ -19,6 +19,7 @@ import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
 import { RadioGroup, RadioGroupTile } from '@renderer/components/ui/radio-group'
 import { NodeInstallAction } from '@renderer/features/agents/node-install'
 import { needsNode, useNodeRuntime } from '@renderer/features/agents/node-runtime'
+import { useHostLabel } from '@renderer/features/sidebar/host-label'
 import { bytes } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
 import { hostScope, HostScopeContext, LOCAL_SCOPE, useHostScope } from '@renderer/stores/host-scope'
@@ -100,9 +101,10 @@ function InstallDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const { useAgentsStore, useSettingsStore } = useHostScope()
+  const { hostId, useAgentsStore, useSettingsStore } = useHostScope()
   const { t } = useTranslation(['settings', 'common', 'agents'])
   const status = useAgentsStore((s) => s.byId[harness])
+  const hostLabel = useHostLabel(hostId)
   const { offer, error: offerError } = useOffer(harness, open)
   const [picked, setPicked] = useState<InstallRoute['id'] | null>(null)
   const [reload, reloading, reloadError] = useAction()
@@ -123,7 +125,14 @@ function InstallDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* The body scrolls between the title and the actions in a short window. */}
       <SettingsDialogContent className="flex flex-col overflow-y-hidden sm:max-w-125">
-        <SettingsDialogHeader title={t('harnesses.install.title', { name: status.harnessName })}>
+        <SettingsDialogHeader
+          title={
+            // Another computer's harness says where it installs.
+            hostId === null
+              ? t('harnesses.install.title', { name: status.harnessName })
+              : t('harnesses.install.titleOnHost', { name: status.harnessName, host: hostLabel })
+          }
+        >
           {body}
         </SettingsDialogHeader>
         <SettingsDialogBody className="min-h-0 overflow-y-auto">
@@ -264,6 +273,10 @@ function introText(t: SettingsT, status: AgentStatus, offer: InstallOffer | null
   const vendor = VENDORS[status.harnessId]
   // With one route there is nothing to pick.
   const one = offer ? offer.routes.length === 1 : status.installMethods.length === 1
+  // Claude Code's SDK installs right after the program, as part of the same Install.
+  if (pkg?.isSdk && vendor) {
+    return t(one ? 'harnesses.install.bodyOneSdk' : 'harnesses.install.bodySdk', { name, vendor })
+  }
   if (one) {
     return t(vendor ? 'harnesses.install.bodyOne' : 'harnesses.install.bodyOnePlain', {
       name,

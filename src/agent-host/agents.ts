@@ -386,6 +386,9 @@ const READ_ANTIGRAVITY_LIMITS = false
 /** How often a read the user asks for may run agy, however many views ask within it. */
 const ASKED_READ_MS = 60_000
 
+/** How long the install window waits for the check that names the version a first install takes. */
+const OFFER_CHECK_MS = 5_000
+
 /**
  * Huli: how soon a refresh the user presses asks OpenCode's providers' vendors again with their
  * keys, however often it is pressed; a read nobody asked for waits `limitsMs`.
@@ -570,6 +573,8 @@ class Harness {
   autoNote: string | null = null
   /** What the last update check found, and when it finished. */
   latest: AgentUpdate | null = null
+  /** The check a first install of Kettu's own package runs first, while it runs. */
+  freshCheck: Promise<unknown> | null = null
   /** The newest version of the user's own CLI on npm, from the same check. */
   cliLatest: string | null = null
   checkedAt: number | null = null
@@ -1945,7 +1950,6 @@ export class AgentManager {
     }
     const { diagnostics, platform } = this.deps
     const harnessId = h.def.id
-    const version = request.version ?? adapter.version
     // The SDK never brings the CLI of its own: only the user's runs.
     const withoutCli = !!h.def.cli
     if (h.task?.kind === 'install' && h.task.state === 'failed') h.task = null
@@ -1955,6 +1959,10 @@ export class AgentManager {
     this.emit(slot)
     const abort = new AbortController()
     h.installAbort = abort
+    // A first install takes the newest version in range, not the bundled one an update replaces.
+    const first = request.version === undefined && !adapter.current && !adapter.fallback
+    if (first) await this.checkBeforeInstall(h, abort.signal)
+    const version = request.version ?? (first ? this.freshVersion(h) : null) ?? adapter.version
     const started = Date.now()
     diagnostics.event(slot.id, 'install', `${adapter.package}@${version}`)
     try {
@@ -2423,6 +2431,52 @@ export class AgentManager {
       (version): version is string => !!version && acceptsVersion(def, this.bundled, version),
     )
     return wanted ? { wanted, ...known } : null
+  }
+
+  /**
+   * The version a first install of Kettu's own package takes when it is newer than the one
+   * wanted: the newest the update check found within the versions the harness takes, so no update
+   * is on offer the moment the install is done. Claude Code's SDK takes it only when the user's
+   * CLI is known to run it. Null for the version wanted.
+   */
+  private freshVersion(h: Harness): string | null {
+    const { def } = h
+    const latest = h.latest
+    const wanted = this.versionChoice(h)?.wanted
+    if (def.launch.kind !== 'package' || this.targeted(h) || !latest || !wanted) return null
+    const version = latest.adapterVersion
+    if (compareVersions(version, wanted) <= 0) return null
+    if (h.failed && compareVersions(h.failed.version, version) === 0) return null
+    if (!usable(this.rule(h), version) || !acceptsVersion(def, this.bundled, version)) return null
+    if (def.cli?.pinsVersion) {
+      const mine = h.detection?.state === 'available' ? h.detection.cli : undefined
+      if (mine?.variable) return version
+      if (!latest.cliVersion || !mine?.version) return null
+      if (compareVersions(mine.version, latest.cliVersion) < 0) return null
+    }
+    return version
+  }
+
+  /**
+   * Before a first install of Kettu's own package, reads the newest version in its range unless a
+   * check found it within a day, so the install takes it. A failed read leaves the version wanted.
+   * Resolves at once for a harness with a target, and when `signal` aborts.
+   */
+  private async checkBeforeInstall(h: Harness, signal?: AbortSignal): Promise<void> {
+    if (h.def.launch.kind !== 'package' || this.targeted(h)) return
+    if (!h.freshCheck && h.latest && this.checkDue(h) > Date.now()) return
+    h.freshCheck ??= this.checkHarness(h, new AbortController().signal).finally(() => {
+      h.freshCheck = null
+    })
+    if (!signal) {
+      await h.freshCheck
+      return
+    }
+    if (signal.aborted) return
+    await new Promise<void>((resolve) => {
+      signal.addEventListener('abort', () => resolve(), { once: true })
+      void h.freshCheck?.then(() => resolve())
+    })
   }
 
   /** The archive a first install of the harness takes on this platform. */
@@ -3559,8 +3613,8 @@ export class AgentManager {
   /**
    * Installs a harness that is missing: the user's own program by one of its routes, or a package
    * harness's pinned adapter now, without starting it. A package harness's vendor route, when one
-   * is picked, installs the user's own program, which then runs in place of Kettu's. Resolves when
-   * done or cancelled.
+   * is picked, installs the user's own program, which then runs in place of Kettu's; Claude Code's
+   * SDK follows its program. Resolves when done or cancelled.
    */
   async install(agentId: AgentId, method?: AgentInstallMethod['id']): Promise<void> {
     const { h } = this.slot(agentId)
@@ -3568,7 +3622,13 @@ export class AgentManager {
     // The user's program an SDK runs is installed first; one found too old is updated instead.
     const cliMissing = h.detection?.state === 'not-installed' && !h.detection.cli
     if (h.def.cli && h.def.launch.kind === 'package' && cliMissing) {
-      return this.installProgram(h, method)
+      await this.installProgram(h, method)
+      // The SDK it runs with follows at once, so one Install readies the harness and its first
+      // session waits for nothing.
+      if (this.stopped || h.detection?.state !== 'available' || h.detection.adapter?.installed) {
+        return
+      }
+      return this.installNow(h)
     }
     switch (h.def.launch.kind) {
       case 'package':
@@ -3595,9 +3655,18 @@ export class AgentManager {
     const { platform } = this.deps
     const node = this.deps.env.nodeProbe()
     const env = this.deps.env.agentEnv(def.id)
-    // Claude Code's SDK installs on its first start, beside the user's own `claude`.
+    // Claude Code's SDK installs with its program, or on its first start beside the user's own.
     const ownPackage = (launch.kind === 'package' && !def.cli) || launch.kind === 'uvx'
-    const version = ownPackage ? (this.versionChoice(h)?.wanted ?? null) : null
+    // The window names the version the install takes; a slow check leaves it the one wanted.
+    if (ownPackage) {
+      const waited = new AbortController()
+      const timer = setTimeout(() => waited.abort(), OFFER_CHECK_MS)
+      await this.checkBeforeInstall(h, waited.signal)
+      clearTimeout(timer)
+    }
+    const version = ownPackage
+      ? (this.freshVersion(h) ?? this.versionChoice(h)?.wanted ?? null)
+      : null
     const copy = version ? { version, bytes: h.sizes.get(version) ?? null } : null
     const npmRoute = h.installPlans.some((plan) => plan.id === 'npm')
     const packages = [
