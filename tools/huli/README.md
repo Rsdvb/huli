@@ -1064,19 +1064,26 @@ kind of agent.
 
 Three small things Claude Code, Cursor and Moshi have, on the desktop and the phone alike.
 
-- Recap: a session opened again after half an hour away, with something new in it, greets the
-  user with one quiet line over the thread's top ("你离开期间：改了 4 个文件（+120 −30），跑了 12
-  条命令，2 次需要你批准，最后回复：……") and 跳到离开处, which brings the first new item to the
-  top. `src/shared/recap.ts` works it out from the entries after the one the device last saw, with
-  no model: distinct files of completed edits and their lines (a Myers count, bounded, or a
-  digest's own counts on the phone), commands that ran, requests that asked the user, errors and
-  the latest reply's first line. Each device keeps where it last saw each session (300 at most):
-  the desktop in localStorage (`session-seen`, `features/session/recap/`), written when a pane
-  shows another session or the window goes to the back, and checked again when it comes to the
-  front; the phone in `<documents>/huli/seen/<computer>.json` (`mobile/src/seen.ts`), written when
-  the screen is left or covered or the app leaves the front. A line goes when it is closed, its
-  jump arrives, or a message is sent. Nothing runs between: the desktop's line takes the thread's
-  items only when its jump is pressed.
+- Recap: a session that comes back into view after half an hour away, with something new in it,
+  greets the user with one quiet bar ("你离开期间：改了 4 个文件（+120 −30），跑了 12 条命令，2 次
+  需要你批准，最后回复：……") and 跳到离开处, which brings the first new item to the top.
+  `src/shared/recap.ts` works it out from the entries after the one the device last saw, with no
+  model: distinct files of completed edits and their lines (a Myers count, bounded, or a digest's
+  own counts on the phone), commands that ran, requests that asked the user, errors and the latest
+  reply's first line; counts that start on a page not loaded read "16+". Time in view counts as
+  seen (`recapStep`): a visit steps through view, leave and done, each writing the mark, and only
+  a view after a leave can show a recap, so a long look never comes back as one. In view means, on
+  the desktop, a pane shows the session and the window is not hidden (blur alone is not leaving:
+  the user can watch it beside another app); on the phone, the session screen is in front and the
+  app is not in the background (Control Center does not count), a return waiting for the read
+  of what happened meanwhile (`ThreadView.reads`). Closing the bar, its jump and a message sent
+  are done with it. Each device keeps its marks (300 at most): the desktop in localStorage
+  (`session-seen`, `features/session/recap/`); the phone in `<documents>/huli/seen/<computer>.json`
+  (`mobile/src/seen.ts`, through `seenBook`). Neither covers the conversation: the desktop's bar
+  sits above the message scroller, which gives it its room; the phone's is a solid surface under
+  the header, the chips, a banner and the plan's pill (`RecapBar`, drawn by the session screen
+  from the conversation's `recapSlot`), and the conversation adds its height to its top room while
+  the header's scroll edge reaches under it. Nothing runs between.
 - Compact: the context card on the desktop (`composer/usage.tsx`) and the context sheet on the
   phone offer 压缩上下文 for an agent that lists `/compact` (Claude Code, Codex, OpenCode, Pi, agy)
   or `/compress` (Gemini CLI, Qwen Code), only while the session is free (`ready`, nothing
@@ -1091,8 +1098,10 @@ Three small things Claude Code, Cursor and Moshi have, on the desktop and the ph
   `IMAGE_SIDE`; Done takes react-native-svg's own `toDataURL` snapshot (the view's size at the
   screen's scale) and crops it with expo-image-manipulator, and a crop alone cuts the photo
   itself. `src/shared/markup.ts` holds the marks both draw.
-- The simulator's `85-recap-compact-markup` flow walks the phone's part; a developer build's
-  `-huliRecapAwayMs` launch argument shortens the half hour for it.
+- The simulator's `85-recap-compact-markup` flow walks the phone's part and `86-recap-return` the
+  recap's returns (the bar, its jump, a short absence in the background that shows nothing, a long
+  one that counts only the new work, closing it); a developer build's `-huliRecapAwayMs` launch
+  argument shortens the half hour for them.
 
 ### Dev servers on the phone (开发服务器预览)
 
