@@ -321,3 +321,122 @@ export function refusedMenuItem(path: readonly string[]): boolean {
     .replace(/(\.\.\.|…)$/, '')
   return REFUSED_MENU.some((word) => item.startsWith(word))
 }
+
+/** Huli: a step in an app run as administrator that the user confirms first. */
+export interface RiskyStep {
+  kind: 'click' | 'type' | 'key' | 'drag' | 'menu'
+  /** What it names: the clicked element's label, the keys, the text or the menu item. */
+  text: string | null
+}
+
+/** Keys that only move about, which need no confirmation without modifiers. */
+const MOVING_KEYS = new Set([
+  'tab',
+  'escape',
+  'up',
+  'down',
+  'left',
+  'right',
+  'home',
+  'end',
+  'pageup',
+  'pagedown',
+  'arrowup',
+  'arrowdown',
+  'arrowleft',
+  'arrowright',
+])
+
+/** Words of a button that commits something, as whole words in a Latin script. */
+const COMMIT_WORDS =
+  /\b(ok|yes|apply|delete|remove|uninstall|install|format|erase|wipe|reset|run|execute|start|submit|confirm|save|overwrite|replace|allow|accept|agree|continue|next|finish|end task|kill|shut down|restart|update|upgrade|change|disable|enable)\b/
+/** The same in Chinese, found anywhere in a label. */
+const COMMIT_CJK = [
+  '确定',
+  '确认',
+  '应用',
+  '删除',
+  '移除',
+  '卸载',
+  '安装',
+  '格式化',
+  '清除',
+  '清空',
+  '重置',
+  '运行',
+  '执行',
+  '开始',
+  '提交',
+  '保存',
+  '覆盖',
+  '替换',
+  '允许',
+  '接受',
+  '同意',
+  '继续',
+  '下一步',
+  '完成',
+  '结束',
+  '关机',
+  '重启',
+  '更新',
+  '升级',
+  '更改',
+  '禁用',
+  '启用',
+]
+/** One-character answers, which count only as a whole label. */
+const COMMIT_EXACT = new Set(['是', '好'])
+
+/** Whether an element's label reads as a button that commits something. */
+export function commitLabel(label: string): boolean {
+  const text = label
+    .toLowerCase()
+    .replace(/\(&\w\)|&/g, '')
+    .replace(/(\.\.\.|…)$/, '')
+    .trim()
+  if (!text) return false
+  return (
+    COMMIT_EXACT.has(text) || COMMIT_WORDS.test(text) || COMMIT_CJK.some((w) => text.includes(w))
+  )
+}
+
+/**
+ * Whether a step in an app run as administrator needs the user's confirmation, and what it is: a
+ * click on a committing button or at a bare point, a key other than moving about, any shortcut,
+ * text with a line break, a drag or a menu item. Reading and scrolling never do. `label` is the
+ * clicked element's, when the click names one.
+ */
+export function riskyStep(
+  call: {
+    tool: string
+    args: Record<string, unknown>
+    elementToken?: string
+    keys?: string[]
+    menuPath?: string[]
+  },
+  label: string | null,
+): RiskyStep | null {
+  switch (call.tool) {
+    case 'computer_click':
+      if (!call.elementToken || label === null) return { kind: 'click', text: label }
+      return commitLabel(label) ? { kind: 'click', text: label } : null
+    case 'computer_type_text': {
+      const text = typeof call.args.text === 'string' ? call.args.text : ''
+      return /[\r\n]/.test(text) ? { kind: 'type', text: text.slice(0, 120) } : null
+    }
+    case 'computer_press_key': {
+      const keys = call.keys ?? []
+      const only = keys.length === 1 ? keys[0]!.trim().toLowerCase() : null
+      return only && MOVING_KEYS.has(only) ? null : { kind: 'key', text: shortcut(keys) }
+    }
+    case 'computer_hotkey':
+      return { kind: 'key', text: shortcut(call.keys ?? []) }
+    case 'computer_drag':
+      return { kind: 'drag', text: null }
+    case 'computer_invoke_menu':
+      return { kind: 'menu', text: (call.menuPath ?? []).join(' › ') }
+    default:
+      return null
+  }
+}

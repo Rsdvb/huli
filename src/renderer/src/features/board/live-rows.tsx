@@ -2,7 +2,9 @@ import { useId, useState } from 'react'
 import { ComputerTerminal01Icon, StopIcon, ViewIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { SessionSummary } from '@shared/agent-host'
-import type { BackgroundTaskView } from '@shared/thread'
+import type { TaskProcess } from '@shared/task-processes'
+import type { BackgroundTaskView, ForegroundTaskView } from '@shared/thread'
+import type { PortBlock } from '@shared/worktree-ports'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Button } from '@renderer/components/ui/button'
 import {
@@ -13,6 +15,8 @@ import { PaneIcon } from '@renderer/features/shell/panel-button'
 import { hostOfSession, sessionTitle } from '@renderer/stores/sessions'
 import { openSession } from '@renderer/stores/view'
 import { askedStep, currentStep, lastLine, subagentWaiting } from './board-model'
+import { TaskStats } from './process-parts'
+import { useToBackground } from './use-to-background'
 import { Clock, Fold } from './row-parts'
 import { TaskDetail } from './task-detail'
 import { useStopTask } from './use-stop-task'
@@ -31,12 +35,19 @@ export function AgentLive({
   child,
   digest,
   compact,
+  sessionId,
+  held = null,
 }: {
   child: SessionSummary
   digest: SubagentDigestOf['digest']
   compact: boolean
+  /** The parent's session, which a move to the background goes through. */
+  sessionId: string
+  /** Huli: set while it holds up the call that started it, which it can be moved out of. */
+  held?: ForegroundTaskView | null
 }) {
   const { t } = useTranslation('board')
+  const toBackground = useToBackground(sessionId, held?.toolCallId ?? '')
   useLoadSubagent(child, true)
   const waiting = subagentWaiting(child)
   const title = sessionTitle(child)
@@ -76,13 +87,29 @@ export function AgentLive({
               <>
                 {child.description && <span className="kb-live__type">{child.description} · </span>}
                 <span className="shimmer">
-                  {currentStep(digest, child.projectPath) ?? t('step.starting')}
+                  {child.progress ?? currentStep(digest, child.projectPath) ?? t('step.starting')}
                 </span>
               </>
             )}
           </span>
         )}
+        {held && !waiting && !one && (
+          <Button
+            size="xs"
+            variant="outline"
+            className="kb-live__act kb-live__move"
+            disabled={toBackground.moving}
+            onClick={toBackground.move}
+          >
+            {t('actions.toBackground')}
+          </Button>
+        )}
       </div>
+      {toBackground.error && (
+        <p role="alert" className="kb-item__error">
+          {toBackground.error}
+        </p>
+      )}
     </div>
   )
 }
@@ -96,10 +123,15 @@ export function TaskLive({
   sessionId,
   task,
   compact,
+  stats = null,
+  block = null,
 }: {
   sessionId: string
   task: BackgroundTaskView
   compact: boolean
+  /** Huli: what the board's latest reading found of its processes. */
+  stats?: TaskProcess | null
+  block?: PortBlock | null
 }) {
   const { t } = useTranslation('board')
   const id = useId()
@@ -142,9 +174,12 @@ export function TaskLive({
         </span>
         {!one && (
           <span className="kb-live__what kb-live__what--mono">
-            {open ? command : ((output.text ? lastLine(output.text) : null) ?? command)}
+            {open
+              ? command
+              : (task.progress ?? (output.text ? lastLine(output.text) : null) ?? command)}
           </span>
         )}
+        {!one && stats && <TaskStats stats={stats} block={block} />}
       </div>
       {error && (
         <p role="alert" className="kb-item__error">

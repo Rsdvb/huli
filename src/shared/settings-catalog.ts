@@ -839,6 +839,19 @@ const ENTRIES = {
     access: 'change',
     ...flag('computerUse', 'pauseOnUse', (file) => file.computerUse.pauseOnUse),
   },
+  // Huli: the foreground once an action is not delivered in the background.
+  'computer-use.allow-foreground': {
+    section: 'computer-use',
+    row: 'allow-foreground',
+    group: 'computer.groups.use',
+    name: 'computer.allowForeground.name',
+    description: 'computer.allowForeground.description',
+    keywords: 'computer.allowForeground.keywords',
+    part: 'desktop',
+    access: 'ask',
+    warning: 'agentSettings.warning.computerForeground',
+    ...flag('computerUse', 'allowForeground', (file) => file.computerUse.allowForeground),
+  },
   'computer-use.stop-shortcut': {
     section: 'computer-use',
     row: 'stop-shortcut',
