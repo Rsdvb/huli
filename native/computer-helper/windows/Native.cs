@@ -383,6 +383,35 @@ namespace Kite.ComputerHelper
             return GetClassNameW(window, name, name.Capacity) > 0 ? name.ToString() : "";
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        struct GUITHREADINFO
+        {
+            public int cbSize;
+            public uint flags;
+            public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+            public RECT rcCaret;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
+
+        /// <summary>
+        /// Whether the thread of a window is in a menu now (GUI_INMENUMODE or GUI_POPUPMENUMODE), as
+        /// while its menu bar or a context menu is open, whichever way it was opened.
+        /// </summary>
+        public static bool InMenuMode(long windowId)
+        {
+            if (windowId <= 0) return false;
+            var handle = new IntPtr(windowId);
+            if (!IsWindow(handle)) return false;
+            int pid;
+            int thread = GetWindowThreadProcessId(handle, out pid);
+            if (thread == 0) return false;
+            var info = new GUITHREADINFO { cbSize = Marshal.SizeOf(typeof(GUITHREADINFO)) };
+            if (!GetGUIThreadInfo((uint)thread, ref info)) return false;
+            return (info.flags & (0x00000004 | 0x00000010)) != 0;
+        }
+
         /// <summary>The process that owns a top-level window, or 0 when it is no window.</summary>
         public static int WindowOwner(long windowId)
         {

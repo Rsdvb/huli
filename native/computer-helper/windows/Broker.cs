@@ -693,8 +693,10 @@ namespace Kite.ComputerHelper
                         RearmIdle();
                         continue;
                     }
-                    // What passes is what was checked: the parsed message, written anew.
-                    byte[] bytes = Encoding.UTF8.GetBytes(json.Serialize(message) + "\n");
+                    // What passes is what was checked: the parsed message, written anew, as strict
+                    // UTF-8: a lone surrogate, which would read as U+FFFD to the driver though it
+                    // differs here, fails and ends the session. The JSON reader replaces them already.
+                    byte[] bytes = Strict.GetBytes(json.Serialize(message) + "\n");
                     await input.WriteAsync(bytes, 0, bytes.Length);
                     await input.FlushAsync();
                     RearmIdle();
@@ -818,11 +820,17 @@ namespace Kite.ComputerHelper
 
             const long MaxWholeId = 9007199254740992;
 
-            /// <summary>A whole number within what a JSON reader keeps exactly, or a short string.</summary>
+            static readonly UTF8Encoding Strict = new UTF8Encoding(false, true);
+            static readonly Regex PrintableId = new Regex(@"\A[\x20-\x7E]{1,128}\z");
+
+            /// <summary>
+            /// A whole number within what a JSON reader keeps exactly, or a short string of printable
+            /// ASCII, which reads the same on both sides of every encoding.
+            /// </summary>
             static bool ValidId(object id)
             {
                 long number;
-                return id is string ? ((string)id).Length <= 128 : WholeId(id, out number);
+                return id is string ? PrintableId.IsMatch((string)id) : WholeId(id, out number);
             }
 
             static bool WholeId(object id, out long number)
@@ -907,6 +915,16 @@ namespace Kite.ComputerHelper
                 try { return Convert.ToDouble(value, CultureInfo.InvariantCulture); } catch (Exception) { return 0; }
             }
 
+            /// <summary>The window a call's arguments name, by window_id or its target's.</summary>
+            static long WindowOf(Dictionary<string, object> arguments)
+            {
+                object value;
+                if (arguments.TryGetValue("window_id", out value) && (value is int || value is long)) return Convert.ToInt64(value, CultureInfo.InvariantCulture);
+                var target = arguments.ContainsKey("target") ? arguments["target"] as Dictionary<string, object> : null;
+                if (target != null && target.TryGetValue("window_id", out value) && (value is int || value is long)) return Convert.ToInt64(value, CultureInfo.InvariantCulture);
+                return 0;
+            }
+
             static Dictionary<string, object> Arguments(Dictionary<string, object> message)
             {
                 var parameters = message["params"] as Dictionary<string, object>;
@@ -920,12 +938,17 @@ namespace Kite.ComputerHelper
             string Confirmed(string name, Dictionary<string, object> arguments)
             {
                 Assessment assessment;
+                // What the program's own thread says beats what the steps so far suggest: a menu
+                // it shows is open whichever way it was opened.
+                Focus now = focus;
+                if (!now.MenuOpen && Native.InMenuMode(WindowOf(arguments)))
+                    now = new Focus { Edit = focus.Edit, EditToken = focus.EditToken, MenuOpen = true };
                 lock (snapshots)
                 {
                     assessment = Risk.Assess(name, arguments,
                         id => { Snapshot s; return snapshots.TryGetValue(id, out s) ? s : null; },
                         window => { Snapshot s; return latest.TryGetValue(window, out s) ? s : null; },
-                        focus);
+                        now);
                 }
                 Step step = assessment.Step;
                 if (step == null)

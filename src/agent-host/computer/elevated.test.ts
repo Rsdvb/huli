@@ -747,23 +747,30 @@ describe.skipIf(!runs)('the elevated helper', () => {
     child.kill()
   }, 30_000)
 
-  it('ends when a request has an id that is no whole number, which could alias another', async () => {
+  it('ends on an id that could alias another', async () => {
     const program = await target()
-    const helper = helperFor('allow')
-    const secrets = newSecrets()
-    const launcher = await helper.elevate({ ...(await request(helper, program)), ...secrets })
-    const exe = path.join(installDir, HELPER)
-    const { child, pid } = await connect(
-      exe,
-      ['--pipe', secrets.pipe, '--launcher', String(launcher), '--install-dir', installDir],
-      secrets.token,
-    )
-    children.push(child)
-    child.stdin.write(
-      `{"jsonrpc":"2.0","id":5.1,"method":"tools/call","params":{"name":"list_windows","arguments":{"pid":${program.pid}}}}\n`,
-    )
-    expect(await exited(pid, 5_000)).toBe(true)
-  }, 30_000)
+    const list = `"name":"list_windows","arguments":{"pid":${program.pid}}`
+    // Raw JSON lines: a fraction, and a lone surrogate and the replacement character it turns into
+    // on the way: string ids are printable ASCII alone.
+    const lines = [
+      `{"jsonrpc":"2.0","id":5.1,"method":"tools/call","params":{${list}}}`,
+      `{"jsonrpc":"2.0","id":"\\ud800","method":"tools/call","params":{${list}}}`,
+      `{"jsonrpc":"2.0","id":"\\ufffd","method":"tools/call","params":{${list}}}`,
+    ]
+    for (const line of lines) {
+      const helper = helperFor('allow')
+      const secrets = newSecrets()
+      const launcher = await helper.elevate({ ...(await request(helper, program)), ...secrets })
+      const { child, pid } = await connect(
+        path.join(installDir, HELPER),
+        ['--pipe', secrets.pipe, '--launcher', String(launcher), '--install-dir', installDir],
+        secrets.token,
+      )
+      children.push(child)
+      child.stdin.write(`${line}\n`)
+      expect(await exited(pid, 5_000), line).toBe(true)
+    }
+  }, 60_000)
 
   it('ends when a request uses an id again, so no answer stands for another', async () => {
     const program = await target()
