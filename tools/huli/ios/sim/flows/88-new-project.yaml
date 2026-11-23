@@ -54,8 +54,10 @@ appId: io.github.rsdvb.huli
 - waitForAnimationToEnd
 - tapOn: '返回'
 - waitForAnimationToEnd
+# Settings comes back scrolled down to 项目, below 主题.
 - scrollUntilVisible:
     element: '主题'
+    direction: UP
 - tapOn: '主题'
 - tapOn: '深色'
 - waitForAnimationToEnd
