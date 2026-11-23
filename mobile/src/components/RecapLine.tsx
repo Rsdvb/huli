@@ -1,37 +1,54 @@
-// What happened in a session while the user was away from it, as one quiet line over the top of
-// the conversation, as the desktop's thread shows it (@shared/recap): worked out once when the
-// screen opens on the computer's copy of the thread, and again when the app comes back to the
-// front after a while, from where this phone last saw the session. Nothing runs in between.
+// What happened in a session while the user was away from it, as the desktop's thread shows it
+// (@shared/recap): a solid bar under the session's header, worked out when the session comes back
+// into view after a while away, from where this phone last saw it. Time the session spends on
+// screen with the app in front counts as seen. Nothing runs in between.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, Platform, Pressable, Settings, StyleSheet, Text, View } from 'react-native'
-import { RECAP_AWAY_MS, recapSince, type Recap } from '@shared/recap'
+import {
+  NOT_VISITED,
+  RECAP_AWAY_MS,
+  recapStep,
+  type Recap,
+  type RecapEvent,
+  type RecapVisit,
+} from '@shared/recap'
 import type { ThreadState } from '@shared/thread'
 import { devMode } from '../dev/devMode'
-import { loadSeen, markSeen } from '../seen'
+import { markSeen, seenMark } from '../seen'
+import { useSelector, type Store } from '../select'
 import type { ThreadView } from '../thread'
+import { Glass } from '../ui/Glass'
 import { haptic } from '../ui/session/feedback'
 import { G, Icon } from '../ui/session/icons'
 import { useSessionTokens } from '../ui/session/palette'
 
-/** The recap as the line reads it: what changed, ran and asked, then the latest reply. */
-export function recapText(recap: Recap): string {
+const LEAD = '你离开期间：'
+
+/** A count, as "16+" where the recap could not see back to where the user left. */
+const count = (n: number, partial: boolean): string => (partial ? `${n}+` : `${n}`)
+
+/** What changed, ran and asked, then the latest reply, without the lead. */
+function recapParts(recap: Recap): string {
+  const { partial } = recap
   const parts: string[] = []
   if (recap.files > 0) {
-    const lines = recap.added + recap.removed > 0 ? `（+${recap.added} −${recap.removed}）` : ''
-    parts.push(`改了 ${recap.files} 个文件${lines}`)
+    const lines =
+      !partial && recap.added + recap.removed > 0 ? `（+${recap.added} −${recap.removed}）` : ''
+    parts.push(`改了 ${count(recap.files, partial)} 个文件${lines}`)
   }
-  if (recap.commands > 0) parts.push(`跑了 ${recap.commands} 条命令`)
+  if (recap.commands > 0) parts.push(`跑了 ${count(recap.commands, partial)} 条命令`)
   if (recap.approvals > 0) {
-    parts.push(
-      recap.waiting > 0
-        ? `${recap.approvals} 次需要你批准，${recap.waiting} 个还在等你`
-        : `${recap.approvals} 次需要你批准`,
-    )
+    const asked = `${count(recap.approvals, partial)} 次需要你批准`
+    parts.push(recap.waiting > 0 ? `${asked}，${recap.waiting} 个还在等你` : asked)
   }
-  if (recap.errors > 0) parts.push(`出了 ${recap.errors} 次错`)
+  if (recap.errors > 0) parts.push(`出了 ${count(recap.errors, partial)} 次错`)
   if (recap.reply) parts.push(`最后回复：${recap.reply}`)
-  return `${recap.partial ? '你离开期间至少：' : '你离开期间：'}${parts.join('，')}`
+  return parts.join('，')
+}
+
+export function recapText(recap: Recap): string {
+  return `${LEAD}${recapParts(recap)}`
 }
 
 /**
@@ -44,7 +61,7 @@ function awayMs(): number {
   return Number.isFinite(given) && given > 0 ? given : RECAP_AWAY_MS
 }
 
-/** The latest message the user sent, whose change, a new one, ends the recap. */
+/** The latest message the user sent, whose change, a new one, puts the recap away. */
 function lastSent(thread: ThreadState): string | null {
   for (let i = thread.order.length - 1; i >= 0; i--) {
     const entry = thread.byId[thread.order[i]!]
@@ -53,11 +70,10 @@ function lastSent(thread: ThreadState): string | null {
   return null
 }
 
-const lastEntry = (thread: ThreadState): string | null => thread.order.at(-1) ?? null
-
 /**
- * The session's recap, if the user comes back to it after a while, and a way to put it away.
- * `focused`: the screen is in front, not covered by another.
+ * The session's recap, when the user comes back to it after a while, and `done` for when they
+ * are done with it. The session is in view while its screen is in front (`focused`) and the app
+ * is not in the background; it leaves view otherwise, and each leave marks it seen.
  */
 export function useRecap(
   computer: string | null,
@@ -65,104 +81,153 @@ export function useRecap(
   view: ThreadView,
   thread: ThreadState | null,
   focused: boolean,
-): { recap: Recap | null; dismiss: () => void } {
-  const [shown, setShown] = useState<{ recap: Recap; sent: string | null } | null>(null)
-  const latest = useRef({ thread, older: view.hasOlder })
+): { recap: Recap | null; done: () => void } {
+  const [recap, setRecap] = useState<Recap | null>(null)
+  // Null until this phone's mark for the session is read.
+  const visit = useRef<RecapVisit | null>(null)
+  const latest = useRef({ view, focused })
   useEffect(() => {
-    latest.current = { thread, older: view.hasOlder }
+    latest.current = { view, focused }
   })
-  const opened = useRef(false)
-  // Back in front after leaving: the thread the recap waits for, which the computer's next copy
-  // replaces; nothing coming means nothing happened.
-  const waitingFor = useRef<ThreadState | null | undefined>(undefined)
+  const sentAtRecap = useRef<string | null>(null)
+  // Back from the background: when, and the read count then, as the next read holds what happened
+  // meanwhile. The absence ends when the user came back, however long that read takes.
+  const awaiting = useRef<{ reads: number; at: number } | null>(null)
 
-  const work = useCallback(
-    (now: ThreadState) => {
-      if (!computer) return
-      void loadSeen(computer).then((marks) => {
-        const found = recapSince(now, marks[sessionId] ?? null, {
-          now: Date.now(),
-          older: latest.current.older,
-          awayMs: awayMs(),
-        })
-        if (found) setShown({ recap: found, sent: lastSent(now) })
-        markSeen(computer, sessionId, lastEntry(now))
+  const step = useCallback(
+    (event: RecapEvent, at = Date.now()) => {
+      const was = visit.current
+      const now = latest.current.view.store.get()
+      if (!computer || !was || !now) return
+      const next = recapStep(was, event, now, {
+        now: at,
+        older: latest.current.view.hasOlder,
+        awayMs: awayMs(),
       })
+      if (next === was) return
+      visit.current = next
+      if (next.mark && next.mark !== was.mark) markSeen(computer, sessionId, next.mark)
+      if (next.shown !== was.shown) {
+        sentAtRecap.current = lastSent(now)
+        setRecap(next.shown)
+      }
     },
     [computer, sessionId],
   )
 
-  // Opened: once the computer's copy of the thread is in, not the cache's from an earlier visit.
-  const ready = thread !== null && !view.cached
+  // Opened: once the computer's copy of the thread is in, not the cache's from an earlier visit,
+  // and this phone's mark is read.
+  const ready = computer !== null && thread !== null && !view.cached
   useEffect(() => {
-    const now = latest.current.thread
-    if (!ready || !now || opened.current) return
-    opened.current = true
-    work(now)
-  }, [ready, work])
-
-  useEffect(() => {
-    const now = waitingFor.current
-    if (now === undefined || !thread || thread === now) return
-    waitingFor.current = undefined
-    work(thread)
-  }, [thread, work])
-
-  // Left: the screen goes or is covered, or the app leaves the front.
-  useEffect(() => {
-    if (!computer) return
-    const leave = (): void => {
-      const now = latest.current.thread
-      if (now && opened.current) markSeen(computer, sessionId, lastEntry(now))
-    }
-    const back = (): void => {
-      if (opened.current) waitingFor.current = latest.current.thread
-    }
-    if (!focused) {
-      leave()
-      return back
-    }
-    const listener = AppState.addEventListener('change', (state) =>
-      state === 'active' ? back() : leave(),
-    )
+    if (!ready || !computer || visit.current) return
+    let current = true
+    void seenMark(computer, sessionId).then((mark) => {
+      if (!current || visit.current) return
+      visit.current = { ...NOT_VISITED, mark }
+      if (latest.current.focused && AppState.currentState !== 'background') step('view')
+    })
     return () => {
-      listener.remove()
-      leave()
+      current = false
     }
-  }, [computer, sessionId, focused])
+  }, [ready, computer, sessionId, step])
 
-  const sentNow = shown && thread ? lastSent(thread) : null
-  const recap = shown && sentNow === shown.sent ? shown.recap : null
-  const dismiss = useCallback(() => setShown(null), [])
-  return { recap, dismiss }
+  // In view while the screen is in front and the app is not in the background. A screen over it,
+  // or the app going to the background, leaves; an overlay of the system's that keeps the app
+  // inactive, as Control Center, does not.
+  useEffect(() => {
+    if (!focused) return
+    // Back from a screen over it, the thread having kept up meanwhile.
+    step('view')
+    let away = false
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'background') {
+        away = true
+        awaiting.current = null
+        step('leave')
+      } else if (state === 'active' && away) {
+        away = false
+        // The session was let go in the background and is read afresh now.
+        awaiting.current = { reads: latest.current.view.reads, at: Date.now() }
+      }
+    })
+    return () => {
+      subscription.remove()
+      awaiting.current = null
+      step('leave')
+    }
+  }, [focused, step])
+
+  useEffect(() => {
+    const back = awaiting.current
+    if (back === null || view.reads === back.reads) return
+    awaiting.current = null
+    step('view', back.at)
+  }, [view.reads, step])
+
+  // Another session or computer starts a visit of its own, after the leave above marked this one.
+  useEffect(
+    () => () => {
+      visit.current = null
+      setRecap(null)
+    },
+    [computer, sessionId],
+  )
+
+  // A message sent is done with the recap too.
+  const sentNow = recap && thread ? lastSent(thread) : null
+  useEffect(() => {
+    if (recap && sentNow !== sentAtRecap.current) step('done')
+  }, [recap, sentNow, step])
+
+  const done = useCallback(() => step('done'), [step])
+  return { recap, done }
 }
 
-export function RecapLine(props: { recap: Recap; top: number; onJump(): void; onDismiss(): void }) {
+/** The recap on show and what the user can do with it, for the bar the session screen draws. */
+export interface RecapShown {
+  recap: Recap
+  jump(): void
+  dismiss(): void
+}
+
+// Between the bar and the conversation's first row when the thread is scrolled to its top.
+const GAP = 8
+
+/**
+ * The recap as a solid bar under the session's header and what floats under it. It is never over
+ * the conversation's words: the screen makes room for it at the top of the conversation and the
+ * header's scroll edge reaches under it. `onRoom`: the height it takes, with its gap.
+ */
+export function RecapBar(props: {
+  slot: Store<RecapShown | null>
+  top: number
+  onRoom(room: number): void
+}) {
+  const shown = useSelector(props.slot, (value) => value)
   const { c } = useSessionTokens()
-  const text = recapText(props.recap)
+  const { onRoom } = props
+  if (!shown) return null
+  const parts = recapParts(shown.recap)
   return (
     <View
       pointerEvents="box-none"
       style={[styles.wrap, { top: props.top }]}
+      onLayout={(event) => onRoom(Math.ceil(event.nativeEvent.layout.height) + GAP)}
       accessibilityLiveRegion="polite"
     >
-      <View
-        style={[
-          styles.line,
-          { backgroundColor: c.surfaceRaised, borderColor: c.border, shadowColor: c.shadow },
-        ]}
-      >
+      <Glass shape="rounded" radius={16} elevated style={styles.line}>
         <Pressable
           onPress={() => {
             haptic.tap()
-            props.onJump()
+            shown.jump()
           }}
           accessibilityRole="button"
-          accessibilityLabel={`${text}。跳到离开处`}
+          accessibilityLabel={`${LEAD}${parts}。跳到离开处`}
           style={({ pressed }) => [styles.body, { opacity: pressed ? 0.6 : 1 }]}
         >
           <Text style={[styles.text, { color: c.textSecondary }]} numberOfLines={2}>
-            {text}
+            <Text style={[styles.lead, { color: c.text }]}>{LEAD}</Text>
+            {parts}
           </Text>
           <View style={styles.jump}>
             <Icon icon={G.send} size={11} color={c.tint} weight="semibold" />
@@ -170,7 +235,7 @@ export function RecapLine(props: { recap: Recap; top: number; onJump(): void; on
           </View>
         </Pressable>
         <Pressable
-          onPress={props.onDismiss}
+          onPress={shown.dismiss}
           hitSlop={10}
           accessibilityRole="button"
           accessibilityLabel="关闭离开期间的摘要"
@@ -178,7 +243,7 @@ export function RecapLine(props: { recap: Recap; top: number; onJump(): void; on
         >
           <Icon icon={G.close} size={11} color={c.textTertiary} weight="semibold" />
         </Pressable>
-      </View>
+      </Glass>
     </View>
   )
 }
@@ -189,17 +254,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     maxWidth: 560,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
     paddingLeft: 12,
     paddingRight: 4,
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
   },
   body: { flexShrink: 1, paddingVertical: 8, gap: 4 },
   text: { fontSize: 13, lineHeight: 18 },
+  lead: { fontWeight: '600' },
   jump: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   jumpText: { fontSize: 13, fontWeight: '600' },
   close: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },

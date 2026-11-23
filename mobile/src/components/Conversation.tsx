@@ -58,7 +58,7 @@ import { observeTools } from '../ui/session/work'
 import { MarksShown, ToBottomButton } from '../ui/session/Working'
 import { SubSessionStart } from './entries/NoteEntries'
 import { ThreadRow } from './EntryView'
-import { RecapLine, useRecap } from './RecapLine'
+import { useRecap, type RecapShown } from './RecapLine'
 
 // How far up the conversation may be scrolled before the way back to its end shows.
 const AWAY = 280
@@ -119,6 +119,10 @@ export function Conversation(props: {
   fromParent: boolean
   /** Room above the oldest row, under the floating header. */
   paddingTop: number
+  /** Where the recap of time away goes for the screen to show, under its header. */
+  recapSlot?: WritableStore<RecapShown | null>
+  /** The room the recap's bar takes while it shows, added to `paddingTop`. */
+  recapRoom?: number
   /** Set while the conversation scrolls fast. */
   scrolling?: WritableStore<boolean>
   /** The turn waits for the user, which the way back to the newest message shows. */
@@ -230,14 +234,34 @@ export function Conversation(props: {
     [scrolling, place],
   )
 
-  // What happened while the user was away, and the way back to where they left off.
-  const recap = useRecap(useComputerId(), id, view, thread, focused)
-  const recapFrom = recap.recap?.from ?? null
-  const { dismiss: dismissRecap } = recap
-  const toRecap = useCallback(() => {
-    dismissRecap()
-    if (!thread || recapFrom === null) return
-    const start = thread.order.indexOf(recapFrom)
+  // What happened while the user was away, and the way back to where they left off, which the
+  // screen shows in a bar under its header; the conversation makes room for it at its top.
+  const { recap, done: doneWithRecap } = useRecap(useComputerId(), id, view, thread, focused)
+  const paddingTop = props.paddingTop + (recap ? (props.recapRoom ?? 0) : 0)
+  const jumpFrom = useRef<string | null>(null)
+  const { recapSlot } = props
+  useEffect(() => {
+    recapSlot?.set(
+      recap
+        ? {
+            recap,
+            jump: () => {
+              jumpFrom.current = recap.from
+              doneWithRecap()
+            },
+            dismiss: doneWithRecap,
+          }
+        : null,
+    )
+  }, [recapSlot, recap, doneWithRecap])
+  useEffect(() => () => recapSlot?.set(null), [recapSlot])
+  // Jumped: once the bar has gone and given its room back, so the first new row comes to just
+  // under the header.
+  useEffect(() => {
+    const from = jumpFrom.current
+    if (from === null || recap || !thread) return
+    jumpFrom.current = null
+    const start = thread.order.indexOf(from)
     if (start < 0) return
     const after = new Set(thread.order.slice(start))
     const index = rows.findIndex((row) =>
@@ -246,8 +270,10 @@ export function Conversation(props: {
         : (row.type === 'entry' || row.type === 'reply') && after.has(row.entry.id),
     )
     if (index < 0) return
-    void list.current?.scrollToIndex({ index, animated: true, viewOffset: headerRoom.current })
-  }, [thread, rows, recapFrom, dismissRecap])
+    requestAnimationFrame(() => {
+      void list.current?.scrollToIndex({ index, animated: true, viewOffset: headerRoom.current })
+    })
+  }, [recap, thread, rows])
 
   const toBottom = useCallback(() => {
     haptic.tap()
@@ -256,8 +282,8 @@ export function Conversation(props: {
 
   // A reply's `#anchor` link: its heading comes to just under the floating header. The same
   // function for the list's life, as every reply's text takes it.
-  const headerRoom = useRef(props.paddingTop)
-  headerRoom.current = props.paddingTop
+  const headerRoom = useRef(paddingTop)
+  headerRoom.current = paddingTop
   const reveal = useCallback((target: AnchorTarget) => {
     const scroller = list.current?.getNativeScrollRef()
     if (!scroller) return
@@ -307,10 +333,7 @@ export function Conversation(props: {
     [keep],
   )
 
-  const contentStyle = useMemo(
-    () => [styles.content, { paddingTop: props.paddingTop }],
-    [props.paddingTop],
-  )
+  const contentStyle = useMemo(() => [styles.content, { paddingTop }], [paddingTop])
 
   return (
     <RevealContext value={reveal}>
@@ -378,14 +401,6 @@ export function Conversation(props: {
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       />
-      {recap.recap && (
-        <RecapLine
-          recap={recap.recap}
-          top={props.paddingTop - 4}
-          onJump={toRecap}
-          onDismiss={dismissRecap}
-        />
-      )}
       <Reanimated.View pointerEvents="box-none" style={[styles.overDock, overDock]}>
         <ToBottomButton
           visible={away}

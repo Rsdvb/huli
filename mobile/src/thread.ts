@@ -35,6 +35,11 @@ export interface ThreadView {
   cacheRead: boolean
   /** Why the computer's copy could not be read; the cache's, if any, still shows. */
   error: string | null
+  /**
+   * How many times the computer's copy has been read: one read after the app comes back to the
+   * front holds what happened while it was away, even when the thread came out the same.
+   */
+  reads: number
   /** Reads the computer's copy again now, as it does by itself a while after a failure. */
   retry(): void
   hasOlder: boolean
@@ -90,6 +95,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const [olderError, setOlderError] = useState<string | null>(null)
   const [requests, setRequests] = useState<ThreadEntry[]>([])
   const [plan, setPlan] = useState<PlanEntry | null>(null)
+  const [reads, setReads] = useState(0)
   const seq = useRef(-1)
   const pending = useRef<PatchBatch[] | null>(null)
   const generation = useRef(0)
@@ -219,6 +225,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
       setOlder(snapshot.older)
       setPlan(snapshot.plan ?? null)
       setError(null)
+      setReads((count) => count + 1)
       failures.current = 0
       void link.request('sessions.show', { sessionIds: [sessionId] }).catch(() => {})
       reloadRequests()
@@ -319,6 +326,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
     cached,
     cacheRead,
     error,
+    reads,
     retry,
     hasOlder: older !== null && !cached,
     loadingOlder,

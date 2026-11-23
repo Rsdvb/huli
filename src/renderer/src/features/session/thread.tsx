@@ -539,6 +539,15 @@ export const Thread = memo(function Thread({
     >
       <ScrollOnSend sent={sent} />
       <TrimAtEnd excess={trimmable} trim={trim} />
+      <RecapLine
+        key={sessionId}
+        sessionId={sessionId}
+        items={itemsNow}
+        sent={sent}
+        viewport={viewport}
+        content={content}
+        jumps={jumps}
+      />
       <MessageScroller className="ks-thread min-h-0 flex-1 scroll-fade-top-overlay">
         <MessageScrollerViewport
           ref={viewport}
@@ -650,15 +659,6 @@ export const Thread = memo(function Thread({
         />
         <JumpToLatest sessionId={sessionId} working={working} />
         <OlderLoading sessionId={sessionId} />
-        <RecapLine
-          key={sessionId}
-          sessionId={sessionId}
-          items={itemsNow}
-          sent={sent}
-          viewport={viewport}
-          content={content}
-          jumps={jumps}
-        />
         <MessageOutline sessionId={sessionId} viewport={viewport} content={content} jumps={jumps} />
         <RevealTarget sessionId={sessionId} viewport={viewport} content={content} jumps={jumps} />
         <FindInSession

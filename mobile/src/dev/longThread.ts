@@ -438,6 +438,7 @@ export function useLongThread(options: {
       cached: false,
       cacheRead: true,
       error: null,
+      reads: 1,
       retry: () => {},
       hasOlder,
       loadingOlder,
