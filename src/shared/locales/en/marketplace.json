@@ -18,7 +18,9 @@
       "published": "Published",
       "sync": "Sync"
     },
-    "searchPublished": "Search what you published"
+    "searchPublished": "Search what you published",
+    "reload": "Reload",
+    "reloadHint": "Apply newly installed skills and plugins to running sessions"
   },
   "add": {
     "button": "Add",

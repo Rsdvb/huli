@@ -78,22 +78,25 @@ function shorten(text: string): string {
 
 /** An MCP error's first sentences, without Codex's wrappers, safe inside Markdown. */
 export function errorDetail(text: string): string {
+  return plainErrorDetail(text).replace(/[\\`*_[\]<>~]/g, (character) => `\\${character}`)
+}
+
+/** Huli: an MCP error's first sentences, without Codex's wrappers, as plain text. */
+export function plainErrorDetail(text: string): string {
   const line = text.slice(0, MAX_INPUT_LENGTH).replace(/\s+/g, ' ').trim()
   const message = line
     .split(': ')
     .map((segment) => segment.replace(TYPE_PATH, '').replace(/\s+/g, ' ').trim())
     .filter((segment) => segment.length > 0 && !WRAPPER_SEGMENT.test(segment))
     .join(': ')
-  const cleaned =
-    message === ''
-      ? shorten(line)
-      : shorten(
-          message
-            .split(/(?<=[.!?])\s+/)
-            .slice(0, MAX_ERROR_SENTENCES)
-            .join(' '),
-        )
-  return cleaned.replace(/[\\`*_[\]<>~]/g, (character) => `\\${character}`)
+  return message === ''
+    ? shorten(line)
+    : shorten(
+        message
+          .split(/(?<=[.!?])\s+/)
+          .slice(0, MAX_ERROR_SENTENCES)
+          .join(' '),
+      )
 }
 
 function detail(server: McpServerStatus, startupError: string | null): string | null {
@@ -238,6 +241,12 @@ export class McpStartup {
   /** Ends every wait, as when the connection closes. */
   close(): void {
     for (const waiter of [...this.waiters]) waiter.done(null)
+  }
+
+  /** Huli: why the server last failed to start for the thread, or null when it did not. */
+  failure(name: string, threadId: string): string | null {
+    const state = this.latest(name, threadId)
+    return state?.status === 'failed' ? (state.error ?? t('codex.mcp.unknownError')) : null
   }
 
   private latest(name: string, threadId: string): StartupState | undefined {

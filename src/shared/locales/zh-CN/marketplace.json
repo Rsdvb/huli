@@ -18,7 +18,9 @@
       "published": "已发布",
       "sync": "同步"
     },
-    "searchPublished": "搜索你发布的"
+    "searchPublished": "搜索你发布的",
+    "reload": "重新加载",
+    "reloadHint": "让正在运行的会话用上新装的技能和插件"
   },
   "add": {
     "button": "添加",

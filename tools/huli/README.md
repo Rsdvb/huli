@@ -515,6 +515,47 @@ background so the turn goes on (转到后台), and cleans the list.
   `codex/connection.test.ts` (terminals listed, ended, missing), `acp/kite-tasks.test.ts`,
   `validate.test.ts`.
 
+### A session's MCP servers (MCP 服务器…, 重新加载技能和插件)
+
+The session's More menu opens MCP 服务器…, which lists the MCP servers the session's agent
+really has: each one's state (connected, connecting, failed with its error, needs sign-in, off),
+where it comes from (Kite, the user's settings, the project's, a plugin, an organization, the
+account) and its tools, which a row unfolds. Marketplace › Installed still shows what Kite keeps
+and where each agent keeps its own; the panel is the session's live view.
+
+- Host: `sessions.mcp`, `sessions.mcpAct` (reconnect, disable, enable), `sessions.mcpLogin` and
+  `sessions.reloadPlugins` (`src/agent-host/session-mcp/`, guards in its `validate.ts`; the
+  connection methods `readMcp`, `reconnectMcp`, `toggleMcp`, `loginMcp` and `reloadPlugins`).
+  `session.mcpChanged` goes to the ports watching the session when its agent reports a change
+  (an `mcp` mapper effect) or after an action. Errors leave the host as one line with every
+  address's query masked (`session-mcp/text.ts`); a server's configuration never does.
+- Claude Code: `mcpServerStatus` (its `source`, else its `scope`), `reconnectMcpServer` one server
+  at a time, `reloadPlugins({ refuseIfBusy: true })` then `reloadSkills`, between turns only.
+  Kite's own servers (the names its last attach handed the agent, under the `dynamic` scope) turn
+  off for the session alone: `setMcpServers` without them, and its later queries start without
+  them too. The user's own go through `toggleMcpServer`, which Claude Code keeps in the folder's
+  entry of its `.claude.json` (`disabledMcpServers`), so the menu says it lasts. Sign-in stays in
+  Claude Code's own `/mcp`: the SDK's `mcpAuthenticate` is not in its published types.
+- Codex: `mcpServerStatus/list` with the thread, `config/read`'s `origins` for each server's layer
+  (user, project, managed), `pluginId` for a plugin's; Reconnect is one `config/mcpServer/reload`
+  for every server (concurrent ones share it). 登录 runs `mcpServer/oauth/login` with the thread;
+  its `authorizationUrl` must be http(s) and opens through the window's own link path, and
+  `mcpServer/oauthLogin/completed` reloads the servers and tells the panel how it ended. No token
+  passes through Kite. Its apps are `app/list`'s linked ones (`isAccessible`), at most five pages,
+  listed read-only with 在 ChatGPT 管理; Codex has no per-thread switch for a server, so none shows.
+- Other agents (ACP, OpenCode, Pi, Cline, DeepSeek Harness) report no servers: the panel lists
+  those Kite handed the session, their state unknown.
+- Reload: 重新加载技能和插件 in the panel, and 重新加载 in the Marketplace's toolbar for every
+  session whose agent runs (`sessions.reloadPlugins` without a session), so a skill or plugin
+  installed meanwhile applies without a restart.
+- Nothing reads before the panel opens (its dialog is a lazy chunk); it reads again on Refresh,
+  after an action and 250 ms after the last `session.mcpChanged`; no timer otherwise.
+- Phone: MCP 服务器 in the session's ⋯ menu (`mobile/src/app/mcp/[id].tsx`): states, sources,
+  errors and tools, with Reconnect; read on open, on a pull and on `session.mcpChanged`. Turning
+  a server off and signing in stay on the computer, and `sessions.mcpLogin` is refused to devices.
+- Tests: `claude/connection.test.ts` and `codex/connection.test.ts` (Huli: a session's MCP panel),
+  `session-mcp/validate.test.ts`.
+
 ### Risk levels and auto-approve (风险等级、自动批准低风险操作)
 
 After Codex's risk before an action, Kiro's Approve for me and Claude Code's auto mode, without

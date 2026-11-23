@@ -4679,3 +4679,178 @@ describe('Huli: background moves, progress, memory and goals', () => {
     await turn
   })
 })
+
+describe("Huli: a session's MCP panel", () => {
+  const kettu = {
+    type: 'http' as const,
+    name: 'kettu',
+    url: 'http://127.0.0.1:9/mcp',
+    headers: [{ name: 'X-Key', value: 'k' }],
+  }
+  const playwright = {
+    type: 'stdio' as const,
+    name: 'playwright',
+    command: 'npx',
+    args: [],
+    env: [],
+  }
+
+  it('lists the servers with their states, sources and tools, never their settings', async () => {
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
+    const { sessionId } = await connection.newSession('/repo', { mcpServers: [kettu] })
+    sdk.mcpStatus = [
+      {
+        name: 'kettu',
+        status: 'connected',
+        source: 'dynamic',
+        tools: [{ name: 'show_artifact' }, { name: 'ask' }],
+        config: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { 'X-Key': 'k' } },
+      } as never,
+      {
+        name: 'github',
+        status: 'failed',
+        source: 'user',
+        error: 'HTTP 401 from https://api.example.com/mcp?token=ghp_123',
+      },
+      { name: 'plugin:docs:search', status: 'connected', source: 'plugin', tools: [] },
+      { name: 'claude.ai Gmail', status: 'needs-auth', source: 'claudeai' },
+      { name: 'db', status: 'pending', scope: 'project' },
+      { name: 'local', status: 'disabled', source: 'local' },
+      { name: 'org', status: 'connected', source: 'enterprise', tools: [{ name: 'q' }] },
+      { name: 'odd', status: 'connected', source: 'something-new' },
+    ]
+    const read = await connection.readMcp(sessionId, ['kettu'])
+    expect(read?.can).toEqual({ reconnect: 'server', toggle: true, login: false, reload: true })
+    const none = { error: null, plugin: null }
+    expect(read?.servers).toEqual([
+      {
+        ...none,
+        name: 'kettu',
+        state: 'connected',
+        source: 'kite',
+        tools: ['show_artifact', 'ask'],
+      },
+      {
+        name: 'github',
+        state: 'failed',
+        error: 'HTTP 401 from https://api.example.com/mcp?token=••••',
+        source: 'user',
+        plugin: null,
+        tools: null,
+      },
+      {
+        name: 'plugin:docs:search',
+        state: 'connected',
+        error: null,
+        source: 'plugin',
+        plugin: 'docs',
+        tools: [],
+      },
+      { ...none, name: 'claude.ai Gmail', state: 'needs-auth', source: 'cloud', tools: null },
+      { ...none, name: 'db', state: 'pending', source: 'project', tools: null },
+      { ...none, name: 'local', state: 'disabled', source: 'local', tools: null },
+      { ...none, name: 'org', state: 'connected', source: 'managed', tools: ['q'] },
+      { ...none, name: 'odd', state: 'connected', source: 'other', tools: null },
+    ])
+    expect(JSON.stringify(read)).not.toContain('ghp_123')
+    expect(JSON.stringify(read)).not.toContain('X-Key')
+  })
+
+  it('counts a server the user named as Kite names its own as the user’s', async () => {
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
+    const { sessionId } = await connection.newSession('/repo', {})
+    sdk.mcpStatus = [{ name: 'kettu', status: 'connected', source: 'user', tools: [] }]
+    expect((await connection.readMcp(sessionId, ['kettu']))?.servers[0]?.source).toBe('user')
+  })
+
+  it('reads nothing for a session it runs no query for', async () => {
+    const { connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
+    expect(await connection.readMcp('nobody', [])).toBeNull()
+    await expect(connection.reconnectMcp('nobody', 'github')).rejects.toThrow()
+  })
+
+  it('reconnects one server at a time', async () => {
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
+    const { sessionId } = await connection.newSession('/repo', {})
+    await connection.reconnectMcp(sessionId, 'github')
+    expect(sdk.last.calls.filter((call) => call.method === 'reconnectMcpServer')).toEqual([
+      { method: 'reconnectMcpServer', args: ['github'] },
+    ])
+    await expect(connection.reconnectMcp(sessionId, null)).rejects.toThrow()
+  })
+
+  it("turns Kite's own server off for the session alone, and the user's through Claude Code", async () => {
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
+    const { sessionId } = await connection.newSession('/repo', {
+      mcpServers: [kettu, playwright],
+    })
+    const query = sdk.last
+    await connection.toggleMcp(sessionId, 'kettu', false, ['kettu', 'playwright'])
+    const set = () => query.calls.filter((call) => call.method === 'setMcpServers')
+    expect(set().at(-1)?.args[0]).toEqual({
+      playwright: { type: 'stdio', command: 'npx', args: [], env: {} },
+    })
+    expect(query.calls.some((call) => call.method === 'toggleMcpServer')).toBe(false)
+    sdk.mcpStatus = [{ name: 'playwright', status: 'connected', source: 'dynamic', tools: [] }]
+    const read = await connection.readMcp(sessionId, ['kettu', 'playwright'])
+    expect(read?.servers.map((server) => [server.name, server.state, server.source])).toEqual([
+      ['playwright', 'connected', 'kite'],
+      ['kettu', 'disabled', 'kite'],
+    ])
+
+    await connection.toggleMcp(sessionId, 'github', false, ['kettu', 'playwright'])
+    expect(query.calls.filter((call) => call.method === 'toggleMcpServer')).toEqual([
+      { method: 'toggleMcpServer', args: ['github', false] },
+    ])
+
+    await connection.toggleMcp(sessionId, 'kettu', true, ['kettu', 'playwright'])
+    expect(Object.keys(set().at(-1)?.args[0] as object).sort()).toEqual(['kettu', 'playwright'])
+  })
+
+  it("starts the session's next query without Kite's server it turned off", async () => {
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
+    const { sessionId } = await connection.newSession('/repo', { mcpServers: [kettu, playwright] })
+    await connection.toggleMcp(sessionId, 'kettu', false, ['kettu', 'playwright'])
+    await connection.closeSession(sessionId)
+    await connection.resumeSession(sessionId, '/repo', { mcpServers: [kettu, playwright] })
+    expect(Object.keys(sdk.last.options.mcpServers ?? {})).toEqual(['playwright'])
+  })
+
+  it('reloads plugins and skills between turns, and leaves a running turn alone', async () => {
+    const { sdk, connection: hosted } = await setup()
+    const connection = hosted as ClaudeConnection
+    const target = new Target()
+    const { sessionId } = await connection.newSession('/repo', {})
+    connection.register(sessionId, target)
+    sdk.reloadedCommands = [{ name: 'fresh-skill', description: 'Just installed' }]
+    expect(await connection.reloadPlugins(sessionId)).toBe('reloaded')
+    const methods = sdk.last.calls.map((call) => call.method)
+    expect(methods).toContain('reloadSkills')
+    expect(sdk.last.calls.find((call) => call.method === 'reloadPlugins')?.args).toEqual([
+      { refuseIfBusy: true },
+    ])
+    await settle()
+    expect(target.thread.session.commands.map((command) => command.name)).toContain('fresh-skill')
+
+    sdk.reloadError = Object.assign(new Error('busy'), { errorCode: 'reload_plugins_busy' })
+    expect(await connection.reloadPlugins(sessionId)).toBe('busy')
+    sdk.reloadError = new Error('broken plugin')
+    await expect(connection.reloadPlugins(sessionId)).rejects.toThrow('broken plugin')
+
+    sdk.reloadError = null
+    sdk.script = (q) => q.running()
+    const turn = connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
+    await settle()
+    const before = sdk.last.calls.filter((call) => call.method === 'reloadPlugins').length
+    expect(await connection.reloadPlugins(sessionId)).toBe('busy')
+    expect(sdk.last.calls.filter((call) => call.method === 'reloadPlugins')).toHaveLength(before)
+    sdk.last.finish()
+    await turn
+  })
+})

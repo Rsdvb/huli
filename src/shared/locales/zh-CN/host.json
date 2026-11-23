@@ -2368,5 +2368,12 @@
     "extractFailed": "Moli 的压缩包解压失败：{{reason}}",
     "doesNotRun": "Moli 已解压，但在这台电脑上运行不起来。",
     "inUse": "有 Agent 正在用 Moli 读网页，等它读完再试。"
+  },
+  "sessionMcp": {
+    "cannotReconnect": "{{agent}} 不能重新连接这个 MCP 服务器",
+    "cannotToggle": "{{agent}} 不能关闭或打开这个 MCP 服务器",
+    "cannotReload": "{{agent}} 不重启就不能重新加载技能和插件",
+    "unsupported": "{{agent}} 不支持在纸鸢里这样做",
+    "loginPage": "{{agent}} 没有给出可以登录的网页"
   }
 }

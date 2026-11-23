@@ -32,6 +32,7 @@ export type SessionMenuItem =
   | 'copyResume'
   | 'copySessionId'
   | 'export'
+  | 'mcp'
   | 'move'
   | 'showInParent'
   | 'removeWorktree'
@@ -181,8 +182,9 @@ export function sessionMenuGroups(
       ? [
           state,
           ['rename', ...(topLevel ? (['pin'] as const) : []), ...forks],
-          // Huli: how much of the agent's work the thread shows (简洁视图).
-          entryShown('session.zenView') ? ['toolCalls'] : [],
+          // Huli: how much of the agent's work the thread shows (简洁视图), and the MCP servers
+          // its agent has.
+          [...(entryShown('session.zenView') ? (['toolCalls'] as const) : []), 'mcp'],
           tidy,
           own,
           flow,
