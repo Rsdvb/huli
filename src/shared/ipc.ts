@@ -1,4 +1,6 @@
 import type { AccountStatus } from './account'
+import type { CaptureImage, CaptureRegion, CaptureShot } from './capture'
+import type { MiniTarget } from './mini-window'
 import type { AccountDevicesResult, RevokeTarget } from './huli-cloud'
 import type { AgentsApi, HostMethod } from './agent-host'
 import type {
@@ -646,6 +648,12 @@ export interface IpcEventContract {
   'backup:changed': BackupStatus
   /** Huli: the chat bridges' view changed: a connection, an account, the binding. */
   'chat-bridge:changed': ChatBridgeView
+  /** Huli: to the mini window's page: the session it follows. */
+  'mini:target': MiniTarget
+  /** Huli: to the screenshot overlay's page: the frozen display it shows. */
+  'capture:image': CaptureImage
+  /** Huli: to the main window: a screenshot to attach to the session in focus. */
+  'capture:shot': CaptureShot
 }
 
 export type IpcEventChannel = keyof IpcEventContract
@@ -682,6 +690,14 @@ export interface IpcSendContract {
   'tray:quit': []
   'tray:hide': []
   'tray:resize': [height: number]
+  /** Huli: the main window opens the mini window on a session. */
+  'mini:open': [sessionId: string]
+  /** Huli: the mini window's calls, which main takes from its own page alone. */
+  'mini:show-session': []
+  'mini:close': []
+  /** Huli: the screenshot overlay's answer, which main takes from its own page alone. */
+  'capture:done': [region: CaptureRegion]
+  'capture:cancel': []
 }
 
 /** Payload of `agent-host:reset` and `terminal-host:reset`. */
@@ -1215,6 +1231,10 @@ export interface KettuApi {
    * cancelled. Absent in the web client.
    */
   exportSession?(request: SessionExportRequest): Promise<boolean>
+  /** Huli: the mini window over the others, on a session; absent in the web client. */
+  mini?: { open(sessionId: string): void }
+  /** Huli: the global screenshot's shots for the session in focus; absent in the web client. */
+  capture?: { onShot(listener: (shot: CaptureShot) => void): () => void }
   /** Huli: moving a session to another computer, which main runs; absent in the web client. */
   moves?: {
     preview(

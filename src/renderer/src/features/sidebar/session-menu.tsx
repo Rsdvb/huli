@@ -13,6 +13,7 @@ import {
   Copy01Icon,
   Delete02Icon,
   FileExportIcon,
+  PictureInPictureOnIcon,
   FolderOpenIcon,
   GitBranchIcon,
   GitMergeIcon,
@@ -593,6 +594,17 @@ export function SessionMenuItems({
             {t('row.copySessionId')}
           </DropdownMenuItem>
         )
+      case 'mini':
+        return (
+          <DropdownMenuItem
+            key={name}
+            {...props}
+            onClick={() => window.kettu.mini?.open(summary.id)}
+          >
+            <MenuGlyph icon={PictureInPictureOnIcon} />
+            {t('row.mini')}
+          </DropdownMenuItem>
+        )
       case 'export':
         return (
           <DropdownMenuItem key={name} {...props} onClick={() => askExport(summary)}>
@@ -689,6 +701,7 @@ export function SessionMenuItems({
     removeWorktree: canRemoveWorktree(summary),
     exportable: canExport(),
     movable: canMove() && !summary.scratch && summary.origin !== 'subagent',
+    mini: local && window.kettu.mini !== undefined,
     prFlow: prTarget !== null,
     subagents: listed.length > 0,
   }

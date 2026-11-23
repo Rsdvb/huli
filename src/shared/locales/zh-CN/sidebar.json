@@ -242,7 +242,8 @@
     "watchPr": "盯着这个 PR",
     "issue": "议题 #{{number}}",
     "manager": "总管会话",
-    "managerBadge": "总管"
+    "managerBadge": "总管",
+    "mini": "在小窗中打开"
   },
   "work": {
     "turn": "当前这一轮",

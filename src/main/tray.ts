@@ -199,6 +199,8 @@ export interface TrayDeps {
   togglePanel?(bounds: Electron.Rectangle): boolean
   /** Closes the panel, so the short menu never opens over it. */
   hidePanel?(): void
+  /** Huli: the mini window on the latest session. */
+  openMini?(): void
 }
 
 export class KettuTray {
@@ -304,6 +306,9 @@ export class KettuTray {
         click: () => this.deps.open(),
       },
       { label: t('tray.newSession'), ...key('CmdOrCtrl+N'), click: () => this.deps.newSession() },
+      ...(this.deps.openMini
+        ? [{ label: t('tray.mini'), click: () => this.deps.openMini?.() }]
+        : []),
       { type: 'separator' },
       {
         label: t('tray.remoteAccess'),

@@ -440,6 +440,8 @@ const api: KettuApi = {
     onChanged: subscribe('backup:changed'),
   },
   exportSession: (request) => invoke('session:export', request),
+  mini: { open: (sessionId) => send('mini:open', sessionId) },
+  capture: { onShot: subscribe('capture:shot') },
   moves: {
     preview: (source, sessionId, target, project) =>
       invoke('sessions:move-preview', source, sessionId, target, project),

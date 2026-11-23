@@ -262,7 +262,8 @@
     "watchPr": "Watch this pull request",
     "issue": "Issue #{{number}}",
     "manager": "Manager session",
-    "managerBadge": "Manager"
+    "managerBadge": "Manager",
+    "mini": "Open in mini window"
   },
   "work": {
     "turn": "Current turn",

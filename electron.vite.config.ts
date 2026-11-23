@@ -31,6 +31,9 @@ export default defineConfig({
           tray: resolve('src/preload/tray.ts'),
           overlay: resolve('src/preload/overlay.ts'),
           'computer-overlay': resolve('src/preload/computer-overlay.ts'),
+          // Huli: the mini window's and the screenshot overlay's.
+          mini: resolve('src/preload/mini.ts'),
+          capture: resolve('src/preload/capture.ts'),
         },
       },
     },
@@ -61,6 +64,8 @@ export default defineConfig({
           tray: resolve('src/renderer/tray.html'),
           overlay: resolve('src/renderer/overlay.html'),
           'computer-overlay': resolve('src/renderer/computer-overlay.html'),
+          mini: resolve('src/renderer/mini.html'),
+          capture: resolve('src/renderer/capture.html'),
         },
       },
     },

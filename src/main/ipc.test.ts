@@ -23,7 +23,7 @@ vi.stubEnv('ELECTRON_RENDERER_URL', 'http://localhost:5173')
 
 const { browserTabId, isTrusted, mayUse, whenSettled } = await import('./ipc')
 const { watchSubframes } = await import('./subframes')
-const { markOverlay, markPanel } = await import('./window')
+const { markOverlay, markOwnPage, markPanel } = await import('./window')
 
 const ARTIFACT = 'kettu-artifact://0123456789abcdef0123456789/'
 
@@ -205,4 +205,59 @@ describe('browserTabId', () => {
       expect(() => browserTabId(value)).toThrow()
     },
   )
+})
+
+describe("Huli: the mini window's and the screenshot overlay's pages", () => {
+  const MINI = [
+    'settings:get',
+    'themes:get',
+    'agent-host:connect',
+    'mini:show-session',
+    'mini:close',
+  ]
+  const OTHERS = [
+    'settings:update',
+    'app:get-info',
+    'terminal-host:connect',
+    'session:export',
+    'mini:open',
+    'capture:done',
+    'tray:open',
+  ]
+
+  it('takes only its own channels from the mini window, by its URL or its window', () => {
+    const contents = new FakeContents()
+    contents.mainFrame.url = 'http://localhost:5173/mini.html'
+    for (const channel of MINI) expect(mayUse(eventFrom(contents), channel)).toBe(true)
+    for (const channel of OTHERS) expect(mayUse(eventFrom(contents), channel)).toBe(false)
+    // history.pushState can give its page the window page's URL; its window still tells it apart.
+    const moved = new FakeContents()
+    const window = {}
+    windows.set(moved, window)
+    markOwnPage(window as never, 'mini')
+    expect(mayUse(eventFrom(moved), 'mini:close')).toBe(true)
+    expect(mayUse(eventFrom(moved), 'settings:update')).toBe(false)
+  })
+
+  it('takes only the region or Cancel from the screenshot overlay', () => {
+    const contents = new FakeContents()
+    const window = {}
+    windows.set(contents, window)
+    markOwnPage(window as never, 'capture')
+    expect(mayUse(eventFrom(contents), 'capture:done')).toBe(true)
+    expect(mayUse(eventFrom(contents), 'capture:cancel')).toBe(true)
+    for (const channel of [...MINI, ...OTHERS.filter((c) => c !== 'capture:done')]) {
+      expect(mayUse(eventFrom(contents), channel)).toBe(false)
+    }
+  })
+
+  it("lets the window open the mini window, but never send those pages' own calls", () => {
+    const contents = new FakeContents()
+    expect(mayUse(eventFrom(contents), 'mini:open')).toBe(true)
+    for (const channel of ['mini:show-session', 'mini:close', 'capture:done', 'capture:cancel']) {
+      expect(mayUse(eventFrom(contents), channel)).toBe(false)
+    }
+    contents.mainFrame.url = 'http://localhost:5173/tray.html'
+    expect(mayUse(eventFrom(contents), 'mini:open')).toBe(false)
+  })
 })

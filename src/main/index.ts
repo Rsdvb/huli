@@ -76,6 +76,8 @@ import {
   registerSessionMoveIpc,
   registerSignInIpc,
   registerTrayIpc,
+  registerMiniIpc,
+  registerCaptureIpc,
 } from './ipc'
 import { Reports } from './report'
 import { MediaGrants, mediaScheme, serveMedia } from './media'
@@ -83,6 +85,9 @@ import { createLogger } from './log'
 import { SessionMover } from './session-move'
 import { installMenu } from './menu'
 import { setReboundShortcuts } from './artifacts/guards'
+import type { SessionSummary } from '@shared/agent-host'
+import { MiniWindow } from './mini-window'
+import { ScreenCapture } from './screen-capture'
 import { isOpenedAtLogin, startMode, syncLoginItem } from './login-item'
 import { notifyAttention, notifyDiscovery, notifyNotice, RepeatedNotices } from './notifications'
 import { KeepAwake } from './power-save'
@@ -312,9 +317,16 @@ async function start(): Promise<void> {
           quit: () => app.quit(),
         })
       : null
+  // Huli: the mini window and the global screenshot, made here but loading nothing until used.
+  const mini = new MiniWindow({
+    systemLocale,
+    showSession: (sessionId) => openTrayTarget({ kind: 'session', sessionId }),
+  })
+  const screenCapture = new ScreenCapture()
   const tray = new KettuTray({
     open: () => showMainWindow(),
     quit: () => app.quit(),
+    openMini: () => void openLatestMini(),
     newSession: () => sendCommand({ kind: 'new-session' }),
     // As the app menu's item does: About shows the answer, the window being closed or not.
     checkForUpdates: () => {
@@ -338,6 +350,8 @@ async function start(): Promise<void> {
   // Huli: an agent's test copy puts no icon beside the owner's (test-window.ts).
   if (!testInBackground()) tray.start()
   if (trayPanel) registerTrayIpc(trayPanel)
+  registerMiniIpc(mini)
+  registerCaptureIpc(screenCapture)
 
   const mediaGrants = new MediaGrants()
   const browserOrigins = await BrowserOriginStore.load(userDataPath)
@@ -532,7 +546,24 @@ async function start(): Promise<void> {
     log: islandLog,
   })
   nativeTheme.on('updated', () => island.appearanceChanged())
-  app.on('will-quit', () => island.quit())
+  app.on('will-quit', () => {
+    island.quit()
+    screenCapture.stop()
+    mini.close()
+  })
+  /** Huli: the mini window on the session the user touched last, from the tray. */
+  const openLatestMini = async (): Promise<void> => {
+    try {
+      const sessions = (await agentHost.call('sessions.list', {})) as SessionSummary[]
+      const latest = sessions
+        .filter((s) => s.parentId === null && s.archivedAt === null && s.origin === 'user')
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0]
+      if (latest) mini.open(latest.id)
+      else sendCommand({ kind: 'new-session' })
+    } catch (error) {
+      log.warn(`Could not open the mini window: ${(error as Error).message}`)
+    }
+  }
   const agentHost = new AgentHost({
     settings: () => hostSettings(settings.get(), systemLocale),
     marketKeys: () => marketKeys.contentsForHost(),
@@ -1180,6 +1211,7 @@ async function start(): Promise<void> {
     // Huli: the menu bar carries the shortcuts as the user bound them, and pages pass them on.
     if (changed.has('keyboard')) {
       setReboundShortcuts(next.keyboard.shortcuts, process.platform)
+      screenCapture.setHotkey(next.keyboard.screenshot)
       if (!localeChanged) installMenu(menuDeps)
     }
     if (localeChanged) {
@@ -1306,6 +1338,7 @@ async function start(): Promise<void> {
   )
   ipcReady = true
   setReboundShortcuts(settings.get().keyboard.shortcuts, process.platform)
+  screenCapture.setHotkey(settings.get().keyboard.screenshot)
   installMenu(menuDeps)
 
   app.on('browser-window-created', (_, window) => {
