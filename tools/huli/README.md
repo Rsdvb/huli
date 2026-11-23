@@ -1306,39 +1306,57 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
 - **Administrator use** (操作以管理员身份运行的程序, Windows, `computerUse.elevated`, `access:
 'read'` so agents never change it, a computer setting a paired device cannot change): 关闭
   (`off`, the default, and what any older file reads as; the old `allowElevated` switch is
-  dropped) or 始终允许（高风险） (`always`). Turning it on opens a dialog that says an agent outside
-  a sandbox runs as the user and could take over the prompt or the helper's windows, that the
-  prompt and those windows sit on the normal desktop, and that it is the user's call; nothing
-  changes until they confirm. Off, computer use is exactly as without the helper: the same refusal
-  and list notes, no helper call from Settings, and the guide unchanged; turned off, a running
-  helper ends. A choice limited to sandboxed sessions was tried and dropped: a container's agent
-  gets none of Kite's MCP tools, so it had no session to serve. Settings › 功能管理 lists it under
-  computer use with a link to its row.
-  - The helper is installed only when the user presses Install, never by an update: the warm
-    helper stages itself and the driver (hash checked, held open) in a temporary folder and starts
-    Windows' own `robocopy.exe` through the administrator prompt to copy them and `install.json`
-    (protocol, the files' SHA-256, Kite's program) into `%ProgramFiles%\Kite Computer Helper`, then
-    checks what landed against the hashes it held; anything else is `tampered`. Remove runs Windows'
-    `cmd.exe` `rd`. So no program from the user-writable app folder runs as administrator, and a
-    newer Kite of the same protocol (`Layout.Protocol`) keeps using the installed copy; only a new
-    protocol asks for a new install. Every start checks the installed files against the record and
-    that only administrators, SYSTEM and TrustedInstaller own or may change the folder, its parent
-    and the files.
-  - Before any prompt the warm helper refuses while a variable that makes .NET load code (`COR_*`,
-    `COMPlus_*`, `CORECLR_*`, `DOTNET_*` but the SDK's own) is set in its own environment, in
-    `HKCU\Environment`, in `HKCU\Volatile Environment` or any of its per-session subkeys, or in the
-    machine's, while `HKCU\Software\Microsoft\.NETFramework` holds a knob that loads code (`AltJit`,
-    `JitName`, `InstallRoot`, ...), or while the user set their own `SystemRoot` or `windir`
-    (`Guard.cs`). The prompt then starts Windows' `cmd.exe` (`/d`, no AutoRun), which is no .NET
-    program, so nothing written while the prompt is open loads into it; it clears the code-loading
-    names, sets `SystemRoot` and `windir` from `GetSystemWindowsDirectory` and starts the broker,
-    whose `Main` refuses to go on with any such name left or another Windows folder. `connect`
-    checks the pipe's server is that launcher's child, started after it, running the installed
-    helper as administrator.
-  - An action or read of an elevated app shows a card naming it (only this computer's window can
-    answer). Programs that start other programs or run what is typed into them (consoles and
-    terminals, Task Manager, Explorer, process tools, script hosts and interpreters, msiexec, mmc,
-    regedit, editors with a terminal or macros: `startsPrograms` in `policy.ts`, `Launchers` in
+  dropped) or 始终允许（高风险） (`always`). Turning it on opens a short dialog: an agent outside a
+  sandbox runs as the user and could take over the prompt or the helper's windows; once on, any
+  session may ask, and the approved program's Open and Save dialogs can change any file as
+  administrator; what the design cannot fix (another program can raise an identical prompt for its
+  own command, or slip code into the helper while the prompt is open); and that it is the user's
+  call, with turning it off leaving the helper installed for Remove. Nothing changes until they
+  confirm. `always` counts as on only while the install in Program Files is current and not
+  remembered as tampered (`ElevatedInstall.ready` in `elevated-install.ts`), so a value written
+  into the settings file does nothing without an install only the user's prompt makes. Off,
+  computer use is exactly as without the helper: the same refusal and list notes and the guide
+  unchanged; turned off, a running helper ends. Settings looks at the install's place on the disk
+  while off and starts the helper only when something is there, so Remove stays reachable. A
+  choice limited to sandboxed sessions was tried and dropped: a container's agent gets none of
+  Kite's MCP tools, so it had no session to serve. Settings › 功能管理 lists it under computer use
+  with a link to its row.
+  - The helper is installed only when the user presses Install while the setting is on (the host
+    refuses it otherwise), never by an update: the warm helper stages itself, the driver and
+    `install.json` (protocol, the files' SHA-256, Kite's program) in a temporary folder and holds
+    the folder open with no delete sharing and each staged file read-only with read sharing alone,
+    hashing the held handles, until Windows' own `robocopy.exe`, started through the administrator
+    prompt, has copied them into `%ProgramFiles%\Kite Computer Helper`; then it checks what landed
+    against those hashes. A failed check is `tampered`, and the host remembers it (the record's
+    helper hash in `computer-helper.json` in its data folder), so the install stays refused until
+    it is removed or installed again. Remove runs Windows' `cmd.exe` `rd`, whatever the setting and
+    whatever .NET variables are set, as no .NET program runs for it. So no program from the
+    user-writable app folder runs as administrator, and a newer Kite of the same protocol
+    (`Layout.Protocol`) keeps using the installed copy; only a new protocol asks for a new install.
+    Every start checks the installed files against the record and that only administrators, SYSTEM
+    and TrustedInstaller own or may change the folder, its parent and the files.
+  - Every prompt goes through `ShellExecuteEx` with `SEE_MASK_CLASSKEY` on
+    `HKLM\SOFTWARE\Classes\exefile` (`Shell.cs`), so the user's `HKCU\Software\Classes` cannot put
+    a command of its own behind the prompt; a test build asks the same way with the open verb.
+  - Before install and every start the warm helper refuses while a variable that makes .NET load
+    code (`COR_*`, `COMPlus_*`, `CORECLR_*`, `APPDOMAIN_MANAGER_ASM`/`_TYPE`, `DOTNET_*` but the
+    SDK's own) is set in its own environment, in `HKCU\Environment`, in `HKCU\Volatile Environment`
+    or any of its per-session subkeys, or in the machine's; while
+    `HKCU\Software\Microsoft\.NETFramework` holds a knob that loads code (`AltJit`, `JitName`,
+    `InstallRoot`, ...); while `HKCU\Software\Classes\exefile` or `\.exe` exists; or while the user
+    set their own `SystemRoot` or `windir` (`Guard.cs`). The prompt then starts Windows' `cmd.exe`
+    (`/d`, no AutoRun), which is no .NET program; it clears the fixed code-loading names it can name
+    and sets `SystemRoot` and `windir` from `GetSystemWindowsDirectory`, `PATH` to System32 and
+    `TEMP` to the install folder's, then starts the broker, whose `Main` checks its own environment
+    and the user's registry again and refuses to go on with any such name or another Windows folder.
+    What is written into the registry, or under a name cmd.exe cannot clear, while the prompt is
+    open still reaches the runtime before `Main`. `connect` checks the pipe's server is that
+    launcher's child, started after it, running the installed helper as administrator.
+  - An action or read of an elevated app shows a card naming it, which says the program's Open and
+    Save dialogs can change any file as administrator (only this computer's window can answer).
+    Programs that start other programs or run what is typed into them (consoles and terminals,
+    Task Manager, Explorer, process tools, script hosts and interpreters, msiexec, mmc, regedit,
+    editors with a terminal or macros: `startsPrograms` in `policy.ts`, `Launchers` in
     `Broker.cs`) are refused here and in the broker, by the image's own file name.
   - The broker trusts nothing it was started with: it matches the program's image exactly as
     Windows names it (no trailing dot or short name) and its start time, requires it to run as
@@ -1357,24 +1375,33 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
   - It relays only the read and input tools, with only Kite's arguments, each of its type, choice
     and range, an element token or a point but not both, keys from a fixed set, `initialize` and
     `_meta` held to what Kite's client sends, `delivery_mode: "background"` on every action, one
-    tool call at a time, scoped to the program's windows, re-serialized. It confirms every step in
-    its own window but plainly harmless ones (`Risk.cs`): a click only on an element of a focusing
-    or selecting role from the snapshot that gave its token, with one left click and a label that
-    commits nothing; typing only into the edit field the last step clicked, with no line break or
-    tab. Every question shows the whole window with a red box at the step (both ends of a drag),
-    typed text in full with control, direction and invisible characters made visible, and what
-    went through unasked since the last question. Pastes, clicks it cannot place and text longer
-    than 1,000 characters are refused. Its Allow button works only after the window has been in
-    front for a second with no other program's window over it. No answer in two minutes is a no.
-    The broker ends with the hold (turn end, idle, Stop), after three refused steps, when the
-    driver delivered in the foreground, after thirty minutes, or when the program or the agent host
-    exits. No UIAccess.
-  - Not fixed, as it needs a native launcher, a secure desktop or a per-machine install: the
-    `.NETFramework` knobs are checked only before the prompt (cmd.exe cannot clear registry
-    knobs); the prompt and the broker's windows sit on the user's desktop, where a process with a
-    borrowed UIAccess token can still click them; the install copies what the per-user app folder
-    holds at that moment; the broker's binding to Kite is a speed bump; and services the program
-    asks (WMI, Task Scheduler, installers) can still start programs outside its job.
+    tool call at a time (released only by that call's own answer), scoped to the program's windows,
+    re-serialized; a request that uses an id again ends the session. It confirms every step in its
+    own window but plainly harmless ones (`Risk.cs`): a click only on an element of a focusing or
+    selecting role from the snapshot that gave its token, with one left click and a label that
+    commits nothing; typing only into the edit field the last step clicked (no element token, or
+    that field's), with no line break or tab. Every question shows the whole window with a red box
+    at the step (both ends of a drag), typed text in full with control, direction and invisible
+    characters made visible, and what went through unasked since the last question; in a window
+    that shows files (one holding `SHELLDLL_DefView`, as Open and Save dialogs do) it says a step
+    there can change any file as administrator, and drags there are refused. Paste is refused by
+    every route it can tell: its shortcuts, a menu item or a click on an element named Paste in
+    English, Chinese, Japanese, Korean, German, French, Spanish or Italian, and a letter, Enter or
+    typed text while a context menu is open (after a right-click, the menu key or Shift+F10), whose
+    items must be clicked so their names are checked. Clicks it cannot place and text longer than
+    1,000 characters are refused too. Its Allow button works only after the window has been in
+    front for a second with no other program's window over it, the second starting again after a
+    window covered it. No answer in two minutes is a no. The broker ends with the hold (turn end,
+    idle, Stop), after three refused steps, when the driver delivered in the foreground, after
+    thirty minutes, or when the program or the agent host exits. No UIAccess.
+  - Not fixed, as it needs a broker that is no .NET program, a secure desktop or a per-machine
+    install: `.NETFramework` knobs and unlisted `COMPlus_` names written while the prompt is open
+    reach the runtime before the broker's `Main` sees them; any program of the user's can raise the
+    same Microsoft-signed cmd.exe and Robocopy prompts for its own commands; a process with a
+    borrowed UIAccess token can still click the broker's windows; the install copies what the
+    per-user app folder holds at that moment; the broker's binding to Kite is a speed bump; the
+    approved program's own dialogs can change files as administrator; and services the program asks
+    (WMI, Task Scheduler, installers) can still start programs outside its job.
 
 A test copy (`KITE_TEST_WINDOW=background`) keeps computer use's floating label and light off every
 display and registers no stop shortcut. To try computer use there, start a window of your own and

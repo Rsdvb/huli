@@ -42,14 +42,18 @@ engine whose text reads as its own script. Boxes are in the image's own pixels, 
 `process` gives a process's image path and start time (a FILETIME), which the broker checks.
 `layout` says how the install folder stands for a Kite program: `missing`, `current`, `outdated`
 (another protocol, an install without a record, or another Kite program) or `tampered` (files that
-are not the recorded ones, or rights that let others than administrators change them). `install`
-stages this program, the driver beside it and `install.json` in a temporary folder and runs
-Windows' `robocopy.exe` through the administrator prompt (`ShellExecute` with `runas`) to copy them
-into the install folder, then checks what landed against the hashes it took while it held the files
-open; `uninstall` runs Windows' `cmd.exe` `rd /s /q` the same way. `elevate` starts the installed
-broker through `cmd.exe` the same way and answers that launcher's pid. Each answers
-`{ cancelled: true }` when the owner says no at the prompt, and each refuses first while a .NET
-setting that loads code is set anywhere the prompt's environment comes from (`Guard.cs`).
+are not the recorded ones, or rights that let others than administrators change them), with the
+record's helper hash. `install` stages this program, the driver beside it and `install.json` in a
+temporary folder, holds the folder (no delete sharing) and the staged files (read-only, read sharing
+alone) open and hashes the held handles, runs Windows' `robocopy.exe` through the administrator
+prompt to copy them into the install folder, and checks what landed against those hashes before it
+lets go. `uninstall` runs Windows' `cmd.exe` `rd /s /q` the same way, and `elevate` starts the
+installed broker through `cmd.exe` and answers that launcher's pid. Every prompt is `ShellExecuteEx`
+with `SEE_MASK_CLASSKEY` on `HKLMSOFTWAREClassesexefile` (`Shell.cs`), so the user's classes
+cannot change what it runs. Each answers `{ cancelled: true }` when the owner says no at the prompt;
+`install` and `elevate` refuse first while a .NET setting that loads code, or an executable class
+override, is set anywhere the prompt reads from (`Guard.cs`). Removal runs no .NET program, so
+nothing of that stops it.
 
 ## The elevated helper (Windows)
 
@@ -68,10 +72,12 @@ kite-computer-helper connect --pipe kite-computer-<32 hex> --launcher <pid>
   (`protocol`, both files' SHA-256 and Kite's program) into `%ProgramFiles%\Kite Computer Helper`,
   which only administrators can write to. No program from the app's folder runs as administrator
   for it, and an update of the same protocol (`Layout.Protocol`) needs none.
-- **broker** (as administrator) starts through `cmd.exe`, which clears the names that make .NET load
-  code and sets `SystemRoot` and `windir` from the system; it refuses to go on with any such name
-  left or another Windows folder. It runs only from the install folder, only when its record, its
-  own hash and the folder's rights check out. It matches the program's image exactly as Windows
+- **broker** (as administrator) starts through `cmd.exe`, which clears the fixed names that make
+  .NET load code and sets `SystemRoot`, `windir`, `PATH` and `TEMP`; its `Main` checks its own
+  environment and the user's registry again and refuses to go on with any such name or another
+  Windows folder, though what was written while the prompt was open may have loaded already. It
+  runs only from the install folder, only when its record, its own hash and the folder's rights
+  check out. It matches the program's image exactly as Windows
   names it and its start time, refuses programs that start other programs or run what is typed
   into them, programs that do not run as administrator and programs with programs of their own
   running, then waits for one client on its pipe (`D:P(A;;GRGW;;;<SID>)S:(ML;;NWNR;;;ME)`, first
@@ -85,23 +91,24 @@ kite-computer-helper connect --pipe kite-computer-<32 hex> --launcher <pid>
   and answers `{"ok": true, "pid"}`. It relays MCP: only `initialize`, `ping`, `tools/list`,
   cancellations and the read and input tools Kite uses, with only Kite's arguments and `params`
   keys, each checked for its type and range, `delivery_mode: "background"` on every action, one
-  tool call at a time, scoped to the program's windows, and passes on the message it parsed,
-  re-serialized. Before every step but harmless ones (`Risk.cs`) it asks the owner again, with a
-  picture of the whole window, the typed text in full and what went through unasked; pastes,
-  clicks it cannot place and overlong text are refused. It ends when the client goes, the program
-  or the host exits, `--idle` passes with no request pending, the owner refused three steps, the
-  driver delivered in the foreground or thirty minutes passed; the job limit on the program is
-  lifted then.
+  tool call at a time, a reused request id ending it, scoped to the program's windows, and passes
+  on the message it parsed, re-serialized. Before every step but harmless ones (`Risk.cs`) it asks
+  the owner again, with a picture of the whole window, the typed text in full and what went
+  through unasked; paste by any route it can tell, drags in windows that show files, clicks it
+  cannot place and overlong text are refused. It ends when the client goes, the program or the
+  host exits, `--idle` passes with no request pending, the owner refused three steps, the driver
+  delivered in the foreground or thirty minutes passed; the job limit on the program is lifted
+  then.
 - **connect** (without elevation, from that folder) reads the token as its first stdin line,
   checks that the pipe's server is a child of `--launcher` started after it, running this same
   installed program, as administrator, hands the token over, writes the broker's answer as its
   first stdout line and relays both ways.
 
 `build.mjs --test` makes a test build for `src/agent-host/computer/elevated.test.ts`: it takes
-`--install-dir`, starts what the prompt would with no prompt, answers its own windows from
-`KITE_BROKER_TEST_ANSWER`, logging each question to `KITE_BROKER_TEST_LOG`, reads a private hive
-file (`KITE_HELPER_TEST_HIVE`) in place of the user's registry and skips the checks of rights and
-integrity a test folder and program cannot pass. Releases never ship it.
+`--install-dir`, asks the shell with the open verb in place of runas, so no prompt shows, answers
+its own windows from `KITE_BROKER_TEST_ANSWER`, logging each question to `KITE_BROKER_TEST_LOG`,
+reads a private hive file (`KITE_HELPER_TEST_HIVE`) in place of the user's registry and skips the
+checks of rights and integrity a test folder and program cannot pass. Releases never ship it.
 
 It never uses UIAccess. The install copies what the app's folder holds at that moment, so in a
 per-user install it is only as safe as that folder then; every later start runs the copy in Program
