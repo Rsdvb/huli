@@ -119,6 +119,9 @@ vi.mock('./agent', () => {
           signal.addEventListener('abort', () => reject(new ActionError('stopped', 'Stopped'))),
         )
       }
+      stopRecordings() {
+        return Promise.resolve()
+      }
     },
   }
 })

@@ -117,6 +117,13 @@ const OWN_TOOLS: Names = {
   device_alert: ['Handle device alert', '处理设备弹窗'],
   device_keyboard: ['Device keyboard', '设备键盘'],
   device_batch: ['Run device steps', '在设备上执行多步操作'],
+  device_record_start: ['Record device screen', '录制设备屏幕'],
+  device_record_stop: ['Stop device recording', '停止录制设备屏幕'],
+  device_screenshot_compare: ['Compare device screen', '对比设备截图'],
+  device_network: ['Read app network activity', '查看应用网络请求'],
+  device_push: ['Send test notification', '发送测试推送'],
+  device_perf: ['Sample app performance', '采样应用性能'],
+  device_reset_app: ['Reset app data', '重置应用数据'],
   // Terminals
   terminal_run: ['Run in terminal', '在终端运行'],
   terminal_read: ['Read terminal', '读取终端'],

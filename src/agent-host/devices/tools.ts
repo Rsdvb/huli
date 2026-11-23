@@ -3,17 +3,24 @@
 // session first uses a device, and the device host carries the action out.
 
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js'
+import { pathToFileURL } from 'node:url'
 import {
   DEVICE_ACCESS_WAIT_MS,
   DEVICE_ALERT_ACTIONS,
   DEVICE_BATCH_COMMANDS,
   DEVICE_CALL_TIMEOUT_MS,
+  DEVICE_CAPTURES_FOLDER,
   DEVICE_FIND_ACTIONS,
   DEVICE_FIND_LOCATORS,
   DEVICE_IS_PREDICATES,
   DEVICE_KEYBOARD_ACTIONS,
+  DEVICE_NETWORK_INCLUDES,
+  DEVICE_PERMISSIONS,
+  DEVICE_PERMISSION_STATES,
   DEVICE_TOOL_NAMES,
   MAX_DEVICE_BATCH_STEPS,
+  MAX_DEVICE_PUSH_BYTES,
+  MAX_DEVICE_RECORDING_MS,
   type DeviceAccessAnswer,
   type DeviceAction,
   type DeviceBatchCommand,
@@ -21,6 +28,7 @@ import {
   type DeviceCall,
   type DeviceCallAnswer,
   type DeviceLevel,
+  type DevicePermissionState,
   type DeviceToolName,
 } from '@shared/device-agent'
 import type { DeviceInfo } from '@shared/device-host'
@@ -53,8 +61,10 @@ const LEVEL: Schema = {
   description: 'digest answers in a compact form that costs fewer tokens.',
 }
 const TIMEOUT: Schema = { type: 'integer', minimum: 100, maximum: 60_000 }
+const APP: Schema = { type: 'string', description: 'A bundle id or Android package.' }
 const READ_ONLY = { readOnlyHint: true } as const
 const ACTS = { readOnlyHint: false, openWorldHint: false } as const
+const RECORDING_MINUTES = MAX_DEVICE_RECORDING_MS / 60_000
 
 export const DEVICE_TOOLS: Tool[] = [
   {
@@ -226,9 +236,20 @@ export const DEVICE_TOOLS: Tool[] = [
   {
     name: 'device_logs',
     title: 'Read device logs',
-    description: 'The latest log lines of the app open in this session.',
+    description:
+      'The latest log lines of the app open in this session (launch it with device_launch_app ' +
+      'first), and its crash reports since it started: the crash, the exception and the top ' +
+      'frames. The first call starts the log capture.',
     inputSchema: object(
-      { deviceId: DEVICE_ID, lines: { type: 'integer', minimum: 1, maximum: 2000, default: 200 } },
+      {
+        deviceId: DEVICE_ID,
+        lines: { type: 'integer', minimum: 1, maximum: 2000, default: 200 },
+        crashes: {
+          type: 'boolean',
+          default: true,
+          description: 'Adds the crash reports of the app since it started.',
+        },
+      },
       ['deviceId'],
     ),
     annotations: { ...READ_ONLY },
@@ -259,29 +280,18 @@ export const DEVICE_TOOLS: Tool[] = [
   },
   {
     name: 'device_set_permission',
-    title: 'Grant or deny an app permission',
+    title: 'Grant, deny or reset an app permission',
     description:
-      'Grants or denies a permission, such as camera, photos, location or notifications, to an app.',
+      'Grants, denies or resets a permission of an app, such as camera, photos, location or ' +
+      'notifications; reset makes the app ask again. all changes every one the device can.',
     inputSchema: object(
       {
         deviceId: DEVICE_ID,
-        app: { type: 'string' },
-        permission: {
-          type: 'string',
-          enum: [
-            'camera',
-            'microphone',
-            'photos',
-            'contacts',
-            'notifications',
-            'calendar',
-            'location',
-            'reminders',
-          ],
-        },
-        grant: { type: 'boolean' },
+        app: APP,
+        permission: { type: 'string', enum: [...DEVICE_PERMISSIONS] },
+        state: { type: 'string', enum: [...DEVICE_PERMISSION_STATES] },
       },
-      ['deviceId', 'app', 'permission', 'grant'],
+      ['deviceId', 'app', 'permission', 'state'],
     ),
     annotations: { ...ACTS },
   },
@@ -438,6 +448,129 @@ export const DEVICE_TOOLS: Tool[] = [
       ['deviceId', 'steps'],
     ),
     annotations: { ...ACTS },
+  },
+  {
+    name: 'device_record_start',
+    title: 'Record the device screen',
+    description:
+      `Starts recording the device screen into an .mp4 in this session’s folder, under ` +
+      `${DEVICE_CAPTURES_FOLDER}/recordings. It stops by itself after ${RECORDING_MINUTES} ` +
+      'minutes; device_record_stop stops it and shows the video in the conversation.',
+    inputSchema: object(
+      {
+        deviceId: DEVICE_ID,
+        name: {
+          type: 'string',
+          description:
+            'The video’s file name, without .mp4: letters, digits, dots, dashes and underscores. ' +
+            'The time it started by default.',
+        },
+      },
+      ['deviceId'],
+    ),
+    annotations: { ...ACTS },
+  },
+  {
+    name: 'device_record_stop',
+    title: 'Stop recording the device screen',
+    description:
+      'Stops the recording device_record_start began, or gives the one that stopped at its ' +
+      'limit, with where the video is and how long it runs.',
+    inputSchema: object({ deviceId: DEVICE_ID }, ['deviceId']),
+    annotations: { ...ACTS },
+  },
+  {
+    name: 'device_screenshot_compare',
+    title: 'Compare the device screen',
+    description:
+      'Takes a screenshot and compares it with a baseline .png in this session’s folder, or ' +
+      'without one with the previous shot this tool took. Returns the share of pixels that ' +
+      'differ, where they changed and a picture of the differences. A baseline that does not ' +
+      'exist yet is saved from this shot; update keeps the new shot as the baseline.',
+    inputSchema: object(
+      {
+        deviceId: DEVICE_ID,
+        baseline: {
+          type: 'string',
+          description:
+            'A .png by its path from this session’s folder, such as tests/screens/home.png.',
+        },
+        threshold: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          description:
+            'How far a pixel’s color may differ and still match, from 0 (exact) to 1; 0.1 by default.',
+        },
+        update: {
+          type: 'boolean',
+          default: false,
+          description: 'With baseline: keeps this shot as the baseline once compared.',
+        },
+      },
+      ['deviceId'],
+    ),
+    annotations: { ...ACTS },
+  },
+  {
+    name: 'device_network',
+    title: 'Read the app’s network activity',
+    description:
+      'The latest HTTP requests of the app open in this session, as its logs show them: method, ' +
+      'address, status and timing, with headers or bodies when asked. They come from the app’s ' +
+      'log capture, which the first call starts; an app that logs no requests shows none.',
+    inputSchema: object(
+      {
+        deviceId: DEVICE_ID,
+        limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+        include: { type: 'string', enum: [...DEVICE_NETWORK_INCLUDES], default: 'summary' },
+      },
+      ['deviceId'],
+    ),
+    annotations: { ...READ_ONLY },
+  },
+  {
+    name: 'device_push',
+    title: 'Send a test push notification',
+    description:
+      'Sends a test push notification to an app on an iOS simulator or an Android device. On ' +
+      'iOS the payload is an APNs payload with an "aps" object, such as {"aps":{"alert":"Hi"}}. ' +
+      'On Android it is a broadcast to the app: {"action", "receiver", "extras"}, the action ' +
+      '<package>.TEST_PUSH by default and extras of strings, numbers and booleans. ' +
+      `At most ${MAX_DEVICE_PUSH_BYTES} bytes as JSON.`,
+    inputSchema: object(
+      {
+        deviceId: DEVICE_ID,
+        app: {
+          ...APP,
+          description: 'A bundle id or Android package; the session’s app by default.',
+        },
+        payload: { type: 'object' },
+      },
+      ['deviceId', 'payload'],
+    ),
+    annotations: { ...ACTS },
+  },
+  {
+    name: 'device_perf',
+    title: 'Sample the app’s performance',
+    description:
+      'Samples the app open in this session: its CPU use over one second, where 100 is one ' +
+      'core, and its memory.',
+    inputSchema: object({ deviceId: DEVICE_ID }, ['deviceId']),
+    annotations: { ...READ_ONLY },
+  },
+  {
+    name: 'device_reset_app',
+    title: 'Reset an app’s data',
+    description:
+      'Clears the data of an app on an iOS simulator or an Android device, as a fresh install ' +
+      'has it. keychain also resets the iOS simulator’s whole keychain, for every app on it.',
+    inputSchema: object(
+      { deviceId: DEVICE_ID, app: APP, keychain: { type: 'boolean', default: false } },
+      ['deviceId', 'app'],
+    ),
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   },
 ]
 
@@ -745,6 +878,130 @@ function appId(value: unknown): string {
   return app
 }
 
+/** What kind of device an id names, by the prefix the device host gives it. */
+function deviceKindOf(deviceId: unknown): 'ios-simulator' | 'iphone' | 'android' | null {
+  if (typeof deviceId !== 'string') return null
+  if (deviceId.startsWith('ios-sim:')) return 'ios-simulator'
+  if (deviceId.startsWith('ios:')) return 'iphone'
+  if (deviceId.startsWith('android:') || deviceId.startsWith('avd:')) return 'android'
+  return null
+}
+
+/** A video's file name without its extension: no path, no flag, no hidden file. */
+function recordingName(value: unknown): string {
+  const name = text(value, 'name', 96).replace(/\.mp4$/i, '')
+  if (!/^[A-Za-z0-9][\w.-]{0,79}$/.test(name) || name.includes('..')) {
+    throw new DeviceArgsError('"name" must be letters, digits, dots, dashes and underscores')
+  }
+  return name
+}
+
+/**
+ * A .png by its path from the session's folder, written with forward slashes: never absolute,
+ * from the home folder, up a level or through a drive or a device name.
+ */
+function folderPng(value: unknown, key: string): string {
+  const given = text(value, key, MAX_TEXT).replace(/\\/g, '/')
+  const parts = given.split('/')
+  const fits =
+    !given.startsWith('/') &&
+    !given.startsWith('~') &&
+    parts.every(
+      (part) =>
+        part !== '.' &&
+        part !== '..' &&
+        !part.startsWith('-') &&
+        /^[\p{L}\p{N}_. -]+$/u.test(part) &&
+        part.trim() === part,
+    ) &&
+    /\.png$/i.test(given)
+  if (!fits) {
+    throw new DeviceArgsError(
+      `"${key}" must be a .png by its path in this session's folder, such as screens/home.png`,
+    )
+  }
+  return given
+}
+
+const PUSH_KEY = /^[A-Za-z0-9_.-]{1,128}$/
+const ANDROID_ACTION = /^[A-Za-z][\w.]{0,199}$/
+const ANDROID_COMPONENT = /^[A-Za-z][\w.]{0,199}\/[\w.$]{1,200}$/
+
+/**
+ * A test notification's payload, checked for the device it goes to: an APNs payload with an
+ * `aps` object for an iOS simulator, an Android broadcast's action, receiver and extras.
+ */
+function pushPayload(value: unknown, deviceId: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new DeviceArgsError('"payload" must be a JSON object')
+  }
+  const payload = value as Record<string, unknown>
+  let json: string
+  try {
+    json = JSON.stringify(payload)
+  } catch {
+    throw new DeviceArgsError('"payload" must be plain JSON')
+  }
+  if (new TextEncoder().encode(json).length > MAX_DEVICE_PUSH_BYTES) {
+    throw new DeviceArgsError(`"payload" must be at most ${MAX_DEVICE_PUSH_BYTES} bytes as JSON`)
+  }
+  const kind = deviceKindOf(deviceId)
+  if (kind === 'ios-simulator') {
+    const aps = payload.aps
+    if (typeof aps !== 'object' || aps === null || Array.isArray(aps)) {
+      throw new DeviceArgsError(
+        'An iOS payload needs an "aps" object, such as {"aps":{"alert":"Hi"}}',
+      )
+    }
+    // A plain JSON value through and through: what JSON.stringify kept, read back.
+    return JSON.parse(json) as Record<string, unknown>
+  }
+  if (kind !== 'android') {
+    throw new DeviceArgsError('Test notifications go to iOS simulators and Android devices only')
+  }
+  only(payload, ['action', 'receiver', 'extras'], 'An Android payload')
+  const checked: Record<string, unknown> = {}
+  if (payload.action !== undefined) {
+    const action = text(payload.action, 'action', 200)
+    if (!ANDROID_ACTION.test(action)) throw new DeviceArgsError('"action" must be an intent action')
+    checked.action = action
+  }
+  if (payload.receiver !== undefined) {
+    const receiver = text(payload.receiver, 'receiver', 401)
+    if (!ANDROID_COMPONENT.test(receiver)) {
+      throw new DeviceArgsError('"receiver" must be a component such as com.example/.PushReceiver')
+    }
+    checked.receiver = receiver
+  }
+  if (payload.extras !== undefined) {
+    const extras = payload.extras
+    if (typeof extras !== 'object' || extras === null || Array.isArray(extras)) {
+      throw new DeviceArgsError('"extras" must be an object')
+    }
+    const entries = Object.entries(extras as Record<string, unknown>)
+    if (entries.length > 50) throw new DeviceArgsError('"extras" holds at most 50 values')
+    const out: Record<string, string | number | boolean> = {}
+    for (const [key, extra] of entries) {
+      if (!PUSH_KEY.test(key)) throw new DeviceArgsError(`Extra "${key}" needs a plain key`)
+      if (typeof extra === 'string') out[key] = extra === '' ? '' : text(extra, key, 1024)
+      else if (typeof extra === 'boolean') out[key] = extra
+      else if (typeof extra === 'number' && Number.isFinite(extra)) out[key] = extra
+      else throw new DeviceArgsError(`Extra "${key}" must be a string, number or boolean`)
+    }
+    checked.extras = out
+  }
+  return checked
+}
+
+function permissionState(input: Record<string, unknown>): DevicePermissionState {
+  // The form before reset, which a prompt written for it may still send.
+  if (input.state === undefined && typeof input.grant === 'boolean') {
+    return input.grant ? 'grant' : 'deny'
+  }
+  if (input.grant !== undefined) throw new DeviceArgsError('Give "state", not "grant"')
+  return oneOf(input.state, 'state', DEVICE_PERMISSION_STATES)
+}
+
 /** The action a tool's checked arguments ask for; list, open and close are not actions. */
 export function actionOf(
   tool: DeviceToolName,
@@ -833,6 +1090,7 @@ export function actionOf(
       return {
         type: 'logs',
         lines: input.lines === undefined ? 200 : number(input.lines, 'lines', 1, 2000),
+        crashes: flag(input.crashes, 'crashes') ?? true,
       }
     case 'device_set_appearance':
       return { type: 'appearance', mode: oneOf(input.mode, 'mode', ['light', 'dark']) }
@@ -846,18 +1104,55 @@ export function actionOf(
       return {
         type: 'permission',
         app: appId(input.app),
-        permission: oneOf(input.permission, 'permission', [
-          'camera',
-          'microphone',
-          'photos',
-          'contacts',
-          'notifications',
-          'calendar',
-          'location',
-          'reminders',
-        ]),
-        grant: input.grant === true,
+        permission: oneOf(input.permission, 'permission', DEVICE_PERMISSIONS),
+        state: permissionState(input),
       }
+    case 'device_record_start':
+      return input.name === undefined
+        ? { type: 'record_start' }
+        : { type: 'record_start', name: recordingName(input.name) }
+    case 'device_record_stop':
+      return { type: 'record_stop' }
+    case 'device_screenshot_compare': {
+      const compare: Extract<DeviceAction, { type: 'screenshot_compare' }> = {
+        type: 'screenshot_compare',
+      }
+      if (input.baseline !== undefined) compare.baseline = folderPng(input.baseline, 'baseline')
+      if (input.threshold !== undefined) {
+        compare.threshold = number(input.threshold, 'threshold', 0, 1)
+      }
+      if (flag(input.update, 'update')) {
+        if (compare.baseline === undefined) throw new DeviceArgsError('"update" needs a baseline')
+        compare.update = true
+      }
+      return compare
+    }
+    case 'device_network':
+      return {
+        type: 'network',
+        limit: optionalNumber(input.limit, 'limit', 1, 100) ?? 20,
+        include:
+          input.include === undefined
+            ? 'summary'
+            : oneOf(input.include, 'include', DEVICE_NETWORK_INCLUDES),
+      }
+    case 'device_push': {
+      const push: Extract<DeviceAction, { type: 'push' }> = {
+        type: 'push',
+        payload: pushPayload(input.payload, input.deviceId),
+      }
+      if (input.app !== undefined) push.app = appId(input.app)
+      return push
+    }
+    case 'device_perf':
+      return { type: 'perf' }
+    case 'device_reset_app': {
+      const keychain = flag(input.keychain, 'keychain') ?? false
+      if (keychain && deviceKindOf(input.deviceId) !== 'ios-simulator') {
+        throw new DeviceArgsError('"keychain" resets an iOS simulator’s keychain only')
+      }
+      return { type: 'reset_app', app: appId(input.app), keychain }
+    }
     case 'device_wait': {
       const kinds = ['text', 'selector', 'absent', 'stable'].filter(
         (key) => input[key] !== undefined && input[key] !== false,
@@ -1076,10 +1371,19 @@ export class DeviceTools {
 
   private answer(answer: DeviceCallAnswer): CallToolResult {
     if ('error' in answer) return failure(answer.error.code, answer.error.message)
-    const content: CallToolResult['content'] = [{ type: 'text', text: answer.result.text }]
-    if (answer.result.image)
-      content.push({ type: 'image', data: answer.result.image, mimeType: 'image/png' })
-    return { content }
+    const { text, image, structured, file } = answer.result
+    const content: CallToolResult['content'] = [{ type: 'text', text }]
+    if (image) content.push({ type: 'image', data: image, mimeType: 'image/png' })
+    if (file) {
+      const name = file.path.split(/[\\/]/).pop() ?? file.path
+      content.push({
+        type: 'resource_link',
+        uri: pathToFileURL(file.path).href,
+        name,
+        mimeType: file.mimeType,
+      })
+    }
+    return structured ? { content, structuredContent: structured } : { content }
   }
 }
 
