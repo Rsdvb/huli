@@ -60,8 +60,7 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: t03-mention-list
 # The title in the header opens the session's menu, past the list of mentions.
 - tapOn:
-    text: 'Fix the flaky login test'
-    index: 0
+    text: 'Fix the flaky login test, .*'
 - waitForAnimationToEnd
 - tapOn: '工具调用'
 - waitForAnimationToEnd
