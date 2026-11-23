@@ -37,6 +37,7 @@ export const SCENARIOS = [
   'tables',
   'open-site',
   'browser',
+  'browser-values',
   'device',
   'computer',
   'approvals',
@@ -167,6 +168,10 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   },
   browser: {
     description: "Calls Kettu's browser tools in turn, calling again while the user has the page",
+    hint: '<browser_* tool> [arguments as JSON] [; wait <ms> ; ...]',
+  },
+  'browser-values': {
+    description: 'Calls the browser tools as /browser does, showing the value each call answers',
     hint: '<browser_* tool> [arguments as JSON] [; wait <ms> ; ...]',
   },
   device: {
