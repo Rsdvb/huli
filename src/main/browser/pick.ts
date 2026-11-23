@@ -102,10 +102,16 @@ const READ_ELEMENT = `function (wanted) {
   // Huli: the styles that shape it, leaving out the ones at a plain default.
   const computed = getComputedStyle(el)
   const styles = {}
-  const plain = new Set(['none', 'normal', 'auto', '0px', 'rgba(0, 0, 0, 0)', 'static', 'visible', 'start', 'stretch', '0px none rgb(0, 0, 0)'])
+  // Each property's plain value, which says nothing about the element; flex and grid ones only
+  // matter in a flex or grid container.
+  const plain = { position: 'static', margin: '0px', padding: '0px', gap: 'normal', 'flex-direction': 'row', 'justify-content': 'normal', 'align-items': 'normal', 'grid-template-columns': 'none', 'background-color': 'rgba(0, 0, 0, 0)', 'background-image': 'none', 'border-radius': '0px', 'box-shadow': 'none', opacity: '1', 'z-index': 'auto', overflow: 'visible' }
+  const layout = /flex|grid/.test(computed.display)
   for (const name of ['display', 'position', 'width', 'height', 'margin', 'padding', 'gap', 'flex-direction', 'justify-content', 'align-items', 'grid-template-columns', 'color', 'background-color', 'background-image', 'font-family', 'font-size', 'font-weight', 'line-height', 'border', 'border-radius', 'box-shadow', 'opacity', 'z-index', 'overflow']) {
     const value = computed.getPropertyValue(name)
-    if (value && !plain.has(value)) styles[name] = value.slice(0, 200)
+    if (!value || plain[name] === value) continue
+    if (!layout && ['gap', 'flex-direction', 'justify-content', 'align-items', 'grid-template-columns'].includes(name)) continue
+    if (name === 'border' && /^0px /.test(value)) continue
+    styles[name] = value.slice(0, 200)
   }
   return {
     styles,

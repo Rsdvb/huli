@@ -697,7 +697,23 @@ export class BrowserCdp {
     const view = await this.viewport(sessionId)
     const x = probe.x + offset.x
     const y = probe.y + offset.y
-    return { ...probe, x, y, inside: x >= 0 && y >= 0 && x <= view.width && y <= view.height }
+    const target = this.nodeTarget(page, backend)?.target ?? null
+    return {
+      ...probe,
+      x,
+      y,
+      inside: x >= 0 && y >= 0 && x <= view.width && y <= view.height,
+      // The page's own input does not reach into such a frame here: its events go to the frame.
+      ...(target ? { frame: { target, x: probe.x, y: probe.y } } : {}),
+    }
+  }
+
+  /** Huli: the point and target a mouse event at a probed element goes to. */
+  private pointOf(spot: Probe): { x: number; y: number; target: string | undefined } {
+    const frame = (spot as Probe & { frame?: { target: string; x: number; y: number } }).frame
+    return frame
+      ? { x: frame.x, y: frame.y, target: frame.target }
+      : { x: spot.x, y: spot.y, target: undefined }
   }
 
   /** A tab's page is gone. */
@@ -972,28 +988,20 @@ export class BrowserCdp {
     await this.gate(sessionId)
     const contents = this.contentsOf(sessionId)
     const routed = this.routed(sessionId, params, target)
-    if (routed.target !== null) {
-      const answer = (await contents.debugger.sendCommand(
-        method,
-        routed.params,
-        routed.target,
-      )) as T
-      const object = (answer as { object?: { objectId?: string } } | null)?.object?.objectId
-      const page = this.pageOf(sessionId)
-      if (method === 'DOM.resolveNode' && object) {
-        page.objects.set(object, routed.target)
-        if (page.objects.size > 2_000) page.objects.delete(page.objects.keys().next().value!)
-      }
-      return answer
-    }
     params = routed.params
     // Chromium reports an injected input event as it reports the user's, so the pane's input
     // watch must know this one is the agent's.
     const injecting = method.startsWith('Input.')
     const tab = this.tabOf(sessionId)
     const state = tab === null ? undefined : this.pages.get(tab)
-    // A drag event's point is in the page's own CSS pixels, which Chromium scales itself.
-    if (method === 'Input.dispatchMouseEvent' && tab !== null && this.deps.pointScale) {
+    // A drag event's point is in the page's own CSS pixels, which Chromium scales itself, and so
+    // is a frame target's: only the page's own widget takes the view's pixels.
+    if (
+      method === 'Input.dispatchMouseEvent' &&
+      routed.target === null &&
+      tab !== null &&
+      this.deps.pointScale
+    ) {
       // The debugger takes the point in the view's pixels, and a page of a fixed size draws
       // scaled there. Nothing runs between reading the scale and sending the event.
       const scale = await this.deps.pointScale(tab)
@@ -1003,7 +1011,15 @@ export class BrowserCdp {
     }
     if (injecting && state) state.injecting += 1
     try {
-      return (await contents.debugger.sendCommand(method, params)) as T
+      if (routed.target === null) return (await contents.debugger.sendCommand(method, params)) as T
+      const answer = (await contents.debugger.sendCommand(method, params, routed.target)) as T
+      // Huli: an object of a frame of another site is used on its target from now on.
+      const object = (answer as { object?: { objectId?: string } } | null)?.object?.objectId
+      if (method === 'DOM.resolveNode' && object && state) {
+        state.objects.set(object, routed.target)
+        if (state.objects.size > 2_000) state.objects.delete(state.objects.keys().next().value!)
+      }
+      return answer
     } finally {
       if (injecting && state) state.injecting -= 1
     }
@@ -1564,7 +1580,8 @@ export class BrowserCdp {
     const spot = await this.actionable(sessionId, backend, args, 'click')
     const { x, y } = spot
     this.deps.acted?.(sessionId, { x, y }, true)
-    await this.clickPoint(sessionId, x, y, button, double)
+    const point = this.pointOf(spot)
+    await this.clickPoint(sessionId, point.x, point.y, button, double, point.target)
     return this.afterAction(
       sessionId,
       page,
@@ -1579,26 +1596,23 @@ export class BrowserCdp {
     y: number,
     button: string,
     double: boolean,
+    target?: string,
   ): Promise<void> {
-    await this.send(sessionId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+    await this.send(sessionId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, target)
     const clicks = double ? 2 : 1
     for (let count = 1; count <= clicks; count++) {
-      await this.send(sessionId, 'Input.dispatchMouseEvent', {
-        type: 'mousePressed',
-        x,
-        y,
-        button,
-        buttons: buttonMask(button),
-        clickCount: count,
-      })
-      await this.send(sessionId, 'Input.dispatchMouseEvent', {
-        type: 'mouseReleased',
-        x,
-        y,
-        button,
-        buttons: 0,
-        clickCount: count,
-      })
+      await this.send(
+        sessionId,
+        'Input.dispatchMouseEvent',
+        { type: 'mousePressed', x, y, button, buttons: buttonMask(button), clickCount: count },
+        target,
+      )
+      await this.send(
+        sessionId,
+        'Input.dispatchMouseEvent',
+        { type: 'mouseReleased', x, y, button, buttons: 0, clickCount: count },
+        target,
+      )
     }
   }
 
@@ -2415,6 +2429,8 @@ export class BrowserCdp {
     }>(sessionId, 'Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: source,
+      // Huli: the element is the function's argument, as the tool says, and `this` as well.
+      ...(args.ref !== undefined ? { arguments: [{ objectId }] } : {}),
       returnByValue: true,
       awaitPromise: true,
     })
@@ -2466,9 +2482,15 @@ export class BrowserCdp {
   ): Promise<BrowserCallResult> {
     const page = this.pageOf(sessionId)
     const backend = this.resolveRef(page, String(args.ref ?? ''))
-    const { x, y } = await this.actionable(sessionId, backend, args, 'click')
-    this.deps.acted?.(sessionId, { x, y }, false)
-    await this.send(sessionId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+    const spot = await this.actionable(sessionId, backend, args, 'click')
+    this.deps.acted?.(sessionId, { x: spot.x, y: spot.y }, false)
+    const point = this.pointOf(spot)
+    await this.send(
+      sessionId,
+      'Input.dispatchMouseEvent',
+      { type: 'mouseMoved', x: point.x, y: point.y },
+      point.target,
+    )
     return this.afterAction(sessionId, page, `Hovered over ${describe(args, 'the element')}.`)
   }
 

@@ -24,7 +24,8 @@ export function DownloadBar({
   return (
     <div role="alert" className="kp-origin" data-download-bar="">
       <span className="kp-origin__text">
-        <span className="truncate">
+        {/* The file's name and size are what the user judges, so they wrap rather than cut. */}
+        <span>
           {request.size === null
             ? t('download.asksUnknown', { name: request.name })
             : t('download.asks', { name: request.name, size: bytes(request.size) })}
