@@ -29,6 +29,10 @@ appId: io.github.rsdvb.huli
 - longPressOn:
     text: '.*Fix the flaky login test.*'
 - waitForAnimationToEnd
+# 删除… is the menu's last item, below the fold on a phone.
+- scrollUntilVisible:
+    element: '删除…'
+    direction: DOWN
 - tapOn: '删除…'
 - waitForAnimationToEnd
 - takeScreenshot: b01-delete-dialog
@@ -45,6 +49,10 @@ appId: io.github.rsdvb.huli
 - longPressOn:
     text: '.*Fix the flaky login test.*'
 - waitForAnimationToEnd
+# 删除… is the menu's last item, below the fold on a phone.
+- scrollUntilVisible:
+    element: '删除…'
+    direction: DOWN
 - tapOn: '删除…'
 - waitForAnimationToEnd
 - tapOn: '删除'
@@ -75,6 +83,10 @@ appId: io.github.rsdvb.huli
 - longPressOn:
     text: '.*Fix the flaky login test.*'
 - waitForAnimationToEnd
+# 删除… is the menu's last item, below the fold on a phone.
+- scrollUntilVisible:
+    element: '删除…'
+    direction: DOWN
 - tapOn: '删除…'
 - waitForAnimationToEnd
 - tapOn: '删除'
