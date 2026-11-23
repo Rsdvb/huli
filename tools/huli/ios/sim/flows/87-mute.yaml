@@ -1,5 +1,6 @@
 # A session's mute kept by the computer: the row's long-press menu offers 静音通知 with the line
-# of what it keeps quiet, muting it there makes the session's title menu offer 取消静音 (the
+# of what it keeps quiet (a system menu, whose subtitles only the screenshots show, as Maestro
+# reads the titles alone), muting it there makes the session's title menu offer 取消静音 (the
 # computer's flag, which the desktop's menu reads too), and unmuting there brings 静音通知 back.
 # Ends: both appearances
 appId: io.github.rsdvb.huli
@@ -31,8 +32,7 @@ appId: io.github.rsdvb.huli
     text: '.*Fix the flaky login test.*'
 - waitForAnimationToEnd
 - takeScreenshot: m01-row-menu
-- assertVisible:
-    text: '.*批准和提问照常.*'
+- assertVisible: '静音通知'
 - tapOn:
     text: '静音通知.*'
 - extendedWaitUntil:
@@ -48,8 +48,6 @@ appId: io.github.rsdvb.huli
 - takeScreenshot: m02-title-menu-muted
 - assertVisible:
     text: '取消静音.*'
-- assertVisible:
-    text: '.*只提醒批准和提问.*'
 - tapOn:
     text: '取消静音.*'
 - extendedWaitUntil:
