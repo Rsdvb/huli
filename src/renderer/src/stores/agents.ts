@@ -520,14 +520,26 @@ export function harnessStatuses(order: AgentId[], byId: AgentsStore['byId']): Ag
   return order.map((id) => byId[id]).filter((s): s is AgentStatus => !!s?.isDefault)
 }
 
+/** The harnesses Add agent offers: installed ones, but none whose first install still runs. */
 export function addableHarnesses(order: AgentId[], byId: AgentsStore['byId']): AgentStatus[] {
   return harnessStatuses(order, byId).filter(
     (s) =>
       s.uninstalled !== true &&
       hasProgram(s) &&
       !awaitsPackage(s) &&
+      !firstInstalling(s) &&
       (s.registered === false || MULTI_AGENT_HARNESSES.includes(s.harnessId)),
   )
+}
+
+/**
+ * Its first install runs: Kettu's package is not there yet while it installs, or its program's
+ * install route runs. An update of what is installed is none.
+ */
+function firstInstalling(status: AgentStatus): boolean {
+  const pkg = status.package
+  if (status.state === 'installing' && pkg && !pkg.installed) return true
+  return status.task?.kind === 'install' && status.task.state === 'running'
 }
 
 /** The agents the agent menu lists: those on installed harnesses, but no hidden or turned-off agent. */
