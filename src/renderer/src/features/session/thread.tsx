@@ -38,6 +38,7 @@ import { ReplyToSelection } from './reply-selection'
 import { SubSessionStart } from './subagent/sub-session-start'
 import { itemAtTop, leaveThread, readingPosition, type ReadingPosition } from './reading-position'
 import { RecapLine } from './recap/recap-line'
+import { useSidewaysWheel } from './sideways-wheel'
 import { playEntrance } from './thread-entrance'
 import { TurnStatus } from './turn-status'
 import { HiddenSteps } from './hidden-steps'
@@ -480,6 +481,7 @@ export const Thread = memo(function Thread({
   const viewport = useRef<HTMLDivElement | null>(null)
   const content = useRef<HTMLDivElement | null>(null)
   const selected = useSelectedText(viewport)
+  useSidewaysWheel(viewport)
   const nearStart = useCallback(() => {
     const el = viewport.current
     if (!el || held || returnTo || el.scrollTop >= el.clientHeight) return
