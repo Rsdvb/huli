@@ -195,7 +195,7 @@ export function sessionMenuGroups(
           [
             ...(entryShown('session.zenView') ? (['toolCalls'] as const) : []),
             'menuOptions',
-            'mcp',
+            ...(entryShown('sessionMenu.mcp') ? (['mcp'] as const) : []),
           ],
           tidy,
           own,

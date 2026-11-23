@@ -136,6 +136,21 @@ describe("a paired device's requests", () => {
     expect(busy.map((message) => message.id)).toEqual([total - 1, total])
   })
 
+  it("never start an MCP server's sign-in, whatever the session's agent", async () => {
+    const { hub: h, calls } = hub()
+    const phone = new FakePort()
+    const window = new FakePort()
+    h.add(phone, DEVICE)
+    h.add(window)
+    phone.request(1, 'sessions.mcpLogin', { sessionId: 'claude-session', server: 'linear' })
+    phone.request(2, 'sessions.mcp', { sessionId: 'claude-session' })
+    window.request(3, 'sessions.mcpLogin', { sessionId: 'claude-session', server: 'linear' })
+    await settle()
+    expect(phone.answer(1)).toMatchObject({ type: 'error', error: { code: 'forbidden' } })
+    // The window's sign-in ran, and the phone's read of the servers; the phone's sign-in did not.
+    expect(calls.map((call) => call.method).sort()).toEqual(['sessions.mcp', 'sessions.mcpLogin'])
+  })
+
   it("leave a window's requests as they are", async () => {
     const { hub: h, calls } = hub()
     const port = new FakePort()

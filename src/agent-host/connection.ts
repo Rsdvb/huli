@@ -778,9 +778,10 @@ export interface AgentConnection {
   ): Promise<void>
   /**
    * Huli: starts the agent's sign-in to the server and answers with the page to open in the
-   * browser; how it ended comes as an `mcp` effect with `login`.
+   * browser, or null when it needs none after all; how it ended comes as an `mcp` effect with
+   * `login`.
    */
-  loginMcp?(sessionId: string, server: string): Promise<{ url: string }>
+  loginMcp?(sessionId: string, server: string): Promise<{ url: string | null }>
   /**
    * Huli: the agent reads its skills and plugins again without starting over; 'busy' while a turn
    * runs, which a reload would change under it.

@@ -127,6 +127,12 @@ export const FEATURES = [
   },
   { id: 'sessionMentions', entries: ['composer.sessionMention', 'phone.sessionMention'] },
   { id: 'zenView', entries: ['session.zenView', 'settings.zenView', 'phone.zenView'] },
+  // A session's MCP servers and their sign-ins; the Marketplace's reload of every session stays.
+  {
+    id: 'mcpPanel',
+    entries: ['sessionMenu.mcp', 'notice.mcp', 'phone.mcp', 'phone.mcpNotice'],
+    methods: ['sessions.mcp', 'sessions.mcpAct', 'sessions.mcpLogin'],
+  },
   { id: 'secrets', entries: [], toolGroups: ['secrets'] },
   { id: 'agentTheme', entries: [], toolGroups: ['theme'] },
   // An agent's own desktop notification and phone push, through the session's attention.

@@ -5,6 +5,7 @@
 
 import { useState, type ReactNode } from 'react'
 import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { router } from 'expo-router'
 import {
   outOfCreditTurn,
   retryableTurn,
@@ -16,7 +17,7 @@ import {
 import { GITHUB_URL } from '../../about'
 import { call } from '../../git'
 import { Clamp } from '../../ui/session/Clamp'
-import { useLink } from '../../host'
+import { useEntryOn, useLink } from '../../host'
 import { copyText } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
 import { MONO, useSessionTokens } from '../../ui/session/palette'
@@ -172,8 +173,30 @@ export function NoticeEntry(props: { entry: Notice }) {
             ) : null}
           </View>
         )}
+        {entry.mcpServers?.[0] !== undefined ? (
+          <McpNoticeAction sessionId={sessionId} server={entry.mcpServers[0]} />
+        ) : null}
         <SendState sender={sender} />
       </View>
+    </View>
+  )
+}
+
+/** Huli: a notice of an MCP server that failed or needs a sign-in opens the session's MCP page. */
+function McpNoticeAction(props: { sessionId: string; server: string }) {
+  const on = useEntryOn('phone.mcpNotice')
+  if (!on) return null
+  return (
+    <View style={styles.actions}>
+      <CardButton
+        label="查看 MCP 服务器"
+        onPress={() =>
+          router.push({
+            pathname: '/mcp/[id]',
+            params: { id: props.sessionId, server: props.server },
+          })
+        }
+      />
     </View>
   )
 }

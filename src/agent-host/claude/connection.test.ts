@@ -4906,6 +4906,98 @@ describe("Huli: a session's MCP panel", () => {
     expect(Object.keys(sdk.last.options.mcpServers ?? {})).toEqual(['playwright'])
   })
 
+  describe('signing in to a server', () => {
+    const page = 'https://auth.example.com/authorize?client_id=c&state=st4te&code_challenge=ch4l'
+
+    async function signingIn() {
+      const traffic: unknown[] = []
+      const logs: string[] = []
+      const { sdk, connection: hosted } = await setup(
+        {},
+        {},
+        {
+          hooks: {
+            traffic: (_direction, message) => traffic.push(message),
+            account: () => {},
+            ignored: () => {},
+            log: (_level, message) => logs.push(message),
+          },
+        },
+      )
+      const connection = hosted as ClaudeConnection
+      const target = new Target()
+      const { sessionId } = await connection.newSession('/repo', {})
+      connection.register(sessionId, target)
+      return { sdk, connection, target, sessionId, traffic, logs }
+    }
+
+    const logins = (target: Target) =>
+      target.effects.flatMap((effect) =>
+        effect.kind === 'mcp' && effect.login ? [effect.login] : [],
+      )
+
+    it("opens Claude Code's page, and tells the panel once a read finds the server connected", async () => {
+      const { sdk, connection, target, sessionId, traffic, logs } = await signingIn()
+      sdk.mcpAuth = { authUrl: page, requiresUserAction: true, callbackExpected: true }
+      sdk.mcpStatus = [{ name: 'linear', status: 'needs-auth', source: 'user' }]
+      expect((await connection.readMcp(sessionId, []))?.can.login).toBe(true)
+
+      expect(await connection.loginMcp(sessionId, 'linear')).toEqual({ url: page })
+      expect(sdk.last.calls.filter((call) => call.method === 'mcpAuthenticate')).toEqual([
+        { method: 'mcpAuthenticate', args: ['linear'] },
+      ])
+      await connection.readMcp(sessionId, [])
+      expect(logins(target)).toEqual([])
+
+      sdk.mcpStatus = [{ name: 'linear', status: 'connected', source: 'user', tools: [] }]
+      await connection.readMcp(sessionId, [])
+      await connection.readMcp(sessionId, [])
+      expect(logins(target)).toEqual([{ server: 'linear', ok: true, error: null }])
+      // The page carries the sign-in's state and challenge, which no trace or log holds.
+      expect(JSON.stringify([traffic, logs])).not.toMatch(/st4te|ch4l|auth\.example/)
+    })
+
+    it('says how a sign-in ended when the server failed after it', async () => {
+      const { sdk, connection, target, sessionId } = await signingIn()
+      sdk.mcpAuth = { authUrl: page, requiresUserAction: true }
+      await connection.loginMcp(sessionId, 'linear')
+      sdk.mcpStatus = [
+        { name: 'linear', status: 'failed', source: 'user', error: 'HTTP 403 https://x.io/?k=s' },
+      ]
+      await connection.readMcp(sessionId, [])
+      expect(logins(target)).toEqual([
+        { server: 'linear', ok: false, error: 'HTTP 403 https://x.io/?k=••••' },
+      ])
+    })
+
+    it('opens nothing for a server that needs no sign-in after all', async () => {
+      const { sdk, connection, target, sessionId } = await signingIn()
+      sdk.mcpAuth = { requiresUserAction: false, callbackExpected: false }
+      expect(await connection.loginMcp(sessionId, 'linear')).toEqual({ url: null })
+      expect(logins(target)).toEqual([{ server: 'linear', ok: true, error: null }])
+    })
+
+    it('refuses a page that is no web address, and masks the address a failure quotes', async () => {
+      const { sdk, connection, sessionId } = await signingIn()
+      sdk.mcpAuth = { authUrl: 'file:///etc/passwd', requiresUserAction: true }
+      await expect(connection.loginMcp(sessionId, 'linear')).rejects.toThrow()
+      sdk.mcpAuth = { requiresUserAction: true }
+      await expect(connection.loginMcp(sessionId, 'linear')).rejects.toThrow()
+      sdk.mcpAuth = new Error('Discovery failed for https://mcp.example.com/sse?token=abc123')
+      const failed = await connection.loginMcp(sessionId, 'linear').catch((error: Error) => error)
+      expect((failed as Error).message).toContain('https://mcp.example.com/sse?token=••••')
+      expect((failed as Error).message).not.toContain('abc123')
+    })
+
+    it('offers no sign-in where the SDK lacks the call', async () => {
+      const { sdk, connection, sessionId } = await signingIn()
+      sdk.mcpStatus = [{ name: 'linear', status: 'needs-auth', source: 'user' }]
+      expect((await connection.readMcp(sessionId, []))?.can.login).toBe(false)
+      await expect(connection.loginMcp(sessionId, 'linear')).rejects.toThrow()
+      expect(sdk.last.calls.some((call) => call.method === 'mcpAuthenticate')).toBe(false)
+    })
+  })
+
   it('reloads plugins and skills between turns, and leaves a running turn alone', async () => {
     const { sdk, connection: hosted } = await setup()
     const connection = hosted as ClaudeConnection

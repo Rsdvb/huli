@@ -3462,6 +3462,10 @@
       "zenView": {
         "name": "Concise thread",
         "description": "Hide tool calls that went well, or show only your messages and the agent's final replies, for each session or by default. Requests and questions always show."
+      },
+      "mcpPanel": {
+        "name": "MCP servers of a session",
+        "description": "MCP servers… in a session’s More menu: each server’s state, source and tools, with reconnect, turning one off and sign-in. A thread’s notice of a server that failed opens it."
       }
     }
   },

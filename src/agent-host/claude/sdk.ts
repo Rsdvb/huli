@@ -173,6 +173,19 @@ export interface McpServerStatus {
   tools?: { name: string; description?: string }[]
 }
 
+/**
+ * Huli: what `mcpAuthenticate` answers, of the fields Kite reads. Claude Code listens for the
+ * browser's return on a port of its own and stores the token itself; Kite only opens the page.
+ */
+export interface McpAuthenticateAnswer {
+  /** The page to sign in at, while `requiresUserAction`. */
+  authUrl?: string
+  /** False when the server needed no sign-in after all, as when a stored token still worked. */
+  requiresUserAction: boolean
+  /** Claude Code waits for the page to send the browser back to it; false for claude.ai's own. */
+  callbackExpected?: boolean
+}
+
 /** Huli: what `reloadPlugins` answers, of the fields Kite reads. */
 export interface ReloadPluginsAnswer {
   commands: SlashCommandInfo[]
@@ -513,6 +526,13 @@ export interface Query extends AsyncIterable<SdkMessage> {
    * own configuration for the folder, so it lasts past the session.
    */
   toggleMcpServer?(serverName: string, enabled: boolean): Promise<void>
+  /**
+   * Huli: starts the OAuth sign-in to a server that needs one and answers with its page once it
+   * is known. Present in the SDKs Kite installs, though not in their published types; without a
+   * redirect it names, Claude Code takes the browser's return on a loopback port of its own and
+   * connects the server again when the sign-in ends.
+   */
+  mcpAuthenticate?(serverName: string): Promise<McpAuthenticateAnswer>
   /**
    * Huli: reads the plugins again from disk. With `refuseIfBusy`, a session at work rejects with
    * `errorCode` 'reload_plugins_busy', where the CLI honors it.

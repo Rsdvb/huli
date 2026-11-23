@@ -2253,6 +2253,7 @@ describe('warnings about Codex itself', () => {
         kind: 'notice',
         title: 'MCP server github could not start',
         description: 'spawn gh-mcp ENOENT',
+        mcpServers: ['github'],
       },
     ])
   })

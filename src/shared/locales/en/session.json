@@ -2429,14 +2429,14 @@
       "button": "Sign in",
       "again": "Sign in again",
       "waiting": "Signing in",
-      "inBrowser": "Finish signing in in your browser. This list updates when it's done.",
+      "inBrowser": "Finish signing in in your browser. This list updates when you come back.",
       "elsewhere": "Sign in to it in the agent's own terminal, such as /mcp in Claude Code.",
       "done": "Signed in to {{name}}",
       "failed": "Couldn't sign in to {{name}}: {{error}}"
     },
     "apps": {
       "title": "ChatGPT apps",
-      "manage": "Manage on ChatGPT",
+      "manage": "Manage in ChatGPT settings",
       "none": "This ChatGPT account has no apps connected.",
       "off": "Off in Codex"
     },
@@ -2461,6 +2461,9 @@
       "reconnect": "Couldn't reconnect {{name}}: {{error}}",
       "disable": "Couldn't turn off {{name}}: {{error}}",
       "enable": "Couldn't turn on {{name}}: {{error}}"
+    },
+    "notice": {
+      "open": "View MCP servers"
     }
   }
 }

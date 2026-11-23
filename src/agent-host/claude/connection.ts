@@ -11,6 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { AgentAccount, ContextBreakdown, PlanLimit } from '@shared/agent-host'
 import { canonicalClaudeModel } from '@shared/agents'
+import type { SessionMcpServer } from '@shared/session-mcp'
 import type { ClaudeRunSettings } from '@shared/settings'
 import {
   PROMPT_SUGGESTION_CHARS,
@@ -108,7 +109,8 @@ import {
 import { findClaudeTranscript } from '../prompt-cache'
 import { folderHooks } from './project-hooks'
 import { declaredServers } from './project-mcp'
-import { claudeMcpServers, reloadBusy } from './mcp-panel'
+import { claudeMcpServers, reloadBusy, signInEnd } from './mcp-panel'
+import { shownError } from '../session-mcp/text'
 import { mapAccount, mapAuthStatus, mapContextUsage, mapUsageLimits } from './reports'
 import { forkedUuids, rewindCut, RewindPointMissing, transcriptRecords } from './rewind'
 import { TerminalCommands } from './terminal-commands'
@@ -123,6 +125,7 @@ import type {
   ElicitationRequest,
   ElicitationResult,
   FlagSettings,
+  McpAuthenticateAnswer,
   McpServerConfig,
   ModelInfo,
   ModelUsage,
@@ -160,6 +163,8 @@ const PENDING_TTL_MS = 60_000
 const CLOSED_SESSIONS = 256
 /** Accepted pages that have not reported done; the oldest is forgotten past this. */
 const OPEN_PAGES = 64
+/** Huli: sessions with an MCP sign-in waiting on the browser; the oldest is forgotten past this. */
+const SIGN_IN_SESSIONS = 32
 const TITLE_CONTEXT = 1000
 const TITLE_MINIMUM = 10
 /** How long a stop waits for Claude Code to exit before it goes on. */
@@ -578,6 +583,8 @@ export class ClaudeConnection implements AgentConnection {
   private readonly openPages = new Map<string, { targetId: string; entryId: string }>()
   /** Huli: Kite's servers each session turned off in its MCP panel, which its queries go without. */
   private readonly mcpOff = new Map<string, Set<string>>()
+  /** Huli: the servers each session's MCP panel started a sign-in to, until a read sees it end. */
+  private readonly mcpSignIns = new Map<string, Set<string>>()
   private envQueue: Promise<unknown> = Promise.resolve()
   private account: string | null = null
   private readonly terminalCommands: TerminalCommands
@@ -2075,14 +2082,87 @@ export class ClaudeConnection implements AgentConnection {
     const can = {
       reconnect: query.reconnectMcpServer ? ('server' as const) : null,
       toggle: !!query.toggleMcpServer,
-      login: false,
+      // An SDK without the call shows no Sign in, as before.
+      login: typeof query.mcpAuthenticate === 'function',
       reload: !!query.reloadPlugins,
     }
     if (!query.mcpServerStatus) return { servers: [], apps: null, can }
     this.context.hooks.traffic('out', { method: 'mcpServerStatus', sessionId })
     const statuses = await query.mcpServerStatus()
     const off = this.mcpOff.get(sessionId) ?? new Set<string>()
-    return { servers: claudeMcpServers(statuses, new Set(kite), off), apps: null, can }
+    const servers = claudeMcpServers(statuses, new Set(kite), off)
+    this.signInsRead(sessionId, servers)
+    return { servers, apps: null, can }
+  }
+
+  /**
+   * Starts Claude Code's sign-in to the server and answers with its page, which the window opens
+   * in the browser; null when the server needed none after all. The page carries the sign-in's
+   * state and challenge, so neither it nor the answer is traced or logged.
+   */
+  async loginMcp(sessionId: string, server: string): Promise<{ url: string | null }> {
+    const query = this.runningQuery(sessionId)
+    if (typeof query.mcpAuthenticate !== 'function') {
+      throw new AgentRequestError(
+        'agent_error',
+        t('sessionMcp.unsupported', { agent: 'Claude Code' }),
+      )
+    }
+    this.context.hooks.traffic('out', { method: 'mcpAuthenticate', sessionId, server })
+    let answer: McpAuthenticateAnswer
+    try {
+      answer = await query.mcpAuthenticate(server)
+    } catch (error) {
+      // Claude Code may quote the server's address, whose query can hold a key.
+      const message = shownError(errorText(error))
+      throw new AgentRequestError(
+        'agent_error',
+        message ?? t('sessionMcp.loginPage', { agent: 'Claude Code' }),
+      )
+    }
+    if (answer?.requiresUserAction === false) {
+      this.mcpLoginEnded(sessionId, server, { ok: true, error: null })
+      return { url: null }
+    }
+    if (typeof answer?.authUrl !== 'string' || !isWebUrl(answer.authUrl)) {
+      throw new AgentRequestError(
+        'agent_error',
+        t('sessionMcp.loginPage', { agent: 'Claude Code' }),
+      )
+    }
+    const waiting = this.mcpSignIns.get(sessionId) ?? new Set<string>()
+    waiting.add(server)
+    this.mcpSignIns.delete(sessionId)
+    this.mcpSignIns.set(sessionId, waiting)
+    if (this.mcpSignIns.size > SIGN_IN_SESSIONS) {
+      this.mcpSignIns.delete(this.mcpSignIns.keys().next().value!)
+    }
+    return { url: answer.authUrl }
+  }
+
+  /**
+   * Claude Code says nothing when a sign-in ends, and connects the server again by itself: a
+   * read of the servers that finds one it waited for connected, or failed, tells the panel.
+   */
+  private signInsRead(sessionId: string, servers: readonly SessionMcpServer[]): void {
+    const waiting = this.mcpSignIns.get(sessionId)
+    if (!waiting) return
+    for (const name of [...waiting]) {
+      const ended = signInEnd(servers.find((server) => server.name === name))
+      if (ended === undefined) continue
+      waiting.delete(name)
+      if (ended) this.mcpLoginEnded(sessionId, name, ended)
+    }
+    if (waiting.size === 0) this.mcpSignIns.delete(sessionId)
+  }
+
+  private mcpLoginEnded(
+    sessionId: string,
+    server: string,
+    end: { ok: boolean; error: string | null },
+  ): void {
+    const effect: MapperEffect = { kind: 'mcp', login: { server, ...end } }
+    this.deliver({ sessionId, map: () => ({ patches: [], effects: [effect] }) })
   }
 
   async reconnectMcp(sessionId: string, server: string | null): Promise<void> {
