@@ -1677,33 +1677,32 @@ remote host already bundles.
   `settings-catalog.ts`, `settings-page.tsx`, `web-sections.ts`, `use-search-entries.ts`. The daemon
   has no chat bridges.
 
-### Rewinding to a message (从这里重来、回退到这里)
+### Rewinding to a message (从这里重新编辑、回退到这里)
 
-As Claude Code's `/rewind` and T3 Code's Edit from here, each of the user's messages that started a
-turn offers 从这里重来 (the message and all after it leave the conversation, and the message goes
-back to the composer) and 回退到这里 (it stays with its reply; the turns after leave), on the
-desktop under the message and on the phone in its menu. Both open a dialog that asks
-`sessions.rewindPreview` first: how many messages leave, how the agent takes it, and, with 同时还原
-文件, every file a restore would change (还原, 删除 or 恢复, with its lines). Going on, the window
-calls `sessions.restoreFiles` with the preview's token when the box is ticked, then
-`sessions.rewind` (`{ sessionId, entryId, draft }` → `{ content }`), both at the first message the
-rewind takes out (`rewindTarget` in `shared/rewind-target.ts`): the message itself, or for 回退到这里
-the next one that started a turn.
+Upstream Kettu's Edit from here (KettuAI/Kettu #2271) is the conversation half, taken whole:
+`sessions.rewind` (`{ sessionId, entryId, draft }` → `{ content }`) sets the turns from a message
+aside, gives the message back to the composer, and cuts the agent's own session there at the next
+send (Claude Code by a fork before the prompt, Codex by `thread/revert`); Put back
+(`sessions.putBack`) returns them until then. Huli's Undo this turn (`sessions.revert`, Codex's
+`revertTurns`) stays beside it. On it Huli adds:
 
-`sessions.rewind` has upstream Kettu's signature (KettuAI/Kettu #2271, Edit from here), which sets
-the turns aside until the next send and has Put back. Until that merge lands here, the host cuts at
-once as below; when it does, upstream's model takes over the conversation and Huli keeps what it
-lacks: 回退到这里, the files with their preview and checkpoints, the fresh session for an agent that
-cannot cut its history, the busy-folder refusal and the phone.
-
-- Conversation (`sessions.ts`: `rewindCut`, `rewindConversation`): Codex cuts its own history with
-  `thread/revert` before the first turn taken out; Claude Code keeps its transcript whole, so the
-  session resumes at the last message kept (`resumeSessionAt`, `historyCut` in
-  `claude/connection.ts`) until the next turn has gone, the cut kept in the record (`resumeAt`)
-  across restarts. Other agents, or a cut before the last takeover, leave their own session behind:
-  the entries go and a new session of the same agent is given the conversation kept with its first
-  turn, as a takeover's is (`record.carry.rewound`, a `takeover` entry with `rewound`, shown as
-  在新的 X 会话里继续). A cut that keeps nothing starts the next message in a new session.
+- 回退到这里 (Rewind to here) beside 从这里重新编辑 under the message (`useEditFrom(…, 'rewind')`
+  in `edit-from-here.tsx`): the message and its reply stay, `sessions.rewind` goes at the next
+  message that started a turn (`rewindTarget` in `shared/rewind-target.ts`, `rewindToMessage` in
+  `app/actions.ts`), and the composer keeps what it holds. It always asks.
+- The confirmation (`EditConfirm`, `rewind-files.tsx`) asks `sessions.rewindPreview`: how the agent
+  takes it, and, with 同时还原文件, every file a restore would change (还原, 删除 or 恢复, with its
+  lines). Going on, the window calls `sessions.restoreFiles` with the preview's token first, then
+  `sessions.rewind`; the toast offers 撤销还原 (`sessions.undoRewindFiles`). Files go back to the
+  checkpoint of the first message taken out: for 回退到这里, the next message's.
+- An agent that cannot cut its own session (no `rewind` capability, or an older Codex thread with
+  `noRewind`) is no longer refused: the edit marks the cut with a `takeover` entry of the same agent
+  with `rewound` (在新的 X 会话里继续) and keeps `record.rewound.carry` with `rewound`; at the next
+  send `cutAgentSession` leaves the agent's session and a new one is given the conversation kept, as
+  a takeover's agent is (`attachStored` keeps the session's own values for it). Put back drops the
+  line. `lastSwitchAt` steps over such lines, so an edit can still go back past them.
+- The phone has both in a message's menu (`RewindDialog.tsx`), between turns, with the same preview,
+  switch and undo; it has no Put back yet.
 - Files: Kite's own checkpoints (`src/agent-host/file-checkpoints/`), for every agent. Claude Code's
   (`enableFileCheckpointing`, `Query.rewindFiles`) know only what its edit tools changed, not what
   its commands did, and a fork, as upstream's cut for an edit makes, starts without them.
@@ -1732,14 +1731,15 @@ e-<entry>.json.gz`) names them. Nothing is written into the user's repository or
   repository lists in 80 to 140 ms and keeps under 1 KiB when little changed; outside a repository
   the first copies everything (5.8 s for 35 MB, beside the turn), the next ones about 250 ms.
 - Files: `src/agent-host/file-checkpoints/{git,snapshot,plan,store}.ts` (+ `store.test.ts`), the
-  `sessions.rewindPreview`, `sessions.rewind`, `sessions.restoreFiles` and
-  `sessions.undoRewindFiles` requests
-  (`shared/agent-host.ts`, `validate.ts`, `host.ts`), `claude/connection.ts` (`revertTurns`),
-  `features/session/entries/rewind-dialog.tsx`, `message-actions.tsx`,
+  `sessions.rewindPreview`, `sessions.restoreFiles` and `sessions.undoRewindFiles` requests
+  (`shared/agent-host.ts`, `validate.ts`, `host.ts`), the fallback in `sessions.ts` (`rewind`,
+  `putBack`, `cutAgentSession`), `features/session/entries/rewind-files.tsx`, `edit-confirm.tsx`,
+  `edit-from-here.tsx`, `message-actions.tsx`,
   `takeover-entry.tsx`, `rewind` in `locales/*/session.json`, and on the phone
   `components/RewindDialog.tsx`, `UserMessage.tsx` and `app/session/[id].tsx`. Tests: `store.test.ts`
-  (round trips on temp folders, refusals, sweeping), `session-revert.test.ts` (Codex),
-  `claude/connection.test.ts` (Huli: rewinds) and `validate.test.ts`.
+  (round trips on temp folders, refusals, sweeping), `session-revert.test.ts` (files through the
+  host), `session-rewind.test.ts` (the new session for an older Codex thread) and
+  `validate.test.ts`.
 
 ### Feature switches (功能管理)
 
