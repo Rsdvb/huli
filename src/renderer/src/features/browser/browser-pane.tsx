@@ -47,6 +47,8 @@ import { BringSignInsOffer, SignInChip } from './sign-in-offer'
 import { EmulationChip } from './emulation-chip'
 import { DownloadBar } from './download-bar'
 import { BrowserDataButton } from './browser-data'
+import { LaunchPresets, LaunchPresetsButton } from './launch-presets'
+import { useLaunchConfigs } from './launch-configs'
 
 // Huli: pick mode's code loads only while the feature is on (Settings > Features).
 const pickMode = () => import('./pick-mode')
@@ -90,6 +92,8 @@ export function BrowserPane({
     return hostOfPath(summary.projectPath) === null ? tree.path : null
   })
   const agent = useControlAgent(agentId, hostId)
+  // Huli: the dev servers the session's folder names in .claude/launch.json.
+  const presets = useLaunchConfigs(sessionId)
   const overlayOpen = useOverlayOpen()
   const zoom = useSettingsStore((s) => s.settings.appearance.zoom)
   // The frame the page fills.
@@ -325,6 +329,9 @@ export function BrowserPane({
               {sessionId && hostId !== null && portsOn && (
                 <PortsButton hostId={hostId} sessionId={sessionId} />
               )}
+              {sessionId && presets.length > 0 && (
+                <LaunchPresetsButton sessionId={sessionId} configs={presets} onOpen={navigate} />
+              )}
               {sessionId && (
                 <BrowserDataButton
                   sessionId={sessionId}
@@ -413,6 +420,9 @@ export function BrowserPane({
                     autoFocus
                   />
                 </div>
+              )}
+              {sessionId && presets.length > 0 && (
+                <LaunchPresets sessionId={sessionId} configs={presets} onOpen={navigate} />
               )}
               {sessionId && <BringSignInsOffer />}
             </PaneEmpty>

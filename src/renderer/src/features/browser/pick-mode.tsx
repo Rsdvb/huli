@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { CursorAddSelection01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
-import { MAX_PAGE_NOTE_TEXT, type ElementPick } from '@shared/page-notes'
+import { MAX_PAGE_NOTE_TEXT, sourceText, type ElementPick } from '@shared/page-notes'
 import { Button } from '@renderer/components/ui/button'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { toast } from '@renderer/components/ui/toast'
@@ -167,6 +167,12 @@ export function PickLayer({
             </span>
             {pick.text && <span className="kp-pick-editor__text">{pick.text}</span>}
           </div>
+          {/* Huli: where the element's source is, as the page's dev build said. */}
+          {pick.source && (
+            <span className="kp-pick-editor__source" title={sourceText(pick.source)}>
+              {sourceText(pick.source)}
+            </span>
+          )}
           <textarea
             ref={field}
             value={text}

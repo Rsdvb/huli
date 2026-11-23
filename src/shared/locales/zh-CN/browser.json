@@ -188,7 +188,9 @@
       "selector": "选择器",
       "text": "文字",
       "box": "位置：{{width}} × {{height}} 像素，在 ({{x}}, {{y}})，视口 {{viewWidth}} × {{viewHeight}}",
-      "shot": "截图：附上的第 {{index}} 张图"
+      "shot": "截图：附上的第 {{index}} 张图",
+      "source": "源码",
+      "styles": "样式"
     }
   },
   "ports": {
@@ -261,5 +263,10 @@
     "saved": "已把登录存为“{{name}}”",
     "restored_one": "已恢复“{{name}}”：{{count}} 个 Cookie。请刷新网站。",
     "restored_other": "已恢复“{{name}}”：{{count}} 个 Cookie。请刷新网站。"
+  },
+  "presets": {
+    "title": ".claude/launch.json 里的开发服务器",
+    "start": "启动",
+    "button": "launch.json 里的开发服务器"
   }
 }

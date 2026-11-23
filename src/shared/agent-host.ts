@@ -2,6 +2,7 @@
 
 import type { CodebuddyShellOverride, CodebuddySite, PromptCacheTtl } from './agents'
 import type { AgentRemovalPreview, AgentRemovalProgress, AgentRemovalResult } from './agent-removal'
+import type { LaunchConfig } from './launch-configs'
 import type {
   AgentSyncState,
   SyncApplied,
@@ -2105,6 +2106,8 @@ export interface HostContract {
     params: { sessionId: string; command: string; notify: boolean }
     result: { terminalId: string; notified: boolean }
   }
+  /** Huli: the dev servers `.claude/launch.json` names in the session's folder, for presets. */
+  'sessions.launchConfigs': { params: { sessionId: string }; result: { configs: LaunchConfig[] } }
   'sessions.unqueue': { params: { sessionId: string; itemId: string }; result: void }
   'sessions.steer': { params: { sessionId: string; itemId: string }; result: void }
   // Steers where the agent can; otherwise stops the turn and sends the prompt as the next one.
@@ -2978,6 +2981,7 @@ export const HOST_METHODS = [
   'sessions.contextEstimates',
   'sessions.queue',
   'sessions.runCommand',
+  'sessions.launchConfigs',
   'sessions.unqueue',
   'sessions.steer',
   'sessions.sendNow',

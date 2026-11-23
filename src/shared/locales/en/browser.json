@@ -188,7 +188,9 @@
       "selector": "Selector",
       "text": "Text",
       "box": "Box: {{width}} × {{height}} px at ({{x}}, {{y}}) in a {{viewWidth}} × {{viewHeight}} viewport",
-      "shot": "Screenshot: attached image {{index}}"
+      "shot": "Screenshot: attached image {{index}}",
+      "source": "Source",
+      "styles": "Styles"
     }
   },
   "ports": {
@@ -261,5 +263,10 @@
     "saved": "Saved the sign-in as “{{name}}”",
     "restored_one": "Restored “{{name}}”: {{count}} cookie. Reload the site.",
     "restored_other": "Restored “{{name}}”: {{count}} cookies. Reload the site."
+  },
+  "presets": {
+    "title": "Dev servers in .claude/launch.json",
+    "start": "Start",
+    "button": "Dev servers from launch.json"
   }
 }

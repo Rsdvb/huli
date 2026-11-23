@@ -269,7 +269,35 @@ interface PageState {
   trace: ((stream: string | null) => void) | null
   /** Huli: the data of a drag the page started while drags are intercepted. */
   drag: Record<string, unknown> | null
+  /**
+   * Huli: the page's frames of other sites, each a target of its own in another process, by the
+   * debugger session flattened auto-attach gave it, and by the slot its nodes' ids are kept in.
+   */
+  children: Map<string, ChildFrame>
+  slots: Map<number, ChildFrame>
+  nextSlot: number
+  /** Huli: whether the tab attaches its frames of other sites, from its first snapshot on. */
+  attaching: boolean
+  /** Huli: the frame target each element object of such a frame belongs to. */
+  objects: Map<string, string>
 }
+
+/** Huli: a frame of another site, which Chromium runs in a process of its own. */
+interface ChildFrame {
+  /** Its flattened debugger session. */
+  session: string
+  /** Its target's id, which is its frame's id too. */
+  targetId: string
+  /** The session of the frame that holds it; null for the page itself. */
+  parent: string | null
+  slot: number
+}
+
+/**
+ * Huli: a node of a frame of another site is known by its backend id there, which may be any
+ * other target's too, plus its frame's slot times this: one number, as refs keep it.
+ */
+const SLOT = 2 ** 32
 
 interface FileChooser {
   /** The file input's backend node id. */
@@ -528,6 +556,11 @@ export class BrowserCdp {
       mocked: new Map(),
       trace: null,
       drag: null,
+      children: new Map(),
+      slots: new Map(),
+      nextSlot: 0,
+      attaching: false,
+      objects: new Map(),
     }
     this.pages.set(tabId, page)
     if (page.agentUsed) void this.syncRoutes(page)
@@ -547,9 +580,124 @@ export class BrowserCdp {
         return tree
       })
       .catch(() => {})
-    contents.debugger.on('message', (_event, method, params) => {
-      this.event(page, method, params as Record<string, unknown>)
+    contents.debugger.on('message', (_event, method, params, session?: string) => {
+      this.event(page, method, params as Record<string, unknown>, session || null)
     })
+  }
+
+  /**
+   * Huli: from the tab's first snapshot on, its frames of other sites attach as targets of their
+   * own (`Target.setAutoAttach` with flatten), so their elements read and act as the page's do.
+   */
+  private async attachFrames(page: PageState): Promise<void> {
+    if (page.attaching) return
+    page.attaching = true
+    await page.contents.debugger
+      .sendCommand('Target.setAutoAttach', {
+        autoAttach: true,
+        waitForDebuggerOnStart: false,
+        flatten: true,
+      })
+      .catch(() => {
+        page.attaching = false
+      })
+  }
+
+  /** Huli: a frame of another site attached, under the frame whose session `parent` is. */
+  private frameAttached(
+    page: PageState,
+    params: Record<string, unknown>,
+    parent: string | null,
+  ): void {
+    const info = (params.targetInfo ?? {}) as { targetId?: string; type?: string }
+    const session = typeof params.sessionId === 'string' ? params.sessionId : null
+    if (!session) return
+    const command = (method: string, extra: Record<string, unknown> = {}): void => {
+      void page.contents.debugger.sendCommand(method, extra, session).catch(() => {})
+    }
+    if (info.type === 'iframe' && typeof info.targetId === 'string') {
+      const frame: ChildFrame = { session, targetId: info.targetId, parent, slot: ++page.nextSlot }
+      page.children.set(session, frame)
+      page.slots.set(frame.slot, frame)
+      // Its own frames of yet other sites attach under it.
+      command('Target.setAutoAttach', {
+        autoAttach: true,
+        waitForDebuggerOnStart: false,
+        flatten: true,
+      })
+    }
+    if (params.waitingForDebugger === true) command('Runtime.runIfWaitingForDebugger')
+  }
+
+  /** Huli: a frame target went with its frame. */
+  private frameDetached(page: PageState, params: Record<string, unknown>): void {
+    const frame = typeof params.sessionId === 'string' ? page.children.get(params.sessionId) : null
+    if (!frame) return
+    page.children.delete(frame.session)
+    page.slots.delete(frame.slot)
+    for (const [object, session] of page.objects) {
+      if (session === frame.session) page.objects.delete(object)
+    }
+  }
+
+  /** Huli: the frame target a node id names, and its id there; the page's own has none. */
+  private nodeTarget(
+    page: PageState,
+    backend: number,
+  ): { target: string | null; backend: number } | null {
+    if (backend < SLOT) return { target: null, backend }
+    const frame = page.slots.get(Math.floor(backend / SLOT))
+    return frame ? { target: frame.session, backend: backend % SLOT } : null
+  }
+
+  /**
+   * Huli: where a frame of another site's viewport starts in the page's, in CSS pixels: its
+   * element's content box in the frame holding it, added up to the page.
+   */
+  private async frameOffset(
+    sessionId: string,
+    page: PageState,
+    backend: number,
+  ): Promise<{ x: number; y: number }> {
+    let x = 0
+    let y = 0
+    let frame = backend < SLOT ? undefined : page.slots.get(Math.floor(backend / SLOT))
+    for (let depth = 0; frame && depth < 8; depth++) {
+      const holder = frame.parent ?? ''
+      const owner = await this.send<{ backendNodeId?: number }>(
+        sessionId,
+        'DOM.getFrameOwner',
+        { frameId: frame.targetId },
+        holder,
+      )
+      if (typeof owner.backendNodeId !== 'number') break
+      const box = await this.send<{ model?: { content?: number[] } }>(
+        sessionId,
+        'DOM.getBoxModel',
+        { backendNodeId: owner.backendNodeId },
+        holder,
+      )
+      const content = box.model?.content
+      if (!content || content.length < 2) break
+      x += content[0]!
+      y += content[1]!
+      frame = frame.parent ? page.children.get(frame.parent) : undefined
+    }
+    return { x, y }
+  }
+
+  /**
+   * Huli: PROBE for an element of a frame of another site gives its centre in that frame's
+   * viewport, which the frame's place in the page moves into the page's.
+   */
+  private async inPage(sessionId: string, backend: number, probe: Probe): Promise<Probe> {
+    if (backend < SLOT || !probe.connected) return probe
+    const page = this.pageOf(sessionId)
+    const offset = await this.frameOffset(sessionId, page, backend)
+    const view = await this.viewport(sessionId)
+    const x = probe.x + offset.x
+    const y = probe.y + offset.y
+    return { ...probe, x, y, inside: x >= 0 && y >= 0 && x <= view.width && y <= view.height }
   }
 
   /** A tab's page is gone. */
@@ -586,7 +734,12 @@ export class BrowserCdp {
     } catch {
       // Without a frame tree the page's own nodes are all there is.
     }
-    return ids.length > 0 ? ids : ['']
+    // Huli: a frame of another site is read through its own target.
+    const tab = this.tabOf(sessionId)
+    const page = tab === null ? undefined : this.pages.get(tab)
+    const remote = new Set([...(page?.children.values() ?? [])].map((frame) => frame.targetId))
+    const local = ids.filter((id, index) => index === 0 || !remote.has(id))
+    return local.length > 0 ? local : ['']
   }
 
   /** A dialog a tab's page opened, which views.ts answered at once. */
@@ -805,14 +958,35 @@ export class BrowserCdp {
     await this.deps.controls.gate(sessionId, wait)
   }
 
-  /** Runs one CDP command, once the page is the agent's: the user may hold it meanwhile. */
+  /**
+   * Runs one CDP command, once the page is the agent's: the user may hold it meanwhile. Huli: a
+   * command on a node or an object of a frame of another site goes to that frame's target, and
+   * `target` names one outright ('' for the page itself).
+   */
   private async send<T = Record<string, unknown>>(
     sessionId: string,
     method: string,
     params: Record<string, unknown> = {},
+    target?: string,
   ): Promise<T> {
     await this.gate(sessionId)
     const contents = this.contentsOf(sessionId)
+    const routed = this.routed(sessionId, params, target)
+    if (routed.target !== null) {
+      const answer = (await contents.debugger.sendCommand(
+        method,
+        routed.params,
+        routed.target,
+      )) as T
+      const object = (answer as { object?: { objectId?: string } } | null)?.object?.objectId
+      const page = this.pageOf(sessionId)
+      if (method === 'DOM.resolveNode' && object) {
+        page.objects.set(object, routed.target)
+        if (page.objects.size > 2_000) page.objects.delete(page.objects.keys().next().value!)
+      }
+      return answer
+    }
+    params = routed.params
     // Chromium reports an injected input event as it reports the user's, so the pane's input
     // watch must know this one is the agent's.
     const injecting = method.startsWith('Input.')
@@ -835,12 +1009,45 @@ export class BrowserCdp {
     }
   }
 
+  /** Huli: the frame target a command goes to, and its parameters there; null for the page. */
+  private routed(
+    sessionId: string,
+    params: Record<string, unknown>,
+    target: string | undefined,
+  ): { target: string | null; params: Record<string, unknown> } {
+    if (target !== undefined) return { target: target === '' ? null : target, params }
+    const tab = this.tabOf(sessionId)
+    const page = tab === null ? undefined : this.pages.get(tab)
+    if (!page) return { target: null, params }
+    if (typeof params.backendNodeId === 'number' && params.backendNodeId >= SLOT) {
+      const node = this.nodeTarget(page, params.backendNodeId)
+      if (!node) {
+        throw new ToolFailure(
+          'stale_ref',
+          'That element’s frame is no longer on the page. Take a new snapshot.',
+        )
+      }
+      return { target: node.target, params: { ...params, backendNodeId: node.backend } }
+    }
+    const object = typeof params.objectId === 'string' ? page.objects.get(params.objectId) : null
+    return object ? { target: object, params } : { target: null, params }
+  }
+
   /** Whether an input event a tab's page reports right now is the agent's own. */
   isInjecting(tabId: string): boolean {
     return (this.pages.get(tabId)?.injecting ?? 0) > 0
   }
 
-  private event(page: PageState, method: string, params: Record<string, unknown>): void {
+  private event(
+    page: PageState,
+    method: string,
+    params: Record<string, unknown>,
+    child: string | null = null,
+  ): void {
+    // Huli: frames of other sites attach and go; their own events are not the page's.
+    if (method === 'Target.attachedToTarget') return this.frameAttached(page, params, child)
+    if (method === 'Target.detachedFromTarget') return this.frameDetached(page, params)
+    if (child !== null) return
     switch (method) {
       case 'Runtime.consoleAPICalled':
         this.pushConsole(page, consoleCall(params))
@@ -1069,6 +1276,7 @@ export class BrowserCdp {
     scope: { root?: number; depth?: number } = {},
   ): Promise<{ outline: string; head: string; all: string[]; found: boolean }> {
     // Each frame has a tree of its own, which goes under the element of the frame that holds it.
+    await this.attachFrames(page)
     let main: AXNode[] | null = null
     const frames: { owner: number | null; nodes: AXNode[] }[] = []
     for (const frameId of await this.frameIds(sessionId)) {
@@ -1086,6 +1294,33 @@ export class BrowserCdp {
         frameId,
       }).catch(() => null)
       frames.push({ owner: owner?.backendNodeId ?? null, nodes: tree.nodes })
+    }
+    // Huli: each frame of another site through its own target, its nodes' ids in its slot; a
+    // frame holding another comes first, as it attached first.
+    for (const frame of page.children.values()) {
+      const tree = await this.send<{ nodes: AXNode[] }>(
+        sessionId,
+        'Accessibility.getFullAXTree',
+        {},
+        frame.session,
+      ).catch(() => null)
+      if (!tree) continue
+      const owner = await this.send<{ backendNodeId?: number }>(
+        sessionId,
+        'DOM.getFrameOwner',
+        { frameId: frame.targetId },
+        frame.parent ?? '',
+      ).catch(() => null)
+      const holder = frame.parent ? (page.children.get(frame.parent)?.slot ?? 0) : 0
+      frames.push({
+        owner:
+          typeof owner?.backendNodeId === 'number' ? holder * SLOT + owner.backendNodeId : null,
+        nodes: tree.nodes.map((node) =>
+          node.backendDOMNodeId === undefined
+            ? node
+            : { ...node, backendDOMNodeId: frame.slot * SLOT + node.backendDOMNodeId },
+        ),
+      })
     }
     const nodes = mergeFrames(main ?? [], frames)
     const contents = this.contentsOf(sessionId)
@@ -1395,10 +1630,11 @@ export class BrowserCdp {
           return null
         },
       )
-      const problem = probe
-        ? actionProblem(probe, action)
+      const placed = probe ? await this.inPage(sessionId, backend, probe) : null
+      const problem = placed
+        ? actionProblem(placed, action)
         : actionProblem({ connected: false } as Probe, action)
-      if (!problem) return probe!
+      if (!problem) return placed!
       if (!problem.retry || Date.now() - started >= AUTO_WAIT_MS) {
         throw new ToolFailure(
           problem.code,
@@ -1448,7 +1684,9 @@ export class BrowserCdp {
         await this.send(sessionId, 'Input.dispatchKeyEvent', { type: 'keyUp', key: char })
       }
     } else {
-      await this.send(sessionId, 'Input.insertText', { text })
+      // Huli: a field of a frame of another site takes its text through that frame's target.
+      const node = this.nodeTarget(page, backend)
+      await this.send(sessionId, 'Input.insertText', { text }, node?.target ?? '')
     }
     if (args.submit === true) await this.pressKey(sessionId, 'Enter')
     return this.afterAction(
@@ -2219,7 +2457,7 @@ export class BrowserCdp {
         return null
       },
     )
-    return probe ?? ({ connected: false } as Probe)
+    return probe ? this.inPage(sessionId, backend, probe) : ({ connected: false } as Probe)
   }
 
   private async hover(
