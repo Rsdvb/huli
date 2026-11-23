@@ -1,7 +1,8 @@
 # Huli: a project's own session order (会话排序), as the desktop keeps it on the host: the seeded
 # project lists 排序 C, A, B, the order its host keeps, where latest activity would list A, B, C.
 # run.sh seeds the daemon for it (seed-order.mjs) when FLOWS names it; in a run of every flow,
-# without the seed, it only looks.
+# without the seed, it only looks. The rows read to Maestro with their project and state, so the
+# texts match as patterns.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -13,19 +14,19 @@ appId: io.github.rsdvb.huli
     optional: true
 - tapOn: '会话'
 - extendedWaitUntil:
-    visible: '排序演示'
+    visible: '.*排序演示.*'
     timeout: 60000
     optional: true
 - takeScreenshot: o01-home
 - runFlow:
     when:
-      visible: '排序演示'
+      visible: '.*排序演示.*'
     commands:
       - assertVisible:
-          text: '排序 A'
+          text: '.*排序 A.*'
           below:
-            text: '排序 C'
+            text: '.*排序 C.*'
       - assertVisible:
-          text: '排序 B'
+          text: '.*排序 B.*'
           below:
-            text: '排序 A'
+            text: '.*排序 A.*'
