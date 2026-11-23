@@ -89,11 +89,11 @@ export function SessionSignIn({
         <img
           src={image}
           alt={t('signIn.scanAlt')}
-          className="mt-2 size-36 rounded-lg [image-rendering:pixelated] group-has-[>svg]/alert:col-start-2"
+          className="mt-2 size-36 rounded-lg [image-rendering:pixelated] [[data-slot=alert]:has(>svg)_&]:col-start-2"
           draggable={false}
         />
       )}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 group-has-[>svg]/alert:col-start-2">
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 [[data-slot=alert]:has(>svg)_&]:col-start-2">
         <SignInActions
           agentId={agentId}
           hostId={hostId}
