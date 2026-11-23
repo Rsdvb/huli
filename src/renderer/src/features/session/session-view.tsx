@@ -335,7 +335,7 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
                     !archived &&
                     summary.origin !== 'subagent' &&
                     session.queue.length > 0 && (
-                      <QueueStack session={session} onError={setQueueError} />
+                      <QueueStack session={session} readOnly={!!away} onError={setQueueError} />
                     )}
                   {summary.manager && !archived && managerStrip && (
                     <ManagerStrip sessionId={sessionId} />
@@ -370,32 +370,34 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
                       </>
                     )}
                   </div>
-                  {away ? (
-                    session && <HostAway host={away} inline />
-                  ) : summary.origin === 'subagent' ? (
-                    <SubagentBar summary={summary} session={session} />
-                  ) : archived && !summary.movedTo?.sameComputer ? (
-                    <ArchivedComposer sessionId={sessionId} />
-                  ) : summary.movedTo ? (
-                    // Huli: one moved within its computer is archived too, and says where it went.
-                    <MovedComposer summary={summary} />
-                  ) : summary.worktree?.state === 'gone' ? (
-                    // Its history stays readable; nothing more can run without the branch.
-                    <WorktreeGoneComposer />
-                  ) : session ? (
-                    // Its menus open inside it, so while one is open it rises over the computer label.
-                    <div className="relative z-10 has-aria-expanded:z-20">
-                      {/* An agent removed or turned off: the session goes on with another one. */}
+                  {/* Whatever takes the composer's place lies over the queue's tab as the composer
+                      does. The composer's menus open inside it, so while one is open it rises over
+                      the computer label. */}
+                  <div className="relative z-10 has-aria-expanded:z-20">
+                    {away ? (
+                      session && <HostAway host={away} inline />
+                    ) : summary.origin === 'subagent' ? (
+                      <SubagentBar summary={summary} session={session} />
+                    ) : archived && !summary.movedTo?.sameComputer ? (
+                      <ArchivedComposer sessionId={sessionId} />
+                    ) : summary.movedTo ? (
+                      // Huli: one moved within its computer is archived too, and says where it went.
+                      <MovedComposer summary={summary} />
+                    ) : summary.worktree?.state === 'gone' ? (
+                      // Its history stays readable; nothing more can run without the branch.
+                      <WorktreeGoneComposer />
+                    ) : session ? (
+                      // An agent removed or turned off: the session goes on with another one.
                       <Composer
                         key={sessionId}
                         session={session}
                         agentName={name}
                         mustSwitch={agentRemoved || agentOff}
                       />
-                    </div>
-                  ) : (
-                    <ComposerPlaceholder agentId={summary.agentId} hostId={hostId} />
-                  )}
+                    ) : (
+                      <ComposerPlaceholder agentId={summary.agentId} hostId={hostId} />
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

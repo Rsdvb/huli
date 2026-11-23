@@ -482,6 +482,11 @@
   background: var(--thread-fox);
   box-shadow: 0 0 0 3px var(--thread-fox-halo);
 }
+/* The turn as last seen before its host went away, in place of the running dots. */
+.ks-status__away {
+  flex: none;
+  color: var(--thread-faint);
+}
 @keyframes ks-fade-in {
   from {
     opacity: 0;

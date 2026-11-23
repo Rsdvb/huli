@@ -51,13 +51,16 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t
  * back narrower, fainter and tucked under the one in front, each offering Send now while a turn
  * runs, Edit in the composer and Remove. A single message shows these at once, in place of the
  * count. Past three, scrolling moves the list like a periscope, following the wheel and settling
- * on a whole row. A paused queue says so and offers to go on.
+ * on a whole row. A paused queue says so and offers to go on. While the session's host is away
+ * they only show, since nothing reaches the host to act on them.
  */
 export function QueueStack({
   session,
+  readOnly = false,
   onError,
 }: {
   session: SessionView
+  readOnly?: boolean
   /** The latest action's error, or null once another starts or the queue empties. */
   onError: (message: string | null) => void
 }) {
@@ -256,7 +259,8 @@ export function QueueStack({
       role="region"
       className="kettu-queue"
       data-open={open || undefined}
-      data-single={n === 1 || undefined}
+      data-single={(n === 1 && !readOnly) || undefined}
+      data-read-only={readOnly || undefined}
       data-scrolling={scrolling || undefined}
       style={{ '--shown': Math.min(n, SHOWN) } as CSSProperties}
       aria-label={t('queue.label', { count: n })}
@@ -333,32 +337,36 @@ export function QueueStack({
             {i === 0 && queuePaused && (
               <span className="kettu-queue__paused">
                 {t('queue.paused')}
-                <button type="button" className="kettu-queue__resume" onClick={resume}>
-                  {t('queue.resume')}
-                </button>
+                {!readOnly && (
+                  <button type="button" className="kettu-queue__resume" onClick={resume}>
+                    {t('queue.resume')}
+                  </button>
+                )}
               </span>
             )}
             <span className="kettu-queue__count">
               {t('queue.count', { count: n })}
               <Glyph icon={ArrowUp01Icon} size={12} />
             </span>
-            <span className="kettu-queue__actions">
-              {running && (
-                <QueueAction
-                  label={t('queue.sendNow')}
-                  tip={t(steering ? 'queue.steer' : 'queue.stopAndSend')}
-                  onClick={() => sendNow(item)}
-                >
-                  <ReturnGlyph />
+            {!readOnly && (
+              <span className="kettu-queue__actions">
+                {running && (
+                  <QueueAction
+                    label={t('queue.sendNow')}
+                    tip={t(steering ? 'queue.steer' : 'queue.stopAndSend')}
+                    onClick={() => sendNow(item)}
+                  >
+                    <ReturnGlyph />
+                  </QueueAction>
+                )}
+                <QueueAction label={t('queue.edit')} onClick={() => edit(item)}>
+                  <Glyph icon={PencilEdit02Icon} size={14} />
                 </QueueAction>
-              )}
-              <QueueAction label={t('queue.edit')} onClick={() => edit(item)}>
-                <Glyph icon={PencilEdit02Icon} size={14} />
-              </QueueAction>
-              <QueueAction label={t('queue.remove')} onClick={() => remove(item)}>
-                <Glyph icon={Cancel01Icon} size={14} />
-              </QueueAction>
-            </span>
+                <QueueAction label={t('queue.remove')} onClick={() => remove(item)}>
+                  <Glyph icon={Cancel01Icon} size={14} />
+                </QueueAction>
+              </span>
+            )}
           </div>
         )
       })}

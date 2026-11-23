@@ -1,8 +1,10 @@
 import { memo, useEffect, useState } from 'react'
+import { WifiDisconnected01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { SessionSummary } from '@shared/agent-host'
-import { duration, tokens } from '@renderer/lib/format'
+import { clockTime, daysBefore, duration, monthDayTime, tokens } from '@renderer/lib/format'
+import { Glyph } from '@renderer/features/shell/glyph'
 import { useBrowserStore } from '@renderer/stores/browser'
 import { deviceInUse, useDevicesStore } from '@renderer/stores/devices'
 import { useSessionsStore } from '@renderer/stores/sessions'
@@ -10,6 +12,7 @@ import { terminalInUse, useTerminalsStore } from '@renderer/stores/terminals'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { TurnDots } from './turn-dots'
 import { askedStep, turnDoing, turnTokens, writingId, type TurnPhaseName } from './turn-phase'
+import { useSessionAwaySince } from './use-away-since'
 
 /** Phases in which the agent thinks or writes rather than works in the app it uses. */
 const QUIET_PHASES = new Set(['thinking', 'writing', 'compacting', 'approval', 'question'])
@@ -67,11 +70,32 @@ function TurnClock({ since }: { since: number }) {
 }
 
 /**
+ * What the turn showed when its host was last seen, held still while the host is away: how long it
+ * had run then, and when that was. Without that time, as of when the host was found away.
+ */
+function StaleClock({ since, lastSeen }: { since: number; lastSeen: number | null }) {
+  const { t } = useTranslation('session')
+  const [noticed] = useState(Date.now)
+  const elapsed = Math.max(0, (lastSeen ?? noticed) - since)
+  return (
+    <span className="shrink-0">
+      {t('thread.stale.running', { elapsed: duration(elapsed - (elapsed % 1000)) })}
+    </span>
+  )
+}
+
+/** When the host was last seen: the clock time that day, with the date on another. */
+function seenAt(at: number): string {
+  return daysBefore(at) === 0 ? clockTime(at) : monthDayTime(at)
+}
+
+/**
  * The running turn's status, the thread's last line at the left, where the reply will start: how
  * long it has run, its tokens and its phase, with the attention dot in place of the running dots
  * while it waits for you: to answer, to do a step it asked for, or to hand back the page or the
  * app you took over. While the agent writes a message, that message's own label carries the
- * turn, so this line steps aside: two turn marks never show at once.
+ * turn, so this line steps aside: two turn marks never show at once. While the session's host is
+ * away, it holds what was last seen, marked as such, instead of counting on.
  */
 export const TurnStatus = memo(function TurnStatus({
   sessionId,
@@ -118,7 +142,9 @@ export const TurnStatus = memo(function TurnStatus({
     return used?.control.kind === 'you' ? used.name : null
   })
   const subagentWaiting = useSessionsStore((s) => subagentWaits(s.byId, sessionId))
-  if (writing) return null
+  const awaySince = useSessionAwaySince(sessionId)
+  const stale = awaySince !== undefined
+  if (writing && !stale) return null
   const separator = <i aria-hidden>·</i>
   const app = computer?.app ?? null
   const appHeld = computer?.control === 'you'
@@ -157,16 +183,38 @@ export const TurnStatus = memo(function TurnStatus({
                     ? t(`thread.phase.${phase}`, { count })
                     : t(`thread.doing.${doingKey(phase, count, quoted)}`, { count, detail })
   return (
-    <div role="status" className="ks-status" data-after-sent={afterSent ? '' : undefined}>
-      {waiting ? <span aria-hidden className="ks-status__attn" /> : <TurnDots phase={phase} />}
-      {/* Only the phase is announced; the clock and the count change too often to read out. */}
-      {startedAt !== null && (
+    <div
+      role="status"
+      className="ks-status"
+      data-after-sent={afterSent ? '' : undefined}
+      data-stale={stale || undefined}
+    >
+      {stale ? (
+        <Glyph icon={WifiDisconnected01Icon} size={12} className="ks-status__away" />
+      ) : waiting ? (
+        <span aria-hidden className="ks-status__attn" />
+      ) : (
+        <TurnDots phase={phase} />
+      )}
+      {stale ? (
         <>
-          <span aria-live="off" className="shrink-0">
-            <TurnClock since={startedAt} />
-          </span>
+          {startedAt !== null ? (
+            <StaleClock key={awaySince} since={startedAt} lastSeen={awaySince} />
+          ) : (
+            <span className="shrink-0">{t('thread.stale.label')}</span>
+          )}
           {separator}
         </>
+      ) : (
+        // Only the phase is announced; the clock and the count change too often to read out.
+        startedAt !== null && (
+          <>
+            <span aria-live="off" className="shrink-0">
+              <TurnClock since={startedAt} />
+            </span>
+            {separator}
+          </>
+        )
       )}
       <span
         key={
@@ -188,14 +236,23 @@ export const TurnStatus = memo(function TurnStatus({
       >
         {text}
       </span>
-      {added !== null && (
-        <>
-          {separator}
-          <span aria-live="off" className="shrink-0 tabular">
-            {t('thread.tokens', { count: added, tokens: tokens(added) })}
-          </span>
-        </>
-      )}
+      {stale
+        ? awaySince !== null && (
+            <>
+              {separator}
+              <span className="shrink-0">
+                {t('thread.stale.lastSeen', { time: seenAt(awaySince) })}
+              </span>
+            </>
+          )
+        : added !== null && (
+            <>
+              {separator}
+              <span aria-live="off" className="shrink-0 tabular">
+                {t('thread.tokens', { count: added, tokens: tokens(added) })}
+              </span>
+            </>
+          )}
     </div>
   )
 })

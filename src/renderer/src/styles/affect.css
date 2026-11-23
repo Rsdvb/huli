@@ -7628,8 +7628,9 @@ body:has(.ui-mdpc[data-open], .ui-ccc__menu[data-open='true']) .kettu-toasts {
   .kettu-queue__actions {
   display: flex;
 }
+/* Read only, as while the host is away, the count keeps its place: no actions take it. */
 .kettu-queue[data-single] .kettu-queue__count,
-.kettu-queue[data-open]:not([data-scrolling])
+.kettu-queue[data-open]:not([data-scrolling], [data-read-only])
   .kettu-queue__card:is(:hover, :focus-visible, :focus-within)
   .kettu-queue__count {
   display: none;

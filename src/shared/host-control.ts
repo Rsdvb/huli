@@ -740,6 +740,9 @@ export type MainToRemoteHost =
   // The computer woke from sleep, maybe on another network: the direct addresses are read again
   // and the hosts not connected are tried at once.
   | { type: 'remote-host:resume' }
+  // Huli: a window of the app was focused, so the hosts not connected are tried now, unless
+  // tried a moment ago.
+  | { type: 'remote-host:nudge' }
   | { type: 'remote-host:rename-device'; id: string; name: string }
   // Opens a pairing code for the asker `codeId` names, voiding any code still open; its progress
   // comes back as remote-host:pairing under the same id.

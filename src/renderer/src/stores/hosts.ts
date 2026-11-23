@@ -160,6 +160,18 @@ export function awayHosts(): string[] {
     .map((host) => host.id)
 }
 
+/**
+ * While a host is away, when it was last online, or null when that is not known; undefined while
+ * it is connected or connecting, and for this computer (null).
+ */
+export function useAwaySince(hostId: string | null): number | null | undefined {
+  return useHostsStore((s) => {
+    if (hostId === null) return undefined
+    const host = (s.status?.hosts ?? s.kept).find((h) => h.id === hostId)
+    return host && isAway(host.connection) ? host.lastOnlineAt : undefined
+  })
+}
+
 /** Whether a host's sessions show greyed: it is neither connected nor connecting. */
 export function isAway(connection: HostConnection | null): boolean {
   return connection !== null && connection.state !== 'online' && connection.state !== 'connecting'

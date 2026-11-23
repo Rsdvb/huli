@@ -58,6 +58,7 @@ import { FromSessionCard, KettuCard, ReportLine } from './session-origin'
 import { DigestCard } from '@renderer/features/manager/digest-card'
 import { TurnEndTag } from './turn-end-tag'
 import { RefChip, SentAttachments, UserContentView } from './user-content'
+import { useSessionAwaySince } from '../use-away-since'
 
 export interface EntryProps {
   sessionId: string
@@ -185,6 +186,10 @@ export const AgentEntry = memo(function AgentEntry({ sessionId, entryId }: Entry
   const entry = useEntry(sessionId, entryId, 'agent')
   const animation = useEntryAnimation(sessionId, entryId)
   const writing = useThreadsStore((s) => writingId(s.replicas[sessionId]?.state) === entryId)
+  // While its host is away nothing more comes, so the label folds and the turn's status holds
+  // what was last seen.
+  const stale = useSessionAwaySince(writing ? sessionId : null) !== undefined
+  const streaming = writing && !stale
   // A reply shown already written never shows its label, so only one written while shown has the
   // dots, for the label to fade out when it is done.
   const [wrote, setWrote] = useState(writing)
@@ -200,8 +205,8 @@ export const AgentEntry = memo(function AgentEntry({ sessionId, entryId }: Entry
       <AIAnswer
         sources={NO_SOURCES}
         answer=""
-        streaming={writing}
-        mark={wrote && <TurnDots phase="writing" still={!writing} />}
+        streaming={streaming}
+        mark={wrote && <TurnDots phase="writing" still={!streaming} />}
         labels={{ writing: t('thread.phase.writing', { count: 1 }) }}
       >
         <SessionIdContext value={sessionId}>

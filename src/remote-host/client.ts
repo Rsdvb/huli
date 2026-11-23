@@ -151,6 +151,12 @@ const REJOIN_MS = 10_000
 /** The longest wait between tries, which a host that needs an update also waits. */
 const MAX_RETRY_MS = 60_000
 
+/**
+ * Huli: how long after a try began a nudge leaves a host to its backoff, so a burst of nudges, as
+ * a window focused again and again, tries a host that stays away at most this often.
+ */
+const NUDGE_GAP_MS = 5_000
+
 /** Host protocol messages kept for main's port while it is on its way; more are dropped. */
 const MAX_QUEUED = 1000
 
@@ -465,6 +471,8 @@ class HostLink {
   private trying: AbortController | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
   private failures = 0
+  /** When the last try began. */
+  private triedAt = 0
   private closed = false
   /** Main's port for the host's session, kept while the host keeps the session. */
   private port: PortChannel | null = null
@@ -559,6 +567,20 @@ class HostLink {
     if (this.closed || this.session || this.trying) return
     if (this.stoppedFor('removed', 'update_client')) return
     this.failures = 0
+    this.cancel()
+    void this.connect()
+  }
+
+  /**
+   * Huli: the host may be back, as when the user came back to the computer or to the window, or
+   * this computer reached the relay again: one not connected is tried now, unless a try began
+   * within NUDGE_GAP_MS. The backoff keeps its count, so a host that stays away is not tried more
+   * often after it; the relay says nothing when a host comes back, so only such events or the
+   * backoff try it again.
+   */
+  nudge(): void {
+    if (this.closed || this.session || this.trying || this.connection.state === 'stopped') return
+    if (this.client.now() - this.triedAt < NUDGE_GAP_MS) return
     this.cancel()
     void this.connect()
   }
@@ -669,6 +691,7 @@ class HostLink {
     if (this.closed || this.session || this.trying || !host || host.removed) return
     const { options } = this.client
     const trying = (this.trying = new AbortController())
+    this.triedAt = this.client.now()
     const hostKey = publicKeyBytes(host.publicKey)!
     const resume = this.resumeToken
       ? { token: this.resumeToken, received: this.acks.received }
@@ -1941,6 +1964,7 @@ export class HostClient {
   readonly ssh: SshProgram
   readonly installScript: (version: string) => string
   readonly retryDelay: (failures: number) => number
+  readonly now: () => number
   private readonly links = new Map<string, HostLink>()
   private readonly pairings = new Map<number, Pairing | SshAdding | DiscoveryPairing>()
   /** The hosts an action of their page runs on, which stopping the client aborts. */
@@ -1956,6 +1980,7 @@ export class HostClient {
     this.ssh = options.ssh ?? SYSTEM_SSH
     this.installScript = options.installScript ?? ((version) => installRun(version))
     this.retryDelay = options.retryDelay ?? retryDelay
+    this.now = options.now ?? Date.now
   }
 
   /**
@@ -2339,6 +2364,12 @@ export class HostClient {
   resume(): void {
     this.network = networkPrint()
     for (const link of this.links.values()) link.wake()
+  }
+
+  /** Huli: the hosts may be back; those not connected are tried now, as `HostLink.nudge` says. */
+  nudge(): void {
+    if (this.stopped) return
+    for (const link of this.links.values()) link.nudge()
   }
 
   async stop(): Promise<void> {

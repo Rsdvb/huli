@@ -1014,6 +1014,11 @@
     "olderFailed": "Couldn't load earlier messages",
     "tokens_one": "{{tokens}} token",
     "tokens_other": "{{tokens}} tokens",
+    "stale": {
+      "label": "Was running before going offline",
+      "running": "Ran {{elapsed}} before going offline",
+      "lastSeen": "last seen {{time}}"
+    },
     "phase": {
       "thinking": "Thinking",
       "execute_one": "Running a command",
