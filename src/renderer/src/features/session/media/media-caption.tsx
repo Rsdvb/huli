@@ -50,7 +50,7 @@ export function MediaCaption({
       </span>
       <span className="shrink-0 text-meta text-tertiary tabular">{meta}</span>
       {error && <span className="min-w-0 truncate text-meta text-danger">{error}</span>}
-      <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-(--duration-fast) group-focus-within/media:opacity-100 group-hover/media:opacity-100">
+      <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-(--duration-fast) focus-within-media:opacity-100 hover-media:opacity-100">
         {onOpenLarger && (
           <CaptionButton label={t('media.openLarger')} onClick={onOpenLarger}>
             <HugeiconsIcon icon={ArrowExpand01Icon} strokeWidth={1.9} aria-hidden />

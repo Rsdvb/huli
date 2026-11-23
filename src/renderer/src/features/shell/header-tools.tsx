@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { flushSync } from 'react-dom'
 import { shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 import type { IconSvgElement } from '@hugeicons/react'
 import {
@@ -240,9 +241,12 @@ function useToolSlots(ref: RefObject<HTMLElement | null>): number {
         parseFloat(style.paddingRight) -
         BAR_RESERVE
       // Two of the slots go to the side panel button and the More menu.
-      setSlots(Math.max(0, Math.floor(room / TOOL_SLOT) - 2))
+      const next = Math.max(0, Math.floor(room / TOOL_SLOT) - 2)
+      // Before the frame paints, so the bar never shows with more buttons than fit.
+      flushSync(() => setSlots(next))
     }
-    measure()
+    // The observer's first call, once the frame is laid out, takes the first measure: measuring
+    // here would lay the whole page out again in the middle of the commit, as a pane mounts.
     const observer = new ResizeObserver(measure)
     observer.observe(bar)
     return () => observer.disconnect()

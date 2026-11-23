@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { DragDropProvider, type DragEndEvent } from '@dnd-kit/react'
+import { DragFeedback, lightPlugins } from '@renderer/components/drag-feedback'
 import { isSortable, useSortable } from '@dnd-kit/react/sortable'
 import { useTranslation } from 'react-i18next'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
@@ -41,7 +42,8 @@ export function FileTabs({
   }
 
   return (
-    <DragDropProvider sensors={tabSensors} onDragEnd={dragEnded}>
+    <DragDropProvider sensors={tabSensors} plugins={lightPlugins} onDragEnd={dragEnded}>
+      <DragFeedback />
       <div role="tablist" aria-label={t('tabs.label')} className="flex items-center gap-0.5">
         {files.map((file, index) => (
           <FileTab

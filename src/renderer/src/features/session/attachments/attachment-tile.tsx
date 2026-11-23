@@ -152,7 +152,7 @@ export function AttachmentTile({
             'pointer-events-none absolute inset-0 rounded-[inherit] transition-shadow duration-(--duration-fast)',
             failed
               ? 'shadow-[inset_0_0_0_var(--hairline)_var(--danger-border)]'
-              : 'shadow-[inset_0_0_0_var(--hairline)_var(--border-subtle)] group-hover/tile:shadow-[inset_0_0_0_var(--hairline)_var(--border-strong)]',
+              : 'shadow-[inset_0_0_0_var(--hairline)_var(--border-subtle)] hover-tile:shadow-[inset_0_0_0_var(--hairline)_var(--border-strong)]',
           )}
         />
         {view.warn && (
@@ -166,7 +166,7 @@ export function AttachmentTile({
             tabIndex={-1}
             aria-label={removeLabel}
             onClick={remove}
-            className="absolute -top-1.5 -right-1.5 grid size-4.5 place-items-center rounded-full bg-surface text-icon opacity-0 shadow-card transition-opacity duration-(--duration-fast) group-focus-visible/tile:opacity-100 group-hover/tile:opacity-100 hover:text-primary"
+            className="absolute -top-1.5 -right-1.5 grid size-4.5 place-items-center rounded-full bg-surface text-icon opacity-0 shadow-card transition-opacity duration-(--duration-fast) focus-visible-tile:opacity-100 hover-tile:opacity-100 hover:text-primary"
           >
             <Glyph icon={Cancel01Icon} className="size-2.5" />
           </button>
@@ -178,7 +178,7 @@ export function AttachmentTile({
             aria-label={markupLabel}
             title={markupLabel}
             onClick={markup}
-            className="absolute right-1 bottom-1 grid size-6 place-items-center rounded-full bg-surface text-icon opacity-0 shadow-card transition-opacity duration-(--duration-fast) group-focus-visible/tile:opacity-100 group-hover/tile:opacity-100 hover:text-primary"
+            className="absolute right-1 bottom-1 grid size-6 place-items-center rounded-full bg-surface text-icon opacity-0 shadow-card transition-opacity duration-(--duration-fast) focus-visible-tile:opacity-100 hover-tile:opacity-100 hover:text-primary"
           >
             <Glyph icon={PencilEdit02Icon} className="size-3.5" />
           </button>

@@ -16,7 +16,7 @@ export function FrameRing({ className }: { className?: string }) {
     <span
       aria-hidden
       className={cn(
-        'pointer-events-none absolute inset-0 rounded-[inherit] shadow-[inset_0_0_0_var(--hairline)_var(--border-subtle)] transition-shadow duration-(--duration-fast) group-hover/media:shadow-[inset_0_0_0_var(--hairline)_var(--border-default)]',
+        'pointer-events-none absolute inset-0 rounded-[inherit] shadow-[inset_0_0_0_var(--hairline)_var(--border-subtle)] transition-shadow duration-(--duration-fast) hover-media:shadow-[inset_0_0_0_var(--hairline)_var(--border-default)]',
         className,
       )}
     />

@@ -276,21 +276,27 @@ export function Toaster() {
     check()
     return () => observer.disconnect()
   }, [])
-  // Huli: how far up from the window's foot the stack reaches, as `--toast-room` on the root, so
-  // a screen it stays over, such as Settings, can scroll its last rows clear of it.
+  // Huli: how far up from the window's foot the stack reaches, as `--toast-room` on Settings'
+  // page, so it can scroll its last rows clear of it. A rule of a sheet of its own sets it: the
+  // property on the root restyled every element of the page each time a toast came or went.
   useEffect(() => {
     const list = frame.current?.querySelector('.ui-ts__list')
     if (!list) return
-    const root = document.documentElement
+    const sheet = new CSSStyleSheet()
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+    let rule = ''
     const observer = new ResizeObserver(() => {
       const box = list.getBoundingClientRect()
-      if (box.height > 0) root.style.setProperty('--toast-room', `${innerHeight - box.top}px`)
-      else root.style.removeProperty('--toast-room')
+      const next =
+        box.height > 0 ? `.kettu-settings__page { --toast-room: ${innerHeight - box.top}px; }` : ''
+      if (next === rule) return
+      rule = next
+      sheet.replaceSync(rule)
     })
     observer.observe(list)
     return () => {
       observer.disconnect()
-      root.style.removeProperty('--toast-room')
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== sheet)
     }
   }, [])
   // The frame stays above dialogs and below open menus, and takes the area's box, which the

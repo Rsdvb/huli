@@ -84,7 +84,7 @@ export default defineConfig([
     files: ['src/renderer/**/*.{ts,tsx}'],
     ignores: ['**/*.test.ts', '**/*.test.tsx'],
     plugins: { kettu },
-    rules: { 'kettu/no-color-literals': 'error' },
+    rules: { 'kettu/no-color-literals': 'error', 'kettu/no-group-state-variant': 'error' },
   },
   {
     // Huli's phone app, React Native under Expo: the hooks rules hold as in the renderer, Metro

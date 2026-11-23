@@ -187,7 +187,8 @@
    sidebar's right padding up to the resize handle, which starts 6px before the sidebar's edge and
    would take the thumb's drags. macOS keeps its overlay scrollbar, as the system shows it. The
    :has() is on the list itself: on the sidebar, any focus change or added element would restyle
-   every row. */
+   every row. The pointer is told by data-pointer (sidebar/side-pointer.ts), not by :hover on the
+   sidebar, which made the pointer's every entry and exit restyle the rows too. */
 .kettu-frame .ui-as-side__nav.ui-as-side__nav {
   --side-scrollbar: 6px;
   --side-scrollbar-inset: 1px;
@@ -196,7 +197,7 @@
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
-.kettu-frame .ui-as-side:hover .ui-as-side__nav.ui-as-side__nav,
+.kettu-frame .ui-as-side .ui-as-side__nav.ui-as-side__nav[data-pointer],
 .kettu-frame .ui-as-side .ui-as-side__nav.ui-as-side__nav:has(:focus-visible),
 :root[data-platform='darwin'] .kettu-frame .ui-as-side__nav.ui-as-side__nav {
   scrollbar-color: var(--scrollbar-thumb) transparent;
@@ -222,8 +223,8 @@
 }
 :root[data-platform='win32']
   .kettu-frame
-  .ui-as-side:hover
-  .ui-as-side__nav.ui-as-side__nav::-webkit-scrollbar-thumb,
+  .ui-as-side
+  .ui-as-side__nav.ui-as-side__nav[data-pointer]::-webkit-scrollbar-thumb,
 :root[data-platform='win32']
   .kettu-frame
   .ui-as-side
@@ -7549,7 +7550,18 @@ li[data-row-exit='dust'] > * {
 .kettu-queue__card[data-row] > * {
   transition-delay: 90ms;
 }
-.kettu-queue[data-open]:not([data-scrolling]) .kettu-queue__card:is(:hover, :focus-visible) > * {
+/* The card's parts by name: ending in `> *`, a :hover rule made every hover change in the page
+   restyle the whole subtree of what it changed on. */
+.kettu-queue[data-open]:not([data-scrolling])
+  .kettu-queue__card:is(:hover, :focus-visible)
+  > :is(
+    .kettu-queue__n,
+    .kettu-queue__text,
+    .kettu-queue__from,
+    .kettu-queue__paused,
+    .kettu-queue__count,
+    .kettu-queue__actions
+  ) {
   opacity: 1;
 }
 .kettu-queue[data-scrolling] .kettu-queue__card,

@@ -13,6 +13,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/react'
+import { DragFeedback, lightPlugins } from '@renderer/components/drag-feedback'
 import { ArrowDown01Icon, Folder01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { BOARD_STATUSES, type BoardStatus } from '@shared/session-board'
@@ -81,7 +82,8 @@ export function BoardView({ project }: { project: string | null }) {
     void moveOnBoard(card.sessionId, column.boardStatus)
   }
   return (
-    <DragDropProvider sensors={sensors} onDragStart={start} onDragEnd={end}>
+    <DragDropProvider sensors={sensors} plugins={lightPlugins} onDragStart={start} onDragEnd={end}>
+      <DragFeedback />
       <div className="kb-frame">
         <div className="kb-board">
           {BOARD_STATUSES.map((status) => (
