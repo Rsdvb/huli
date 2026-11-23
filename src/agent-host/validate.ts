@@ -2326,7 +2326,7 @@ export function createValidators(platform: Platform): Validators {
     },
     'sessions.restoreFiles': (params) => {
       const o = fields(params)
-      if (typeof o.token !== 'string' || !/^(?:agent|[0-9a-f]{64})$/.test(o.token)) {
+      if (typeof o.token !== 'string' || !/^[0-9a-f]{64}$/.test(o.token)) {
         throw invalidParams('token must be a preview token')
       }
       return {

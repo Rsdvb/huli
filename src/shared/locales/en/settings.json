@@ -3178,7 +3178,7 @@
       },
       "fileCheckpoints": {
         "name": "File checkpoints for rewinds",
-        "description": "Kite keeps a copy of the session's files as each message goes, so going back to a message can restore them too. Claude Code keeps its own either way."
+        "description": "Kite keeps a copy of the session's files as each message goes, so going back to a message can restore them too."
       },
       "agentTheme": {
         "name": "Agent theme changes",

@@ -2035,10 +2035,7 @@ describe('worktree requests', () => {
       entryId: 'e:4',
       token,
     })
-    expect(
-      posix['sessions.restoreFiles']({ sessionId: 's', entryId: 'e:4', token: 'agent' }),
-    ).toMatchObject({ token: 'agent' })
-    for (const bad of [undefined, '', '../x', 'A'.repeat(64), 7]) {
+    for (const bad of [undefined, '', 'agent', '../x', 'A'.repeat(64), 7]) {
       rejects(() => posix['sessions.restoreFiles']({ sessionId: 's', entryId: 'e:4', token: bad }))
     }
     expect(

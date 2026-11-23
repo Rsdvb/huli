@@ -28,7 +28,6 @@ import {
   SideQuestionUnsupported,
   type AgentConnection,
   type AgentInit,
-  type FileRewind,
   type FolderHooks,
   type ForkPoint,
   type ListedSession,
@@ -358,10 +357,6 @@ interface Pending {
   items: Delivery[]
 }
 
-function noRewind(error: string): FileRewind {
-  return { canRewind: false, error, files: [], insertions: null, deletions: null }
-}
-
 /** Huli: the ids Kettu names a stored message's items by: its API message id and its tool calls. */
 function itemIdsOf(message: StoredMessage): string[] {
   if (message.type !== 'assistant') return []
@@ -383,7 +378,7 @@ function isPrompt(message: StoredMessage): boolean {
 
 /**
  * Huli: where a revert at `point` cuts Claude Code's history: `prompt`, the first user message it
- * takes out, whose uuid is also its file checkpoint, and `keep`, the last message it keeps. The cut
+ * takes out, and `keep`, the last message it keeps. The cut
  * is found after the latest kept item Claude Code has, else before the first removed one. Null
  * when neither is in the history; `prompt` null when nothing of the cut turns is.
  */
@@ -733,7 +728,6 @@ export class ClaudeConnection implements AgentConnection {
         forkSession: true,
         forkAtMessage: true,
         revertTurns: true,
-        rewindFiles: true,
         ownTitles: 'sent',
         logout: true,
         steering: true,
@@ -984,29 +978,6 @@ export class ClaudeConnection implements AgentConnection {
     session.stale = true
     if (session.query) await this.stop(session)
     return { resumeAt: cut.keep }
-  }
-
-  /** Huli: Claude Code's own file rewind to the first user message `point` takes out. */
-  async rewindFiles(sessionId: string, point: RevertPoint, dryRun: boolean): Promise<FileRewind> {
-    const known = this.sessions.get(sessionId)
-    if (!known) throw new AgentRequestError('agent_error', `Session ${sessionId} is not open`)
-    const cut = historyCut(await this.history(sessionId, known.cwd), point)
-    if (!cut?.prompt) return noRewind(t('claude.noFileCheckpoint'))
-    const session = await this.ready(sessionId)
-    const query = session.query
-    if (!query?.rewindFiles) return noRewind(t('claude.noFileCheckpoint'))
-    try {
-      const result = await query.rewindFiles(cut.prompt, { dryRun })
-      return {
-        canRewind: result.canRewind,
-        ...(result.error ? { error: result.error } : {}),
-        files: result.filesChanged ?? [],
-        insertions: result.insertions ?? null,
-        deletions: result.deletions ?? null,
-      }
-    } catch (error) {
-      return noRewind(errorText(error))
-    }
   }
 
   private async history(sessionId: string, cwd: string): Promise<StoredMessage[]> {
@@ -1307,8 +1278,6 @@ export class ClaudeConnection implements AgentConnection {
         : {}),
       extraArgs: { 'replay-user-messages': null },
       ...(hidden ? { persistSession: false } : {}),
-      // Huli: a copy of each file its edit tools change, so a rewind can put the files back.
-      ...(!hidden && !how.quiet ? { enableFileCheckpointing: true } : {}),
       ...(how.from
         ? {
             resume: how.from,

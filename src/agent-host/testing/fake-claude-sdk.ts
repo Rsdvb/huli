@@ -14,7 +14,6 @@ import type {
   PermissionMode,
   Query,
   QueryOptions,
-  RewindFilesResult,
   SdkMessage,
   SessionInfo,
   StoredMessage,
@@ -212,11 +211,6 @@ export class FakeQuery implements Query {
     return { added: Object.keys(servers), removed: [], errors: {} }
   }
 
-  async rewindFiles(userMessageId: string, options?: { dryRun?: boolean }) {
-    this.record('rewindFiles', userMessageId, options ?? {})
-    return this.sdk.rewind
-  }
-
   async generateSessionTitle(description: string, options: { persist: boolean }) {
     this.record('generateSessionTitle', description, options)
     if (this.sdk.titleError) throw this.sdk.titleError
@@ -275,8 +269,6 @@ export class FakeClaudeSdk implements ClaudeSdk {
   /** Each source's own settings `resolveSettings` reports, lowest precedence first. */
   sources: { source: string; settings: Record<string, unknown>; path?: string }[] = []
   generatedTitle: string | null = null
-  /** What a query's `rewindFiles` answers. */
-  rewind: RewindFilesResult = { canRewind: true, filesChanged: [], insertions: 0, deletions: 0 }
   /** What a query's `getTaskOutput` answers. */
   taskOutput = { output: '', total_bytes: 0, truncated: false }
   /** What `backgroundTasks` answers: whether a task was moved. */

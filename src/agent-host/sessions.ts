@@ -9575,15 +9575,11 @@ export class SessionManager {
     return {
       messages: cut.messages,
       conversation,
-      files: await this.rewindFilesPreview(live, cut, own && !!caps?.rewindFiles),
+      files: await this.rewindFilesPreview(live, cut),
     }
   }
 
-  private async rewindFilesPreview(
-    live: Live,
-    cut: RewindCut,
-    agentFiles: boolean,
-  ): Promise<RewindFiles> {
+  private async rewindFilesPreview(live: Live, cut: RewindCut): Promise<RewindFiles> {
     const folders = this.checkpointFolders(live.record)
     const busy = this.busyIn(live, folders)
     if (busy) return { state: 'unavailable', reason: 'busy', detail: busy }
@@ -9593,7 +9589,7 @@ export class SessionManager {
         const preview = await kite.preview(live.id, { entryId: cut.from }, folders)
         if (!preview) return { state: 'unavailable', reason: 'none' }
         if (preview.folders.every((folder) => folder.changes.length === 0)) {
-          return { state: 'unchanged', source: 'kite' }
+          return { state: 'unchanged' }
         }
         let insertions = 0
         let deletions = 0
@@ -9605,7 +9601,6 @@ export class SessionManager {
         }
         return {
           state: 'ready',
-          source: 'kite',
           folders: preview.folders.map((folder) => ({
             folder: folder.folder,
             changes: folder.changes.map((change) => ({
@@ -9623,38 +9618,7 @@ export class SessionManager {
           token: preview.token,
         }
       }
-      if (!agentFiles) return { state: 'unavailable', reason: 'none' }
-      const connection = await this.attachClosed(live)
-      if (!connection.rewindFiles) return { state: 'unavailable', reason: 'none' }
-      const result = await connection.rewindFiles(live.record.acpSessionId, cut.point, true)
-      if (!result.canRewind) {
-        return {
-          state: 'unavailable',
-          reason: 'none',
-          ...(result.error ? { detail: result.error } : {}),
-        }
-      }
-      if (result.files.length === 0) return { state: 'unchanged', source: 'agent' }
-      const cwd = await this.cwdOf(live)
-      return {
-        state: 'ready',
-        source: 'agent',
-        folders: [
-          {
-            folder: cwd,
-            changes: result.files.map((file) => ({
-              path: shownPath(file, cwd, this.deps.platform),
-              action: 'restore',
-              insertions: null,
-              deletions: null,
-            })),
-            kept: 0,
-          },
-        ],
-        insertions: result.insertions,
-        deletions: result.deletions,
-        token: 'agent',
-      }
+      return { state: 'unavailable', reason: 'none' }
     } catch (error) {
       this.deps.diagnostics.log(
         'warn',
@@ -9689,58 +9653,33 @@ export class SessionManager {
   async restoreFiles(sessionId: string, entryId: string, token: string): Promise<FilesRestored> {
     const live = await this.rewindable(sessionId)
     const cut = rewindCut(live.thread, entryId)
-    return this.restoreRewindFiles(
-      live,
-      cut,
-      this.ownHistory(live, cut),
-      this.checkpointFolders(live.record),
-      token,
-    )
+    return this.restoreRewindFiles(live, cut, this.checkpointFolders(live.record), token)
   }
 
   private async restoreRewindFiles(
     live: Live,
     cut: RewindCut,
-    own: boolean,
     folders: string[],
     token: string,
   ): Promise<FilesRestored> {
     const busy = this.busyIn(live, folders)
     if (busy) throw new HostError('conflict', t('session.rewindFolderBusy', { session: busy }))
-    if (token !== 'agent') {
-      const kite = this.deps.fileCheckpoints
-      if (!kite || !(await kite.has(live.id, cut.from, folders))) {
-        throw new HostError('conflict', t('session.rewindNoCheckpoint'))
-      }
-      try {
-        const done = await kite.restore(live.id, { entryId: cut.from }, folders, token)
-        return { restored: done.restored, failed: done.failed.length, backup: done.backup }
-      } catch (error) {
-        if (error instanceof ChangedSincePreview) {
-          throw new HostError('conflict', t('session.rewindFilesChanged'))
-        }
-        throw new HostError(
-          'internal',
-          t('session.rewindFilesFailed', { reason: (error as Error).message }),
-        )
-      }
-    }
-    const runtime = own ? await this.rewindRuntime(live) : null
-    if (!runtime?.init.capabilities.rewindFiles) {
+    const kite = this.deps.fileCheckpoints
+    if (!kite || !(await kite.has(live.id, cut.from, folders))) {
       throw new HostError('conflict', t('session.rewindNoCheckpoint'))
     }
-    let connection: AgentConnection
     try {
-      connection = await this.attachClosed(live)
+      const done = await kite.restore(live.id, { entryId: cut.from }, folders, token)
+      return { restored: done.restored, failed: done.failed.length, backup: done.backup }
     } catch (error) {
-      throw agentError(error)
+      if (error instanceof ChangedSincePreview) {
+        throw new HostError('conflict', t('session.rewindFilesChanged'))
+      }
+      throw new HostError(
+        'internal',
+        t('session.rewindFilesFailed', { reason: (error as Error).message }),
+      )
     }
-    if (!connection.rewindFiles) throw new HostError('conflict', t('session.rewindNoCheckpoint'))
-    const result = await connection.rewindFiles(live.record.acpSessionId, cut.point, false)
-    if (!result.canRewind) {
-      throw new HostError('conflict', result.error ?? t('session.rewindNoCheckpoint'))
-    }
-    return { restored: result.files.length, failed: 0, backup: null }
   }
 
   private async rewindConversation(live: Live, cut: RewindCut, own: boolean): Promise<void> {
@@ -9857,8 +9796,9 @@ export class SessionManager {
   }
 
   /**
-   * Starts the checkpoint of the session's files for the turn's message, for an agent that keeps
-   * none of its own; null when none is taken.
+   * Starts the checkpoint of the session's files for the turn's message, whatever its agent: one's
+   * own checkpoints, as Claude Code's, know only what its edit tools changed. Null when none is
+   * taken.
    */
   private beginCheckpoint(
     live: Live,
@@ -9870,10 +9810,6 @@ export class SessionManager {
     if (!featureOn(this.deps.settings().features, 'fileCheckpoints')) return null
     const entry = live.thread.byId[turn.entryId]
     if (entry?.kind !== 'user' || entry.steered) return null
-    const own =
-      this.deps.agents.runtime(record.agentId)?.init.capabilities.rewindFiles ??
-      harnessOf(record.agentId) === 'claude-code'
-    if (own) return null
     return kite.begin(live.id, turn.entryId, this.checkpointFolders(record))
   }
 
@@ -15347,14 +15283,6 @@ export function rewindCut(thread: Pick<ThreadState, 'order' | 'byId'>, entryId: 
     messages: ids.filter(startsTurn).length,
     keepsAny: before.some(startsTurn),
   }
-}
-
-/** Huli: a file an agent named, relative to the session's folder when it is inside it. */
-function shownPath(file: string, cwd: string, platform: Platform): string {
-  const p = platform === 'win32' ? path.win32 : path.posix
-  const abs = p.isAbsolute(file) ? file : p.join(cwd, file)
-  if (!isInside(abs, cwd, platform)) return abs
-  return p.relative(cwd, abs).split(p.sep).join('/')
 }
 
 /** The ids the agent gave the messages and tool calls of these entries, in their order. */

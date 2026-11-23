@@ -134,9 +134,6 @@ function FilesState({ files }: { files: RewindFiles | null }) {
         )}
       </div>
       {kept > 0 && <p className="text-hint text-tertiary">{t('rewind.kept', { count: kept })}</p>}
-      {files.source === 'agent' && (
-        <p className="text-hint text-tertiary">{t('rewind.agentSource')}</p>
-      )}
     </div>
   )
 }

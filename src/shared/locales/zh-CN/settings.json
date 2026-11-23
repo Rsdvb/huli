@@ -3133,7 +3133,7 @@
       },
       "fileCheckpoints": {
         "name": "回退时还原文件",
-        "description": "每条消息发出时，纸鸢都保存一份会话文件夹里的文件，回退到这条消息时可以一起还原。Claude Code 自己保存，不受这个开关影响。"
+        "description": "每条消息发出时，纸鸢都保存一份会话文件夹里的文件，回退到这条消息时可以一起还原。"
       },
       "agentTheme": {
         "name": "Agent 改主题",

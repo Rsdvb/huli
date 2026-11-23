@@ -542,7 +542,6 @@
     }
   },
   "claude": {
-    "noFileCheckpoint": "Claude Code 没有保存这条消息时的文件",
     "noRevertPoint": "Claude Code 在它的历史里找不到这一轮",
     "mode": {
       "default": {

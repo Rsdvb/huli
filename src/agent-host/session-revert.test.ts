@@ -229,7 +229,6 @@ it('restores the files a message found, refuses a stale preview, and undoes the 
   })
   expect(preview.files).toMatchObject({
     state: 'ready',
-    source: 'kite',
     folders: [{ changes: [{ path: 'notes.md', action: 'restore', insertions: 1, deletions: 1 }] }],
   })
   const token = preview.files.state === 'ready' ? preview.files.token : ''

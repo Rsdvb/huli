@@ -4356,14 +4356,6 @@ describe('Huli: rewinds', () => {
     expect(historyCut(history, { removed: ['msg_9'], kept: ['msg_8'] })).toBeNull()
   })
 
-  it('keeps file checkpoints for the user’s sessions, not for its own', async () => {
-    const s = await setup()
-    await s.connection.newSession('/repo')
-    expect(s.sdk.last.options.enableFileCheckpointing).toBe(true)
-    await s.connection.newSession('/repo', { hidden: 'titles' })
-    expect(s.sdk.last.options).not.toHaveProperty('enableFileCheckpointing')
-  })
-
   it('reopens at the cut, and the next prompt is chained there', async () => {
     const s = await setup()
     const target = new Target()
@@ -4387,36 +4379,6 @@ describe('Huli: rewinds', () => {
     expect(s.sdk.last.options).toMatchObject({ resume: 'old', resumeSessionAt: 'a2' })
     await s.connection.resumeSession('other', '/repo')
     expect(s.sdk.last.options).not.toHaveProperty('resumeSessionAt')
-  })
-
-  it('rewinds the files from the first message the cut takes out', async () => {
-    const s = await setup()
-    const target = new Target()
-    const { sessionId } = await s.connection.newSession('/repo')
-    s.connection.register(sessionId, target)
-    s.sdk.history.set(sessionId, history)
-    s.sdk.rewind = { canRewind: true, filesChanged: ['/repo/a.ts'], insertions: 3, deletions: 1 }
-    const preview = await s.connection.rewindFiles!(
-      sessionId,
-      { removed: ['msg_3', 'msg_4'], kept: ['msg_2'] },
-      true,
-    )
-    expect(preview).toEqual({ canRewind: true, files: ['/repo/a.ts'], insertions: 3, deletions: 1 })
-    expect(s.sdk.last.calls.find((call) => call.method === 'rewindFiles')?.args).toEqual([
-      'u2',
-      { dryRun: true },
-    ])
-    s.sdk.rewind = { canRewind: false, error: 'No file checkpoint found for this message' }
-    const refused = await s.connection.rewindFiles!(
-      sessionId,
-      { removed: ['msg_4'], kept: ['msg_3'] },
-      false,
-    )
-    expect(refused).toMatchObject({ canRewind: false, files: [] })
-    expect(s.sdk.last.calls.filter((call) => call.method === 'rewindFiles').at(-1)?.args).toEqual([
-      'u3',
-      { dryRun: false },
-    ])
   })
 })
 

@@ -249,11 +249,7 @@ export function RewindDialog(props: {
                       还有 {kept} 个改过的文件当时没有保存，会保持现在的样子。
                     </Text>
                   ) : null}
-                  {ready.source === 'agent' ? (
-                    <Text style={[typeScale.footnote, { color: c.textTertiary }]}>
-                      Claude Code 只还原它用编辑工具改过的文件，它用命令改的不会还原。
-                    </Text>
-                  ) : null}
+
                   {restore ? (
                     <Text style={[typeScale.footnote, { color: c.warning }]}>
                       这之后你自己改的内容也会被撤掉。纸鸢会先保存一份现在的文件，还原之后可以撤销。

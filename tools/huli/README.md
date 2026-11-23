@@ -1701,8 +1701,9 @@ cannot cut its history, the busy-folder refusal and the phone.
   the entries go and a new session of the same agent is given the conversation kept with its first
   turn, as a takeover's is (`record.carry.rewound`, a `takeover` entry with `rewound`, shown as
   在新的 X 会话里继续). A cut that keeps nothing starts the next message in a new session.
-- Files: Claude Code's own checkpoints (`enableFileCheckpointing`, `Query.rewindFiles`), which know
-  only what its edit tools changed; for every other agent, Kite's (`src/agent-host/file-checkpoints/`).
+- Files: Kite's own checkpoints (`src/agent-host/file-checkpoints/`), for every agent. Claude Code's
+  (`enableFileCheckpointing`, `Query.rewindFiles`) know only what its edit tools changed, not what
+  its commands did, and a fork, as upstream's cut for an edit makes, starts without them.
   As a turn starts and before its prompt goes, the host lists each of the session's folders (its
   own and its project's further ones): in a repository one `git status` (the paths that differ from
   HEAD, every other one being HEAD's blob), elsewhere a walk that leaves out `node_modules` and the
@@ -1730,8 +1731,8 @@ e-<entry>.json.gz`) names them. Nothing is written into the user's repository or
 - Files: `src/agent-host/file-checkpoints/{git,snapshot,plan,store}.ts` (+ `store.test.ts`), the
   `sessions.rewindPreview`, `sessions.rewind`, `sessions.restoreFiles` and
   `sessions.undoRewindFiles` requests
-  (`shared/agent-host.ts`, `validate.ts`, `host.ts`), `claude/connection.ts` (`revertTurns`,
-  `rewindFiles`), `features/session/entries/rewind-dialog.tsx`, `message-actions.tsx`,
+  (`shared/agent-host.ts`, `validate.ts`, `host.ts`), `claude/connection.ts` (`revertTurns`),
+  `features/session/entries/rewind-dialog.tsx`, `message-actions.tsx`,
   `takeover-entry.tsx`, `rewind` in `locales/*/session.json`, and on the phone
   `components/RewindDialog.tsx`, `UserMessage.tsx` and `app/session/[id].tsx`. Tests: `store.test.ts`
   (round trips on temp folders, refusals, sweeping), `session-revert.test.ts` (Codex),

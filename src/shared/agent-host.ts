@@ -597,7 +597,6 @@ export interface AgentStatus {
     forkSession: boolean
     forkAtMessage: boolean // `session/fork` up to a message, through the adapters' fork point
     revertTurns: boolean // takes the latest turn out of a session's history, as Codex's `thread/revert`
-    rewindFiles?: boolean // Huli: puts the files back from checkpoints of its own, as Claude Code does
     steering: boolean // `_session/steering` into a running turn
     reports: boolean // plan limits from its own report (`/usage`, `/status`)
     context: boolean // what fills the context from its own report (`/context`)
@@ -882,7 +881,7 @@ export interface SessionPullRequest {
 
 /** Huli: one file a rewind would put back, by what it does to the file as it is now. */
 export interface RewindChange {
-  /** Relative to its folder and `/`-separated, or absolute for an agent's own checkpoint. */
+  /** Relative to its folder, `/`-separated. */
   path: string
   action: 'restore' | 'delete' | 'recreate'
   /** Lines the restore adds and removes; null where they were not counted. */
@@ -895,8 +894,6 @@ export interface RewindChange {
 export type RewindFiles =
   | {
       state: 'ready'
-      /** Kite's own checkpoints, or the agent's, which know only the files its edit tools changed. */
-      source: 'kite' | 'agent'
       folders: {
         folder: string
         changes: RewindChange[]
@@ -905,13 +902,12 @@ export type RewindFiles =
         /** No checkpoint of this folder for the message. */
         missing?: boolean
       }[]
-      /** Totals where only they are known, as for the agent's checkpoints. */
       insertions: number | null
       deletions: number | null
       /** Passed back to the rewind, which restores only while the files are as previewed. */
       token: string
     }
-  | { state: 'unchanged'; source: 'kite' | 'agent' }
+  | { state: 'unchanged' }
   | {
       state: 'unavailable'
       /** `none`: no checkpoint for the message; `busy`: another session is at work in the files. */

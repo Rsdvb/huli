@@ -550,7 +550,6 @@
     }
   },
   "claude": {
-    "noFileCheckpoint": "Claude Code kept no copy of the files at this message",
     "noRevertPoint": "Claude Code can't find this turn in its history",
     "mode": {
       "default": {

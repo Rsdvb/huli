@@ -2137,7 +2137,6 @@
     "binary": "Binary",
     "kept_one": "{{count}} more changed file wasn't saved then, so it stays as it is.",
     "kept_other": "{{count}} more changed files weren't saved then, so they stay as they are.",
-    "agentSource": "Claude Code puts back only the files its edit tools changed; what its commands changed stays.",
     "overwrite": "Changes you made yourself since then are undone too. Kite keeps a copy of the files as they are now, so you can undo the restore.",
     "confirmEdit": "Edit from here",
     "confirmRewind": "Rewind",

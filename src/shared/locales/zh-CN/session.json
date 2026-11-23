@@ -2056,7 +2056,6 @@
     "binary": "二进制",
     "kept_one": "还有 {{count}} 个改过的文件当时没有保存，会保持现在的样子。",
     "kept_other": "还有 {{count}} 个改过的文件当时没有保存，会保持现在的样子。",
-    "agentSource": "Claude Code 只还原它用编辑工具改过的文件，它用命令改的不会还原。",
     "overwrite": "这之后你自己改的内容也会被撤掉。纸鸢会先保存一份现在的文件，还原之后可以撤销。",
     "confirmEdit": "从这里重来",
     "confirmRewind": "回退",
