@@ -2228,5 +2228,12 @@
       "team": "团队",
       "organization": "组织"
     }
+  },
+  "zen": {
+    "menu": "工具调用",
+    "followSettings": "跟随设置（{{view}}）",
+    "hidden_other": "{{count}} 个步骤已隐藏",
+    "show": "展开",
+    "findShowsAll": "查找时显示全部步骤。"
   }
 }

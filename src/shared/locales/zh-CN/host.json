@@ -164,7 +164,12 @@
       }
     },
     "backgroundUnsupported": "这个版本的 {{agent}} 不能列出后台进程",
-    "noToBackground": "{{agent}} 不能把任务转到后台"
+    "noToBackground": "{{agent}} 不能把任务转到后台",
+    "tidy": {
+      "noReset": "不知道这个 Agent 的额度什么时候恢复，请改选一个时间。",
+      "snoozeRange": "请选现在之后、一年以内的时间。",
+      "ownOnly": "只有你自己开的会话可以稍后提醒或收起。"
+    }
   },
   "notice": {
     "historyUnavailable": {
@@ -746,7 +751,8 @@
     "unknownTool": "未知工具内容",
     "toolCall": "工具调用",
     "toolReference": "找到工具：{{name}}",
-    "document": "文档：{{name}}"
+    "document": "文档：{{name}}",
+    "sessionRef": "[参考会话「{{name}}」: id {{id}}，用 read_session_history 读取]"
   },
   "antigravity": {
     "plan": {

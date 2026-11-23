@@ -49,6 +49,7 @@ import { showSearch, useViewStore } from '@renderer/stores/view'
 import { usePathRequest } from '@renderer/web/host-path-request'
 import { useKeyboardShortcuts } from './shortcuts'
 import { useActionLog, useAppCommands } from './commands'
+import { useSnoozeAsk } from '@renderer/features/sidebar/tidy'
 import { QuitHint } from './quit-hint'
 
 const SettingsPage = lazy(() => import('@renderer/features/settings/settings-page'))
@@ -65,6 +66,11 @@ const SessionMoveDialog = lazy(() =>
 )
 // What an install of a harness brings, shown before it runs; loaded once an Install first opens it.
 const InstallWindow = lazy(() => import('@renderer/features/settings/install-window'))
+
+// Huli: 稍后提醒 › 自定义…, loaded once first asked for.
+const SnoozeDialog = lazy(() =>
+  import('@renderer/features/sidebar/snooze-dialog').then((m) => ({ default: m.SnoozeDialog })),
+)
 
 export function App() {
   const settingsOpen = useViewStore((s) => s.settings.open)
@@ -88,6 +94,7 @@ export function App() {
   const moveAsked = useMoveStore((s) => s.summary !== null)
   const [moveLoaded, setMoveLoaded] = useState(false)
   if (moveAsked && !moveLoaded) setMoveLoaded(true)
+  const snoozeAsked = useSnoozeAsk((s) => s.asked)
   if (pathAsked && !pathPicker) setPathPicker(true)
   useKeyboardShortcuts()
   useAppCommands()
@@ -169,6 +176,11 @@ export function App() {
         {moveLoaded && (
           <Suspense fallback={null}>
             <SessionMoveDialog />
+          </Suspense>
+        )}
+        {snoozeAsked && (
+          <Suspense fallback={null}>
+            <SnoozeDialog />
           </Suspense>
         )}
         <Toaster />

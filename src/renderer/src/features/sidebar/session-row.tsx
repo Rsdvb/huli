@@ -22,6 +22,7 @@ import {
 } from '@renderer/components/ui/dropdown-menu'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@renderer/components/ui/hover-card'
 import { Glyph } from '@renderer/features/shell/glyph'
+import { backTime } from '@renderer/lib/format'
 import { isMac, isMod } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { awayHosts, isAway, sidebarHosts, useOtherHost } from '@renderer/stores/hosts'
@@ -323,6 +324,17 @@ export const SessionRow = memo(function SessionRow({
           />
         )}
         <RowEnd>
+          {/* Huli: when a snoozed session comes back (会话整理). */}
+          {summary.snooze && (
+            <span
+              title={t(summary.snooze.reset ? 'tidy.backAtReset' : 'tidy.backAt', {
+                time: backTime(summary.snooze.until),
+              })}
+              className="shrink-0 text-[12px] font-normal text-(--faint) tabular-nums"
+            >
+              {backTime(summary.snooze.until)}
+            </span>
+          )}
           {showHost && hostName && (
             <span className="max-w-24 truncate text-[12px] font-normal text-(--faint)">
               {hostName}

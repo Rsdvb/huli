@@ -2,17 +2,22 @@
 // command it starts with, `@` mentions of attached or project files, and links. Chips are only how
 // the text looks; the text is what was sent.
 
+import { shortSessionId } from '../../sessionMentions'
+
 export interface MentionTarget {
-  kind: 'file' | 'folder' | 'image'
+  kind: 'file' | 'folder' | 'image' | 'session'
   /** The attachment it stands for, when one has its name. */
   attachmentId?: string
   /** The path relative to the project, when the project has it. */
   path?: string
+  /** Huli: the session a `@session:<id>` names, and its title as the message carried it. */
+  sessionId?: string
+  name?: string
 }
 
 export type Chip =
   | ({
-      kind: 'file' | 'folder' | 'image'
+      kind: 'file' | 'folder' | 'image' | 'session'
       from: number
       to: number
       label: string
@@ -86,11 +91,13 @@ export function findChips(text: string, resolve: (token: string) => MentionTarge
     if (!found) continue
     const { token, name, lines, target } = found
     const label =
-      target.kind === 'folder'
-        ? name.endsWith('/')
-          ? name
-          : `${name}/`
-        : name.slice(name.lastIndexOf('/') + 1)
+      target.kind === 'session'
+        ? (target.name ?? name)
+        : target.kind === 'folder'
+          ? name.endsWith('/')
+            ? name
+            : `${name}/`
+          : name.slice(name.lastIndexOf('/') + 1)
     chips.push({ ...target, from, to: from + 1 + token.length, label, lines })
   }
   const taken = (from: number, to: number) => chips.some((c) => from < c.to && to > c.from)
@@ -111,8 +118,15 @@ export function findChips(text: string, resolve: (token: string) => MentionTarge
 export function mentionResolver(
   attachments: readonly { id: string; name: string; type: string }[],
   project: { files: ReadonlySet<string>; folders: ReadonlySet<string> } | null,
+  sessions: readonly { id: string; name: string }[] = [],
 ): (token: string) => MentionTarget | null {
   return (token) => {
+    // Huli: another session the message referenced, by the desktop's short id.
+    if (token.startsWith('session:')) {
+      const short = token.slice('session:'.length)
+      const session = sessions.find((s) => shortSessionId(s.id) === short)
+      if (session) return { kind: 'session', sessionId: session.id, name: session.name }
+    }
     const item = attachments.find(
       (a) =>
         a.type !== 'text' &&

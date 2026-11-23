@@ -34,18 +34,16 @@ import { cn } from '@renderer/lib/utils'
 import { useTasksStore } from '@renderer/stores/tasks'
 import { openTask, useViewStore } from '@renderer/stores/view'
 import { updateTask } from './actions'
+import { undoToast } from '@renderer/features/sidebar/undo'
 
-/** Archives with a toast that undoes it. */
+/** Archives with a toast that undoes it for five seconds, as Mod+Z does meanwhile. */
 function archiveTask(task: TaskSummary): void {
   void updateTask(task.id, { archived: true }).then(
     () =>
-      toast(
+      undoToast(
         i18n.t('tasks:menu.archived', { title: task.title }),
-        {
-          label: i18n.t('sidebar:row.undo'),
-          onClick: () => void updateTask(task.id, { archived: false }).catch(() => {}),
-        },
-        { icon: Archive01Icon },
+        () => void updateTask(task.id, { archived: false }).catch(() => {}),
+        Archive01Icon,
       ),
     () => {},
   )

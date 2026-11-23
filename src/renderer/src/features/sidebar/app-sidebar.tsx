@@ -90,6 +90,7 @@ import { SessionRow } from './session-row'
 import { SortableGroup, SortableList } from './sortable-list'
 import { TaskRow } from './task-row'
 import { RunGroupRow } from './run-group-row'
+import { ParkedGroup } from './parked-group'
 
 /**
  * The sidebar's list under its menu, in App Shell's look: Pinned, then No project and the projects
@@ -200,6 +201,8 @@ export function SidebarList() {
                 />
               ))}
             </SortableList>
+            <ParkedGroup kind="snoozed" stop={stop} hosts={hosts} />
+            <ParkedGroup kind="settled" stop={stop} hosts={hosts} />
           </>
         ) : (
           <>
@@ -219,6 +222,8 @@ export function SidebarList() {
               <ProjectList projects={projects} stop={stop} onImport={importSessions} />
             </div>
             <FolderSection hostId={null} at="below" stop={stop} />
+            <ParkedGroup kind="snoozed" stop={stop} />
+            <ParkedGroup kind="settled" stop={stop} />
           </>
         )}
       </div>

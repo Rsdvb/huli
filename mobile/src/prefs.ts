@@ -5,6 +5,7 @@
 import { useSyncExternalStore } from 'react'
 import { Appearance, AppState } from 'react-native'
 import * as SecureStore from 'expo-secure-store'
+import { isToolCallView, type ToolCallView } from '@shared/zen-view'
 
 export type ThemePref = 'system' | 'light' | 'dark'
 
@@ -40,6 +41,8 @@ export interface Prefs {
    * then, when a single one shows open and more fold.
    */
   queueOpen: boolean | null
+  /** Huli: each session's own choice of how much of its agent's work it shows (简洁视图). */
+  threadViews: Record<string, ToolCallView>
 }
 
 export type HomeScope = 'all' | 'one'
@@ -61,6 +64,7 @@ const DEFAULTS: Prefs = {
   homeShowArchived: false,
   homeCollapsed: [],
   queueOpen: null,
+  threadViews: {},
 }
 
 const ITEM = 'huli.prefs'
@@ -96,10 +100,21 @@ function parse(text: string | null): Prefs {
             .slice(0, COLLAPSED_KEPT)
         : [],
       queueOpen: typeof raw.queueOpen === 'boolean' ? raw.queueOpen : null,
+      threadViews: threadViewsOf(raw.threadViews),
     }
   } catch {
     return DEFAULTS
   }
+}
+
+/** The kept choices that read, at most the newest few hundred. */
+function threadViewsOf(value: unknown): Record<string, ToolCallView> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, ToolCallView] => isToolCallView(entry[1]))
+      .slice(-200),
+  )
 }
 
 function applyTheme(theme: ThemePref): void {

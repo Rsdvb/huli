@@ -1126,6 +1126,7 @@ export class AgentHost {
         startMode: (agentId) => startModeIn(this.settings, agentId),
         sendRefusal: (callerId, sessionId) =>
           this.sessions.manager.sendRefusal(callerId, sessionId),
+        referenced: (callerId, sessionId) => this.sessions.referencedBy(callerId, sessionId),
       },
       manager: () => this.sessions.manager,
       log,
@@ -2219,6 +2220,7 @@ export class AgentHost {
     if (JSON.stringify(previous.supervisor) !== JSON.stringify(next.supervisor)) {
       this.sessions.supervisorChanged()
     }
+    if (JSON.stringify(previous.tidy) !== JSON.stringify(next.tidy)) this.sessions.tidyChanged()
     if (previous.workflow.maxWorkingSteps !== next.workflow.maxWorkingSteps) {
       this.tasks.limitChanged()
     }
@@ -2266,6 +2268,7 @@ export class AgentHost {
     }
     if (changed('github') || changed('routines')) void this.githubFlow.refresh()
     if (changed('chatBridge')) this.applyChatBridge()
+    if (changed('sessionTidy')) this.sessions.tidyChanged()
     if (changed('board') || changed('devices')) void this.ownSkillsChanged()
     else if (
       ['manager', 'secrets', 'agentTheme', 'webReader'].some((id) => changed(id as FeatureId))
@@ -4213,6 +4216,10 @@ export class AgentHost {
         return agents.resumeCommand(target.agentId, target, true)
       },
       'sessions.pin': ({ sessionId, pinned }) => sessions.pin(sessionId, pinned),
+      'sessions.snooze': ({ sessionId, until }) => sessions.snooze(sessionId, until),
+      'sessions.settle': ({ sessionId, settled }) => sessions.settle(sessionId, settled),
+      'sessions.setNeverSettle': ({ sessionId, never }) =>
+        sessions.setNeverSettle(sessionId, never),
       'sessions.archive': ({ sessionId, subSessions }) =>
         sessions.archive(sessionId, subSessions ?? true),
       'sessions.unarchive': ({ sessionId }) => sessions.unarchive(sessionId),

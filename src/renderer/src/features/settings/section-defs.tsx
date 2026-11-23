@@ -57,6 +57,8 @@ import { useIdleSessionRows } from './idle-sessions'
 import { useAutoApproveRows } from './auto-approve'
 import { useSandboxRows } from './sandbox'
 import { ResumeAfterLimit, ResumeText, StallMinutesChoice } from './supervisor-rows'
+import { AutoSettle, SettleDaysChoice, SettleMerged } from './tidy-rows'
+import { ToolCallsChoice } from './zen-rows'
 import { IslandSwitch } from './island-row'
 import { useIslandDescription } from './island-state'
 import { useWorkflowRows } from './workflow-settings'
@@ -198,6 +200,9 @@ export function useGeneralSection(): SectionDef {
   })
   const loginItem = useLoginItemStatus()
   const agentHistory = useAgentHistoryRow()
+  // Huli: 会话整理's rules, while Settings > Features has it on.
+  const tidyOn = useEntry('settings.autoSettle')
+  const zenOn = useEntry('settings.zenView')
   const openAtLoginDescription = loginItem
     ? !loginItem.available
       ? t('general.openAtLogin.unavailable')
@@ -283,6 +288,28 @@ export function useGeneralSection(): SectionDef {
         group: sessions,
         render: () => <StallMinutesChoice label={t('general.stallMinutes.name')} />,
       },
+      ...(tidyOn
+        ? [
+            {
+              id: 'auto-settle',
+              setting: 'general.auto-settle',
+              group: sessions,
+              render: () => <AutoSettle label={t('general.autoSettle.name')} />,
+            } satisfies RowDef,
+            {
+              id: 'settle-days',
+              setting: 'general.settle-days',
+              group: sessions,
+              render: () => <SettleDaysChoice label={t('general.settleDays.name')} />,
+            } satisfies RowDef,
+            {
+              id: 'settle-merged',
+              setting: 'general.settle-merged',
+              group: sessions,
+              render: () => <SettleMerged label={t('general.settleMerged.name')} />,
+            } satisfies RowDef,
+          ]
+        : []),
       {
         id: 'background',
         setting: 'general.background',
@@ -307,6 +334,16 @@ export function useGeneralSection(): SectionDef {
         group: thread,
         render: () => <OutlineSummaries label={t('general.outlineSummaries.name')} />,
       },
+      ...(zenOn
+        ? [
+            {
+              id: 'tool-calls',
+              setting: 'general.tool-calls',
+              group: thread,
+              render: () => <ToolCallsChoice label={t('general.toolCalls.name')} />,
+            } satisfies RowDef,
+          ]
+        : []),
       // Huli: the import from the agents is a window's alone; a paired device may not list.
       ...(isWeb ? [] : [agentHistory]),
       {

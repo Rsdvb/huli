@@ -1234,6 +1234,11 @@ function contentRef(value: unknown, at: string): { ref: ContentRef; bytes: numbe
       const name = string(o, 'name', TERMINAL_NAME_CHARS)
       return { ref: { kind: 'device', deviceId, name }, bytes: deviceId.length + name.length }
     }
+    case 'session': {
+      const id = string(o, 'sessionId', ID_CHARS)
+      const name = string(o, 'name', TEXT_CHARS)
+      return { ref: { kind: 'session', sessionId: id, name }, bytes: id.length + name.length }
+    }
     case 'attachment': {
       // Only the id counts: the host takes everything else from its own record.
       const id = string(fields(o.attachment), 'id', ID_CHARS)
@@ -1241,7 +1246,7 @@ function contentRef(value: unknown, at: string): { ref: ContentRef; bytes: numbe
     }
     default:
       throw invalidParams(
-        `${at}: a prompt can carry images, links, terminals, tabs, devices and attachments only`,
+        `${at}: a prompt can carry images, links, terminals, tabs, devices, sessions and attachments only`,
       )
   }
 }
@@ -2593,6 +2598,26 @@ export function createValidators(platform: Platform): Validators {
     'sessions.pin': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), pinned: flag(o, 'pinned') }
+    },
+    'sessions.snooze': (params) => {
+      const o = fields(params)
+      const until = o.until
+      if (
+        until !== null &&
+        until !== 'reset' &&
+        !(typeof until === 'number' && Number.isSafeInteger(until) && until > 0)
+      ) {
+        throw invalidParams('until must be a time in ms, "reset" or null')
+      }
+      return { sessionId: sessionId(o), until }
+    },
+    'sessions.settle': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), settled: flag(o, 'settled') }
+    },
+    'sessions.setNeverSettle': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), never: flag(o, 'never') }
     },
     'sessions.archive': (params) => {
       const o = fields(params)

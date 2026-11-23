@@ -40,6 +40,9 @@ import { itemAtTop, leaveThread, readingPosition, type ReadingPosition } from '.
 import { RecapLine } from './recap/recap-line'
 import { playEntrance } from './thread-entrance'
 import { TurnStatus } from './turn-status'
+import { HiddenSteps } from './hidden-steps'
+import { zenItems, zenSignatureOf } from './zen-items'
+import { useToolCallView } from '@renderer/stores/thread-view'
 import {
   buildItems,
   estimateOf,
@@ -313,9 +316,14 @@ const isSent = (item: Item): boolean =>
 
 const isText = (item: Item): boolean => item.type === 'entry' && item.char === 'a'
 
-/** A folded line of work: a run, a group of lookups or an answered request. */
+/** A folded line of work: a run, a group of lookups, an answered request or hidden steps. */
 const isRow = (item: Item): boolean =>
-  item.type === 'run' || item.type === 'group' || (item.type === 'entry' && item.char === 'r')
+  item.type === 'run' ||
+  item.type === 'group' ||
+  item.type === 'hidden' ||
+  (item.type === 'entry' && item.char === 'r')
+
+const NO_TURNS: ReadonlySet<string> = new Set()
 
 /**
  * The thread's rhythm, as affectUI's chat screen sets it: 22 px between a message you sent and
@@ -355,7 +363,24 @@ export const Thread = memo(function Thread({
     () => withoutHidden(allOrder ?? [], allSignature),
     [allOrder, allSignature],
   )
-  const items = useMemo(() => buildItems(order, signature, working), [order, signature, working])
+  const built = useMemo(() => buildItems(order, signature, working), [order, signature, working])
+  // Huli: the 简洁视图, a view of the built items; Find shows every step while it is open.
+  const [findOpen, setFindOpen] = useState(false)
+  const chosenView = useToolCallView(sessionId)
+  const view = findOpen ? 'all' : chosenView
+  const zen = useThreadsStore((s) =>
+    view === 'all' ? '' : zenSignatureOf(s.replicas[sessionId]?.state),
+  )
+  const [openTurns, setOpenTurns] = useState<ReadonlySet<string>>(NO_TURNS)
+  const zenned = useMemo(
+    () => zenItems(built, order, zen, view, openTurns),
+    [built, order, zen, view, openTurns],
+  )
+  const items = zenned.items
+  const openTurn = useCallback(
+    (turn: string) => setOpenTurns((open) => new Set(open).add(turn)),
+    [],
+  )
   const statusLast = useMemo(() => items.at(-1)?.type === 'status', [items])
   const replies = useMemo(() => replyKeys(items), [items])
   // Another session's footer may share a key, so a switch made from the keyboard starts clear.
@@ -392,7 +417,12 @@ export const Thread = memo(function Thread({
     const waiting = revealing.current
     if (!waiting) return
     const index = items.findIndex((item) => item.key === waiting.key)
-    if (index < 0) return
+    if (index < 0) {
+      // Huli: one the 简洁视图 hides opens its turn, and is found once that renders.
+      const turn = zenned.turnOf.get(waiting.key)
+      if (turn) openTurn(turn)
+      return
+    }
     if (shownFrom > index) {
       revealFrom(index)
       return
@@ -567,6 +597,8 @@ export const Thread = memo(function Thread({
                 >
                   {item.type === 'status' ? (
                     <TurnStatus sessionId={sessionId} afterSent={item.afterSent} />
+                  ) : item.type === 'hidden' ? (
+                    <HiddenSteps count={item.count} onShow={() => openTurn(item.turn)} />
                   ) : item.type === 'reply' ? (
                     <ReplyFooter
                       replyKey={item.key}
@@ -635,6 +667,7 @@ export const Thread = memo(function Thread({
           viewport={viewport}
           content={content}
           jumps={jumps}
+          onOpenChange={setFindOpen}
         />
       </MessageScroller>
       {returnTo && (returnShown || returnLost) && (

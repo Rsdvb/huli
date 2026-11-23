@@ -1348,6 +1348,9 @@ export type ContentRef =
   | { kind: 'terminal'; terminalId: string; name: string }
   | { kind: 'page'; tabId: string; name: string }
   | { kind: 'device'; deviceId: string; name: string }
+  // Huli: another session of the user's they referenced (@ in the composer), which the agent reads
+  // with read_session_history; `name` its title then.
+  | { kind: 'session'; sessionId: string; name: string }
   | { kind: 'unsupported'; label: string }
 
 export interface Attachment {
@@ -1781,6 +1784,8 @@ function isContentRef(value: unknown): value is ContentRef {
       return typeof value.tabId === 'string' && typeof value.name === 'string'
     case 'device':
       return typeof value.deviceId === 'string' && typeof value.name === 'string'
+    case 'session':
+      return typeof value.sessionId === 'string' && typeof value.name === 'string'
     case 'attachment':
       return isAttachment(value.attachment)
     case 'unsupported':

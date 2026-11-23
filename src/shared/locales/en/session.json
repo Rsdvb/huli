@@ -2322,5 +2322,13 @@
       "team": "Team",
       "organization": "Organization"
     }
+  },
+  "zen": {
+    "menu": "Tool calls",
+    "followSettings": "As in Settings ({{view}})",
+    "hidden_one": "{{count}} step hidden",
+    "hidden_other": "{{count}} steps hidden",
+    "show": "Show",
+    "findShowsAll": "Find shows every step while it is open."
   }
 }

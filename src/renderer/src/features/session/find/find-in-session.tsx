@@ -80,11 +80,14 @@ export function FindInSession({
   viewport,
   content,
   jumps,
+  onOpenChange,
 }: {
   sessionId: string
   viewport: RefObject<HTMLDivElement | null>
   content: RefObject<HTMLDivElement | null>
   jumps: ThreadJumps
+  /** Huli: the bar opened or closed, while which the thread shows every step. */
+  onOpenChange?: (open: boolean) => void
 }) {
   const { t } = useTranslation('session')
   const focused = usePaneFocused()
@@ -106,6 +109,7 @@ export function FindInSession({
   // What the last request was for, to tell a new query from the same one asked again.
   const asked = useRef({ text: '', version: 0 })
   const current = useRef<string | null>(null)
+  useEffect(() => onOpenChange?.(open), [open, onOpenChange])
 
   const words = useMemo(() => queryWords(query.trim()), [query])
   const ready = longEnough(words)

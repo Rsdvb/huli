@@ -119,6 +119,13 @@ export const FEATURES = [
     entries: ['rewind.files', 'phone.rewindFiles'],
     methods: ['sessions.restoreFiles', 'sessions.undoRewindFiles'],
   },
+  {
+    id: 'sessionTidy',
+    entries: ['sidebar.parked', 'sessionMenu.snooze', 'settings.autoSettle', 'phone.snooze'],
+    methods: ['sessions.snooze', 'sessions.settle', 'sessions.setNeverSettle'],
+  },
+  { id: 'sessionMentions', entries: ['composer.sessionMention', 'phone.sessionMention'] },
+  { id: 'zenView', entries: ['session.zenView', 'settings.zenView', 'phone.zenView'] },
   { id: 'secrets', entries: [], toolGroups: ['secrets'] },
   { id: 'agentTheme', entries: [], toolGroups: ['theme'] },
   // Turning it on downloads Moli; Settings › Browser shows it and removes it again.

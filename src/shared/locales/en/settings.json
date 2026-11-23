@@ -182,6 +182,31 @@
       "thread": "Thread",
       "startup": "Startup",
       "cloud": "Kettu cloud"
+    },
+    "autoSettle": {
+      "name": "Settle idle sessions",
+      "description": "Sessions nobody has touched for a while move to Settled at the foot of the sidebar. Pinned sessions, ones at work and ones set to Never settle stay.",
+      "keywords": "settle idle tidy clean up hide old sessions archive auto"
+    },
+    "settleDays": {
+      "name": "Settle after",
+      "description": "How long a session sits idle before it settles.",
+      "keywords": "settle idle days inactive",
+      "after_one": "{{count}} day idle",
+      "after_other": "{{count}} days idle"
+    },
+    "settleMerged": {
+      "name": "Settle when the pull request merges",
+      "description": "A session whose pull request merged settles after an hour of quiet.",
+      "keywords": "settle merged pull request pr"
+    },
+    "toolCalls": {
+      "name": "Tool calls in the thread",
+      "description": "What a session shows of its agent's work, unless you chose otherwise in its menu. Requests, questions and errors always show.",
+      "keywords": "tool calls hide zen concise conclusions steps compact quiet",
+      "all": "Show all",
+      "hideSuccessful": "Hide successful tool calls",
+      "conclusions": "Conclusions only"
     }
   },
   "appearance": {
@@ -3327,6 +3352,18 @@
       "webReader": {
         "name": "Background web reading (Moli)",
         "description": "When an agent’s own fetch cannot read a page that needs JavaScript, it reads the page in the background with Moli, a headless browser. Turning it on downloads Moli (about 42 MB) from GitHub."
+      },
+      "sessionTidy": {
+        "name": "Snooze and settle",
+        "description": "Snooze a session until later; it comes back then, or sooner if it needs you. Idle sessions and ones whose pull request merged settle out of the list by themselves."
+      },
+      "sessionMentions": {
+        "name": "Mention a session",
+        "description": "Type @ in the composer, or drag a session's row onto it, to point the agent at another session; it reads that session's history only when it needs to."
+      },
+      "zenView": {
+        "name": "Concise thread",
+        "description": "Hide tool calls that went well, or show only your messages and the agent's final replies, for each session or by default. Requests and questions always show."
       }
     }
   },

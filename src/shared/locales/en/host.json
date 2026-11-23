@@ -164,7 +164,12 @@
       }
     },
     "backgroundUnsupported": "This version of {{agent}} cannot list its background processes",
-    "noToBackground": "{{agent}} cannot move a task to the background"
+    "noToBackground": "{{agent}} cannot move a task to the background",
+    "tidy": {
+      "noReset": "Kite doesn't know when this agent's plan resets, so pick a time instead.",
+      "snoozeRange": "Pick a time after now and within a year.",
+      "ownOnly": "Only a session you started yourself can be snoozed or settled."
+    }
   },
   "notice": {
     "historyUnavailable": {
@@ -754,7 +759,8 @@
     "unknownTool": "Unknown tool content",
     "toolCall": "Tool call",
     "toolReference": "Found tool: {{name}}",
-    "document": "Document: {{name}}"
+    "document": "Document: {{name}}",
+    "sessionRef": "[Session \"{{name}}\" for reference: id {{id}}, read it with read_session_history]"
   },
   "antigravity": {
     "plan": {

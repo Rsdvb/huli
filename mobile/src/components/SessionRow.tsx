@@ -9,6 +9,7 @@ import Svg, { Circle } from 'react-native-svg'
 import { Bot } from 'lucide-react-native'
 import type { PlanProgress, SessionPullRequest, SessionSummary } from '@shared/agent-host'
 import { folder, listTime, sessionState, sessionTitle, type SessionState } from '../sessions'
+import { backText } from '../tidy'
 import { sessionPullRequests, topPrState } from '../sessionMenu'
 import { SubagentMenu } from './SubagentMenu'
 import { PR_STATE_TEXT, PrMark } from '../ui/session/gitIcons'
@@ -302,7 +303,8 @@ export const SessionRow = memo(function SessionRow(props: {
             <RunningTime since={since} />
           ) : (
             <Text style={[typeScale.subhead, styles.time, { color: c.textTertiary }]}>
-              {listTime(props.time ?? s.updatedAt)}
+              {/* Huli: a snoozed session says when it comes back (会话整理). */}
+              {backText(s) ?? listTime(props.time ?? s.updatedAt)}
             </Text>
           )}
         </View>

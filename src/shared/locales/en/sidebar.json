@@ -578,5 +578,49 @@
     "workspace": "Workspace",
     "worktrees": "Worktrees are off while the project has several folders: one would set apart only the project folder.",
     "done": "Done"
+  },
+  "tidy": {
+    "snooze": "Snooze",
+    "snoozeFor": "Snooze until…",
+    "presets": {
+      "hour": "In an hour",
+      "tonight": "Tonight",
+      "tomorrow": "Tomorrow morning",
+      "monday": "Next Monday"
+    },
+    "reset": "When the plan resets",
+    "resetUnknown": "Plan isn't used up",
+    "custom": "Pick a time…",
+    "wake": "Wake now",
+    "settle": "Settle",
+    "settleCount_one": "Settle {{count}} session",
+    "settleCount_other": "Settle {{count}} sessions",
+    "unsettle": "Back to the list",
+    "neverSettle": "Never settle",
+    "snoozed": "Snoozed “{{title}}” until {{time}}",
+    "snoozedReset": "Snoozed “{{title}}” until the plan resets",
+    "snoozedCount_one": "Snoozed {{count}} session",
+    "snoozedCount_other": "Snoozed {{count}} sessions",
+    "settled": "Settled “{{title}}”",
+    "settledCount_one": "Settled {{count}} session",
+    "settledCount_other": "Settled {{count}} sessions",
+    "snoozedGroup": "Snoozed",
+    "settledGroup": "Settled",
+    "backAt": "Back {{time}}",
+    "backAtReset": "Back when the plan resets, {{time}}",
+    "settledAt": "Settled {{time}}",
+    "settledBy": {
+      "user": "by you",
+      "idle": "idle",
+      "merged": "pull request merged"
+    },
+    "dialog": {
+      "title": "Snooze until",
+      "description": "It leaves the list until then, and comes back sooner if it needs you.",
+      "time": "Time",
+      "when": "Back {{time}}",
+      "past": "Pick a time after now.",
+      "snooze": "Snooze"
+    }
   }
 }

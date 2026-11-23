@@ -2,13 +2,21 @@ import { create } from 'zustand'
 import type { NoProject, Project, SessionSummary } from '@shared/agent-host'
 import type { TaskSummary } from '@shared/workflow'
 import type { SessionGroupRef } from '@shared/run-groups'
+import { isParked } from '@shared/session-tidy'
 import { entryShown } from '@renderer/lib/features'
 import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { i18n } from '@renderer/lib/i18n'
 import { noProjectPinned, pinnedFolders, type PinnedFolder } from './projects'
 import { listedTasks, needingTasks, pinnedTasks, startedSteps, taskExpanded } from './tasks'
-import { NO_PROJECT_GROUP, PINNED_GROUP, THIS_COMPUTER, type MainView } from './view'
+import {
+  NO_PROJECT_GROUP,
+  PINNED_GROUP,
+  SETTLED_GROUP,
+  SNOOZED_GROUP,
+  THIS_COMPUTER,
+  type MainView,
+} from './view'
 
 interface SessionsStore {
   byId: Record<string, SessionSummary>
@@ -211,7 +219,7 @@ export function sessionTree(
       (projectPath === null
         ? s.scratch && hostOfSession(s) === hostId
         : s.projectPath === projectPath),
-    (s) => !s.pinnedAt && !s.archivedAt,
+    (s) => !s.pinnedAt && !s.archivedAt && !isParked(s),
   ).sort((a, b) => b.summary.updatedAt - a.summary.updatedAt)
 }
 
@@ -220,8 +228,65 @@ export function pinnedTree(byId: Record<string, SessionSummary>): SessionNode[] 
   return buildTree(
     byId,
     (s) => listedOrigin(s),
-    (s) => !!s.pinnedAt && !s.archivedAt,
+    (s) => !!s.pinnedAt && !s.archivedAt && !isParked(s),
   ).sort((a, b) => (a.summary.pinnedAt ?? 0) - (b.summary.pinnedAt ?? 0))
+}
+
+/** Huli: which of the two groups out of the active list a session sits in (会话整理). */
+export type ParkedKind = 'snoozed' | 'settled'
+
+export function parkedKind(s: Pick<SessionSummary, 'snooze' | 'settled'>): ParkedKind | null {
+  return s.snooze ? 'snoozed' : s.settled ? 'settled' : null
+}
+
+/**
+ * Huli: the snoozed sessions across the projects as trees, the soonest back first, or the settled
+ * ones, the latest settled first.
+ */
+export function parkedTree(byId: Record<string, SessionSummary>, kind: ParkedKind): SessionNode[] {
+  return buildTree(
+    byId,
+    (s) => listedOrigin(s),
+    (s) => !s.archivedAt && parkedKind(s) === kind,
+  ).sort((a, b) =>
+    kind === 'snoozed'
+      ? (a.summary.snooze?.until ?? 0) - (b.summary.snooze?.until ?? 0)
+      : (b.summary.settled?.at ?? 0) - (a.summary.settled?.at ?? 0),
+  )
+}
+
+/** Huli: whether the session sits in a parked group, at the top of its tree or under it. */
+export function inParkedTree(
+  byId: Record<string, SessionSummary>,
+  s: SessionSummary,
+  kind: ParkedKind,
+): boolean {
+  let root = s
+  while (root.parentId && byId[root.parentId]) root = byId[root.parentId]!
+  return !root.archivedAt && parkedKind(root) === kind
+}
+
+/** Huli: a parked group's rows in its order, as the group sorts its trees. */
+export const byParked =
+  (kind: ParkedKind) =>
+  (row: SidebarRow): number => {
+    const of = (s: SessionSummary) =>
+      kind === 'snoozed' ? (s.snooze?.until ?? 0) : -(s.settled?.at ?? 0)
+    return row.kind === 'session'
+      ? of(row.node.summary)
+      : row.kind === 'group'
+        ? Math.min(...row.runs.map((run) => of(run.summary)))
+        : 0
+  }
+
+/** Huli: whether a parked group is open: Snoozed unless the user closed it, Settled once opened. */
+export function parkedOpen(
+  view: Pick<SidebarView, 'collapsedProjects' | 'expandedParents'>,
+  kind: ParkedKind,
+): boolean {
+  return kind === 'snoozed'
+    ? !view.collapsedProjects[SNOOZED_GROUP]
+    : view.expandedParents[SETTLED_GROUP] === true
 }
 
 /**
@@ -259,7 +324,7 @@ export function liveTree(byId: Record<string, SessionSummary>): SessionNode[] {
 export function inPinnedTree(byId: Record<string, SessionSummary>, s: SessionSummary): boolean {
   let root = s
   while (root.parentId && byId[root.parentId]) root = byId[root.parentId]!
-  return !!root.pinnedAt && !root.archivedAt
+  return !!root.pinnedAt && !root.archivedAt && !isParked(root)
 }
 
 /**
@@ -631,6 +696,12 @@ export function visibleOrder(
               .filter((p) => p.pinnedAt == null && hostOfPath(p.path) === hostId)
               .flatMap(projectRows),
           ],
+    ),
+    // Huli: the snoozed and settled sessions, below every host's.
+    ...(['snoozed', 'settled'] as const).flatMap((kind) =>
+      parkedOpen(view, kind)
+        ? flatten(sidebarRows(parkedTree(byId, kind).filter(shown), [], byParked(kind)))
+        : [],
     ),
   ]
   // A row Needs you lists is listed in its project as well; the keys visit it once.

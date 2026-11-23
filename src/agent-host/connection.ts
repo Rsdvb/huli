@@ -1,6 +1,7 @@
 // A connection to a running agent, whatever protocol it speaks, and the Kettu types that cross
 // it. The session, agent and report code use only this; each protocol's driver implements it.
 
+import { t } from './i18n'
 import type {
   AgentAccount,
   ContextBreakdown,
@@ -376,6 +377,8 @@ export function promptBlocks(content: readonly UserContent[]): PromptBlock[] {
         return { type: 'text', text: pageNotice(ref.name) }
       case 'device':
         return { type: 'text', text: deviceNotice(ref.deviceId, ref.name) }
+      case 'session':
+        return { type: 'text', text: sessionNotice(ref.sessionId, ref.name) }
       // The host turns attachments into images and links before a prompt goes; never reached.
       case 'attachment':
         return { type: 'text', text: ref.attachment.name }
@@ -402,6 +405,14 @@ export function pageNotice(title: string): string {
 /** What the agent reads where the user referenced a mobile device of the session. */
 export function deviceNotice(deviceId: string, name: string): string {
   return `[The user shares the device "${name}" with you, id ${deviceId}: use it with the device tools.]`
+}
+
+/**
+ * Huli: what the agent reads where the user referenced another of their sessions: only its id, as
+ * the history tool reads the session when the agent needs it, in the language of the host.
+ */
+export function sessionNotice(sessionId: string, name: string): string {
+  return t('content.sessionRef', { name, id: sessionId })
 }
 
 /** A message of the conversation before an agent took a session over, as it is carried to it. */

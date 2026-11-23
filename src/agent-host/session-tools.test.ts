@@ -219,3 +219,46 @@ describe('set_board_status', () => {
     expect(off.setBoard).not.toHaveBeenCalled()
   })
 })
+
+// Huli: a session the user referenced in a message to the caller (@ in the composer).
+describe('read_session_history of a referenced session', () => {
+  function history(refs: Record<string, string[]>) {
+    const elsewhere = { ...session('elsewhere', null), projectPath: '/other' }
+    const sessions = [session('starter', null), session('other', null), elsewhere]
+    const read = vi.fn<SessionToolsDeps['history']>(async () => [
+      { number: 1, agentId: 'codex', user: 'fix it', assistant: 'fixed' },
+    ])
+    const deps = {
+      info: (id: string) => sessions.find((item) => item.id === id) ?? null,
+      history: read,
+      agentLabel: () => 'Codex',
+      referenced: (callerId: string, id: string) => refs[callerId]?.includes(id) ?? false,
+    } as unknown as SessionToolsDeps
+    return { tools: new SessionTools(deps), read }
+  }
+
+  it('reads a referenced session, in another project too', async () => {
+    const { tools: t, read } = history({ starter: ['other', 'elsewhere'] })
+    for (const id of ['other', 'elsewhere']) {
+      const out = await t.call(caller, 'read_session_history', { id })
+      expect(out.isError).toBeUndefined()
+      expect(read).toHaveBeenLastCalledWith(id)
+    }
+  })
+
+  it('refuses one the user referenced to another session, or never', async () => {
+    const { tools: t, read } = history({ someone: ['other', 'elsewhere'] })
+    const same = await t.call(caller, 'read_session_history', { id: 'other' })
+    expect(same.isError).toBe(true)
+    const away = await t.call(caller, 'read_session_history', { id: 'elsewhere' })
+    expect(away.isError).toBe(true)
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('says not found for a referenced session that is gone', async () => {
+    const { tools: t, read } = history({ starter: ['gone'] })
+    const out = await t.call(caller, 'read_session_history', { id: 'gone' })
+    expect(out.isError).toBe(true)
+    expect(read).not.toHaveBeenCalled()
+  })
+})

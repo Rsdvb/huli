@@ -25,6 +25,8 @@ import {
 import { AUTO_APPROVE_LEVELS } from './risk'
 import { SANDBOX_NETWORKS, SANDBOX_TIERS } from './sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from './supervisor'
+import { SETTLE_DAYS } from './session-tidy'
+import { TOOL_CALL_VIEWS } from './zen-view'
 import type { AgentId, HarnessId } from './thread'
 import { PORT_BASE_MAX, PORT_BASE_MIN } from './worktree-ports'
 import { WORKING_STEP_LIMITS } from './workflow'
@@ -251,6 +253,9 @@ export const FEATURE_GROUP: Readonly<Record<FeatureId, FeatureGroup>> = {
   routines: 'work',
   github: 'work',
   fileCheckpoints: 'work',
+  sessionTidy: 'work',
+  sessionMentions: 'work',
+  zenView: 'work',
   sandbox: 'agents',
   devices: 'agents',
   secrets: 'agents',
@@ -434,6 +439,23 @@ const ENTRIES = {
     part: 'desktop',
     access: 'change',
     ...flag('thread', 'outlineSummaries', (file) => file.thread.outlineSummaries),
+  },
+  'general.tool-calls': {
+    section: 'general',
+    row: 'tool-calls',
+    group: 'general.groups.thread',
+    name: 'general.toolCalls.name',
+    description: 'general.toolCalls.description',
+    keywords: 'general.toolCalls.keywords',
+    part: 'desktop',
+    access: 'change',
+    feature: 'zenView',
+    ...pick(
+      'thread',
+      'toolCalls',
+      (file) => file.thread.toolCalls,
+      choices(TOOL_CALL_VIEWS, (view) => `general.toolCalls.${view}`),
+    ),
   },
   'general.open-at-login': {
     section: 'general',
@@ -2104,6 +2126,50 @@ const ENTRIES = {
             : { key: 'general.stallMinutes.after', params: { count: String(minutes) } },
       })),
     ),
+  },
+  'general.auto-settle': {
+    section: 'general',
+    row: 'auto-settle',
+    group: 'general.groups.sessions',
+    name: 'general.autoSettle.name',
+    description: 'general.autoSettle.description',
+    keywords: 'general.autoSettle.keywords',
+    part: 'host',
+    access: 'change',
+    feature: 'sessionTidy',
+    ...flag('tidy', 'autoSettle', (file) => file.tidy.autoSettle),
+  },
+  'general.settle-days': {
+    section: 'general',
+    row: 'settle-days',
+    group: 'general.groups.sessions',
+    name: 'general.settleDays.name',
+    description: 'general.settleDays.description',
+    keywords: 'general.settleDays.keywords',
+    part: 'host',
+    access: 'change',
+    feature: 'sessionTidy',
+    ...pick(
+      'tidy',
+      'idleDays',
+      (file) => file.tidy.idleDays,
+      SETTLE_DAYS.map((days) => ({
+        value: days,
+        label: { key: 'general.settleDays.after', params: { count: String(days) } },
+      })),
+    ),
+  },
+  'general.settle-merged': {
+    section: 'general',
+    row: 'settle-merged',
+    group: 'general.groups.sessions',
+    name: 'general.settleMerged.name',
+    description: 'general.settleMerged.description',
+    keywords: 'general.settleMerged.keywords',
+    part: 'host',
+    access: 'change',
+    feature: 'sessionTidy',
+    ...flag('tidy', 'merged', (file) => file.tidy.merged),
   },
   'account.huli-this-computer': {
     section: 'account',

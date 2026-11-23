@@ -1,8 +1,9 @@
 // The rows of the home list, from the sessions of one computer or of all of them: 需要你处理, 正在
 // 运行 and 置顶 first, then the user's folders and the projects as groups that fold and show their
 // latest few (按项目分组), or one list by time (按时间). A session shows once, in the first part that
-// takes it. Runs of one best-of-N group (同时交给几个 Agent) are one row, where their loudest run
-// would be, that opens to the runs. Pure, so the screen only renders what this returns.
+// takes it; snoozed and settled ones show last, in 已推迟 and 已收起. Runs of one best-of-N group
+// (同时交给几个 Agent) are one row, where their loudest run would be, that opens to the runs. Pure,
+// so the screen only renders what this returns.
 
 import type { SessionSummary } from '@shared/agent-host'
 import type { SessionGroupRef } from '@shared/run-groups'
@@ -10,6 +11,7 @@ import { shownFolders, type SessionFolder } from '@shared/session-folders'
 import type { TaskSummary } from '@shared/workflow'
 import type { HomeGrouping } from './prefs'
 import { folder as folderName, listOrder, needsYou } from './sessions'
+import { parked } from './tidy'
 
 /** A session with the computer it is on. */
 export interface Placed {
@@ -157,7 +159,38 @@ export function homeItems(input: HomeInput): HomeItem[] {
     for (const p of list) taken.add(placedKey(p))
     return list
   }
-  const live = sessions.filter((p) => p.session.archivedAt === null)
+  // Huli: snoozed and settled sessions leave every part above for their own at the end (会话整理).
+  const snoozed = take(
+    sessions
+      .filter((p) => parked(p.session) === 'snoozed')
+      .sort((a, b) => (a.session.snooze?.until ?? 0) - (b.session.snooze?.until ?? 0)),
+  )
+  const settled = take(
+    sessions
+      .filter((p) => parked(p.session) === 'settled')
+      .sort((a, b) => (b.session.settled?.at ?? 0) - (a.session.settled?.at ?? 0)),
+  )
+  const pushParked = () => {
+    if (snoozed.length > 0) {
+      out.push({ kind: 'section', key: '__snoozed', title: '已推迟', count: snoozed.length })
+      for (const p of snoozed) out.push(...sessionItems(p))
+    }
+    if (settled.length > 0) {
+      out.push({ kind: 'section', key: '__settled', title: '已收起', count: settled.length })
+      const shown = input.expanded.has('__settled') ? settled : settled.slice(0, GROUP_PREVIEW)
+      for (const p of shown) out.push(...sessionItems(p))
+      if (settled.length > shown.length) {
+        out.push({
+          kind: 'more',
+          key: 'more:__settled',
+          group: '__settled',
+          hidden: settled.length - shown.length,
+          total: settled.length,
+        })
+      }
+    }
+  }
+  const live = sessions.filter((p) => p.session.archivedAt === null && !parked(p.session))
 
   const needing = take(live.filter(ownWait).sort(byOrder))
   if (needing.length + input.tasks.length > 0) {
@@ -199,6 +232,7 @@ export function homeItems(input: HomeInput): HomeItem[] {
       out.push({ kind: 'section', key: '__recent', title: '最近', count: list.length })
       for (const p of list) out.push(...sessionItems(p))
     }
+    pushParked()
     return out
   }
 
@@ -301,5 +335,6 @@ export function homeItems(input: HomeInput): HomeItem[] {
       )
     }
   }
+  pushParked()
   return out
 }
