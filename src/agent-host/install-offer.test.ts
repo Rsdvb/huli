@@ -31,13 +31,13 @@ const NODE: NodeProbe = {
   npmPath: '/usr/bin/npm',
 }
 
+// The global prefix comes from `npm prefix -g`, beside what `npm config get` printed.
 const NPM_CONFIG = parseNpmConfig(
-  [
-    'registry=https://registry.npmjs.org/',
-    'prefix=/usr/local',
-    '@moonshot-ai:registry=https://npm.example.com/',
-  ].join('\n'),
-)
+  ['registry=https://registry.npmjs.org/', '@moonshot-ai:registry=https://npm.example.com/'].join(
+    '\n',
+  ),
+  ['registry', '@moonshot-ai:registry'],
+).set('prefix', '/usr/local')
 
 function input(over: Partial<OfferInput> & Pick<OfferInput, 'def'>): OfferInput {
   return {
@@ -296,22 +296,27 @@ describe('a uvx harness', () => {
 })
 
 describe("npm's configuration", () => {
-  it("asks for the registry, the global prefix and each scoped package's registry", () => {
+  // npm 11 refuses `npm config get prefix` ("The prefix option is protected").
+  it("asks for the registry and each scoped package's registry, never the prefix", () => {
     expect(npmConfigKeys(['@moonshot-ai/kimi-code', 'cline', '@moonshot-ai/kimi-code'])).toEqual([
       'registry',
-      'prefix',
       '@moonshot-ai:registry',
     ])
   })
 
   it('reads the lines npm prints, leaving out what is not set', () => {
     const config = parseNpmConfig(
-      'registry=https://registry.npmjs.org/\r\nprefix=C:\\Users\\me\\AppData\\Roaming\\npm\n@google:registry=undefined\n',
+      'registry=https://registry.npmjs.org/\r\n@google:registry=undefined\n',
+      ['registry', '@google:registry'],
     )
-    expect([...config]).toEqual([
-      ['registry', 'https://registry.npmjs.org/'],
-      ['prefix', 'C:\\Users\\me\\AppData\\Roaming\\npm'],
+    expect([...config]).toEqual([['registry', 'https://registry.npmjs.org/']])
+  })
+
+  it('reads the value alone that npm prints for one key', () => {
+    expect([...parseNpmConfig('https://registry.npmmirror.com/\r\n', ['registry'])]).toEqual([
+      ['registry', 'https://registry.npmmirror.com/'],
     ])
+    expect([...parseNpmConfig('undefined\n', ['registry'])]).toEqual([])
   })
 })
 

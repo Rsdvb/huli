@@ -3696,7 +3696,10 @@ export class AgentManager {
     })
   }
 
-  /** `npm config get` of these keys, asked once until the next redetect; null when npm fails. */
+  /**
+   * `npm config get` of these keys, with the global prefix as `npm prefix -g` says it, asked once
+   * until the next redetect; null when npm fails.
+   */
   private npmConfig(
     h: Harness,
     npm: string | null,
@@ -3708,16 +3711,23 @@ export class AgentManager {
     const known = this.npmConfigs.get(key)
     if (known) return known
     const read = (async () => {
-      const run = await runNpm({
-        npm,
-        args: ['config', 'get', ...keys],
-        cwd: os.homedir(),
-        env,
-        platform: this.deps.platform,
-        timeoutMs: this.timings.updateViewMs,
-      })
+      const [run, prefix] = await Promise.all([
+        runNpm({
+          npm,
+          args: ['config', 'get', ...keys],
+          cwd: os.homedir(),
+          env,
+          platform: this.deps.platform,
+          timeoutMs: this.timings.updateViewMs,
+        }),
+        this.npmPrefix(npm),
+      ])
       const failure = programFailure('npm', run, this.timings.updateViewMs)
-      if (!failure) return parseNpmConfig(run.stdout)
+      if (!failure) {
+        const config = parseNpmConfig(run.stdout, keys)
+        if (prefix) config.set('prefix', prefix)
+        return config
+      }
       this.deps.diagnostics.log(
         'warn',
         `${h.def.name}: npm's configuration was not read: ${failure}`,
@@ -6846,6 +6856,14 @@ export class AgentManager {
     const cliCommandName =
       slot.def.cli?.command ?? own?.command ?? (replaces ? program?.command : undefined)
     const unused = detection?.unused
+    // The version of a package that is the harness's program, before the program names its own:
+    // Kettu's install of it, or the user's own that runs in its place.
+    const programPackage =
+      launch.kind === 'package' && launch.command && !slot.def.cli
+        ? replaces
+          ? detection?.cli?.version
+          : (adapter?.current ?? adapter?.fallback)?.version
+        : undefined
     // Huli: what an earlier sign-in read, the account, its plan and balances, stays kept for when
     // it signs in again, but is not shown as this agent's while it is signed out.
     const signedOut = slot.signIn === 'required'
@@ -6871,8 +6889,9 @@ export class AgentManager {
       ...profilesOf(this.deps.profiles?.(agentId)),
       sandbox: this.sandboxSupport(agentId),
       state: slot.state,
-      // Kettu's own install names its release when the program reports no version of its own.
-      version: init?.version ?? h.binaryVersion ?? installed?.version ?? null,
+      // Kettu's own install names its release when the program reports no version of its own, and
+      // a package that is the program itself, as DeepSeek Harness's is, the version installed.
+      version: init?.version ?? h.binaryVersion ?? installed?.version ?? programPackage ?? null,
       // None runs while the user's own program runs in its place.
       package:
         launch.kind === 'package' && !replaces
@@ -6885,6 +6904,7 @@ export class AgentManager {
               // An install below the floor runs too, when the floor cannot be installed.
               installed: !!(adapter?.current ?? adapter?.fallback),
               ...(launch.library ? { isSdk: true as const } : {}),
+              ...(launch.command && !slot.def.cli ? { isCli: true as const } : {}),
             }
           : null,
       release: installed

@@ -1659,13 +1659,20 @@ function ConfigurationGroup({ status }: { status: AgentStatus }) {
             {t('agents.openHarnessButton')}
           </SetButton>
         </RowFrame>
-        {takesStartMode(status.id) && <StartModeRow key={status.id} status={status} />}
-        {takesAutoCompact(status.id) && <AutoCompactRows key={status.id} status={status} />}
-        {takesClaudeSettings(status.id) && <ClaudeSettingsRows key={status.id} status={status} />}
-        {takesCodebuddySettings(status.id) && (
-          <CodebuddySettingsRows key={status.id} status={status} />
+        {/* Keyed by the agent, so another agent's page starts afresh, each row by its own name. */}
+        {takesStartMode(status.id) && <StartModeRow key={`start ${status.id}`} status={status} />}
+        {takesAutoCompact(status.id) && (
+          <AutoCompactRows key={`compact ${status.id}`} status={status} />
         )}
-        {takesCodexSettings(status.id) && <CodexSettingsRows key={status.id} status={status} />}
+        {takesClaudeSettings(status.id) && (
+          <ClaudeSettingsRows key={`claude ${status.id}`} status={status} />
+        )}
+        {takesCodebuddySettings(status.id) && (
+          <CodebuddySettingsRows key={`codebuddy ${status.id}`} status={status} />
+        )}
+        {takesCodexSettings(status.id) && (
+          <CodexSettingsRows key={`codex ${status.id}`} status={status} />
+        )}
         {/* Huli: the agent network is this computer's alone. */}
         {hostId === null && !isWeb && <NetworkChoiceRow agentId={status.id} />}
         {/* The Marketplace shows this computer's servers only. */}

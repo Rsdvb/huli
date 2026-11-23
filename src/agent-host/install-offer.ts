@@ -45,25 +45,40 @@ function scopeOf(name: string): string | null {
   return name.startsWith('@') && name.includes('/') ? name.slice(0, name.indexOf('/')) : null
 }
 
-/** The keys `npm config get` answers for these packages: the registry, each scope's, the prefix. */
+/**
+ * The keys `npm config get` answers for these packages: the registry and each scope's. npm 11
+ * refuses the global prefix there, which `npm prefix -g` gives instead.
+ */
 export function npmConfigKeys(packages: readonly string[]): string[] {
   const scopes = packages.flatMap((name) => {
     const scope = scopeOf(name)
     return scope ? [`${scope}:registry`] : []
   })
-  return [...new Set(['registry', 'prefix', ...scopes])]
+  return [...new Set(['registry', ...scopes])]
 }
 
-/** `npm config get` with several keys prints `key=value` lines, and `undefined` for one not set. */
-export function parseNpmConfig(text: string): NpmConfig {
+/** Whether `npm config get` printed a value, not one left unset. */
+function isSet(value: string): boolean {
+  return value !== '' && value !== 'undefined' && value !== 'null'
+}
+
+/**
+ * `npm config get` with several keys prints `key=value` lines, and `undefined` for one not set;
+ * with one key, its value alone.
+ */
+export function parseNpmConfig(text: string, keys: readonly string[]): Map<string, string> {
   const config = new Map<string, string>()
+  const [only] = keys
+  if (keys.length === 1 && only) {
+    const value = text.trim()
+    if (isSet(value)) config.set(only, value)
+    return config
+  }
   for (const line of text.split(/\r?\n/)) {
     const at = line.indexOf('=')
     if (at <= 0) continue
     const value = line.slice(at + 1).trim()
-    if (value !== '' && value !== 'undefined' && value !== 'null') {
-      config.set(line.slice(0, at).trim(), value)
-    }
+    if (isSet(value)) config.set(line.slice(0, at).trim(), value)
   }
   return config
 }

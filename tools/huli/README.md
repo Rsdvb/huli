@@ -1782,7 +1782,10 @@ variable. Stop the copy by ending its process tree (`taskkill /PID <electron-vit
 it saves no window position. `src/main/test-window.ts` holds it; hooks in `src/main/window.ts`
 (the place and `keepInBackground`), `src/main/index.ts` (no tray), `src/main/notifications.ts` and
 `src/main/computer-overlay.ts`: computer use's floating label and light go off every display too,
-and the copy registers no stop shortcut.
+and the copy registers no stop shortcut. Its agent host never reads Windows' PATH from the
+registry again, after an install or on Reload environment (`src/agent-host/start.ts`), so it keeps
+the PATH it started with and finds none of the owner's programs that PATH left out, such as their
+own `claude.exe` in `~\.local\bin`.
 
 ### Kite's artwork
 
