@@ -111,6 +111,7 @@
       "startAgentLabel": "Agent 自己的 CLI，在这个文件夹中",
       "showIn": "在{{name}}中显示",
       "showArchived": "显示已归档的会话",
+      "showBin": "打开回收站",
       "worktreeSettings": "工作树设置…",
       "remove": "移除项目…",
       "issues": "议题",

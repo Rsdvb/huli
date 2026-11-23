@@ -1,5 +1,6 @@
 import {
   Archive01Icon,
+  Delete02Icon,
   CommandLineIcon,
   ComputerTerminal01Icon,
   Download04Icon,
@@ -160,6 +161,11 @@ export function ProjectMenuItems({
           <MenuGlyph icon={Archive01Icon} />
           {t('project.menu.showArchived')}
         </DropdownMenuItem>
+        {/* Huli: the recycle bin sits beside the archive, as a Settings page. */}
+        <DropdownMenuItem onClick={() => openSettings('recycle-bin')}>
+          <MenuGlyph icon={Delete02Icon} />
+          {t('project.menu.showBin')}
+        </DropdownMenuItem>
       </DropdownMenuGroup>
       <DropdownMenuGroup>
         <DropdownMenuSeparator />
@@ -268,6 +274,11 @@ export function NoProjectMenuItems({
         <DropdownMenuItem onClick={() => openSettings('archived')}>
           <MenuGlyph icon={Archive01Icon} />
           {t('project.menu.showArchived')}
+        </DropdownMenuItem>
+        {/* Huli: the recycle bin sits beside the archive, as a Settings page. */}
+        <DropdownMenuItem onClick={() => openSettings('recycle-bin')}>
+          <MenuGlyph icon={Delete02Icon} />
+          {t('project.menu.showBin')}
         </DropdownMenuItem>
       </DropdownMenuGroup>
     </>

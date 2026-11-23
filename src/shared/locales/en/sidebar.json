@@ -116,6 +116,7 @@
       "startAgentLabel": "Its own CLI, in this folder",
       "showIn": "Show in {{name}}",
       "showArchived": "Show archived",
+      "showBin": "Open recycle bin",
       "worktreeSettings": "Worktree settings…",
       "remove": "Remove project…",
       "issues": "Issues",
