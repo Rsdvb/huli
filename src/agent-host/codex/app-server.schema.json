@@ -1131,6 +1131,16 @@
         "required": ["threadId"]
       },
       "ThreadCompactStartResponse": { "type": "object" },
+      "ThreadShellCommandParams": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string" },
+          "threadId": { "type": "string" },
+          "timeoutMs": { "type": ["integer", "null"] }
+        },
+        "required": ["command", "threadId"]
+      },
+      "ThreadShellCommandResponse": { "type": "object" },
       "ThreadApproveGuardianDeniedActionParams": {
         "type": "object",
         "properties": { "event": {}, "threadId": { "type": "string" } },
@@ -1816,6 +1826,71 @@
         },
         "required": ["data"]
       },
+      "ExperimentalFeatureListParams": {
+        "type": "object",
+        "properties": {
+          "cursor": { "type": ["string", "null"] },
+          "limit": { "type": ["integer", "null"] },
+          "threadId": { "type": ["string", "null"] }
+        }
+      },
+      "ExperimentalFeatureStage": {
+        "oneOf": [
+          { "type": "string", "enum": ["beta"] },
+          { "type": "string", "enum": ["underDevelopment"] },
+          { "type": "string", "enum": ["stable"] },
+          { "type": "string", "enum": ["deprecated"] },
+          { "type": "string", "enum": ["removed"] }
+        ]
+      },
+      "ExperimentalFeature": {
+        "type": "object",
+        "properties": {
+          "defaultEnabled": { "type": "boolean" },
+          "description": { "type": ["string", "null"] },
+          "displayName": { "type": ["string", "null"] },
+          "enabled": { "type": "boolean" },
+          "name": { "type": "string" },
+          "stage": { "allOf": [{ "$ref": "#/definitions/v2/ExperimentalFeatureStage" }] }
+        },
+        "required": ["defaultEnabled", "enabled", "name", "stage"]
+      },
+      "ExperimentalFeatureListResponse": {
+        "type": "object",
+        "properties": {
+          "data": { "type": "array", "items": { "$ref": "#/definitions/v2/ExperimentalFeature" } },
+          "nextCursor": { "type": ["string", "null"] }
+        },
+        "required": ["data"]
+      },
+      "PermissionProfileListParams": {
+        "type": "object",
+        "properties": {
+          "cursor": { "type": ["string", "null"] },
+          "cwd": { "type": ["string", "null"] },
+          "limit": { "type": ["integer", "null"] }
+        }
+      },
+      "PermissionProfileSummary": {
+        "type": "object",
+        "properties": {
+          "allowed": { "type": "boolean" },
+          "description": { "type": ["string", "null"] },
+          "id": { "type": "string" }
+        },
+        "required": ["allowed", "id"]
+      },
+      "PermissionProfileListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": { "$ref": "#/definitions/v2/PermissionProfileSummary" }
+          },
+          "nextCursor": { "type": ["string", "null"] }
+        },
+        "required": ["data"]
+      },
       "McpServerOauthLoginParams": {
         "type": "object",
         "properties": { "name": { "type": "string" }, "threadId": { "type": ["string", "null"] } },
@@ -1951,6 +2026,13 @@
         }
       },
       "AppsConfig": { "type": "object", "properties": {} },
+      "SandboxWorkspaceWrite": {
+        "type": "object",
+        "properties": {
+          "network_access": { "type": "boolean" },
+          "writable_roots": { "type": "array", "items": { "type": "string" } }
+        }
+      },
       "ToolsV2": { "type": "object", "properties": {} },
       "Config": {
         "type": "object",
@@ -1959,11 +2041,23 @@
           "developer_instructions": { "type": ["string", "null"] },
           "instructions": { "type": ["string", "null"] },
           "model": { "type": ["string", "null"] },
+          "model_provider": { "type": ["string", "null"] },
+          "sandbox_workspace_write": {
+            "anyOf": [{ "$ref": "#/definitions/v2/SandboxWorkspaceWrite" }, { "type": "null" }]
+          },
           "tools": { "anyOf": [{ "$ref": "#/definitions/v2/ToolsV2" }, { "type": "null" }] }
         }
       },
       "ConfigLayerSource": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "key": { "type": "string" },
+              "type": { "type": "string", "enum": ["mdm"] }
+            },
+            "required": ["key", "type"]
+          },
           {
             "type": "object",
             "properties": {
@@ -1975,7 +2069,17 @@
           {
             "type": "object",
             "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "type": { "type": "string", "enum": ["enterpriseManaged"] }
+            },
+            "required": ["id", "name", "type"]
+          },
+          {
+            "type": "object",
+            "properties": {
               "file": { "allOf": [{ "$ref": "#/definitions/v2/AbsolutePathBuf" }] },
+              "profile": { "type": ["string", "null"] },
               "type": { "type": "string", "enum": ["user"] }
             },
             "required": ["file", "type"]
@@ -1983,6 +2087,21 @@
           {
             "type": "object",
             "properties": { "type": { "type": "string", "enum": ["project"] } },
+            "required": ["type"]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "file": { "$ref": "#/definitions/v2/AbsolutePathBuf" },
+              "type": { "type": "string", "enum": ["legacyManagedConfigTomlFromFile"] }
+            },
+            "required": ["file", "type"]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["legacyManagedConfigTomlFromMdm"] }
+            },
             "required": ["type"]
           }
         ]
@@ -2006,7 +2125,7 @@
         },
         "required": ["config", "origins"]
       },
-      "MergeStrategy": { "type": "string", "enum": ["upsert"] },
+      "MergeStrategy": { "type": "string", "enum": ["replace", "upsert"] },
       "ConfigValueWriteParams": {
         "type": "object",
         "properties": {
@@ -2330,7 +2449,7 @@
       "HookScope": { "type": "string", "enum": ["turn"] },
       "HookSource": {
         "type": "string",
-        "enum": ["system", "user", "project", "plugin", "unknown"]
+        "enum": ["system", "user", "project", "mdm", "plugin", "unknown"]
       },
       "HookRunStatus": {
         "type": "string",
@@ -2818,10 +2937,11 @@
         "type": "object",
         "properties": {
           "message": { "type": "string" },
+          "provider": { "type": "string" },
           "threadId": { "type": "string" },
           "turnId": { "type": "string" }
         },
-        "required": ["message", "threadId", "turnId"]
+        "required": ["message", "provider", "threadId", "turnId"]
       },
       "TurnModerationMetadataNotification": {
         "type": "object",
@@ -3042,6 +3162,16 @@
             "method": { "type": "string", "enum": ["thread/compact/start"] },
             "params": { "$ref": "#/definitions/v2/ThreadCompactStartParams" },
             "result": { "$ref": "#/definitions/v2/ThreadCompactStartResponse" }
+          },
+          "required": ["id", "method", "params"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/definitions/v2/RequestId" },
+            "method": { "type": "string", "enum": ["thread/shellCommand"] },
+            "params": { "$ref": "#/definitions/v2/ThreadShellCommandParams" },
+            "result": { "$ref": "#/definitions/v2/ThreadShellCommandResponse" }
           },
           "required": ["id", "method", "params"]
         },
@@ -3282,6 +3412,26 @@
             "method": { "type": "string", "enum": ["model/list"] },
             "params": { "$ref": "#/definitions/v2/ModelListParams" },
             "result": { "$ref": "#/definitions/v2/ModelListResponse" }
+          },
+          "required": ["id", "method", "params"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/definitions/v2/RequestId" },
+            "method": { "type": "string", "enum": ["experimentalFeature/list"] },
+            "params": { "$ref": "#/definitions/v2/ExperimentalFeatureListParams" },
+            "result": { "$ref": "#/definitions/v2/ExperimentalFeatureListResponse" }
+          },
+          "required": ["id", "method", "params"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": { "$ref": "#/definitions/v2/RequestId" },
+            "method": { "type": "string", "enum": ["permissionProfile/list"] },
+            "params": { "$ref": "#/definitions/v2/PermissionProfileListParams" },
+            "result": { "$ref": "#/definitions/v2/PermissionProfileListResponse" }
           },
           "required": ["id", "method", "params"]
         },
