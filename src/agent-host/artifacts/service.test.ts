@@ -50,6 +50,7 @@ describe('the servers a session attaches with', () => {
       'browser_console_messages',
       'browser_network_requests',
       'browser_network_request',
+      'browser_downloads',
       'report_problem',
       'list_memories',
       'read_memory',
