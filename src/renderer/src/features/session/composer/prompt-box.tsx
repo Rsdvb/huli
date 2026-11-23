@@ -1,4 +1,13 @@
-import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { Popover } from '@base-ui/react/popover'
 import { useTranslation } from 'react-i18next'
 import type { AgentId, SlashCommand } from '@shared/thread'
@@ -133,6 +142,14 @@ export function PromptBox({
   const panel = box.sessionId ?? (projectPath ? newSessionPanel(projectPath) : null)
   const sessionRows = useSessionMentions(shown ? mention!.query : null, panel)
   const drop = useComposerDrop(draft, hostId, box.sessionId)
+  const attachDrop = drop.attach
+  const groupRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      group.current = element
+      attachDrop(element)
+    },
+    [attachDrop],
+  )
   const filesReady = !!mentions.files && !(mentions.files.error && !mentions.files.paths.length)
   // With nothing typed it shows the files the session used and how many there are to search;
   // typed, only while something matches. With no project it says to choose one.
@@ -311,10 +328,7 @@ export function PromptBox({
   return (
     <>
       <div
-        ref={(element) => {
-          group.current = element
-          drop.attach(element)
-        }}
+        ref={groupRef}
         className="kettu-prompt"
         data-disabled={disabled || undefined}
         data-drop={drop.over || undefined}
