@@ -1,10 +1,11 @@
 // Huli: the end of a turn the model declined to continue, as Claude's `stop_reason: "refusal"`
 // reports it. The API gives no reason, so the note says so, quotes what the model itself said
 // when its reply holds an explanation, and offers the next steps: the same message again, the
-// message back in the composer to rephrase, or another model. Huli's own; see tools/huli/README.md.
+// message back in the composer to rephrase, or the same message again on another model the session
+// offers. Huli's own; see tools/huli/README.md.
 
 import { useState } from 'react'
-import { InformationCircleIcon } from '@hugeicons/core-free-icons'
+import { ArrowDown01Icon, InformationCircleIcon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
@@ -12,6 +13,12 @@ import type { ThreadState, UserContent } from '@shared/thread'
 import { emitAppEvent } from '@renderer/app/events'
 import { Alert, AlertDescription, AlertTitle } from '@renderer/components/ui/alert'
 import { Button } from '@renderer/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@renderer/components/ui/dropdown-menu'
 import { shortDuration } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
 import { cn } from '@renderer/lib/utils'
@@ -101,7 +108,12 @@ export function RefusalEnd({
       if (!state) return null
       const { prompt, text, said, userId } = refusedTurn(state, entryId)
       const { status, origin } = state.session
+      const model = state.session.config.find((o) => o.category === 'model' && o.type === 'select')
       return {
+        // Huli: the model option, whose other models the same message can go to.
+        modelId: model?.id ?? null,
+        modelValue: typeof model?.value === 'string' ? model.value : null,
+        models: model?.choices ?? null,
         prompt,
         text,
         userId,
@@ -118,6 +130,28 @@ export function RefusalEnd({
   )
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Huli: the session's other models, newest first as the menu lists them, without aliases of
+  // the one in use.
+  const current = turn?.models?.find((c) => c.value === turn.modelValue)
+  const others = (turn?.models ?? []).filter(
+    (c) =>
+      !c.older &&
+      c.value !== turn?.modelValue &&
+      (c.modelId ?? c.shownAs ?? c.value) !==
+        (current?.modelId ?? current?.shownAs ?? turn?.modelValue),
+  )
+  const againWith = (model: string) => {
+    if (!turn?.prompt || !turn.modelId) return
+    setSending(true)
+    setError(null)
+    const { prompt, modelId } = turn
+    host('sessions.setConfigOption', { sessionId, optionId: modelId, value: model })
+      .then(() => host('sessions.queue', { sessionId, content: prompt }))
+      .catch((e: unknown) => {
+        setError(errorMessage(e))
+        setSending(false)
+      })
+  }
   const again = () => {
     if (!turn?.prompt) return
     setSending(true)
@@ -167,6 +201,23 @@ export function RefusalEnd({
               <Button size="xs" variant="outline" disabled={sending} onClick={again}>
                 {t('refusal.again')}
               </Button>
+            )}
+            {turn.prompt && others.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<Button size="xs" variant="outline" disabled={sending} />}
+                >
+                  {t('refusal.otherModel')}
+                  <HugeiconsIcon icon={ArrowDown01Icon} strokeWidth={1.9} aria-hidden />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-72 w-56">
+                  {others.map((choice) => (
+                    <DropdownMenuItem key={choice.value} onClick={() => againWith(choice.value)}>
+                      <span className="min-w-0 truncate">{choice.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             {turn.text && (
               <Button

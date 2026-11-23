@@ -2,6 +2,7 @@
 // session is a Codex thread under the thread's own id; its settings live here and go with each
 // turn, since app-server keeps none between them that Kettu could read back.
 
+import { randomUUID } from 'node:crypto'
 import os from 'node:os'
 import type { AgentAccount, PlanLimit, ProviderBalance } from '@shared/agent-host'
 import type { ContextEstimates } from '@shared/context'
@@ -58,6 +59,10 @@ import { addEntry, mergeConfig, type MapperEffect, type MapperOutput } from '../
 import { isWebUrl } from '../elicitation'
 import { shownError } from '../session-mcp/text'
 import { SIDE_INSTRUCTIONS, sideTurnText } from '../side-chat'
+import { errorStatus, isProviderQuota, providerName } from './provider-quota'
+import { workspaceWrite } from './settings'
+
+type WorkspaceWrite = ReturnType<typeof workspaceWrite>
 import { mapAccount, mapPlanExtras, mapRateLimits } from './account'
 import { isAsyncQuestion, type AsyncQuestionItem } from './async-questions'
 import {
@@ -73,6 +78,7 @@ import {
 import {
   commandList,
   parseCommand,
+  parseShell,
   skillsMessage,
   statusMessage,
   usageMessage,
@@ -544,6 +550,19 @@ function workspaceRoots(
 }
 
 /** Huli: a policy that writes in the workspace writes in the project's further folders too. */
+/**
+ * Huli: a workspace turn's policy with the user's own `sandbox_workspace_write`: its network
+ * access and its further writable folders, as Codex gives its own workspace turns.
+ */
+function withWorkspace(policy: SandboxPolicy, workspace: WorkspaceWrite | null): SandboxPolicy {
+  if (policy.type !== 'workspaceWrite' || !workspace) return policy
+  return {
+    ...policy,
+    networkAccess: policy.networkAccess || workspace.networkAccess,
+    writableRoots: [...new Set([...policy.writableRoots, ...workspace.writableRoots])],
+  }
+}
+
 function withFolders(policy: SandboxPolicy, folders: readonly string[]): SandboxPolicy {
   if (policy.type !== 'workspaceWrite' || folders.length === 0) return policy
   return { ...policy, writableRoots: [...new Set([...policy.writableRoots, ...folders])] }
@@ -590,6 +609,12 @@ export class CodexConnection implements AgentConnection {
   private readonly rpc: RpcPeer
   private readonly closeTransport: () => void
   private readonly threads = new Map<string, ThreadRecord>()
+  /**
+   * Huli: the user's `sandbox_workspace_write`, which Kite's workspace turns take as Codex's own
+   * do; read before a turn, again after a config write, null when it could not be read.
+   */
+  private workspace: WorkspaceWrite | null = null
+  private workspaceRead: Promise<void> | null = null
   private readonly targets = new Map<string, SessionTarget>()
   private readonly pending = new Map<string, { at: number; updates: Delivery[] }>()
   private readonly unregistered = new Set<string>()
@@ -658,7 +683,22 @@ export class CodexConnection implements AgentConnection {
 
   /** A request of app-server outside any thread, such as its plugins and skills. */
   request<T>(method: string, params?: unknown): Promise<T> {
+    // Huli: a write of the configuration may change what workspace turns may do.
+    if (method.startsWith('config/') && method !== 'config/read') this.workspaceRead = null
     return this.call<T>(method, params)
+  }
+
+  /** Huli: reads the user's workspace sandbox settings once, and again after a write. */
+  private readWorkspace(): Promise<void> {
+    this.workspaceRead ??= this.call<{ config: Record<string, unknown> }>('config/read', {}).then(
+      (read) => {
+        this.workspace = workspaceWrite(read.config)
+      },
+      () => {
+        this.workspace = null
+      },
+    )
+    return this.workspaceRead
   }
 
   /**
@@ -1649,7 +1689,16 @@ export class CodexConnection implements AgentConnection {
     if (!prompting || (prompting.turnId !== null && prompting.turnId !== turn.id)) return
     record.prompting = null
     if (turn.status === 'failed') {
-      prompting.reject(this.turnFailure(turn.error ?? running?.error ?? null))
+      const error = turn.error ?? running?.error ?? null
+      const text = [error?.message, error?.additionalDetails].filter(Boolean).join('\n')
+      // Huli: a provider's empty quota or balance names the provider, read from Codex's config.
+      if (error && isProviderQuota(this.account, error.codexErrorInfo, text)) {
+        void this.providerQuotaFailure(error, record.cwd).then((failure) =>
+          prompting.reject(failure),
+        )
+        return
+      }
+      prompting.reject(this.turnFailure(error))
       return
     }
     prompting.resolve({
@@ -1716,12 +1765,38 @@ export class CodexConnection implements AgentConnection {
     }
   }
 
+  /**
+   * Huli: a turn the provider refused for want of quota or balance, as an error that names the
+   * provider and says what to do, marked so the session offers Retry and another model rather
+   * than waiting for a plan to reset.
+   */
+  private async providerQuotaFailure(
+    error: TurnError,
+    cwd: string | null,
+  ): Promise<AgentRequestError> {
+    const config = await this.call<{ config: Record<string, unknown> }>('config/read', {
+      ...(cwd ? { cwd } : {}),
+    }).then(
+      (read) => read.config,
+      () => null,
+    )
+    const provider = providerName(config, this.account)
+    const details = error.additionalDetails ?? error.message
+    const message = provider
+      ? t('codex.providerQuota', { provider })
+      : t('codex.providerQuotaUnnamed')
+    const status = errorStatus(error.codexErrorInfo)
+    return new AgentRequestError('agent_error', `${message}\n\n${details}`, null, {
+      codexErrorInfo: error.codexErrorInfo,
+      ...(typeof status === 'number' ? { status } : {}),
+      message: error.message,
+      providerQuota: provider ?? true,
+    })
+  }
+
   private turnFailure(error: TurnError | null): AgentRequestError {
     const info = error?.codexErrorInfo ?? null
-    const status =
-      typeof info === 'object' && info !== null && !Array.isArray(info)
-        ? (Object.values(info)[0] as { httpStatusCode?: unknown } | undefined)?.httpStatusCode
-        : undefined
+    const status = errorStatus(info)
     const message = error?.message ?? t('codex.turnFailed')
     if (info === 'unauthorized' || status === 401) {
       return new AgentRequestError('auth_required', message)
@@ -1824,7 +1899,10 @@ export class CodexConnection implements AgentConnection {
       threadId: record.id,
       approvalPolicy: mode.approvalPolicy,
       approvalsReviewer: mode.approvalsReviewer,
-      sandboxPolicy: withFolders(heldPolicy(mode.sandbox, record.sandbox), record.folders),
+      sandboxPolicy: withFolders(
+        heldPolicy(withWorkspace(mode.sandbox, this.workspace), record.sandbox),
+        record.folders,
+      ),
       ...workspaceRoots(record.cwd, record.folders),
       summary: 'auto',
       ...(settings.model ? { model: settings.model } : {}),
@@ -1855,8 +1933,10 @@ export class CodexConnection implements AgentConnection {
     }
     const command = parseCommand(prompt)
     if (command) return this.runCommand(record, command)
+    const shell = parseShell(prompt)
+    if (shell) return this.runShell(record, shell)
     return this.runTurn(record, async () => {
-      await this.listModels()
+      await Promise.all([this.listModels(), this.readWorkspace()])
       const response = await this.call<{ turn: Turn }>(
         'turn/start',
         this.turnParams(record, userInputs(prompt)),
@@ -2067,8 +2147,8 @@ export class CodexConnection implements AgentConnection {
     sessionId: string,
     prompt: readonly PromptBlock[],
   ): Promise<'injected' | 'promptRequired'> {
-    // A command waits for the turn to end and runs as a prompt of its own.
-    if (parseCommand(prompt)) return 'promptRequired'
+    // A command waits for the turn to end and runs as a prompt of its own; a `!command` too.
+    if (parseCommand(prompt) || parseShell(prompt)) return 'promptRequired'
     const record = this.threads.get(sessionId)
     const turnId = record?.running?.id ?? record?.prompting?.turnId ?? null
     if (!turnId) return 'promptRequired'
@@ -2330,6 +2410,72 @@ export class CodexConnection implements AgentConnection {
     }
   }
 
+  /**
+   * Huli: a `!command`, which Codex runs in the thread's folder with the user's shell, as its own
+   * client runs one, so the command and its output join the conversation the model sees. Codex
+   * runs it outside its sandbox, so Kite asks first, as for a command of the agent's that leaves
+   * the sandbox, unless the session runs in full access; and never in a sandbox Kite holds.
+   */
+  private async runShell(record: ThreadRecord, command: string): Promise<PromptResult> {
+    if (record.sandbox) return this.answer(record, async () => t('codex.shell.sandboxed'))
+    const mode = modeOf(record.settings.mode) ?? modeOf(DEFAULT_MODE)!
+    if (mode.approvalPolicy !== 'never') {
+      const allowed = await this.allowShell(record, command)
+      if (allowed === 'cancelled') return stopped('cancelled')
+      if (!allowed) return this.answer(record, async () => t('codex.shell.declined'))
+    }
+    try {
+      return await this.commandTurn(record, async () => {
+        await this.call('thread/shellCommand', { threadId: record.id, command })
+        return null
+      })
+    } catch (error) {
+      if (lacksMethod(error)) {
+        throw new AgentRequestError('agent_error', t('codex.shell.unsupported'), null, {
+          shellUnsupported: true,
+        })
+      }
+      throw error
+    }
+  }
+
+  /**
+   * Huli: asks for a `!command` as for an agent's command, in a card of its own that the host's
+   * approval rules answer as theirs; the card goes once allowed, as the command shows below.
+   */
+  private async allowShell(record: ThreadRecord, command: string): Promise<boolean | 'cancelled'> {
+    const target = this.targets.get(record.id)
+    if (!target) return false
+    const approval = commandApproval(
+      {
+        threadId: record.id,
+        turnId: '',
+        itemId: `shell-${randomUUID()}`,
+        command,
+        cwd: record.cwd,
+        reason: t('codex.shell.reason'),
+        availableDecisions: ['accept', 'decline'],
+      },
+      record.mapper,
+      target.context(),
+    )
+    let answer: PermissionAnswer
+    try {
+      answer = await target.requestPermission(approval.request, new AbortController().signal)
+    } catch {
+      return 'cancelled'
+    }
+    const picked = optionAnswer(answer)
+    if (picked === 'cancelled') return 'cancelled'
+    const { decision } = approval.respond(picked) as { decision: unknown }
+    if (decision !== 'accept') return false
+    target.apply({
+      patches: [{ op: 'entry.remove', ids: [approval.request.toolEntryId] }],
+      effects: [],
+    })
+    return true
+  }
+
   private runCommand(record: ThreadRecord, { name, rest }: ParsedCommand): Promise<PromptResult> {
     const usage = async () => usageMessage(name)
     switch (name) {
@@ -2399,7 +2545,7 @@ export class CodexConnection implements AgentConnection {
     start: (prompting: Prompting) => Promise<string | null>,
   ): Promise<PromptResult> {
     return this.runTurn(record, async (prompting) => {
-      await this.listModels()
+      await Promise.all([this.listModels(), this.readWorkspace()])
       await this.call('thread/settings/update', this.settingsParams(record))
       return start(prompting)
     })
@@ -2449,6 +2595,7 @@ export class CodexConnection implements AgentConnection {
     return this.commandTurn(record, async (prompting) => {
       await this.call<ThreadGoalSetResponse>('thread/goal/set', { threadId: record.id, ...goal })
       if (await this.goalStarted(record, prompting)) return null
+      await this.readWorkspace()
       if (prompting.cancel) {
         record.prompting = null
         prompting.resolve(stopped('cancelled'))

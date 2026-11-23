@@ -382,6 +382,8 @@ export interface ConfigOption {
   defaultValue?: boolean | null
   /** Show the option's name beside the model while it is enabled. */
   indicator?: boolean
+  /** Huli: offered in the session's menu rather than beside the composer, as an output style is. */
+  place?: 'menu'
 }
 
 export function booleanConfigValue(option: ConfigOption): boolean | undefined {
@@ -497,6 +499,7 @@ export type ThreadEntry =
       // first, which the session's own card offers while the notice stays.
       cause?: 'agent_stopped' | 'out_of_credit' | 'turn_failed' | 'sign_in'
       model?: string // out_of_credit: the session's model when the turn failed
+      provider?: string // Huli: out_of_credit: the model provider that refused, when it is named
       // turn_failed: the agent's plan refused the turn because a usage window ran out.
       planLimit?: true
       // The agent's entry before it, to put it back after a replay: set on the notices Kettu
@@ -1290,7 +1293,9 @@ export interface PendingQuestion {
   header: string
   question: string
   multiSelect: boolean
-  options: { label: string; description?: string }[]
+  // Huli: `preview` is a mockup, code or diagram of the option in markdown, shown beside the
+  // options, as Claude Code's AskUserQuestion previews are.
+  options: { label: string; description?: string; preview?: string }[]
   // Whether the user may write an answer of their own
   allowsText: boolean
   // Whether the answer is a secret: typed as dots, never kept

@@ -48,7 +48,13 @@ export function OutOfCreditStrip({
     >
       <Glyph icon={Wallet01Icon} className="size-4 shrink-0 text-warning" />
       <div className="min-w-0 flex-[1_1_12rem] text-primary">
-        <p>{name ? t('outOfCredit.strip', { model: name }) : t('outOfCredit.stripNoModel')}</p>
+        <p>
+          {notice.provider
+            ? t('outOfCredit.stripProvider', { provider: notice.provider })
+            : name
+              ? t('outOfCredit.strip', { model: name })
+              : t('outOfCredit.stripNoModel')}
+        </p>
         {error && <p className="text-xs text-danger">{error}</p>}
       </div>
       <div className="ml-auto flex shrink-0 gap-1.5">

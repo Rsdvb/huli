@@ -263,6 +263,11 @@ export function signsInWithKeyOnly(id: AgentId): boolean {
   return !isDefaultAgent(id) && KEY_ONLY_ADDED_HARNESSES.includes(harnessOf(id))
 }
 
+/** Huli: whether the agent's page edits Codex's own settings through its app-server. */
+export function takesCodexSettings(id: AgentId): boolean {
+  return harnessOf(id) === 'codex'
+}
+
 /** Whether the agent's page edits which site Codebuddy Code talks to. */
 export function takesCodebuddySettings(id: AgentId): boolean {
   return harnessOf(id) === 'codebuddy'

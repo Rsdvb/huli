@@ -3965,6 +3965,10 @@ export class AgentHost {
       'agents.setAutoCompact': ({ agentId, change }) =>
         agents.setAutoCompact(agentId, change, () => this.appServer(agentId)),
       'agents.codebuddySettings': ({ agentId }) => agents.codebuddySettings(agentId),
+      'agents.codexSettings': ({ agentId }) =>
+        agents.codexSettings(agentId, () => this.appServer(agentId)),
+      'agents.setCodexSetting': ({ agentId, change }) =>
+        agents.setCodexSetting(agentId, change, () => this.appServer(agentId)),
       'agents.setCodebuddySite': ({ agentId, change }) => agents.setCodebuddySite(agentId, change),
       'agents.refreshAccount': ({ agentId, force }) => agents.refreshAccount(agentId, { force }),
       'agents.readSignIn': ({ agentId, watch }) => agents.readSignIn(agentId, { watch }),

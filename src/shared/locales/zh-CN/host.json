@@ -187,7 +187,8 @@
     },
     "outOfCredit": {
       "title": "{{model}} 余额不足",
-      "titleNoModel": "{{agent}} 的模型服务商余额不足"
+      "titleNoModel": "{{agent}} 的模型服务商余额不足",
+      "titleProvider": "{{provider}} 的额度或余额已用完"
     },
     "turnFailed": "本轮对话失败",
     "chatgptLimit": {
@@ -910,7 +911,32 @@
       "effort": "推理强度",
       "effortDescription": "这个模型能用的推理强度",
       "fast": "快速模式",
-      "fastDescription": "支持的模型回复更快"
+      "fastDescription": "支持的模型回复更快",
+      "outputStyle": "输出风格",
+      "outputStyleDescription": "Claude Code 写回复的方式"
+    },
+    "outputStyle": {
+      "custom": "自己的",
+      "default": {
+        "name": "默认",
+        "description": "Claude Code 平常的写法"
+      },
+      "Proactive": {
+        "name": "主动",
+        "description": "直接动手，少打断，先做再说"
+      },
+      "Concise": {
+        "name": "简洁",
+        "description": "简短，先给结果，不写开场白和过程叙述"
+      },
+      "Explanatory": {
+        "name": "讲解",
+        "description": "讲清楚为什么这样实现、代码库里的惯用做法"
+      },
+      "Learning": {
+        "name": "学习",
+        "description": "停下来让你亲手写一小段代码，边做边学"
+      }
     },
     "background": {
       "unsupported": "这个版本的 Claude Code 不能把任务转到后台，请先更新"
@@ -925,6 +951,20 @@
   "codex": {
     "signInNeeded": "请在终端里运行 `codex login` 登录 Codex",
     "turnFailed": "这一轮失败了",
+    "providerQuota": "{{provider}} 拒绝了这次请求：你在 {{provider}} 的额度或余额已用完。请到 {{provider}} 充值或检查账单后重试，或换一个其他服务商的模型。",
+    "providerQuotaUnnamed": "Codex 的模型服务商拒绝了这次请求：账号的额度或余额已用完。请到服务商那里充值或检查账单后重试，或换一个模型。",
+    "shell": {
+      "reason": "你的 ! 命令会在会话的文件夹里、Codex 的沙箱之外运行，和离开沙箱的命令一样。",
+      "declined": "命令没有运行。",
+      "sandboxed": "这个会话在沙箱里运行，! 命令会跑到沙箱之外，所以没有运行。请改在终端里运行。",
+      "unsupported": "这个 Codex 不能运行 ! 命令。请更新 Codex，或在终端里运行这条命令。"
+    },
+    "settings": {
+      "notSwitch": "这个值只能是开或关",
+      "badProfile": "这个 Codex 没有可以选的这个权限档案",
+      "badFeature": "这个 Codex 没有这个名字的测试版功能",
+      "unknown": "这里没有这个 Codex 设置"
+    },
     "noForkPoint": "Codex 在它的历史里找不到这条回复",
     "noRevertPoint": "Codex 在它的历史里找不到这一轮",
     "revertOlderThread": "只有较新版本的 Codex 开始的会话才能撤销一轮",

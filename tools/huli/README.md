@@ -1846,6 +1846,53 @@ the denied call's card (`denial-appeal.tsx`), the phone in the call's screen (`m
 both with the risk and a confirmation for a high one. Tests: `codex/mapper.test.ts`,
 `codex-appeal-host.test.ts`, `validate.test.ts`.
 
+### Agent controls (选项预览、输出风格、`!` 命令、换模型提示、节奏刻度、Codex 设置)
+
+- **Question previews.** Claude Code's AskUserQuestion asks for option previews only when the host
+  names a format, so `claude/connection.ts` passes `toolConfig.askUserQuestion.previewFormat:
+'markdown'`. `claude/tools.ts` keeps an option's `preview` (left out past 32 KiB),
+  `PendingQuestion` carries it, and the answer sends `annotations` with the picked option's
+  preview, as Claude Code's own dialog does. The desktop card shows the preview of the option
+  pointed at or picked beside the options (under them below a 600 px column), the phone the
+  picked one's under the options with 展开 for a sheet; `src/shared/question-preview.ts` fences a
+  preview with no fenced block, since Claude Code shows them in a monospace box. Markdown renders
+  without raw HTML (Streamdown's `skipHtml`).
+- **Output style.** The SDK's initialize answer lists `available_output_styles` and the
+  `output_style` in use; the session's options carry them as `__outputStyle` with `place: 'menu'`,
+  which keeps it out of the composer and puts it in the session's More menu
+  (`features/session/menu-options.tsx`); a change goes through `applyFlagSettings({ outputStyle })`,
+  which Claude Code tells the model of with the next request. Settings › Claude Code saves the
+  style new sessions start in as `claudeRuns[agent].outputStyle` (optional, so older files still
+  load), passed as the flag settings' `outputStyle`; its list is the built-in styles plus the
+  user's own `output-styles/*.md` beside the agent's settings file, read only
+  (`claude/output-styles.ts`).
+- **Codex `!command`.** A Codex prompt of text alone that starts with `!` runs through
+  `thread/shellCommand` in the turn it opens (`commandTurn`), so Codex adds the command and its
+  output to the conversation. Codex runs it outside its sandbox, so unless the mode is full access
+  Kite asks first with a command card the host's approval rules answer (risk auto-approve
+  included); it never runs in a sandbox Kite holds, and a Codex without the method fails the turn
+  saying so. The composer shows a line while such a message is typed. The side question (`/btw`)
+  was already there, on an ephemeral `thread/fork`.
+- **Model change and refusals.** After a model change mid-session, Claude Code's and Codex's
+  composers say the prompt cache starts over (`composer/cache-restart.ts`; other agents' providers
+  say nothing to go by), until the next request. A refused turn offers 换个模型重试, the session's
+  other models, which sets the model and sends the same message.
+- **Pace tick.** `evenPacePercent` (`src/shared/plan-limits.ts`) is where a window's use would be
+  now if spread evenly, for windows of a fixed length (5-hour, daily, weekly, counted); the
+  composer's plan bars, the agent page's, the tray's and the phone's mark it, computed as they
+  render.
+- **Codex settings.** The Codex agent's page reads memories (`features.memories`), the workspace
+  sandbox's network access (`sandbox_workspace_write`), `default_permissions` with
+  `permissionProfile/list`, and the beta features of `experimentalFeature/list` through
+  `config/read`, and writes one key with `config/value/write`, which edits config.toml in place
+  and keeps comments (`codex/settings.ts`). A key a managed layer sets shows locked. Kite's
+  workspace turns take the user's network access and writable folders, read before a turn and
+  again after a config write.
+- **A provider's quota.** Off a ChatGPT plan, Codex's `usageLimitExceeded`, a 402 or a provider's
+  billing words end the turn as out of credit rather than a plan limit
+  (`codex/provider-quota.ts`), naming the provider from `config/read`'s `model_providers`, in the
+  notice's title and the composer's strip. The Anthropic Console preset was already a profile.
+
 ### Kite's own Node.js
 
 Agents that run on Node.js (most package agents; DeepSeek wants ≥ 24.9) said 「需要 Node.js」 and

@@ -1016,6 +1016,12 @@
         "1h": "1 hour"
       },
       "runs": {
+        "outputStyle": {
+          "name": "Output style",
+          "description": "How new sessions' replies are written. Change one session's style in its More menu. Styles of your own are the Markdown files in the output-styles folder of Claude Code's configuration folder.",
+          "follow": "Claude Code's setting ({{style}})",
+          "missing": "{{style}} (not found)"
+        },
         "fallback": {
           "name": "Fallback model",
           "description": "Claude Code switches to this model while the main one is overloaded or unavailable, and tries the main one again at your next message. Applies from the next session.",
@@ -1032,6 +1038,29 @@
           "name": "Also for all sessions",
           "description": "Every session of this agent stops once it has spent this much since it was opened."
         }
+      }
+    },
+    "codexSettings": {
+      "name": "Codex settings",
+      "readFailed": "Could not read Codex’s settings: {{error}}",
+      "locked": "Your organization’s managed configuration sets this.",
+      "memories": {
+        "name": "Memories",
+        "description": "Codex remembers what it learns across sessions and uses it in later ones. Written to Codex’s config.toml; new sessions take it."
+      },
+      "network": {
+        "name": "Network in the workspace sandbox",
+        "description": "Commands of a session that may write the workspace may also reach the network (sandbox_workspace_write.network_access). Kite’s sessions follow it from their next turn.",
+        "roots": "Also writable: {{roots}}"
+      },
+      "profile": {
+        "name": "Permission profile",
+        "description": "The profile Codex’s own new threads start with (default_permissions). Kite’s sessions keep the mode you pick in the composer.",
+        "default": "Codex’s default"
+      },
+      "features": {
+        "name": "Features in beta",
+        "description": "Codex’s experimental features, as it lists them. New sessions take a change."
       }
     },
     "autoCompact": {

@@ -2,17 +2,22 @@
 // question, each choice a tile with its box (square when several may be picked, round when one),
 // a dashed 其他 tile that becomes a field for the user's own words, then 跳过 and 提交. Several
 // questions are asked one at a time, with how far along they are, and answered together.
+// Huli: options that carry a preview (a mockup or code) show the picked one's under the options,
+// cut short with 展开 to read it whole in a sheet.
 
 import { useState } from 'react'
-import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native'
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
+import { hasPreviews, previewMarkdown, shownPreview } from '@shared/question-preview'
 import type { HostLink } from '@shared/remote/link'
 import type { PendingQuestion, QuestionAnswer, ToolEntry } from '@shared/thread'
+import { BottomSheet } from '../../ui/BottomSheet'
 import { useConnected } from '../../host'
 import { haptic } from '../../ui/session/feedback'
 import { AgentGlyph, G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
 import { agentIdOf, useSessionField } from '../../ui/session/sessionField'
 import { PressScale } from '../../ui/session/Press'
+import { Markdown } from '../Markdown'
 import { useAgentName } from './AccessEntries'
 import { E, SendState, useSender } from './kit'
 
@@ -126,6 +131,7 @@ export function QuestionCard(props: { entry: ToolEntry; sessionId: string; link:
   }
   const hint = hintOf(q)
   const ownOpen = writing[at]!
+  const preview = hasPreviews(q) ? shownPreview(q, null, picked) : null
 
   return (
     <View
@@ -257,6 +263,9 @@ export function QuestionCard(props: { entry: ToolEntry; sessionId: string; link:
           )
         ) : null}
       </View>
+      {preview !== null ? (
+        <OptionPreview label={q.options[preview]!.label} preview={q.options[preview]!.preview!} />
+      ) : null}
       <View style={[styles.rule, { backgroundColor: c.border }]} />
       <View style={styles.buttons}>
         <PressScale
@@ -315,7 +324,64 @@ export function QuestionCard(props: { entry: ToolEntry; sessionId: string; link:
   )
 }
 
+/** The picked option's preview, cut to a few lines; 展开 opens it whole in a sheet. */
+function OptionPreview(props: { label: string; preview: string }) {
+  const { c } = useSessionTokens()
+  const [open, setOpen] = useState(false)
+  const markdown = previewMarkdown(props.preview)
+  return (
+    <View style={[styles.preview, { backgroundColor: c.fill, borderColor: c.border }]}>
+      <View style={styles.previewHead}>
+        <Text style={[styles.previewTitle, { color: c.textTertiary }]}>预览</Text>
+        <Text style={[styles.previewName, { color: c.text }]} numberOfLines={1}>
+          {props.label}
+        </Text>
+        <PressScale
+          scale={0.96}
+          onPress={() => {
+            haptic.tap()
+            setOpen(true)
+          }}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`展开${props.label}的预览`}
+        >
+          <Text style={[styles.backText, { color: c.tint }]}>展开</Text>
+        </PressScale>
+      </View>
+      <View style={styles.previewBody} pointerEvents="none">
+        <Markdown markdown={markdown} size="compact" />
+      </View>
+      <BottomSheet
+        visible={open}
+        onClose={() => setOpen(false)}
+        title={props.label}
+        maxHeight={560}
+        solid
+      >
+        <ScrollView contentContainerStyle={styles.previewSheet}>
+          <Markdown markdown={markdown} size="compact" />
+        </ScrollView>
+      </BottomSheet>
+    </View>
+  )
+}
+
 const styles = StyleSheet.create({
+  preview: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    borderCurve: 'continuous',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+    marginTop: 4,
+  },
+  previewHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  previewTitle: { fontSize: 12, fontWeight: '600' },
+  previewName: { flex: 1, fontSize: 13, fontWeight: '600' },
+  previewBody: { maxHeight: 150, overflow: 'hidden' },
+  previewSheet: { paddingHorizontal: 16, paddingBottom: 24 },
   card: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 22,

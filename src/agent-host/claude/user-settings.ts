@@ -68,12 +68,14 @@ export async function readClaudeSettings(
     if (!listed.some((item) => item.id === model)) compact.push({ model, name: null, window })
   }
   const ttl = settings.promptCacheTtl
+  const style = settings.outputStyle
   return {
     defaultWindow: windowOf(settings),
     compact,
     promptCacheTtl: (PROMPT_CACHE_TTLS as readonly unknown[]).includes(ttl)
       ? (ttl as PromptCacheTtl)
       : null,
+    outputStyle: typeof style === 'string' && style !== '' ? style : null,
   }
 }
 

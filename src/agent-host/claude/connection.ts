@@ -74,6 +74,7 @@ import {
   DEFAULT_MODEL,
   modelInfo,
   OPTION_IDS,
+  outputStyleOption,
   settingsModel,
   type InheritedEffort,
   type SessionChoices,
@@ -94,6 +95,7 @@ import {
   BUILD_MODES,
   OTHER_ANSWER,
   pendingQuestions,
+  questionAnnotations,
   permissionOptions,
   permissionResult,
   planResult,
@@ -293,6 +295,8 @@ interface Session {
   models: ModelInfo[]
   modes: PermissionMode[]
   choices: SessionChoices
+  /** Huli: the output styles Claude Code lists, built-in and custom. */
+  outputStyles: string[]
   /** The mode it opened in, Claude Code's own default for new sessions. */
   openMode: PermissionMode
   /** The last mode other than plan its choices took, which a plan's approval starts with. */
@@ -514,6 +518,19 @@ export function promptContent(blocks: readonly PromptBlock[]): ContentBlock[] {
     }
   }
   return content
+}
+
+/** A session's options from its models, choices and the output styles Claude Code lists. */
+function sessionConfig(session: Session): ConfigOption[] {
+  const config = buildConfig(
+    session.models,
+    session.choices,
+    session.modes,
+    session.ultracodeDefault,
+    session.inheritedEffort,
+  )
+  const style = outputStyleOption(session.outputStyles, session.choices.outputStyle)
+  return style ? [...config, style] : config
 }
 
 /** The SDK's own copy of Claude Code, from its optional platform package. */
@@ -1066,7 +1083,9 @@ export class ClaudeConnection implements AgentConnection {
         effort: DEFAULT_EFFORT,
         fast: false,
         ultracode: 'default',
+        outputStyle: null,
       },
+      outputStyles: [],
       openMode: mode,
       buildMode: null,
       config: [],
@@ -1119,6 +1138,9 @@ export class ClaudeConnection implements AgentConnection {
     // agent's own settings reaches the profile's provider. The key follows over the control
     // channel once the query has started, before any request.
     if (provider) flags.env = provider.plain
+    // Huli: the output style Kite's settings start the agent's sessions in.
+    const startStyle = this.context.claudeRun?.()?.outputStyle
+    if (startStyle && !hidden && !bare) flags.outputStyle = startStyle
     const off = this.mcpOff.get(sessionId)
     const servers = bare
       ? []
@@ -1171,6 +1193,9 @@ export class ClaudeConnection implements AgentConnection {
       perTaskStopAffordance: true,
       // Huli: a subagent's row says what it does now, in a line its own model writes.
       ...(!hidden && !bare ? { agentProgressSummaries: true } : {}),
+      // Huli: a question's options may show a mockup or code beside them, which the card renders
+      // as markdown; HTML would need a sandboxed frame no client has.
+      ...(!bare ? { toolConfig: { askUserQuestion: { previewFormat: 'markdown' as const } } } : {}),
       settingSources: sources,
       systemPrompt: {
         type: 'preset',
@@ -1291,13 +1316,10 @@ export class ClaudeConnection implements AgentConnection {
     if (typeof init.claude_code_version === 'string') session.version = init.claude_code_version
     session.commands = init.commands ?? []
     session.terminal = new Set(this.terminalCommands.namesFor(session.version))
-    session.config = buildConfig(
-      session.models,
-      session.choices,
-      modes,
-      session.ultracodeDefault,
-      session.inheritedEffort,
-    )
+    // Huli: the output style in use, and the ones Claude Code can switch to.
+    session.outputStyles = init.available_output_styles ?? []
+    session.choices.outputStyle = init.output_style ?? null
+    session.config = sessionConfig(session)
     this.sessions.set(sessionId, session)
     if (!session.quiet) {
       this.unregistered.delete(sessionId)
@@ -1866,12 +1888,15 @@ export class ClaudeConnection implements AgentConnection {
       [OPTION_IDS.effort, 'effort'],
       [OPTION_IDS.fast, 'fast'],
       [OPTION_IDS.ultracode, 'ultracode'],
+      [OPTION_IDS.outputStyle, 'outputStyle'],
     ]
     for (const [id, key] of options) {
       const value = choices[key]
       const option = session.config.find((item) => item.id === id)
       // The choices, not the option values: an effort left at its default shows the level it runs at.
-      if (!option || session.choices[key] === value) continue
+      if (!option || value === undefined || value === null || session.choices[key] === value) {
+        continue
+      }
       try {
         await this.applyOption(session, id, value)
       } catch (error) {
@@ -2242,50 +2267,34 @@ export class ClaudeConnection implements AgentConnection {
         if (!info?.supportedEffortLevels?.includes(session.choices.effort)) {
           session.choices.effort = DEFAULT_EFFORT
         }
-        session.config = buildConfig(
-          session.models,
-          session.choices,
-          session.modes,
-          session.ultracodeDefault,
-          session.inheritedEffort,
-        )
+        session.config = sessionConfig(session)
         return
       }
       case OPTION_IDS.effort:
         if (typeof value !== 'string') break
         await this.applyFlags(session, { effortLevel: value === DEFAULT_EFFORT ? null : value })
         session.choices.effort = value
-        session.config = buildConfig(
-          session.models,
-          session.choices,
-          session.modes,
-          session.ultracodeDefault,
-          session.inheritedEffort,
-        )
+        session.config = sessionConfig(session)
         return
       case OPTION_IDS.fast:
         await this.applyFlags(session, { fastMode: value === true })
         session.choices.fast = value === true
-        session.config = buildConfig(
-          session.models,
-          session.choices,
-          session.modes,
-          session.ultracodeDefault,
-          session.inheritedEffort,
-        )
+        session.config = sessionConfig(session)
         return
+      case OPTION_IDS.outputStyle: {
+        // Huli: Claude Code tells the model of the new style with the next request.
+        if (typeof value !== 'string' || !session.outputStyles.includes(value)) break
+        await query.applyFlagSettings({ outputStyle: value })
+        session.choices.outputStyle = value
+        session.config = sessionConfig(session)
+        return
+      }
       case OPTION_IDS.ultracode: {
         if (value !== 'default' && typeof value !== 'boolean') break
         const ultracode = value === 'default' ? this.inheritedUltracode(session) : value
         await query.applyFlagSettings({ ultracode })
         session.choices.ultracode = value
-        session.config = buildConfig(
-          session.models,
-          session.choices,
-          session.modes,
-          session.ultracodeDefault,
-          session.inheritedEffort,
-        )
+        session.config = sessionConfig(session)
         return
       }
     }
@@ -2329,13 +2338,7 @@ export class ClaudeConnection implements AgentConnection {
     const model = settingsModel(session.models, switched.requested_model)
     if (session.choices.model === model) return
     session.choices.model = model
-    session.config = buildConfig(
-      session.models,
-      session.choices,
-      session.modes,
-      session.ultracodeDefault,
-      session.inheritedEffort,
-    )
+    session.config = sessionConfig(session)
     const config = session.config
     this.deliver({
       sessionId: session.id,
@@ -2356,13 +2359,7 @@ export class ClaudeConnection implements AgentConnection {
     if (session.choices[id] === value) return
     session.choices[id] = value
     if (value !== 'plan') session.buildMode = value as PermissionMode
-    session.config = buildConfig(
-      session.models,
-      session.choices,
-      session.modes,
-      session.ultracodeDefault,
-      session.inheritedEffort,
-    )
+    session.config = sessionConfig(session)
   }
 
   // Permissions.
@@ -2502,20 +2499,27 @@ export class ClaudeConnection implements AgentConnection {
     if (answer === 'cancelled' || 'values' in answer)
       return permissionResult(null, input, permission)
     let answers: Record<string, string>
+    let annotations: Record<string, { preview: string }> | null = null
     if ('answers' in answer) {
       answers = questionAnswers(questions, answer.answers)
       if (Object.keys(answers).length === 0) {
         return { behavior: 'deny', message: QUESTIONS_SKIPPED, toolUseID }
       }
+      annotations = questionAnnotations(questions, answer.answers)
     } else {
       const chosen = questions[0]!.options[Number(answer.optionId.replace(/^answer:/, ''))]
       if (answer.optionId === OTHER_ANSWER || !chosen) {
         return { behavior: 'deny', message: ANSWER_IN_REPLY, toolUseID }
       }
       answers = { [questions[0]!.question]: chosen.label }
+      if (chosen.preview) annotations = { [questions[0]!.question]: { preview: chosen.preview } }
     }
     target.apply(session.mapper.toolStatus(target.context(), toolUseID, 'in_progress'))
-    return { behavior: 'allow', updatedInput: { ...input, answers }, toolUseID }
+    return {
+      behavior: 'allow',
+      updatedInput: { ...input, answers, ...(annotations ? { annotations } : {}) },
+      toolUseID,
+    }
   }
 
   // MCP servers' requests.

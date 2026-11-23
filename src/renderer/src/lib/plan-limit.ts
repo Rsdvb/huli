@@ -1,5 +1,5 @@
 import type { PlanLimit } from '@shared/agent-host'
-import type { LimitLevel } from '@shared/plan-limits'
+import { evenPacePercent, type LimitLevel } from '@shared/plan-limits'
 
 export { limitLevel, type LimitLevel } from '@shared/plan-limits'
 
@@ -66,4 +66,18 @@ export const LIMIT_TEXT: Record<LimitLevel, string> = {
   ok: 'text-tertiary',
   warn: 'text-warning',
   bad: 'text-danger',
+}
+
+/**
+ * Huli: where a window's bar marks the even pace, 0 to 100 in the view's terms: the share used by
+ * now were the window's use spread evenly, or the share that would be left. Null where none.
+ */
+export function paceMark(
+  limit: Pick<PlanLimit, 'window' | 'label' | 'resetsAt'>,
+  view: LimitView,
+  now: number,
+): number | null {
+  const pace = evenPacePercent(limit, now)
+  if (pace === null) return null
+  return Math.round(view === 'left' ? 100 - pace : pace)
 }

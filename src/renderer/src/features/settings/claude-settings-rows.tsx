@@ -5,7 +5,12 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { AgentStatus, ClaudeCompactRow, ClaudeSettings } from '@shared/agent-host'
+import type {
+  AgentStatus,
+  ClaudeCompactRow,
+  ClaudeSettings,
+  OutputStyleInfo,
+} from '@shared/agent-host'
 import { KNOWN_CLAUDE_MODELS, PROMPT_CACHE_TTLS, type PromptCacheTtl } from '@shared/agents'
 import {
   CLAUDE_RUN_DEFAULTS,
@@ -24,6 +29,7 @@ import { DIALOG_MONO_FIELD } from './settings-dialog'
 
 const AUTO = 'auto'
 const NO_FALLBACK = ''
+const FOLLOW_STYLE = ''
 
 const knownName = (id: string): string | null =>
   KNOWN_CLAUDE_MODELS.find((model) => model.id === id)?.name ?? null
@@ -103,6 +109,8 @@ export function ClaudeSettingsRows({ status }: { status: AgentStatus }) {
         agentId={status.id}
         models={settings ? settings.compact.filter((row) => row.name !== null) : []}
         loading={read.state === 'loading'}
+        styles={settings?.outputStyles ?? null}
+        ownStyle={settings?.outputStyle ?? null}
       />
       <PromptSuggestionsRow />
       {hostId === null && <ClaudeTestEntrypointRow />}
@@ -123,10 +131,16 @@ function ClaudeRunRows({
   agentId,
   models,
   loading,
+  styles,
+  ownStyle,
 }: {
   agentId: AgentId
   models: readonly ClaudeCompactRow[]
   loading: boolean
+  /** Huli: Claude Code's output styles; null from an older host, which keeps none. */
+  styles: readonly OutputStyleInfo[] | null
+  /** Huli: the style Claude Code's own settings name; null for its default. */
+  ownStyle: string | null
 }) {
   const { useSettingsStore } = useHostScope()
   const { t } = useTranslation('settings')
@@ -147,7 +161,12 @@ function ClaudeRunRows({
     const store = useSettingsStore.getState()
     const runs = { ...store.settings.general.claudeRuns }
     const next = { ...CLAUDE_RUN_DEFAULTS, ...runs[agentId], ...change }
-    if (next.fallbackModel === null && next.budgetUsd === null && !next.budgetAllSessions) {
+    if (
+      next.fallbackModel === null &&
+      next.budgetUsd === null &&
+      !next.budgetAllSessions &&
+      !next.outputStyle
+    ) {
       delete runs[agentId]
     } else {
       runs[agentId] = next
@@ -171,8 +190,55 @@ function ClaudeRunRows({
       : []),
   ]
 
+  // Huli: the output style new sessions start in, or Claude Code's own setting.
+  const styleName = t('agents.claudeSettings.runs.outputStyle.name')
+  const chosenStyle = run.outputStyle ?? null
+  const labelOf = (name: string): string =>
+    styles?.find((style) => style.name === name)?.label ?? name
+  const styleOptions = styles
+    ? [
+        {
+          value: FOLLOW_STYLE,
+          label: t('agents.claudeSettings.runs.outputStyle.follow', {
+            style: labelOf(ownStyle ?? 'default'),
+          }),
+        },
+        ...styles.map((style) => ({ value: style.name, label: style.label })),
+        ...(chosenStyle !== null && !styles.some((style) => style.name === chosenStyle)
+          ? [
+              {
+                value: chosenStyle,
+                label: t('agents.claudeSettings.runs.outputStyle.missing', { style: chosenStyle }),
+              },
+            ]
+          : []),
+      ]
+    : null
+
   return (
     <>
+      {styleOptions && (
+        <RowShell>
+          <RowLine
+            text={
+              <RowText
+                name={styleName}
+                description={t('agents.claudeSettings.runs.outputStyle.description')}
+              />
+            }
+          >
+            <SettingSelect
+              label={styleName}
+              value={chosenStyle ?? FOLLOW_STYLE}
+              disabled={busy}
+              options={styleOptions}
+              onChange={(next) =>
+                save(() => write({ outputStyle: next === FOLLOW_STYLE ? null : next }))
+              }
+            />
+          </RowLine>
+        </RowShell>
+      )}
       <RowShell>
         <RowLine
           text={

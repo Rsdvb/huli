@@ -1007,6 +1007,12 @@
         "1h": "1 小时"
       },
       "runs": {
+        "outputStyle": {
+          "name": "输出风格",
+          "description": "新会话的回复怎么写。单个会话可在它的「更多」菜单里改。自己的风格是 Claude Code 配置文件夹里 output-styles 下的 Markdown 文件。",
+          "follow": "跟随 Claude Code 的设置（{{style}}）",
+          "missing": "{{style}}（没找到）"
+        },
         "fallback": {
           "name": "备用模型",
           "description": "主模型过载或不可用时改用这个模型，你发下一条消息时再试主模型。从下一个会话起生效。",
@@ -1023,6 +1029,29 @@
           "name": "也用于所有会话",
           "description": "这个 Agent 的每个会话，自打开起花费超过这个金额时停止。"
         }
+      }
+    },
+    "codexSettings": {
+      "name": "Codex 设置",
+      "readFailed": "没能读取 Codex 的设置：{{error}}",
+      "locked": "这一项由你所在组织的托管配置设定。",
+      "memories": {
+        "name": "记忆",
+        "description": "Codex 记住它在各会话里学到的东西，用在之后的会话里。写入 Codex 的 config.toml，新会话生效。"
+      },
+      "network": {
+        "name": "工作区沙箱里的网络",
+        "description": "能写工作区的会话，它的命令也能联网（sandbox_workspace_write.network_access）。纸鸢的会话从下一轮起照此执行。",
+        "roots": "另外可写：{{roots}}"
+      },
+      "profile": {
+        "name": "权限档案",
+        "description": "Codex 自己的新线程用的档案（default_permissions）。纸鸢的会话仍按你在输入框里选的模式。",
+        "default": "Codex 默认"
+      },
+      "features": {
+        "name": "测试版功能",
+        "description": "Codex 列出的实验功能。改动对新会话生效。"
       }
     },
     "autoCompact": {

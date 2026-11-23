@@ -43,6 +43,20 @@ function isCommand(name: string): name is CodexCommand {
   return (COMMANDS as readonly string[]).includes(name)
 }
 
+/**
+ * Huli: the shell command of a `!command` prompt, as Codex's own client takes one: a prompt of
+ * text alone that starts with `!`; null for any other.
+ */
+export function parseShell(prompt: readonly PromptBlock[]): string | null {
+  if (prompt.length !== 1) return null
+  const first = prompt[0]
+  if (!first || first.type !== 'text') return null
+  const text = first.text.trim()
+  if (!text.startsWith('!')) return null
+  const command = text.slice(1).trim()
+  return command === '' ? null : command
+}
+
 /** The command a prompt's first text starts with; null for a prompt for the model. */
 export function parseCommand(prompt: readonly PromptBlock[]): ParsedCommand | null {
   const first = prompt[0]

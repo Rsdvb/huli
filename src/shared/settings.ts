@@ -353,6 +353,8 @@ export interface ClaudeRunSettings {
   fallbackModel: string | null
   budgetUsd: number | null // what one run may spend; null for no limit
   budgetAllSessions: boolean // false: the budget holds for routine runs only
+  // Huli: the output style a new session starts in; null or absent keeps Claude Code's own setting.
+  outputStyle?: string | null
 }
 
 export const CLAUDE_RUN_DEFAULTS: ClaudeRunSettings = {
@@ -371,6 +373,19 @@ export function isClaudeFallbackModel(value: unknown): value is string {
     value.length > 0 &&
     value.length <= CLAUDE_MODEL_CHARS &&
     /^[^\s,]+$/.test(value)
+  )
+}
+
+export const OUTPUT_STYLE_CHARS = 100
+
+/** Huli: an output style's name as Claude Code's settings take it: a line of at most 100 characters. */
+export function isOutputStyleName(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.trim() === value &&
+    value.length > 0 &&
+    value.length <= OUTPUT_STYLE_CHARS &&
+    !/\p{Cc}/u.test(value)
   )
 }
 

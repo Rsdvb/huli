@@ -22,8 +22,12 @@ export interface AskedQuestion {
   question: string
   header: string
   multiSelect: boolean
-  options: { label: string; description: string }[]
+  /** Huli: `preview` is the option's mockup or code, in markdown, as Claude Code's previews are. */
+  options: { label: string; description: string; preview?: string }[]
 }
+
+/** Huli: a preview longer than this is left out rather than cut, which could break its fences. */
+export const MAX_PREVIEW_CHARS = 32_768
 
 type Input = Record<string, unknown>
 
@@ -86,10 +90,14 @@ export function askedQuestions(raw: unknown): AskedQuestion[] | null {
       ? fields.options
           .map((option) => asInput(option))
           .filter((option) => text(option.label))
-          .map((option) => ({
-            label: String(option.label),
-            description: text(option.description) ?? '',
-          }))
+          .map((option) => {
+            const preview = text(option.preview)
+            return {
+              label: String(option.label),
+              description: text(option.description) ?? '',
+              ...(preview && preview.length <= MAX_PREVIEW_CHARS ? { preview } : {}),
+            }
+          })
       : []
     if (!question || options.length === 0) return null
     asked.push({

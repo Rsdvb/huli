@@ -17,6 +17,8 @@ export function isOutOfCredit(error: Pick<HostError, 'code' | 'message' | 'data'
   if (error.code !== 'agent_error') return false
   const data = (error.data as { data?: unknown } | undefined)?.data
   if (statusOf(data) === PAYMENT_REQUIRED) return true
+  // Huli: Codex's provider out of quota or balance, which its connection names.
+  if (typeof data === 'object' && data !== null && 'providerQuota' in data) return true
   const text = `${error.message}\n${textOf(data)}`.toLowerCase()
   return PHRASES.some((phrase) => text.includes(phrase))
 }

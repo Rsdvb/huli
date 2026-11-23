@@ -187,7 +187,8 @@
     },
     "outOfCredit": {
       "title": "{{model}} is out of credit",
-      "titleNoModel": "{{agent}}'s model provider is out of credit"
+      "titleNoModel": "{{agent}}'s model provider is out of credit",
+      "titleProvider": "{{provider}}'s quota or balance has run out"
     },
     "turnFailed": "The turn failed",
     "chatgptLimit": {
@@ -922,7 +923,32 @@
       "effort": "Effort",
       "effortDescription": "Available effort levels for this model",
       "fast": "Fast mode",
-      "fastDescription": "Faster responses on supported models"
+      "fastDescription": "Faster responses on supported models",
+      "outputStyle": "Output style",
+      "outputStyleDescription": "How Claude Code writes its replies"
+    },
+    "outputStyle": {
+      "custom": "Your own",
+      "default": {
+        "name": "Default",
+        "description": "Claude Code as it always writes"
+      },
+      "Proactive": {
+        "name": "Proactive",
+        "description": "Executes at once, interrupts little, prefers action to planning"
+      },
+      "Concise": {
+        "name": "Concise",
+        "description": "Terse: leads with results, skips preamble and narration"
+      },
+      "Explanatory": {
+        "name": "Explanatory",
+        "description": "Explains its implementation choices and the codebase's patterns"
+      },
+      "Learning": {
+        "name": "Learning",
+        "description": "Pauses to have you write small pieces of code, for practice"
+      }
     },
     "background": {
       "unsupported": "This Claude Code cannot move a task to the background; update it first"
@@ -938,6 +964,20 @@
   "codex": {
     "signInNeeded": "Sign in to Codex with `codex login` in a terminal",
     "turnFailed": "The turn failed",
+    "providerQuota": "{{provider}} turned the request down: the account's quota or balance with {{provider}} has run out. Top up or check billing with {{provider}}, then try again, or pick a model of another provider.",
+    "providerQuotaUnnamed": "Codex's model provider turned the request down: the account's quota or balance has run out. Top up or check billing with the provider, then try again, or pick another model.",
+    "shell": {
+      "reason": "Your ! command runs in the session's folder outside Codex's sandbox, as a command that leaves it would.",
+      "declined": "The command did not run.",
+      "sandboxed": "This session runs in a sandbox, and a ! command would run outside it, so it did not run. Run it in the terminal instead.",
+      "unsupported": "This Codex cannot run ! commands. Update Codex, or run the command in the terminal."
+    },
+    "settings": {
+      "notSwitch": "The value must be on or off",
+      "badProfile": "This Codex has no permission profile of that name that may be picked",
+      "badFeature": "This Codex has no feature in beta of that name",
+      "unknown": "Codex has no such setting here"
+    },
     "noForkPoint": "Codex can't find this reply in its history",
     "noRevertPoint": "Codex can't find this turn in its history",
     "revertOlderThread": "Codex can undo turns only in sessions a newer Codex started",

@@ -1589,6 +1589,57 @@
   max-width: none;
 }
 
+/* Huli: a question whose options carry previews: the preview of the option pointed at or picked
+   beside the card in a wide column, under it in a narrow one. */
+.ks-question-frame {
+  container-type: inline-size;
+}
+.ks-question-split {
+  display: grid;
+  gap: 8px;
+}
+@container (inline-size >= 600px) {
+  .ks-question-split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+.ks-option-preview {
+  min-width: 0;
+  border-radius: 10px;
+  background: var(--thread-card);
+  box-shadow: var(--thread-card-shadow);
+  overflow: hidden;
+}
+.ks-option-preview__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--thread-muted);
+}
+.ks-option-preview__name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  color: var(--thread-ink);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ks-option-preview__body {
+  max-height: 420px;
+  overflow: auto;
+  padding: 6px 14px 12px;
+  font-size: 13px;
+}
+.ks-option-preview__none {
+  padding: 6px 14px 14px;
+  font-size: 13px;
+  color: var(--thread-muted);
+}
+
 /* An ask once answered, in the folded permission card's look: what it came to, then each
    question in gray over its answer. */
 .ks-answered {

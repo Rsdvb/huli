@@ -57,7 +57,13 @@ import {
   tokens,
 } from '@renderer/lib/format'
 import { errorMessage, host, sessionHost } from '@renderer/lib/host'
-import { isUsedUp, limitLevel, limitPercent, shownPercent } from '@renderer/lib/plan-limit'
+import {
+  isUsedUp,
+  limitLevel,
+  limitPercent,
+  paceMark,
+  shownPercent,
+} from '@renderer/lib/plan-limit'
 import { useClock, useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
 import { showSending } from '@renderer/stores/threads'
@@ -850,6 +856,7 @@ function PlanLimits({ limits, account }: { limits: PlanLimit[]; account: AgentAc
       </div>
       {limits.map((limit) => {
         const shown = shownPercent(Math.round(limit.usedPercent ?? 0), view)
+        const pace = paceMark(limit, view, now)
         return (
           <div key={limit.window} className="kettu-limit" data-level={METER[usageTone(limit)]}>
             <div className="kettu-limit__row">
@@ -870,6 +877,14 @@ function PlanLimits({ limits, account }: { limits: PlanLimit[]; account: AgentAc
             </div>
             <div
               className="kettu-limit__bar"
+              data-paced={pace === null ? undefined : ''}
+              title={
+                pace === null
+                  ? undefined
+                  : t(view === 'left' ? 'usage.limits.paceLeft' : 'usage.limits.paceUsed', {
+                      percent: pace,
+                    })
+              }
               role="meter"
               aria-valuemin={0}
               aria-valuemax={100}
@@ -879,6 +894,7 @@ function PlanLimits({ limits, account }: { limits: PlanLimit[]; account: AgentAc
               })}
             >
               <span style={{ width: `${Math.min(100, Math.max(0, shown))}%` }} />
+              {pace !== null && <i className="kettu-pace" style={{ left: `${pace}%` }} />}
             </div>
           </div>
         )
