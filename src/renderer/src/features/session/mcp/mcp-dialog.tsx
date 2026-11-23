@@ -121,12 +121,17 @@ function McpPanel({ summary }: { summary: SessionSummary }) {
 
   const read = () => setAsked((n) => n + 1)
 
-  const run = async (key: string, work: () => Promise<void>) => {
+  const run = async (
+    key: string,
+    work: () => Promise<void>,
+    failed?: (error: string) => string,
+  ) => {
     setBusy(key)
     try {
       await work()
     } catch (e) {
-      toast(errorMessage(e), undefined, { tone: 'warning' })
+      const error = errorMessage(e)
+      toast(failed ? failed(error) : error, undefined, { tone: 'warning' })
       read()
     } finally {
       setBusy(null)
@@ -134,16 +139,27 @@ function McpPanel({ summary }: { summary: SessionSummary }) {
   }
 
   const act = (action: SessionMcpAction, server: string | null) =>
-    run(`${action}:${server ?? ''}`, async () => {
-      setView(await host('sessions.mcpAct', { sessionId, action, server }))
-    })
+    run(
+      `${action}:${server ?? ''}`,
+      async () => {
+        setView(await host('sessions.mcpAct', { sessionId, action, server }))
+      },
+      (error) =>
+        server === null
+          ? t('mcp.failedAll', { error })
+          : t(`mcp.failed.${action}`, { name: server, error }),
+    )
 
   const signIn = (server: string) =>
-    run(`login:${server}`, async () => {
-      const { url } = await host('sessions.mcpLogin', { sessionId, server })
-      openLinkIn(url, 'browser', null)
-      setSigning({ server, ended: useMcpPanelStore.getState().logins[server] ?? 0 })
-    })
+    run(
+      `login:${server}`,
+      async () => {
+        const { url } = await host('sessions.mcpLogin', { sessionId, server })
+        openLinkIn(url, 'browser', null)
+        setSigning({ server, ended: useMcpPanelStore.getState().logins[server] ?? 0 })
+      },
+      (error) => t('mcp.login.failed', { name: server, error }),
+    )
 
   const reload = () =>
     run('reload', async () => {

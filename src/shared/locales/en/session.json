@@ -2416,6 +2416,12 @@
       "unsupportedSome_one": "{{count}} can't reload without restarting",
       "unsupportedSome_other": "{{count}} can't reload without restarting",
       "join": "; "
+    },
+    "failedAll": "Couldn't reconnect the servers: {{error}}",
+    "failed": {
+      "reconnect": "Couldn't reconnect {{name}}: {{error}}",
+      "disable": "Couldn't turn off {{name}}: {{error}}",
+      "enable": "Couldn't turn on {{name}}: {{error}}"
     }
   }
 }

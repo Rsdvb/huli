@@ -2317,6 +2317,12 @@
       "busySome_other": "{{count}} 个正在工作，等这一轮结束后再加载",
       "unsupportedSome_other": "{{count}} 个不重启就不能重新加载",
       "join": "；"
+    },
+    "failedAll": "没能重新连接服务器：{{error}}",
+    "failed": {
+      "reconnect": "没能重新连接 {{name}}：{{error}}",
+      "disable": "没能关闭 {{name}}：{{error}}",
+      "enable": "没能打开 {{name}}：{{error}}"
     }
   }
 }
