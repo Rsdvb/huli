@@ -441,9 +441,10 @@ const api: KettuApi = {
   },
   exportSession: (request) => invoke('session:export', request),
   moves: {
-    preview: (source, sessionId, target) =>
-      invoke('sessions:move-preview', source, sessionId, target),
-    start: (source, sessionId, target) => invoke('sessions:move-start', source, sessionId, target),
+    preview: (source, sessionId, target, project) =>
+      invoke('sessions:move-preview', source, sessionId, target, project),
+    start: (source, sessionId, target, project) =>
+      invoke('sessions:move-start', source, sessionId, target, project),
     list: () => invoke('sessions:moves'),
     onProgress: subscribe('sessions:move-progress'),
   },

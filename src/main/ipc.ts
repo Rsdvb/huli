@@ -1181,14 +1181,32 @@ function moveSessionArg(value: unknown): string {
   return value
 }
 
+/**
+ * Huli: a project to move a session into within its own computer, as its host writes it, or none;
+ * the host checks it is one of its projects.
+ */
+function moveProjectArg(value: unknown): string | null {
+  if (value === null) return null
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 4096 ||
+    value.includes(' ')
+  ) {
+    throw new Error('Not a project folder')
+  }
+  return value
+}
+
 /** Huli: moving a session to another computer, which main runs between the hosts. */
 export function registerSessionMoveIpc(mover: SessionMover): void {
-  handle('sessions:move-preview', 3, async (_, source, session, target) => {
+  handle('sessions:move-preview', 4, async (_, source, session, target, project) => {
     try {
       const preview = await mover.preview(
         moveHostArg(source),
         moveSessionArg(session),
         moveHostArg(target),
+        moveProjectArg(project),
       )
       return { ok: true, preview }
     } catch (error) {
@@ -1199,9 +1217,14 @@ export function registerSessionMoveIpc(mover: SessionMover): void {
       }
     }
   })
-  handle('sessions:move-start', 3, (_, source, session, target) => {
+  handle('sessions:move-start', 4, (_, source, session, target, project) => {
     actionLog.info('session.move')
-    return mover.start(moveHostArg(source), moveSessionArg(session), moveHostArg(target))
+    return mover.start(
+      moveHostArg(source),
+      moveSessionArg(session),
+      moveHostArg(target),
+      moveProjectArg(project),
+    )
   })
   handle('sessions:moves', 0, () => mover.list())
 }

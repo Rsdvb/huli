@@ -571,12 +571,13 @@ export interface IpcInvokeContract {
   // Huli: a session as the page built it, saved where main's dialog says; false when cancelled.
   'session:export': { args: [request: SessionExportRequest]; result: boolean }
   // Huli: moving a session to another computer (session-move.ts); a host is null for this one.
+  // `project`, one of the host's projects as it writes it, moves it within its own computer.
   'sessions:move-preview': {
-    args: [source: string | null, sessionId: string, target: string | null]
+    args: [source: string | null, sessionId: string, target: string | null, project: string | null]
     result: MovePreviewResult
   }
   'sessions:move-start': {
-    args: [source: string | null, sessionId: string, target: string | null]
+    args: [source: string | null, sessionId: string, target: string | null, project: string | null]
     result: string
   }
   'sessions:moves': { args: []; result: MoveProgress[] }
@@ -1220,8 +1221,14 @@ export interface KettuApi {
       source: string | null,
       sessionId: string,
       target: string | null,
+      project: string | null,
     ): Promise<MovePreviewResult>
-    start(source: string | null, sessionId: string, target: string | null): Promise<string>
+    start(
+      source: string | null,
+      sessionId: string,
+      target: string | null,
+      project: string | null,
+    ): Promise<string>
     list(): Promise<MoveProgress[]>
     onProgress(listener: (progress: MoveProgress) => void): () => void
   }

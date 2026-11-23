@@ -269,6 +269,21 @@ describe('the host files', () => {
     expect(await sessionsFile(dir, log).load()).toEqual({ version: 1, sessions: [session] })
   })
 
+  it('keeps where a session moved, within one computer too', async () => {
+    const movedTo = { hostId: null, name: 'notes', sessionId: 's2', projectPath: '/notes', at: 5 }
+    const local = { ...session, movedTo: { ...movedTo, sameComputer: true as const } }
+    const store = sessionsFile(dir, log)
+    store.save({ version: 1, sessions: [local] })
+    await store.flush()
+    expect(await sessionsFile(dir, log).load()).toEqual({ version: 1, sessions: [local] })
+    // Only a true flag reads; a file from before has none and stays another computer's.
+    for (const sameComputer of [false, 'yes', 1]) {
+      expect(
+        parseSessionsFile({ sessions: [{ ...session, movedTo: { ...movedTo, sameComputer } }] }),
+      ).toEqual({ version: 1, sessions: [{ ...session, movedTo }] })
+    }
+  })
+
   it('validates every session field', () => {
     expect(parseSessionsFile({ sessions: [session] })).toEqual({ version: 1, sessions: [session] })
     expect(parseSessionsFile({ sessions: [{ ...session, agentId: 'other' }] })).toBe(

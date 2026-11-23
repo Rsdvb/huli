@@ -99,6 +99,8 @@ export interface MoveServiceDeps {
     removeAdopted(sessionId: string): Promise<void>
     setMovedTo(sessionId: string, movedTo: MovedTo | null): void
     agentSessionIds(agentId: AgentId): Set<string>
+    /** Huli: archives the session, its sub-sessions left in the list with `subSessions` false. */
+    archive(sessionId: string, subSessions?: boolean): Promise<void>
   }
   agents: {
     statuses(): AgentStatus[]
@@ -140,8 +142,13 @@ interface Move {
   journal: Journal
   /** The source's pack's files, by name; the target's parts so far. */
   files: Map<string, { size: number; written: number }>
-  /** The target's project. */
-  project: { path: string; cloned: boolean; remote: string | null } | null
+  /** The target's project; Huli: `conversationOnly` takes the conversation alone. */
+  project: {
+    path: string
+    cloned: boolean
+    remote: string | null
+    conversationOnly?: boolean
+  } | null
   /** Runs its requests one at a time. */
   chain: Promise<unknown>
 }
@@ -288,27 +295,39 @@ export class SessionMoves {
    * Packs the session for the target, which has `haves`: the Git bundle, and the agent's own
    * transcript or Kite's copy of the thread, each in the move's staging folder.
    */
-  async pack(sessionId: string, moveId: string, haves: string[]): Promise<MovePack> {
+  async pack(
+    sessionId: string,
+    moveId: string,
+    haves: string[],
+    conversationOnly = false,
+  ): Promise<MovePack> {
     await this.ready()
     if (this.moves.has(moveId)) throw new HostError('conflict', 'That move is under way already')
     const facts = this.deps.sessions.moveFacts(sessionId)
     if (facts.problems.length > 0) throw moveError(facts.problems[0]!, facts.problems[0]!)
-    const repo = await inspectRepo(this.deps.exec, facts.cwd)
-    if ('problem' in repo) throw moveError(repo.problem, repo.problem)
-    if (repo.operation) throw moveError('operation', 'A merge or rebase is under way')
+    // Huli: the conversation alone leaves the code, so a worktree with work in it is not left.
+    if (conversationOnly && facts.worktree) {
+      throw moveError('worktree', 'The session works in a worktree of its repository')
+    }
+    const repo = conversationOnly ? null : await inspectRepo(this.deps.exec, facts.cwd)
+    if (repo && 'problem' in repo) throw moveError(repo.problem, repo.problem)
+    if (repo?.operation) throw moveError('operation', 'A merge or rebase is under way')
     const move = await this.begin(moveId, 'source')
     try {
-      const scratch = path.join(move.dir, 'scratch')
-      await mkdir(scratch, { recursive: true })
-      const git = await packRepo(this.deps.exec, {
-        cwd: facts.cwd,
-        moveId,
-        haves,
-        bundle: path.join(move.dir, 'bundle'),
-        scratch,
-        facts: repo,
-      })
-      await rm(scratch, { recursive: true, force: true })
+      let git: MovePack['git'] = null
+      if (repo) {
+        const scratch = path.join(move.dir, 'scratch')
+        await mkdir(scratch, { recursive: true })
+        git = await packRepo(this.deps.exec, {
+          cwd: facts.cwd,
+          moveId,
+          haves,
+          bundle: path.join(move.dir, 'bundle'),
+          scratch,
+          facts: repo,
+        })
+        await rm(scratch, { recursive: true, force: true })
+      }
       const found = await this.conversationOf(facts)
       const conversation: MoveConversation = {
         kind: found.kind,
@@ -316,7 +335,7 @@ export class SessionMoves {
         cwd: facts.cwd,
         platform: this.deps.platform,
       }
-      const names = git.bundled ? ['bundle'] : []
+      const names = git?.bundled ? ['bundle'] : []
       if (found.kind === 'claude' && found.file) {
         await copyFile(found.file, path.join(move.dir, 'transcript'))
         names.push('transcript')
@@ -397,6 +416,9 @@ export class SessionMoves {
     // A turn that started since the pack would be left behind.
     if (facts.problems.includes('busy')) throw moveError('busy', 'The session started working')
     this.deps.sessions.setMovedTo(sessionId, to)
+    // Huli: within one computer the session goes on in the other project's list, so the one it
+    // left leaves its own, archived with where it went; its sub-sessions stay.
+    if (to.sameComputer) await this.deps.sessions.archive(sessionId, false)
     await this.drop(move)
   }
 
@@ -415,8 +437,11 @@ export class SessionMoves {
     agentId: AgentId
     remotes: MoveRemote[]
     remote: string | null
+    project?: string
   }): Promise<MoveTarget> {
     await this.ready()
+    if (params.project !== undefined)
+      return this.checkProject({ ...params, project: params.project })
     const problems: MoveProblem[] = []
     const version = await this.deps.exec('git', ['--version'], { timeoutMs: 20_000 })
     const hasGit = version.failure === null && version.code === 0
@@ -441,6 +466,47 @@ export class SessionMoves {
       clonePath: clone?.kind === 'new' ? clone.folder : null,
       problems,
     }
+  }
+
+  /**
+   * Huli: the project named for a move within one computer: the same repository moves as to
+   * another computer, into a worktree of it; another one, or none, takes the conversation alone.
+   */
+  private async checkProject(params: {
+    agentId: AgentId
+    remotes: MoveRemote[]
+    project: string
+  }): Promise<MoveTarget> {
+    const folder = await this.knownProject(params.project)
+    const problems: MoveProblem[] = []
+    const agent = this.pickAgent(params.agentId)
+    if (!agent) problems.push('agentMissing')
+    else if (agent.state === 'off') problems.push('agentOff')
+    else if (agent.state === 'notInstalled') problems.push('agentNotInstalled')
+    else if (agent.state === 'signedOut') problems.push('signedOut')
+    const keys = params.remotes.map((remote) => remoteKey(remote.url))
+    const own = await remotesOf(this.deps.exec, folder).catch(() => [])
+    const remote = own.find((item) => keys.includes(remoteKey(item.url)) && keys.length > 0)
+    return {
+      platform: this.deps.platform,
+      agent,
+      project: { path: folder, remote: remote?.name ?? '' },
+      clonePath: null,
+      problems,
+      ...(remote ? {} : { conversationOnly: true }),
+    }
+  }
+
+  /** Huli: one of this computer's projects by its folder, canonical; refused otherwise. */
+  private async knownProject(value: string): Promise<string> {
+    const folder = await canonicalizePath(value, this.deps.platform, realpath).catch(() => {
+      throw new HostError('not_found', 'No such project here')
+    })
+    const known = this.deps.projects
+      .paths()
+      .some((item) => samePath(item, folder, this.deps.platform))
+    if (!known) throw new HostError('not_found', 'No such project here')
+    return folder
   }
 
   /** The agent of the session's kind here: the same one, else the kind's own, else any. */
@@ -522,11 +588,19 @@ export class SessionMoves {
    */
   async prepare(
     moveId: string,
-    project: { path: string } | { clone: true },
-    url: string,
+    project: { path: string; conversationOnly?: true } | { clone: true },
+    url: string | null,
   ): Promise<MovePrepared> {
     await this.ready()
     if (this.moves.has(moveId)) throw new HostError('conflict', 'That move is under way already')
+    // Huli: the conversation alone goes into one of this computer's projects as it is.
+    if ('path' in project && project.conversationOnly) {
+      const folder = await this.knownProject(project.path)
+      const move = await this.begin(moveId, 'target')
+      move.project = { path: folder, cloned: false, remote: null, conversationOnly: true }
+      return { projectPath: folder, cloned: false, haves: [], remote: null }
+    }
+    if (url === null) throw new HostError('invalid_params', 'url must name a repository')
     const key = remoteKey(url)
     if (key === null || withoutCredentials(url) !== url) {
       throw new HostError('invalid_params', 'url must name a repository without credentials')
@@ -677,6 +751,31 @@ export class SessionMoves {
     if (conversation.kind !== 'carry' && harnessOf(params.agentId) !== resumer) {
       throw new HostError('invalid_params', 'The agent cannot resume that conversation')
     }
+    // Huli: the conversation alone, which goes on in the project's own folder.
+    if (params.git === null || project.conversationOnly) {
+      if (params.git !== null || !project.conversationOnly || has('bundle')) {
+        throw new HostError('invalid_params', 'The pack does not match the move')
+      }
+      const cwd = await canonicalizePath(project.path, platform, realpath)
+      const rewrite: TranscriptRewrite = {
+        from: { root: conversation.cwd, platform: conversation.platform },
+        to: { root: cwd, platform },
+      }
+      const resume = await this.placeConversation(move, params, cwd, rewrite)
+      const summary = await this.deps.sessions.adoptMoved({
+        agentId: params.agentId,
+        projectPath: project.path,
+        worktree: null,
+        title: params.title,
+        createdAt: params.createdAt,
+        resume,
+      })
+      await this.took(move, { kind: 'session', id: summary.id })
+      move.journal.applied = true
+      await this.saveJournal(move)
+      return { sessionId: summary.id, projectPath: project.path }
+    }
+    const git = params.git
     // A clone made for a session that worked in the project's folder is that folder.
     const mode =
       params.worktree || !project.cloned
@@ -687,7 +786,7 @@ export class SessionMoves {
       platform,
       mode,
       bundle: has('bundle') ? this.stagedFile(move, 'bundle') : null,
-      pack: params.git,
+      pack: git,
       remote: project.remote,
       took: (step) => void this.took(move, step),
     })
@@ -699,14 +798,14 @@ export class SessionMoves {
         path: cwd,
         branch: applied.branch,
         base: base?.base ?? 'HEAD',
-        baseOid: base?.baseOid ?? params.git.head,
+        baseOid: base?.baseOid ?? git.head,
       }
     }
     const rewrite: TranscriptRewrite = {
       from: { root: conversation.cwd, platform: conversation.platform },
       to: { root: cwd, platform },
-      ...(params.git.branch && params.git.branch !== applied.branch
-        ? { branch: { from: params.git.branch, to: applied.branch } }
+      ...(git.branch && git.branch !== applied.branch
+        ? { branch: { from: git.branch, to: applied.branch } }
         : {}),
     }
     const resume = await this.placeConversation(move, params, cwd, rewrite)

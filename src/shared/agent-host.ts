@@ -2748,8 +2748,10 @@ export interface HostContract {
   // of this computer's host through its own messages, of the others as a desktop device.
   // The source's: what the session holds, its pack in parts, and the mark once it went.
   'moves.inspect': { params: { sessionId: string }; result: MoveSource }
+  // Huli: `conversationOnly` packs the conversation alone, for a move within one computer into
+  // another repository.
   'moves.pack': {
-    params: { sessionId: string; moveId: string; haves: string[] }
+    params: { sessionId: string; moveId: string; haves: string[]; conversationOnly?: true }
     result: MovePack
   }
   'moves.part': {
@@ -2760,12 +2762,18 @@ export interface HostContract {
   'moves.abort': { params: { moveId: string }; result: void }
   // The target's: what it would do, its project (a clone made when it has none), the pack's parts,
   // the session, and the undo of all of it until main commits the move.
+  // Huli: `project` names one of the host's projects to move into, for a move within one computer.
   'moves.check': {
-    params: { agentId: AgentId; remotes: MoveRemote[]; remote: string | null }
+    params: { agentId: AgentId; remotes: MoveRemote[]; remote: string | null; project?: string }
     result: MoveTarget
   }
+  // Huli: a project with `conversationOnly` takes the conversation alone, without a `url`.
   'moves.prepare': {
-    params: { moveId: string; project: { path: string } | { clone: true }; url: string }
+    params: {
+      moveId: string
+      project: { path: string; conversationOnly?: true } | { clone: true }
+      url: string | null
+    }
     result: MovePrepared
   }
   'moves.receive': {

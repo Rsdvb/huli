@@ -4713,8 +4713,8 @@ export class AgentHost {
       'agentHistory.copy': ({ token }) => this.agentHistory.copy(token),
       'moves.inspect': async ({ sessionId }, ctx) =>
         (await this.sessionMoves(ctx)).inspect(sessionId),
-      'moves.pack': async ({ sessionId, moveId, haves }, ctx) =>
-        (await this.sessionMoves(ctx)).pack(sessionId, moveId, haves),
+      'moves.pack': async ({ sessionId, moveId, haves, conversationOnly }, ctx) =>
+        (await this.sessionMoves(ctx)).pack(sessionId, moveId, haves, conversationOnly === true),
       'moves.part': async ({ moveId, name, offset }, ctx) =>
         (await this.sessionMoves(ctx)).part(moveId, name, offset),
       'moves.finish': async ({ moveId, sessionId, to }, ctx) =>

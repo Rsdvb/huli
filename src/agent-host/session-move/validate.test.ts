@@ -109,4 +109,58 @@ describe('the move requests', () => {
     expect(() => prepare({ clone: true, path: '/x' })).toThrow()
     expect(() => prepare({ clone: true }, 'not a url')).toThrow()
   })
+
+  it('takes a move within one computer: a project of its own, the conversation alone', () => {
+    const check = (project?: unknown) =>
+      linux['moves.check']({ agentId: 'claude-code', remotes: [], remote: null, project })
+    expect(check('/home/me/notes')).toEqual({
+      agentId: 'claude-code',
+      remotes: [],
+      remote: null,
+      project: '/home/me/notes',
+    })
+    expect(check()).not.toHaveProperty('project')
+    expect(() => check('notes')).toThrow()
+    expect(() => check(7)).toThrow()
+    expect(() => check('/x'.repeat(3_000))).toThrow()
+
+    // The conversation alone goes into a project as it is, with no repository to name.
+    const prepare = (project: unknown, url: unknown) =>
+      linux['moves.prepare']({ moveId: MOVE, project, url })
+    expect(prepare({ path: '/home/me/notes', conversationOnly: true }, null)).toEqual({
+      moveId: MOVE,
+      project: { path: '/home/me/notes', conversationOnly: true },
+      url: null,
+    })
+    expect(() => prepare({ path: '/home/me/notes' }, null)).toThrow()
+    expect(() => prepare({ clone: true, conversationOnly: true }, null)).toThrow()
+    expect(() => prepare({ path: '/home/me/notes', conversationOnly: 'yes' }, null)).toThrow()
+    expect(() => prepare({ path: 'notes', conversationOnly: true }, null)).toThrow()
+
+    const pack = (more: Record<string, unknown>) =>
+      linux['moves.pack']({ sessionId: 's', moveId: MOVE, haves: [], ...more })
+    expect(pack({ conversationOnly: true })).toMatchObject({ conversationOnly: true })
+    expect(pack({})).not.toHaveProperty('conversationOnly')
+    expect(() => pack({ conversationOnly: 1 })).toThrow()
+
+    expect(linux['moves.apply'](apply({ git: null })).git).toBeNull()
+    expect(() => linux['moves.apply'](apply({ git: undefined }))).toThrow()
+
+    const finish = (to: Record<string, unknown>) =>
+      linux['moves.finish']({
+        moveId: MOVE,
+        sessionId: 's',
+        to: {
+          hostId: null,
+          name: 'notes',
+          sessionId: 't',
+          projectPath: '/home/me/notes',
+          at: 1,
+          ...to,
+        },
+      }).to
+    expect(finish({ sameComputer: true })).toMatchObject({ sameComputer: true })
+    expect(finish({})).not.toHaveProperty('sameComputer')
+    expect(() => finish({ sameComputer: false })).toThrow()
+  })
 })

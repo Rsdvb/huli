@@ -7,7 +7,7 @@ import type { SessionSummary } from '@shared/agent-host'
 import type { MoveHost, MovePreviewResult, MoveProgress } from '@shared/session-move'
 import { hostOfSession } from '@renderer/stores/sessions'
 import { errorMessage } from '@renderer/lib/host'
-import { onHost } from '@renderer/lib/host-paths'
+import { hostPath, onHost } from '@renderer/lib/host-paths'
 import { switchHost } from '@renderer/stores/host-switch'
 import { openSession, THIS_COMPUTER, useViewStore } from '@renderer/stores/view'
 
@@ -96,21 +96,37 @@ export function closeMove(): void {
   useMoveStore.setState({ summary: null, more: [], dropped: null, preview: null })
 }
 
-/** Asks main what moving the session to `target` would do; the dialog shows the answer. */
-export function previewMove(summary: SessionSummary, target: MoveHost): void {
+/**
+ * Asks main what moving the session to `target` would do; the dialog shows the answer. Huli:
+ * `project`, one of the host's projects as it writes it, moves it within its own computer.
+ */
+export function previewMove(
+  summary: SessionSummary,
+  target: MoveHost,
+  project: string | null = null,
+): void {
   const ask = ++asked
   const answered = (preview: MovePreviewResult): void => {
     if (ask === asked) useMoveStore.setState({ preview })
   }
   useMoveStore.setState({ preview: 'loading' })
   window.kettu
-    .moves!.preview(hostOfSession(summary), summary.id, target)
+    .moves!.preview(hostOfSession(summary), summary.id, target, project)
     .then(answered, (e) => answered({ ok: false, reason: null, message: errorMessage(e) }))
 }
 
-export function startMove(summary: SessionSummary, target: MoveHost): Promise<string> {
+export function startMove(
+  summary: SessionSummary,
+  target: MoveHost,
+  project: string | null = null,
+): Promise<string> {
   listen()
-  return window.kettu.moves!.start(hostOfSession(summary), summary.id, target)
+  return window.kettu.moves!.start(hostOfSession(summary), summary.id, target, project)
+}
+
+/** Huli: the project a drop moves the sessions into within their own computer, as it writes it. */
+export function localProject(summary: SessionSummary, dropped: MoveDrop | null): string | null {
+  return dropped && dropped.host === hostOfSession(summary) ? hostPath(dropped.projectPath) : null
 }
 
 /** The session main moved there, shown in its host's projects. */
