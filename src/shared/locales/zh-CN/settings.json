@@ -630,7 +630,7 @@
       },
       "install": {
         "action": "安装助手",
-        "note": "管理员助手要先装到 Program Files，只装一次。之后 Windows 会请你允许它自带的复制程序 Robocopy 把助手放进去：只在你刚点了「安装助手」时才批准，「显示更多详细信息」里应能看到 …\\Kite Computer Helper。"
+        "note": "管理员助手要先装到 Program Files，只装一次。之后 Windows 会请你允许「Windows 命令处理程序」：只在你刚点了「安装助手」时才批准，「显示更多详细信息」里应能看到 robocopy.exe 和 …\\Kite Computer Helper\\install.txt。"
       },
       "outdated": "安装的助手来自旧版纸鸢，重新安装后才能用。",
       "tampered": "安装的助手在安装后被改动过，纸鸢不会再用它。请先移除，再重新安装。",

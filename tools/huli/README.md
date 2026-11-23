@@ -1342,13 +1342,19 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
     files.
   - Every prompt goes through `ShellExecuteEx` with `SEE_MASK_CLASSKEY` on
     `HKLM\SOFTWARE\Classes\exefile` (`Shell.cs`), so the user's `HKCU\Software\Classes` cannot put
-    a command of its own behind the prompt; a test build asks the same way with the open verb. To
+    a command of its own behind the prompt; a test build asks the same way with the open verb. The
+    install's prompt is cmd.exe too ("Windows Command Processor"), whose details show robocopy.exe
+    and `…\Kite Computer Helper\install.txt`, as the install note in Settings tells. To
     check this on a test machine (never on the owner's own), remember the guard below refuses first
     while `HKCU\Software\Classes\exefile\shell` exists, so a plain run tests only the guard:
     either create the harmless override after the guard passed and before the prompt is asked, or
     call `Shell.Start` directly from a scratch program compiled with the helper's sources, using
     csc's `/main` option to pick its entry point, with a harmless override in place, and see that
-    the prompt still runs the program asked for.
+    the prompt still runs the program asked for. Also try the route the guard does not look at: a
+    user `.exe` mapped to a ProgID of its own (`HKCU\Software\Classes\.exe` set to `KiteVmTest`,
+    with `HKCU\Software\Classes\KiteVmTest\shell\runas\command` running something harmless);
+    pressing Install should still show the "Windows Command Processor" prompt with Kite's line under
+    Show more details, and run it.
   - Before install and every start the warm helper refuses while a variable that makes .NET load
     code (`COR_*`, `COMPlus_*`, `CORECLR_*`, `APPDOMAIN_MANAGER_ASM`/`_TYPE`, `DOTNET_*` but the
     SDK's own) is set in its own environment, in `HKCU\Environment`, in `HKCU\Volatile Environment`
@@ -1387,8 +1393,10 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
     and range, an element token or a point but not both, keys from a fixed set, `initialize` and
     `_meta` held to what Kite's client sends, `delivery_mode: "background"` on every action, one
     tool call at a time (released only by that call's own answer), scoped to the program's windows,
-    re-serialized; a request whose id is no whole number within ±2^53 or short string, or that
-    uses an id again, ends the session. It confirms every step in its
+    re-serialized; a request whose id is no whole number within ±2^53 or short string of
+    printable ASCII, or that uses an id again, ends the session. (The JSON reader turns a lone
+    surrogate into U+FFFD, and what goes to the driver is written as strict UTF-8, which would
+    refuse one.) It confirms every step in its
     own window but plainly harmless ones (`Risk.cs`): a click only on an element of a focusing or
     selecting role from the snapshot that gave its token, with one left click and a label that
     commits nothing; typing only into the edit field the last step clicked (no element token, or
@@ -1405,7 +1413,9 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
     Russian, Dutch, Polish, Turkish or Swedish, and, while a context menu or the menu bar is open
     (after a right-click, a click on a menu item, the menu key with or without Shift, Shift+F10,
     Alt, F10 or Alt with a letter), a letter, Enter, typed text or a click by a point, so its items
-    are clicked by their element and their names are checked. The clipboard itself is never shown.
+    are clicked by their element and their names are checked; besides the steps it tracked, it asks
+    the program's thread whether it is in a menu (`GetGUIThreadInfo`). The clipboard itself is
+    never shown.
     Clicks it cannot place and text longer than
     1,000 characters are refused too. Its Allow button works only after the window has been in
     front for a second with no other program's window over it, the second starting again after a
@@ -1415,7 +1425,7 @@ foreground` while Settings › Computer use › 允许必要时切到前台操�
   - Not fixed, as it needs a broker that is no .NET program, a secure desktop or a per-machine
     install: `.NETFramework` knobs and unlisted `COMPlus_` names written while the prompt is open
     reach the runtime before the broker's `Main` sees them; any program of the user's can raise the
-    same Microsoft-signed cmd.exe and Robocopy prompts for its own commands; a process with a
+    same Microsoft-signed cmd.exe prompt for its own commands; a process with a
     borrowed UIAccess token can still click the broker's windows; the install copies what the
     per-user app folder holds at that moment; the broker's binding to Kite is a speed bump; the
     approved program's own dialogs can change files as administrator; and services the program asks

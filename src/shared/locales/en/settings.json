@@ -633,7 +633,7 @@
       },
       "install": {
         "action": "Install helper",
-        "note": "The administrator helper goes into Program Files once. Windows then asks you to let Robocopy, its own copy program, put it there: approve that prompt only right after you pressed Install, and under Show more details it should name …\\Kite Computer Helper."
+        "note": "The administrator helper goes into Program Files once. Windows then asks you to allow “Windows Command Processor”: approve that prompt only right after you pressed Install, and under Show more details it should name robocopy.exe and …\\Kite Computer Helper\\install.txt."
       },
       "outdated": "The installed helper is from an older version of Kite. Install it again to use it.",
       "tampered": "The installed helper changed after it was installed, so Kite no longer uses it. Remove it, then install it again.",
