@@ -10,7 +10,7 @@ import {
   Delete02Icon,
   FlowIcon,
   Folder01Icon,
-  FolderLibraryIcon,
+  FolderOpenIcon,
   Message01Icon,
   Task01Icon,
   TimeScheduleIcon,
@@ -67,7 +67,7 @@ import { useApply } from './use-apply'
 const KIND_ICON: Record<BinKind, IconSvgElement> = {
   session: Message01Icon,
   folder: Folder01Icon,
-  project: FolderLibraryIcon,
+  project: FolderOpenIcon,
   task: Task01Icon,
   routine: TimeScheduleIcon,
   workflow: FlowIcon,
@@ -337,7 +337,7 @@ export function RecycleBinPage() {
             : t('recycleBin.keepNote', { count: keepDays })}{' '}
           <button
             type="button"
-            className="text-link underline-offset-2 hover:underline"
+            className="k-link"
             onClick={() => openSettingsRow('general', null, 'bin-keep-days')}
           >
             {t('recycleBin.keepChange')}
@@ -576,7 +576,7 @@ function ProjectDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
-          <Button variant="secondary" onClick={() => onChoose('noProject')}>
+          <Button variant="outline" size="dialog" onClick={() => onChoose('noProject')}>
             {t('recycleBin.toNoProject')}
           </Button>
           <AlertDialogAction onClick={() => onChoose('restore')}>

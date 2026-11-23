@@ -1,0 +1,102 @@
+# 回收站 on the phone: a deleted session says 已移到回收站 with 撤销, which brings it back; deleted
+# again, it waits in 设置 › 回收站, comes back from there, and a delete for good asks twice.
+# Ends: the recycle bin empty after a delete for good
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/basic-turn'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- tapOn: '返回'
+- waitForAnimationToEnd
+- longPressOn:
+    text: '.*Fix the flaky login test.*'
+- waitForAnimationToEnd
+- tapOn: '删除…'
+- waitForAnimationToEnd
+- takeScreenshot: b01-delete-dialog
+- tapOn: '删除'
+- extendedWaitUntil:
+    visible: '.*已移到回收站'
+    timeout: 10000
+- takeScreenshot: b02-binned-notice
+- tapOn: '撤销'
+- extendedWaitUntil:
+    visible: '.*Fix the flaky login test.*'
+    timeout: 10000
+- takeScreenshot: b03-undone
+- longPressOn:
+    text: '.*Fix the flaky login test.*'
+- waitForAnimationToEnd
+- tapOn: '删除…'
+- waitForAnimationToEnd
+- tapOn: '删除'
+- extendedWaitUntil:
+    visible: '.*已移到回收站'
+    timeout: 10000
+- tapOn: '账户与设置'
+- scrollUntilVisible:
+    element: '回收站'
+    centerElement: true
+- tapOn: '回收站'
+- extendedWaitUntil:
+    visible: '.*天后永久删除.*'
+    timeout: 20000
+- takeScreenshot: b04-bin
+- tapOn: 'Fix the flaky login test'
+- waitForAnimationToEnd
+- takeScreenshot: b05-row-sheet
+- tapOn: '恢复'
+- extendedWaitUntil:
+    visible: '回收站是空的'
+    timeout: 10000
+- takeScreenshot: b06-restored
+- tapOn: '返回'
+- waitForAnimationToEnd
+- tapOn: '返回'
+- waitForAnimationToEnd
+- longPressOn:
+    text: '.*Fix the flaky login test.*'
+- waitForAnimationToEnd
+- tapOn: '删除…'
+- waitForAnimationToEnd
+- tapOn: '删除'
+- waitForAnimationToEnd
+- tapOn: '账户与设置'
+- scrollUntilVisible:
+    element: '回收站'
+    centerElement: true
+- tapOn: '回收站'
+- extendedWaitUntil:
+    visible: '.*天后永久删除.*'
+    timeout: 20000
+- tapOn: 'Fix the flaky login test'
+- waitForAnimationToEnd
+- tapOn: '永久删除'
+- waitForAnimationToEnd
+- takeScreenshot: b07-confirm-first
+- tapOn: '永久删除'
+- waitForAnimationToEnd
+- takeScreenshot: b08-confirm-second
+- tapOn: '永久删除'
+- extendedWaitUntil:
+    visible: '回收站是空的'
+    timeout: 20000
+- takeScreenshot: b09-empty
