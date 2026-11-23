@@ -9,7 +9,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Platform } from '@shared/platform'
 import { isClonable, remoteKey, withoutCredentials } from '@shared/session-move'
-import { createExec } from '../git/exec'
+import { createExec, type Exec } from '../git/exec'
 import {
   applyRepo,
   chooseRemote,
@@ -190,9 +190,10 @@ describe(
       expect(git(target, 'branch', '--list', 'feat/move').trim()).toBe('')
     })
 
-    it('clones from the remote and checks the branch out there', async () => {
+    it('checks the branch out in a clone made for the move', async () => {
+      // cloneRepo takes no folder as a remote, so the clone is made as it would make it.
+      git(dir, 'clone', '-q', '--no-recurse-submodules', '--', origin, 'fresh')
       const clone = path.join(dir, 'fresh')
-      await cloneRepo(exec, origin, clone)
       const { packed, bundle } = await pack(await tipsOf(exec, clone))
       const applied = await applyRepo(exec, {
         project: clone,
@@ -285,6 +286,77 @@ describe('remote URLs', () => {
     expect(isClonable('git@github.com:owner/repo.git')).toBe(true)
     expect(isClonable('https://github.com/owner/repo')).toBe(true)
     expect(isClonable('ext::sh -c touch% /tmp/pwned')).toBe(false)
+  })
+
+  it('clones only what Clone from Git takes, whatever the other computer sends', () => {
+    for (const url of [
+      'https://github.com/owner/repo.git',
+      'ssh://git@github.com:22/owner/repo.git',
+      'git@github.com:owner/repo.git',
+    ]) {
+      expect(isClonable(url), url).toBe(true)
+    }
+    for (const url of [
+      'http://example.com/owner/repo.git',
+      'git://example.com/owner/repo.git',
+      'file:///srv/git/repo.git',
+      'ext::sh -c touch% /tmp/pwned',
+      'fd::3',
+      '/srv/git/repo.git',
+      'C:\\repos\\repo',
+      '\\\\server\\share\\repo',
+      './repo',
+      '~/repo',
+      '-uhost:repo',
+      '--upload-pack=touch /tmp/pwned',
+      'github.com:owner/repo.git',
+      'git@github.com:-oProxyCommand=x',
+      'ssh://-oProxyCommand=x/repo',
+      'https://user:pw@example.com/repo.git',
+    ]) {
+      expect(isClonable(url), url).toBe(false)
+    }
+  })
+
+  it('runs git only on such an address, with HTTPS and SSH alone and no hook', async () => {
+    const calls: { args: readonly string[]; env: NodeJS.ProcessEnv | undefined }[] = []
+    const fake: Exec = async (_file, args, options) => {
+      calls.push({ args, env: options.env })
+      return { code: 0, stdout: '', stderr: '', failure: null, message: '' }
+    }
+    const folder = path.join(tmpdir(), 'kite-projects', 'repo')
+    for (const url of [
+      'http://example.com/owner/repo.git',
+      'git://example.com/owner/repo.git',
+      'file:///srv/git/repo.git',
+      '/srv/git/repo.git',
+      'ext::sh -c touch% /tmp/pwned',
+      '-uhost:repo',
+    ]) {
+      await expect(cloneRepo(fake, url, folder, '/data/no-hooks'), url).rejects.toMatchObject({
+        code: 'invalid_params',
+      })
+    }
+    expect(calls).toEqual([])
+
+    const url = 'https://github.com/owner/repo.git'
+    await cloneRepo(fake, url, folder, '/data/no-hooks')
+    expect(calls).toEqual([
+      {
+        args: [
+          '-c',
+          'protocol.ext.allow=never',
+          '-c',
+          'core.hooksPath=/data/no-hooks',
+          'clone',
+          '--no-recurse-submodules',
+          '--',
+          url,
+          folder,
+        ],
+        env: { GIT_ALLOW_PROTOCOL: 'https:ssh' },
+      },
+    ])
   })
 
   it('drops passwords and tokens but keeps an SSH user', () => {

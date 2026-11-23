@@ -14,7 +14,9 @@ import {
   type MoveRemote,
 } from '@shared/session-move'
 import type { Platform } from '@shared/platform'
+import { cloneUrlProblem } from '@shared/project-create'
 import { HostError } from '../errors'
+import { cloneArgs, CLONE_ENV } from '../git/clone'
 import { describeFailure, type Exec, type ExecResult } from '../git/exec'
 import { checkWorktreeBranch, folderNameFor, insideRoot } from '../worktrees/names'
 
@@ -303,15 +305,26 @@ export async function packRepo(exec: Exec, input: PackInput): Promise<MoveGitPac
   }
 }
 
-/** Clones `url` into a folder that is not there yet; the target's own sign-in reaches the remote. */
-export async function cloneRepo(exec: Exec, url: string, folder: string): Promise<void> {
+/**
+ * Clones `url` into a folder that is not there yet; the target's own sign-in reaches the remote.
+ * The address came from the other computer, so it is held to Clone from Git's rules and git runs
+ * as for that clone: HTTPS and SSH only, no transport helper, no hook and no submodule.
+ */
+export async function cloneRepo(
+  exec: Exec,
+  url: string,
+  folder: string,
+  hooksPath: string,
+): Promise<void> {
+  const problem = cloneUrlProblem(url)
+  if (problem !== null) {
+    throw new HostError('invalid_params', `The remote cannot be cloned here (${problem})`, {
+      field: 'url',
+      problem,
+    })
+  }
   const parent = path.dirname(folder)
-  const result = await git(
-    exec,
-    parent,
-    ['clone', '--no-recurse-submodules', '--', url, folder],
-    CLONE_MS,
-  )
+  const result = await git(exec, parent, cloneArgs(url, folder, hooksPath), CLONE_MS, CLONE_ENV)
   if (!ok(result)) throw gitError('git clone', result)
 }
 

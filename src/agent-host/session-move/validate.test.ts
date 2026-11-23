@@ -110,6 +110,29 @@ describe('the move requests', () => {
     expect(() => prepare({ clone: true }, 'not a url')).toThrow()
   })
 
+  it('clones only an address Clone from Git takes; a project here is matched by any', () => {
+    const prepare = (project: unknown, url: string) =>
+      linux['moves.prepare']({ moveId: MOVE, project, url })
+    for (const url of ['https://github.com/me/kite.git', 'ssh://git@github.com/me/kite.git']) {
+      expect(prepare({ clone: true }, url).url).toBe(url)
+    }
+    for (const url of [
+      'http://example.com/me/kite.git',
+      'git://example.com/me/kite.git',
+      'file:///srv/git/kite.git',
+      '/srv/git/kite.git',
+      'C:\\repos\\kite',
+      'ext::ssh -oProxyCommand=x host/kite',
+      'example.com:me/kite.git',
+    ]) {
+      expect(() => prepare({ clone: true }, url), url).toThrow(/cannot be cloned/)
+    }
+    // Only compared with the remotes the project has already.
+    expect(prepare({ path: '/home/me/kite' }, 'http://example.com/me/kite.git').url).toBe(
+      'http://example.com/me/kite.git',
+    )
+  })
+
   it('takes a move within one computer: a project of its own, the conversation alone', () => {
     const check = (project?: unknown) =>
       linux['moves.check']({ agentId: 'claude-code', remotes: [], remote: null, project })
