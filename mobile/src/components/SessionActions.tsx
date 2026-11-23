@@ -16,7 +16,7 @@ import { BOARD_STATUSES, type BoardStatus } from '@shared/session-board'
 import { runPhase } from '@shared/run-groups'
 import type { HostLink } from '@shared/remote/link'
 import { call, sessionFolder } from '../git'
-import { entryShownOnPhone, useMaybeLink } from '../host'
+import { entryShownOnPhone, useAgents, useMaybeLink } from '../host'
 import { isMuted, setMuted } from '../push/muted'
 import { errorText, sessionTitle } from '../sessions'
 import {
@@ -36,6 +36,9 @@ import { DeleteSessionDialog } from './DeleteSessionDialog'
 import { RenameDialog } from './RenameDialog'
 import { openUrl } from '../system/openUrl'
 import { BOARD_ICON, BOARD_LABEL, boardStatusOf } from '../board'
+import { planReturns, snoozePresets } from '@shared/session-tidy'
+import { PRESET_LABEL, laterTimes, restoreTidy } from '../tidy'
+import { momentText } from '../ui/session/format'
 
 export type ActionsPlace = 'list' | 'archive' | 'session'
 
@@ -65,6 +68,14 @@ export interface SessionActions {
   stop(summary: SessionSummary): void
   /** Huli: moves it to a column of the user's task board. */
   setBoard(summary: SessionSummary, status: BoardStatus): void
+  /** Huli: snoozes it until a time or its plan's reset, with Undo (会话整理). */
+  snooze(summary: SessionSummary, until: number | 'reset'): void
+  /** Huli: settles it out of the list with Undo, or brings it back. */
+  settle(summary: SessionSummary, settled: boolean): void
+  /** Huli: brings a snoozed session back now. */
+  wake(summary: SessionSummary): void
+  /** Huli: 永不收起: the settings' rules never settle it. */
+  setNeverSettle(summary: SessionSummary, never: boolean): void
   copyResume(summary: SessionSummary): void
   copySessionId(summary: SessionSummary): void
   /** Its resume command, or null for an agent without one. */
@@ -83,6 +94,8 @@ export function useSessionActions(
   linkFor?: (summary: SessionSummary) => HostLink | null | undefined,
 ): SessionActions {
   const active = useMaybeLink()
+  // Huli: the active computer's agents, whose plans say when 额度恢复后 is.
+  const agents = useAgents()
   const [target, setTarget] = useState<SessionSummary | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState<SessionSummary | null>(null)
@@ -127,6 +140,7 @@ export function useSessionActions(
         onGone?.()
         showNotice({
           text: `已归档“${sessionTitle(s)}”`,
+          ms: 5000,
           action: {
             label: '撤销',
             onPress: () =>
@@ -158,6 +172,142 @@ export function useSessionActions(
           ],
         )
       })
+  }
+
+  // Huli: 会话整理. Undo puts back what the session was before, a snooze or a settle.
+  const tidyUndo = (s: SessionSummary, change: 'snooze' | 'settle') => {
+    const link = linkOf(s)
+    if (!link) return
+    restoreTidy(link, s, change).catch((error: unknown) =>
+      Alert.alert('没能撤销', errorText(error)),
+    )
+  }
+
+  const snooze = (s: SessionSummary, until: number | 'reset') =>
+    run(
+      s,
+      '没能推迟',
+      (link) => link.request('sessions.snooze', { sessionId: s.id, until }),
+      () =>
+        showNotice({
+          text:
+            until === 'reset'
+              ? `已推迟“${sessionTitle(s)}”，额度恢复后再提醒`
+              : `已推迟“${sessionTitle(s)}”，${momentText(until)} 再提醒`,
+          ms: 5000,
+          action: { label: '撤销', onPress: () => tidyUndo(s, 'snooze') },
+        }),
+    )
+
+  const settle = (s: SessionSummary, settled: boolean) =>
+    run(
+      s,
+      settled ? '没能收起' : '没能移回列表',
+      (link) => link.request('sessions.settle', { sessionId: s.id, settled }),
+      settled
+        ? () =>
+            showNotice({
+              text: `已收起“${sessionTitle(s)}”`,
+              ms: 5000,
+              action: { label: '撤销', onPress: () => tidyUndo(s, 'settle') },
+            })
+        : undefined,
+    )
+
+  const wake = (s: SessionSummary) =>
+    run(s, '没能取消推迟', (link) =>
+      link.request('sessions.snooze', { sessionId: s.id, until: null }),
+    )
+
+  const setNeverSettle = (s: SessionSummary, never: boolean) =>
+    run(s, '没能设置', (link) =>
+      link.request('sessions.setNeverSettle', { sessionId: s.id, never }),
+    )
+
+  /** 稍后提醒's submenu: the quick times, the plan's reset, more times, and 取消推迟. */
+  const snoozeNodes = (s: SessionSummary): MenuNode[] => {
+    const now = Date.now()
+    const agent = onActive(s) ? agents.get(s.agentId) : undefined
+    const reset = planReturns(s, agent, now)
+    // Another computer's agents are not known here; that computer says when it cannot.
+    const resetKnown = reset !== null || !onActive(s)
+    return joinGroups([
+      snoozePresets(now).map(({ preset, until }) => ({
+        key: `snooze:${preset}`,
+        label: PRESET_LABEL[preset],
+        subtitle: momentText(until, now),
+        onPress: () => snooze(s, until),
+      })),
+      [
+        {
+          key: 'snooze:reset',
+          label: '额度恢复后',
+          subtitle: reset !== null ? momentText(reset, now) : resetKnown ? undefined : '额度没用完',
+          disabled: !resetKnown,
+          onPress: () => snooze(s, 'reset'),
+        },
+        {
+          key: 'snooze:later',
+          label: '更多时间',
+          items: laterTimes(now).map((time) => ({
+            key: `snooze:${time.key}`,
+            label: time.label,
+            subtitle: momentText(time.until, now),
+            onPress: () => snooze(s, time.until),
+          })),
+        },
+      ],
+      s.snooze
+        ? [
+            {
+              key: 'snooze:wake',
+              label: '取消推迟',
+              onPress: () => wake(s),
+            },
+          ]
+        : [],
+    ])
+  }
+
+  /** 稍后提醒, 收起 and 永不收起, for a session of the user's own in the list. */
+  const tidyNodes = (s: SessionSummary): MenuNode[] => {
+    if (
+      s.parentId !== null ||
+      s.origin !== 'user' ||
+      s.archivedAt !== null ||
+      !entryShownOnPhone('phone.snooze')
+    ) {
+      return []
+    }
+    return [
+      {
+        key: 'snooze',
+        label: '稍后提醒',
+        icon: 'alarm',
+        ...(s.snooze ? { subtitle: `${momentText(s.snooze.until)} 提醒` } : {}),
+        items: snoozeNodes(s),
+      },
+      s.settled
+        ? {
+            key: 'unsettle',
+            label: '移回列表',
+            icon: 'arrow.uturn.backward',
+            onPress: () => settle(s, false),
+          }
+        : {
+            key: 'settle',
+            label: '收起',
+            icon: 'tray.and.arrow.down',
+            onPress: () => settle(s, true),
+          },
+      {
+        key: 'never',
+        label: '永不收起',
+        icon: 'tray',
+        checked: s.neverSettle === true,
+        onPress: () => setNeverSettle(s, s.neverSettle !== true),
+      },
+    ]
   }
 
   const remove = (s: SessionSummary) => {
@@ -413,7 +563,7 @@ export function useSessionActions(
             },
           ]
         : []
-    return joinGroups([keep, state, own, organize, end, del])
+    return joinGroups([keep, state, own, tidyNodes(s), organize, end, del])
   }
 
   const element = (
@@ -457,6 +607,10 @@ export function useSessionActions(
     open: (summary) => openMenuSheet(sessionTitle(summary), menu(summary)),
     menu,
     ...actions,
+    snooze,
+    settle,
+    wake,
+    setNeverSettle,
     archive,
     rename,
     resumeOf,

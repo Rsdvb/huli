@@ -599,15 +599,15 @@ export function ProblemReportEntry(props: {
 // Computer use's setup.
 
 const SETUP_STEP = {
-  enable: '打开 Computer use',
+  enable: '打开电脑操控',
   accessibility: '允许辅助功能',
   'screen-recording': '允许屏幕录制',
 } as const
 
 const SETUP_OUTCOME = {
-  ready: '已设置好 Computer use',
-  declined: '没有设置 Computer use',
-  timeout: '没有在限定时间内设置好 Computer use',
+  ready: '已设置好电脑操控',
+  declined: '没有设置电脑操控',
+  timeout: '没有在限定时间内设置好电脑操控',
 } as const
 
 /**

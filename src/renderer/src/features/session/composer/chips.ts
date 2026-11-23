@@ -201,9 +201,12 @@ export function mentionedAs(item: { name: string; kind: string }): string {
   return item.kind === 'folder' ? `${item.name}/` : item.name
 }
 
-/** What else of the session a message can mention, which the agent may then use. */
-export type SurfaceMention = 'terminal' | 'page' | 'device'
-const SURFACE_MENTIONS: readonly SurfaceMention[] = ['terminal', 'page', 'device']
+/**
+ * What else a message can mention, which the agent may then use: the session's terminals, browser
+ * tabs and devices, and Huli: another session of the user's, which the agent reads.
+ */
+export type SurfaceMention = 'terminal' | 'page' | 'device' | 'session'
+const SURFACE_MENTIONS: readonly SurfaceMention[] = ['terminal', 'page', 'device', 'session']
 
 export function isSurfaceMention(kind: string): kind is SurfaceMention {
   return (SURFACE_MENTIONS as readonly string[]).includes(kind)
@@ -215,14 +218,15 @@ export interface MentionItem {
   name: string
 }
 
-/** The session's terminals, browser tabs and devices that a message can mention. */
+/** The session's terminals, browser tabs and devices, and other sessions, a message can mention. */
 export interface MentionSurfaces {
   terminal: readonly MentionItem[]
   page: readonly MentionItem[]
   device: readonly MentionItem[]
+  session: readonly MentionItem[]
 }
 
-export const NO_SURFACES: MentionSurfaces = { terminal: [], page: [], device: [] }
+export const NO_SURFACES: MentionSurfaces = { terminal: [], page: [], device: [], session: [] }
 
 // Enough of an id to tell the session's terminals, tabs or devices apart; a device's id starts with
 // its kind, so its own part after the last colon counts.
@@ -267,7 +271,9 @@ export function surfaceRefs(
           ? { kind: 'page', tabId: id, name: chip.label }
           : chip.kind === 'device'
             ? { kind: 'device', deviceId: id, name: chip.label }
-            : null
+            : chip.kind === 'session'
+              ? { kind: 'session', sessionId: id, name: chip.label }
+              : null
     if (ref) refs.set(`${chip.kind}:${id}`, ref)
   }
   return [...refs.values()]
@@ -277,6 +283,7 @@ export type SurfaceRef =
   | { kind: 'terminal'; terminalId: string; name: string }
   | { kind: 'page'; tabId: string; name: string }
   | { kind: 'device'; deviceId: string; name: string }
+  | { kind: 'session'; sessionId: string; name: string }
 
 /**
  * Resolves a mention against the session's terminals and the attachments first, by the name it is

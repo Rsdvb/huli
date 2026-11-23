@@ -393,6 +393,65 @@ describe('the host files', () => {
     }
   })
 
+  // Huli: a snoozed or settled session, and the user's choices that keep the rules off it.
+  it("keeps a session's tidy state and drops each part that does not read", () => {
+    const tidy = {
+      snooze: { until: 9_000, reset: true as const },
+      settled: { at: 8_000, by: 'merged' as const },
+      never: true as const,
+      keptAt: 7_000,
+      merged: 'https://github.com/o/r/pull/1',
+    }
+    const kept: SessionRecord = { ...session, tidy }
+    expect(parseSessionsFile({ sessions: [kept] })).toEqual({ version: 1, sessions: [kept] })
+    // A snooze without `reset` is one to a time the user picked.
+    const timed: SessionRecord = { ...session, tidy: { snooze: { until: 9_000 } } }
+    expect(
+      parseSessionsFile({
+        sessions: [{ ...session, tidy: { snooze: { until: 9_000, reset: 'yes' } } }],
+      }),
+    ).toEqual({ version: 1, sessions: [timed] })
+    expect(
+      parseSessionsFile({
+        sessions: [
+          {
+            ...session,
+            tidy: {
+              snooze: { until: -1 },
+              settled: { at: 8_000, by: 'robot' },
+              never: 'yes',
+              keptAt: 7_000,
+              merged: '',
+            },
+          },
+        ],
+      }),
+    ).toEqual({ version: 1, sessions: [{ ...session, tidy: { keptAt: 7_000 } }] })
+    for (const odd of [null, 'snoozed', [], { snooze: 'soon', settled: { at: '1', by: 'user' } }]) {
+      expect(parseSessionsFile({ sessions: [{ ...session, tidy: odd }] })).toEqual({
+        version: 1,
+        sessions: [session],
+      })
+    }
+  })
+
+  // Huli: the sessions the user referenced in a session's messages, whose history its agent reads.
+  it("keeps a session's referenced sessions, each once, and drops what does not read", () => {
+    const kept: SessionRecord = { ...session, refs: ['a', 'b'] }
+    expect(parseSessionsFile({ sessions: [kept] })).toEqual({ version: 1, sessions: [kept] })
+    expect(
+      parseSessionsFile({
+        sessions: [{ ...session, refs: ['a', 7, '', 'a', 'x'.repeat(201), 'b'] }],
+      }),
+    ).toEqual({ version: 1, sessions: [{ ...session, refs: ['a', 'b'] }] })
+    for (const refs of ['a', [], [7], null]) {
+      expect(parseSessionsFile({ sessions: [{ ...session, refs }] })).toEqual({
+        version: 1,
+        sessions: [session],
+      })
+    }
+  })
+
   // Huli: the block of ports a worktree session holds.
   it("keeps a session's port block and drops one that does not read", () => {
     const held: SessionRecord = { ...session, ports: { first: 20_010, count: 10 } }

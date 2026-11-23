@@ -4,7 +4,8 @@ import { useBrowserStore } from '@renderer/stores/browser'
 import { devicesOf, selectDevice, useDevicesStore } from '@renderer/stores/devices'
 import type { SurfaceKind } from '@renderer/stores/surface-tabs'
 import { showTerminal, terminalsOf, useTerminalsStore } from '@renderer/stores/terminals'
-import { panelSession, toggleSidePane } from '@renderer/stores/view'
+import { useSessionsStore } from '@renderer/stores/sessions'
+import { openSession, panelSession, toggleSidePane } from '@renderer/stores/view'
 
 /**
  * Opens the row on the kind shown last when it still has a tab, else on any kind that has one,
@@ -25,14 +26,20 @@ export function openSurfaces(panel: string, projectPath: string, last?: SurfaceK
   toggleSidePane(panel, kind ?? 'surfaces', true)
 }
 
-/** Opens the row on one terminal, browser tab or device, such as a message's chip names. */
+/**
+ * Opens the row on one terminal, browser tab or device, such as a message's chip names; Huli: a
+ * session's chip opens that session.
+ */
 export function revealSurface(
   panel: string,
-  kind: 'terminal' | 'page' | 'device',
+  kind: 'terminal' | 'page' | 'device' | 'session',
   id: string,
 ): void {
   const sessionId = panelSession(panel)
-  if (kind === 'terminal') {
+  if (kind === 'session') {
+    const summary = useSessionsStore.getState().byId[id]
+    if (summary) openSession(summary.id, summary.projectPath)
+  } else if (kind === 'terminal') {
     toggleSidePane(panel, 'terminal', true)
     showTerminal(panel, id)
   } else if (kind === 'page') {

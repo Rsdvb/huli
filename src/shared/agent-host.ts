@@ -58,6 +58,7 @@ import type {
 } from './agent-history'
 import type { SessionFolder } from './session-folders'
 import type { BoardStatus, SessionBoard } from './session-board'
+import type { SessionSettled, SessionSnooze, SnoozeUntil } from './session-tidy'
 import type { GroupRunStart, KeptRun, RunChanges, SessionGroupRef } from './run-groups'
 import type { IssueInbox, SessionIssue, SessionPrFlow } from './github-flow'
 import type {
@@ -134,6 +135,7 @@ import type { ReportOrigin } from './report'
 import type { AutoApprove } from './risk'
 import type { SessionProcesses } from './task-processes'
 import type { AgentSandboxSupport, ContainerStatus, SandboxChoice } from './sandbox'
+import type { WebReaderStatus } from './web-reader'
 import type {
   ManagerChoices,
   ManagerSummary,
@@ -1190,6 +1192,11 @@ export interface SessionSummary {
   worker?: WorkerSummary | null
   // Huli: moved to another computer, where it goes on; absent while it was not
   movedTo?: MovedTo
+  // Huli: out of the active list until a time or its plan's reset, or settled, and the user's
+  // 永不收起 (会话整理); absent from older hosts, null and absent while the feature is off.
+  snooze?: SessionSnooze | null
+  settled?: SessionSettled | null
+  neverSettle?: boolean
   // The tool its running turn calls now; null while none runs; absent from older hosts
   activity?: SessionActivity | null
   // What its running turn does now, as the thread's nine dots act it out; null between turns;
@@ -2162,6 +2169,15 @@ export interface HostContract {
   }
   'sessions.pin': { params: { sessionId: string; pinned: boolean }; result: void }
   /**
+   * Huli: takes a top-level session out of the active list until `until`, or until its agent's
+   * plan resets (`reset`, refused while no reset is known); null brings it back now.
+   */
+  'sessions.snooze': { params: { sessionId: string; until: SnoozeUntil }; result: void }
+  /** Huli: settles a top-level session out of the active list, or brings it back. */
+  'sessions.settle': { params: { sessionId: string; settled: boolean }; result: void }
+  /** Huli: 永不收起: no rule of the settings settles the session. */
+  'sessions.setNeverSettle': { params: { sessionId: string; never: boolean }; result: void }
+  /**
    * `subSessions: false` archives the session alone, its sub-sessions staying in the list on their
    * own until it is restored; without it, its whole tree is archived.
    */
@@ -2668,6 +2684,13 @@ export interface HostContract {
   'sandbox.containerStatus': { params: void; result: ContainerStatus }
   'sandbox.pullImage': { params: void; result: ContainerStatus }
   'sandbox.removeImage': { params: void; result: ContainerStatus }
+  // Huli: background web reading with Moli (shared/web-reader.ts), the windows' alone. `install`
+  // downloads the pinned release, which the window asks the user about first with its size, and
+  // its progress comes in `webReader.changed`; `remove` frees its space.
+  'webReader.status': { params: void; result: WebReaderStatus }
+  'webReader.install': { params: void; result: WebReaderStatus }
+  'webReader.cancel': { params: void; result: void }
+  'webReader.remove': { params: void; result: WebReaderStatus }
   'agentNetwork.addSubscription': { params: { name: string; url: string }; result: { id: string } }
   // A subscription from a file's text, Clash YAML or a list of node links, at most 10 MiB; it is
   // never refreshed, only imported again.
@@ -2964,6 +2987,9 @@ export const HOST_METHODS = [
   'sessions.close',
   'sessions.terminalCommand',
   'sessions.pin',
+  'sessions.snooze',
+  'sessions.settle',
+  'sessions.setNeverSettle',
   'sessions.archive',
   'sessions.unarchive',
   'sessions.markUnread',
@@ -3130,6 +3156,10 @@ export const HOST_METHODS = [
   'sandbox.containerStatus',
   'sandbox.pullImage',
   'sandbox.removeImage',
+  'webReader.status',
+  'webReader.install',
+  'webReader.cancel',
+  'webReader.remove',
   'agentNetwork.addSubscription',
   'agentNetwork.importSubscription',
   'agentNetwork.reimportSubscription',
@@ -3266,6 +3296,8 @@ export type HostEvent =
   | { type: 'folders.changed'; folders: SessionFolder[] }
   // Huli: the agents' network changed; to this computer's windows only.
   | { type: 'agentNetwork.changed'; status: AgentNetworkStatus }
+  // Huli: Moli's download, install or removal moved on; to this computer's windows only.
+  | { type: 'webReader.changed'; status: WebReaderStatus }
 
 export interface AgentsApi {
   request<M extends HostMethod>(method: M, params: HostParams<M>): Promise<HostResult<M>>

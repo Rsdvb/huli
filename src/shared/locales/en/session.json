@@ -1071,18 +1071,22 @@
     },
     "recap": {
       "lead": "While you were away: ",
-      "leadPartial": "While you were away, at least: ",
       "files_one": "changed {{count}} file",
       "files_other": "changed {{count}} files",
+      "filesMore": "changed {{count}}+ files",
       "lines": " (+{{added}} −{{removed}})",
       "commands_one": "ran {{count}} command",
       "commands_other": "ran {{count}} commands",
+      "commandsMore": "ran {{count}}+ commands",
       "approvals_one": "needed your approval once",
       "approvals_other": "needed your approval {{count}} times",
+      "approvalsMore": "needed your approval {{count}}+ times",
       "approvalsWaiting_one": "needed your approval once, {{waiting}} still waiting",
       "approvalsWaiting_other": "needed your approval {{count}} times, {{waiting}} still waiting",
+      "approvalsWaitingMore": "needed your approval {{count}}+ times, {{waiting}} still waiting",
       "errors_one": "hit {{count}} error",
       "errors_other": "hit {{count}} errors",
+      "errorsMore": "hit {{count}}+ errors",
       "reply": "last reply: {{text}}",
       "separator": ", ",
       "jump": "Where you left off",
@@ -2327,5 +2331,13 @@
       "team": "Team",
       "organization": "Organization"
     }
+  },
+  "zen": {
+    "menu": "Tool calls",
+    "followSettings": "As in Settings ({{view}})",
+    "hidden_one": "{{count}} step hidden",
+    "hidden_other": "{{count}} steps hidden",
+    "show": "Show",
+    "findShowsAll": "Find shows every step while it is open."
   }
 }

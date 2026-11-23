@@ -208,8 +208,10 @@ describe('joining a device to a host', () => {
     await expect.poll(connected(t)).toBe('connected')
     const device = await api.relayToken(signedIn())
     expect((await dial(t.id, device.token)).kind).toBe('joined')
-    // A token with its signature changed is refused.
-    const forged = `${device.token.slice(0, -2)}AA`
+    // A token with its signature changed is refused. The second-to-last character carries six
+    // whole bits of the signature, and always becomes a different one.
+    const flip = device.token.at(-2) === 'A' ? 'B' : 'A'
+    const forged = `${device.token.slice(0, -2)}${flip}${device.token.at(-1)}`
     expect((await dial(t.id, forged)).kind).toBe('forbidden')
     t.stop()
   })

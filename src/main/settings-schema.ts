@@ -69,6 +69,8 @@ import { isPortBase, PORT_BASE_MAX, PORT_BASE_MIN } from '@shared/worktree-ports
 import { AUTO_APPROVE_LEVELS } from '@shared/risk'
 import { SANDBOX_NETWORKS, SANDBOX_TIERS } from '@shared/sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
+import { SETTLE_DAYS } from '@shared/session-tidy'
+import { TOOL_CALL_VIEWS } from '@shared/zen-view'
 import { THEME_ID } from '@shared/themes'
 import { WORKING_STEP_LIMITS } from '@shared/workflow'
 import { isAbsolutePath } from '../agent-host/paths'
@@ -318,6 +320,7 @@ const SECTION_FIELDS = {
     confirmLinks: isBoolean,
     openLinksIn: oneOf('browser', 'session', 'ask'),
     alwaysOpenIn: isLinkSites,
+    toolCalls: oneOf(...TOOL_CALL_VIEWS),
   },
   appearance: {
     theme: oneOf('system', 'light', 'dark'),
@@ -363,6 +366,11 @@ const SECTION_FIELDS = {
     resumeAfterLimit: isBoolean,
     resumeText: isResumeText,
     stallMinutes: oneOf(...STALL_MINUTES),
+  },
+  tidy: {
+    autoSettle: isBoolean,
+    idleDays: oneOf(...SETTLE_DAYS),
+    merged: isBoolean,
   },
   workflow: { maxWorkingSteps: oneOf(...WORKING_STEP_LIMITS) },
   computerUse: {
@@ -1957,6 +1965,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     startModes: { ...settings.startModes },
     idleSessions: { ...settings.idleSessions },
     supervisor: { ...settings.supervisor },
+    tidy: { ...settings.tidy },
     workflow: { ...settings.workflow },
     usage: { fromComputer: settings.usage.fromComputer },
     sessionTitles: settings.general.sessionTitles,
@@ -2003,6 +2012,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'startModes',
   'idleSessions',
   'supervisor',
+  'tidy',
   'workflow',
   'usage',
   'computerUse',

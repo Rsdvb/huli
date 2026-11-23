@@ -217,6 +217,9 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'sessions.close': AGENT_MS,
   'sessions.terminalCommand': AGENT_MS,
   'sessions.pin': HOST_MS,
+  'sessions.snooze': HOST_MS,
+  'sessions.settle': HOST_MS,
+  'sessions.setNeverSettle': HOST_MS,
   'sessions.archive': AGENT_MS,
   'sessions.unarchive': HOST_MS,
   'sessions.markUnread': HOST_MS,
@@ -384,6 +387,11 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   // A pull downloads some 80 MB, whose time is the network's; the window shows it waits.
   'sandbox.pullImage': NONE,
   'sandbox.removeImage': AGENT_MS,
+  'webReader.status': HOST_MS,
+  // A download of some 42 MB, whose time is the network's; the window shows its progress.
+  'webReader.install': NONE,
+  'webReader.cancel': HOST_MS,
+  'webReader.remove': AGENT_MS,
   'agentNetwork.addSubscription': AGENT_MS,
   'agentNetwork.importSubscription': AGENT_MS,
   'agentNetwork.reimportSubscription': AGENT_MS,

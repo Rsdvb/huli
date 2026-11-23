@@ -76,6 +76,7 @@ import {
 } from '../../components/ConfigMenus'
 import { ContextSheet } from '../../components/ContextSheet'
 import { Conversation } from '../../components/Conversation'
+import { RecapBar, type RecapShown } from '../../components/RecapLine'
 import {
   PLAN_PILL_ROOM,
   PlanApprovalCard,
@@ -83,7 +84,7 @@ import {
   pinnedPlan,
   planPage,
 } from '../../components/entries/PlanCards'
-import { createStore } from '../../select'
+import { createStore, useSelector } from '../../select'
 import {
   cutNoticeOf,
   OutOfCreditStrip,
@@ -357,6 +358,10 @@ function Session() {
   const planAnchor = useRef<ViewHandle>(null)
   // Whether the conversation is flung, which only the plan's pill reads.
   const scrolling = useMemo(() => createStore(false), [])
+  // The recap of time away the conversation finds, shown in a bar under the header.
+  const recapSlot = useMemo(() => createStore<RecapShown | null>(null), [])
+  const recapShown = useSelector(recapSlot, (shown) => shown !== null)
+  const [recapRoom, setRecapRoom] = useState(0)
   const [contextOpen, setContextOpen] = useState(false)
   const [usageOpen, setUsageOpen] = useState(false)
   // Another agent picked to take over with the next message, and the options it starts with.
@@ -1216,6 +1221,8 @@ function Session() {
       case 'agents':
         return agentsPage(agentMenu)
       default:
+        // The title menu's own pages (看板, 工具调用, 稍后提醒 and its times) come from it too.
+        if (page.startsWith('title-')) return titlePages?.(page) ?? null
         if (page.startsWith('option:')) return optionPage(control, page.slice('option:'.length))
         if (page.startsWith('agent:'))
           return agentModelsPage(agentMenu, page.slice('agent:'.length))
@@ -1224,6 +1231,12 @@ function Session() {
   }
 
   const outbox = useMemo(() => <OutboxRows sessionId={id} onWithdraw={withdraw} />, [id, withdraw])
+  const linkDown = down && (hostState.kind === 'reconnecting' || hostState.kind === 'stopped')
+  // Under the header the chips, a banner, the plan's pill and the recap's bar stack in turn.
+  const bannerRoom = linkDown || (hasThread && view.error) ? 42 : 0
+  const planRoom = pinned && hasThread ? PLAN_PILL_ROOM : 0
+  const recapBelow = recapShown && hasThread ? recapRoom : 0
+
   let body
   if (view.error && !hasThread) {
     // A read that failed with nothing kept to show: why, and a way to try again, which it also
@@ -1279,6 +1292,8 @@ function Session() {
         pending={outbox}
         fromParent={summary?.origin === 'user' && !!summary.parentId}
         paddingTop={headerHeight + 12 + (chips ? CHIPS_HEIGHT : 0) + (pinned ? PLAN_PILL_ROOM : 0)}
+        recapSlot={recapSlot}
+        recapRoom={recapRoom}
         scrolling={scrolling}
         waiting={running && (waitingYou || handBack || turn.asked !== null)}
         phase={turn.phase}
@@ -1289,8 +1304,6 @@ function Session() {
     // The rows' file references open the folder's files.
     body = <FileRefs.Provider value={fileRefs}>{body}</FileRefs.Provider>
   }
-
-  const linkDown = down && (hostState.kind === 'reconnecting' || hostState.kind === 'stopped')
 
   return (
     <SessionRows.Provider value={context}>
@@ -1589,7 +1602,11 @@ function Session() {
         floating
         below={
           (chips ? CHIPS_HEIGHT : 0) +
-          (pinned && hasThread ? PLAN_PILL_ROOM + (linkDown ? 42 : 0) : 0)
+          (recapBelow
+            ? bannerRoom + planRoom + recapBelow
+            : planRoom
+              ? planRoom + (linkDown ? 42 : 0)
+              : 0)
         }
         title={title}
         subtitle={[agent?.name, profileShown, project].filter(Boolean).join(' · ')}
@@ -1641,6 +1658,13 @@ function Session() {
           onPress={() =>
             menu.open('plan', planAnchor, { placement: 'below', align: 'center', width: 340 })
           }
+        />
+      ) : null}
+      {hasThread ? (
+        <RecapBar
+          slot={recapSlot}
+          top={headerHeight + 6 + (chips ? CHIPS_HEIGHT : 0) + bannerRoom + planRoom}
+          onRoom={setRecapRoom}
         />
       ) : null}
       {hasThread && view.error && !linkDown ? (

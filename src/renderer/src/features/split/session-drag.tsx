@@ -11,6 +11,10 @@ import { BotIcon, Folder01Icon } from '@hugeicons/core-free-icons'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { dropIntoFolder } from '@renderer/features/session-folders/drag'
 import { rowDragEnded, rowDragMoved, rowDragStarted } from '@renderer/features/sidebar/row-drag'
+import {
+  dropIntoComposer,
+  overComposer,
+} from '@renderer/features/session/composer/session-mentions'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { selectionFor, useSessionSelection } from '@renderer/stores/session-selection'
 import { hostOfSession, sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
@@ -55,14 +59,18 @@ export function SplitDragProvider({ children }: { children: React.ReactNode }) {
   const move = (event: DragMoveEvent) => {
     // The operation's position is still the one before this move; the move's own is `to`.
     const point = event.to ?? pointerOf(event)
-    // Huli: over the sidebar, the drop is the sidebar's: a row's new place or another project.
-    dragMoved(point, rowDragMoved(point))
+    // Huli: over the sidebar, the drop is the sidebar's: a row's new place or another project;
+    // over a composer it mentions the session. Neither marks a pane for it.
+    const sidebar = rowDragMoved(point)
+    dragMoved(point, sidebar || overComposer(event.operation.target?.data))
   }
   const end = (event: DragEndEvent) => {
     const drop = dragEnded(event.canceled)
     const { source, target } = event.operation
-    const folder = !event.canceled && dropIntoFolder(source?.data, target?.data)
-    if (rowDragEnded(event.canceled || folder) || folder) return
+    const taken =
+      !event.canceled &&
+      (dropIntoComposer(source?.data, target?.data) || dropIntoFolder(source?.data, target?.data))
+    if (rowDragEnded(event.canceled || taken) || taken) return
     const size = splitSize()
     if (!drop || !size) return
     const view = viewOf(drop.data)

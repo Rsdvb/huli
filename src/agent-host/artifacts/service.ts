@@ -126,6 +126,7 @@ import {
 import type { ArtifactData } from './runtime/data'
 import { DATA_TOOLS, DataTools, isDataToolName } from './runtime/data-tools'
 import { ArtifactTools, isToolName, TOOLS, type ArtifactToolsDeps, type Caller } from './tools'
+import { isWebReaderToolName, WEB_READER_TOOLS, type WebReaderCalls } from '../web-reader/tools'
 
 export { SERVICE_NAME }
 export const SERVICE_PATH = '/mcp'
@@ -170,6 +171,7 @@ const TOOL_GROUPS: ReadonlyMap<string, McpToolGroup> = new Map(
       [SETTINGS_TOOLS, 'settings'],
       [SECRET_TOOLS, 'secrets'],
       [THEME_TOOLS, 'theme'],
+      [WEB_READER_TOOLS, 'browser'],
     ] as const
   )
     .flatMap(([tools, group]) => tools.map((tool) => [tool.name, group] as const))
@@ -285,6 +287,8 @@ export interface ArtifactServiceDeps extends ArtifactToolsDeps {
    * tools neither listed nor answered. Without it all are on.
    */
   features?: () => Partial<Record<string, boolean>> | undefined
+  /** Huli: background web reading with Moli, listed only while its feature is on; without it none. */
+  webReader?: WebReaderCalls
   /** The proxy to the Marketplace's OAuth servers, under its own paths; without it none. */
   proxy?: {
     handle(req: http.IncomingMessage, res: http.ServerResponse, path: string): Promise<void>
@@ -541,6 +545,7 @@ export class ArtifactService {
       devices: this.featureOn('devices'),
       secrets: this.deps.secrets !== undefined && this.featureOn('secrets'),
       theme: this.deps.theme !== undefined && this.featureOn('agentTheme'),
+      webReader: this.deps.webReader !== undefined && this.featureOn('webReader'),
     }
   }
 
@@ -586,6 +591,7 @@ export class ArtifactService {
       ...(this.deps.settings ? SETTINGS_TOOLS : []),
       ...(this.deps.secrets ? SECRET_TOOLS : []),
       ...(this.deps.theme ? THEME_TOOLS : []),
+      ...(this.deps.webReader ? WEB_READER_TOOLS : []),
     ].filter((tool) => !this.toolOff(tool.name))
   }
 
@@ -1027,6 +1033,15 @@ export class ArtifactService {
     if (secrets && isSecretToolName(name)) {
       try {
         return await secrets.call(caller, name, input)
+      } catch (error) {
+        this.deps.log('error', `${name} failed: ${(error as Error).message}`)
+        throw new McpError(ErrorCode.InternalError, `${name} failed: ${(error as Error).message}`)
+      }
+    }
+    const webReader = this.deps.webReader
+    if (webReader && isWebReaderToolName(name)) {
+      try {
+        return await webReader.read(caller, input)
       } catch (error) {
         this.deps.log('error', `${name} failed: ${(error as Error).message}`)
         throw new McpError(ErrorCode.InternalError, `${name} failed: ${(error as Error).message}`)

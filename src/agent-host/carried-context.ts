@@ -144,6 +144,8 @@ function contentText(content: readonly UserContent[]): string {
           return `[the user's browser tab ${ref.name}]`
         case 'device':
           return `[the device ${ref.name}]`
+        case 'session':
+          return `[the user's session "${ref.name}", id ${ref.sessionId}]`
         case 'image':
           return '[an image]'
         case 'audio':

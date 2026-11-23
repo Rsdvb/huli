@@ -1159,19 +1159,26 @@ kind of agent.
 
 Three small things Claude Code, Cursor and Moshi have, on the desktop and the phone alike.
 
-- Recap: a session opened again after half an hour away, with something new in it, greets the
-  user with one quiet line over the thread's top ("你离开期间：改了 4 个文件（+120 −30），跑了 12
-  条命令，2 次需要你批准，最后回复：……") and 跳到离开处, which brings the first new item to the
-  top. `src/shared/recap.ts` works it out from the entries after the one the device last saw, with
-  no model: distinct files of completed edits and their lines (a Myers count, bounded, or a
-  digest's own counts on the phone), commands that ran, requests that asked the user, errors and
-  the latest reply's first line. Each device keeps where it last saw each session (300 at most):
-  the desktop in localStorage (`session-seen`, `features/session/recap/`), written when a pane
-  shows another session or the window goes to the back, and checked again when it comes to the
-  front; the phone in `<documents>/huli/seen/<computer>.json` (`mobile/src/seen.ts`), written when
-  the screen is left or covered or the app leaves the front. A line goes when it is closed, its
-  jump arrives, or a message is sent. Nothing runs between: the desktop's line takes the thread's
-  items only when its jump is pressed.
+- Recap: a session that comes back into view after half an hour away, with something new in it,
+  greets the user with one quiet bar ("你离开期间：改了 4 个文件（+120 −30），跑了 12 条命令，2 次
+  需要你批准，最后回复：……") and 跳到离开处, which brings the first new item to the top.
+  `src/shared/recap.ts` works it out from the entries after the one the device last saw, with no
+  model: distinct files of completed edits and their lines (a Myers count, bounded, or a digest's
+  own counts on the phone), commands that ran, requests that asked the user, errors and the latest
+  reply's first line; counts that start on a page not loaded read "16+". Time in view counts as
+  seen (`recapStep`): a visit steps through view, leave and done, each writing the mark, and only
+  a view after a leave can show a recap, so a long look never comes back as one. In view means, on
+  the desktop, a pane shows the session and the window is not hidden (blur alone is not leaving:
+  the user can watch it beside another app); on the phone, the session screen is in front and the
+  app is not in the background (Control Center does not count), a return waiting for the read
+  of what happened meanwhile (`ThreadView.reads`). Closing the bar, its jump and a message sent
+  are done with it. Each device keeps its marks (300 at most): the desktop in localStorage
+  (`session-seen`, `features/session/recap/`); the phone in `<documents>/huli/seen/<computer>.json`
+  (`mobile/src/seen.ts`, through `seenBook`). Neither covers the conversation: the desktop's bar
+  sits above the message scroller, which gives it its room; the phone's is a solid surface under
+  the header, the chips, a banner and the plan's pill (`RecapBar`, drawn by the session screen
+  from the conversation's `recapSlot`), and the conversation adds its height to its top room while
+  the header's scroll edge reaches under it. Nothing runs between.
 - Compact: the context card on the desktop (`composer/usage.tsx`) and the context sheet on the
   phone offer 压缩上下文 for an agent that lists `/compact` (Claude Code, Codex, OpenCode, Pi, agy)
   or `/compress` (Gemini CLI, Qwen Code), only while the session is free (`ready`, nothing
@@ -1186,8 +1193,10 @@ Three small things Claude Code, Cursor and Moshi have, on the desktop and the ph
   `IMAGE_SIDE`; Done takes react-native-svg's own `toDataURL` snapshot (the view's size at the
   screen's scale) and crops it with expo-image-manipulator, and a crop alone cuts the photo
   itself. `src/shared/markup.ts` holds the marks both draw.
-- The simulator's `85-recap-compact-markup` flow walks the phone's part; a developer build's
-  `-huliRecapAwayMs` launch argument shortens the half hour for it.
+- The simulator's `85-recap-compact-markup` flow walks the phone's part and `86-recap-return` the
+  recap's returns (the bar, its jump, a short absence in the background that shows nothing, a long
+  one that counts only the new work, closing it); a developer build's `-huliRecapAwayMs` launch
+  argument shortens the half hour for them.
 
 ### Dev servers on the phone (开发服务器预览)
 
@@ -1665,6 +1674,64 @@ before the first detection, `nodeSetupChanged`, the handlers, `ownProxy`),
 `harness-section.tsx`, `new-session.tsx`, `mobile/src/app/settings/agents.tsx` and the
 `node`/`nodeRuntime` keys of `locales/*/{agents,settings,host}.json`.
 
+### Snooze, settle and Undo (稍后提醒、自动收起、撤销)
+
+A session's menu (and several selected ones') has 稍后提醒 › with 1 小时后, 今晚 (20:00, offered
+while more than an hour away), 明天早上 (9:00), 下周一, 额度恢复后 and 自定义… (a day and a time; on
+the phone, 更多时间 with a few more choices), plus 收起 and 永不收起. A snoozed session leaves the
+projects, Pinned and its folder for 已推迟 at the foot of the sidebar (the soonest back first, its
+row saying when) and comes back at its time, or at once when it needs an approval or an answer or
+its turn fails. 额度恢复后 snoozes until a minute after the agent's used-up plan window resets, from
+the stopped turn's pause or the agent's limits; the host refuses it while no reset is known.
+Settled sessions sit in 已收起, closed by default; 移回列表 brings one back and keeps the rules off
+it until the user's next message, and writing to a snoozed or settled session brings it back too.
+Only the user's own top-level sessions are snoozed or settled.
+
+Settings › 通用 › 会话 holds the rules (`tidy` in the settings, on by default): settle a session
+idle for 1, 3, 7 (default), 14 or 30 days, and one whose pull request merged (its branch's, else
+the latest it opened) after an hour of quiet, once per pull request. Pinned sessions, ones at work
+(a turn, a wait, a limit pause, PR automation, manager or worker sessions, background work) and
+ones set to 永不收起 never settle by a rule; a parent older than the rules sends none, so nothing
+settles.
+
+The state is the session record's `tidy` (`snooze`, `settled`, `never`, `keptAt`, `merged`;
+`src/agent-host/session-tidy.ts`, parsed leniently in `storage.ts`), shown in the summary as
+`snooze`, `settled` and `neverSettle` while the feature is on. One timer is set for the next
+moment anything is due, a snooze's end or a session's settle; each summary change of a session
+looks at its own state, and the agent host's `attention` (a request or a failure) wakes it. Nothing
+polls.
+
+Archive, settle and snooze show Undo for five seconds (`features/sidebar/undo.ts`; the phone's
+notice too, and its archive); Ctrl/Cmd+Z runs the latest while it shows, unless a text field with
+text has the key for its own undo.
+
+### Mentioning another session (@ 会话)
+
+Typing `@` and part of a title in the composer lists the user's sessions of the box's host (not
+its own, nor subagents) over the files, with agent and project; choosing one, or dropping a
+session's row from the sidebar onto the box, writes `@session:<short id>` as a chip. The message
+carries a `session` content ref, and the agent gets one line, in the host's language: 参考会话「X」:
+id …，用 read_session_history 读取. The host keeps each session's referenced sessions (`refs` on the
+record, the latest 50, from the user's own messages only), and `read_session_history` reads those
+wherever they are; an agent still cannot read a session the user never referenced. The phone's
+`@` list does the same, its box showing `@<title>`, and sent messages show the chip or a tile that
+opens the session.
+
+### Concise thread (简洁视图)
+
+A session's More menu › 工具调用 (kept on this device) and Settings › 通用 › 对话 (the default,
+`thread.toolCalls`) choose 全部显示, 隐藏成功的工具调用 (completed calls drop out of their runs) or
+只看结论 (each turn's message, its final replies, changes card and footer, and what waits for the
+user, with one "N 个步骤已隐藏" line that opens the turn; a running turn shows its status only).
+Requests, questions and errors always show; Find shows every step while its bar is open, and a jump
+to a hidden item opens its turn. It is a view derived from the thread's built items
+(`features/session/zen-items.ts`), with a second signature read only while something is hidden.
+The phone's title menu has the same, per session (`ui/session/zenRows.ts`).
+
+Measured in the test copy (fake agent, one session, 8 s of a turn): all 1536 ms of renderer task
+time, 542 ms of script, 299 layouts; conclusions only 559 ms, 264 ms, 21 layouts. Idle, 10 s:
+0 ms either way.
+
 ### Chat apps (聊天软件)
 
 Settings › 聊天软件 lets the user drive the agents from a bot of their own in Feishu, DingTalk,
@@ -1792,26 +1859,31 @@ e-<entry>.json.gz`) names them. Nothing is written into the user's repository or
 Settings › 功能管理 lists Kite's big optional features, each with a switch and one line. A feature
 turned off has its entry points hidden, in the window and on paired phones, and its code neither
 loaded nor run; agents are not offered its MCP tools and the agent host refuses its methods. Every
-feature is on by default, and each takes effect at once, both ways, without a restart (code a
+feature is on by default but 后台读网页, which downloads a program and so waits for the user's own
+yes (`offByDefault`), and each takes effect at once, both ways, without a restart (code a
 feature already loaded leaves memory at the next launch).
 
-| Feature (id)                       | Off, it stops                                                                                                            |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| 看板 (`board`)                     | the Overview's board view (now lazily loaded), the rows' column mark, the session menus' 看板 ›, `set_board_status`      |
-| 总管模式 (`manager`)               | Settings › 总管模式, New session's chip, the 工人 pane, the strip, the menu switch, the manager tools, restart recovery  |
-| 同时交给几个 Agent (`bestOfN`)     | the way-of-working item, the group page and row (runs list one by one), `groups.*`                                       |
-| 定时任务 (`routines`)              | the sidebar row, its pages and palette entries, the schedule's timer and event runs; windows and phones do not read them |
-| GitHub 自动化 (`github`)           | the issue inbox, auto-merge and PR watch, the GitHub chips, routine triggers; the flow reads nothing, so no timer        |
-| 沙箱 (`sandbox`)                   | where a sandbox is chosen (Settings, project menu, New session); see below                                               |
-| 聊天软件遥控 (`chatBridge`)        | Settings › 聊天软件; the agent host gets no bridge, so its code never loads and a running one disconnects                |
-| Agent 同步 (`agentSync`)           | the Marketplace's Sync tab and `sync.*`                                                                                  |
-| 端口转发 (`portForwarding`)        | the browser's and the host page's Ports, a remote localhost through a forward, the terminal watch; forwards stop         |
-| 手机预览开发服务器 (`devPreview`)  | the phone's 开发服务器 entries; the remote host refuses `preview.open` and closes open previews                          |
-| 移动设备 (`devices`)               | Settings › 移动设备, the devices pane and tabs, the `device_*` tools; main parks the device host and its polling         |
-| 浏览器点选元素 (`pickElement`)     | the pick toggle, hint, layer and tray (now lazily loaded); main refuses `browser:pick` and ends pick mode                |
-| 密钥卡片 (`secrets`)               | `request_secrets` and its line in Kite's MCP instructions                                                                |
-| Agent 改主题 (`agentTheme`)        | `read_theme`, `set_theme_colors` and their line                                                                          |
-| 回退时还原文件 (`fileCheckpoints`) | Kite's file checkpoints as each turn starts, the rewind dialog's files part, `sessions.restoreFiles`                     |
+| Feature (id)                           | Off, it stops                                                                                                                           |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 看板 (`board`)                         | the Overview's board view (now lazily loaded), the rows' column mark, the session menus' 看板 ›, `set_board_status`                     |
+| 总管模式 (`manager`)                   | Settings › 总管模式, New session's chip, the 工人 pane, the strip, the menu switch, the manager tools, restart recovery                 |
+| 同时交给几个 Agent (`bestOfN`)         | the way-of-working item, the group page and row (runs list one by one), `groups.*`                                                      |
+| 定时任务 (`routines`)                  | the sidebar row, its pages and palette entries, the schedule's timer and event runs; windows and phones do not read them                |
+| GitHub 自动化 (`github`)               | the issue inbox, auto-merge and PR watch, the GitHub chips, routine triggers; the flow reads nothing, so no timer                       |
+| 沙箱 (`sandbox`)                       | where a sandbox is chosen (Settings, project menu, New session); see below                                                              |
+| 聊天软件遥控 (`chatBridge`)            | Settings › 聊天软件; the agent host gets no bridge, so its code never loads and a running one disconnects                               |
+| Agent 同步 (`agentSync`)               | the Marketplace's Sync tab and `sync.*`                                                                                                 |
+| 端口转发 (`portForwarding`)            | the browser's and the host page's Ports, a remote localhost through a forward, the terminal watch; forwards stop                        |
+| 手机预览开发服务器 (`devPreview`)      | the phone's 开发服务器 entries; the remote host refuses `preview.open` and closes open previews                                         |
+| 移动设备 (`devices`)                   | Settings › 移动设备, the devices pane and tabs, the `device_*` tools; main parks the device host and its polling                        |
+| 浏览器点选元素 (`pickElement`)         | the pick toggle, hint, layer and tray (now lazily loaded); main refuses `browser:pick` and ends pick mode                               |
+| 密钥卡片 (`secrets`)                   | `request_secrets` and its line in Kite's MCP instructions                                                                               |
+| Agent 改主题 (`agentTheme`)            | `read_theme`, `set_theme_colors` and their line                                                                                         |
+| 回退时还原文件 (`fileCheckpoints`)     | Kite's file checkpoints as each turn starts, the rewind dialog's files part, `sessions.restoreFiles`                                    |
+| 后台读网页（Moli） (`webReader`)       | `read_web_page` and its line; off by default, and turning it on downloads Moli (below)                                                  |
+| 稍后提醒与自动收起 (`sessionTidy`)     | the menus' 稍后提醒, 收起 and 永不收起, the 已推迟 and 已收起 groups, the settle rules; the host's timer and `sessions.snooze`/`settle` |
+| 在输入框里引用会话 (`sessionMentions`) | sessions in the composer's `@` list and a row dropped on the box, on both apps                                                          |
+| 简洁视图 (`zenView`)                   | the More menu's 工具调用, its Settings row and the phone's; every thread shows all                                                      |
 
 Computer use (电脑操控) already has its own switch (`computerUse.enabled`), so the page links to it
 rather than repeating it. These stay on for good, as Kite's core: sessions, the terminal, the
@@ -1858,6 +1930,89 @@ host private 154 MB against 153 MB (no difference). At rest the features already
 since most loaded lazily; what the switches save shows once one is used: the device host, which
 starts once Settings › 移动设备 or the devices pane opens and polls for simulators every 5 s, holds
 about 60 MB and never starts with 移动设备 off.
+
+### Background web reading (后台读网页)
+
+Agents' own web fetch tools read the HTML a server sends, so a page that renders with JavaScript
+comes back as an empty shell. `read_web_page`, a tool of Kite's MCP server, reads such a page in
+the background with [Moli](https://github.com/lexmount/moli), a headless browser for agents in Rust
+(Apache-2.0 OR MIT; its archive also carries Chromium's BSD-3-Clause and Selenium's notice), and
+returns it as text. Kite's visible browser stays the way to check the user's own app or a page that
+needs a sign-in; agents are told to use their own web tools first.
+
+- Fetched on demand, never bundled: `src/agent-host/web-reader/release.ts` pins v1.1.27's archive
+  for each system (Windows, macOS, Linux; x64 and arm64; none on musl) with its size and SHA-256 as
+  GitHub lists them. Nothing is downloaded until the user turns 后台读网页 on, from Settings ›
+  功能管理 or Settings › 浏览器 › 后台读网页 (both ask first in a dialog that names the 42 MB and
+  where it comes from), or an agent proposes the switch with `change_settings`, which always asks
+  in the user's card (the switch's line names the size too). `install.ts` streams the archive from
+  github.com the way Kite's own downloads go (Advanced › Proxy, else the environment's proxy, else
+  directly; never an agent's node) into `<userData>/runtimes/moli/.partial-*/`, refuses one whose
+  SHA-256 or size differs from the pinned ones (deleted, nothing installed), extracts it with the
+  system's tar, requires `moli --version` to say 1.1.27 and renames it into
+  `runtimes/moli/1.1.27/` with its `kite-moli.json` (about 104 MB on disk on Windows x64).
+  Progress reaches the windows in `webReader.changed`; `webReader.remove` (删除 Moli，释放 X MB)
+  deletes it and the page turns the switch off. The `webReader.*` methods are the windows' alone.
+- Nothing runs at rest: the status is read from the record when Settings first asks, and each read
+  is one `moli fetch` process that ends with it (about 0.1 s to start and read a local page), at
+  most two at a time. A warm `moli serve` was not needed.
+- The tool: `url` (http or https only, no credentials in it), `format` (`markdown`; `text`, the
+  visible text; `semantic`, Moli's semantic tree without its node ids), `selector` (only the
+  matching elements, handed to the page as a JSON string on stdin), `max_chars` (40,000 by
+  default, 1,000 to 200,000; Moli's output is read up to 4 bytes a character and the process is
+  ended past it), `wait_for_js` (true: `--wait domstable`; false: `--wait load`),
+  `wait_for_selector` and `timeout_seconds` (10 by default, 3 to 60; a page still changing then is
+  returned as it is). The answer says what it is and holds the page between
+  `<untrusted-web-page boundary="<random>">` markers, labelled as untrusted data from the web, not
+  instructions; an HTTP error status is said with the page the server sent.
+- Network: Moli's environment loses every proxy variable and `MOLI_*`, and the flags name the
+  agent's own way out, read from the agent's environment as its commands get it: its Agent network
+  node's listener, else Kite's proxy, else directly. The local network's ranges (10/8, 172.16/12,
+  192.168/16, 169.254/16, 100.64/10, 0/8, fd00::/8, fe80::/10) and this computer (127/8, ::1) are
+  blocked with `--block-cidrs` for every request the page makes, its redirects included, by the
+  address a name resolves to. Not Moli's `--block-private-networks`: it also blocks
+  198.18.0.0/15, which a Clash, sing-box or Karing TUN answers every name with in fake-ip mode, so
+  every read through one failed (seen on the owner's computer).
+- What it may read (`policy.ts`): Moli runs on the computer outside any sandbox, with the user's
+  network position, where Kite's MCP server, mihomo's API and other local services listen. So the
+  tool refuses this computer and the local network, as addresses (also `127.1`, a decimal or a
+  mapped IPv6 one) and as names (`localhost`, a name without a dot, `.local`, `.lan`, `.internal`,
+  `.home.arpa`, `.ts.net`), but for the session's own worktree ports (KITE_PORT), where its dev
+  servers run; those reads may reach the loopback, still not the local network. Another local page
+  goes to Kite's browser (`browser_navigate`), as the refusal says. A container session is refused
+  (Moli would go around the container's network limits; such a session gets no MCP servers
+  anyway), and so is a sandbox whose commands are off the network (`none`); with `agent` the read
+  must go through the agent's node and reaches no local port.
+- Agents: the tool is in the `browser` group, listed only while the switch is on (a change replaces
+  the prepared sessions), never allowed without asking, and the MCP instructions get one line
+  (the `webReader` guide flag): read_web_page for a page the agent's own fetch fails on.
+- Measured on the owner's computer (2026-11-23, Windows 11, Moli 1.1.27 against Kite's built-in
+  browser in a test copy driven by the fake agent; 10 local test pages and 5 public documentation
+  pages: MDN Array.map, react.dev useState, Python asyncio-task, Node.js fs, Electron
+  WebContentsView). Both read all 15. Moli's default (`domstable`): local pages 0.47–0.50 s, 1.4
+  and 1.7 s for the two that render late, peak working set 30–42 MB; public pages 3.3–5.5 s and
+  10.2 s on react.dev, peak 55–103 MB but 474 MB on react.dev, whose scripts keep running to the
+  limit. With `wait_for_js: false`: 0.09–0.13 s locally (missing what renders after the load) and
+  1.9–2.9 s for the public pages, with the same text but on MDN (26.7k against 35k characters).
+  Kite's browser (navigate and snapshot): 0.63–1.47 s locally and 1.7–5.5 s for the public pages;
+  its page's renderer held 135–148 MB (28–41 MB private) locally and 161–248 MB (54–142 MB private)
+  for the public pages, kept while the tab is open; its snapshot stops at 2,000 lines (79k
+  characters of Node's fs page, of which Moli read 465k). Moli leaves out what is inside an iframe
+  and, in Markdown, the kinds of a form's fields (`semantic` keeps them). So it is not faster than
+  the visible browser for documentation; what it brings is a read in the background that needs no
+  tab, no site card and no visible pane, in plain Markdown, at a lower memory cost that ends with
+  the read.
+
+Huli's own files: `src/shared/web-reader.ts`, `src/agent-host/web-reader/` (`release.ts`,
+`install.ts`, `policy.ts`, `fetch.ts`, `tools.ts`, `service.ts`, `web-reader.test.ts`),
+`src/renderer/src/stores/web-reader.ts` and `features/settings/web-reader-rows.tsx`. Hooks:
+`features.ts` (`webReader`, `offByDefault`), `settings-catalog.ts` (`browser.web-reader`,
+`FEATURE_GROUP`), `agent-host.ts`, `host-request-limits.ts`, `remote/allow-list.ts`,
+`agent-host/validate.ts`, `host.ts`, `sessions.ts` (`webReadPlace`), `artifacts/service.ts`,
+`guide/guide.ts` and `topics.ts`, `bootstrap.ts`, `section-defs.tsx`, `features-section.tsx`, and
+the `webReader` keys of `locales/*/{settings,host}.json`. Tests: a download refused on a SHA-256 or
+size mismatch, the arguments and addresses, the command line and environment, the cut and the
+untrusted wrapping, and the feature gate (`web-reader.test.ts`, `service.test.ts`).
 
 ## Merging Kettu
 

@@ -5755,6 +5755,12 @@ body:has(.ui-mdpc[data-open], .ui-ccc__menu[data-open='true']) .kettu-toasts {
 .kettu-prompt .cm-editor .cm-placeholder {
   color: var(--ui-ccc-hint);
 }
+/* Huli: a session's row dragged over the box, which mentions it once dropped. */
+.kettu-prompt[data-drop] {
+  border-radius: var(--radius-md);
+  background: var(--selection);
+  box-shadow: 0 0 0 1px var(--focus-ring-color);
+}
 .kettu-prompt[data-disabled] {
   cursor: default;
 }

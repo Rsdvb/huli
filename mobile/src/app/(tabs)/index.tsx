@@ -87,6 +87,9 @@ import { IconButton } from '../../ui/IconButton'
 import { LIST_COLUMN, useWide } from '../../ui/layout'
 import { joinGroups, offlineMenu, type MenuNode } from '../../ui/menu'
 import { showNotice } from '../../ui/NoticeBar'
+import { snoozePresets } from '@shared/session-tidy'
+import { PRESET_LABEL, laterTimes, restoreTidy } from '../../tidy'
+import { momentText } from '../../ui/session/format'
 import { OsIcon } from '../../ui/OsIcon'
 import { Press } from '../../ui/Press'
 import { AnimatedFlashList, type FlashListRef } from '../../ui/AnimatedList'
@@ -998,6 +1001,7 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
       if (done.length === 0) return
       showNotice({
         text: `已归档 ${done.length} 个会话`,
+        ms: 5000,
         action: {
           label: '撤销',
           onPress: () =>
@@ -1009,6 +1013,73 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
         },
       })
     })
+  }
+
+  // Huli: the chosen sessions of the user's own snooze or settle together, with Undo (会话整理).
+  const tidyOn = useEntryOn('phone.snooze')
+  const tidyChosen = (
+    what: string,
+    request: (link: HostLink, s: SessionSummary) => Promise<unknown>,
+    change: 'snooze' | 'settle',
+    text: (count: number) => string,
+  ) => {
+    const list = chosenPlaced.filter(
+      (p) =>
+        p.session.archivedAt === null && p.session.parentId === null && p.session.origin === 'user',
+    )
+    select(null)
+    void bulk(what, request, list).then((done) => {
+      if (done.length === 0) return
+      showNotice({
+        text: text(done.length),
+        ms: 5000,
+        action: {
+          label: '撤销',
+          onPress: () => void bulk('撤销', (link, s) => restoreTidy(link, s, change), done),
+        },
+      })
+    })
+  }
+  const snoozeChosen = (until: number) =>
+    tidyChosen(
+      '推迟',
+      (link, s) => link.request('sessions.snooze', { sessionId: s.id, until }),
+      'snooze',
+      (count) => `已推迟 ${count} 个会话，${momentText(until)} 再提醒`,
+    )
+  const tidyMenu = (): MenuNode[] => {
+    const now = Date.now()
+    return [
+      ...snoozePresets(now).map(({ preset, until }) => ({
+        key: `snooze:${preset}`,
+        label: PRESET_LABEL[preset],
+        subtitle: momentText(until, now),
+        onPress: () => snoozeChosen(until),
+      })),
+      {
+        key: 'snooze:later',
+        label: '更多时间',
+        items: laterTimes(now).map((time) => ({
+          key: `snooze:${time.key}`,
+          label: time.label,
+          subtitle: momentText(time.until, now),
+          onPress: () => snoozeChosen(time.until),
+        })),
+      },
+      { kind: 'divider', key: 'settle-rule' },
+      {
+        key: 'settle',
+        label: '收起',
+        icon: 'tray.and.arrow.down',
+        onPress: () =>
+          tidyChosen(
+            '收起',
+            (link, s) => link.request('sessions.settle', { sessionId: s.id, settled: true }),
+            'settle',
+            (count) => `已收起 ${count} 个会话`,
+          ),
+      },
+    ]
   }
 
   const deleteChosen = () => {
@@ -1414,6 +1485,18 @@ function SessionList(props: { selected: string | null; onOpen(id: string): void 
               />
             )}
           </TapMenu>
+          {tidyOn ? (
+            <TapMenu items={tidyMenu()} title="稍后提醒" disabled={chosen.length === 0}>
+              {(open) => (
+                <BarButton
+                  icon="clock"
+                  label="稍后"
+                  disabled={chosen.length === 0}
+                  onPress={open ?? noop}
+                />
+              )}
+            </TapMenu>
+          ) : null}
           <BarButton
             icon="archive"
             label="归档"
@@ -1440,7 +1523,7 @@ const SELECT_BAR = 64
 const noop = () => {}
 
 function BarButton(props: {
-  icon: 'folder' | 'archive' | 'trash'
+  icon: 'folder' | 'archive' | 'trash' | 'clock'
   label: string
   danger?: boolean
   disabled?: boolean

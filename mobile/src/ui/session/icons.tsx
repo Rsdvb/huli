@@ -4,6 +4,7 @@
 import { Text, View } from 'react-native'
 import Svg, { Rect } from 'react-native-svg'
 import {
+  AlarmClock,
   Apple,
   ArrowRightLeft,
   ArrowUp,
@@ -83,6 +84,8 @@ import {
   Timer,
   TextSelect,
   Undo2,
+  EyeOff,
+  Inbox,
 } from 'lucide-react-native'
 import type { HarnessId } from '@shared/agents'
 import { harnessOf, markFor } from '../agent-marks'
@@ -163,6 +166,10 @@ export const G = {
   check: { sf: 'checkmark', lucide: Check },
   wifiOff: { sf: 'wifi.slash', lucide: WifiOff },
   timer: { sf: 'timer', lucide: Timer },
+  // Huli: 稍后提醒 and 收起 (会话整理), and the thread's 简洁视图.
+  alarm: { sf: 'alarm', lucide: AlarmClock },
+  tray: { sf: 'tray.and.arrow.down', lucide: Inbox },
+  eyeOff: { sf: 'eye.slash', lucide: EyeOff },
   paste: { sf: 'doc.on.clipboard', lucide: ClipboardPaste },
   sliders: { sf: 'slider.horizontal.3', lucide: SlidersHorizontal },
   sendNow: { sf: 'arrow.turn.down.left', lucide: CornerDownLeft },

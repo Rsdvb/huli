@@ -1807,4 +1807,15 @@ describe('extensions and helpers', () => {
       { type: 'resource_link', uri: 'file:///a', name: 'a' },
     ])
   })
+
+  // Huli: a referenced session goes as its id and title alone, for the history tool to read.
+  it('maps a referenced session to a line naming its id and the history tool', () => {
+    const [block] = promptBlocks([
+      { type: 'ref', ref: { kind: 'session', sessionId: 's-42', name: 'Fix login' } },
+    ])
+    expect(block).toEqual({
+      type: 'text',
+      text: expect.stringMatching(/Fix login.*s-42.*read_session_history/),
+    })
+  })
 })

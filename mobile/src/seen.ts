@@ -1,16 +1,15 @@
 // Where this phone last saw each session, per computer, for the recap that greets the user when
-// they come back to one (@shared/recap). Read once per computer, written when a session stops being
-// looked at: its screen is left or covered, or the app leaves the front.
+// they come back to one (@shared/recap). Read once per computer and kept current in memory;
+// written when a session leaves view, comes back into it, or its recap is put away.
 //
 //   <documents>/huli/seen/<computer id>.json   { v: 1, marks: { <session id>: SeenMark } }
 
 import { Directory, File, Paths } from 'expo-file-system'
-import { parseSeenMarks, withSeen, type SeenMark } from '@shared/recap'
+import { seenBook, type SeenBook, type SeenMark } from '@shared/recap'
 
 const VERSION = 1
 
-const memory = new Map<string, Record<string, SeenMark>>()
-const loading = new Map<string, Promise<Record<string, SeenMark>>>()
+const books = new Map<string, SeenBook>()
 
 function fileOf(computer: string): File {
   return new File(
@@ -19,58 +18,50 @@ function fileOf(computer: string): File {
   )
 }
 
-/** The computer's marks, read once; later calls wait on the same read. */
-export function loadSeen(computer: string): Promise<Record<string, SeenMark>> {
-  const known = loading.get(computer)
-  if (known) return known
-  const read = (async () => {
-    let marks: Record<string, SeenMark> = {}
-    try {
-      const file = fileOf(computer)
-      if (file.exists) {
+function bookOf(computer: string): SeenBook {
+  let book = books.get(computer)
+  if (book) return book
+  book = seenBook({
+    async read() {
+      try {
+        const file = fileOf(computer)
+        if (!file.exists) return {}
         const value = JSON.parse(await file.text()) as { v?: unknown; marks?: unknown }
-        if (value.v === VERSION) marks = parseSeenMarks(value.marks)
+        return value.v === VERSION ? value.marks : {}
+      } catch (error) {
+        console.warn('Could not read where sessions were left', error)
+        return {}
       }
-    } catch (error) {
-      console.warn('Could not read where sessions were left', error)
-    }
-    // A mark made while the file was read is newer than the file's.
-    const made = memory.get(computer)
-    if (made) marks = { ...marks, ...made }
-    memory.set(computer, marks)
-    return marks
-  })()
-  loading.set(computer, read)
-  return read
+    },
+    async write(marks) {
+      try {
+        const file = fileOf(computer)
+        const dir = file.parentDirectory
+        if (!dir.exists) dir.create({ intermediates: true, idempotent: true })
+        if (!file.exists) file.create({ intermediates: true })
+        await file.write(JSON.stringify({ v: VERSION, marks }))
+      } catch (error) {
+        console.warn('Could not save where sessions were left', error)
+      }
+    },
+  })
+  books.set(computer, book)
+  return book
 }
 
-/** Marks the session seen now, at `entry`, the thread's last entry (null for an empty one). */
-export function markSeen(computer: string, sessionId: string, entry: string | null): void {
-  const marks = withSeen(memory.get(computer) ?? {}, sessionId, { at: Date.now(), entry })
-  memory.set(computer, marks)
-  void save(computer)
+/** Where this phone last saw the session, once the computer's marks are read. */
+export function seenMark(computer: string, sessionId: string): Promise<SeenMark | null> {
+  return bookOf(computer).get(sessionId)
 }
 
-async function save(computer: string): Promise<void> {
-  // Never over the file before it has been read, or the marks in it would be lost.
-  await loadSeen(computer)
-  const marks = memory.get(computer)
-  if (!marks) return
-  try {
-    const file = fileOf(computer)
-    const dir = file.parentDirectory
-    if (!dir.exists) dir.create({ intermediates: true, idempotent: true })
-    if (!file.exists) file.create({ intermediates: true })
-    await file.write(JSON.stringify({ v: VERSION, marks }))
-  } catch (error) {
-    console.warn('Could not save where sessions were left', error)
-  }
+export function markSeen(computer: string, sessionId: string, mark: SeenMark): void {
+  void bookOf(computer).set(sessionId, mark)
 }
 
 /** Forgets a computer's marks, as when it is unpaired. */
 export function dropSeen(computer: string): void {
-  memory.delete(computer)
-  loading.delete(computer)
+  books.get(computer)?.close()
+  books.delete(computer)
   try {
     const file = fileOf(computer)
     if (file.exists) file.delete()

@@ -544,5 +544,46 @@
     "moved": "这个会话已经搬走了。",
     "noWindow": "只有桌面版纸鸢能搬会话。",
     "oneOf": "「{{title}}」：{{why}}"
+  },
+  "tidy": {
+    "snooze": "稍后提醒",
+    "snoozeFor": "稍后提醒…",
+    "presets": {
+      "hour": "1 小时后",
+      "tonight": "今晚",
+      "tomorrow": "明天早上",
+      "monday": "下周一"
+    },
+    "reset": "额度恢复后",
+    "resetUnknown": "额度没用完",
+    "custom": "自定义…",
+    "wake": "取消推迟",
+    "settle": "收起",
+    "settleCount_other": "收起 {{count}} 个会话",
+    "unsettle": "移回列表",
+    "neverSettle": "永不收起",
+    "snoozed": "已推迟“{{title}}”，{{time}} 再提醒",
+    "snoozedReset": "已推迟“{{title}}”，额度恢复后再提醒",
+    "snoozedCount_other": "已推迟 {{count}} 个会话",
+    "settled": "已收起“{{title}}”",
+    "settledCount_other": "已收起 {{count}} 个会话",
+    "snoozedGroup": "已推迟",
+    "settledGroup": "已收起",
+    "backAt": "{{time}} 提醒",
+    "backAtReset": "额度恢复后提醒，{{time}}",
+    "settledAt": "{{time}}收起",
+    "settledBy": {
+      "user": "你收起的",
+      "idle": "闲置",
+      "merged": "PR 已合并"
+    },
+    "dialog": {
+      "title": "稍后提醒",
+      "description": "到时间前它不在列表里；需要你处理时会提前回来。",
+      "time": "时间",
+      "when": "{{time}} 提醒",
+      "past": "请选现在之后的时间。",
+      "snooze": "推迟"
+    }
   }
 }

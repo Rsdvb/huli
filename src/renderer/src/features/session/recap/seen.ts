@@ -1,10 +1,9 @@
 import { parseSeenMarks, withSeen, type SeenMark } from '@shared/recap'
 import { readJson, writeJson } from '@renderer/lib/storage'
-import { useThreadsStore } from '@renderer/stores/threads'
 
 // Huli: where this device last saw each session, kept in localStorage, for the recap that greets
-// the user when they come back to one. Written only when a session stops being looked at: its
-// pane shows another, or the window goes to the back.
+// the user when they come back to one. Written when a session comes into view, leaves it (its
+// pane shows another, the window is hidden or closes) and when its recap is put away.
 
 const KEY = 'session-seen'
 
@@ -19,10 +18,7 @@ export function seenMark(sessionId: string): SeenMark | null {
   return loaded()[sessionId] ?? null
 }
 
-/** Marks the session seen now, at its thread's last entry, when the replica holds its thread. */
-export function markSeen(sessionId: string): void {
-  const order = useThreadsStore.getState().replicas[sessionId]?.state?.order
-  if (!order) return
-  marks = withSeen(loaded(), sessionId, { at: Date.now(), entry: order.at(-1) ?? null })
+export function markSeen(sessionId: string, mark: SeenMark): void {
+  marks = withSeen(loaded(), sessionId, mark)
   writeJson(KEY, marks)
 }

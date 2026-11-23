@@ -242,6 +242,9 @@ import {
   NodeRuntimeService,
 } from './node-runtime/service'
 import { httpTransport, ownProxyVariables } from './node-runtime/transport'
+import { getEnv } from './find-command'
+import { moliRoot } from './web-reader/install'
+import { WebReaderService } from './web-reader/service'
 import { ComputerUse } from './computer/service'
 import { SessionFiles } from './session-files'
 import { SessionManager, type SessionTimings } from './sessions'
@@ -526,6 +529,8 @@ export class AgentHost {
   private readonly nodeProxy: NodeProxy
   /** Huli: Kite's own Node.js, for agents when the user's own is missing or too old. */
   private readonly nodeRuntime: NodeRuntimeService
+  /** Huli: background web reading with Moli, downloaded once the user turns it on. */
+  private readonly webReader: WebReaderService
   /** When idle Claude Code sessions let their agent go, by the setting and the system's memory. */
   private readonly idleRelease: IdleRelease
   /** The saved routines and the lifecycle of their runs. */
@@ -1095,6 +1100,7 @@ export class AgentHost {
       secrets: this.secretTools,
       theme: this.themeTools,
       features: () => this.settings.features,
+      webReader: { read: (caller, input) => this.webReader.read(caller, input) },
       proxy: this.mcpProxy,
       sessions: {
         info: (sessionId) => this.sessions.sessionInfo(sessionId),
@@ -1120,6 +1126,7 @@ export class AgentHost {
         startMode: (agentId) => startModeIn(this.settings, agentId),
         sendRefusal: (callerId, sessionId) =>
           this.sessions.manager.sendRefusal(callerId, sessionId),
+        referenced: (callerId, sessionId) => this.sessions.referencedBy(callerId, sessionId),
       },
       manager: () => this.sessions.manager,
       log,
@@ -1546,6 +1553,40 @@ export class AgentHost {
       changed: () => this.env.notify(),
     })
     this.env.setInstallStatus(() => this.nodeRuntime.status())
+    this.webReader = new WebReaderService({
+      root: moliRoot(options.userDataPath),
+      platform,
+      arch: process.arch,
+      musl: () => platform === 'linux' && isMusl(),
+      // Downloaded the way Kite's own requests go, never through an agent's node.
+      transport: httpTransport(() => routeFor(this.ownProxy())),
+      log,
+      on: () => this.featureOn('webReader'),
+      egress: (sessionId) => {
+        const agentId = this.sessions.sessionAgent(
+          this.sessions.browserSession(sessionId) ?? sessionId,
+        )
+        if (!agentId) return null
+        // The agent's own way out: its node's listener, else Kite's proxy, as its commands get it.
+        const env = this.env.agentEnv(agentId)
+        const read = (name: string) =>
+          getEnv(env, name, platform) ?? getEnv(env, name.toLowerCase(), platform) ?? null
+        return {
+          proxy: read('HTTPS_PROXY') ?? read('ALL_PROXY') ?? read('HTTP_PROXY'),
+          noProxy: read('NO_PROXY'),
+        }
+      },
+      place: (sessionId) =>
+        this.sessions.webReadPlace(this.sessions.browserSession(sessionId) ?? sessionId),
+      ownExit: (sessionId) => {
+        const agentId = this.sessions.sessionAgent(
+          this.sessions.browserSession(sessionId) ?? sessionId,
+        )
+        return agentId !== null && this.nodeProxy.portFor(agentId) !== null
+      },
+      baseEnv: () => process.env,
+      changed: (status) => this.hub.sendToWindows({ type: 'webReader.changed', status }),
+    })
     void this.env.setNodeSetup({ required: nodeRequired })
     this.routines = new RoutinesManager({
       userDataPath: options.userDataPath,
@@ -2179,6 +2220,7 @@ export class AgentHost {
     if (JSON.stringify(previous.supervisor) !== JSON.stringify(next.supervisor)) {
       this.sessions.supervisorChanged()
     }
+    if (JSON.stringify(previous.tidy) !== JSON.stringify(next.tidy)) this.sessions.tidyChanged()
     if (previous.workflow.maxWorkingSteps !== next.workflow.maxWorkingSteps) {
       this.tasks.limitChanged()
     }
@@ -2226,10 +2268,15 @@ export class AgentHost {
     }
     if (changed('github') || changed('routines')) void this.githubFlow.refresh()
     if (changed('chatBridge')) this.applyChatBridge()
+    if (changed('sessionTidy')) this.sessions.tidyChanged()
     if (changed('board') || changed('devices')) void this.ownSkillsChanged()
-    else if (['manager', 'secrets', 'agentTheme'].some((id) => changed(id as FeatureId))) {
+    else if (
+      ['manager', 'secrets', 'agentTheme', 'webReader'].some((id) => changed(id as FeatureId))
+    ) {
       this.sessions.libraryChanged(() => true)
     }
+    // Turning it on is the user's yes to Moli's download, whose size the page and the card name.
+    if (changed('webReader') && this.featureOn('webReader')) void this.webReader.turnedOn()
   }
 
   /** Huli: the handlers with the methods of a feature that is off refused. */
@@ -4010,6 +4057,13 @@ export class AgentHost {
       'sandbox.containerStatus': async () => (await this.containerSandbox()).status(),
       'sandbox.pullImage': async () => (await this.containerSandbox()).pull(),
       'sandbox.removeImage': async () => (await this.containerSandbox()).remove(),
+      'webReader.status': () => this.webReader.status(),
+      'webReader.install': async () => {
+        await this.webReader.install()
+        return this.webReader.status()
+      },
+      'webReader.cancel': () => this.webReader.cancel(),
+      'webReader.remove': () => this.webReader.remove(),
       'projects.setAutoApprove': ({ path, autoApprove }) =>
         projects.setAutoApprove(projects.match(path), autoApprove),
       'projects.setManager': ({ path, manager }) =>
@@ -4164,6 +4218,10 @@ export class AgentHost {
         return agents.resumeCommand(target.agentId, target, true)
       },
       'sessions.pin': ({ sessionId, pinned }) => sessions.pin(sessionId, pinned),
+      'sessions.snooze': ({ sessionId, until }) => sessions.snooze(sessionId, until),
+      'sessions.settle': ({ sessionId, settled }) => sessions.settle(sessionId, settled),
+      'sessions.setNeverSettle': ({ sessionId, never }) =>
+        sessions.setNeverSettle(sessionId, never),
       'sessions.archive': ({ sessionId, subSessions }) =>
         sessions.archive(sessionId, subSessions ?? true),
       'sessions.unarchive': ({ sessionId }) => sessions.unarchive(sessionId),

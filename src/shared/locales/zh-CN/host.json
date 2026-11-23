@@ -164,7 +164,12 @@
       }
     },
     "backgroundUnsupported": "这个版本的 {{agent}} 不能列出后台进程",
-    "noToBackground": "{{agent}} 不能把任务转到后台"
+    "noToBackground": "{{agent}} 不能把任务转到后台",
+    "tidy": {
+      "noReset": "不知道这个 Agent 的额度什么时候恢复，请改选一个时间。",
+      "snoozeRange": "请选现在之后、一年以内的时间。",
+      "ownOnly": "只有你自己开的会话可以稍后提醒或收起。"
+    }
   },
   "notice": {
     "historyUnavailable": {
@@ -241,7 +246,7 @@
     },
     "computerForeground": {
       "title": "已把 {{app}} 切到前台操作",
-      "description": "它在后台不接收这个操作，所以窗口短暂切到前台完成这一步，然后切回。可在设置 › Computer use 里关闭。"
+      "description": "它在后台不接收这个操作，所以窗口短暂切到前台完成这一步，然后切回。可在设置 › 电脑操控 里关闭。"
     },
     "computerElevatedStopped": {
       "title": "已停止以管理员权限操作 {{app}}",
@@ -746,7 +751,8 @@
     "unknownTool": "未知工具内容",
     "toolCall": "工具调用",
     "toolReference": "找到工具：{{name}}",
-    "document": "文档：{{name}}"
+    "document": "文档：{{name}}",
+    "sessionRef": "[参考会话「{{name}}」: id {{id}}，用 read_session_history 读取]"
   },
   "antigravity": {
     "plan": {
@@ -2352,5 +2358,16 @@
     "copyPaths": "要复制的文件必须写成路径",
     "copyEntry": "复制 {{entry}}：{{reason}}",
     "setupCommand": "初始化命令最多 {{max}} 个字符"
+  },
+  "webReader": {
+    "busy": "正在下载或删除 Moli，请等它完成。",
+    "unsupported": "Moli 没有适合这台电脑系统和处理器的版本。",
+    "stopped": "Moli 的下载已停止。",
+    "stalled": "下载卡住了",
+    "downloadFailed": "Moli 下载失败：{{reason}}。请检查网络，或设置 › 高级里的代理。",
+    "hashMismatch": "{{file}} 和纸鸢内置的 SHA-256 不符，已删除，没有安装。",
+    "extractFailed": "Moli 的压缩包解压失败：{{reason}}",
+    "doesNotRun": "Moli 已解压，但在这台电脑上运行不起来。",
+    "inUse": "有 Agent 正在用 Moli 读网页，等它读完再试。"
   }
 }

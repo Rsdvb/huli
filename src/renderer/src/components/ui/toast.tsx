@@ -70,7 +70,7 @@ export function toast(
   title: string,
   action?: { label: string; onClick: () => void },
   options: ToastOptions = {},
-) {
+): ToastId {
   const { tone, icon, duration } = options
   const show =
     tone === 'success' ? affectToast.success : tone === 'info' ? affectToast.info : affectToast
@@ -85,11 +85,16 @@ export function toast(
     ) : icon ? (
       <HugeiconsIcon icon={icon} strokeWidth={1.9} aria-hidden className="size-3.75 text-icon" />
     ) : undefined
-  track((settings) => show(title, settings), {
+  return track((settings) => show(title, settings), {
     icon: mark,
-    ...(duration !== undefined && { duration }),
     ...(action && { action: actionOf(action), duration: 6000 }),
+    ...(duration !== undefined && { duration }),
   })
+}
+
+/** Huli: closes a toast before its time, as when what it offers was done another way. */
+export function dismissToast(id: ToastId): void {
+  affectToast.dismiss(id)
 }
 
 /**

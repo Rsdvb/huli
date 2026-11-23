@@ -359,7 +359,9 @@
     "folder": "Folder",
     "keysMove": "↑↓ to move",
     "keysInsert": "↵ to insert",
-    "keysFolder": "Tab opens a folder"
+    "keysFolder": "Tab opens a folder",
+    "sessions": "Sessions",
+    "noProject": "No project"
   },
   "chips": {
     "pastedLink": "Pasted as a link",

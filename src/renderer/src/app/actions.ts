@@ -1,3 +1,4 @@
+import type { SnoozeUntil } from '@shared/session-tidy'
 import {
   REMOVED_WHILE_STARTING,
   type ReturnedMessage,
@@ -560,6 +561,21 @@ export function retryPendingSession(): void {
 
 export async function pinSession(sessionId: string, pinned: boolean): Promise<void> {
   await host('sessions.pin', { sessionId, pinned })
+}
+
+/** Huli: snoozes a session until a time or its agent's plan reset; null wakes it. */
+export async function snoozeSession(sessionId: string, until: SnoozeUntil): Promise<void> {
+  await host('sessions.snooze', { sessionId, until })
+}
+
+/** Huli: settles a session out of the active list, or brings it back. */
+export async function settleSession(sessionId: string, settled: boolean): Promise<void> {
+  await host('sessions.settle', { sessionId, settled })
+}
+
+/** Huli: 永不收起, which keeps the settings' rules from settling the session. */
+export async function setNeverSettle(sessionId: string, never: boolean): Promise<void> {
+  await host('sessions.setNeverSettle', { sessionId, never })
 }
 
 /**

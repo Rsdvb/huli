@@ -32,6 +32,7 @@ import { hostOfPath } from '@renderer/lib/host-paths'
 import { isHosted, isWeb, platform } from '@renderer/lib/platform'
 import { initAccount } from '@renderer/stores/account'
 import { receiveAgentNetwork } from '@renderer/stores/agent-network'
+import { receiveWebReader } from '@renderer/stores/web-reader'
 import { loadAgentOptions, receiveAgentOptions } from '@renderer/stores/agent-options'
 import { initDevices } from '@renderer/stores/devices'
 import { initBrowser } from '@renderer/stores/browser'
@@ -206,6 +207,9 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
     case 'agentNetwork.changed':
       // Only this computer's host sends it; another's would be no business of this window.
       if (hostId === null) receiveAgentNetwork(event.status)
+      return
+    case 'webReader.changed':
+      if (hostId === null) receiveWebReader(event.status)
       return
   }
   receiveArtifactEvent(event, hostId)

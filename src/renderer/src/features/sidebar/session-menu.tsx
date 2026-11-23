@@ -118,6 +118,9 @@ import {
   type SessionMenuPlace,
 } from './session-menu-model'
 import { confirmArchive } from './archive-confirm-model'
+import { NeverSettleItem, SettleItem, SnoozeMenu } from './tidy-menu'
+import { ZenMenu } from '@renderer/features/session/zen-menu'
+import { undoToast } from './undo'
 import { workAtStake, type WorkItem } from './running-work'
 import { RunningWorkList } from './running-work-list'
 import { dissolveRows } from './row-dust'
@@ -162,7 +165,7 @@ function useInFront(sessionId: string): boolean {
 }
 
 /**
- * Archives with a toast that undoes it for six seconds, with their sub-sessions as `subSessions`
+ * Archives with a toast that undoes it for five seconds, or Mod+Z meanwhile, with their sub-sessions as `subSessions`
  * says, once the user said whether they go when it does not, and confirmed when anything of theirs
  * runs, which archiving stops. Undo takes back the ones that archived, with the sub-sessions they
  * left; the toast names the failure when some did not, since a second toast would replace it.
@@ -191,18 +194,15 @@ function archiveNow(ids: readonly string[], title: string, subSessions: boolean)
     const archived = failure
       ? i18n.t('sidebar:row.archivedSome', { done: done.length, total: ids.length, error: failure })
       : title
-    toast(
+    undoToast(
       archived,
-      {
-        label: i18n.t('sidebar:row.undo'),
-        onClick: () => {
-          markReturning(done)
-          void settle(done, unarchiveSession).then(({ errors: failed }) => {
-            if (failed.length > 0) toast(errorMessage(failed[0]))
-          })
-        },
+      () => {
+        markReturning(done)
+        void settle(done, unarchiveSession).then(({ errors: failed }) => {
+          if (failed.length > 0) toast(errorMessage(failed[0]))
+        })
       },
-      { icon: Archive01Icon },
+      Archive01Icon,
     )
     void offerWorktreeRemoval(
       before.filter((s) => done.includes(s.id)),
@@ -362,6 +362,14 @@ export function SessionMenuItems({
             {t('row.autoResume')}
           </DropdownMenuCheckboxItem>
         )
+      case 'snooze':
+        return <SnoozeMenu key={name} summaries={[summary]} />
+      case 'settle':
+        return <SettleItem key={name} summaries={[summary]} />
+      case 'neverSettle':
+        return <NeverSettleItem key={name} summary={summary} />
+      case 'toolCalls':
+        return <ZenMenu key={name} sessionId={summary.id} />
       case 'board':
         return <BoardStatusMenu key={name} summary={summary} />
       case 'manager':
@@ -904,6 +912,10 @@ export function MultiSessionMenuItems({
                     {name === 'pin' ? t('row.pin') : t('row.unpin')}
                   </DropdownMenuItem>
                 )
+              case 'snooze':
+                return <SnoozeMenu key={name} summaries={summaries} />
+              case 'settle':
+                return <SettleItem key={name} summaries={summaries} />
               case 'archive': {
                 const archive = (subSessions?: boolean) => () => {
                   clearSelection()

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { MarketTools } from '../marketplace/publish-tools'
-import { FEATURES, type FeatureDef } from '@shared/features'
+import { FEATURE_IDS, FEATURES, type FeatureDef } from '@shared/features'
 import { PLAN_PROMPT } from '../plan-tool'
 import { CORE_TOOLS, declared, GATEWAY_TOOL } from '../tool-gateway'
 import { ArtifactService, type AgentProcess, type ArtifactServiceDeps } from './service'
@@ -246,6 +246,7 @@ describe('the feature switches of Settings > Features', () => {
       manager: () => ({ roleOf: () => role }),
       secrets: { call: () => Promise.reject(new Error('not in this test')) },
       theme: { call: () => Promise.reject(new Error('not in this test')) },
+      webReader: { read: () => Promise.reject(new Error('not in this test')) },
       features: () => features.current,
     } as unknown as ArtifactServiceDeps
     const service = new ArtifactService(deps)
@@ -257,19 +258,23 @@ describe('the feature switches of Settings > Features', () => {
   const listed = async (service: ArtifactService) =>
     (await rpc<{ tools: Tool[] }>(service, 'tools/list', {})).tools.map((tool) => tool.name)
 
+  /** Every feature on, those that start off too. */
+  const allOn = (): Record<string, boolean> =>
+    Object.fromEntries(FEATURE_IDS.map((id) => [id, true]))
+
   /** Each feature's tools, as a session of its role lists them with everything on. */
   async function toolsOf(feature: FeatureDef, role: string): Promise<string[]> {
-    const on = { current: {} }
+    const on = { current: allOn() }
     const all = await listed(await switched(on, role))
-    const off = { current: { [feature.id]: false } }
+    const off = { current: { ...allOn(), [feature.id]: false } }
     const without = new Set(await listed(await switched(off, role)))
     return all.filter((name) => !without.has(name))
   }
 
   it('offer every tool the registry names while its feature is on', async () => {
     const all = new Set([
-      ...(await listed(await switched({ current: {} }, 'manager'))),
-      ...(await listed(await switched({ current: {} }, 'worker'))),
+      ...(await listed(await switched({ current: allOn() }, 'manager'))),
+      ...(await listed(await switched({ current: allOn() }, 'worker'))),
     ])
     for (const feature of FEATURES as readonly FeatureDef[]) {
       for (const name of feature.tools ?? []) expect(all, `${feature.id}: ${name}`).toContain(name)
@@ -288,6 +293,7 @@ describe('the feature switches of Settings > Features', () => {
       ],
       secrets: ['request_secrets'],
       agentTheme: ['read_theme', 'set_theme_colors'],
+      webReader: ['read_web_page'],
     }
     for (const [id, names] of Object.entries(expected)) {
       const feature = (FEATURES as readonly FeatureDef[]).find((each) => each.id === id)!
@@ -311,6 +317,19 @@ describe('the feature switches of Settings > Features', () => {
     const on = await listed(service)
     expect(on).toContain('report_work')
     expect(on).toContain('set_board_status')
+  })
+
+  // Huli: background web reading downloads a program, so it waits for the user's own yes.
+  it('keep a feature that starts off unlisted and unanswered until the user turns it on', async () => {
+    const features = { current: {} as Record<string, boolean> }
+    const service = await switched(features, 'worker')
+    expect(await listed(service)).not.toContain('read_web_page')
+    const answer = await call(service, 'read_web_page', { url: 'https://example.com/' })
+    expect(answer.error?.message).toContain('turned its feature off')
+    const { instructions } = await rpc<{ instructions?: string }>(service, 'initialize', INITIALIZE)
+    expect(instructions).not.toContain('read_web_page')
+    features.current = { webReader: true }
+    expect(await listed(service)).toContain('read_web_page')
   })
 
   it('keep start_session for a manager while manager mode is off', async () => {

@@ -275,10 +275,21 @@ import type { McpTransports } from './marketplace/servers'
 import { questionsResult } from './question-answers'
 import { HostError, invalidParams, notFound } from './errors'
 import { currentLocale, t } from './i18n'
+import {
+  SessionTidy,
+  snoozeInRange,
+  tidySummary,
+  withActivity,
+  withNever,
+  withSettled,
+  withSnooze,
+  type TidyFacts,
+} from './session-tidy'
 import { logText } from './localized-error'
 import type { ProviderProfiles } from './provider-profiles'
 import { claudeProfileEnv, takesProfiles } from '@shared/provider-profiles'
 import { NEW_BOARD_STATUS, type BoardStatus, type SessionBoard } from '@shared/session-board'
+import type { SnoozeUntil } from '@shared/session-tidy'
 import type { MovedTo, MoveProblem } from '@shared/session-move'
 import { DEFAULT_PORT_BASE, isPortBase, portEnv, type PortBlock } from '@shared/worktree-ports'
 import {
@@ -378,6 +389,7 @@ import {
   type StoredGroup,
   type StoredPrFlow,
   type WorktreeRecord,
+  MAX_SESSION_REFS,
 } from './storage'
 import { SUMMARY_RETRY_MS, writeTitles } from './outline-titles'
 import { lightTarget, type LightTarget } from './light-model'
@@ -1412,6 +1424,8 @@ export class SessionManager {
   private readonly records = new Map<string, SessionRecord>()
   /** Huli: manager mode's coordinator. */
   readonly manager: ManagerHub
+  /** Huli: snoozed and settled sessions (会话整理), on one timer for the next one due. */
+  private readonly tidy: SessionTidy<SessionRecord>
   /** Huli: the sessions whose agent runs in a container of their own now. */
   private readonly containerLives = new Set<string>()
   /** Huli: what each session's pull request automation saw last; in memory, read again at start. */
@@ -1552,6 +1566,21 @@ export class SessionManager {
       state: (sessionId) => this.stallState(sessionId),
       changed: (sessionId, stall) => this.stallChanged(sessionId, stall),
     })
+    this.tidy = new SessionTidy<SessionRecord>({
+      now: () => this.now(),
+      on: () => this.tidyOn(),
+      settings: () => this.deps.settings().tidy,
+      records: () => this.everyRecord(),
+      facts: (record) => this.tidyFacts(record),
+      working: (record) => {
+        const live = this.live.get(record.id)
+        return live !== undefined && this.workOf(live) !== null
+      },
+      save: (record) => {
+        if (this.records.has(record.id)) this.saveIndex()
+      },
+      touch: (sessionId) => this.touch(sessionId),
+    })
     deps.agents.hooks = {
       liveSessions: (agentId) => this.connectedCount(agentId),
       agentExited: (agentId) => this.agentExited(agentId),
@@ -1578,6 +1607,8 @@ export class SessionManager {
       if (record.limitPause)
         this.armLimit(record.id, Math.max(record.limitPause.resumeAt, settledAt))
     }
+    // Huli: snoozes that ended and sessions due to settle while the host was down, once it settled.
+    this.tidy.start(this.timings.limitResume.startupMs)
     this.returned = (await this.deps.returned.load()).messages
     this.manager.load()
     // Huli: workers a quit cut go on once the host has settled, which is no startup work.
@@ -1941,6 +1972,7 @@ export class SessionManager {
       ...(record.manager ? { manager: this.manager.managerSummary(record) } : {}),
       ...(record.worker ? { worker: this.manager.workerSummary(record) } : {}),
       ...(record.movedTo ? { movedTo: { ...record.movedTo } } : {}),
+      ...(this.tidyOn() ? tidySummary(record.tidy) : {}),
       activity:
         live && (status === 'running' || status === 'awaiting_permission')
           ? live.activity.current(live.thread)
@@ -2039,6 +2071,7 @@ export class SessionManager {
       this.workShown.delete(sessionId)
       return
     }
+    this.tidy.check(this.recordOf(sessionId))
     const summary = this.summary(sessionId)
     if (summary.working) this.workShown.set(sessionId, summary.working)
     else this.workShown.delete(sessionId)
@@ -2470,7 +2503,7 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.deps.events.attention(
+    this.attention(
       live.id,
       'permission',
       this.titleOf(live),
@@ -2553,7 +2586,7 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.deps.events.attention(
+    this.attention(
       live.id,
       'permission',
       this.titleOf(live),
@@ -2603,7 +2636,7 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.deps.events.attention(
+    this.attention(
       live.id,
       'permission',
       this.titleOf(live),
@@ -2789,7 +2822,7 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.deps.events.attention(
+    this.attention(
       live.id,
       'permission',
       this.titleOf(live),
@@ -2934,7 +2967,7 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.deps.events.attention(
+    this.attention(
       live.id,
       'permission',
       this.titleOf(live),
@@ -3118,7 +3151,7 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.deps.events.attention(
+    this.attention(
       live.id,
       'permission',
       this.titleOf(live),
@@ -3167,13 +3200,9 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.deps.events.attention(
-      live.id,
-      'permission',
-      this.titleOf(live),
-      t('attention.themeChange'),
-      { id: entry.id },
-    )
+    this.attention(live.id, 'permission', this.titleOf(live), t('attention.themeChange'), {
+      id: entry.id,
+    })
     const answer = new Promise<ThemeAnswer>((resolve) => {
       const timer = setTimeout(
         () => this.settleTheme(sessionId, entry.id, { decision: 'expired' }),
@@ -3365,7 +3394,7 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.deps.events.attention(
+    this.attention(
       live.id,
       'permission',
       this.titleOf(live),
@@ -3532,7 +3561,7 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.deps.events.attention(
+    this.attention(
       live.id,
       'permission',
       this.titleOf(live),
@@ -3673,13 +3702,9 @@ export class SessionManager {
       this.update(live, { status: 'awaiting_permission' })
     this.touch(live.id)
     this.updateBadge()
-    this.deps.events.attention(
-      live.id,
-      'permission',
-      this.titleOf(live),
-      t('attention.computerSetup'),
-      { id: entry.id },
-    )
+    this.attention(live.id, 'permission', this.titleOf(live), t('attention.computerSetup'), {
+      id: entry.id,
+    })
   }
 
   /** Steps of a waiting setup were done: its card moves on to the next. */
@@ -3966,7 +3991,7 @@ export class SessionManager {
           },
         },
       ])
-      this.deps.events.attention(live.id, 'error', this.titleOf(live), title)
+      this.attention(live.id, 'error', this.titleOf(live), title)
     }
     this.scheduleCheckpoint(live)
   }
@@ -7000,8 +7025,7 @@ export class SessionManager {
     } else {
       this.update(live, { status: 'failed', error: { message: mapped.message } })
       // A session still being created is in front of the user, and create rejects instead.
-      if (live.saved)
-        this.deps.events.attention(live.id, 'error', this.titleOf(live), mapped.message)
+      if (live.saved) this.attention(live.id, 'error', this.titleOf(live), mapped.message)
     }
     this.touch(live.id)
     return mapped
@@ -7384,7 +7408,7 @@ export class SessionManager {
             ? this.reportRun(live, { stopReason: null, error: stopped, usage: null, turn })
             : false) || this.reportStep(live)
         if (!routineTurn) {
-          this.deps.events.attention(live.id, 'error', this.titleOf(live), stopped.message)
+          this.attention(live.id, 'error', this.titleOf(live), stopped.message)
         }
       }
       held.push(live.record)
@@ -8185,7 +8209,7 @@ export class SessionManager {
     })
     this.persist(live)
     this.touch(live.id)
-    this.deps.events.attention(live.id, 'error', this.titleOf(live), notice.title)
+    this.attention(live.id, 'error', this.titleOf(live), notice.title)
     this.checkpoint(live)
   }
 
@@ -8571,6 +8595,7 @@ export class SessionManager {
     if (!canSend(live.thread.session.status) || this.waitsForWorktree(live)) {
       throw busyError(live.thread.session.status)
     }
+    this.tidyActivity(sessionId, true)
     this.sendPrompt(live, hydrated, undefined, portId, device)
   }
 
@@ -8659,6 +8684,7 @@ export class SessionManager {
     const live = await this.revive(sessionId)
     const { status } = live.thread.session
     if (!canSend(status) || live.turn || waitingCount(live) > 0) throw busyError(status)
+    this.tidyActivity(sessionId, true)
     // The agent it had keeps its session cut where the edit went back to, should it come back.
     if (live.record.agentId !== agentId && live.record.rewound) {
       await this.applyRewind(live).catch((error: unknown) => {
@@ -8974,6 +9000,7 @@ export class SessionManager {
     approval?: true,
     kettu?: true,
   ): string {
+    if (!from) this.noteReferences(live.record, content)
     const entryId = this.nextId(live)
     const entry: ThreadEntry = {
       kind: 'user',
@@ -9219,6 +9246,7 @@ export class SessionManager {
     this.reportsSent.delete(sessionId)
     const content = this.hydrate(input)
     const live = await this.revive(sessionId)
+    this.tidyActivity(sessionId, true)
     const { status, queue, queuePaused } = live.thread.session
     if (canSend(status) && (queue.length === 0 || queuePaused) && !this.waitsForWorktree(live)) {
       // At once: another prompt waiting on the same revive must see this turn running.
@@ -10479,7 +10507,7 @@ export class SessionManager {
       const reply = stopReason === 'end_turn' ? replySummary(live.thread) : null
       const changed = stopReason === 'end_turn' ? changedFiles(live.thread) : 0
       const text = reply ?? turnEndText(stopReason)
-      this.deps.events.attention(
+      this.attention(
         live.id,
         'turn-ended',
         stopReason === 'end_turn'
@@ -10799,7 +10827,7 @@ export class SessionManager {
         planLimit,
       }) || this.reportStep(live)
     if (!routineTurn) {
-      this.deps.events.attention(
+      this.attention(
         live.id,
         'error',
         this.titleOf(live),
@@ -11096,7 +11124,7 @@ export class SessionManager {
       kind,
       failed ? { entryId: failed.prompt.id, content: failed.prompt.content } : null,
     )
-    this.deps.events.attention(
+    this.attention(
       live.id,
       'limit-resumed',
       t('supervisor.resumed', { title: this.titleOf(live) }),
@@ -11464,7 +11492,7 @@ export class SessionManager {
     this.touch(sessionId)
     if (!stall) return
     const minutes = Math.max(1, Math.round((this.now() - stall.since) / 60_000))
-    this.deps.events.attention(
+    this.attention(
       sessionId,
       'stalled',
       t('supervisor.stalled', { title: this.titleOf(live) }),
@@ -12786,7 +12814,7 @@ export class SessionManager {
         const deny = request.options.find((option) => option.kind === 'reject_once')
         const question = notificationQuestion(request.questions)
         const asked = requestText(tool, workDir(live.record))
-        this.deps.events.attention(
+        this.attention(
           live.id,
           'permission',
           this.titleOf(live),
@@ -13417,6 +13445,21 @@ export class SessionManager {
   agentName(sessionId: string): string {
     const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
     return record ? this.deps.agents.name(record.agentId) : ''
+  }
+
+  /**
+   * Huli: what decides where read_web_page may read for the session: its sandbox and its
+   * worktree's ports. Null for a session Kite does not hold, or one whose sandbox it cannot read.
+   */
+  webReadPlace(
+    sessionId: string,
+  ): { sandbox: SandboxChoice | null; ports: PortBlock | null } | null {
+    const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
+    if (!record || record.sandboxUnknown) return null
+    return {
+      sandbox: record.sandbox ? { ...record.sandbox } : null,
+      ports: this.portsOf(record),
+    }
   }
 
   /** The session's agent now, null for a session Kettu does not hold. */
@@ -14132,7 +14175,7 @@ export class SessionManager {
           .then((revived) => notice(revived, severity, title, description))
           .catch(() => {})
       },
-      attention: (id, title, body) => this.deps.events.attention(id, 'turn-ended', title, body),
+      attention: (id, title, body) => this.attention(id, 'turn-ended', title, body),
       pending: (id) => {
         const live = this.live.get(id)
         if (!live) return []
@@ -14236,6 +14279,162 @@ export class SessionManager {
     this.persist(live)
     this.touch(live.id)
     return { itemId: id, merged: false }
+  }
+
+  // Huli: sessions the user referenced in a message (@ in the composer).
+
+  /** Keeps the sessions the user referenced in a message here, which its agent may then read. */
+  private noteReferences(record: SessionRecord, content: readonly UserContent[]): void {
+    const ids = content.flatMap((item) =>
+      item.type === 'ref' && item.ref.kind === 'session' && item.ref.sessionId !== record.id
+        ? [item.ref.sessionId]
+        : [],
+    )
+    if (ids.length === 0) return
+    const kept = (record.refs ?? []).filter((id) => !ids.includes(id))
+    record.refs = [...kept, ...new Set(ids)].slice(-MAX_SESSION_REFS)
+    if (this.records.has(record.id)) this.saveIndex()
+  }
+
+  /** Whether the user referenced `sessionId` in a message of `callerId`'s, which lets it read it. */
+  referencedBy(callerId: string, sessionId: string): boolean {
+    const record = this.live.get(callerId)?.record ?? this.records.get(callerId)
+    return record?.refs?.includes(sessionId) ?? false
+  }
+
+  // Huli: snoozing and settling sessions (会话整理); see session-tidy.ts.
+
+  private tidyOn(): boolean {
+    return featureOn(this.deps.settings().features, 'sessionTidy')
+  }
+
+  /** Every record, the index's and the live ones', once each. */
+  private *everyRecord(): Generator<SessionRecord> {
+    for (const record of this.records.values()) yield this.live.get(record.id)?.record ?? record
+    for (const live of this.live.values()) if (!this.records.has(live.id)) yield live.record
+  }
+
+  /** What the rules read of a session: cheap, since each change of it reads them. */
+  private tidyFacts(record: SessionRecord): TidyFacts {
+    const live = this.live.get(record.id)
+    const status = live?.thread.session.status ?? 'closed'
+    const flow = record.prFlow
+    return {
+      listed:
+        record.parentId === null &&
+        record.origin === 'user' &&
+        record.archivedAt === undefined &&
+        this.records.has(record.id) &&
+        !live?.prepared,
+      pinned: record.pinnedAt !== undefined,
+      busy:
+        status === 'running' ||
+        status === 'awaiting_permission' ||
+        (live !== undefined && waitingCount(live) > 0) ||
+        record.limitPause !== undefined ||
+        (flow !== undefined && flow.ended === undefined) ||
+        record.manager !== undefined ||
+        record.worker !== undefined,
+      updatedAt: live?.thread.session.updatedAt ?? record.updatedAt,
+      merged: this.mergedPullRequest(record),
+    }
+  }
+
+  /** Its pull request that merged: its branch's, else the latest it opened; null for none. */
+  private mergedPullRequest(record: SessionRecord): string | null {
+    const git = this.deps.git()
+    if (!git) return null
+    const branch = record.branch
+      ? (git.branchPullRequests(workDir(record)).get(record.branch) ??
+        git.branchPullRequests(record.projectPath).get(record.branch))
+      : undefined
+    if (branch) return branch.state === 'merged' ? branch.url : null
+    const latest = record.pullRequests?.at(-1)
+    return latest && git.knownPullRequest(latest)?.state === 'merged' ? latest : null
+  }
+
+  /** The top-level session a session belongs to, through its parents. */
+  private tidyRoot(sessionId: string): SessionRecord | null {
+    let record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
+    const seen = new Set<string>()
+    while (record && record.parentId !== null && !seen.has(record.id)) {
+      seen.add(record.id)
+      record = this.live.get(record.parentId)?.record ?? this.records.get(record.parentId)
+    }
+    return record ?? null
+  }
+
+  /**
+   * The user wrote to the session or a session under it (`message`), or it needs them: a snoozed
+   * or settled session comes back, and after a message the rules settle it again in time.
+   */
+  private tidyActivity(sessionId: string, message: boolean): void {
+    if (!this.tidyOn()) return
+    const root = this.tidyRoot(sessionId)
+    if (root?.tidy) this.tidy.apply(root, (tidy) => withActivity(tidy, message))
+  }
+
+  /** Tells of what needs the user, and brings back a snoozed or settled session it is in. */
+  private attention(...args: Parameters<SessionEvents['attention']>): void {
+    this.deps.events.attention(...args)
+    const [sessionId, kind] = args
+    if (kind === 'permission' || kind === 'error') this.tidyActivity(sessionId, false)
+  }
+
+  /**
+   * When the session's agent's plan comes back, a minute after its reset: its paused turn's, the
+   * window that ended its last turn, else its agent's used-up windows; null when not known.
+   */
+  private planReturns(record: SessionRecord): number | null {
+    const quota = this.recordQuota(record)
+    const reset =
+      record.limitPause?.resetsAt ??
+      record.lastTurn?.limit?.resetsAt ??
+      (quota.kind === 'out' || quota.kind === 'extra' ? quota.resetsAt : null)
+    return reset !== null && reset > this.now() ? reset + this.timings.limitResume.marginMs : null
+  }
+
+  /**
+   * Takes a top-level session out of the active list until `until`, or until its agent's plan
+   * comes back; null brings it back now.
+   */
+  /** The user's own top-level session, the only kind snoozed or settled. */
+  private tidyTarget(sessionId: string): SessionRecord {
+    const record = this.topLevel(sessionId)
+    if (record.origin !== 'user') throw new HostError('restricted', t('session.tidy.ownOnly'))
+    return record
+  }
+
+  snooze(sessionId: string, until: SnoozeUntil): void {
+    const record = this.tidyTarget(sessionId)
+    if (until === null) {
+      this.tidy.apply(record, (tidy) => withSnooze(tidy, null, false))
+      return
+    }
+    const time = until === 'reset' ? this.planReturns(record) : until
+    if (time === null) throw new HostError('restricted', t('session.tidy.noReset'))
+    if (!snoozeInRange(time, this.now())) {
+      throw new HostError('invalid_params', t('session.tidy.snoozeRange'))
+    }
+    this.tidy.apply(record, (tidy) => withSnooze(tidy, time, until === 'reset'))
+  }
+
+  /** Settles a top-level session out of the active list, or brings it back. */
+  settle(sessionId: string, settled: boolean): void {
+    const record = this.tidyTarget(sessionId)
+    this.tidy.apply(record, (tidy) => withSettled(tidy, settled, this.now()))
+  }
+
+  /** 永不收起: no rule settles the session; turning it on brings back one a rule settled. */
+  setNeverSettle(sessionId: string, never: boolean): void {
+    const record = this.tidyTarget(sessionId)
+    this.tidy.apply(record, (tidy) => withNever(tidy, never))
+  }
+
+  /** The rules or the feature's switch changed: each session is looked at, and shown, again. */
+  tidyChanged(): void {
+    for (const record of [...this.everyRecord()]) if (record.tidy) this.touch(record.id)
+    this.tidy.changed()
   }
 
   // Huli: the task board.
@@ -15671,6 +15870,7 @@ export class SessionManager {
     for (const timer of this.limitTimers.values()) clearTimeout(timer)
     this.limitTimers.clear()
     this.stalls.stop()
+    this.tidy.stop()
     if (this.followTimer) clearInterval(this.followTimer)
     this.followTimer = null
     this.stopped = true

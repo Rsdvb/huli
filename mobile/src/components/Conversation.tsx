@@ -51,11 +51,14 @@ import { RevealContext, type AnchorTarget } from '../ui/session/anchors'
 import { haptic } from '../ui/session/feedback'
 import { useSessionTokens } from '../ui/session/palette'
 import { rowBuilder, type Row } from '../ui/session/turns'
+import { zenRows, type ZenRow } from '../ui/session/zenRows'
+import { useThreadViewOf } from '../threadView'
+import { HiddenSteps } from './HiddenSteps'
 import { observeTools } from '../ui/session/work'
 import { MarksShown, ToBottomButton } from '../ui/session/Working'
 import { SubSessionStart } from './entries/NoteEntries'
 import { ThreadRow } from './EntryView'
-import { RecapLine, useRecap } from './RecapLine'
+import { useRecap, type RecapShown } from './RecapLine'
 
 // How far up the conversation may be scrolled before the way back to its end shows.
 const AWAY = 280
@@ -70,16 +73,16 @@ const DRAW_AHEAD = 500
 const ANCHOR_ROOM = 8
 
 const NO_ROWS: Row[] = []
+const NO_TURNS: ReadonlySet<string> = new Set()
 const DEV = devMode()
 // A reply the simulator scripts time apart, in characters.
 const LONG_REPLY = 50_000
 const selectThread = (thread: ThreadState | null) => thread
-const renderRow = ({ item }: { item: Row }) => <ThreadRow row={item} />
 
 /** What a session's list keeps between its visits: the heights Legend List keeps are by `key`. */
 interface ListMemory {
   build: ReturnType<typeof rowBuilder>
-  key: (row: Row) => string
+  key: (row: ZenRow) => string
 }
 
 // As many as the threads the cache keeps in memory (cache.ts).
@@ -87,7 +90,7 @@ const MEMORIES_KEPT = 6
 const memories = new Map<string, ListMemory>()
 
 function listMemory(sessionId: string): ListMemory {
-  const memory = memories.get(sessionId) ?? { build: rowBuilder(), key: (row: Row) => row.key }
+  const memory = memories.get(sessionId) ?? { build: rowBuilder(), key: (row: ZenRow) => row.key }
   memories.delete(sessionId)
   memories.set(sessionId, memory)
   for (const old of memories.keys()) {
@@ -116,6 +119,10 @@ export function Conversation(props: {
   fromParent: boolean
   /** Room above the oldest row, under the floating header. */
   paddingTop: number
+  /** Where the recap of time away goes for the screen to show, under its header. */
+  recapSlot?: WritableStore<RecapShown | null>
+  /** The room the recap's bar takes while it shows, added to `paddingTop`. */
+  recapRoom?: number
   /** Set while the conversation scrolls fast. */
   scrolling?: WritableStore<boolean>
   /** The turn waits for the user, which the way back to the newest message shows. */
@@ -139,11 +146,27 @@ export function Conversation(props: {
   const [fresh, setFresh] = useState(false)
 
   const memory = useMemo(() => listMemory(id), [id])
-  const rows = useMemo(() => {
+  const built = useMemo(() => {
     if (!thread) return NO_ROWS
     observeTools(id, thread)
     return memory.build(thread, running)
   }, [thread, id, running, memory])
+  // Huli: the 简洁视图, a view of the built rows; a turn's hidden steps open with a tap.
+  const shownView = useThreadViewOf(id)
+  const [openTurns, setOpenTurns] = useState<ReadonlySet<string>>(NO_TURNS)
+  const rows = useMemo(() => zenRows(built, shownView, openTurns), [built, shownView, openTurns])
+  const renderRow = useCallback(
+    ({ item }: { item: ZenRow }) =>
+      item.type === 'hidden' ? (
+        <HiddenSteps
+          count={item.count}
+          onOpen={() => setOpenTurns((open) => new Set(open).add(item.turn))}
+        />
+      ) : (
+        <ThreadRow row={item} />
+      ),
+    [],
+  )
   // The list's size before its layout, whose width its kept heights are restored at.
   const screen = useWindowDimensions()
   const listSize = useMemo(
@@ -211,14 +234,34 @@ export function Conversation(props: {
     [scrolling, place],
   )
 
-  // What happened while the user was away, and the way back to where they left off.
-  const recap = useRecap(useComputerId(), id, view, thread, focused)
-  const recapFrom = recap.recap?.from ?? null
-  const { dismiss: dismissRecap } = recap
-  const toRecap = useCallback(() => {
-    dismissRecap()
-    if (!thread || recapFrom === null) return
-    const start = thread.order.indexOf(recapFrom)
+  // What happened while the user was away, and the way back to where they left off, which the
+  // screen shows in a bar under its header; the conversation makes room for it at its top.
+  const { recap, done: doneWithRecap } = useRecap(useComputerId(), id, view, thread, focused)
+  const paddingTop = props.paddingTop + (recap ? (props.recapRoom ?? 0) : 0)
+  const jumpFrom = useRef<string | null>(null)
+  const { recapSlot } = props
+  useEffect(() => {
+    recapSlot?.set(
+      recap
+        ? {
+            recap,
+            jump: () => {
+              jumpFrom.current = recap.from
+              doneWithRecap()
+            },
+            dismiss: doneWithRecap,
+          }
+        : null,
+    )
+  }, [recapSlot, recap, doneWithRecap])
+  useEffect(() => () => recapSlot?.set(null), [recapSlot])
+  // Jumped: once the bar has gone and given its room back, so the first new row comes to just
+  // under the header.
+  useEffect(() => {
+    const from = jumpFrom.current
+    if (from === null || recap || !thread) return
+    jumpFrom.current = null
+    const start = thread.order.indexOf(from)
     if (start < 0) return
     const after = new Set(thread.order.slice(start))
     const index = rows.findIndex((row) =>
@@ -227,8 +270,10 @@ export function Conversation(props: {
         : (row.type === 'entry' || row.type === 'reply') && after.has(row.entry.id),
     )
     if (index < 0) return
-    void list.current?.scrollToIndex({ index, animated: true, viewOffset: headerRoom.current })
-  }, [thread, rows, recapFrom, dismissRecap])
+    requestAnimationFrame(() => {
+      void list.current?.scrollToIndex({ index, animated: true, viewOffset: headerRoom.current })
+    })
+  }, [recap, thread, rows])
 
   const toBottom = useCallback(() => {
     haptic.tap()
@@ -237,8 +282,8 @@ export function Conversation(props: {
 
   // A reply's `#anchor` link: its heading comes to just under the floating header. The same
   // function for the list's life, as every reply's text takes it.
-  const headerRoom = useRef(props.paddingTop)
-  headerRoom.current = props.paddingTop
+  const headerRoom = useRef(paddingTop)
+  headerRoom.current = paddingTop
   const reveal = useCallback((target: AnchorTarget) => {
     const scroller = list.current?.getNativeScrollRef()
     if (!scroller) return
@@ -279,7 +324,7 @@ export function Conversation(props: {
   const onLoad = useCallback(() => keep('conversation-shown'), [keep])
   const longDrawn = useRef(false)
   const onItemSizeChanged = useCallback(
-    ({ itemData }: { itemData: Row }) => {
+    ({ itemData }: { itemData: ZenRow }) => {
       const entry = itemData.type === 'reply' || itemData.type === 'entry' ? itemData.entry : null
       if (longDrawn.current || entry?.kind !== 'agent' || entry.markdown.length < LONG_REPLY) return
       longDrawn.current = true
@@ -288,10 +333,7 @@ export function Conversation(props: {
     [keep],
   )
 
-  const contentStyle = useMemo(
-    () => [styles.content, { paddingTop: props.paddingTop }],
-    [props.paddingTop],
-  )
+  const contentStyle = useMemo(() => [styles.content, { paddingTop }], [paddingTop])
 
   return (
     <RevealContext value={reveal}>
@@ -359,14 +401,6 @@ export function Conversation(props: {
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       />
-      {recap.recap && (
-        <RecapLine
-          recap={recap.recap}
-          top={props.paddingTop - 4}
-          onJump={toRecap}
-          onDismiss={dismissRecap}
-        />
-      )}
       <Reanimated.View pointerEvents="box-none" style={[styles.overDock, overDock]}>
         <ToBottomButton
           visible={away}

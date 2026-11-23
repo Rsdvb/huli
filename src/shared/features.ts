@@ -22,6 +22,11 @@ export interface FeatureDef {
   toolGroups?: readonly McpToolGroup[]
   /** The agent host's methods it refuses while it is off, for windows and paired devices alike. */
   methods?: readonly HostMethod[]
+  /**
+   * Off until the user turns it on, as a feature that downloads a program on first use is: absent
+   * settings, as from a host older than the switches, leave it off too.
+   */
+  offByDefault?: true
 }
 
 export const FEATURES = [
@@ -114,8 +119,17 @@ export const FEATURES = [
     entries: ['rewind.files', 'phone.rewindFiles'],
     methods: ['sessions.restoreFiles', 'sessions.undoRewindFiles'],
   },
+  {
+    id: 'sessionTidy',
+    entries: ['sidebar.parked', 'sessionMenu.snooze', 'settings.autoSettle', 'phone.snooze'],
+    methods: ['sessions.snooze', 'sessions.settle', 'sessions.setNeverSettle'],
+  },
+  { id: 'sessionMentions', entries: ['composer.sessionMention', 'phone.sessionMention'] },
+  { id: 'zenView', entries: ['session.zenView', 'settings.zenView', 'phone.zenView'] },
   { id: 'secrets', entries: [], toolGroups: ['secrets'] },
   { id: 'agentTheme', entries: [], toolGroups: ['theme'] },
+  // Turning it on downloads Moli; Settings › Browser shows it and removes it again.
+  { id: 'webReader', entries: [], tools: ['read_web_page'], offByDefault: true },
 ] as const satisfies readonly FeatureDef[]
 
 export type FeatureId = (typeof FEATURES)[number]['id']
@@ -123,11 +137,16 @@ export type FeatureEntry = (typeof FEATURES)[number]['entries'][number]
 
 export const FEATURE_IDS: readonly FeatureId[] = FEATURES.map((feature) => feature.id)
 
-/** Which features are on, by id; every feature is on unless it says false. */
+/** Which features are on, by id. */
 export type FeatureSettings = Record<FeatureId, boolean>
 
+const OFF_BY_DEFAULT: ReadonlySet<string> = new Set(
+  (FEATURES as readonly FeatureDef[]).filter((f) => f.offByDefault).map((f) => f.id),
+)
+
+/** Every feature is on unless it says it starts off. */
 export const DEFAULT_FEATURES: FeatureSettings = Object.fromEntries(
-  FEATURE_IDS.map((id) => [id, true]),
+  FEATURE_IDS.map((id) => [id, !OFF_BY_DEFAULT.has(id)]),
 ) as FeatureSettings
 
 export function isFeatureId(value: unknown): value is FeatureId {
@@ -143,12 +162,16 @@ export function featureOfEntry(entry: FeatureEntry): FeatureId {
   return BY_ENTRY.get(entry)!
 }
 
-/** Whether a feature is on; absent settings, as from a host older than the switches, are all on. */
+/**
+ * Whether a feature is on; absent settings, as from a host older than the switches, are all on but
+ * for the features that start off.
+ */
 export function featureOn(
   features: Partial<Record<string, boolean>> | null | undefined,
   id: FeatureId,
 ): boolean {
-  return features?.[id] !== false
+  const value = features?.[id]
+  return value === undefined ? !OFF_BY_DEFAULT.has(id) : value !== false
 }
 
 /** Whether an entry point shows. */
@@ -166,7 +189,7 @@ export function featuresOff(features: Partial<Record<string, boolean>> | null | 
 
 /** The same as settings from a list of the features turned off; unknown ids are left out. */
 export function featuresFromOff(off: readonly unknown[]): FeatureSettings {
-  const features = { ...DEFAULT_FEATURES }
+  const features = Object.fromEntries(FEATURE_IDS.map((id) => [id, true])) as FeatureSettings
   for (const id of off) if (isFeatureId(id)) features[id] = false
   return features
 }

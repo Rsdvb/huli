@@ -2,6 +2,7 @@
 // sessions, pinned ones first, with a header that folds it and takes dropped sessions. Huli's own;
 // see tools/huli/README.md.
 
+import { isParked } from '@shared/session-tidy'
 import { useMemo, useState } from 'react'
 import {
   Add01Icon,
@@ -118,7 +119,12 @@ function FolderList({
   // A pinned session shows under Pinned, as it does for its project.
   const roots = useMemo(() => {
     const nodes = liveTree(Object.fromEntries(summaries.map((x) => [x.id, x])))
-    return new Map(nodes.filter((n) => !n.summary.pinnedAt).map((n) => [n.summary.id, n]))
+    // Huli: and a snoozed or settled one in its group out of the list.
+    return new Map(
+      nodes
+        .filter((n) => !n.summary.pinnedAt && !isParked(n.summary))
+        .map((n) => [n.summary.id, n]),
+    )
   }, [summaries])
   const place = useSessionFoldersStore((s) => s.place)
   const newFolder = () => askFolderDialog({ kind: 'create', hostId, sessionIds: [] })

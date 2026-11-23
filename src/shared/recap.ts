@@ -35,7 +35,7 @@ export interface Recap {
   reply: string | null
   /**
    * The entry the user left at lies on a page not loaded, so the counts start at the loaded
-   * ones and may be short.
+   * ones and may be short: a client shows them as "at least" (16+).
    */
   partial: boolean
 }
@@ -268,4 +268,122 @@ export function parseSeenMarks(value: unknown): Record<string, SeenMark> {
     marks[id] = { at, entry }
   }
   return marks
+}
+
+/** Where a session is seen now: at this moment, at the thread's last entry. */
+export function seenNow(thread: RecapThread, now: number): SeenMark {
+  return { at: now, entry: thread.order.at(-1) ?? null }
+}
+
+/** Where a device stands with one session's recap as the user comes and goes. */
+export interface RecapVisit {
+  /** Where the user last saw the session; null if this device never showed it. */
+  mark: SeenMark | null
+  /** The session is on screen, its screen in front and the window or app in front. */
+  inView: boolean
+  /** The recap on show, until the user is done with it or leaves. */
+  shown: Recap | null
+}
+
+/**
+ * - `view`: the session comes into view: its screen opens, or the window or app comes back.
+ * - `leave`: it goes out of view: the screen is left or covered, the window or app goes back.
+ * - `done`: the user is done with the recap: closed it, jumped to where they left off, or sent a
+ *   message.
+ */
+export type RecapEvent = 'view' | 'leave' | 'done'
+
+export const NOT_VISITED: RecapVisit = { mark: null, inView: false, shown: null }
+
+/**
+ * The visit after `event`. Time in view counts as seen: coming into view shows a recap only of
+ * what came after the user last left, and only after an absence of `awayMs` or more; leaving, and
+ * being done with the recap, mark everything up to now seen. An event that repeats the state, as
+ * a second leave or a view while in view, changes nothing, so it never measures an absence from a
+ * mark older than the last time the user looked.
+ */
+export function recapStep(
+  visit: RecapVisit,
+  event: RecapEvent,
+  thread: RecapThread,
+  clock: { now: number; older: boolean; awayMs?: number },
+): RecapVisit {
+  if (event === 'view') {
+    if (visit.inView) return visit
+    return {
+      mark: seenNow(thread, clock.now),
+      inView: true,
+      shown: recapSince(thread, visit.mark, clock),
+    }
+  }
+  if (event === 'leave') {
+    if (!visit.inView) return visit
+    return { mark: seenNow(thread, clock.now), inView: false, shown: null }
+  }
+  // A recap shows only in view, and leaving puts it away.
+  if (!visit.shown) return visit
+  return { mark: seenNow(thread, clock.now), inView: true, shown: null }
+}
+
+/** Where a device keeps its seen marks, read once and written whole. */
+export interface SeenStorage {
+  /** The marks kept, in any shape: what is not a mark is dropped. */
+  read(): Promise<unknown>
+  write(marks: Record<string, SeenMark>): Promise<void>
+}
+
+export interface SeenBook {
+  /** The session's mark, once the marks kept are read. */
+  get(sessionId: string): Promise<SeenMark | null>
+  /**
+   * Keeps `mark`: at once for `get`, and in storage once the marks kept are read, so none of
+   * them is lost. Resolves when it is written.
+   */
+  set(sessionId: string, mark: SeenMark): Promise<void>
+  /** Writes nothing more, as when the storage is deleted. */
+  close(): void
+}
+
+/**
+ * A device's seen marks over storage that reads and writes asynchronously, as a file. A mark set
+ * while the stored ones are read is newer than its stored one; writes go one at a time, each of
+ * the latest marks, and one that fails leaves the next to try.
+ */
+export function seenBook(storage: SeenStorage): SeenBook {
+  let marks: Record<string, SeenMark> = {}
+  let closed = false
+  const read = Promise.resolve()
+    .then(() => storage.read())
+    .then(parseSeenMarks, () => ({}))
+    .then((stored) => {
+      let merged = stored
+      for (const [id, mark] of Object.entries(marks)) merged = withSeen(merged, id, mark)
+      marks = merged
+    })
+  let writes: Promise<void> = read
+  let queued = false
+  return {
+    async get(sessionId) {
+      await read
+      return marks[sessionId] ?? null
+    },
+    set(sessionId, mark) {
+      marks = withSeen(marks, sessionId, mark)
+      if (queued) return writes
+      queued = true
+      writes = writes.then(async () => {
+        queued = false
+        if (closed) return
+        try {
+          await storage.write(marks)
+        } catch {
+          // The next mark set writes them all again.
+        }
+      })
+      return writes
+    },
+    close() {
+      closed = true
+    },
+  }
 }
