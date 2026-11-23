@@ -2940,6 +2940,247 @@ li[data-row-exit='dust'] > * {
   translate: none;
 }
 
+/* ---------- Files pane: a review's findings on a diff's lines (Huli) ---------- */
+/* A severity's tone: the badge's text and the bar along a finding's card. */
+.kp-finding,
+.kp-finding-panel,
+.kp-review-count {
+  --finding-tone: var(--info);
+  --finding-tint: var(--info-tint);
+}
+:is(.kp-finding, .kp-finding-panel, .kp-review-count)[data-severity='critical'] {
+  --finding-tone: var(--danger);
+  --finding-tint: var(--danger-tint);
+}
+:is(.kp-finding, .kp-finding-panel, .kp-review-count)[data-severity='high'] {
+  --finding-tone: var(--attention);
+  --finding-tint: color-mix(in srgb, var(--attention) 12%, var(--bg-surface));
+}
+:is(.kp-finding, .kp-finding-panel, .kp-review-count)[data-severity='medium'] {
+  --finding-tone: var(--warning);
+  --finding-tint: var(--warning-tint);
+}
+.kp-review-count svg {
+  color: var(--finding-tone);
+}
+/* Its actions go on a second line where the pane is narrow. */
+.kp-findings-strip {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  min-height: 30px;
+  padding: 3px 6px 3px 12px;
+  border-bottom: var(--hairline) solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.kp-findings-strip[data-tone='warning'] > svg {
+  color: var(--warning);
+}
+.kp-findings-strip[data-tone='clean'] {
+  color: var(--success);
+}
+.kp-findings-strip__text {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kp-findings-strip__count {
+  flex: none;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.kp-findings-strip__why {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kp-findings-strip__steps {
+  display: flex;
+  align-items: center;
+}
+.kp-findings-strip[data-tone] .kp-findings-strip__text {
+  flex: 1;
+}
+/* A reply's kite-review block, as one line in the thread. */
+.kp-review-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-block: 6px;
+  padding: 6px 8px 6px 10px;
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: 0 0 0 var(--hairline) var(--border-default);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.kp-review-block > svg {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.kp-review-block__text {
+  flex: 1;
+  min-width: 0;
+}
+.kp-findings-above {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 2px;
+}
+.kp-findings-above > .kp-finding {
+  margin: 0;
+}
+/* Slotted into the diff's rows, which set a code face and size of their own. */
+.kp-finding {
+  margin: 4px 12px 6px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--bg-surface);
+  box-shadow:
+    inset 3px 0 var(--finding-tone),
+    0 0 0 var(--hairline) var(--border-default);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: normal;
+}
+.kp-finding[data-state='dismissed'],
+.kp-finding[data-spot='outdated'] {
+  box-shadow:
+    inset 3px 0 var(--border-strong),
+    0 0 0 var(--hairline) var(--border-default);
+}
+.kp-finding[data-state='dismissed'] .kp-finding__title,
+.kp-finding[data-spot='outdated'] .kp-finding__title {
+  color: var(--text-tertiary);
+}
+.kp-finding__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px 4px 12px;
+  text-align: left;
+  border-radius: 8px;
+}
+.kp-finding__head:hover {
+  background: var(--bg-hover);
+}
+.kp-finding__severity {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--finding-tint);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--finding-tone);
+}
+.kp-finding__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Drawn from the attributes, so a slotted card's state changes no node of it. */
+.kp-finding__tags {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.kp-finding__tags[data-where]::before {
+  content: attr(data-where);
+}
+.kp-finding__tags[data-sent]::after {
+  content: attr(data-sent);
+  color: var(--success);
+}
+/* Over the scrolled diff, laid out on its own, as the comments' layer is. */
+.kp-findings-layer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 2;
+  height: 0;
+  contain: layout size style;
+  pointer-events: none;
+}
+.kp-finding-panel {
+  position: absolute;
+  right: 24px;
+  max-width: 640px;
+  padding-top: 8px;
+  border-radius: 0 0 8px 8px;
+  background: var(--bg-surface);
+  box-shadow:
+    inset 3px 0 var(--finding-tone),
+    0 0 0 var(--hairline) var(--border-default),
+    var(--elevation-popover);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  pointer-events: auto;
+  visibility: hidden;
+}
+.kp-finding-panel[data-placed] {
+  visibility: visible;
+  animation: kp-rise 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.kp-finding__chevron {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--duration-fast) ease-out;
+}
+.kp-finding[data-open] .kp-finding__chevron {
+  transform: rotate(180deg);
+}
+.kp-finding__detail {
+  padding: 0 8px 8px 12px;
+}
+.kp-finding__body {
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.kp-finding__foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.kp-finding__place {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kp-finding__chevron {
+    transition: none;
+  }
+}
+
 /* ---------- Files pane: comments on a diff's lines for the agent ---------- */
 /* Over the scrolled diff, laid out on its own: a pin or the editor coming or going lays out
    nothing of the diff's thousands of rows. Its overflow adds nothing to the scrolled height. */

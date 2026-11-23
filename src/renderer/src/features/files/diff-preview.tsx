@@ -6,6 +6,15 @@ import type { FileDiff } from '@shared/git'
 import { RenderCount } from '@renderer/features/diff-notes/notes'
 import { NotesLayer, type NoteEditing } from '@renderer/features/diff-notes/notes-layer'
 import { NotesTray } from '@renderer/features/diff-notes/notes-tray'
+import {
+  FindingDetailLayer,
+  FindingFocus,
+  FindingsAbove,
+} from '@renderer/features/review/diff-findings'
+import { useDiffFindings } from '@renderer/features/review/use-diff-findings'
+import { FindingsStrip } from '@renderer/features/review/findings-strip'
+import { PaneReviewButton } from '@renderer/features/review/review-button'
+import { useReview } from '@renderer/features/review/review'
 import { useNoteCount } from '@renderer/features/session/composer/drafts'
 import { PaneIcon, PanelButton } from '@renderer/features/shell/panel-button'
 import { closeDiff, openFile, type DiffView } from '@renderer/stores/files'
@@ -51,7 +60,7 @@ export function DiffPreview({
         />
       ) : (
         <>
-          <Bar diff={diff} onShowFile={showFile} />
+          <Bar diff={diff} onShowFile={showFile} sessionId={sessionId} />
           <div className="kp-doc__body">
             <Body diff={diff} error={error} />
           </div>
@@ -61,17 +70,22 @@ export function DiffPreview({
   )
 }
 
-/** The diff's bar: its path, the commit, the change steps and the Diff and File toggle. */
+/**
+ * The diff's bar: its path, the commit, the change steps, Huli's Review changes for the session
+ * whose side panel shows it, and the Diff and File toggle.
+ */
 function Bar({
   diff,
   onShowFile,
   hunks = 0,
   scroller,
+  sessionId,
 }: {
   diff: DiffView
   onShowFile: () => void
   hunks?: number
   scroller?: RefObject<HTMLDivElement | null>
+  sessionId: string | null
 }) {
   const { t } = useTranslation('files')
   return (
@@ -92,6 +106,7 @@ function Bar({
             </PanelButton>
           </span>
         )}
+        {sessionId && diff.ref === null && <PaneReviewButton sessionId={sessionId} />}
         <DiffFileToggle
           value="diff"
           disabled={diff.projectFile === null}
@@ -151,6 +166,9 @@ function Changes({
   // Comments name the file as the session's agent finds it, from the folder the pane shows.
   const notePath = diff.projectFile ?? diff.path
   const notePlace = useMemo(() => ({ path: notePath, ref: diff.ref }), [notePath, diff.ref])
+  // Huli: the session's review's findings on this file, on their lines and above the diff.
+  const findings = useDiffFindings(sessionId, notePath, result.newText ?? '', fileDiff)
+  const review = useReview(sessionId)
   // Lines of a commit are not the file as it is now, so only the working tree's are mentioned.
   const mentionable = diff.ref === null && diff.projectFile !== null
   const lines = mentionable ? selectedLines(selected) : null
@@ -164,7 +182,16 @@ function Changes({
 
   return (
     <>
-      <Bar diff={diff} onShowFile={onShowFile} hunks={fileDiff.hunks.length} scroller={scroller} />
+      <Bar
+        diff={diff}
+        onShowFile={onShowFile}
+        hunks={fileDiff.hunks.length}
+        scroller={scroller}
+        sessionId={sessionId}
+      />
+      {sessionId && (
+        <FindingsStrip sessionId={sessionId} projectPath={projectPath} path={notePath} />
+      )}
       <div
         className="kp-doc__body flex flex-col"
         onKeyDown={(event) => {
@@ -185,12 +212,38 @@ function Changes({
           data-selectable=""
           className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-9 outline-none [contain:layout_size]"
         >
-          <FilesDiff
-            fileDiff={fileDiff}
-            selected={selected}
-            onSelect={onSelect}
-            onRendered={renders.bump}
-          />
+          {sessionId && (
+            <FindingsAbove sessionId={sessionId} review={review} spots={findings.above} />
+          )}
+          {findings.provide(
+            <FilesDiff
+              fileDiff={fileDiff}
+              selected={selected}
+              onSelect={onSelect}
+              onRendered={renders.bump}
+              {...(findings.annotations && findings.renderAnnotation
+                ? { annotations: findings.annotations, renderAnnotation: findings.renderAnnotation }
+                : {})}
+            />,
+          )}
+          {sessionId && (
+            <>
+              <FindingFocus
+                sessionId={sessionId}
+                review={review}
+                spots={findings.spots}
+                scroller={scroller}
+                renders={renders}
+              />
+              <FindingDetailLayer
+                sessionId={sessionId}
+                review={review}
+                spots={findings.spots}
+                scroller={scroller}
+                renders={renders}
+              />
+            </>
+          )}
           {sessionId && (
             <NotesLayer
               scroller={scroller}

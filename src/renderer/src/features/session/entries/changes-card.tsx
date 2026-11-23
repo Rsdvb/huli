@@ -17,6 +17,7 @@ import { hostPath } from '@renderer/lib/host-paths'
 import { cn } from '@renderer/lib/utils'
 import { openDiff, openFile } from '@renderer/stores/files'
 import { openGitPane } from '@renderer/features/git/pane/open-pane'
+import { ReviewButton } from '@renderer/features/review/review-button'
 import { useGitStore } from '@renderer/stores/git'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { turnChanges } from '../turn-work'
@@ -100,6 +101,7 @@ export const ChangesCard = memo(function ChangesCard({
         {totals && <Counts insertions={totals.insertions} deletions={totals.deletions} />}
         {(first || committable.length > 0) && (
           <span className="ks-changes__actions">
+            {first && <ReviewButton sessionId={sessionId} projectPath={projectPath} />}
             {first && (
               <Button
                 variant="outline"

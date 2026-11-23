@@ -42,8 +42,8 @@ it("reads a review prompt's findings, acts on them and keeps them across a resta
     {
       id: 'f1',
       severity: 'high',
-      title: 'Line 1 of a.ts looks wrong',
-      body: 'The value is used before it is checked, so an empty one throws. Check it first.',
+      title: 'a.ts does not handle an empty value',
+      body: 'The value can be empty and is used as it is, which throws at run time. Check it first, or give it a default.',
       path: 'a.ts',
       start: 1,
       end: 2,
