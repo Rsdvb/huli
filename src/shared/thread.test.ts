@@ -982,4 +982,15 @@ describe('coalescePatches with a removal', () => {
     expect(after).toEqual(applyPatches(state(), patches))
     expect(threadEntries(after).map((entry) => entry.id)).toEqual(['e:1', 'm:1'])
   })
+
+  // A kind of patch a merge from upstream brings, which the merge does not list yet.
+  it('keeps a patch it does not know in its place, merging no update across it', () => {
+    const unknown = { op: 'entry.pin', id: 'm:1' } as unknown as Patch
+    const patches: Patch[] = [
+      { op: 'entry.update', id: 'm:1', changes: { streaming: false } },
+      unknown,
+      { op: 'entry.update', id: 'm:1', changes: { markdown: 'Again' } },
+    ]
+    expect(coalescePatches(patches)).toEqual(patches)
+  })
 })

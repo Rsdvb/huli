@@ -255,6 +255,10 @@ which keeps the user's order from then on; a row dropped on a project of another
   null while a group goes by activity and absent from an older host, `SessionFolder.manual` absent
   from one, which leaves dragging off there (`canOrder`). Tests: `storage.test.ts`,
   `validate.test.ts`, `session-folders.test.ts`, `session-order.test.ts`.
+- The simulator's `87-session-order` flow checks the seeded project's order on the phone. A group
+  there shows its first three rows, and in a run with other flows their new sessions land in that
+  project (the new-session page picks the first project) and come first, so the flow opens
+  显示全部 before it compares.
 - The drag (`features/sidebar/row-drag.ts`): the split's drag drives it. Its start measures the
   row's group and the sidebar once (again only when the sidebar scrolls), each move hit-tests that
   geometry and slides the rows it passes by `translate` alone, rendering nothing; the dragged row's
@@ -2286,6 +2290,11 @@ more kind and whose days now follow the bin's.
 - Requests: `bin.list`, `bin.restore` (`keys`, optional `project`), `bin.purge`, `bin.empty`,
   validated in `validate.ts` (keys `kind:id`, at most `MAX_BIN_KEYS`), open to paired devices;
   `memory.remove` now answers its `binKey`.
+- The simulator's `89-recycle-bin` flow taps 撤销 within the toast's five seconds, which one
+  Maestro tap outlasted on a runner busy with work earlier flows left running (no `bin.restore`
+  reached the host). A developer build's `-huliNoticeMs` launch argument (`ui/NoticeBar.tsx`)
+  keeps a notice with an action longer for it, and the flow waits for one to go before it opens
+  the bin page.
 
 Huli's own files: `src/shared/recycle-bin.ts`, `src/agent-host/recycle-bin.ts` (the bin and its
 timer), `recycle-bin-sources.ts` (each kind), their tests (`recycle-bin*.test.ts`),
