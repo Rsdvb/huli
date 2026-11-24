@@ -61,12 +61,12 @@ async function runningSession() {
     sessionId: id,
     content: [{ type: 'text', text: PROMPT }],
   })
-  await vi.waitFor(() => expect(turns.has(PROMPT)).toBe(true))
+  await server.until(() => turns.has(PROMPT))
   const end = (text: string) => {
     const { threadId, turnId } = turns.get(text)!
     server.notify('turn/completed', { threadId, turn: turn(turnId, 'completed') })
   }
-  return { host, window, id, turns, end }
+  return { server, host, window, id, turns, end }
 }
 
 it('keeps a publish card waiting past the turn that opened it, for the user to answer', async () => {
@@ -90,7 +90,7 @@ it('keeps a publish card waiting past the turn that opened it, for the user to a
 })
 
 it('lets a later turn go on once its own card is answered, while an earlier one waits', async () => {
-  const { host, window, id, turns, end } = await runningSession()
+  const { server, host, window, id, turns, end } = await runningSession()
   const early = host.host.sessions.marketAsked(id, ASK, 10 * 60_000)!
   end(PROMPT)
   await window.untilStatus(id, 'ready')
@@ -99,7 +99,7 @@ it('lets a later turn go on once its own card is answered, while an earlier one 
     sessionId: id,
     content: [{ type: 'text', text: 'and the other one' }],
   })
-  await vi.waitFor(() => expect(turns.has('and the other one')).toBe(true))
+  await server.until(() => turns.has('and the other one'))
   const late = host.host.sessions.marketAsked(id, { ...ASK, version: '1.0.1' }, 10 * 60_000)!
   await window.untilStatus(id, 'awaiting_permission')
   await host.host.sessions.answerMarket(id, late.entryId, { decision: 'later' }, async () => {})

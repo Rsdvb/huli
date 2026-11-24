@@ -70,7 +70,7 @@ async function session(texts: string[]) {
   await window.untilStatus(id, 'ready')
   const send = async (text: string) => {
     await window.request('sessions.queue', { sessionId: id, content: [{ type: 'text', text }] })
-    await vi.waitFor(() => expect(started.has(text)).toBe(true))
+    await server.until(() => started.has(text))
     const { threadId, turnId } = started.get(text)!
     server.notify('turn/completed', { threadId, turn: turn(turnId, 'completed') })
     await window.until(
@@ -191,7 +191,7 @@ it('carries on in a new session, given the conversation kept, where the agent ca
     sessionId: id,
     content: [{ type: 'text', text: 'three' }],
   })
-  await vi.waitFor(() => expect(started.has('three')).toBe(true))
+  await server.until(() => started.has('three'))
   const { threadId, turnId } = started.get('three')!
   server.notify('turn/completed', { threadId, turn: turn(turnId, 'completed') })
   await reopened.until(() => reopened.thread(id).session.noRewind === true)
@@ -207,10 +207,8 @@ it('carries on in a new session, given the conversation kept, where the agent ca
     sessionId: id,
     content: [{ type: 'text', text: 'two again' }],
   })
-  await vi.waitFor(() => expect(server.sent('thread/start').length).toBe(threads + 1))
-  await vi.waitFor(() =>
-    expect(JSON.stringify(server.sent('turn/start').at(-1))).toContain('two again'),
-  )
+  await server.until(() => server.sent('thread/start').length === threads + 1)
+  await server.until(() => JSON.stringify(server.sent('turn/start').at(-1)).includes('two again'))
   expect(server.sent('thread/revert')).toEqual([])
   // The new session hears of the turn kept, in its history or ahead of the prompt.
   const heard = JSON.stringify([

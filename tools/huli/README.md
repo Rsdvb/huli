@@ -1765,12 +1765,59 @@ has no updates, as before. A spelling upstream changed shows as a Vite warning,
 
 ### Testing without disturbing the owner
 
-Agents that run the app to check a change do so on the owner's own computer. Start such a copy with
-`KITE_TEST_WINDOW=background` beside its own data folder and debugging port, for instance in
-PowerShell:
+Agents that run the app to check a change do so on the owner's own computer, while he may be using
+it. A test copy never shows anything on his screens, takes the focus, touches his data or his
+agents' sign-ins, or finds his own programs. `KITE_TEST_WINDOW=background` keeps the window away;
+the rest is up to the environment the copy starts in. Each rule here comes from a copy that broke
+it:
+
+1. **Scratch folders only, made first.** Point the data folder and every home and config folder at
+   a scratch folder of the task's own: `KETTU_USER_DATA`, `HOME`, `USERPROFILE`, `APPDATA`,
+   `LOCALAPPDATA`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `DSH_HOME`, `GEMINI_CLI_HOME` and
+   `KITE_CLAUDE_DESKTOP_DATA`. Create each folder before the launch: a missing `APPDATA` crashed a
+   copy at start with a modal error box on the owner's screen. Never write to his real
+   `%APPDATA%\Huli`, `~\.claude`, `~\.codex`, `~\.gemini`, `~\.dsh` or `~\.config`.
+2. **The fake agent, and no real one to find.** Claude Code is the default agent, so the New
+   session page prepares it, and it finds the owner's `claude.exe` whatever `PATH` says. Seed the
+   data folder's `settings.json` with `"general": { "defaultAgent": "fake-agent" }` before the
+   first launch (missing keys take their defaults), set `CLAUDE_CODE_EXECUTABLE` and `CODEX_PATH`
+   to paths that do not exist, and leave the owner's own program folders (`~\.local\bin`,
+   `%APPDATA%\npm`) out of `PATH`. A task that needs a real agent uses scratch config folders
+   alone, never the owner's sign-in.
+3. **No system dialogs.** Save and open dialogs (an artifact's or a page's download, Save as, an
+   export, a backup, a folder picker) are the system's own windows: they open on the owner's screen
+   and take the focus whatever `KITE_TEST_WINDOW` says. Never trigger one in a copy; check that
+   flow through its IPC with a path given, or in a test. The browser pane's downloads go into the
+   session's folder without one.
+4. **npm only inside scratch.** Beyond the repository's own scripts in the worktree
+   (`npx --yes pnpm@10.11.1 test` and the like), never run npm, npx or an installer in the owner's
+   real environment: no `npm config`, `npm prefix -g` or `npm i -g`, nothing that reads or writes
+   his `%APPDATA%\npm`, global packages or `.npmrc`. What a copy installs (Settings › Harness)
+   lands in the scratch folders above. Backticks in a double-quoted shell string run what they
+   quote: a Markdown-style `` `npm prefix -g` `` inside one ran it once.
+5. **One copy, through CDP alone.** Give it its own `REMOTE_DEBUGGING_PORT`, check that CDP answers
+   within about 20 s and kill it if not, drive it through CDP only (no real mouse or keyboard on the
+   owner's desktop), and stop it as soon as its screenshots are taken. Never the owner's installed
+   Kite.
+
+In PowerShell, from the worktree:
 
 ```powershell
-$env:KITE_TEST_WINDOW = 'background'; $env:KETTU_USER_DATA = "$env:TEMP\kite-test-1"; $env:REMOTE_DEBUGGING_PORT = '9333'; npx -y pnpm@10.11.1 dev
+$s = "$env:TEMP\kite-test-1"
+foreach ($d in 'userdata', 'home\AppData\Roaming', 'home\AppData\Local', 'claude-config', 'codex-home', 'dsh-home', 'claude-desktop') {
+  New-Item -ItemType Directory -Force "$s\$d" | Out-Null
+}
+if (-not (Test-Path "$s\userdata\settings.json")) {
+  [IO.File]::WriteAllText("$s\userdata\settings.json", '{"version":1,"initialSetup":{"done":true},"onboarding":{"done":true},"general":{"defaultAgent":"fake-agent"}}')
+}
+$env:KITE_TEST_WINDOW = 'background'; $env:KETTU_USER_DATA = "$s\userdata"; $env:REMOTE_DEBUGGING_PORT = '9333'
+$env:HOME = "$s\home"; $env:USERPROFILE = "$s\home"; $env:GEMINI_CLI_HOME = "$s\home"
+$env:APPDATA = "$s\home\AppData\Roaming"; $env:LOCALAPPDATA = "$s\home\AppData\Local"
+$env:CLAUDE_CONFIG_DIR = "$s\claude-config"; $env:CODEX_HOME = "$s\codex-home"; $env:DSH_HOME = "$s\dsh-home"
+$env:KITE_CLAUDE_DESKTOP_DATA = "$s\claude-desktop"
+$env:CLAUDE_CODE_EXECUTABLE = "$s\no-claude.exe"; $env:CODEX_PATH = "$s\no-codex.exe"
+$env:PATH = ($env:PATH -split ';' | Where-Object { $_ -notmatch '\\\.local\\bin|\\AppData\\Roaming\\npm' }) -join ';'
+.\node_modules\.bin\vite.CMD build -c vite.viewers.config.mts; .\node_modules\.bin\electron-vite.CMD dev
 ```
 
 Its main window then shows without taking the focus, past the right edge of every display and out
@@ -1783,10 +1830,19 @@ variable. Stop the copy by ending its process tree (`taskkill /PID <electron-vit
 it saves no window position. `src/main/test-window.ts` holds it; hooks in `src/main/window.ts`
 (the place and `keepInBackground`), `src/main/index.ts` (no tray), `src/main/notifications.ts` and
 `src/main/computer-overlay.ts`: computer use's floating label and light go off every display too,
-and the copy registers no stop shortcut. Its agent host never reads Windows' PATH from the
-registry again, after an install or on Reload environment (`src/agent-host/start.ts`), so it keeps
-the PATH it started with and finds none of the owner's programs that PATH left out, such as their
-own `claude.exe` in `~\.local\bin`.
+and the copy registers no stop shortcut. `src/main/test-crash.ts`, imported first, logs an
+exception thrown while the copy starts and quits, where Electron would show its modal error box.
+Its agent host never reads Windows' PATH from the registry again, after an install or on Reload
+environment (`src/agent-host/start.ts`), so it keeps the PATH it started with and finds none of
+the owner's programs that PATH left out, such as their own `claude.exe` in `~\.local\bin`.
+
+Checks a worktree passes but the release run does not: a worktree whose `node_modules` are
+junctions to the main checkout's resolves packages through `src/shared/node_modules` and the
+root's, which the release's phone jobs, installing `mobile/` alone, never have (`@lezer/markdown`
+passed locally and failed there). Before reporting a change to `mobile/` or `src/shared/`, run
+`node tools/huli/check-like-release.mjs`, which type-checks the phone app as the release does, in a
+temp copy of the working tree (or of `--ref <commit>`) with a fresh `npm ci` in `mobile/` and an
+npm cache of its own. Pushing the branch runs the same checks in `huli-checks.yml` (Workflows).
 
 ### Kite's artwork
 
@@ -2711,7 +2767,8 @@ Where both had built the same thing, as the 2026-11-23 merge settled it:
 
 ## Tests
 
-`pnpm test` passes on Linux, as CI runs it, and on Windows. Tests of what Huli changes read the
+`pnpm test` passes on Linux, as CI runs it, and on Windows. It includes Huli Cloud's tests
+(`cloud/test`), which `huli-checks.yml` and the release run on their own. Tests of what Huli changes read the
 same constants as the code, so they pass on Huli and on upstream alike and survive a sync:
 `DEFAULT_SETTINGS.cloud` (settings), `GITHUB_SOURCE` and the shared release keys (update-sources),
 `PAIRING_URL` and `HOSTED_WEB_URL` (pairing), `PUSH_URL` (push), `RELAY_URL` (relay-regions) and
@@ -2817,11 +2874,19 @@ Only the `huli-*` workflows run here. Kettu's own (`ci.yml`, `docker.yml`, `issu
 `release.yml`) stay in the tree unchanged, so syncs merge cleanly, but disabled: `huli-sync.yml`
 disables every other workflow after each merge, new ones included.
 
-- `huli-checks.yml`, on every push to main and every pull request that changes more than Markdown
-  and the licenses (or by hand): on Linux, `pnpm typecheck`, Huli Cloud's types, `pnpm test`,
-  `pnpm lint` and `pnpm format:check`; beside it, the phone app's `npm ci` and `tsc --noEmit`. A
-  newer push to the same branch cancels the run before it. It stands in for Kettu's `ci.yml`,
-  which only runs on pull requests.
+- `huli-checks.yml`, on every push to any branch, every pull request from a fork, and by hand,
+  unless only Markdown and the licenses changed: on Linux, the checks the release run would fail,
+  so a branch hears of them before it is merged. A first job lists the files changed (on main,
+  those of the push; on a branch, all it changes against main) and the others run for what they
+  check: `pnpm typecheck` and the tests outside `cloud/` for anything outside `mobile/` and
+  `cloud/`; Huli Cloud's types, `vitest run cloud/test` and its bundle, as the release's cloud job,
+  for `cloud/`, `src/shared/` and what the install reads; the phone app's `npm ci` in `mobile/`
+  alone and `npx tsc --noEmit`, as the release's phone jobs, for `mobile/` and `src/shared/`;
+  `pnpm lint` and `pnpm format:check` always. A change to the workflow runs everything, and so
+  does a comparison of 300 files or more, which GitHub lists no further. pnpm's and npm's
+  downloads are cached; a newer push to the same branch cancels the run before it. A pull request
+  from a branch here is checked by its pushes. It stands in for Kettu's `ci.yml`, which only runs
+  on pull requests. To see a branch's: `gh run list -R Rsdvb/huli --branch <branch>`.
 - `huli-sync.yml`, every night at 03:23 Beijing time: merges Kettu's main, checks it, pushes and
   starts `huli-build.yml`. A conflict or failed check pushes nothing and opens one issue,
   `上游同步失败`, with the conflicting files (or what failed), upstream's commit, how far main is

@@ -3,7 +3,7 @@
 
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it } from 'vitest'
 import type { SessionsFile } from './storage'
 import { FakeAppServer, turn } from './testing/fake-app-server'
 import { startTestHost, type TestHost, type TestPort } from './testing/harness'
@@ -73,7 +73,7 @@ async function running(fake: ReturnType<typeof codex>, userDataPath?: string) {
     sessionId: id,
     content: [{ type: 'text', text: PROMPT }],
   })
-  await vi.waitFor(() => expect(fake.turnOf(PROMPT)).toBeDefined())
+  await fake.server.until(() => fake.turnOf(PROMPT) !== undefined)
   return { test, window, id, started: fake.turnOf(PROMPT)! }
 }
 
@@ -112,9 +112,7 @@ it('pauses until the reset Codex gave, then sends the stopped message again', as
   // The stopped message stays in the thread for the pause, not in the composer.
   expect(await window.request('sessions.takeReturned', { sessionId: id })).toEqual([])
 
-  await vi.waitFor(() => expect(fake.turns.filter((t) => t.text === PROMPT)).toHaveLength(2), {
-    timeout: 5_000,
-  })
+  await fake.server.until(() => fake.turns.filter((t) => t.text === PROMPT).length === 2)
   await window.until(() => window.summary(id)?.limitPause === null)
   // The same message again under its own entry, as Retry sends it.
   const users = window.entries(id).filter((entry) => entry.kind === 'user')
@@ -135,7 +133,7 @@ it('sends the prompt queued behind the stopped turn instead', async () => {
   resetS = soon()
   stopAtLimit(fake.server, started, resetS)
   await paused(window, id)
-  await vi.waitFor(() => expect(fake.turnOf('then add tests')).toBeDefined(), { timeout: 5_000 })
+  await fake.server.until(() => fake.turnOf('then add tests') !== undefined)
   expect(fake.turns.filter((t) => t.text === PROMPT)).toHaveLength(1)
 })
 
@@ -151,7 +149,7 @@ it('asks the agent to carry on after work the stopped turn did', async () => {
   resetS = soon()
   stopAtLimit(fake.server, started, resetS)
   await paused(window, id)
-  await vi.waitFor(() => expect(fake.turnOf('Continue')).toBeDefined(), { timeout: 5_000 })
+  await fake.server.until(() => fake.turnOf('Continue') !== undefined)
   expect(fake.turns.filter((t) => t.text === PROMPT)).toHaveLength(1)
 })
 
@@ -199,7 +197,7 @@ it('keeps the pause across a restart and goes on after it', async () => {
 
   const second = codex(() => usedUp(resetS))
   await host(second.server, dir)
-  await vi.waitFor(() => expect(second.turnOf(PROMPT)).toBeDefined(), { timeout: 8_000 })
+  await second.server.until(() => second.turnOf(PROMPT) !== undefined)
 }, 20_000)
 
 it('goes on now when asked, and with the settings off drops the pause', async () => {
@@ -209,7 +207,7 @@ it('goes on now when asked, and with the settings off drops the pause', async ()
   stopAtLimit(fake.server, started, resetS)
   await paused(window, id)
   await window.request('sessions.limitPause', { sessionId: id, action: 'now' })
-  await vi.waitFor(() => expect(fake.turns.filter((t) => t.text === PROMPT)).toHaveLength(2))
+  await fake.server.until(() => fake.turns.filter((t) => t.text === PROMPT).length === 2)
 
   // Stopped again, and turned off for this session: the pause goes.
   const again = fake.turns.at(-1)!
