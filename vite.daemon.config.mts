@@ -55,6 +55,10 @@ export default defineConfig({
         format: 'cjs',
         entryFileNames: '[name].cjs',
         chunkFileNames: 'chunks/[name]-[hash].cjs',
+        // As main's build: each host keeps its code's text at one byte a character only when all
+        // of it is ASCII.
+        charset: 'ascii',
+        comments: { legal: true, annotation: true, jsdoc: false },
       },
     },
   },

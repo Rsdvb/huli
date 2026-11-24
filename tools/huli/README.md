@@ -1788,6 +1788,46 @@ registry again, after an install or on Reload environment (`src/agent-host/start
 the PATH it started with and finds none of the owner's programs that PATH left out, such as their
 own `claude.exe` in `~\.local\bin`.
 
+### Memory at rest (空闲内存)
+
+What keeps the processes small while the app sits idle. Measured on the built app (2026-11-24,
+Windows, a test copy with 2 projects, 304 sessions and a 300 KB reply; private bytes 75 s after
+launch plus 5 minutes idle, median of 3 alternating launches each): the agent host went from 159 to
+100 MB and main from 96 to 83 MB, the whole app from 659 to 586 MB; the renderer, GPU and network
+processes did not change. The agent host is ready about 30 ms sooner, and the window is interactive
+as soon as before.
+
+- Entry files are stubs. Electron loads main's entry file and each utility process's through
+  Node's ESM loader, which keeps a second copy of the file's text, and for a utility process its
+  bytes too, for as long as the process runs: 20 MB in the agent host. So `src/main/index.ts` only
+  imports `app.ts`, and each host's `entry.ts` only its `index.ts`, which `require()` loads and
+  keeps once. Put no code in them.
+- The bundles are ASCII. V8 keeps a script's text at one byte a character only when all of it is
+  ASCII, and a single Chinese word or `—` makes the whole file two bytes a character. Main's build
+  (which the hosts' `?modulePath` builds inherit) and the daemon's escape non-ASCII text and leave
+  out doc comments (`output.charset`, `output.comments`).
+- A worker thread costs 15-20 MB however little it does. The usage worker and the thread reader
+  stop after a minute without a request (`IDLE_MS` in `agent-host/usage/store.ts`,
+  `READER_IDLE_MS` in `agent-host/threads/store.ts`) and the next request starts another; the
+  writer answers reads meanwhile. The thread writer runs for good, as it keeps the search index and
+  the media. An ended worker gives back about two thirds of what it held; the allocator keeps the
+  rest for the next one.
+- An agent's connection code loads when one of its agents first starts: each driver's `load()`
+  (`lazyCode` in `agent-host/driver.ts`), which the launcher awaits, reads its `connection.ts`,
+  with the ACP SDK and its schemas for ACP. Import a `connection.ts` elsewhere only as a type.
+- Code for rare actions is `import()`ed where it runs: toml-patch and jsonc-parser (an agent's
+  config file, `launch.json`), JSZip (Marketplace bundles, session export) and main's session
+  export with its Markdown parser.
+- The words of the settings rows (the `settings`, `usage`, `huliAccount` and `agentHistory`
+  catalogs) are in `agent-host/settings-words.ts`, which only the host loads: main and the usage
+  worker share host modules that write the host's own text and load `host.json` alone.
+
+To look into a process, run a copy with `KETTU_DEBUG=1`: `logs/debug-ports.json` lists each
+host's inspector, whose `process.memoryUsage()`, `v8.getHeapStatistics()` and heap snapshot show
+what it holds, and its `NodeWorker` domain reaches the worker threads. Still loaded at launch:
+`tldts` (300 KB, for sign-ins, site icons and the MCP registry's publishers) in main and the host,
+and `yaml` in the host; the renderer bundles both languages' catalogs.
+
 ### Kite's artwork
 
 `tools/huli/brand/` holds the masters, SVG on a 1024 grid: `kite-light.svg` (the icon, white kite
