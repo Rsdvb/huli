@@ -787,6 +787,8 @@ interface Turn {
   portId: string | null
   ended: boolean
   cancelRequested: boolean
+  /** Its prompt went to the agent, or the agent started it; a stop before needs no agent's word. */
+  prompted: boolean
   fallback: ReturnType<typeof setTimeout> | null
   /** The agent reported a request of the session's thread during the turn. */
   requested: boolean
@@ -9588,6 +9590,7 @@ export class SessionManager {
       portId,
       ended: false,
       cancelRequested: false,
+      prompted: byAgent,
       fallback: null,
       requested: false,
       byAgent,
@@ -10349,7 +10352,10 @@ export class SessionManager {
     }
     try {
       const resolved = await this.resolveAttachments(live, turn.content)
-      if (turn.ended) return
+      if (turn.ended) {
+        checkpoint?.cancel()
+        return
+      }
       // A message given back goes to a composer, which sends an image with its bytes.
       turn.written = resolved.written
       if (resolved.ids.length > 0) {
@@ -10360,6 +10366,9 @@ export class SessionManager {
           ])
         }
       }
+      // Before what goes ahead of the message counts as sent, so a stop while it lists loses none.
+      await this.checkpointListed(checkpoint)
+      if (turn.ended) return
       const carry = live.record.carry
       const carried = carry
         ? await this.withCarried(live, connection, carry, resolved.wire, turn.entryId)
@@ -10384,13 +10393,12 @@ export class SessionManager {
       }
       const named = opensWithCommand(resolved.wire) ? null : this.foldersNote(live, connection)
       if (named) wire = [{ type: 'text', text: `${named}\n\n` }, ...wire]
-      await this.checkpointListed(checkpoint)
-      if (turn.ended) return
       const entryId = turn.entryId
       const sent = (ref: string): void => {
         if (!entryId || live.thread.byId[entryId]?.kind !== 'user') return
         this.emit(live, [{ op: 'entry.update', id: entryId, changes: { agentRef: ref } }])
       }
+      turn.prompted = true
       const sending = connection.prompt(live.record.acpSessionId, wire, sent).finally(() => {
         if (live.unansweredCancel === turn) live.unansweredCancel = null
       })
@@ -12038,8 +12046,8 @@ export class SessionManager {
     const turn = live.turn
     if (!turn || turn.ended || turn.cancelRequested) return
     turn.cancelRequested = true
-    if (!live.connection) {
-      // Still attaching: the prompt never reached the agent.
+    if (!live.connection || !turn.prompted) {
+      // Still attaching or preparing the prompt: it never reached the agent, and now never will.
       this.endTurn(live, turn, 'cancelled', null)
       return
     }

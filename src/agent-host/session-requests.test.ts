@@ -158,6 +158,29 @@ it("says in the session's summary how its last turn ended", async () => {
   expect(window.summary(id)?.lastTurn).toEqual({ reason: 'cancelled', endedAt: expect.any(Number) })
 })
 
+it('ends a turn stopped before its message reaches the agent, and never sends it', async () => {
+  // The fallback that ends a turn the agent never confirms stopping would end it too.
+  const host = await startTestHost({ sessionTimings: { cancelFallbackMs: 600_000 } })
+  hosts.push(host)
+  const window = host.connect()
+  const { id } = await window.request('sessions.create', {
+    agentId: 'fake-agent',
+    projectPath: host.project,
+  })
+  await window.open(id)
+  await window.untilStatus(id, 'ready')
+  // An agent that got this message would run it to its end, whatever the stop.
+  await window.request('sessions.prompt', {
+    sessionId: id,
+    content: [{ type: 'text', text: '/cancel --ignore-cancel' }],
+  })
+  await window.request('sessions.cancel', { sessionId: id })
+  await window.until(() => window.summary(id)?.lastTurn?.reason === 'cancelled')
+  const kinds = window.entries(id).map((entry) => entry.kind)
+  expect(kinds).not.toContain('agent')
+  expect(kinds).not.toContain('notice')
+})
+
 it('names the window that stopped a turn at a plan limit, and when it resets', async () => {
   const { window, id } = await readySession()
   await window.request('sessions.prompt', {
