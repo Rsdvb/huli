@@ -6,7 +6,6 @@
 import { createHash } from 'node:crypto'
 import { lstat, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import JSZip from 'jszip'
 import { displayTitle, specRuns } from '@shared/marketplace'
 import {
   HANDLE,
@@ -476,7 +475,8 @@ function readServer(check: FolderCheck, file: CheckedFile): void {
 async function readBundle(check: FolderCheck, file: CheckedFile): Promise<void> {
   let manifest: Fields | null = null
   try {
-    const zip = await JSZip.loadAsync(file.data)
+    const { default: Zip } = await import('jszip')
+    const zip = await Zip.loadAsync(file.data)
     const entry = zip.file('manifest.json')
     if (entry) manifest = record(JSON.parse(await entry.async('string')))
   } catch {
