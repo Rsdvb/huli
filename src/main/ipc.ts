@@ -65,6 +65,7 @@ import type { SiteIcons } from './browser/site-icons'
 import { originOf } from './browser/origins'
 import type { SignIns } from './browser/signins/service'
 import { offerUrl, signInChoice, signInRequest, signInSite } from './browser/signins/validate'
+import { caretBlinkForRun } from './caret'
 import { defaultBrowser } from './default-browser'
 import { debugStatus, prepareRelaunch } from './debug-mode'
 import { Editors } from './editors'
@@ -524,6 +525,7 @@ export function registerIpcHandlers({
 }: IpcDeps): void {
   handle('app:get-info', 0, () => appInfo())
   handle('app:default-browser', 0, () => defaultBrowser(app))
+  handle('app:caret-blink', 0, () => caretBlinkForRun())
   handle('app:capture-rect', 1, async ({ window, event }, value) => {
     const rect = pageRect(value)
     if (!window) return null

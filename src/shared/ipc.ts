@@ -87,6 +87,19 @@ export interface AppInfo {
   isPackaged: boolean
 }
 
+/**
+ * Huli: how the system blinks a text caret, which the page follows: Windows' caret settings,
+ * macOS's insertion point periods, GNOME's cursor keys.
+ */
+export interface CaretBlink {
+  /** Whether a caret blinks at all. */
+  blinks: boolean
+  /** One whole blink, shown and hidden, in milliseconds; null for the default. */
+  periodMs: number | null
+  /** How long after typing, focusing or clicking a blinking caret holds still; null for never. */
+  holdAfterMs: number | null
+}
+
 /** Steps to reproduce being recorded, in Unix milliseconds. */
 export interface ReportRecording {
   startedAt: number
@@ -247,6 +260,7 @@ export interface PageRect {
 export interface IpcInvokeContract {
   'app:get-info': { args: []; result: AppInfo }
   'app:default-browser': { args: []; result: DefaultBrowser }
+  'app:caret-blink': { args: []; result: CaretBlink }
   'app:capture-rect': { args: [rect: PageRect]; result: Uint8Array | null }
   // true stops the work and goes on, false stays, 'background' closes the windows and keeps it running.
   'app:respond-quit': { args: [id: number, answer: boolean | 'background']; result: void }
@@ -762,6 +776,8 @@ export interface KettuApi {
     getInfo(): Promise<AppInfo>
     /** The browser links open in outside Kettu, read once per run. */
     defaultBrowser(): Promise<DefaultBrowser>
+    /** Huli: how the system blinks a text caret, read once per run. */
+    caretBlink(): Promise<CaretBlink>
     /** That part of this window as it is on screen, as PNG bytes; null where it cannot be read. */
     captureRect(rect: PageRect): Promise<Uint8Array | null>
     respondQuit(id: number, answer: boolean | 'background'): Promise<void>
