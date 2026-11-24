@@ -1256,8 +1256,16 @@
   /* Adding a child to a parent whose children a structural pseudo-class was tested on restyles
      all of them in Chromium, with their whole subtrees when the selector goes on after it. So the
      chunk class keeps the chunks out of that test, and the last block's own last child finds the
-     block by its mark, not by position; otherwise each new chunk restyled the whole reply. */
-  & > :where(.markdown-chunk):last-child > :nth-last-child(1 of :not([data-media-block]:empty)) {
+     block by its mark, not by position; otherwise each new chunk restyled the whole reply.
+     Huli: the position is tested only once the message is written, as `markdown-written` says,
+     which Chromium rules out from an element's ancestors before it tests anything: tested while
+     the message streamed, it marked every element in it, so each block added restyled the whole
+     subtrees of the blocks before it, at every update. Until then markdown-impl.tsx marks the
+     last block itself. */
+  &.markdown-written
+    > :where(.markdown-chunk):last-child
+    > :nth-last-child(1 of :not([data-media-block]:empty)),
+  & > :where(.markdown-chunk):last-child > [data-last-block] {
     margin-bottom: 0;
     --markdown-last-block: 1;
   }

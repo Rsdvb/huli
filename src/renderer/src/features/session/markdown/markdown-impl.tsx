@@ -15,6 +15,7 @@ import {
   type ComponentProps,
   type ReactElement,
   type ReactNode,
+  type RefObject,
 } from 'react'
 import { cjk } from '@streamdown/cjk'
 import {
@@ -391,6 +392,26 @@ const ChunkPlaceholder = memo(function ChunkPlaceholder({
   return <div aria-hidden className="markdown-chunk" data-part-placeholder="" style={style} />
 })
 
+/**
+ * While the message is written, marks its last block, the last child of the last chunk that is
+ * not an empty media block, for the last-block rules in globals.css, which find it by position
+ * only once it is written: a position rule tested while it streams restyled the whole subtrees of
+ * the blocks before each block added.
+ */
+function useLastBlockMark(root: RefObject<HTMLElement | null>, live: boolean): void {
+  const marked = useRef<Element | null>(null)
+  useLayoutEffect(() => {
+    let last = live ? (root.current?.lastElementChild?.lastElementChild ?? null) : null
+    while (last?.hasAttribute('data-media-block') && !last.hasChildNodes()) {
+      last = last.previousElementSibling
+    }
+    if (last === marked.current) return
+    marked.current?.removeAttribute('data-last-block')
+    last?.setAttribute('data-last-block', '')
+    marked.current = last
+  })
+}
+
 type ChunkOptions = Pick<MarkdownProps, 'components' | 'remarkPlugins'>
 
 /** The chunk at `index`, rendered or holding its place. */
@@ -446,6 +467,7 @@ function MarkdownImpl({
   const count = settled.length + 1
   const root = useRef<HTMLDivElement>(null)
   const view = useRenderedChunks(split, streaming, root, slots)
+  useLastBlockMark(root, streaming)
   useEffect(() => {
     if (count > 1) saveParts(key, split)
   }, [key, split, count])
@@ -471,7 +493,7 @@ function MarkdownImpl({
     options,
   )
   return (
-    <div ref={root} className={cn('markdown', className)}>
+    <div ref={root} className={cn('markdown', !streaming && 'markdown-written', className)}>
       <NamedMediaContext value={named}>
         <KeepInPlace root={root} view={view}>
           {count === 1 ? [tailElement] : [...settledElements, tailElement]}
