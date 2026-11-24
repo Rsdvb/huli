@@ -2881,10 +2881,12 @@ disables every other workflow after each merge, new ones included.
   check: `pnpm typecheck` and the tests outside `cloud/` for anything outside `mobile/` and
   `cloud/`; Huli Cloud's types, `vitest run cloud/test` and its bundle, as the release's cloud job,
   for `cloud/`, `src/shared/` and what the install reads; the phone app's `npm ci` in `mobile/`
-  alone and `npx tsc --noEmit`, as the release's phone jobs, for `mobile/` and `src/shared/`;
-  `pnpm lint` and `pnpm format:check` always. A change to the workflow runs everything, and so
-  does a comparison of 300 files or more, which GitHub lists no further. pnpm's and npm's
-  downloads are cached; a newer push to the same branch cancels the run before it. A pull request
+  alone, `npx tsc --noEmit` and `expo export` for iOS and Android, as the release's phone jobs
+  and `huli-sync.yml`, for `mobile/` and `src/shared/`; `pnpm lint` and `pnpm format:check`
+  always. A change to the workflow runs everything, and so does a comparison of 300 files or more,
+  which GitHub lists no further. pnpm's and npm's downloads are cached, and Metro's transforms:
+  Expo's `EXPO_METRO_CACHE_RESTORE_DIR` and `EXPO_METRO_CACHE_OUTPUT_DIR` keep only what the
+  last bundle used. A newer push to the same branch cancels the run before it. A pull request
   from a branch here is checked by its pushes. It stands in for Kettu's `ci.yml`, which only runs
   on pull requests. To see a branch's: `gh run list -R Rsdvb/huli --branch <branch>`.
 - `huli-sync.yml`, every night at 03:23 Beijing time: merges Kettu's main, checks it, pushes and
