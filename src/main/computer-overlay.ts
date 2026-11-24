@@ -175,8 +175,21 @@ export class ComputerOverlay {
     this.send()
   }
 
+  /**
+   * The pages run unthrottled while they show and throttled while hidden: unthrottled, the hidden
+   * light went on drawing its turning colors at the display's rate for as long as Kettu was in
+   * front.
+   */
   private hide(page: Page | null): void {
-    if (page && !page.window.isDestroyed() && page.window.isVisible()) page.window.hide()
+    if (!page || page.window.isDestroyed() || !page.window.isVisible()) return
+    page.window.webContents.setBackgroundThrottling(true)
+    page.window.hide()
+  }
+
+  private reveal(page: Page): void {
+    if (page.window.isVisible()) return
+    page.window.showInactive()
+    page.window.webContents.setBackgroundThrottling(false)
   }
 
   /** Everything goes with the hold: the windows, the following and the shortcut. */
@@ -249,7 +262,7 @@ export class ComputerOverlay {
       width: Math.round(bounds.width + 2 * pad),
       height: Math.round(bounds.height + 2 * pad),
     })
-    if (!page.window.isVisible()) page.window.showInactive()
+    this.reveal(page)
     try {
       // Just above the real window, so a window over it covers the light as well.
       page.window.moveAbove(`window:${hold.window.id}:0`)
@@ -276,7 +289,7 @@ export class ComputerOverlay {
       width: size.width,
       height: size.height,
     })
-    if (!page.window.isVisible()) page.window.showInactive()
+    this.reveal(page)
   }
 
   private state(part: ComputerOverlayPart): ComputerOverlayState | null {
