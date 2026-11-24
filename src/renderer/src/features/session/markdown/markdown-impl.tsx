@@ -16,7 +16,11 @@ import {
   type ReactNode,
 } from 'react'
 import { cjk } from '@streamdown/cjk'
-import { createCodePlugin } from '@streamdown/code'
+import {
+  createCodePlugin,
+  type CodeHighlighterPlugin,
+  type HighlightResult,
+} from '@streamdown/code'
 import { Tick02Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
@@ -71,10 +75,38 @@ import type { MarkdownProps } from './index'
 // KaTeX, its styles and fonts load with the first formula, not with every reply.
 const InlineMath = lazy(() => import('./math').then((m) => ({ default: m.InlineMath })))
 
+/** Code as it is, one plain token a line: what Streamdown shows before Shiki has loaded. */
+function plainTokens(code: string): HighlightResult {
+  return {
+    bg: 'transparent',
+    fg: 'inherit',
+    tokens: code
+      .split('\n')
+      .map((content) => [
+        { content, color: 'inherit', bgColor: 'transparent', htmlStyle: {}, offset: 0 },
+      ]),
+  }
+}
+
+/**
+ * Shiki for a closed block only: one still being written shows its code plain until its fence
+ * closes, and is highlighted once then. Highlighting it on every chunk tokenized it again and
+ * set the colors of all its spans anew, which restyled every one of them.
+ */
+function highlightClosed(shiki: CodeHighlighterPlugin): CodeHighlighterPlugin {
+  return {
+    ...shiki,
+    highlight: (options, done) =>
+      options.isIncomplete ? plainTokens(options.code) : shiki.highlight(options, done),
+  }
+}
+
 // Fenced blocks go through BlockCode, which picks maths, SVG, diagrams or code by language.
 function createPlugins({ light, dark }: CodeThemes) {
   return {
-    code: createCodePlugin({ themes: [codeThemeInput(light), codeThemeInput(dark)] }),
+    code: highlightClosed(
+      createCodePlugin({ themes: [codeThemeInput(light), codeThemeInput(dark)] }),
+    ),
     cjk,
   }
 }
