@@ -2286,10 +2286,10 @@ export function coalescePatches(patches: readonly Patch[]): Patch[] {
         open.delete(patch.entry.id)
         out.push(patch)
         break
-      // Huli: `entry.remove` too, as a reverted turn's entries leave.
-      case 'thread.reset':
-      case 'thread.truncate':
-      case 'entry.remove':
+      // Huli: a reset, a truncate, `entry.remove` (a reverted turn's entries) and any kind not
+      // listed here stay in their place and end every open update; a kind added later is never
+      // dropped, as `entry.remove` was once.
+      default:
         open.clear()
         out.push(patch)
         break
