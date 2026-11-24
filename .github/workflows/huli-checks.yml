@@ -1,12 +1,15 @@
 name: Huli checks
 
-# Every push to main and every pull request: the desktop app's and Huli Cloud's types, the tests,
-# lint and formatting, and the phone app's types, on Linux. A change to docs alone runs nothing.
-# Kettu's own ci.yml stays disabled in this repository (huli-sync.yml keeps it so); this one runs
-# instead, so a sync never has to change it.
+# Every push, to main or any branch, and every pull request from a fork: what the release run would
+# fail on, checked before a merge rather than after it, on Linux. The `changes` job picks the jobs
+# from the files changed: the desktop app's types and tests, Huli Cloud's types, tests and bundle as
+# the release builds it, the phone app's types from its own fresh install alone, as the release's
+# phone jobs check them, and lint and formatting for every change. A change to docs alone runs
+# nothing. Kettu's own ci.yml stays disabled in this repository (huli-sync.yml keeps it so); this
+# one runs instead, so a sync never has to change it.
 on:
   push:
-    branches: [main]
+    branches: ['**']
     paths-ignore: ['**/*.md', 'LICENSE', 'LICENSE-EXCEPTION']
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -21,9 +24,75 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: What changed
+    # A pull request from a branch of this repository was checked on its push already.
+    if: >-
+      !github.event.pull_request.draft && (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name != github.repository)
+    runs-on: ubuntu-24.04
+    outputs:
+      desktop: ${{ steps.diff.outputs.desktop }}
+      cloud: ${{ steps.diff.outputs.cloud }}
+      mobile: ${{ steps.diff.outputs.mobile }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          all() {
+            echo "$1; checking everything."
+            printf '%s\n' desktop=true cloud=true mobile=true >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          # A branch is compared with main, so every push to it checks all it changes; main with
+          # what the push brought.
+          case "$EVENT" in
+            pull_request) range="$PR_BASE...$PR_HEAD" ;;
+            push)
+              if [ "$REF" != refs/heads/main ]; then
+                range="main...$SHA"
+              elif [ -z "${BEFORE//0/}" ]; then
+                all 'A new main'
+              else
+                range="$BEFORE...$SHA"
+              fi
+              ;;
+            *) all "Started by $EVENT" ;;
+          esac
+          # The comparison lists 300 files at most; a longer one is taken as touching everything.
+          if ! files="$(gh api "repos/$GH_REPO/compare/$range" --jq '.files[].filename')"; then
+            all "No comparison for $range"
+          fi
+          count="$(grep -c . <<< "$files" || true)"
+          [ "$count" -ge 300 ] && all "$count files changed"
+          echo "$count files changed in $range:"
+          sed 's/^/  /' <<< "$files"
+          code="$(grep -Ev '\.md$|^LICENSE(-EXCEPTION)?$' <<< "$files" || true)"
+          has() { grep -Eq "$1" <<< "$code" && echo true || echo false; }
+          # The desktop app's checks read the whole tree but the phone app's, Huli Cloud's and the
+          # other workflows; this workflow's own changes run every job.
+          self='^\.github/workflows/huli-checks\.yml$'
+          outside="$(grep -Ev '^(mobile/|cloud/|vite\.cloud\.config\.mts$|\.github/)' <<< "$code" || true)"
+          # What Huli Cloud's install, config and tests read beside cloud/.
+          cloud='^(cloud/|vite\.cloud\.config\.mts$|vitest\.config\.mts$|src/shared/|tools/build/|patches/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$)'
+          {
+            echo "desktop=$([ -n "$outside" ] && echo true || has "$self")"
+            echo "cloud=$(has "$cloud|$self")"
+            echo "mobile=$(has "^(mobile/|src/shared/)|$self")"
+          } | tee -a "$GITHUB_OUTPUT"
+
   desktop:
-    name: Desktop and Huli Cloud
-    if: ${{ !github.event.pull_request.draft }}
+    name: Desktop app
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -34,15 +103,49 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - name: Type-check Huli Cloud
-        run: pnpm exec tsc -p cloud/tsconfig.json
-      - run: pnpm test
+      # Huli Cloud's tests are the cloud job's.
+      - run: pnpm exec vitest run --exclude 'cloud/**'
+
+  # As the release's Huli Cloud job checks and builds it.
+  cloud:
+    name: Huli Cloud
+    needs: changes
+    if: needs.changes.outputs.cloud == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc -p cloud/tsconfig.json
+      - run: pnpm exec vitest run cloud/test
+      - run: pnpm exec vite build -c vite.cloud.config.mts
+
+  lint:
+    name: Lint and formatting
+    needs: changes
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm format:check
 
+  # As the release's iOS and Android jobs check it: mobile/'s own packages, freshly installed, and
+  # nothing of the workspace's, which a computer that ran pnpm install still resolves through.
+  # tools/huli/check-like-release.mjs does the same on a computer.
   mobile:
     name: Phone app
-    if: ${{ !github.event.pull_request.draft }}
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-24.04
     defaults:
       run:
