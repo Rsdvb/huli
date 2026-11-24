@@ -915,3 +915,20 @@ describe('entryMessageId', () => {
     expect(entryMessageId('sm:msg_1')).toBeNull()
   })
 })
+
+// Huli: Undo takes a reverted turn's entries out with `entry.remove`, which a merge keeps in its
+// place and merges no update across.
+describe('coalescePatches with a removal', () => {
+  it('keeps the removal and the updates on either side of it apart', () => {
+    const patches: Patch[] = [
+      { op: 'entry.update', id: 'm:1', changes: { streaming: false } },
+      { op: 'entry.remove', ids: ['m:1'] },
+      { op: 'entry.add', entry: { ...agent, id: 'm:1', markdown: 'Again' } },
+      { op: 'entry.update', id: 'm:1', changes: { streaming: false } },
+    ]
+    expect(coalescePatches(patches)).toEqual(patches)
+    const after = applyPatches(state(), coalescePatches(patches))
+    expect(after).toEqual(applyPatches(state(), patches))
+    expect(threadEntries(after).map((entry) => entry.id)).toEqual(['e:1', 'm:1'])
+  })
+})
