@@ -56,7 +56,7 @@ export function endingWindow(ttl: number): number {
 function providerOf(
   agentId: AgentId,
   model: string | null,
-  account: AgentAccount | null,
+  account: Pick<AgentAccount, 'kind'> | null,
 ): string | null {
   if (agentId === 'codex') {
     return account?.kind === 'account' || account?.kind === 'api_key' ? 'openai' : null
@@ -71,7 +71,7 @@ export function expiryOf(
   agentId: AgentId,
   cache: PromptCache | null | undefined,
   model: string | null,
-  account: AgentAccount | null,
+  account: Pick<AgentAccount, 'kind'> | null,
 ): CacheExpiry | null {
   if (!cache) return null
   const { lastRequestAt, ttl } = cache

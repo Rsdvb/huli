@@ -13,14 +13,20 @@ export type SessionCache = { state: 'none' } | { state: CachePhase; cache: Known
 
 export function useSessionCache(summary: SessionSummary): SessionCache {
   const hostId = hostOfSession(summary)
-  const account = useAgentsStore((s) => agentsOn(s, hostId).byId[summary.agentId]?.account ?? null)
+  // The account's kind alone: its agent's every status names it in a new object, which rendered
+  // all of the agent's rows again.
+  const kind = useAgentsStore(
+    (s) => agentsOn(s, hostId).byId[summary.agentId]?.account?.kind ?? null,
+  )
   const quiet =
     summary.origin === 'subagent' ||
     summary.status === 'running' ||
     summary.status === 'awaiting_permission'
   const cache = quiet
     ? null
-    : knownExpiry(expiryOf(summary.agentId, summary.cache, summary.model, account))
+    : knownExpiry(
+        expiryOf(summary.agentId, summary.cache, summary.model, kind === null ? null : { kind }),
+      )
   const phase = useCachePhase(cache)
   if (quiet) return null
   if (!summary.cache) return { state: 'none' }
