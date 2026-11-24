@@ -344,6 +344,91 @@ const controls = false
 const repair = { katex: false }
 
 /**
+ * How often, at most, a text being written renders what came: each render of the tail parses its
+ * open block again and restyles and lays it out, and rendering at every chunk of a fast stream kept
+ * Blink's heap growing by about 300 MB over a 300 KB reply.
+ */
+const WRITING_RENDER_MS = 50
+
+interface Text {
+  markdown: string
+  step: TextStep | undefined
+}
+
+/** What has come since the text shown: the newest text, and one step to it from the one shown. */
+interface Waiting {
+  markdown: string
+  id: number | null
+  /** The id of the text shown. */
+  from: number | null
+  /** What was appended to the text shown, or null when it changed otherwise. */
+  appended: string | null
+  /** When the text shown was last replaced. */
+  at: number
+  timer: ReturnType<typeof setTimeout> | undefined
+}
+
+/**
+ * The text a message renders: while it is written, what came at most every WRITING_RENDER_MS,
+ * the newest always following within that time; the rest of the time, and as soon as the writing
+ * ends, the text as it is. The step given to useChunks goes from the text shown, so it still reads
+ * only what was appended.
+ */
+function useWritingCadence(markdown: string, step: TextStep | undefined, writing: boolean): Text {
+  const [shown, setShown] = useState<Text>(() => ({ markdown, step }))
+  if (!writing && (shown.markdown !== markdown || shown.step?.id !== step?.id)) {
+    setShown({ markdown, step })
+  }
+  const waiting = useRef<Waiting>({
+    markdown,
+    id: step?.id ?? null,
+    from: step?.id ?? null,
+    appended: '',
+    at: 0,
+    timer: undefined,
+  })
+  useLayoutEffect(() => {
+    const queue = waiting.current
+    if (!writing) {
+      clearTimeout(queue.timer)
+      Object.assign(queue, { markdown, id: step?.id ?? null, appended: '', timer: undefined })
+      queue.from = queue.id
+      return
+    }
+    if (markdown === queue.markdown) return
+    const id = step?.id ?? null
+    const follows = step !== undefined && step.after !== null && step.after === queue.id
+    queue.appended = follows && queue.appended !== null ? queue.appended + step.appended : null
+    queue.markdown = markdown
+    queue.id = id
+    if (queue.timer !== undefined) return
+    const show = (): void => {
+      queue.timer = undefined
+      queue.at = performance.now()
+      const next: TextStep | undefined =
+        queue.id === null
+          ? undefined
+          : {
+              id: queue.id,
+              after: queue.appended === null ? null : queue.from,
+              appended: queue.appended ?? '',
+            }
+      setShown({ markdown: queue.markdown, step: next })
+      queue.from = queue.id
+      queue.appended = ''
+    }
+    const wait = queue.at + WRITING_RENDER_MS - performance.now()
+    if (wait <= 0) show()
+    else queue.timer = setTimeout(show, wait)
+  })
+  useEffect(() => {
+    const queue = waiting.current
+    return () => clearTimeout(queue.timer)
+  }, [])
+  return writing ? shown : { markdown, step }
+}
+
+/**
  * The text's chunks, kept from the previous render while the text only grows. A long message's are
  * kept while it is not shown too, with the places its chunks were laid out at (in-parts.ts).
  */
@@ -462,7 +547,8 @@ function MarkdownImpl({
   const sessionId = useContext(SessionIdContext)
   const entryId = useContext(EntryIdContext)
   const key = sessionId !== null && entryId !== null ? `${sessionId}\0${entryId}` : null
-  const split = useChunks(markdown, live, key, step)
+  const text = useWritingCadence(markdown, step, streaming)
+  const split = useChunks(text.markdown, live, key, text.step)
   const { settled, tail, slots } = split
   const count = settled.length + 1
   const root = useRef<HTMLDivElement>(null)
