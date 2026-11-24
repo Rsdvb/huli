@@ -2315,6 +2315,9 @@
     "disableLasting": "关闭",
     "disableLastingHint": "{{agent}} 会在这个项目里记住，直到你重新打开。",
     "enable": "打开",
+    "desktopApp": "Codex 桌面版专用，纸鸢里不启动",
+    "startAnyway": "仍然启动",
+    "startAnywayHint": "只对这个会话生效。它依赖桌面版自己的通道，在纸鸢里多半连不上。",
     "state": {
       "connected": "已连接",
       "pending": "连接中",

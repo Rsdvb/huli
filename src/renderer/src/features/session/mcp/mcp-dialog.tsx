@@ -384,6 +384,7 @@ function ServerRow({
   const canReconnect = view.can.reconnect === 'server' && state !== 'disabled'
   const canToggle = view.can.toggle
   const off = state === 'disabled'
+  const desktopApp = off && server.desktopApp === true
   const lasting = server.source !== 'kite'
   const source =
     server.source === 'plugin' && server.plugin
@@ -451,6 +452,18 @@ function ServerRow({
             {waiting ? t('mcp.login.again') : t('mcp.login.button')}
           </Button>
         )}
+        {desktopApp && (
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={busy !== null}
+            title={t('mcp.startAnywayHint')}
+            onClick={() => onAct('enable', name)}
+          >
+            {busy === `enable:${name}` && <Spinner />}
+            {t('mcp.startAnyway')}
+          </Button>
+        )}
         {state === 'failed' && canReconnect && (
           <Button
             variant="outline"
@@ -508,6 +521,7 @@ function ServerRow({
           {server.error}
         </p>
       )}
+      {desktopApp && <p className="pl-4 text-hint text-muted-foreground">{t('mcp.desktopApp')}</p>}
       {state === 'needs-auth' && !canLogin && (
         <p className="pl-4 text-hint text-muted-foreground">{t('mcp.login.elsewhere')}</p>
       )}

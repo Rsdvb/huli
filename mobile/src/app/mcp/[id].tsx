@@ -301,6 +301,9 @@ const ServerRow = memo(function ServerRow(props: {
       {server.state === 'needs-auth' ? (
         <Text style={[styles.meta, { color: c.textTertiary }]}>请在电脑上登录这个服务器。</Text>
       ) : null}
+      {server.state === 'disabled' && server.desktopApp ? (
+        <Text style={[styles.meta, { color: c.textTertiary }]}>Codex 桌面版专用，纸鸢里不启动</Text>
+      ) : null}
       {open && tools && tools.length > 0 ? (
         <View style={styles.tools}>
           {tools.map((tool) => (

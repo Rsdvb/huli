@@ -2411,6 +2411,9 @@
     "disableLasting": "Turn off",
     "disableLastingHint": "{{agent}} remembers this for the project until you turn it on again.",
     "enable": "Turn on",
+    "desktopApp": "Codex desktop app only, so Kite doesn't start it",
+    "startAnyway": "Start anyway",
+    "startAnywayHint": "For this session only. It relies on the desktop app's own channels, so it will most likely fail to connect in Kite.",
     "state": {
       "connected": "Connected",
       "pending": "Connecting",
