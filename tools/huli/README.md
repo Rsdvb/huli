@@ -255,6 +255,10 @@ which keeps the user's order from then on; a row dropped on a project of another
   null while a group goes by activity and absent from an older host, `SessionFolder.manual` absent
   from one, which leaves dragging off there (`canOrder`). Tests: `storage.test.ts`,
   `validate.test.ts`, `session-folders.test.ts`, `session-order.test.ts`.
+- The simulator's `87-session-order` flow checks the seeded project's order on the phone. A group
+  there shows its first three rows, and in a run with other flows their new sessions land in that
+  project (the new-session page picks the first project) and come first, so the flow opens
+  显示全部 before it compares.
 - The drag (`features/sidebar/row-drag.ts`): the split's drag drives it. Its start measures the
   row's group and the sidebar once (again only when the sidebar scrolls), each move hit-tests that
   geometry and slides the rows it passes by `translate` alone, rendering nothing; the dragged row's

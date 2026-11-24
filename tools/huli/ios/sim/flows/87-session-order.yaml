@@ -2,7 +2,8 @@
 # project lists 排序 C, A, B, the order its host keeps, where latest activity would list A, B, C.
 # run.sh seeds the daemon for it (seed-order.mjs) when FLOWS names it; in a run of every flow,
 # without the seed, it only looks. The rows read to Maestro with their project and state, so the
-# texts match as patterns.
+# texts match as patterns. A group shows its first three rows: in a run with other flows their new
+# sessions land in this project, the only one, and come first, so 显示全部 opens the rest.
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
@@ -22,6 +23,15 @@ appId: io.github.rsdvb.huli
     when:
       visible: '.*排序演示.*'
     commands:
+      - tapOn:
+          text: '显示全部 .* 个'
+          below:
+            text: '.*排序演示.*'
+          optional: true
+      - scrollUntilVisible:
+          element: '.*排序 B.*'
+          direction: DOWN
+          centerElement: true
       - assertVisible:
           text: '.*排序 A.*'
           below:
