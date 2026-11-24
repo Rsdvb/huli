@@ -1792,10 +1792,11 @@ own `claude.exe` in `~\.local\bin`.
 
 What keeps the processes small while the app sits idle. Measured on the built app (2026-11-24,
 Windows, a test copy with 2 projects, 304 sessions and a 300 KB reply; private bytes 75 s after
-launch plus 5 minutes idle, median of 3 alternating launches each): the agent host went from 159 to
-100 MB and main from 96 to 83 MB, the whole app from 659 to 586 MB; the renderer, GPU and network
-processes did not change. The agent host is ready about 30 ms sooner, and the window is interactive
-as soon as before.
+launch plus 5 minutes idle, medians of 3 to 5 alternating launches): the agent host went from 159
+to 98 MB and main from 96 to 84 MB, the app without its GPU process (which varied from 125 to 311 MB
+between launches either way) from 419 to 349 MB; the renderer and network processes did not change
+beyond their noise. The agent host loads its code in 80 ms instead of 105 and is ready about 30 ms
+sooner, and the window is interactive as soon as before (17 launches each).
 
 - Entry files are stubs. Electron loads main's entry file and each utility process's through
   Node's ESM loader, which keeps a second copy of the file's text, and for a utility process its
@@ -1805,7 +1806,8 @@ as soon as before.
 - The bundles are ASCII. V8 keeps a script's text at one byte a character only when all of it is
   ASCII, and a single Chinese word or `—` makes the whole file two bytes a character. Main's build
   (which the hosts' `?modulePath` builds inherit) and the daemon's escape non-ASCII text and leave
-  out doc comments (`output.charset`, `output.comments`).
+  out doc comments (`output.charset`, `output.comments`); the renderer's escapes it too, which took
+  the scripts' text the window holds from 13.5 to 8.1 MB.
 - A worker thread costs 15-20 MB however little it does. The usage worker and the thread reader
   stop after a minute without a request (`IDLE_MS` in `agent-host/usage/store.ts`,
   `READER_IDLE_MS` in `agent-host/threads/store.ts`) and the next request starts another; the
