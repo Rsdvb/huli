@@ -590,10 +590,9 @@ describe('a command that starts no turn', () => {
     const { id } = await session(setup)
     refuse(setup, 'CommandNotFoundError', 'Command not found: review')
     void setup.connection.prompt(id, text('/review now')).catch(() => {})
-    await new Promise((resolve) => setTimeout(resolve, 30))
-    expect(setup.server.posts(/\/prompt$/).map((sent) => sent.body)).toEqual([
-      { text: '/review now' },
-    ])
+    await expect
+      .poll(() => setup.server.posts(/\/prompt$/).map((sent) => sent.body))
+      .toEqual([{ text: '/review now' }])
   })
 
   it('fails the turn for any other failure of the command', async () => {
@@ -721,12 +720,13 @@ describe('what a prompt carries', () => {
         { type: 'resource_link', uri: `file://${import.meta.filename}`, name: 'a.ts' },
       ])
       .catch(() => {})
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    const bodies = setup.server.posts(/\/prompt$/).map((sent) => sent.body)
-    expect(bodies).toEqual([
-      { text: 'Read it', files: [{ uri: `file://${import.meta.filename}`, name: 'a.ts' }] },
-      { text: `Read it\n\n@${import.meta.filename}` },
-    ])
+    // The second goes once the first was refused and the file's size read, as late as a busy disk.
+    await expect
+      .poll(() => setup.server.posts(/\/prompt$/).map((sent) => sent.body))
+      .toEqual([
+        { text: 'Read it', files: [{ uri: `file://${import.meta.filename}`, name: 'a.ts' }] },
+        { text: `Read it\n\n@${import.meta.filename}` },
+      ])
   })
 })
 
@@ -1232,8 +1232,7 @@ describe('a dropped event stream', () => {
       ],
     }))
     setup.server.drop()
-    await new Promise((resolve) => setTimeout(resolve, 400))
-    expect(thread.asked.map((request) => request.toolCallId)).toEqual(['per_1'])
-    expect(thread.lines).toEqual(['tool in_progress other shell: echo hi'])
+    await expect.poll(() => thread.asked.map((request) => request.toolCallId)).toEqual(['per_1'])
+    await expect.poll(() => thread.lines).toEqual(['tool in_progress other shell: echo hi'])
   })
 })
