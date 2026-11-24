@@ -174,6 +174,7 @@ async function setup(
     loaded.push(file)
     return sdk
   })
+  await driver.load?.()
   const connection = driver.connect(context)
   const init = await connection.initialize('1.0.0')
   return {

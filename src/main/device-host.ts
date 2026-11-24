@@ -6,7 +6,7 @@ import {
 } from '@shared/device-agent'
 import type { DeviceHostToMain, MainToDeviceHost } from '@shared/host-control'
 import type { PortDevice } from '@shared/remote/device'
-import deviceHostPath from '../device-host/index?modulePath'
+import deviceHostPath from '../device-host/entry?modulePath'
 import { locale as currentLocale, t } from './i18n'
 import { createLogger } from './log'
 import { UtilityHost, type UtilityHostEvent, type UtilityHostState } from './utility-host'

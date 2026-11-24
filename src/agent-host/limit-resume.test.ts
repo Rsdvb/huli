@@ -118,7 +118,9 @@ async function claude() {
   const entry = path.join(dir, 'sdk.mjs')
   await writeFile(path.join(dir, 'package.json'), JSON.stringify({ version: '0.3.314' }))
   const sdk = new FakeClaudeSdk()
-  const connection = claudeSdkDriver(async () => sdk).connect({
+  const driver = claudeSdkDriver(async () => sdk)
+  await driver.load?.()
+  const connection = driver.connect({
     def: CLAUDE_CODE,
     hooks: { traffic: () => {}, account: () => {}, ignored: () => {}, log: () => {} },
     spec: {

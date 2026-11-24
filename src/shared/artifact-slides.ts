@@ -1,7 +1,7 @@
 // The slides type's content: a deck in `slides.json`, each slide a layout and its text, with
 // pictures under `images/`. Read alike by the host, which checks and exports it, and by the viewer.
 
-import { isImagePath } from './artifact-document'
+import { isImagePath } from './artifact-types'
 
 export const SLIDE_LAYOUTS = [
   'title',

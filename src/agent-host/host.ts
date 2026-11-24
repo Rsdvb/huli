@@ -13,7 +13,6 @@ import {
 import { DeviceAccessStore } from './devices/access'
 import os from 'node:os'
 import path from 'node:path'
-import { parse as parseJsonc } from 'jsonc-parser'
 import { LAUNCH_FILE, parseLaunchConfigs, type LaunchConfig } from '@shared/launch-configs'
 import { cp, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import type {
@@ -148,7 +147,8 @@ import { reportDraftPrompt, writeReportDraft } from './report-draft'
 import { Diagnostics } from './diagnostics'
 import type { ContainerSandbox } from './sandbox/container'
 import { HostError, invalidParams, isHostError, notFound } from './errors'
-import { setLocale, t, tSettings, tSettingsEnglish } from './i18n'
+import { setLocale, t } from './i18n'
+import { tSettings, tSettingsEnglish } from './settings-words'
 import { FilesService } from './files'
 import { MediaService } from './media'
 import { MemoryError, type MemoryErrorCode } from './memory/errors'
@@ -3767,7 +3767,8 @@ export class AgentHost {
       return { configs: [] }
     }
     if (text.length > 256 * 1024) return { configs: [] }
-    return { configs: parseLaunchConfigs(parseJsonc(text, [], { allowTrailingComma: true })) }
+    const { parse } = await import('jsonc-parser')
+    return { configs: parseLaunchConfigs(parse(text, [], { allowTrailingComma: true })) }
   }
 
   /** Sends an agent's terminal call to its parent, which hands it to the terminal host. */

@@ -83,6 +83,8 @@ export interface ThreadStoreOptions {
   log: LogFn
   /** How long closing waits for the worker to fold the WAL before stopping it. */
   closeTimeoutMs?: number
+  /** How long the reader may go without a read before it stops; the next read starts another. */
+  readerIdleMs?: number
 }
 
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void }
@@ -93,6 +95,11 @@ type Request = WithoutId<ThreadRequest>
 /** A worker that stops more often than this within a minute is not started again. */
 const MAX_RESTARTS = 3
 const RESTART_WINDOW_MS = 60_000
+/**
+ * A worker thread holds 15-20 MB however little it does, and pages are read in bursts: when a
+ * session opens or scrolls, and while a turn streams into the one shown.
+ */
+const READER_IDLE_MS = 60_000
 
 type SlotKind = 'writer' | 'reader'
 
@@ -110,7 +117,8 @@ interface Slot {
 /**
  * Two workers own the file: the writer, which every write and full load goes to, and a reader
  * beside it, so a page read never waits behind them. A read of a session waits only for that
- * session's writes in flight, so it sees them. A worker that stops is started again.
+ * session's writes in flight, so it sees them. A worker that stops is started again. The reader
+ * stops when it goes unused for a while; the writer answers the read that starts it again.
  */
 export class ThreadStore {
   /** How the database opened; `unavailable` when the worker never got that far. */
@@ -120,6 +128,13 @@ export class ThreadStore {
   private reader: Slot | null = null
   /** Counts the reader's starts, so only the latest becomes the reader. */
   private readerStarts = 0
+  /** A reader is starting, so a read does not start another. */
+  private readerStarting = false
+  /** The reader kept stopping, so no read starts it again. */
+  private readerGivenUp = false
+  private readerIdle: ReturnType<typeof setTimeout> | null = null
+  /** Readers stopping since they went unused, which closing waits for. */
+  private readonly retiringReaders = new Set<Promise<unknown>>()
   private readonly restarts: Record<SlotKind, number[]> = { writer: [], reader: [] }
   private readonly inflight = new Set<Promise<unknown>>()
   /** Each session's writes in flight, which a read of the session waits for. */
@@ -180,23 +195,54 @@ export class ThreadStore {
   /** Starts the reader once the writer has the file at this version, which it then opens. */
   private async startReader(): Promise<void> {
     const start = ++this.readerStarts
-    const writer = this.writer
-    const status = await writer.ready
-    if (status !== 'ok' && status !== 'created' && status !== 'recovered') return
-    if (this.closing || this.stopped || start !== this.readerStarts) return
-    const slot = this.spawn('reader')
-    const opened = await slot.ready
-    if (
-      opened !== 'ok' ||
-      this.closing ||
-      this.stopped ||
-      slot.retired ||
-      start !== this.readerStarts
-    ) {
-      this.retire(slot)
-      return
+    this.readerStarting = true
+    try {
+      const writer = this.writer
+      const status = await writer.ready
+      if (status !== 'ok' && status !== 'created' && status !== 'recovered') return
+      if (this.closing || this.stopped || start !== this.readerStarts) return
+      const slot = this.spawn('reader')
+      const opened = await slot.ready
+      if (
+        opened !== 'ok' ||
+        this.closing ||
+        this.stopped ||
+        slot.retired ||
+        start !== this.readerStarts
+      ) {
+        this.retire(slot)
+        return
+      }
+      this.reader = slot
+      this.armReaderIdle()
+    } finally {
+      if (start === this.readerStarts) this.readerStarting = false
     }
-    this.reader = slot
+  }
+
+  /** A read found no reader: one starts for the reads after it. */
+  private wakeReader(): void {
+    if (this.reader || this.readerStarting || this.readerGivenUp) return
+    if (this.closing || this.stopped) return
+    void this.startReader()
+  }
+
+  /** Stops the reader once it has gone `readerIdleMs` without a read. */
+  private armReaderIdle(): void {
+    if (this.readerIdle) clearTimeout(this.readerIdle)
+    this.readerIdle = setTimeout(() => {
+      this.readerIdle = null
+      const reader = this.reader
+      if (!reader || this.closing || this.stopped) return
+      if (reader.pending.size > 0) return this.armReaderIdle()
+      this.reader = null
+      reader.retired = true
+      const done = this.closeSlot(reader)
+        .then(() => reader.worker.terminate())
+        .finally(() => this.retiringReaders.delete(done))
+      this.retiringReaders.add(done)
+    }, this.options.readerIdleMs ?? READER_IDLE_MS)
+    this.readerIdle.unref?.()
   }
 
   private restartReader(): void {
@@ -222,7 +268,10 @@ export class ThreadStore {
     if (recent.length >= MAX_RESTARTS) {
       this.options.log('error', `The thread ${slot.kind} keeps stopping; it is not started again`)
       if (slot.kind === 'writer') this.stop(reason)
-      else if (this.reader === slot) this.reader = null
+      else {
+        this.readerGivenUp = true
+        if (this.reader === slot) this.reader = null
+      }
       return
     }
     this.restarts[slot.kind] = [...recent, now]
@@ -238,6 +287,7 @@ export class ThreadStore {
   private settle(slot: Slot, id: number): Pending | undefined {
     const pending = slot.pending.get(id)
     slot.pending.delete(id)
+    if (slot === this.reader && slot.pending.size === 0) this.armReaderIdle()
     return pending
   }
 
@@ -315,7 +365,10 @@ export class ThreadStore {
     const read = async (): Promise<T> => {
       if (writes) await Promise.allSettled([...writes])
       const reader = this.reader
-      if (!reader) return this.send<T>(this.writer, request)
+      if (!reader) {
+        this.wakeReader()
+        return this.send<T>(this.writer, request)
+      }
       try {
         return await this.send<T>(reader, request)
       } catch (error) {
@@ -482,6 +535,8 @@ export class ThreadStore {
   /** Waits for the requests in flight, folds the WAL into the file and stops the workers. */
   close(): Promise<void> {
     this.closing ??= (async () => {
+      if (this.readerIdle) clearTimeout(this.readerIdle)
+      this.readerIdle = null
       const reader = this.reader
       this.reader = null
       if (!this.stopped) {
@@ -492,7 +547,11 @@ export class ThreadStore {
       this.stop('The thread store is closed')
       if (reader)
         this.fail(reader, new ThreadStoreError('The thread store is closed', 'unavailable'))
-      await Promise.all([this.writer.worker.terminate(), reader?.worker.terminate()])
+      await Promise.all([
+        this.writer.worker.terminate(),
+        reader?.worker.terminate(),
+        ...this.retiringReaders,
+      ])
     })()
     return this.closing
   }

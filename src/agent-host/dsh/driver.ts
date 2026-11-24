@@ -1,10 +1,12 @@
 // DeepSeek Harness's driver: its SDK interface, run in the agent host, which spawns one
 // `dsh --profile sdk` per open session.
 
-import type { HostedDriver } from '../driver'
-import { DshConnection } from './connection'
+import { lazyCode, type HostedDriver } from '../driver'
+
+const code = lazyCode(() => import('./connection'))
 
 export const DSH_DRIVER: HostedDriver = {
   kind: 'hosted',
-  connect: (context) => new DshConnection(context),
+  load: code.load,
+  connect: (context) => new (code.get().DshConnection)(context),
 }

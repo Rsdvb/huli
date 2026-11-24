@@ -3,12 +3,7 @@
 // comment and line stays as the user wrote it.
 
 import { readFile } from 'node:fs/promises'
-import { applyEdits, modify, parse as parseJsonc, type ParseError } from 'jsonc-parser'
-import {
-  parse as parseToml,
-  patch as patchToml,
-  stringify as stringifyToml,
-} from '@decimalturn/toml-patch'
+import type { ParseError } from 'jsonc-parser'
 import { Document, isMap, parseDocument } from 'yaml'
 import { t } from '../i18n'
 import { isObject, writeTextAtomic } from '../settings-file'
@@ -33,21 +28,30 @@ function unreadable(file: string, format: ConfigFormat): Error {
   return new Error(t('agentConfig.invalidFile', { file, format: name }))
 }
 
-function parseText(file: string, format: ConfigFormat, text: string): Record<string, unknown> {
+// Read the first time a file of their format is, as few users ever change one.
+const jsoncParser = () => import('jsonc-parser')
+const tomlPatch = () => import('@decimalturn/toml-patch')
+
+async function parseText(
+  file: string,
+  format: ConfigFormat,
+  text: string,
+): Promise<Record<string, unknown>> {
   if (text.trim() === '') return {}
   let parsed: unknown
   if (format === 'json') {
     const errors: ParseError[] = []
-    parsed = parseJsonc(text, errors, { allowTrailingComma: true })
+    parsed = (await jsoncParser()).parse(text, errors, { allowTrailingComma: true })
     if (errors.length > 0) throw unreadable(file, format)
   } else if (format === 'yaml') {
     const doc = parseDocument(text)
     if (doc.errors.length > 0) throw unreadable(file, format)
     parsed = doc.toJS() ?? {}
   } else {
+    const { parse } = await tomlPatch()
     try {
       // Integers past the safe range stay bigints, so patching never rewrites them rounded.
-      parsed = parseToml(text)
+      parsed = parse(text)
     } catch {
       throw unreadable(file, format)
     }
@@ -61,7 +65,7 @@ export async function readConfig(
   file: string,
   format: ConfigFormat,
 ): Promise<Record<string, unknown>> {
-  return parseText(file, format, await readText(file))
+  return await parseText(file, format, await readText(file))
 }
 
 export function valueAt(config: unknown, key: KeyPath): unknown {
@@ -104,7 +108,7 @@ export async function setConfigValue(
   value: unknown,
 ): Promise<boolean> {
   const text = await readText(file)
-  const config = parseText(file, format, text)
+  const config = await parseText(file, format, text)
   checkParents(file, config, key)
   const current = valueAt(config, key)
   if (current === value) return false
@@ -112,6 +116,7 @@ export async function setConfigValue(
   const removed = value === undefined ? key.slice(0, emptiedParents(config, key)) : key
   let next: string
   if (format === 'json') {
+    const { applyEdits, modify } = await jsoncParser()
     const edits = modify(text, [...removed], value, {
       formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' },
     })
@@ -125,7 +130,7 @@ export async function setConfigValue(
     next = String(doc)
   } else {
     // A fresh parse, since a copy would turn TOML's dates into plain ones.
-    const updated = parseText(file, format, text)
+    const updated = await parseText(file, format, text)
     if (value === undefined) {
       const parent = valueAt(updated, removed.slice(0, -1))
       if (isObject(parent)) delete parent[removed[removed.length - 1]]
@@ -137,7 +142,8 @@ export async function setConfigValue(
       }
       parent[key[key.length - 1]] = value
     }
-    next = text.trim() === '' ? stringifyToml(updated) : patchToml(text, updated)
+    const { patch, stringify } = await tomlPatch()
+    next = text.trim() === '' ? stringify(updated) : patch(text, updated)
   }
   await writeTextAtomic(file, next)
   return true

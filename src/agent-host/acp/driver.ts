@@ -1,12 +1,14 @@
 // ACP over the stdio of the agent's process: the driver of every agent that speaks ACP.
 
-import type { ProcessDriver } from '../driver'
-import { AcpConnection } from './connection'
+import { lazyCode, type ProcessDriver } from '../driver'
+
+const code = lazyCode(() => import('./connection'))
 
 export const ACP_DRIVER: ProcessDriver = {
   kind: 'process',
+  load: code.load,
   connect: (transport, { def, hooks }) =>
-    AcpConnection.connect(transport, {
+    code.get().AcpConnection.connect(transport, {
       ...hooks,
       agentId: def.id,
       name: def.name,

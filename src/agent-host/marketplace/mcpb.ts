@@ -6,7 +6,7 @@
 import path from 'node:path'
 import type { Readable } from 'node:stream'
 import { crc32 } from 'node:zlib'
-import JSZip from 'jszip'
+import type JSZip from 'jszip'
 import type { BundleInput, BundleType } from '@shared/market-community'
 import type { McpValue } from '@shared/marketplace'
 import type { Platform } from '@shared/platform'
@@ -143,7 +143,8 @@ export async function unpackBundle(
   let zip: JSZip
   try {
     // Without a CRC check JSZip only reads the entries; a check would inflate every one first.
-    zip = await JSZip.loadAsync(zipPart(data), { checkCRC32: false })
+    const { default: Zip } = await import('jszip')
+    zip = await Zip.loadAsync(zipPart(data), { checkCRC32: false })
   } catch {
     throw bad(t('marketBundle.notZip'))
   }

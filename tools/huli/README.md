@@ -43,8 +43,8 @@ Code (kept small so upstream merges stay clean):
 | `src/shared/remote/relay.ts`, `relay-regions.ts`                                                                                                       | `RELAY_URL` is Huli Cloud too (its relay, one region, Ashburn); `REGION_KEYS` are Huli's own region list keys (`tools/huli/region-list.mjs`, private halves in `~/.huli-keys`)                                                                                                                                                                                                                                                                                                                              |
 | `src/shared/remote/pairing.ts`                                                                                                                         | `HOSTED_WEB_URL` is Huli's web client, `https://app.huli.132-145-200-0.sslip.io`; `PAIRING_URL` points at `huli.invalid`, which never resolves                                                                                                                                                                                                                                                                                                                                                              |
 | `src/shared/storage.ts`, `src/agent-host/worktrees/git.ts`                                                                                             | home folder `~/.huli` instead of `~/.kettu`                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `src/main/user-data.ts`                                                                                                                                | development data folder `Huli Dev`; an installed build's, `Huli` (`PACKAGED_DATA_FOLDER`), which `src/main/index.ts` pins                                                                                                                                                                                                                                                                                                                                                                                   |
-| `src/main/index.ts`, `src/main/computer-use.ts`                                                                                                        | app user model id `local.huli.app`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `src/main/user-data.ts`                                                                                                                                | development data folder `Huli Dev`; an installed build's, `Huli` (`PACKAGED_DATA_FOLDER`), which `src/main/app.ts` pins                                                                                                                                                                                                                                                                                                                                                                                     |
+| `src/main/app.ts`, `src/main/computer-use.ts`                                                                                                          | app user model id `local.huli.app`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `package.json`                                                                                                                                         | productName `Kite`, version 0.1.0                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `electron-builder.yml`                                                                                                                                 | appId `local.huli.app`, productName `Kite`, `publish` is Huli's update channel (generic), its path a placeholder as above                                                                                                                                                                                                                                                                                                                                                                                   |
 | `src/renderer/src/stores/marketplace.ts`, `features/marketplace/{directory,model}.ts(x)`, `src/agent-host/marketplace/claude-plugins.ts`               | the Marketplace never reads Kettu's community marketplace (kettu.sh) and has no Published tab; its Community section lists Anthropic's community plugin marketplace (`anthropics/claude-plugins-community`, added once to each Claude Code agent) and the community skills on GitHub                                                                                                                                                                                                                        |
@@ -1828,7 +1828,7 @@ it as on a screen; measured on Windows, a minimized or never-shown window instea
 captured and throttles its animation frames, so it is not used. An installed build ignores the
 variable. Stop the copy by ending its process tree (`taskkill /PID <electron-vite's node> /T /F`);
 it saves no window position. `src/main/test-window.ts` holds it; hooks in `src/main/window.ts`
-(the place and `keepInBackground`), `src/main/index.ts` (no tray), `src/main/notifications.ts` and
+(the place and `keepInBackground`), `src/main/app.ts` (no tray), `src/main/notifications.ts` and
 `src/main/computer-overlay.ts`: computer use's floating label and light go off every display too,
 and the copy registers no stop shortcut. `src/main/test-crash.ts`, imported first, logs an
 exception thrown while the copy starts and quits, where Electron would show its modal error box.
@@ -1843,6 +1843,48 @@ passed locally and failed there). Before reporting a change to `mobile/` or `src
 `node tools/huli/check-like-release.mjs`, which type-checks the phone app as the release does, in a
 temp copy of the working tree (or of `--ref <commit>`) with a fresh `npm ci` in `mobile/` and an
 npm cache of its own. Pushing the branch runs the same checks in `huli-checks.yml` (Workflows).
+
+### Memory at rest (空闲内存)
+
+What keeps the processes small while the app sits idle. Measured on the built app (2026-11-24,
+Windows, a test copy with 2 projects, 304 sessions and a 300 KB reply; private bytes 75 s after
+launch plus 5 minutes idle, medians of 3 to 5 alternating launches): the agent host went from 159
+to 98 MB and main from 96 to 84 MB, the app without its GPU process (which varied from 125 to 311 MB
+between launches either way) from 419 to 349 MB; the renderer and network processes did not change
+beyond their noise. The agent host loads its code in 80 ms instead of 105 and is ready about 30 ms
+sooner, and the window is interactive as soon as before (17 launches each).
+
+- Entry files are stubs. Electron loads main's entry file and each utility process's through
+  Node's ESM loader, which keeps a second copy of the file's text, and for a utility process its
+  bytes too, for as long as the process runs: 20 MB in the agent host. So `src/main/index.ts` only
+  imports `app.ts`, and each host's `entry.ts` only its `index.ts`, which `require()` loads and
+  keeps once. Put no code in them.
+- The bundles are ASCII. V8 keeps a script's text at one byte a character only when all of it is
+  ASCII, and a single Chinese word or `—` makes the whole file two bytes a character. Main's build
+  (which the hosts' `?modulePath` builds inherit) and the daemon's escape non-ASCII text and leave
+  out doc comments (`output.charset`, `output.comments`); the renderer's escapes it too, which took
+  the scripts' text the window holds from 13.5 to 8.1 MB.
+- A worker thread costs 15-20 MB however little it does. The usage worker and the thread reader
+  stop after a minute without a request (`IDLE_MS` in `agent-host/usage/store.ts`,
+  `READER_IDLE_MS` in `agent-host/threads/store.ts`) and the next request starts another; the
+  writer answers reads meanwhile. The thread writer runs for good, as it keeps the search index and
+  the media. An ended worker gives back about two thirds of what it held; the allocator keeps the
+  rest for the next one.
+- An agent's connection code loads when one of its agents first starts: each driver's `load()`
+  (`lazyCode` in `agent-host/driver.ts`), which the launcher awaits, reads its `connection.ts`,
+  with the ACP SDK and its schemas for ACP. Import a `connection.ts` elsewhere only as a type.
+- Code for rare actions is `import()`ed where it runs: toml-patch and jsonc-parser (an agent's
+  config file, `launch.json`), JSZip (Marketplace bundles, session export) and main's session
+  export with its Markdown parser.
+- The words of the settings rows (the `settings`, `usage`, `huliAccount` and `agentHistory`
+  catalogs) are in `agent-host/settings-words.ts`, which only the host loads: main and the usage
+  worker share host modules that write the host's own text and load `host.json` alone.
+
+To look into a process, run a copy with `KETTU_DEBUG=1`: `logs/debug-ports.json` lists each
+host's inspector, whose `process.memoryUsage()`, `v8.getHeapStatistics()` and heap snapshot show
+what it holds, and its `NodeWorker` domain reaches the worker threads. Still loaded at launch:
+`tldts` (300 KB, for sign-ins, site icons and the MCP registry's publishers) in main and the host,
+and `yaml` in the host; the renderer bundles both languages' catalogs.
 
 ### Kite's artwork
 
@@ -2006,7 +2048,7 @@ display's, while any session's turn runs or waits on a permission (the tray's `r
 `host:busy-changed`) or a routine run works (`host:routines-working`), and lets it go once all are
 idle. A session paused at a plan limit holds none. The system's lid and battery rules still apply.
 It is all events, nothing polls. `src/main/power-save.ts` (with its test) holds it, wired in
-`src/main/index.ts`. The `kettu` daemon holds nothing: Node.js has no portable way to, and it
+`src/main/app.ts`. The `kettu` daemon holds nothing: Node.js has no portable way to, and it
 mostly runs on machines that do not sleep.
 
 ### Anthropic's own API as a profile (Anthropic 官方（Console API 额度）)
@@ -2836,7 +2878,7 @@ signed in, Huli Cloud's relay from any network, which the hosted web client at
 - The desktop tries a host it cannot reach again with backoff, 1 s doubling to a minute, give or
   take a fifth (`retryDelay` in `src/remote-host/client.ts`); the relay only answers a dial and says
   nothing when a host comes back. `HostLink.nudge` also tries one not connected at once when a
-  window of the app is focused (`browser-window-focus` in `src/main/index.ts`), when the user comes
+  window of the app is focused (`browser-window-focus` in `src/main/app.ts`), when the user comes
   back to the computer (`remote-host:presence` turning true: unlocked, or input after two idle
   minutes) and when this computer signs in to a relay region again (`RelayHost`'s `connected`),
   unless a try began in the last 5 s; a nudge keeps the backoff's count, so a host that stays away

@@ -18,6 +18,15 @@ export default defineConfig({
   main: {
     resolve: { alias: sharedAlias },
     plugins: [notices(), runtime(), brand()],
+    build: {
+      rolldownOptions: {
+        // V8 keeps a file's text, which main, each host and each worker hold for as long as they
+        // run, at one byte a character only when all of it is ASCII, else at two. So the Chinese
+        // copy is escaped and the doc comments, some of them not ASCII, are left out. The hosts'
+        // `?modulePath` builds inherit this.
+        output: { charset: 'ascii', comments: { legal: true, annotation: true, jsdoc: false } },
+      },
+    },
   },
   preload: {
     resolve: { alias: sharedAlias },
@@ -67,6 +76,8 @@ export default defineConfig({
           mini: resolve('src/renderer/mini.html'),
           capture: resolve('src/renderer/capture.html'),
         },
+        // As main's: a page keeps each script's text, at two bytes a character once one is not ASCII.
+        output: { charset: 'ascii' },
       },
     },
   },

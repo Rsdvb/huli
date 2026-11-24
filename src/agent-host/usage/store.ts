@@ -51,39 +51,64 @@ export interface UsageStoreOptions {
   onStatus(status: UsageDbStatus): void
   /** How long closing waits for the worker to fold the WAL before stopping it. */
   closeTimeoutMs?: number
+  /** How long the worker may go without a request before it stops; the next one starts another. */
+  idleMs?: number
 }
 
 type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => void }
 
 /** How many times a worker that stopped on its own is started again. */
 const RESTARTS = 2
+/**
+ * A worker thread holds 15-20 MB however little it does, and the database is used in bursts: at
+ * launch, at the end of a turn, while the usage page is open and for each scan.
+ */
+const IDLE_MS = 60_000
 type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never
+
+/** Why a worker started: the store's first, after one crashed, or after one went unused. */
+type StartReason = 'first' | 'crash' | 'idle'
+
+interface Live {
+  worker: UsageWorker
+  /** Stopped by the store for going unused, so its exit is no failure. */
+  retired: boolean
+}
 
 export class UsageStore {
   /** How the database opened; `unavailable` when the worker never got that far. */
   readonly ready: Promise<UsageDbStatus>
   private settleReady: (status: UsageDbStatus) => void = () => {}
-  private worker: UsageWorker
+  /** The worker requests go to; null while none runs, after it went unused. */
+  private live: Live | null
   private restarts = 0
   private readonly pending = new Map<number, Pending>()
   private nextId = 1
   private stopped: string | null = null
   private closing: Promise<void> | null = null
+  private idleTimer: ReturnType<typeof setTimeout> | null = null
+  /** Workers stopping since they went unused, which closing waits for. */
+  private readonly retiring = new Set<Promise<void>>()
 
   constructor(private readonly options: UsageStoreOptions) {
     this.ready = new Promise((resolve) => {
       this.settleReady = resolve
     })
-    this.worker = this.startWorker()
+    this.live = this.startWorker('first')
   }
 
-  private startWorker(): UsageWorker {
+  private startWorker(reason: StartReason): Live {
     const { options } = this
     const worker = options.createWorker(options.file)
+    const live: Live = { worker, retired: false }
     worker.onMessage((reply) => {
       switch (reply.type) {
         case 'ready':
-          if (this.restarts > 0) options.onStatus(reply.status)
+          // After a crash the manager reads its figures again; after a worker went unused only
+          // a database that no longer opens is news.
+          if (reason === 'crash' || (reason === 'idle' && !opens(reply.status))) {
+            options.onStatus(reply.status)
+          }
           this.settleReady(reply.status)
           break
         case 'log':
@@ -108,6 +133,7 @@ export class UsageStore {
         this.settleReady('unavailable')
         return
       }
+      if (live.retired || live !== this.live) return
       const reason = error
         ? t('usage.workerStoppedWith', { error: error.message })
         : t('usage.workerStopped')
@@ -117,21 +143,65 @@ export class UsageStore {
       if (this.restarts < RESTARTS) {
         this.restarts++
         options.log('warn', `${reason}; starting it again`)
-        this.worker = this.startWorker()
+        this.live = this.startWorker('crash')
         return
       }
       options.log('error', reason)
+      this.live = null
       this.stop(reason)
       this.settleReady('unavailable')
       options.onStatus('unavailable')
     })
-    return worker
+    return live
   }
 
   private settle(id: number): Pending | undefined {
     const pending = this.pending.get(id)
     this.pending.delete(id)
+    if (this.pending.size === 0) this.armIdle()
     return pending
+  }
+
+  /** Stops the worker once it has gone `idleMs` without a request. */
+  private armIdle(): void {
+    if (!this.live || this.stopped || this.closing) return
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null
+      this.retire()
+    }, this.options.idleMs ?? IDLE_MS)
+    this.idleTimer.unref?.()
+  }
+
+  private retire(): void {
+    const live = this.live
+    if (!live || this.pending.size > 0 || this.stopped || this.closing) return
+    live.retired = true
+    this.live = null
+    const done: Promise<void> = this.closeWorker(live).finally(() => this.retiring.delete(done))
+    this.retiring.add(done)
+  }
+
+  /** Folds the WAL into the file, waiting at most `closeTimeoutMs`, and stops the worker. */
+  private async closeWorker(live: Live): Promise<void> {
+    const id = this.nextId++
+    const closed = new Promise<'closed'>((resolve) => {
+      const done = (): void => resolve('closed')
+      this.pending.set(id, { resolve: done, reject: done })
+    })
+    live.worker.postMessage({ op: 'close', id })
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const timeout = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), this.options.closeTimeoutMs ?? 2_000)
+    })
+    const outcome = await Promise.race([closed, timeout])
+    if (timer) clearTimeout(timer)
+    if (outcome === 'timeout') {
+      this.pending.delete(id)
+      if (this.pending.size === 0) this.armIdle()
+      this.options.log('warn', 'The usage database did not close in time; stopping its worker')
+    }
+    await live.worker.terminate()
   }
 
   private stop(reason: string): void {
@@ -146,11 +216,14 @@ export class UsageStore {
 
   private request<T>(request: WithoutId<UsageRequest>): Promise<T> {
     if (this.stopped) return Promise.reject(new Error(this.stopped))
+    if (this.idleTimer) clearTimeout(this.idleTimer)
+    this.idleTimer = null
+    const live = (this.live ??= this.startWorker('idle'))
     const id = this.nextId++
     const promise = new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject })
     })
-    this.worker.postMessage({ ...request, id } as UsageRequest)
+    live.worker.postMessage({ ...request, id } as UsageRequest)
     return promise
   }
 
@@ -187,6 +260,8 @@ export class UsageStore {
 
   /** Stops the scan in progress, which then resolves as cancelled. */
   cancel(): Promise<void> {
+    // A worker that stopped for going unused was running no scan.
+    if (!this.live) return Promise.resolve()
     return this.request({ op: 'cancel' })
   }
 
@@ -201,7 +276,10 @@ export class UsageStore {
   /** Stops any scan, folds the WAL into the file and stops the worker. */
   close(): Promise<void> {
     this.closing ??= (async () => {
-      if (!this.stopped) {
+      if (this.idleTimer) clearTimeout(this.idleTimer)
+      this.idleTimer = null
+      const live = this.live
+      if (live && !this.stopped) {
         const closed = this.request<null>({ op: 'close' }).catch((error: unknown) => {
           this.options.log('warn', `Closing the usage database failed: ${(error as Error).message}`)
         })
@@ -216,8 +294,10 @@ export class UsageStore {
         }
       }
       this.stop('The usage store is closed')
-      await this.worker.terminate()
+      await Promise.all([live?.worker.terminate(), ...this.retiring])
     })()
     return this.closing
   }
 }
+
+const opens = (status: UsageDbStatus): boolean => status !== 'unavailable' && status !== 'newer'
