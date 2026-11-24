@@ -974,6 +974,10 @@
     "noForkPoint": "Codex 在它的历史里找不到这条回复",
     "noRevertPoint": "Codex 在它的历史里找不到这一轮",
     "revertOlderThread": "只有较新版本的 Codex 开始的会话才能撤销一轮",
+    "desktopMcp": {
+      "notSaved": "Codex 还没存下这个会话。先发一条消息，再点仍然启动。",
+      "stillLoaded": "Codex 还在忙这个会话，没能重新打开它。等它空闲了再试。"
+    },
     "option": {
       "mode": "模式",
       "modeDescription": "这个会话的授权和沙箱预设",

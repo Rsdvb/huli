@@ -2768,3 +2768,117 @@ describe("Huli: a session's MCP panel", () => {
     await expect(connection.reloadPlugins('thread-9')).rejects.toThrow()
   })
 })
+
+describe("Huli: the Codex desktop app's MCP servers", () => {
+  const STORE =
+    'C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1111.9664.0_x64__2p2nqsd0c76g0\\app\\resources\\cua_node\\bin'
+  const NODE_REPL = `${STORE}\\node_repl.exe`
+  const appConfig = {
+    mcp_servers: {
+      node_repl: {
+        command: NODE_REPL,
+        args: [],
+        env_vars: ['BROWSER_USE_ACCESS_PIPE_PATH', 'CODEX_WINDOWS_REGISTERED_CORE'],
+        enabled: true,
+      },
+      files: { command: 'files-mcp', args: [], enabled: true },
+    },
+  }
+  const status = (name: string, runtimeStatus: string) => ({
+    name,
+    runtimeStatus,
+    tools: {},
+    toolsError: null,
+    authStatus: 'unsupported',
+  })
+
+  async function connectAt(version: string) {
+    const server = new FakeAppServer()
+    server.on('initialize', () => ({
+      userAgent: `Kettu/${version} (Windows 10.0.26300; x86_64) unknown (Kettu; 0.0.0-test)`,
+      codexHome: os.tmpdir(),
+    }))
+    server.on('config/read', () => ({ config: appConfig, origins: {} }))
+    const connection = new CodexConnection(server.transport, hooks().value, {
+      spec: SPEC,
+      env: { HOME: '/home' },
+      platform: 'darwin',
+    })
+    await connection.initialize('1.2.3')
+    return { server, connection }
+  }
+
+  it("starts them turned off beside Kite's own, and the thread unloads at once", async () => {
+    const { server, connection } = await connectAt('0.172.0')
+    await connection.newSession('/project', {
+      mcpServers: [{ type: 'stdio', name: 'kettu', command: 'kettu-mcp', args: [], env: [] }],
+    })
+    const [start] = server.sent('thread/start')
+    expect(start?.config).toMatchObject({
+      mcp_servers: {
+        node_repl: { command: NODE_REPL, enabled: false },
+        kettu: { command: 'kettu-mcp', args: [] },
+      },
+      thread_unload_delay_secs: 0,
+    })
+    expect(start?.config).not.toHaveProperty('mcp_servers.files')
+    expect(server.sent('config/read')).toEqual([{ includeLayers: false, cwd: '/project' }])
+  })
+
+  it('starts the threads of a Codex not checked for it as before', async () => {
+    const { server, connection } = await connectAt('0.171.0')
+    await connection.newSession('/project')
+    const [start] = server.sent('thread/start')
+    expect(start?.config).not.toHaveProperty('mcp_servers')
+    expect(start?.config).not.toHaveProperty('thread_unload_delay_secs')
+    expect(server.sent('config/read')).toEqual([])
+  })
+
+  it('lists them as the app’s, and starts one anyway by opening the thread again', async () => {
+    const { server, connection } = await connectAt('0.172.0')
+    await connection.resumeSession('thread-7', '/project')
+    server.on('mcpServerStatus/list', () => ({
+      data: [status('node_repl', 'disabled'), status('files', 'disabled')],
+      nextCursor: null,
+    }))
+    const before = await connection.readMcp('thread-7', [])
+    expect(before?.servers.map((s) => [s.name, s.state, s.desktopApp])).toEqual([
+      ['node_repl', 'disabled', true],
+      ['files', 'disabled', undefined],
+    ])
+
+    server.on('thread/unsubscribe', ({ threadId }, fake) => {
+      setTimeout(() => fake.notify('thread/closed', { threadId }), 0)
+      return { status: 'unsubscribed' }
+    })
+    await connection.toggleMcp('thread-7', 'node_repl', true)
+    expect(server.sent('thread/unsubscribe')).toEqual([{ threadId: 'thread-7' }])
+    const resumes = server.sent('thread/resume')
+    expect(resumes).toHaveLength(2)
+    expect(resumes[0]?.config).toHaveProperty('mcp_servers.node_repl.enabled', false)
+    expect(resumes[1]?.config).not.toHaveProperty('mcp_servers')
+    expect(resumes[1]?.config).not.toHaveProperty('thread_unload_delay_secs')
+
+    server.on('mcpServerStatus/list', () => ({
+      data: [status('node_repl', 'failed')],
+      nextCursor: null,
+    }))
+    const after = await connection.readMcp('thread-7', [])
+    expect(after?.servers[0]).not.toHaveProperty('desktopApp')
+    await expect(connection.toggleMcp('thread-7', 'node_repl', true)).rejects.toThrow()
+  })
+
+  it('starts none anyway in a thread never prompted, nor any other server', async () => {
+    const { server, connection } = await connectAt('0.172.0')
+    const { sessionId } = await connection.newSession('/project')
+    await expect(connection.toggleMcp(sessionId, 'node_repl', true)).rejects.toThrow(
+      AgentRequestError,
+    )
+    await connection.resumeSession('thread-7', '/project')
+    await expect(connection.toggleMcp('thread-7', 'files', true)).rejects.toThrow(AgentRequestError)
+    await expect(connection.toggleMcp('thread-7', 'node_repl', false)).rejects.toThrow(
+      AgentRequestError,
+    )
+    expect(server.sent('thread/unsubscribe')).toEqual([])
+  })
+})

@@ -37,6 +37,11 @@ export interface SessionMcpServer {
   plugin: string | null
   /** Its tools' names; null where the agent did not list them, as before it connected. */
   tools: string[] | null
+  /**
+   * Huli: one of the Codex desktop app's own, which Kite starts turned off in the session because
+   * it runs only beside the app; `enable` starts it anyway, for the session alone.
+   */
+  desktopApp?: true
 }
 
 /** One of Codex's apps, a connector of the ChatGPT account. */
