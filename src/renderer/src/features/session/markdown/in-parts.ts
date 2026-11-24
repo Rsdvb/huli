@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { foldBulk } from '@shared/search-fold'
 import { markdownHeight } from '@renderer/features/session/thread-items'
+import { chunkAt, chunkCount, type Chunks } from './chunks'
 
 // A long text renders only its chunks near the view (chunks.ts cuts it at block boundaries); the
 // others hold their place as placeholders of the size they were last laid out at. A streamed reply
@@ -35,16 +36,13 @@ const FIND_TRIES = 8
 const isPlaceholder = (el: Element): boolean => el.hasAttribute('data-part-placeholder')
 
 /** Which chunks are not rendered, and the place each that was rendered keeps. */
-interface View {
+export interface View {
   hidden: ReadonlySet<number>
   slots: ReadonlyMap<number, Slot>
 }
 
 /** A text's chunks and the places measured, kept while its message is not on screen. */
-export interface SavedParts {
-  markdown: string
-  chunks: string[]
-  retryAt: number
+export interface SavedParts extends Chunks {
   slots: Map<number, Slot>
 }
 
@@ -82,14 +80,15 @@ const sameSet = (a: ReadonlySet<number>, b: ReadonlySet<number>): boolean =>
   a.size === b.size && [...a].every((i) => b.has(i))
 
 /** The chunks hidden at first: all but the last ones that fill the view from the text's end. */
-function firstHidden(chunks: readonly string[], slots: ReadonlyMap<number, Slot>): Set<number> {
+function firstHidden(chunks: Chunks, slots: ReadonlyMap<number, Slot>): Set<number> {
   const hidden = new Set<number>()
+  const count = chunkCount(chunks)
   let height = 0
-  let i = chunks.length - 1
+  let i = count - 1
   for (; i >= 0 && height < window.innerHeight; i--) {
-    height += slots.get(i)?.height ?? markdownHeight(chunks[i]!)
+    height += slots.get(i)?.height ?? markdownHeight(chunkAt(chunks, i))
   }
-  for (; i >= 0; i--) if (i < chunks.length - 1) hidden.add(i)
+  for (; i >= 0; i--) if (i < count - 1) hidden.add(i)
   return hidden
 }
 
@@ -97,7 +96,7 @@ function firstHidden(chunks: readonly string[], slots: ReadonlyMap<number, Slot>
 class Parts {
   root: HTMLElement | null = null
   scroller: HTMLElement | null = null
-  chunks: readonly string[] = []
+  chunks: Chunks
   /** The text is still being written, so its last chunk, the live tail, always renders. */
   live = false
   /** Each chunk's place, as measured whenever a rendered chunk lays out. */
@@ -119,9 +118,11 @@ class Parts {
   private apply: (next: (view: View) => View, urgent: boolean) => void
 
   constructor(
+    chunks: Chunks,
     measured: Map<number, Slot>,
     apply: (next: (view: View) => View, urgent: boolean) => void,
   ) {
+    this.chunks = chunks
     this.measured = measured
     this.apply = apply
   }
@@ -158,7 +159,12 @@ class Parts {
     this.root = null
   }
 
-  /** After each render: observes the chunks and placeholders that are new. */
+  /** After any render: the chunks' text, whose tail a streamed update changes. */
+  textChanged(chunks: Chunks): void {
+    this.chunks = chunks
+  }
+
+  /** After a render that changed the chunks or the view: observes the elements that are new. */
   committed(chunks = this.chunks, measured = this.measured, live = this.live): void {
     this.chunks = chunks
     this.measured = measured
@@ -200,15 +206,22 @@ class Parts {
     const root = this.root
     if (!root) return
     const children = root.children
+    // Each box read once: a streamed reply is measured at every update, with each rendered
+    // chunk's neighbours.
+    const boxes = new Map<number, DOMRect>()
+    const boxOf = (i: number): DOMRect => {
+      let box = boxes.get(i)
+      if (!box) boxes.set(i, (box = children[i]!.getBoundingClientRect()))
+      return box
+    }
     for (let i = 0; i < children.length; i++) {
       const el = children[i]!
       if (isPlaceholder(el)) continue
-      const box = el.getBoundingClientRect()
-      const before = i > 0 ? box.top - children[i - 1]!.getBoundingClientRect().bottom : 0
-      const after =
-        i < children.length - 1 ? children[i + 1]!.getBoundingClientRect().top - box.bottom : 0
+      const box = boxOf(i)
+      const before = i > 0 ? box.top - boxOf(i - 1).bottom : 0
+      const after = i < children.length - 1 ? boxOf(i + 1).top - box.bottom : 0
       this.measured.set(i, {
-        length: this.chunks[i]?.length ?? 0,
+        length: i < chunkCount(this.chunks) ? chunkAt(this.chunks, i).length : 0,
         height: box.height,
         before: Math.max(0, before),
         after: Math.max(0, after),
@@ -283,7 +296,8 @@ class Parts {
    * render.
    */
   private next(view: View, show = true): View {
-    const end = this.live ? this.chunks.length - 1 : this.chunks.length
+    const count = chunkCount(this.chunks)
+    const end = this.live ? count - 1 : count
     if (this.found >= 0 && this.inNear.get(this.found)) this.found = -1
     const hidden = new Set<number>()
     const selected = this.selected
@@ -318,8 +332,8 @@ class Parts {
   async reveal(words: readonly string[], shows: (el: Element) => boolean): Promise<Element | null> {
     let first: Element | null = null
     let tries = 0
-    for (let i = 0; i < this.chunks.length && tries < FIND_TRIES; i++) {
-      const text = foldBulk(this.chunks[i]!)
+    for (let i = 0; i < chunkCount(this.chunks) && tries < FIND_TRIES; i++) {
+      const text = foldBulk(chunkAt(this.chunks, i))
       if (!words.some((word) => text.includes(word))) continue
       tries++
       const el = await this.show(i)
@@ -394,40 +408,53 @@ export async function revealPart(
  * that is not rendered keeps its place (`slot`), so the text around it stays put.
  */
 export function useRenderedChunks(
-  chunks: readonly string[],
+  chunks: Chunks,
   live: boolean,
   root: RefObject<HTMLElement | null>,
   measured: Map<number, Slot>,
-): { view: View; rendered: (index: number) => boolean; slot: (index: number) => Slot | null } {
+): View {
   const [view, setView] = useState<View>(() => ({
     hidden: firstHidden(chunks, measured),
     slots: new Map(measured),
   }))
   const [parts] = useState(
     () =>
-      new Parts(measured, (next, urgent) => {
+      new Parts(chunks, measured, (next, urgent) => {
         if (urgent) setView(next)
         else startTransition(() => setView(next))
       }),
   )
-  const windowed = chunks.length > 1
-  useLayoutEffect(() => parts.committed(chunks, measured, live))
+  const windowed = chunkCount(chunks) > 1
+  // A streamed update changes only the tail's text, which a find and a measure read from here;
+  // the elements to observe change only with the settled chunks or the view.
+  useLayoutEffect(() => parts.textChanged(chunks))
+  const { settled } = chunks
+  useLayoutEffect(
+    () => parts.committed(undefined, measured, live),
+    [parts, settled, view, measured, live],
+  )
   useLayoutEffect(() => {
     const el = root.current
     if (!windowed || !el) return
     parts.start(el)
     return () => parts.stop()
   }, [parts, root, windowed])
-  const last = chunks.length - 1
-  return {
-    view,
-    // A text cut back to one chunk, as a footnote makes it, renders it whatever was hidden.
-    rendered: (index) => !windowed || (live && index >= last) || !view.hidden.has(index),
-    slot: (index) => {
-      const slot = view.slots.get(index)
-      return slot && slot.length === chunks[index]?.length ? slot : null
-    },
-  }
+  return view
+}
+
+/**
+ * Whether the chunk at `index` of `count` renders: near the view, or held, or the tail while the
+ * text is written. A text cut back to one chunk, as a footnote makes it, renders it whatever was
+ * hidden.
+ */
+export function isRendered(view: View, index: number, count: number, live: boolean): boolean {
+  return count === 1 || (live && index >= count - 1) || !view.hidden.has(index)
+}
+
+/** The place the chunk at `index`, of `length` characters, keeps while it is not rendered. */
+export function slotOf(view: View, index: number, length: number): Slot | null {
+  const slot = view.slots.get(index)
+  return slot && slot.length === length ? slot : null
 }
 
 /** Where the first chunk in view sat before others rendered or went, to keep it there after. */

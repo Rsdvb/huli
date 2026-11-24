@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react'
+import type { TextStep } from '@shared/thread'
 import { cn } from '@renderer/lib/utils'
 import { loadedMarkdown, loadMarkdown } from './preload'
 
@@ -7,6 +8,8 @@ const DiffImpl = lazy(() => import('./diff-impl'))
 
 export interface MarkdownProps {
   markdown: string
+  /** How an entry's text came to be, so a streamed one reads only what each update appended. */
+  step?: TextStep
   streaming?: boolean
   className?: string
   components?: import('streamdown').Components

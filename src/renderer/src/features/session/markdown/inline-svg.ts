@@ -6,6 +6,14 @@
 const FENCE = /^ {0,3}(`{3,}|~{3,})/
 const OPEN = /^ {0,3}<svg(?=[\s>/])/i
 const TAG = /<(\/?)svg(?=[\s>/])/gi
+const ANY = /<svg[\s>/]/i
+
+/** Where elementEnd stands at the end of a text: the code fence it is in, if any. */
+export interface SvgState {
+  fence: string | null
+}
+
+export const SVG_START: SvgState = { fence: null }
 
 /** Where the `<svg>` element that starts on `line` ends, as an index, or -1 when it goes on. */
 function elementEnd(line: string, depth: { value: number }): number {
@@ -28,10 +36,27 @@ function elementEnd(line: string, depth: { value: number }): number {
  * leaves one that never closes alone, so it does not swallow what follows.
  */
 export function fenceInlineSvg(markdown: string, live: boolean): string {
-  if (!/<svg[\s>/]/i.test(markdown)) return markdown
+  return fenceInlineSvgFrom(markdown, live, SVG_START).text
+}
+
+/**
+ * fenceInlineSvg for a text that follows one that ended in `state`, so a long text can be
+ * written part by part with the same result. `open` says an element in it has not closed by its
+ * end, so the text after decides how it is written. Without `withState`, a text with no `<svg`
+ * comes back as it is with `state`, its lines unread.
+ */
+export function fenceInlineSvgFrom(
+  markdown: string,
+  live: boolean,
+  state: SvgState,
+  withState = true,
+): { text: string; state: SvgState; open: boolean } {
+  const write = ANY.test(markdown)
+  if (!write && !withState) return { text: markdown, state, open: false }
   const lines = markdown.split(/(?<=\n)/)
   let out = ''
-  let fence: string | null = null
+  let fence = state.fence
+  let open = false
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!
     if (fence !== null) {
@@ -47,13 +72,13 @@ export function fenceInlineSvg(markdown: string, live: boolean): string {
       }
       continue
     }
-    const open = FENCE.exec(line)
-    if (open) {
-      fence = open[1]!
+    const opener = FENCE.exec(line)
+    if (opener) {
+      fence = opener[1]!
       out += line
       continue
     }
-    if (!OPEN.test(line)) {
+    if (!write || !OPEN.test(line)) {
       out += line
       continue
     }
@@ -72,6 +97,7 @@ export function fenceInlineSvg(markdown: string, live: boolean): string {
       closed = true
       i = j
     }
+    if (!closed) open = true
     if (!closed && !live) {
       out += line
       continue
@@ -82,7 +108,7 @@ export function fenceInlineSvg(markdown: string, live: boolean): string {
     out += `${element.endsWith('\n') ? '' : '\n'}${ticks}\n`
     if (rest.trim() !== '') out += rest.replace(/^\s+/, '')
   }
-  return out
+  return { text: write ? out : markdown, state: { fence }, open }
 }
 
 function longestRun(text: string): number {

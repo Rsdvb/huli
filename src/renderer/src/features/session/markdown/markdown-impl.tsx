@@ -13,6 +13,7 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentProps,
+  type ReactElement,
   type ReactNode,
 } from 'react'
 import { cjk } from '@streamdown/cjk'
@@ -32,6 +33,7 @@ import {
   type StreamdownProps,
 } from 'streamdown'
 import { githubIssueUrl } from '@shared/git'
+import type { TextStep } from '@shared/thread'
 import { Kbd } from '@renderer/components/ui/kbd'
 import { AgentFileLink, FileLink } from '@renderer/features/files/file-link'
 import { ProjectPathContext, useAgentFileRef, useFileRef } from '@renderer/features/files/file-refs'
@@ -56,18 +58,19 @@ import { localImageTarget, pictureRun, spacedImages } from './local-images'
 import { INCOMPLETE_LINK, localTarget, unopenedTarget } from './local-links'
 import { githubAlerts } from './github-alerts'
 import { bareReferenceNumber } from './github-refs'
-import { fenceInlineSvg } from './inline-svg'
-import { fenceBracketMath } from './maths'
 import { remarkPlugins } from './remark'
 import { BlockCode } from './code-frame'
 import { MarkdownTable } from './markdown-table'
 import {
+  isRendered,
   KeepInPlace,
   saveParts,
   savedParts,
+  slotOf,
   useRenderedChunks,
   type SavedParts,
   type Slot,
+  type View,
 } from './in-parts'
 import { LiveContext } from './live'
 import type { MarkdownProps } from './index'
@@ -343,14 +346,32 @@ const repair = { katex: false }
  * The text's chunks, kept from the previous render while the text only grows. A long message's are
  * kept while it is not shown too, with the places its chunks were laid out at (in-parts.ts).
  */
-function useChunks(markdown: string, key: string | null): SavedParts {
-  const [split, setSplit] = useState<SavedParts>(() => {
+function useChunks(
+  markdown: string,
+  live: boolean,
+  key: string | null,
+  step: TextStep | undefined,
+): SavedParts {
+  const textId = step?.id ?? null
+  const [split, setSplit] = useState<SavedParts & { textId: number | null }>(() => {
     const kept = savedParts(key, markdown)
-    const chunks = splitIntoChunks(markdown, kept ?? undefined)
-    return { slots: kept?.slots ?? new Map(), markdown, ...chunks }
+    return {
+      ...splitIntoChunks(markdown, live, kept ?? undefined),
+      slots: kept?.slots ?? new Map(),
+      textId,
+    }
   })
-  if (split.markdown === markdown) return split
-  const next = { slots: split.slots, markdown, ...splitIntoChunks(markdown, split) }
+  // The same string, as an entry changed otherwise keeps it, compares without reading it.
+  if (split.markdown === markdown && split.live === live) {
+    if (split.textId !== textId) setSplit({ ...split, textId })
+    return split
+  }
+  const appended = step && step.after !== null && step.after === split.textId
+  const next = {
+    ...splitIntoChunks(markdown, live, split, appended ? step.appended : undefined),
+    slots: split.slots,
+    textId,
+  }
   setSplit(next)
   return next
 }
@@ -370,17 +391,44 @@ const ChunkPlaceholder = memo(function ChunkPlaceholder({
   return <div aria-hidden className="markdown-chunk" data-part-placeholder="" style={style} />
 })
 
+type ChunkOptions = Pick<MarkdownProps, 'components' | 'remarkPlugins'>
+
+/** The chunk at `index`, rendered or holding its place. */
+function chunkElement(
+  index: number,
+  markdown: string,
+  rendered: boolean,
+  view: View,
+  live: boolean,
+  { components, remarkPlugins }: ChunkOptions,
+): ReactElement {
+  // By position: when the tail settles, the chunk in its place keeps its rendered blocks.
+  return rendered ? (
+    <Chunk
+      key={index}
+      markdown={markdown}
+      live={live}
+      components={components}
+      remarkPlugins={remarkPlugins}
+    />
+  ) : (
+    <ChunkPlaceholder key={index} markdown={markdown} slot={slotOf(view, index, markdown.length)} />
+  )
+}
+
 /**
  * Agent prose. Raw HTML goes through the sanitizer, and an inline `<svg>` is first written as an
  * `svg` code block (`inline-svg.ts`) and a `\[...\]` on lines of its own as a `$$` block
  * (`maths.ts`). A long text renders in chunks (`chunks.ts`), so a streamed update re-renders, lays
  * out and paints the live tail instead of the whole message, and only its chunks near the view
- * render (`in-parts.ts`). Streaming mode splits each chunk into memoized blocks, and the mode never
- * changes: static mode renders one tree, so switching when a message finishes would rebuild all
- * of it. Finishing only turns off incomplete-markdown repair.
+ * render (`in-parts.ts`). The settled chunks' elements are kept while only the tail changes, so an
+ * update renders the tail alone. Streaming mode splits each chunk into memoized blocks, and the
+ * mode never changes: static mode renders one tree, so switching when a message finishes would
+ * rebuild all of it. Finishing only turns off incomplete-markdown repair.
  */
 function MarkdownImpl({
   markdown,
+  step,
   streaming = false,
   className,
   components: customComponents,
@@ -393,35 +441,40 @@ function MarkdownImpl({
   const sessionId = useContext(SessionIdContext)
   const entryId = useContext(EntryIdContext)
   const key = sessionId !== null && entryId !== null ? `${sessionId}\0${entryId}` : null
-  const split = useChunks(
-    useMemo(() => fenceBracketMath(fenceInlineSvg(markdown, live), live), [markdown, live]),
-    key,
-  )
-  const { chunks, slots } = split
+  const split = useChunks(markdown, live, key, step)
+  const { settled, tail, slots } = split
+  const count = settled.length + 1
   const root = useRef<HTMLDivElement>(null)
-  const { view, rendered, slot } = useRenderedChunks(chunks, streaming, root, slots)
+  const view = useRenderedChunks(split, streaming, root, slots)
   useEffect(() => {
-    if (chunks.length > 1) saveParts(key, split)
-  }, [key, split, chunks.length])
+    if (count > 1) saveParts(key, split)
+  }, [key, split, count])
   const [named] = useState(() => new NamedMedia())
+  const options = useMemo(
+    () => ({ components: customComponents, remarkPlugins: customRemarkPlugins }),
+    [customComponents, customRemarkPlugins],
+  )
+  const settledElements = useMemo(
+    () =>
+      settled.map((chunk, i) =>
+        chunkElement(i, chunk, isRendered(view, i, count, streaming), view, live, options),
+      ),
+    [settled, view, count, streaming, live, options],
+  )
+  const last = settled.length
+  const tailElement = chunkElement(
+    last,
+    tail,
+    isRendered(view, last, count, streaming),
+    view,
+    live,
+    options,
+  )
   return (
     <div ref={root} className={cn('markdown', className)}>
       <NamedMediaContext value={named}>
         <KeepInPlace root={root} view={view}>
-          {chunks.map((chunk, i) =>
-            // By position: when the tail settles, the chunk in its place keeps its rendered blocks.
-            rendered(i) ? (
-              <Chunk
-                key={i}
-                markdown={chunk}
-                live={live}
-                components={customComponents}
-                remarkPlugins={customRemarkPlugins}
-              />
-            ) : (
-              <ChunkPlaceholder key={i} markdown={chunk} slot={slot(i)} />
-            ),
-          )}
+          {count === 1 ? [tailElement] : [...settledElements, tailElement]}
         </KeepInPlace>
       </NamedMediaContext>
     </div>

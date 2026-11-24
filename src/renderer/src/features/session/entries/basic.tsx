@@ -17,6 +17,7 @@ import { HugeiconsIcon } from '@hugeicons/react'
 import { Trans, useTranslation } from 'react-i18next'
 import type { RoutineRef } from '@shared/routines'
 import { parseReplyRunNotice } from '@shared/terminal-agent'
+import { textStep } from '@shared/thread'
 import { Alert, AlertDescription, AlertTitle } from '@renderer/components/ui/alert'
 import { Button } from '@renderer/components/ui/button'
 import { toast } from '@renderer/components/ui/toast'
@@ -212,7 +213,7 @@ export const AgentEntry = memo(function AgentEntry({ sessionId, entryId }: Entry
         <SessionIdContext value={sessionId}>
           <EntryIdContext value={entryId}>
             <ReplyContext value={sessionId}>
-              <Markdown markdown={entry.markdown} streaming={writing} />
+              <Markdown markdown={entry.markdown} step={textStep(entry)} streaming={writing} />
             </ReplyContext>
           </EntryIdContext>
         </SessionIdContext>
@@ -259,6 +260,7 @@ export const ThoughtEntry = memo(function ThoughtEntry({ sessionId, entryId }: E
           <Clamp maxHeight={90} buttonClassName="-mx-1.5">
             <Markdown
               markdown={entry.markdown}
+              step={textStep(entry)}
               streaming={entry.streaming}
               className="markdown-muted markdown-thought"
             />
