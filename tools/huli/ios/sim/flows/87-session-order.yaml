@@ -31,7 +31,6 @@ appId: io.github.rsdvb.huli
       - scrollUntilVisible:
           element: '.*排序 B.*'
           direction: DOWN
-          centerElement: true
       - assertVisible:
           text: '.*排序 A.*'
           below:
