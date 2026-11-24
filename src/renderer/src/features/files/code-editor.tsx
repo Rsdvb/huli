@@ -16,10 +16,18 @@ import {
   Transaction,
   type Extension,
 } from '@codemirror/state'
-import { Decoration, GutterMarker, gutterLineClass, keymap, ViewPlugin } from '@codemirror/view'
+import {
+  Decoration,
+  drawSelection,
+  GutterMarker,
+  gutterLineClass,
+  keymap,
+  ViewPlugin,
+} from '@codemirror/view'
 import { styleTags, tags } from '@lezer/highlight'
 import { basicSetup, EditorView } from 'codemirror'
 import type { FileContent } from '@shared/files'
+import { caretPeriod } from '@renderer/app/caret-hold'
 import { useCodeThemes } from '@renderer/features/session/markdown/code-themes'
 import { useDark } from '@renderer/hooks/use-dark'
 import { i18n } from '@renderer/lib/i18n'
@@ -250,8 +258,12 @@ function createBuffer(
     scroll: null,
     jumped: -1,
   }
+  const period = caretPeriod()
   const extensions: Extension[] = [
     basicSetup,
+    // Huli: the system's caret blink. CodeMirror keeps the shortest rate it is given, so one slower
+    // than its own 1.2 s stays at that.
+    period === null ? [] : drawSelection({ cursorBlinkRate: period }),
     // Under the header, as the pane's other bars.
     search({ top: true }),
     EditorState.phrases.of(phrases()),
