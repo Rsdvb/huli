@@ -1,4 +1,4 @@
-import { memo, useMemo, useRef, useState, type ReactElement } from 'react'
+import { memo, useMemo, useRef, useState, useSyncExternalStore, type ReactElement } from 'react'
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
@@ -63,6 +63,57 @@ import { useRenaming } from './use-renaming'
 /** Ring segments grow in this long after a task starts, as its row takes its session's place. */
 const FRESH_MS = 2_000
 
+const onViewOrSessions = (changed: () => void): (() => void) => {
+  const stopView = useViewStore.subscribe(changed)
+  const stopSessions = useSessionsStore.subscribe(changed)
+  return () => {
+    stopView()
+    stopSessions()
+  }
+}
+
+/**
+ * Whether the session in front is the task's origin or one of its steps'. A yes or no from both
+ * stores: selecting the front session's id rendered every task row whenever a session opened.
+ */
+function useSessionInFront(taskId: string, originId: string | undefined): boolean {
+  return useSyncExternalStore(onViewOrSessions, () => {
+    const { main, settings } = useViewStore.getState()
+    if (settings.open || main.kind !== 'session') return false
+    return (
+      main.sessionId === originId ||
+      useSessionsStore.getState().byId[main.sessionId]?.task?.taskId === taskId
+    )
+  })
+}
+
+interface TaskRowProps {
+  task: TaskSummary
+  origin?: SessionNode
+  tabStopId: string | null
+  showHost?: boolean
+  indent?: boolean
+  /** In Needs you, where a row stands alone, without its steps. */
+  flat?: boolean
+}
+
+/** Whether the list's Tab stop is the task's row, its conversation's or one of its steps'. */
+const holdsStop = ({ task, origin }: TaskRowProps, id: string | null): boolean =>
+  id !== null &&
+  (id === task.id || id === origin?.summary.id || startedSteps(task).some((row) => row.id === id))
+
+/**
+ * The Tab stop follows the session shown, so it moves on every open; only the rows it leaves and
+ * reaches render for it, not every task's.
+ */
+const sameTaskRow = (a: TaskRowProps, b: TaskRowProps): boolean =>
+  a.task === b.task &&
+  a.origin === b.origin &&
+  a.showHost === b.showHost &&
+  a.indent === b.indent &&
+  a.flat === b.flat &&
+  (a.tabStopId === b.tabStopId || (!holdsStop(a, a.tabStopId) && !holdsStop(b, b.tabStopId)))
+
 /**
  * A task in its project, as a session's row: the caret, its progress ring in place of an agent's
  * mark, its title, the pull requests of its branch and the session row's one status slot over the
@@ -78,15 +129,7 @@ export const TaskRow = memo(function TaskRow({
   showHost = false,
   indent = false,
   flat = false,
-}: {
-  task: TaskSummary
-  origin?: SessionNode
-  tabStopId: string | null
-  showHost?: boolean
-  indent?: boolean
-  /** In Needs you, where a row stands alone, without its steps. */
-  flat?: boolean
-}) {
+}: TaskRowProps) {
   const { t } = useTranslation(['tasks', 'sidebar'])
   const hostId = hostOfPath(task.projectPath)
   const otherHost = useOtherHost(hostId)
@@ -95,16 +138,8 @@ export const TaskRow = memo(function TaskRow({
   const current = useViewStore(
     (s) => !s.settings.open && s.main.kind === 'task' && s.main.taskId === task.id,
   )
-  const frontSession = useViewStore((s) =>
-    !s.settings.open && s.main.kind === 'session' ? s.main.sessionId : null,
-  )
   const originId = flat ? undefined : origin?.summary.id
-  const inFront = useSessionsStore(
-    (s) =>
-      current ||
-      (frontSession !== null &&
-        (frontSession === originId || s.byId[frontSession]?.task?.taskId === task.id)),
-  )
+  const inFront = useSessionInFront(task.id, originId) || current
   const userExpanded = useViewStore((s) => s.expandedParents[task.id])
   const steps = useMemo(() => startedSteps(task), [task])
   const hasSteps = (steps.length > 0 || originId !== undefined) && !flat
@@ -370,7 +405,7 @@ export const TaskRow = memo(function TaskRow({
       <DeleteTaskDialog task={task} open={deleting} onOpenChange={setDeleting} />
     </motion.li>
   )
-})
+}, sameTaskRow)
 
 /** A folded task's status with its conversation's, the loudest of each. */
 function withOrigin(own: RowStatus, origin: RowStatus | null): RowStatus {
