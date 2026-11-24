@@ -1674,6 +1674,7 @@ export function applyPatches(
   let { session, order, byId } = state
   let byIdCopied = false
   let orderCopied = false
+  const madeHere = new Set<ThreadEntry>()
 
   const writableById = (): Record<string, ThreadEntry> => {
     if (!byIdCopied) {
@@ -1704,7 +1705,17 @@ export function applyPatches(
           if (partial) break
           throw new UnknownEntryError(patch.id)
         }
-        writableById()[patch.id] = appendText(entry, patch.text)
+        const next = appendText(entry, patch.text)
+        // No reader has had an entry this call made, so the step starts where that one's did.
+        const earlier = madeHere.has(entry) ? appends.get(entry) : undefined
+        appends.set(
+          next,
+          earlier
+            ? { after: earlier.after, text: earlier.text + patch.text }
+            : { after: textIdOf(entry), text: patch.text },
+        )
+        madeHere.add(next)
+        writableById()[patch.id] = next
         break
       }
       case 'entry.update': {
@@ -1796,6 +1807,36 @@ export function applyPatchInPlace(state: ThreadState, patch: Patch): ThreadState
       return state
     }
   }
+}
+
+// Each entry's text by a number, and what applyPatches appended to make it. A long reply's text
+// is left in pieces by its appends, and reading it whole joins it into one string the size of all
+// of it, at every update; a reader that holds the text before can take the new part from here.
+const textIds = new WeakMap<ThreadEntry, number>()
+const appends = new WeakMap<ThreadEntry, { after: number; text: string }>()
+let nextTextId = 1
+
+function textIdOf(entry: ThreadEntry): number {
+  let id = textIds.get(entry)
+  if (id === undefined) textIds.set(entry, (id = nextTextId++))
+  return id
+}
+
+/** Where an entry's text stands: its number, and the text appended to the one numbered `after`. */
+export interface TextStep {
+  id: number
+  /** The text this one was made from by appending `appended`, or null when it was not. */
+  after: number | null
+  appended: string
+}
+
+/**
+ * The step that made `entry`'s text (`markdown`, or a compaction's `summary`), by applyPatches: a
+ * reader that has the text numbered `after` gets this one by adding `appended` to it.
+ */
+export function textStep(entry: ThreadEntry): TextStep {
+  const append = appends.get(entry)
+  return { id: textIdOf(entry), after: append?.after ?? null, appended: append?.text ?? '' }
 }
 
 function appendText(entry: ThreadEntry, text: string): ThreadEntry {

@@ -1,4 +1,6 @@
 import { parseMarkdownIntoBlocks } from 'streamdown'
+import { fenceInlineSvgFrom, SVG_START, type SvgState } from './inline-svg'
+import { BRACKET_START, fenceBracketMathFrom, type BracketState } from './maths'
 
 /**
  * A chunk is cut once the text after the previous one grows past this many characters: a screen
@@ -15,48 +17,144 @@ const LIVE_BLOCKS = 2
 const FOOTNOTE = /\[\^[\w-]{1,200}\]/
 const LINK_DEFINITION = /^ {0,3}\[[^\]]+\]:/m
 
+/** Where the rewrites before parsing (prepare) stand at a cut, which the next chunk goes on from. */
+interface Rewrites {
+  svg: SvgState
+  math: BracketState
+}
+
+const START: Rewrites = { svg: SVG_START, math: BRACKET_START }
+
+const NONE: readonly string[] = []
+
 export interface Chunks {
-  /** Joined, the text. All but the last are settled; the last is the live tail. */
-  chunks: string[]
+  /** The text the chunks were cut from, as given. */
+  markdown: string
+  /** Whether the tail was written for a text still being written. */
+  live: boolean
+  /**
+   * The settled chunks, prepared for parsing: none changes once cut, and the array stays the same
+   * while no chunk settles, so a streamed update renders and allocates for the tail alone.
+   */
+  settled: readonly string[]
+  /** The length of the text the settled chunks were cut from. */
+  settledLength: number
+  /** Where the rewrites stand at the end of the settled chunks. */
+  rewrites: Rewrites
+  /** The text after the settled chunks, as given. */
+  rest: string
+  /** The rest, prepared: the live tail, or a finished text's last chunk. */
+  tail: string
   /** The text length at which the tail is looked at again. */
   retryAt: number
+}
+
+/** The chunks' count: the settled ones and the tail. */
+export const chunkCount = (chunks: Chunks): number => chunks.settled.length + 1
+
+/** The chunk at `index`, the tail past the settled ones. */
+export const chunkAt = (chunks: Chunks, index: number): string =>
+  index < chunks.settled.length ? chunks.settled[index]! : chunks.tail
+
+/**
+ * The text as the renderer parses it: an inline `<svg>` written as an `svg` code block
+ * (`inline-svg.ts`) and a `\[...\]` on lines of its own as a `$$` block (`maths.ts`), going on
+ * from `from`. `open` says one of them has not closed by the text's end.
+ */
+function prepare(
+  text: string,
+  live: boolean,
+  from: Rewrites,
+  withState: boolean,
+): { text: string; rewrites: Rewrites; open: boolean } {
+  const svg = fenceInlineSvgFrom(text, live, from.svg, withState)
+  const math = fenceBracketMathFrom(svg.text, live, from.math, withState)
+  return {
+    text: math.text,
+    rewrites: { svg: svg.state, math: math.state },
+    open: svg.open || math.open,
+  }
 }
 
 /**
  * Splits markdown into chunks that end on block boundaries, so a long message renders as settled
  * chunks that never change plus a live tail, and each streamed update costs the tail rather than
  * the whole message. When the text only grew since `previous`, its settled chunks are kept as
- * they are, and the tail is lexed again only every few thousand characters.
+ * they are and only the tail is prepared again; the tail is lexed again only every few thousand
+ * characters. A chunk is cut only where no rewritten picture or formula runs on past it, so
+ * preparing each chunk after the one before gives the text it would as a whole.
+ *
+ * `appended`, when given, is what was added to `previous.markdown` to make `text` (thread.ts,
+ * textStep). Then nothing reads the whole text: an append leaves it in pieces, and reading it, even
+ * to compare or slice it, joins them into one string the size of all of it, at every update.
  */
-export function splitIntoChunks(text: string, previous?: Chunks): Chunks {
-  const chunks: string[] = []
-  let offset = 0
-  for (const chunk of previous?.chunks.slice(0, -1) ?? []) {
-    if (!text.startsWith(chunk, offset)) break
-    chunks.push(chunk)
-    offset += chunk.length
-  }
-  const kept = previous !== undefined && chunks.length === previous.chunks.length - 1
+export function splitIntoChunks(
+  text: string,
+  live: boolean,
+  previous?: Chunks,
+  appended?: string,
+): Chunks {
+  const grown = previous !== undefined && appended !== undefined
+  const kept = grown || (previous !== undefined && keepsSettled(text, previous))
+  let settled = kept ? previous!.settled : NONE
+  let offset = kept ? previous!.settledLength : 0
+  let rewrites = kept ? previous!.rewrites : START
+  let rest = grown ? previous!.rest + appended : text.slice(offset)
   // Settled chunks hold neither, so only the text after them needs the test.
-  const rest = text.slice(offset)
   if (FOOTNOTE.test(rest) || LINK_DEFINITION.test(rest)) {
-    return { chunks: [text], retryAt: 0 }
+    return {
+      markdown: text,
+      live,
+      settled: NONE,
+      settledLength: 0,
+      rewrites: START,
+      rest: text,
+      tail: prepare(text, live, START, false).text,
+      retryAt: 0,
+    }
   }
-  if (kept && text.length < previous.retryAt)
-    return { chunks: [...chunks, rest], retryAt: previous.retryAt }
+  if (kept && text.length < previous!.retryAt) {
+    return {
+      ...previous!,
+      markdown: text,
+      live,
+      rest,
+      tail: prepare(rest, live, rewrites, false).text,
+    }
+  }
   for (;;) {
-    const length = settledLength(text, offset)
-    if (length === 0) break
-    chunks.push(own(text.slice(offset, offset + length)))
-    offset += length
+    const from = rewrites
+    const cut = nextCut(rest, (length) => {
+      const chunk = prepare(rest.slice(0, length), live, from, true)
+      return chunk.open ? null : chunk
+    })
+    if (!cut) break
+    settled = [...settled, own(cut.chunk.text)]
+    offset += cut.length
+    rewrites = cut.chunk.rewrites
+    rest = rest.slice(cut.length)
   }
-  const tail = text.length - offset
   return {
-    chunks: [...chunks, text.slice(offset)],
+    markdown: text,
+    live,
+    settled,
+    settledLength: offset,
+    rewrites,
+    rest,
+    tail: prepare(rest, live, rewrites, false).text,
     // A tail too long to settle is one large block still arriving; it is looked at again after
     // half a chunk more.
-    retryAt: tail > CHUNK_SIZE ? text.length + CHUNK_SIZE / 2 : offset + CHUNK_SIZE + 1,
+    retryAt: rest.length > CHUNK_SIZE ? text.length + CHUNK_SIZE / 2 : offset + CHUNK_SIZE + 1,
   }
+}
+
+/** Whether `text` still starts with what `previous` settled. */
+function keepsSettled(text: string, previous: Chunks): boolean {
+  const length = previous.settledLength
+  if (length === 0) return true
+  if (text.length < length) return false
+  // Streamed text only grows, so the whole of the previous text is the common case.
+  return text.startsWith(previous.markdown) || text.startsWith(previous.markdown.slice(0, length))
 }
 
 /**
@@ -68,18 +166,25 @@ function own(text: string): string {
   return JSON.parse(JSON.stringify(text)) as string
 }
 
-/** The length of the next chunk from `offset`, or 0 when what follows is still live. */
-function settledLength(text: string, offset: number): number {
-  const rest = text.length - offset
-  if (rest <= CHUNK_SIZE) return 0
+/**
+ * The first chunk of `text`: the first run of its settled blocks of CHUNK_SIZE or more, or all of
+ * them when they come to less, that `fits` takes; null when what there is is still live.
+ */
+function nextCut<T>(
+  text: string,
+  fits: (length: number) => T | null,
+): { length: number; chunk: T } | null {
+  if (text.length <= CHUNK_SIZE) return null
   // Lexing a window rather than the rest keeps a long finished message linear to split.
   for (let window = 2 * CHUNK_SIZE; ; window *= 2) {
-    const blocks = parseMarkdownIntoBlocks(text.slice(offset, offset + window))
+    const blocks = parseMarkdownIntoBlocks(text.slice(0, window)).slice(0, -LIVE_BLOCKS)
     let length = 0
-    for (const block of blocks.slice(0, -LIVE_BLOCKS)) {
-      length += block.length
-      if (length >= CHUNK_SIZE) break
+    for (let i = 0; i < blocks.length; i++) {
+      length += blocks[i]!.length
+      if (length < CHUNK_SIZE && i < blocks.length - 1) continue
+      const chunk = fits(length)
+      if (chunk) return { length, chunk }
     }
-    if (length > 0 || window >= rest) return length
+    if (window >= text.length) return null
   }
 }

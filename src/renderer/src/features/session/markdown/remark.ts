@@ -7,7 +7,7 @@ import { githubRefs } from './github-refs'
 import { gluedLinks } from './glued-links'
 import { localImages } from './local-images'
 import { localLinks } from './local-links'
-import { replyMath } from './maths'
+import { openMath, replyMath } from './maths'
 
 type RemarkPlugins = NonNullable<StreamdownProps['remarkPlugins']>
 
@@ -27,6 +27,7 @@ export const remarkPlugins: RemarkPlugins = [
   gluedLinks,
   [remarkMath, { singleDollarTextMath: false }],
   replyMath,
+  openMath,
   remarkBreaks,
   emojiShortcodes,
   codexCitations,

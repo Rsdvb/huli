@@ -18,6 +18,7 @@ import { fenceFileName, fenceLanguage, fenceStartLine, foldLines } from './code-
 import { CommandBar } from './command-bar'
 import { isCommandLanguage, useSessionPlatform } from './command'
 import { LiveContext, ReplyContext } from './live'
+import { OPEN_MATH } from './maths'
 import { SvgBlock } from './svg-block'
 
 const MermaidBlock = lazy(() => import('./mermaid-block'))
@@ -37,13 +38,16 @@ function codeOf(children: ReactNode): string {
 export function BlockCode({ node, className, children }: ComponentProps<'code'> & ExtraProps) {
   const isIncomplete = useIsCodeFenceIncomplete()
   const reply = useContext(ReplyContext)
+  const live = useContext(LiveContext)
   const language = /language-(\S+)/.exec(className ?? '')?.[1] ?? ''
   const meta = node?.properties?.metastring
   const code = codeOf(children)
   if (language === 'math') {
+    // A `$$` block still open shows its source while the message is written (maths.ts).
+    const open = isIncomplete || (live && meta === OPEN_MATH)
     return (
       <Suspense fallback={<MathSource tex={code} />}>
-        <MathBlock tex={code} isIncomplete={isIncomplete} />
+        <MathBlock tex={code} isIncomplete={open} />
       </Suspense>
     )
   }

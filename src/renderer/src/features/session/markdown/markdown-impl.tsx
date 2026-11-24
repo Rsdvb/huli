@@ -14,10 +14,16 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentProps,
+  type ReactElement,
   type ReactNode,
+  type RefObject,
 } from 'react'
 import { cjk } from '@streamdown/cjk'
-import { createCodePlugin } from '@streamdown/code'
+import {
+  createCodePlugin,
+  type CodeHighlighterPlugin,
+  type HighlightResult,
+} from '@streamdown/code'
 import { Tick02Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
@@ -29,6 +35,7 @@ import {
   type StreamdownProps,
 } from 'streamdown'
 import { githubIssueUrl } from '@shared/git'
+import type { TextStep } from '@shared/thread'
 import { Kbd } from '@renderer/components/ui/kbd'
 import { AgentFileLink, FileLink } from '@renderer/features/files/file-link'
 import { ProjectPathContext, useAgentFileRef, useFileRef } from '@renderer/features/files/file-refs'
@@ -54,18 +61,19 @@ import { ArtifactLink } from './artifact-link'
 import { INCOMPLETE_LINK, localTarget, unopenedTarget } from './local-links'
 import { githubAlerts } from './github-alerts'
 import { bareReferenceNumber } from './github-refs'
-import { fenceInlineSvg } from './inline-svg'
-import { fenceBracketMath } from './maths'
 import { remarkPlugins } from './remark'
 import { BlockCode } from './code-frame'
 import { MarkdownTable } from './markdown-table'
 import {
+  isRendered,
   KeepInPlace,
   saveParts,
   savedParts,
+  slotOf,
   useRenderedChunks,
   type SavedParts,
   type Slot,
+  type View,
 } from './in-parts'
 import { LiveContext } from './live'
 import type { MarkdownProps } from './index'
@@ -73,10 +81,38 @@ import type { MarkdownProps } from './index'
 // KaTeX, its styles and fonts load with the first formula, not with every reply.
 const InlineMath = lazy(() => import('./math').then((m) => ({ default: m.InlineMath })))
 
+/** Code as it is, one plain token a line: what Streamdown shows before Shiki has loaded. */
+function plainTokens(code: string): HighlightResult {
+  return {
+    bg: 'transparent',
+    fg: 'inherit',
+    tokens: code
+      .split('\n')
+      .map((content) => [
+        { content, color: 'inherit', bgColor: 'transparent', htmlStyle: {}, offset: 0 },
+      ]),
+  }
+}
+
+/**
+ * Shiki for a closed block only: one still being written shows its code plain until its fence
+ * closes, and is highlighted once then. Highlighting it on every chunk tokenized it again and
+ * set the colors of all its spans anew, which restyled every one of them.
+ */
+function highlightClosed(shiki: CodeHighlighterPlugin): CodeHighlighterPlugin {
+  return {
+    ...shiki,
+    highlight: (options, done) =>
+      options.isIncomplete ? plainTokens(options.code) : shiki.highlight(options, done),
+  }
+}
+
 // Fenced blocks go through BlockCode, which picks maths, SVG, diagrams or code by language.
 function createPlugins({ light, dark }: CodeThemes) {
   return {
-    code: createCodePlugin({ themes: [codeThemeInput(light), codeThemeInput(dark)] }),
+    code: highlightClosed(
+      createCodePlugin({ themes: [codeThemeInput(light), codeThemeInput(dark)] }),
+    ),
     cjk,
   }
 }
@@ -307,18 +343,125 @@ const linkSafety = { enabled: false }
 // The blocks and tables draw their own actions (code-frame.tsx, markdown-table.tsx).
 const controls = false
 
+// A `$$` still open is left open, so it shows as its source and KaTeX draws it once it closes
+// (maths.ts, openMath), instead of being closed for KaTeX at every chunk.
+const repair = { katex: false }
+
+/**
+ * How often, at most, a text being written renders what came: each render of the tail parses its
+ * open block again and restyles and lays it out, and rendering at every chunk of a fast stream kept
+ * Blink's heap growing by about 300 MB over a 300 KB reply.
+ */
+const WRITING_RENDER_MS = 50
+
+interface Text {
+  markdown: string
+  step: TextStep | undefined
+}
+
+/** What has come since the text shown: the newest text, and one step to it from the one shown. */
+interface Waiting {
+  markdown: string
+  id: number | null
+  /** The id of the text shown. */
+  from: number | null
+  /** What was appended to the text shown, or null when it changed otherwise. */
+  appended: string | null
+  /** When the text shown was last replaced. */
+  at: number
+  timer: ReturnType<typeof setTimeout> | undefined
+}
+
+/**
+ * The text a message renders: while it is written, what came at most every WRITING_RENDER_MS,
+ * the newest always following within that time; the rest of the time, and as soon as the writing
+ * ends, the text as it is. The step given to useChunks goes from the text shown, so it still reads
+ * only what was appended.
+ */
+function useWritingCadence(markdown: string, step: TextStep | undefined, writing: boolean): Text {
+  const [shown, setShown] = useState<Text>(() => ({ markdown, step }))
+  if (!writing && (shown.markdown !== markdown || shown.step?.id !== step?.id)) {
+    setShown({ markdown, step })
+  }
+  const waiting = useRef<Waiting>({
+    markdown,
+    id: step?.id ?? null,
+    from: step?.id ?? null,
+    appended: '',
+    at: 0,
+    timer: undefined,
+  })
+  useLayoutEffect(() => {
+    const queue = waiting.current
+    if (!writing) {
+      clearTimeout(queue.timer)
+      Object.assign(queue, { markdown, id: step?.id ?? null, appended: '', timer: undefined })
+      queue.from = queue.id
+      return
+    }
+    if (markdown === queue.markdown) return
+    const id = step?.id ?? null
+    const follows = step !== undefined && step.after !== null && step.after === queue.id
+    queue.appended = follows && queue.appended !== null ? queue.appended + step.appended : null
+    queue.markdown = markdown
+    queue.id = id
+    if (queue.timer !== undefined) return
+    const show = (): void => {
+      queue.timer = undefined
+      queue.at = performance.now()
+      const next: TextStep | undefined =
+        queue.id === null
+          ? undefined
+          : {
+              id: queue.id,
+              after: queue.appended === null ? null : queue.from,
+              appended: queue.appended ?? '',
+            }
+      setShown({ markdown: queue.markdown, step: next })
+      queue.from = queue.id
+      queue.appended = ''
+    }
+    const wait = queue.at + WRITING_RENDER_MS - performance.now()
+    if (wait <= 0) show()
+    else queue.timer = setTimeout(show, wait)
+  })
+  useEffect(() => {
+    const queue = waiting.current
+    return () => clearTimeout(queue.timer)
+  }, [])
+  return writing ? shown : { markdown, step }
+}
+
 /**
  * The text's chunks, kept from the previous render while the text only grows. A long message's are
  * kept while it is not shown too, with the places its chunks were laid out at (in-parts.ts).
  */
-function useChunks(markdown: string, key: string | null): SavedParts {
-  const [split, setSplit] = useState<SavedParts>(() => {
+function useChunks(
+  markdown: string,
+  live: boolean,
+  key: string | null,
+  step: TextStep | undefined,
+): SavedParts {
+  const textId = step?.id ?? null
+  const [split, setSplit] = useState<SavedParts & { textId: number | null }>(() => {
     const kept = savedParts(key, markdown)
-    const chunks = splitIntoChunks(markdown, kept ?? undefined)
-    return { slots: kept?.slots ?? new Map(), markdown, ...chunks }
+    return {
+      ...splitIntoChunks(markdown, live, kept ?? undefined),
+      slots: kept?.slots ?? new Map(),
+      textId,
+    }
   })
-  if (split.markdown === markdown) return split
-  const next = { slots: split.slots, markdown, ...splitIntoChunks(markdown, split) }
+  // The same string, as an entry changed otherwise keeps it, compares without reading it.
+  if (split.markdown === markdown && split.live === live) {
+    if (split.textId !== textId) setSplit({ ...split, textId })
+    return split
+  }
+  const appended = step && step.after !== null && step.after === split.textId
+  const next = {
+    ...splitIntoChunks(markdown, live, split, appended ? step.appended : undefined),
+    slots: split.slots,
+    textId,
+  }
   setSplit(next)
   return next
 }
@@ -339,16 +482,63 @@ const ChunkPlaceholder = memo(function ChunkPlaceholder({
 })
 
 /**
+ * While the message is written, marks its last block, the last child of the last chunk that is
+ * not an empty media block, for the last-block rules in globals.css, which find it by position
+ * only once it is written: a position rule tested while it streams restyled the whole subtrees of
+ * the blocks before each block added.
+ */
+function useLastBlockMark(root: RefObject<HTMLElement | null>, live: boolean): void {
+  const marked = useRef<Element | null>(null)
+  useLayoutEffect(() => {
+    let last = live ? (root.current?.lastElementChild?.lastElementChild ?? null) : null
+    while (last?.hasAttribute('data-media-block') && !last.hasChildNodes()) {
+      last = last.previousElementSibling
+    }
+    if (last === marked.current) return
+    marked.current?.removeAttribute('data-last-block')
+    last?.setAttribute('data-last-block', '')
+    marked.current = last
+  })
+}
+
+type ChunkOptions = Pick<MarkdownProps, 'components' | 'remarkPlugins'>
+
+/** The chunk at `index`, rendered or holding its place. */
+function chunkElement(
+  index: number,
+  markdown: string,
+  rendered: boolean,
+  view: View,
+  live: boolean,
+  { components, remarkPlugins }: ChunkOptions,
+): ReactElement {
+  // By position: when the tail settles, the chunk in its place keeps its rendered blocks.
+  return rendered ? (
+    <Chunk
+      key={index}
+      markdown={markdown}
+      live={live}
+      components={components}
+      remarkPlugins={remarkPlugins}
+    />
+  ) : (
+    <ChunkPlaceholder key={index} markdown={markdown} slot={slotOf(view, index, markdown.length)} />
+  )
+}
+
+/**
  * Agent prose. Raw HTML goes through the sanitizer, and an inline `<svg>` is first written as an
  * `svg` code block (`inline-svg.ts`) and a `\[...\]` on lines of its own as a `$$` block
  * (`maths.ts`). A long text renders in chunks (`chunks.ts`), so a streamed update re-renders, lays
  * out and paints the live tail instead of the whole message, and only its chunks near the view
- * render (`in-parts.ts`). Streaming mode splits each chunk into memoized blocks, and the mode never
- * changes: static mode renders one tree, so switching when a message finishes would rebuild all
- * of it. Finishing only turns off incomplete-markdown repair.
+ * render (`in-parts.ts`). The settled chunks' elements are kept while only the tail changes, so an
+ * update renders the tail alone. Streaming mode splits each chunk into memoized blocks, and the
+ * mode never changes: static mode renders one tree, so switching when a message finishes would
+ * rebuild all of it. Finishing only turns off incomplete-markdown repair.
  */
 function MarkdownImpl({
   markdown,
+  step,
   streaming = false,
   className,
   components: customComponents,
@@ -361,35 +551,42 @@ function MarkdownImpl({
   const sessionId = useContext(SessionIdContext)
   const entryId = useContext(EntryIdContext)
   const key = sessionId !== null && entryId !== null ? `${sessionId}\0${entryId}` : null
-  const split = useChunks(
-    useMemo(() => fenceBracketMath(fenceInlineSvg(markdown, live), live), [markdown, live]),
-    key,
-  )
-  const { chunks, slots } = split
+  const text = useWritingCadence(markdown, step, streaming)
+  const split = useChunks(text.markdown, live, key, text.step)
+  const { settled, tail, slots } = split
+  const count = settled.length + 1
   const root = useRef<HTMLDivElement>(null)
-  const { view, rendered, slot } = useRenderedChunks(chunks, streaming, root, slots)
+  const view = useRenderedChunks(split, streaming, root, slots)
+  useLastBlockMark(root, streaming)
   useEffect(() => {
-    if (chunks.length > 1) saveParts(key, split)
-  }, [key, split, chunks.length])
+    if (count > 1) saveParts(key, split)
+  }, [key, split, count])
   const [named] = useState(() => new NamedMedia())
+  const options = useMemo(
+    () => ({ components: customComponents, remarkPlugins: customRemarkPlugins }),
+    [customComponents, customRemarkPlugins],
+  )
+  const settledElements = useMemo(
+    () =>
+      settled.map((chunk, i) =>
+        chunkElement(i, chunk, isRendered(view, i, count, streaming), view, live, options),
+      ),
+    [settled, view, count, streaming, live, options],
+  )
+  const last = settled.length
+  const tailElement = chunkElement(
+    last,
+    tail,
+    isRendered(view, last, count, streaming),
+    view,
+    live,
+    options,
+  )
   return (
-    <div ref={root} className={cn('markdown', className)}>
+    <div ref={root} className={cn('markdown', !streaming && 'markdown-written', className)}>
       <NamedMediaContext value={named}>
         <KeepInPlace root={root} view={view}>
-          {chunks.map((chunk, i) =>
-            // By position: when the tail settles, the chunk in its place keeps its rendered blocks.
-            rendered(i) ? (
-              <Chunk
-                key={i}
-                markdown={chunk}
-                live={live}
-                components={customComponents}
-                remarkPlugins={customRemarkPlugins}
-              />
-            ) : (
-              <ChunkPlaceholder key={i} markdown={chunk} slot={slot(i)} />
-            ),
-          )}
+          {count === 1 ? [tailElement] : [...settledElements, tailElement]}
         </KeepInPlace>
       </NamedMediaContext>
     </div>
@@ -428,6 +625,7 @@ const Chunk = memo(function Chunk({
         className="markdown-chunk"
         mode="streaming"
         parseIncompleteMarkdown={live}
+        remend={repair}
         isAnimating={live}
         animated={false}
         skipHtml

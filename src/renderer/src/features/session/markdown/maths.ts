@@ -204,6 +204,15 @@ function indentOf(line: string): number {
   return width
 }
 
+/** Where fenceBracketMath stands at the end of a text, for the text that follows it. */
+export interface BracketState {
+  fence: string | null
+  inList: boolean
+  blankBefore: boolean
+}
+
+export const BRACKET_START: BracketState = { fence: null, inList: false, blankBefore: true }
+
 /**
  * Writes each `\[...\]` that starts a line and ends one as a `$$` block, the form the renderer
  * splits and parses as one formula: Markdown would take `\[` as an escaped bracket and the lines
@@ -212,12 +221,27 @@ function indentOf(line: string): number {
  * block, which shows its source until it does.
  */
 export function fenceBracketMath(markdown: string, live: boolean): string {
-  if (!markdown.includes('\\[')) return markdown
+  return fenceBracketMathFrom(markdown, live, BRACKET_START).text
+}
+
+/**
+ * fenceBracketMath for a text that follows one that ended in `state`, so a long text can be
+ * written part by part with the same result. `open` says a `\[` in it has not closed by its end,
+ * so the text after decides how it is written. Without `withState`, a text with no `\[` comes
+ * back as it is with `state`, its lines unread.
+ */
+export function fenceBracketMathFrom(
+  markdown: string,
+  live: boolean,
+  state: BracketState,
+  withState = true,
+): { text: string; state: BracketState; open: boolean } {
+  const write = markdown.includes('\\[')
+  if (!write && !withState) return { text: markdown, state, open: false }
   const lines = markdown.split(/(?<=\n)/)
   let out = ''
-  let fence: string | null = null
-  let inList = false
-  let blankBefore = true
+  let { fence, inList, blankBefore } = state
+  let open = false
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!
     const body = line.replace(/\r?\n$/, '')
@@ -246,14 +270,15 @@ export function fenceBracketMath(markdown: string, live: boolean): string {
       if (LIST_ITEM.test(body)) inList = true
       else if (indentOf(body) === 0 && blankBefore) inList = false
     }
-    const open = OPEN.exec(body)
+    const opener = write ? OPEN.exec(body) : null
     const indentedCode = blankBefore && !inList && indentOf(body) >= 4
     blankBefore = blank
-    if (!open || indentedCode) {
+    if (!opener || indentedCode) {
       out += line
       continue
     }
-    const block = bracketBlock(lines, i, open)
+    const block = bracketBlock(lines, i, opener)
+    if (block !== null && !block.closed) open = true
     if (block === null || (!block.closed && !live)) {
       out += line
       continue
@@ -263,7 +288,7 @@ export function fenceBracketMath(markdown: string, live: boolean): string {
     blankBefore = false
     if (!block.closed) break
   }
-  return out
+  return { text: write ? out : markdown, state: { fence, inList, blankBefore }, open }
 }
 
 /** The `$$` block for the `\[` on `lines[start]`, or null when its first `\]` ends no line. */
@@ -302,4 +327,43 @@ function bracketBlock(
     return { text, end: j, closed: true }
   }
   return { text, end: lines.length - 1, closed: false }
+}
+
+interface MathNode {
+  type: string
+  children?: MathNode[]
+  position?: { start: { offset?: number }; end: { offset?: number } }
+  data?: { hChildren?: { type: string; properties?: Record<string, unknown> }[] }
+}
+
+/** The metastring the code of a `$$` block whose closing fence has not come yet is given. */
+export const OPEN_MATH = 'kite-open'
+
+const CLOSING_FENCE = /^(?:[ \t]*>)*[ \t]*\${2,}[ \t]*$/
+
+/**
+ * The remark plugin, after remark-math: marks each `$$` block whose closing fence has not come,
+ * which a message still being written shows as its source until it does (code-frame.tsx). The
+ * fence is never closed for it in the meantime, so KaTeX draws the formula once, whole, rather
+ * than at every chunk.
+ */
+export function openMath() {
+  return (tree: MathNode, file: { value: unknown }) => {
+    const source = String(file.value)
+    const visit = (node: MathNode): void => {
+      if (node.type !== 'math') {
+        for (const child of node.children ?? []) visit(child)
+        return
+      }
+      const start = node.position?.start.offset ?? 0
+      const end = node.position?.end.offset ?? 0
+      const text = source.slice(start, end)
+      const cut = text.lastIndexOf('\n')
+      const code = node.data?.hChildren?.[0]
+      if (code && (cut === -1 || !CLOSING_FENCE.test(text.slice(cut + 1)))) {
+        code.properties = { ...code.properties, metastring: OPEN_MATH }
+      }
+    }
+    visit(tree)
+  }
 }
