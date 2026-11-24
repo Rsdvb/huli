@@ -23,11 +23,22 @@ export function setThreadWidth(width: number | null): void {
   useThreadWidth.setState({ width })
 }
 
-// session.css reads this where it sets the column's width, so every view of the column follows.
+// A dragged width goes straight to the boxes that read --thread-column, as session.css sizes them
+// from it. Setting the property instead, on the root or a session's view, restyled every element
+// under it on each move of a width grip: the whole page, or the whole thread.
+const sheet = new CSSStyleSheet()
+document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+
 function apply(width: number | null): void {
-  const root = document.documentElement
-  if (width === null) root.style.removeProperty('--thread-column-set')
-  else root.style.setProperty('--thread-column-set', `${width}px`)
+  sheet.replaceSync(
+    width === null
+      ? ''
+      : [
+          `.ks-session .ks-thread__column { max-width: ${width + 64}px; }`,
+          `.ks-session .max-w-\\(--thread-column\\) { max-width: ${width}px; }`,
+          `.ks-session .ks-recap { max-width: min(${width + 16}px, calc(100% - 32px)); }`,
+        ].join('\n'),
+  )
 }
 
 apply(useThreadWidth.getState().width)
