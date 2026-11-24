@@ -1789,12 +1789,12 @@ it:
    and take the focus whatever `KITE_TEST_WINDOW` says. Never trigger one in a copy; check that
    flow through its IPC with a path given, or in a test. The browser pane's downloads go into the
    session's folder without one.
-4. **npm only inside scratch.** Never run npm, npx or an installer in the owner's real environment:
-   no `npm config`, `npm prefix -g` or `npm i -g`, nothing that reads or writes his
-   `%APPDATA%\npm`, npm cache or `.npmrc`. The repository's own scripts in the worktree are fine.
-   What a copy installs (Settings › Harness) lands in the scratch folders above. Backticks in a
-   double-quoted shell string run what they quote: a Markdown-style `` `npm prefix -g` `` inside
-   one ran it once.
+4. **npm only inside scratch.** Beyond the repository's own scripts in the worktree
+   (`npx --yes pnpm@10.11.1 test` and the like), never run npm, npx or an installer in the owner's
+   real environment: no `npm config`, `npm prefix -g` or `npm i -g`, nothing that reads or writes
+   his `%APPDATA%\npm`, global packages or `.npmrc`. What a copy installs (Settings › Harness)
+   lands in the scratch folders above. Backticks in a double-quoted shell string run what they
+   quote: a Markdown-style `` `npm prefix -g` `` inside one ran it once.
 5. **One copy, through CDP alone.** Give it its own `REMOTE_DEBUGGING_PORT`, check that CDP answers
    within about 20 s and kill it if not, drive it through CDP only (no real mouse or keyboard on the
    owner's desktop), and stop it as soon as its screenshots are taken. Never the owner's installed
