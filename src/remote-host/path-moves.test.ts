@@ -360,9 +360,13 @@ describe("the web client's link moving between relay regions", () => {
       })
       cleanups.push(() => server.stop('stopping'))
 
-      // Two regions: the slow one's host side hears 100 ms late, the fast one is down at first.
+      // Two regions: the slow one's host side hears 400 ms late, far enough that a busy machine's
+      // timer delays cannot make the fast one time as slow; the fast one is down at first.
       const dials = { slow: 0, fast: 0 }
       let fastUp = false
+      // What the host sent through the fast region, which only a session moved there gets beyond
+      // its handshake.
+      let viaFast = 0
       const route = (key: 'slow' | 'fast'): LinkRoute => ({
         key: `relay ${key}`,
         relay: true,
@@ -370,7 +374,14 @@ describe("the web client's link moving between relay regions", () => {
           if (key === 'fast' && !fastUp) throw new Error('The region is down')
           dials[key]++
           const [deviceEnd, hostEnd] = memoryTransports()
-          server.accept(key === 'slow' ? late(hostEnd, 100) : hostEnd, 'relay')
+          const counted: Transport = {
+            ...hostEnd,
+            send: (message) => {
+              viaFast++
+              hostEnd.send(message)
+            },
+          }
+          server.accept(key === 'slow' ? late(hostEnd, 400) : counted, 'relay')
           return deviceEnd
         },
       })
@@ -403,6 +414,8 @@ describe("the web client's link moving between relay regions", () => {
       fastUp = true
       link.wake()
       await expect.poll(() => dials.fast, { timeout: 15_000 }).toBe(1)
+      // Moved once the host's events come that way: a drain before would find nothing to move.
+      await expect.poll(() => viaFast, { timeout: 15_000 }).toBeGreaterThan(20)
       const moved = sent
       await expect.poll(() => events.length, { timeout: 15_000 }).toBeGreaterThan(moved + 5)
 
