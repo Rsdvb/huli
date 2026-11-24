@@ -2509,6 +2509,7 @@ export class ClaudeConnection implements AgentConnection {
             ...(plan ? { plan: typeof input.plan === 'string' ? input.plan : '' } : {}),
             ...askReason(permission),
             ...subjectOf(toolName, input),
+            ...(toolName === 'PowerShell' ? { shell: 'powershell' as const } : {}),
           },
           permission.signal,
         ),

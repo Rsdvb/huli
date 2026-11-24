@@ -37,9 +37,12 @@ export function locate(text, index) {
 export function checkFile(path, text) {
   if (path === TOKEN_FILE || BRAND_FILES.includes(path)) return []
   const markup = !path.toLowerCase().endsWith('.css')
-  return findColorLiterals(text, { css: true, markup }).map(({ index, match }) => {
+  const lines = text.split('\n')
+  return findColorLiterals(text, { css: true, markup }).flatMap(({ index, match }) => {
     const { line, column } = locate(text, index)
-    return `${path}:${line}:${column} ${colorLiteralMessage(match)}`
+    // Huli: a page's theme-color meta takes a color, never a variable.
+    if (markup && /<meta\s[^>]*name="theme-color"/.test(lines[line - 1] ?? '')) return []
+    return [`${path}:${line}:${column} ${colorLiteralMessage(match)}`]
   })
 }
 

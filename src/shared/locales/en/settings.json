@@ -103,6 +103,11 @@
       "after_one": "After {{count}} minute",
       "after_other": "After {{count}} minutes"
     },
+    "agentPasswords": {
+      "name": "Let agents type passwords",
+      "description": "Agents type passwords and codes you gave them or the project holds, such as a test account’s. What they type goes through their model provider.",
+      "keywords": "password sudo ssh sign in login test account code"
+    },
     "lightModel": {
       "name": "Model for lightweight tasks",
       "description": "Writes titles, branch names, commit messages and report drafts, on that agent’s plan.",
@@ -307,6 +312,13 @@
       "previewLabel": "Preview",
       "preview": "This is how replies and your messages read at this size. Inline code, like <code>settings.json</code>, looks like this."
     },
+    "effortControl": {
+      "name": "Effort",
+      "description": "How the model menu and the agent menu show the effort levels.",
+      "keywords": "effort reasoning thinking dial segments model menu",
+      "dial": "Dial",
+      "segments": "Segments"
+    },
     "reduceMotion": {
       "name": "Reduce motion",
       "description": "System follows macOS. Always removes movement everywhere.",
@@ -338,7 +350,8 @@
       "scale": "Zoom and text",
       "sidebar": "Sidebar",
       "motion": "Motion",
-      "fonts": "Fonts"
+      "fonts": "Fonts",
+      "modelMenu": "Model menu"
     },
     "zoom": {
       "name": "Zoom",
@@ -1004,7 +1017,8 @@
         "claude-code": "Follow Claude Code",
         "codex": "Follow Codex (Auto review)",
         "deepseek": "Follow DeepSeek Harness",
-        "doubao": "Follow Doubao (Sandbox)"
+        "doubao": "Follow Doubao (Sandbox)",
+        "antigravity": "Follow Antigravity (Default)"
       },
       "unused": "Available once this agent has been used.",
       "unoffered": "{{mode}} (no longer offered)",
@@ -1822,12 +1836,16 @@
       "restart": "Restart to update",
       "update": "Update",
       "download": "Download",
+      "downloadDetail": "Kettu downloads the installer and opens it. Drag Kettu to Applications to update.",
       "whatsNew": "What’s new",
       "none": "Kettu on this computer is not updated from here",
       "none_web": "Kettu on {{host}} is not updated from here",
       "noneDetail": "Kettu on this computer is updated the way it was installed.",
       "noneDetail_web": "Kettu on {{host}} is updated the way it was installed.",
-      "readyDetail": "Restart to finish. Your sessions come back."
+      "readyDetail": "Restart to finish. Your sessions come back.",
+      "readyWaiting_one": "Restarts by itself once {{count}} working session finishes.",
+      "readyWaiting_other": "Restarts by itself once {{count}} working sessions finish.",
+      "readyWaitingSoon": "Restarts by itself in a moment."
     },
     "automatic": {
       "name": "Automatic updates",
@@ -2007,7 +2025,7 @@
     },
     "auto": {
       "name": "Publish privately by default",
-      "description": "New artifacts are published to Kettu as private, and every page on Kettu follows its artifact’s latest version. Only you can open a private page, signed in to your Kettu account.",
+      "description": "When this is on, new artifacts are published to Kettu as private, and every page on Kettu follows its artifact’s latest version. Only you can open a private page, signed in to your Kettu account.",
       "keywords": "share publish automatic automatically private default sync latest version kettu",
       "blockedFull_one": "{{count}} artifact was not published: your cloud storage is full.",
       "blockedFull_other": "{{count}} artifacts were not published: your cloud storage is full.",
@@ -3205,6 +3223,7 @@
     "warning": {
       "cloud": "Kettu’s account, relay, push, sharing to Kettu and problem reports go on or off with it.",
       "computer": "Agents will be able to read and operate the apps on this computer.",
+      "passwords": "Agents will be able to type passwords and codes into terminals, pages and devices.",
       "agentOff": "A turned-off agent stops its running turns and starts no more sessions.",
       "startMode": "New sessions of this agent will start in this mode without asking.",
       "kettuMcp": "Without it, this agent loses Kettu’s tools and the guide that comes with them.",

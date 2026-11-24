@@ -724,8 +724,8 @@ export class AgentHost {
     this.files = new FilesService({
       exec: this.execRunner.exec,
       platform,
-      media: (real, info) => this.media.grantFile(real, info, null),
-      describeMedia: (real, info) => this.media.describe(real, info),
+      media: (real, info) => this.media.grantFile(real, info, null, true),
+      describeMedia: (real, info) => this.media.describe(real, info, true),
       trash: (paths) => this.trash(paths),
     })
     this.agentFiles = new AgentFiles({
@@ -1169,6 +1169,7 @@ export class AgentHost {
         used: (sessionId, terminal) =>
           this.sessions.surfaceUsed(sessionId, 'terminal', terminal.name ?? terminal.title),
         shared: (sessionId, terminalId) => sharedWith(this.sharedTerminals, terminalId, sessionId),
+        passwords: () => this.settings.agentPasswords,
       },
       sessionProject: (sessionId) => this.sessions.sessionProject(sessionId),
       sessionFolder: (sessionId) => this.sessions.sessionFolder(sessionId),
@@ -1191,6 +1192,11 @@ export class AgentHost {
           this.sessions.archiveWhenIdle(sessionId, agentName),
         archiveNow: (sessionId, agentName) => this.sessions.archiveByAgent(sessionId, agentName),
         start: (callerId, params) => this.sessions.startFromTool(callerId, params),
+        carried: (callerId, agentId) => this.sessions.carriedOptions(callerId, agentId),
+        agentOptions: (agentId) => this.agentOptions.get(agentId),
+        readOptions: (agentId) => this.agents.readFirstOptions(agentId),
+        choices: (sessionId) => this.sessions.toolChoices(sessionId),
+        held: (sessionId) => this.sessions.firstHeld(sessionId),
         send: (sessionId, text, from, now) =>
           this.sessions.sendFromTool(sessionId, text, from, now),
         started: (callerId) => this.sessions.startedBy(callerId),
@@ -2374,6 +2380,9 @@ export class AgentHost {
     if (previous.webhooks?.port !== next.webhooks?.port) this.syncWebhooks()
     if (previous.workflow.maxWorkingSteps !== next.workflow.maxWorkingSteps) {
       this.tasks.limitChanged()
+    }
+    if (previous.continueAfterLimit !== next.continueAfterLimit) {
+      this.sessions.continueSettingChanged(next.continueAfterLimit)
     }
     // A step held for a tool the host lacked may start once it is installed and on.
     if (JSON.stringify(previous.marketplace) !== JSON.stringify(next.marketplace)) {
@@ -4432,6 +4441,7 @@ export class AgentHost {
         sessions.toBackground(sessionId, toolCallId),
       'sessions.cleanTasks': ({ sessionId }) => sessions.cleanTasks(sessionId),
       'sessions.retry': ({ sessionId }, { portId }) => sessions.retry(sessionId, portId),
+      'sessions.cancelContinue': ({ sessionId }) => sessions.cancelContinue(sessionId),
       'sessions.rewind': ({ sessionId, entryId, draft }) =>
         sessions.rewind(sessionId, entryId, draft),
       'sessions.putBack': ({ sessionId }) => sessions.putBack(sessionId),
@@ -4891,6 +4901,7 @@ export class AgentHost {
         artifacts.reply(id, threadId, { body, author: { person: OWNER, session: null } }),
       'artifacts.resolve': ({ id, threadId, resolved }) =>
         artifacts.resolve(id, threadId, resolved),
+      'artifacts.repin': ({ id, threadId, anchor }) => artifacts.repin(id, threadId, anchor),
       'artifacts.markSent': ({ id, threadIds, sessionId }) =>
         artifacts.markSent(id, threadIds, sessionId),
       'artifacts.editElement': ({ id, baseVersion, path, offset, style, text }) =>

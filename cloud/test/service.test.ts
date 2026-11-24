@@ -535,7 +535,7 @@ describe('push gateway', () => {
 
   it('refuses a signature for another gateway, an old request and no account', async () => {
     const { access } = await signIn()
-    expect((await push(access, alert(), 'https://push.kettu.sh')).status).toBe(401)
+    expect((await push(access, alert(), 'https://push.example')).status).toBe(401)
     const old = JSON.parse(alert()) as { time: number }
     old.time -= 10 * 60 * 1000
     expect((await push(access, JSON.stringify(old))).status).toBe(401)

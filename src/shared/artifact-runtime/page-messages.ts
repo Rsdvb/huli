@@ -4,6 +4,8 @@
 
 import { RUNTIME_PATH, RUNTIME_VERSION, type RuntimeAnswer } from '../artifact-capabilities'
 import { artifactPathProblem, isHtmlPath } from '../artifact-files'
+import { parseDeckReport, type DeckDrive, type DeckReport } from './deck-sheet'
+import { parseDocReport, type DocDrive, type DocReport } from './document-sheet'
 
 export { RUNTIME_PATH, RUNTIME_VERSION, type RuntimeAnswer }
 
@@ -55,6 +57,8 @@ export interface PageSelection {
   /** It holds text and no elements, so its text can be edited. */
   textOnly: boolean
   style: ElementStyle
+  /** The tags of the elements it lies in, outermost first, up to the body; absent from older pages. */
+  ancestors?: string[]
 }
 
 /** Where an element lies in its page, in CSS pixels from the document's top left. */
@@ -75,7 +79,24 @@ export interface SelectMessage {
   selection: PageSelection | null
   /** An answer to `select-locate` instead of a pick: where the element at `src` lies, if anywhere. */
   located?: { src: number; box: PageBox | null }
+  /** A key pressed in the page, outside its text fields, instead of a pick, after `select-keys`. */
+  key?: PageKey
+  /** What a document's viewer reports instead of a pick, after `select-doc`. */
+  doc?: DocReport
+  /** What a deck's viewer reports instead of a pick, after `select-deck`. */
+  deck?: DeckReport
+  /** A pick that landed on a comment pin, by its number, instead of on an element. */
+  pin?: number
+  /** The picked element's text as typed in place after `text-edit`; `done` once typing ends. */
+  typed?: { text: string; done: boolean }
 }
+
+/**
+ * The keys a page passes on while asked to, so the viewer around it keeps stepping through frames
+ * once the user clicked into one.
+ */
+export const PAGE_KEYS = ['ArrowLeft', 'ArrowRight', 'Escape', 'g'] as const
+export type PageKey = (typeof PAGE_KEYS)[number]
 
 /** A numbered pin on an element, or on the page when `src` is null or the element is gone. */
 export interface Pin {
@@ -83,6 +104,19 @@ export interface Pin {
   src: number | null
   /** The thread has an answer, so the pin goes grey. */
   answered: boolean
+  /** `lost`: its element is gone, so it waits dashed on the page; `done`: resolved, a hollow check. */
+  kind?: 'lost' | 'done'
+  /** Its thread is open beside it. */
+  active?: boolean
+}
+
+/** CSS colors a page draws comment pins in: the badge and its number, the ground under a lost or
+ * resolved pin, and a resolved pin's check. The open thread's pin takes the accent. */
+export interface PinColors {
+  ink: string
+  text: string
+  ground: string
+  done: string
 }
 
 /** What a client posts into a frame. The page only receives these. */
@@ -94,6 +128,8 @@ export type DriveMessage =
       channel: string
       /** The outline's color, a CSS color from the app's theme. */
       accent: string
+      /** The pins' colors from the app's theme; an older client sends none. */
+      pinColors?: PinColors
     }
   | { v: typeof RUNTIME_VERSION; kind: 'select-point'; x: number; y: number }
   | { v: typeof RUNTIME_VERSION; kind: 'select-leave' }
@@ -116,6 +152,20 @@ export type DriveMessage =
   | { v: typeof RUNTIME_VERSION; kind: 'params'; values: Record<string, string | number | boolean> }
   // The frame loads the next version of this page now, which comes back where this one is scrolled.
   | { v: typeof RUNTIME_VERSION; kind: 'keep-scroll' }
+  // Pass PAGE_KEYS on as select messages with `key`, or stop.
+  | { v: typeof RUNTIME_VERSION; kind: 'select-keys'; on: boolean; channel: string }
+  // How a document's viewer shows its document, and what it does once.
+  | DocDrive
+  // Which slide a deck's viewer shows and how, and what it does once.
+  | DeckDrive
+  // Scrolls the element whose start tag lies at `src` into view, as a thread's card asks.
+  | { v: typeof RUNTIME_VERSION; kind: 'select-reveal'; src: number }
+  // Scrolls the page while a pick layer over it takes the wheel.
+  | { v: typeof RUNTIME_VERSION; kind: 'select-scroll'; dx: number; dy: number }
+  // Picks the element around the picked one, reported as a pick.
+  | { v: typeof RUNTIME_VERSION; kind: 'select-up'; levels: number }
+  // Lets the user type the picked element's text in place, reported as `typed`, or stops.
+  | { v: typeof RUNTIME_VERSION; kind: 'text-edit'; on: boolean }
 
 /** The properties a direct edit may write into a start tag's `style`, by their CSS names. */
 export const EDITABLE_PROPERTIES = [
@@ -228,7 +278,7 @@ function selection(value: unknown): PageSelection | null | undefined {
     return undefined
   }
   if (typeof tag !== 'string' || !TAG.test(tag)) return undefined
-  return {
+  const picked: PageSelection = {
     path,
     src: src as number | null,
     tag,
@@ -236,7 +286,17 @@ function selection(value: unknown): PageSelection | null | undefined {
     textOnly: textOnly === true,
     style: style(value.style),
   }
+  const { ancestors } = value
+  if (Array.isArray(ancestors)) {
+    picked.ancestors = ancestors
+      .slice(-ANCESTORS)
+      .filter((a): a is string => typeof a === 'string' && TAG.test(a))
+  }
+  return picked
 }
+
+/** The most ancestors a pick names. */
+export const ANCESTORS = 8
 
 /** A page's `select` message, or null for anything else. */
 export function parseSelectMessage(value: unknown): SelectMessage | null {
@@ -258,8 +318,45 @@ export function parseSelectMessage(value: unknown): SelectMessage | null {
     if (!located || picked !== null) return null
     message.located = located
   }
+  if (value.key !== undefined) {
+    const key = PAGE_KEYS.find((k) => k === value.key)
+    if (!key || picked !== null || message.located) return null
+    message.key = key
+  }
+  if (value.doc !== undefined) {
+    const doc = parseDocReport(value.doc)
+    if (!doc || picked !== null || message.located || message.key) return null
+    message.doc = doc
+  }
+  if (value.deck !== undefined) {
+    const deck = parseDeckReport(value.deck)
+    if (!deck || picked !== null || message.located || message.key || message.doc) return null
+    message.deck = deck
+  }
+  if (value.pin !== undefined) {
+    const pin = value.pin
+    if (!Number.isSafeInteger(pin) || (pin as number) < 1 || (pin as number) > MAX_PINS) return null
+    if (picked !== null || message.located || message.key || message.doc || message.deck) {
+      return null
+    }
+    message.pin = pin as number
+  }
+  if (value.typed !== undefined) {
+    const typed = value.typed
+    if (!isRecord(typed) || typeof typed.text !== 'string' || typeof typed.done !== 'boolean') {
+      return null
+    }
+    if (typed.text.length > EDIT_TEXT_CHARS || picked !== null || message.located || message.key) {
+      return null
+    }
+    if (message.pin !== undefined || message.doc || message.deck) return null
+    message.typed = { text: typed.text, done: typed.done }
+  }
   return message
 }
+
+/** The most pins a page draws. */
+export const MAX_PINS = 1_000
 
 function locatedOf(value: unknown): { src: number; box: PageBox | null } | null {
   if (!isRecord(value)) return null

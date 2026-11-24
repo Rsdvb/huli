@@ -54,6 +54,8 @@ async function manager(installedBy: 'winget' | 'npm') {
     claudeRuns: {},
     promptSuggestions: true,
     agentNetwork: DEFAULT_SETTINGS.agentNetwork,
+    continueAfterLimit: true,
+    agentPasswords: false,
     lightModel: { mode: 'small' },
     defaultAgent: null,
     computerUse: DEFAULT_SETTINGS.computerUse,

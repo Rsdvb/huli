@@ -18,7 +18,7 @@ import { NotesTray } from '@renderer/features/diff-notes/notes-tray'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { useCachePhase } from '@renderer/features/prompt-cache/cache-phase'
 import { BranchTrayLink, FolderBranchLinks } from '@renderer/features/git/git-status'
-import { limitPhrase, resetTime, tokens } from '@renderer/lib/format'
+import { limitPhrase, resetTime } from '@renderer/lib/format'
 import { onAppEvent } from '@renderer/app/events'
 import { errorMessage, host } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
@@ -358,6 +358,11 @@ export function Composer({
   const [keptQuota, setKeptQuota] = useState(false)
   const suggestion =
     idle && quota?.kind === 'out' && fallback && !keptQuota ? { quota, fallback } : null
+  // The host carries the session on by itself once the window that stopped it resets.
+  const continuesAt = useSessionsStore((s) => {
+    const turn = s.byId[sessionId]?.lastTurn
+    return turn?.reason === 'limit' ? turn.continuesAt : undefined
+  })
   const switches = config.filter((o) => o.type === 'boolean')
   // Huli: an option of the session's menu, such as Claude Code's output style, stays out of here.
   const others = config.filter(
@@ -767,8 +772,13 @@ export function Composer({
           ? t(
               reached.extraUsage
                 ? 'prompt.placeholder.limitExtraUsage'
-                : 'prompt.placeholder.limitReached',
-              { limit: limitPhrase(reached), time: resetTime(reached.resetsAt) },
+                : typeof continuesAt === 'number'
+                  ? 'prompt.placeholder.limitReachedContinue'
+                  : 'prompt.placeholder.limitReached',
+              {
+                limit: limitPhrase(reached),
+                time: resetTime(typeof continuesAt === 'number' ? continuesAt : reached.resetsAt),
+              },
             )
           : !running && rejected
             ? t('prompt.placeholder.denied')
@@ -794,13 +804,6 @@ export function Composer({
     !mustSwitch &&
     reread >= CACHE_NOTICE_MIN_TOKENS &&
     noticeClosedFor !== timed.lastRequestAt
-  // Claude Code's model, effort and fast mode are part of what its cache was written for.
-  const cacheNote =
-    harnessOf(session.agentId) === 'claude-code' &&
-    !running &&
-    (cachePhase === 'warm' || cachePhase === 'ending')
-      ? t('controls.cacheChange', { tokens: tokens(session.usage?.used ?? 0) })
-      : null
   const modelName = model
     ? (shownChoice(model.choices, String(model.value))?.name ?? String(model.value))
     : null
@@ -994,8 +997,6 @@ export function Composer({
           ) : (
             <ModelMenu
               agentId={session.agentId}
-              hostId={hostId}
-              agentName={agent?.name ?? agentName}
               harness={agent?.harnessName ?? agentName}
               config={config}
               running={running}
@@ -1003,12 +1004,7 @@ export function Composer({
               open={modelMenuOpen}
               onOpenChange={setModelMenuOpen}
               outOfCredit={!!outOfCredit}
-              account={agent?.account ?? null}
-              limits={limits ?? []}
-              balances={agent?.balances}
-              wallet={agent?.balance?.balances}
               source={agent?.version ? `${agent.harnessName} ${agent.version}` : null}
-              cacheNote={cacheNote}
               onSwitchAgent={() => setChoosingAgent(true)}
               canSwitchAgent={idle}
               actions={profileAction}

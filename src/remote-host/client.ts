@@ -93,6 +93,7 @@ import { AsideConnection } from '@shared/remote/standby'
 import { BYTES_FEATURE } from '@shared/remote/streams'
 import type { LogFn } from '../agent-host/storage'
 import { compareVersions } from '../agent-host/versions'
+import { updaterUserAgent } from '../main/update-sources'
 import { ClientForwards } from './client-forwards'
 import {
   dial,
@@ -110,7 +111,6 @@ import type { HostStore } from './hosts'
 import { LinkRequests, type RequestWire } from './link-requests'
 import {
   INSTALL_TIMEOUT_MS,
-  installRun,
   lastLines,
   parseSetupReport,
   parseUninstallReport,
@@ -122,6 +122,7 @@ import {
   SYSTEM_SSH,
   uninstallRun,
   unsupportedSystem,
+  verifiedInstallRun,
   type SshDevice,
   type SshHostInfo,
   type SshProblem,
@@ -251,8 +252,11 @@ export interface HostClientOptions {
   sshTimeoutMs?: number
   /** The ssh to run; the system's by default. */
   ssh?: SshProgram
-  /** The script that installs the daemon's `version`; the release's own by default. */
-  installScript?: (version: string) => string
+  /**
+   * The script that installs the daemon's `version`; the release's own by default, which carries
+   * the checksums of its packages as verified against the release key. Rejects when none could be.
+   */
+  installScript?: (version: string, signal: AbortSignal) => Promise<string>
   retryDelay?: (failures: number) => number
   now?: () => number
   /** When a quiet host is pinged and given up, DEVICE_KEEPALIVE unless a test shortens it. */
@@ -1678,7 +1682,14 @@ class SshAdding {
           ? { state: 'ssh', step: 'installing', version: wanted }
           : { state: 'ssh', step: 'updating', from: installed, to: wanted },
       )
-      const install = await this.ssh(address, this.client.installScript(wanted), INSTALL_TIMEOUT_MS)
+      let script: string
+      try {
+        script = await this.client.installScript(wanted, this.aborting.signal)
+      } catch (error) {
+        if (this.done) return
+        return this.fail('ssh_install', lastLines((error as Error).message))
+      }
+      const install = await this.ssh(address, script, INSTALL_TIMEOUT_MS)
       if (!install) return
       if (install.code !== 0) {
         return this.fail('ssh_install', lastLines(`${install.stdout}\n${install.stderr}`))
@@ -1877,7 +1888,15 @@ class SshManaging {
     if (report.host && report.host.publicKey !== this.host.publicKey) return failure('other_host')
     const installed = report.version
     if (installed === null || compareVersions(installed, wanted) < 0) {
-      const install = await runSsh(this.client.ssh, this.route, this.client.installScript(wanted), {
+      let script: string
+      try {
+        script = await this.client.installScript(wanted, this.signal)
+      } catch (error) {
+        return this.signal.aborted
+          ? STOPPED
+          : failure('ssh_install', lastLines((error as Error).message))
+      }
+      const install = await runSsh(this.client.ssh, this.route, script, {
         timeoutMs: INSTALL_TIMEOUT_MS,
         signal: this.signal,
       })
@@ -1962,7 +1981,7 @@ export class HostClient {
   readonly timeoutMs: number
   readonly sshTimeoutMs: number
   readonly ssh: SshProgram
-  readonly installScript: (version: string) => string
+  readonly installScript: (version: string, signal: AbortSignal) => Promise<string>
   readonly retryDelay: (failures: number) => number
   readonly now: () => number
   private readonly links = new Map<string, HostLink>()
@@ -1978,7 +1997,18 @@ export class HostClient {
     this.timeoutMs = options.timeoutMs ?? PAIR_HOST_TIMEOUT_MS
     this.sshTimeoutMs = options.sshTimeoutMs ?? SSH_TIMEOUT_MS
     this.ssh = options.ssh ?? SYSTEM_SSH
-    this.installScript = options.installScript ?? ((version) => installRun(version))
+    this.installScript =
+      options.installScript ??
+      ((version, signal) =>
+        verifiedInstallRun(version, {
+          fetch,
+          userAgent: updaterUserAgent(
+            options.client.version,
+            options.client.platform,
+            process.arch,
+          ),
+          signal,
+        }))
     this.retryDelay = options.retryDelay ?? retryDelay
     this.now = options.now ?? Date.now
   }
@@ -2289,9 +2319,16 @@ export class HostClient {
     return run && { run, report: parseSetupReport(run.stdout) }
   }
 
-  /** Runs an action of the page of a host added over SSH; one at a time for each host. */
+  /**
+   * Runs an action of the page of a host added over SSH; one at a time for each host. Reconnect
+   * also tries any other known host at once, as a view waiting for it asks.
+   */
   async manageSsh(id: string, action: SshManageAction): Promise<SshManageResult> {
     const host = this.options.hosts.get(id)
+    if (!this.stopped && host && !host.ssh && action.kind === 'reconnect') {
+      await this.reconnect(id)
+      return { ok: true }
+    }
     if (this.stopped || !host?.ssh) return failure('unknown_host')
     if (this.managing.has(id)) return failure('busy')
     const aborting = new AbortController()

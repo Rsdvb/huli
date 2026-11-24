@@ -1833,6 +1833,31 @@ describe('comment and direct edit requests', () => {
     rejects(() => posix['artifacts.comment']({ id, anchor, body: '  ' }))
   })
 
+  it("takes an anchor on a document's block in its Markdown, and no other Markdown file", () => {
+    const block = { ...anchor, path: 'document.md', page: null, tag: 'p', text: 'Between' }
+    expect(posix['artifacts.comment']({ id, anchor: block, body: 'Hi' })).toEqual({
+      id,
+      anchor: { ...block, missing: false },
+      body: 'Hi',
+    })
+    rejects(() =>
+      posix['artifacts.comment']({ id, anchor: { ...block, path: 'notes.md' }, body: 'x' }),
+    )
+  })
+
+  it('pins a thread again only to an anchor as the page reported it', () => {
+    const threadId = 'thr_01J9Z3K4V5W6X7Y8Z9A0B1C2D3'
+    expect(posix['artifacts.repin']({ id, threadId, anchor })).toEqual({
+      id,
+      threadId,
+      anchor: { ...anchor, missing: false },
+    })
+    rejects(() => posix['artifacts.repin']({ id, threadId: 'thr_x', anchor }))
+    rejects(() =>
+      posix['artifacts.repin']({ id, threadId, anchor: { ...anchor, path: '../a.html' } }),
+    )
+  })
+
   it('takes an edit of the editable properties only, to values that stay in the attribute', () => {
     const edit = { id, baseVersion: 3, path: 'index.html', offset: 0, text: null }
     expect(posix['artifacts.editElement']({ ...edit, style: { color: '#ffffff' } })).toEqual({

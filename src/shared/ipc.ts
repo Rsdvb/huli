@@ -147,6 +147,14 @@ export interface QuitRequest {
   unsaved: UnsavedFile[]
   /** The work may keep running in the background, with the windows closed, instead of stopping. */
   keepRunning: boolean
+  /** A restart to update may wait for the working sessions to finish instead of stopping them. */
+  whenIdle: boolean
+}
+
+/** What a restart would stop, as the update dialog shows it. */
+export interface RunningWork {
+  sessions: BusySession[]
+  terminals: BusyTerminal[]
 }
 
 /** A project and the origins it always lets agents open, as Settings › Browser lists them. */
@@ -204,6 +212,15 @@ export interface ArtifactStoppedEvent {
   origin: string
 }
 
+/** A frame the app's page holds on an artifact origin loaded an error answer instead of its page. */
+export interface ArtifactFrameFailedEvent {
+  origin: string
+  /** The address the frame loaded, its file's. */
+  url: string
+  /** The answer's HTTP status: 404 for a file the host cannot read, 503 for a host not reached. */
+  status: number
+}
+
 /** A page on an artifact origin the window opened reported a pick; the page's data, checked. */
 export interface ArtifactSelectedEvent {
   origin: string // as `artifact:open` gave it, without the path
@@ -249,7 +266,10 @@ export interface IpcInvokeContract {
   'app:default-browser': { args: []; result: DefaultBrowser }
   'app:capture-rect': { args: [rect: PageRect]; result: Uint8Array | null }
   // true stops the work and goes on, false stays, 'background' closes the windows and keeps it running.
-  'app:respond-quit': { args: [id: number, answer: boolean | 'background']; result: void }
+  'app:respond-quit': {
+    args: [id: number, answer: boolean | 'background' | 'when-idle']
+    result: void
+  }
   'settings:get': { args: []; result: SettingsFile }
   'settings:update': { args: [patch: SettingsPatch]; result: SettingsFile }
   'login-item:status': { args: []; result: LoginItemStatus }
@@ -341,6 +361,10 @@ export interface IpcInvokeContract {
   'update:download': { args: []; result: void }
   'update:cancel': { args: []; result: void }
   'update:restart': { args: []; result: void }
+  'update:running-work': { args: []; result: RunningWork }
+  'update:restart-confirmed': { args: []; result: void }
+  'update:restart-when-idle': { args: []; result: void }
+  'update:cancel-restart-when-idle': { args: []; result: void }
   'update:dismiss': { args: []; result: void }
   'agent-host:restart': { args: []; result: void }
   'terminal-host:restart': { args: []; result: void }
@@ -363,7 +387,8 @@ export interface IpcInvokeContract {
   }
   'artifact:open-external': { args: [id: string, version: number]; result: void }
   'artifact:reveal': { args: [id: string, version: number]; result: void }
-  'artifact:export': { args: [id: string, version: number]; result: boolean }
+  // The path written; false when the user cancelled the save dialog.
+  'artifact:export': { args: [id: string, version: number]; result: string | false }
   // A page's image as a base64 PNG, for a message to an agent; null when it cannot render.
   'artifact:page-image': {
     args: [
@@ -387,7 +412,7 @@ export interface IpcInvokeContract {
   }
   'artifact:export-as': {
     args: [id: string, version: number, format: ArtifactExportFormat]
-    result: boolean
+    result: string | false
   }
   // `project`: a registered project's folder, or null for No project.
   'artifact:import': {
@@ -641,6 +666,7 @@ export interface IpcEventContract {
   'app:shortcut': ForwardedKey
   'artifact:blocked': ArtifactBlockedEvent
   'artifact:stopped': ArtifactStoppedEvent
+  'artifact:frame-failed': ArtifactFrameFailedEvent
   'artifact:selected': ArtifactSelectedEvent
   'artifact:page-error': ArtifactPageErrorEvent
   'account:changed': AccountStatus
@@ -764,7 +790,7 @@ export interface KettuApi {
     defaultBrowser(): Promise<DefaultBrowser>
     /** That part of this window as it is on screen, as PNG bytes; null where it cannot be read. */
     captureRect(rect: PageRect): Promise<Uint8Array | null>
-    respondQuit(id: number, answer: boolean | 'background'): Promise<void>
+    respondQuit(id: number, answer: boolean | 'background' | 'when-idle'): Promise<void>
     onConfirmQuit(listener: (request: QuitRequest) => void): () => void
     setUnsaved(files: UnsavedFile[]): void
     closeWindow(): void
@@ -794,14 +820,14 @@ export interface KettuApi {
     reveal(id: string, version: number): Promise<void>
     /**
      * Asks where to save the version: its HTML file, or a folder for its files when it has
-     * several; false when the user cancelled.
+     * several. The path written, true where a browser saved it, or false when the user cancelled.
      */
-    export(id: string, version: number): Promise<boolean>
+    export(id: string, version: number): Promise<string | boolean>
     /**
      * Asks where to save a typed version in one of its type's formats, converted on the host:
-     * one file, or a folder for Markdown with pictures; false when the user cancelled.
+     * one file, or a folder for Markdown with pictures. Resolves as `export` does.
      */
-    exportAs(id: string, version: number, format: ArtifactExportFormat): Promise<boolean>
+    exportAs(id: string, version: number, format: ArtifactExportFormat): Promise<string | boolean>
     /**
      * Asks for an HTML file or a folder with an `index.html` and makes it an artifact in the
      * project, or in No project when null; null when the user cancelled.
@@ -809,6 +835,7 @@ export interface KettuApi {
     import(project: string | null, kind: ArtifactImportKind): Promise<ArtifactImportResult>
     onBlocked(listener: (event: ArtifactBlockedEvent) => void): () => void
     onStopped(listener: (event: ArtifactStoppedEvent) => void): () => void
+    onFrameFailed(listener: (event: ArtifactFrameFailedEvent) => void): () => void
     /** A page's pick, from a frame of an origin this window opened. */
     onSelected(listener: (event: ArtifactSelectedEvent) => void): () => void
     /** The errors of the pages' own scripts in frames of the origins this window opened. */
@@ -1124,7 +1151,16 @@ export interface KettuApi {
     download(): Promise<void>
     /** Stops a download that `download()` started. */
     cancel(): Promise<void>
+    /** Restart into the ready update, asking first about the work it would stop. */
     restart(): Promise<void>
+    /** What a restart would stop now, for the update dialog to show before it asks. */
+    runningWork(): Promise<RunningWork>
+    /** Restart into the ready update from the dialog that showed the work it stops. */
+    restartConfirmed(): Promise<void>
+    /** Restart into the ready update by itself once the working sessions finish. */
+    restartWhenIdle(): Promise<void>
+    /** Stops waiting to restart; the update stays ready. */
+    cancelRestartWhenIdle(): Promise<void>
     dismiss(): Promise<void>
     onChanged(listener: (status: UpdateStatus) => void): () => void
   }

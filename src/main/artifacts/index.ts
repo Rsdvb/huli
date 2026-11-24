@@ -197,6 +197,7 @@ export class Artifacts {
       platform: process.platform,
       blocked: (event) => sendEvent(contents, 'artifact:blocked', event),
       stopped: (event) => sendEvent(contents, 'artifact:stopped', event),
+      failed: (event) => sendEvent(contents, 'artifact:frame-failed', event),
       shortcut: (key) => sendEvent(contents, 'app:shortcut', key),
     })
   }
@@ -267,7 +268,7 @@ export class Artifacts {
   }
 
   /** `artifact:export`. */
-  export(window: BrowserWindow | null, id: unknown, version: unknown): Promise<boolean> {
+  export(window: BrowserWindow | null, id: unknown, version: unknown): Promise<string | false> {
     return this.files.export(window, id, version)
   }
 
@@ -277,7 +278,7 @@ export class Artifacts {
     id: unknown,
     version: unknown,
     format: unknown,
-  ): Promise<boolean> {
+  ): Promise<string | false> {
     return this.files.exportAs(window, id, version, format, async (wanted, _type, as) => {
       if (as === 'pdf') {
         return [

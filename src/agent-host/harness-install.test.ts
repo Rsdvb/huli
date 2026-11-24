@@ -67,6 +67,8 @@ function hostSettings(agents: HostSettings['agents']): HostSettings {
     claudeTestEntrypoint: null,
     claudeRuns: {},
     promptSuggestions: true,
+    continueAfterLimit: true,
+    agentPasswords: false,
   }
 }
 

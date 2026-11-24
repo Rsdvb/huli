@@ -58,6 +58,7 @@ function manager(
       ids: () => [],
       // An import checks its agent lists the session: these tests' sessions are listed.
       ...lists(['acp-1', 'acp-2', 'cli-1', 'cli-2']),
+      whileOpening: (_agentId: string, start: Promise<unknown>) => start,
       ...extra.agents,
     } as unknown as AgentManager,
     projects: {
@@ -79,7 +80,7 @@ function manager(
     diagnostics: { log: () => {}, event: () => {} } as unknown as Diagnostics,
     git: () => null,
     events: new Proxy({}, { get: () => () => {} }) as SessionEvents,
-    settings: () => (extra.settings ?? {}) as never,
+    settings: () => ({ startModes: {}, ...extra.settings }) as never,
     ...(extra.outside ? { outside: extra.outside } : {}),
     ...(extra.profiles ? { profiles: extra.profiles } : {}),
     ...(extra.worktrees ? { worktrees: extra.worktrees } : {}),
@@ -1103,5 +1104,44 @@ describe('signing in', () => {
 
     await vi.waitFor(() => expect(starts).toBe(2))
     expect(await notices()).toEqual([])
+  })
+})
+
+describe('starting a session without a prepared one', () => {
+  it('starts in the mode the settings name for new sessions, as a prepared one does', async () => {
+    const mode = (value: string) => ({
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      type: 'select',
+      value,
+      choices: [
+        { value: 'default', name: 'Default' },
+        { value: 'auto', name: 'Auto' },
+      ],
+    })
+    const setConfigOption = vi.fn(async (_session: string, _id: string, value: string) => [
+      mode(value),
+    ])
+    const agents: Record<string, unknown> = {
+      name: () => 'Google Antigravity',
+      signedIn: () => {},
+      ensureReady: async () => ({
+        init: { capabilities: {} },
+        connection: {
+          newSession: async () => ({ sessionId: 'acp-1', config: [mode('default')] }),
+          setConfigOption,
+          prompt: () => new Promise(() => {}),
+          register: () => {},
+          unregister: () => {},
+          isClosed: false,
+        },
+      }),
+    }
+    const { sessions } = manager({}, { agents, settings: { startModes: { antigravity: 'auto' } } })
+    await sessions.load()
+    await sessions.create({ agentId: 'antigravity', projectPath: '/repo' })
+    await vi.waitFor(() => expect(setConfigOption).toHaveBeenCalledWith('acp-1', 'mode', 'auto'))
+    await sessions.flush()
   })
 })

@@ -1754,7 +1754,7 @@ function StartModeRow({ status }: { status: AgentStatus }) {
               {
                 value: FOLLOW_AGENT,
                 label: t(
-                  `agents.startMode.follow.${status.harnessId === 'codex' || status.harnessId === 'deepseek' || status.harnessId === 'doubao' ? status.harnessId : 'claude-code'}`,
+                  `agents.startMode.follow.${status.harnessId === 'codex' || status.harnessId === 'deepseek' || status.harnessId === 'doubao' || status.harnessId === 'antigravity' ? status.harnessId : 'claude-code'}`,
                 ),
               },
               ...view.choices.map((choice) => ({

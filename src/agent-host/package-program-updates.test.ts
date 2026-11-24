@@ -61,6 +61,8 @@ async function manager(version: string, published: string[]) {
     claudeRuns: {},
     promptSuggestions: true,
     agentNetwork: DEFAULT_SETTINGS.agentNetwork,
+    continueAfterLimit: true,
+    agentPasswords: false,
     lightModel: { mode: 'small' },
     defaultAgent: null,
     computerUse: DEFAULT_SETTINGS.computerUse,

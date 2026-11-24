@@ -36,6 +36,7 @@ import type { CanvasControls } from './canvas-controls'
 import { useEditorFrame, useEditorState, type ArtifactEditor, type EditorFrame } from './editor'
 import { framePageUrl } from './use-artifact'
 import { BarButton } from './viewer-parts'
+import { LightBand } from './viewer-states'
 
 /** How long a page may load before the next one starts anyway. */
 const SETTLE_WAIT_MS = 3000
@@ -743,28 +744,35 @@ export function CanvasFrame({
     return () => registerEditor(null)
   }, [frame, registerEditor])
   return (
-    <iframe
-      ref={(el) => {
-        register(el)
-        drivenRef(el)
-      }}
-      src={src}
-      title={title}
-      tabIndex={-1}
-      sandbox={isWeb ? WEB_ARTIFACT_FRAME_SANDBOX : ARTIFACT_FRAME_SANDBOX}
-      allow=""
-      referrerPolicy="no-referrer"
-      onLoad={() => {
-        setLoaded(true)
-        driven.onLoad()
-        onSettled()
-      }}
-      style={{ width, height }}
-      className={cn(
-        'block border-0 opacity-0 transition-opacity duration-(--duration-fast)',
-        loaded && 'opacity-100',
+    <>
+      {!loaded && (
+        <span aria-hidden className="k-ce-page__wait">
+          <LightBand />
+        </span>
       )}
-    />
+      <iframe
+        ref={(el) => {
+          register(el)
+          drivenRef(el)
+        }}
+        src={src}
+        title={title}
+        tabIndex={-1}
+        sandbox={isWeb ? WEB_ARTIFACT_FRAME_SANDBOX : ARTIFACT_FRAME_SANDBOX}
+        allow=""
+        referrerPolicy="no-referrer"
+        onLoad={() => {
+          setLoaded(true)
+          driven.onLoad()
+          onSettled()
+        }}
+        style={{ width, height }}
+        className={cn(
+          'block border-0 opacity-0 transition-opacity duration-(--duration-fast)',
+          loaded && 'opacity-100',
+        )}
+      />
+    </>
   )
 }
 
@@ -908,6 +916,15 @@ export function PickLayer({
         const at = local(event as unknown as React.PointerEvent)
         frame.pick(at.x, at.y, { x: event.clientX, y: event.clientY })
         onDone?.()
+      }}
+      // A double click types the picked element's text in place.
+      onDoubleClick={() => mode === 'select' && frame.typeIn()}
+      // The layer takes the wheel from the page, which it scrolls itself; a frame as tall as its
+      // page has nothing to scroll, and its view moves instead.
+      onWheel={(event) => {
+        if (event.ctrlKey || event.metaKey) return
+        const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 800 : 1
+        frame.scroll((event.deltaX * unit) / scale, (event.deltaY * unit) / scale)
       }}
     />
   )

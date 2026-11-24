@@ -1,13 +1,17 @@
 import { useState } from 'react'
+import { Clock01Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { retryableTurn } from '@shared/thread'
 import { continueWith, retryTurn } from '@renderer/app/actions'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Button } from '@renderer/components/ui/button'
 import { Spinner } from '@renderer/components/ui/spinner'
+import { toast } from '@renderer/components/ui/toast'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { useLimitView } from '@renderer/hooks/use-limit-view'
-import { errorMessage } from '@renderer/lib/host'
+import { limitPhrase, resetTime } from '@renderer/lib/format'
+import { errorMessage, host } from '@renderer/lib/host'
 import { limitPercent } from '@renderer/lib/plan-limit'
 import { useNow } from '@renderer/lib/use-now'
 import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
@@ -106,5 +110,52 @@ export function FailedTurnActions({
       />
       {failed && <p className="col-start-2 mt-1 text-small text-danger">{failed}</p>}
     </>
+  )
+}
+
+/**
+ * Under the notice of a turn that a used-up plan window stopped: when Kettu sends the session a
+ * message to carry on, or that the user stopped it. Only the thread's last error notice shows it.
+ */
+export function LimitContinueLine({ sessionId, entryId }: { sessionId: string; entryId: string }) {
+  const { t } = useTranslation('session')
+  const lastTurn = useSessionsStore((s) => s.byId[sessionId]?.lastTurn)
+  const latest = useThreadsStore((s) => {
+    const state = s.replicas[sessionId]?.state
+    if (!state) return false
+    if (state.session.status !== 'ready' && state.session.status !== 'closed') return false
+    const { order, byId } = state
+    for (let i = order.length - 1; i >= 0; i -= 1) {
+      const entry = byId[order[i]!]
+      if (entry?.kind === 'notice' && entry.severity === 'error') return entry.id === entryId
+    }
+    return false
+  })
+  const [stopping, setStopping] = useState(false)
+  const at = lastTurn?.reason === 'limit' ? lastTurn.continuesAt : undefined
+  if (!latest || at === undefined) return null
+  const limit = lastTurn?.limit ? limitPhrase(lastTurn.limit) : ''
+  const stop = (): void => {
+    setStopping(true)
+    host('sessions.cancelContinue', { sessionId })
+      .catch(() => toast(t('continueLimit.cancelFailed')))
+      .finally(() => setStopping(false))
+  }
+  return (
+    <div className="ks-settings-line col-start-2 mt-1" data-selectable="">
+      <HugeiconsIcon icon={Clock01Icon} strokeWidth={1.9} aria-hidden className="size-3 shrink-0" />
+      {typeof at === 'number' ? (
+        <>
+          <span className="min-w-0 truncate">
+            {t('continueLimit.planned', { time: resetTime(at), limit })}
+          </span>
+          <Button variant="quiet" size="xs" disabled={stopping} onClick={stop}>
+            {t('continueLimit.cancel')}
+          </Button>
+        </>
+      ) : (
+        <span className="min-w-0 truncate">{t('continueLimit.off')}</span>
+      )}
+    </div>
   )
 }

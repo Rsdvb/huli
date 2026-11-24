@@ -3,7 +3,7 @@
 // project come from the service, which knows them from the token or the call's `_meta`.
 
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js'
-import type { AgentStatus, RunningWork } from '@shared/agent-host'
+import type { AgentOptions, AgentStatus, RunningWork } from '@shared/agent-host'
 import { harnessOf, START_MODE_CHARS } from '@shared/agents'
 import { longer } from '@shared/artifacts'
 import { BOARD_STATUSES, isBoardStatus, type BoardStatus } from '@shared/session-board'
@@ -17,10 +17,12 @@ import {
 import { lastPort, PORT_ENV, type PortBlock } from '@shared/worktree-ports'
 import { folded, type Caller } from './artifacts/tools'
 import { cutStart, historyPage, HISTORY_TOOL, type RenderedTurn } from './carried-context'
+import { offered, pickedValues, type OfferedModel, type StartPick } from './started-options'
 import {
   defaultMode,
   isRanked,
   modeLabel,
+  modeRank,
   startableModes,
   startedCeiling,
   STARTED_MAX,
@@ -37,6 +39,7 @@ export const DAILY_LIMIT = 10
 export const REPORT_LIMIT = 10
 const QUERY_CHARS = 200
 const ID_CHARS = 200
+const OPTION_CHARS = 200
 const LAST_REPLY_BYTES = 8 * 1024
 export const HISTORY_LIMIT = 20
 const HISTORY_DEFAULT = 5
@@ -48,6 +51,12 @@ const HISTORY_PAGE_BYTES = 64 * 1024
 export interface ToolMode {
   id: string
   name: string
+}
+
+/** A session's model and effort as the tools show them; null for one it does not list. */
+export interface ToolChoices {
+  model: ToolMode | null
+  effort: ToolMode | null
 }
 
 /** What the tools show of a session; the manager's record and live view, narrowed. */
@@ -90,11 +99,31 @@ export interface SessionToolsDeps {
   archiveAfterTurn(sessionId: string, agentName: string): void
   /** Archives a session that is not working, at once. */
   archiveNow(sessionId: string, agentName: string): Promise<void>
-  /** Starts a sub-session of the caller with its first prompt; returns its id. */
+  /** Starts a sub-session of the caller with its first prompt and start values; returns its id. */
   start(
     callerId: string,
-    params: { prompt: string; title?: string; agentId?: AgentId; mode?: string; report: boolean },
+    params: {
+      prompt: string
+      title?: string
+      agentId?: AgentId
+      mode?: string
+      options: Record<string, string | boolean>
+      report: boolean
+    },
   ): Promise<string>
+  /**
+   * The model and effort values a session the caller starts with the agent takes when none are
+   * named: the caller's own with its agent, New session's remembered ones with another.
+   */
+  carried(callerId: string, agentId: AgentId): Record<string, string | boolean>
+  /** The agent's cached options, which list its models and their efforts; null before a read. */
+  agentOptions(agentId: AgentId): AgentOptions | null
+  /** Reads the agent's options in a hidden session, as New session does for a new agent. */
+  readOptions(agentId: AgentId): Promise<void>
+  /** A session's model and effort, from memory or its stored thread. */
+  choices(sessionId: string): Promise<ToolChoices>
+  /** Whether a started session's first message waits in its paused queue for the user. */
+  held(sessionId: string): boolean
   /**
    * Prompts a session the caller started, or queues the prompt while it works; with `now`, sends
    * a queued prompt on at once as Send now does.
@@ -290,6 +319,21 @@ const AGENT: Schema = {
   type: 'string',
   description: 'The agent to run it with, as list_agents names it; yours by default.',
 }
+const MODEL: Schema = {
+  type: 'string',
+  minLength: 1,
+  maxLength: OPTION_CHARS,
+  description:
+    'The model, an id list_agents gives for the agent; without it, your model with your agent, ' +
+    "else the one the user's New session would start it on.",
+}
+const EFFORT: Schema = {
+  type: 'string',
+  minLength: 1,
+  maxLength: OPTION_CHARS,
+  description:
+    'The effort, one list_agents gives for that model; without it, the one it would get.',
+}
 const MODE: Schema = {
   type: 'string',
   minLength: 1,
@@ -299,6 +343,7 @@ const MODE: Schema = {
     'mode the user set for its new sessions. Kettu starts it no wider than yours.',
 }
 const MODE_INFO = object({ id: { type: 'string' }, name: { type: 'string' } }, ['id', 'name'])
+const EFFORTS: Schema = { type: ['array', 'null'], items: { type: 'string' } }
 const REPORT: Schema = {
   type: 'boolean',
   default: true,
@@ -352,6 +397,8 @@ const INFO: Record<string, Schema> = {
   is_you: { type: 'boolean' },
   archived: { type: 'boolean' },
   mode: MODE_INFO,
+  model: MODE_INFO,
+  effort: MODE_INFO,
   board_status: {
     type: ['string', 'null'],
     enum: [...BOARD_STATUSES, null],
@@ -390,8 +437,10 @@ export const SESSION_TOOLS: Tool[] = [
     title: 'List agents',
     description:
       "Lists the user's agents on this computer that start_session can run, whether each " +
-      'can start now, and the permission modes you can start it in.',
-    inputSchema: object({}),
+      'can start now, the permission modes you can start it in, and its models and efforts.',
+    inputSchema: object({
+      agent: { type: 'string', description: 'Lists only this agent, as its id.' },
+    }),
     outputSchema: output({
       agents: {
         type: 'array',
@@ -408,6 +457,15 @@ export const SESSION_TOOLS: Tool[] = [
               ['id', 'name', 'description'],
             ),
           },
+          models: {
+            type: ['array', 'null'],
+            items: object({ id: { type: 'string' }, name: { type: 'string' }, efforts: EFFORTS }, [
+              'id',
+              'name',
+              'efforts',
+            ]),
+          },
+          efforts: EFFORTS,
         }),
       },
     }),
@@ -485,10 +543,21 @@ export const SESSION_TOOLS: Tool[] = [
       'Starts a session of your own in this project with its first prompt. It runs on its own, ' +
       'and Kettu tells you when its turn ends; do not wait for it in a loop.',
     inputSchema: object(
-      { prompt: PROMPT, title: TITLE, agent: AGENT, mode: MODE, report: REPORT },
+      {
+        prompt: PROMPT,
+        title: TITLE,
+        agent: AGENT,
+        model: MODEL,
+        effort: EFFORT,
+        mode: MODE,
+        report: REPORT,
+      },
       ['prompt'],
     ),
-    outputSchema: output({ ...INFO, mode_lowered: { type: 'boolean' } }, INFO_REQUIRED),
+    outputSchema: output(
+      { ...INFO, mode_lowered: { type: 'boolean' }, held: { type: 'boolean' } },
+      INFO_REQUIRED,
+    ),
     annotations: { destructiveHint: false, openWorldHint: true },
     // Claude Code defers MCP tools behind a search; an entry tool must be listed from the start.
     _meta: { 'anthropic/alwaysLoad': true },
@@ -705,6 +774,15 @@ function agent(o: Args): AgentId | undefined {
   return value
 }
 
+function option(o: Args, key: 'model' | 'effort'): string | undefined {
+  const value = o[key]
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.length === 0 || longer(value, OPTION_CHARS)) {
+    throw invalid(`${key} must be an id, as list_agents gives it.`)
+  }
+  return value
+}
+
 function mode(o: Args): string | undefined {
   const value = o.mode
   if (value === undefined) return undefined
@@ -762,11 +840,27 @@ function modeText(mode: ToolMode | null): string {
   return mode ? ` in ${mode.name} (${mode.id})` : ''
 }
 
+function choicesText(choices: ToolChoices | undefined): string {
+  if (!choices) return ''
+  const { model, effort } = choices
+  return (
+    (model ? ` on ${model.name} (${model.id})` : '') +
+    (effort ? ` at ${effort.name} (${effort.id}) effort` : '')
+  )
+}
+
+function modelsText(models: readonly OfferedModel[]): string {
+  return models
+    .map((model) => (model.efforts ? `${model.id} [${model.efforts.join(', ')}]` : model.id))
+    .join(', ')
+}
+
 function infoOf(
   session: ToolSession,
   callerId: string,
   lastReply?: string | null,
   mode?: ToolMode | null,
+  choices?: ToolChoices,
 ): Record<string, unknown> {
   return {
     id: session.id,
@@ -789,6 +883,8 @@ function infoOf(
         }
       : {}),
     ...(mode ? { mode } : {}),
+    ...(choices?.model ? { model: choices.model } : {}),
+    ...(choices?.effort ? { effort: choices.effort } : {}),
     ...(lastReply ? { last_reply: lastReply } : {}),
   }
 }
@@ -813,8 +909,7 @@ export class SessionTools {
   private run(caller: Caller, name: string, input: unknown): Promise<CallToolResult> {
     switch (name) {
       case 'list_agents':
-        args(input, [])
-        return this.listAgents(caller)
+        return this.listAgents(caller, args(input, ['agent']))
       case 'list_sessions':
         return this.list(caller, args(input, ['query', 'include_archived', 'limit']))
       case 'get_session':
@@ -826,7 +921,10 @@ export class SessionTools {
       case 'archive_session':
         return this.archive(caller, args(input, ['id']))
       case 'start_session':
-        return this.start(caller, args(input, ['prompt', 'title', 'agent', 'mode', 'report']))
+        return this.start(
+          caller,
+          args(input, ['prompt', 'title', 'agent', 'model', 'effort', 'mode', 'report']),
+        )
       case 'send_message':
         return this.send(caller, args(input, ['id', 'text', 'report', 'now']))
       case HISTORY_TOOL:
@@ -844,23 +942,37 @@ export class SessionTools {
     return session
   }
 
-  private async listAgents(caller: Caller): Promise<CallToolResult> {
+  private async listAgents(caller: Caller, o: Args): Promise<CallToolResult> {
+    const only = agent(o)
     const own = this.deps.info(caller.sessionId)?.agentId
     const starter = this.deps.starterRank(caller.sessionId)
-    const agents = this.deps.agents().flatMap((agent) => {
-      const status = toolAgentStatus(agent)
-      if (!status) return []
-      return [
-        {
-          id: agent.id,
-          name: agent.name,
-          harness: agent.harnessName,
-          is_you: agent.id === own,
-          status,
-          modes: this.modesOf(agent.id, starter),
-        },
-      ]
-    })
+    const listed = this.deps
+      .agents()
+      .filter((status) => only === undefined || status.id === only)
+      .flatMap((status) => {
+        const state = toolAgentStatus(status)
+        return state ? [{ status, state }] : []
+      })
+    if (only !== undefined && listed.length === 0) {
+      throw new SessionToolError(
+        'not_found',
+        `No agent ${only} can be started here. list_agents without agent lists the ones that can.`,
+      )
+    }
+    // Asked about by name, an agent Kettu has not read yet is read, as New session reads it.
+    const first = listed[0]
+    if (only !== undefined && first?.state === 'ready' && !this.deps.agentOptions(only)) {
+      await this.deps.readOptions(only).catch(() => {})
+    }
+    const agents = listed.map(({ status, state }) => ({
+      id: status.id,
+      name: status.name,
+      harness: status.harnessName,
+      is_you: status.id === own,
+      status: state,
+      modes: this.modesOf(status.id, starter),
+      ...offered(this.deps.agentOptions(status.id)),
+    }))
     const text =
       agents.length === 0
         ? 'No agent can be started here.'
@@ -871,10 +983,46 @@ export class SessionTools {
                 (agent.is_you ? ', yours' : '') +
                 (agent.modes.length > 0
                   ? `; modes ${agent.modes.map((item) => item.id).join(', ')}`
-                  : ''),
+                  : '') +
+                (agent.models
+                  ? `; models ${modelsText(agent.models)}`
+                  : agent.efforts
+                    ? `; efforts ${agent.efforts.join(', ')}`
+                    : ''),
             )
             .join('\n')
     return result(text, { agents })
+  }
+
+  /** The start values with the model and effort asked for, checked against what the agent offers. */
+  private async picked(
+    agentId: AgentId,
+    carried: Record<string, string | boolean>,
+    pick: StartPick,
+  ): Promise<Record<string, string | boolean>> {
+    const name = this.deps.agents().find((status) => status.id === agentId)?.name ?? agentId
+    if (!this.deps.agentOptions(agentId)) {
+      try {
+        await this.deps.readOptions(agentId)
+      } catch (error) {
+        throw new SessionToolError(
+          'not_allowed',
+          `Kettu could not read the models of ${name}: ${(error as Error).message.replace(/\.$/, '')}. ` +
+            'Leave model and effort out, or try again.',
+        )
+      }
+    }
+    const options = this.deps.agentOptions(agentId)
+    if (!options) {
+      throw new SessionToolError(
+        'not_allowed',
+        `Kettu has not read the models of ${name} yet; it may need the user to sign in. ` +
+          'Leave model and effort out.',
+      )
+    }
+    const out = pickedValues(options, carried, pick, { id: agentId, name })
+    if ('error' in out) throw invalid(out.error)
+    return out.values
   }
 
   /**
@@ -893,6 +1041,34 @@ export class SessionTools {
       this.deps.startMode(agentId) ?? defaultMode(harness),
     )
     return startableModes(harness, ceiling).map((id) => ({ id, ...modeLabel(harness, id) }))
+  }
+
+  /**
+   * Why a started session got a narrower mode than `wanted`: the caller's own mode, the mode the
+   * agent's new sessions start in, or both.
+   */
+  private loweredText(callerId: string, agentId: AgentId, wanted: string): string {
+    const harness = harnessOf(agentId)
+    if (!isRanked(harness)) return ' That is narrower than asked.'
+    const asked = modeRank(harness, wanted) ?? 1
+    const reasons: string[] = []
+    const starter = this.deps.starterRank(callerId)
+    if (starter !== null && starter < asked) reasons.push('your own mode allows no wider')
+    const set = this.deps.startMode(agentId)
+    const agentMode = set ?? defaultMode(harness)
+    if (agentMode !== null && (modeRank(harness, agentMode) ?? 1) < asked) {
+      const name = this.deps.agents().find((status) => status.id === agentId)?.name ?? agentId
+      const label = modeLabel(harness, agentMode).name
+      reasons.push(
+        set === undefined
+          ? `${name} starts its sessions in ${label}, and the user set no mode for its new ` +
+              'sessions in Settings > Agents'
+          : `the user set ${name}'s new sessions to start in ${label} in Settings > Agents`,
+      )
+    }
+    return reasons.length === 0
+      ? ' That is narrower than asked.'
+      : ` That is narrower than asked: ${reasons.join(', and ')}.`
   }
 
   /** Refuses a mode no started session of the agent can have. */
@@ -960,9 +1136,10 @@ export class SessionTools {
     const reply = whole === null ? null : cutReply(whole)
     const cut = whole !== null && reply !== null && reply.length < whole.length
     const current = await this.deps.mode(session.id)
+    const choices = await this.deps.choices(session.id)
     return result(
       `${titleOf(session)} (${session.agentId}), ${toolStatus(session.status)}` +
-        `${modeText(current)}, updated ${iso(session.updatedAt)}.` +
+        `${modeText(current)}${choicesText(choices)}, updated ${iso(session.updatedAt)}.` +
         (session.ports
           ? ` Its worktree holds ports ${session.ports.first} to ${lastPort(session.ports)}.`
           : '') +
@@ -970,7 +1147,7 @@ export class SessionTools {
           ? ` Its latest reply is cut to 8 KB here; ${HISTORY_TOOL} with this id reads more of it.`
           : ''),
       {
-        ...infoOf(session, caller.sessionId, reply, current),
+        ...infoOf(session, caller.sessionId, reply, current, choices),
         ...(cut ? { reply_cut: true } : {}),
       },
     )
@@ -1030,6 +1207,7 @@ export class SessionTools {
     const prompt = text(o, 'prompt')
     const value = o.title === undefined ? undefined : title(o)
     const agentId = agent(o)
+    const pick: StartPick = { model: option(o, 'model'), effort: option(o, 'effort') }
     const wanted = mode(o)
     const reported = report(o)
     const callerInfo = this.deps.info(caller.sessionId)
@@ -1049,24 +1227,38 @@ export class SessionTools {
     const limit = startLimit(caller.sessionId, this.deps.started(caller.sessionId), this.now())
     if (limit) throw limitError(limit)
     if (agentId !== undefined && agentId !== callerInfo.agentId) this.checkAgent(agentId)
-    if (wanted !== undefined) this.checkMode(agentId ?? callerInfo.agentId, wanted)
+    const target = agentId ?? callerInfo.agentId
+    if (wanted !== undefined) this.checkMode(target, wanted)
+    const carried = this.deps.carried(caller.sessionId, target)
+    const options =
+      pick.model === undefined && pick.effort === undefined
+        ? carried
+        : await this.picked(target, carried, pick)
     const started = await this.deps.start(caller.sessionId, {
       prompt,
       ...(value === undefined ? {} : { title: value }),
       ...(agentId === undefined ? {} : { agentId }),
       ...(wanted === undefined ? {} : { mode: wanted }),
+      options,
       report: reported,
     })
     const session = this.deps.info(started)
     if (!session) throw notFound(started)
     const current = await this.deps.mode(started)
+    const choices = await this.deps.choices(started)
     const lowered = wanted !== undefined && current !== null && current.id !== wanted
+    const held = this.deps.held(started)
     return result(
-      `Started "${titleOf(session)}"${modeText(current)}.` +
-        (lowered ? ' That is narrower than asked, to stay within your permissions.' : ''),
+      `Started "${titleOf(session)}"${modeText(current)}${choicesText(choices)}.` +
+        (lowered ? this.loweredText(caller.sessionId, target, wanted) : '') +
+        (held
+          ? ' Kettu could not set every value it starts with, so its first message waits for ' +
+            'the user in that session, and no report comes until they send it.'
+          : ''),
       {
-        ...infoOf(session, caller.sessionId, undefined, current),
+        ...infoOf(session, caller.sessionId, undefined, current, choices),
         ...(lowered ? { mode_lowered: true } : {}),
+        ...(held ? { held: true } : {}),
       },
     )
   }

@@ -30,6 +30,7 @@ import type {
 } from '@shared/thread'
 import type { RiskSubject } from './risk/classify'
 import type { SessionSandbox } from './sandbox/native'
+import type { Shell } from './command-safety'
 import type { MapperContext, MapperOutput } from './session-updates'
 
 /** Huli: an agent's own reading of a session's background processes. */
@@ -58,6 +59,8 @@ export interface PermissionRequest {
    * shows, such as the shell a command runs in or an MCP tool's server; else read from the entry.
    */
   subject?: RiskSubject
+  /** The shell a command runs in, when it is not a POSIX one. */
+  shell?: Shell
   /**
    * The agent does not wait for the answer, so its turn goes on or ends and the card stays until
    * the user answers it or the session closes.
@@ -507,6 +510,11 @@ export interface SessionOptions {
    * them; absent for none.
    */
   folders?: readonly string[]
+  /**
+   * The session starts in full access, for an agent that takes it only as its process starts:
+   * agy's flag, which would otherwise cost a restart right after `session/new`.
+   */
+  fullAccess?: boolean
 }
 
 /** Huli: the MCP servers a session's agent has, as it reports them, and what it can do with them. */

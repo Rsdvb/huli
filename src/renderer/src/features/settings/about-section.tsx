@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ArrowUpRight01Icon, GithubIcon, Tick02Icon } from '@hugeicons/core-free-icons'
+import { GithubIcon, Tick02Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { AppInfo } from '@shared/ipc'
 import type { SettingsFile } from '@shared/settings'
@@ -12,7 +12,7 @@ import { errorMessage } from '@renderer/lib/host'
 import { useHostContext } from '@renderer/lib/host-features'
 import { useNow } from '@renderer/lib/use-now'
 import { useSettingsStore } from '@renderer/stores/settings'
-import { checkForUpdates, useUpdatesStore } from '@renderer/stores/updates'
+import { checkForUpdates, restartToUpdate, useUpdatesStore } from '@renderer/stores/updates'
 import { AboutStarButton } from '@renderer/features/github-star/star-prompts'
 import { ControlError, LinkButton, SetButton, SettingSelect, Skel, Spin } from './controls'
 import { FlashMark, PageHeader, RowText } from './rows'
@@ -142,36 +142,35 @@ export function UpdateRow({ status }: { status: UpdateStatus | null }) {
         </span>
       )
       break
-    case 'ready':
+    case 'ready': {
+      const waiting = status.restartWhenIdle?.sessions ?? null
       title = t('about.updates.ready', { version: state.version })
-      detail = t('about.updates.readyDetail')
+      detail =
+        waiting === null
+          ? t('about.updates.readyDetail')
+          : waiting > 0
+            ? t('about.updates.readyWaiting', { count: waiting })
+            : t('about.updates.readyWaitingSoon')
       action = (
         <>
           {whatsNew(state.version)}
-          <SetButton variant="primary" onClick={() => run(window.kettu.updates.restart)}>
+          <SetButton variant="primary" onClick={restartToUpdate}>
             {t('about.updates.restart')}
           </SetButton>
         </>
       )
       break
+    }
     case 'available':
       title = t('about.updates.available', { version: state.version })
       if (state.mode === 'install' && status.readOnly) detail = t('about.updates.movesFirst')
+      if (state.mode === 'link') detail = t('about.updates.downloadDetail')
       action = (
         <>
           {whatsNew(state.version)}
-          {state.mode === 'link' ? (
-            <LinkButton
-              href={state.downloadUrl ?? releaseUrl(state.version)}
-              icon={<Icon icon={ArrowUpRight01Icon} size={14} />}
-            >
-              {t('about.updates.download')}
-            </LinkButton>
-          ) : (
-            <SetButton variant="primary" onClick={() => run(window.kettu.updates.download)}>
-              {t('about.updates.update')}
-            </SetButton>
-          )}
+          <SetButton variant="primary" onClick={() => run(window.kettu.updates.download)}>
+            {state.mode === 'link' ? t('about.updates.download') : t('about.updates.update')}
+          </SetButton>
         </>
       )
       break

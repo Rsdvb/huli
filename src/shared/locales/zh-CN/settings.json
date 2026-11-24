@@ -101,6 +101,11 @@
       "off": "不提醒",
       "after_other": "{{count}} 分钟后"
     },
+    "agentPasswords": {
+      "name": "允许智能体输入密码",
+      "description": "智能体可以输入你给它的或项目里写着的密码和验证码，比如测试账号的。它输入的内容会经过它的模型服务商。",
+      "keywords": "密码 登录 验证码 测试账号 password sudo ssh sign in login test account code"
+    },
     "lightModel": {
       "name": "轻量任务的模型",
       "description": "用来写标题、分支名、提交信息和问题报告草稿，用掉这个智能体的套餐额度。",
@@ -303,6 +308,13 @@
       "previewLabel": "预览",
       "preview": "回复和你发送的消息在这个字号下就是这样。行内代码，比如 <code>settings.json</code>，是这样显示的。"
     },
+    "effortControl": {
+      "name": "思考强度",
+      "description": "模型菜单和智能体菜单里思考强度的显示方式。",
+      "keywords": "思考强度 推理 刻度盘 分段 模型菜单 effort dial segments",
+      "dial": "刻度盘",
+      "segments": "分段"
+    },
     "reduceMotion": {
       "name": "减弱动态效果",
       "description": "“跟随系统”遵循 macOS 的设置；“始终”会去掉所有动态效果。",
@@ -334,7 +346,8 @@
       "scale": "缩放与文字",
       "sidebar": "侧边栏",
       "motion": "动态效果",
-      "fonts": "字体"
+      "fonts": "字体",
+      "modelMenu": "模型菜单"
     },
     "zoom": {
       "name": "界面缩放",
@@ -994,7 +1007,8 @@
         "claude-code": "跟随 Claude Code",
         "codex": "跟随 Codex（自动审查）",
         "deepseek": "跟随 DeepSeek Harness",
-        "doubao": "跟随豆包（沙箱）"
+        "doubao": "跟随豆包（沙箱）",
+        "antigravity": "跟随 Antigravity（Default）"
       },
       "unused": "这个智能体用过之后才能选择。",
       "unoffered": "{{mode}}（已不再提供）",
@@ -1799,12 +1813,15 @@
       "restart": "重启以更新",
       "update": "更新",
       "download": "下载",
+      "downloadDetail": "Kettu 会下载安装程序并打开它，把 Kettu 拖到“应用程序”即可更新。",
       "whatsNew": "更新内容",
       "none": "这台电脑上的 Kettu 不在这里更新",
       "none_web": "{{host}} 上的 Kettu 不在这里更新",
       "noneDetail": "这台电脑上的 Kettu 按安装它的方式更新。",
       "noneDetail_web": "{{host}} 上的 Kettu 按安装它的方式更新。",
-      "readyDetail": "重启后完成更新。你的会话会回来。"
+      "readyDetail": "重启后完成更新。你的会话会回来。",
+      "readyWaiting_other": "{{count}} 个会话完成后会自己重启。",
+      "readyWaitingSoon": "马上会自己重启。"
     },
     "automatic": {
       "name": "自动更新",
@@ -1971,7 +1988,7 @@
     },
     "auto": {
       "name": "默认私有发布",
-      "description": "新建的产物会以私有方式发布到 Kettu，发布到 Kettu 的每个页面都会跟着产物的最新版本更新。私有页面只有你登录自己的 Kettu 账号才能打开。",
+      "description": "打开后，新建的产物会以私有方式发布到 Kettu，发布到 Kettu 的每个页面都会跟着产物的最新版本更新。私有页面只有你登录自己的 Kettu 账号才能打开。",
       "keywords": "分享 发布 自动 私有 默认 同步 最新版本 kettu",
       "blockedFull_other": "有 {{count}} 个产物没有发布：云端存储已满。",
       "blockedLarge_other": "有 {{count}} 个产物没有发布：太大了。"
@@ -3147,6 +3164,7 @@
     "warning": {
       "cloud": "Kettu 的账号、中继、推送、分享到 Kettu 和问题报告会跟着开或关。",
       "computer": "智能体将能读取并操作这台电脑上的应用。",
+      "passwords": "智能体将可以在终端、网页和设备里输入密码和验证码。",
       "agentOff": "停用的智能体会停下正在运行的对话，也不再开始新会话。",
       "startMode": "这个智能体的新会话会直接以这个模式开始。",
       "kettuMcp": "关掉后，这个智能体就没有 Kettu 的工具和随附的说明了。",

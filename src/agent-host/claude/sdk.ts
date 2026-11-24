@@ -1,11 +1,10 @@
 // The parts of the Claude Agent SDK that Kettu uses, typed here because the package is never a
 // dependency: its license grants no right to ship it, so Kettu installs it on first use into its
 // data folder and loads it from there. Only the fields Kettu reads are named; the SDK sends more.
+// It holds types only and imports nothing of Kettu's: the harness checks compile it alone against
+// each new SDK's declarations.
 
-import type { ClaudeSandboxOption } from '../sandbox/native'
-import { pathToFileURL } from 'node:url'
 import type { ChildProcess } from 'node:child_process'
-import { t } from '../i18n'
 
 export type PermissionMode =
   'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk' | 'auto'
@@ -207,6 +206,21 @@ export interface FlagSettings {
   effortLevel?: string | null
   fastMode?: boolean
   [key: string]: unknown
+}
+
+/** Huli: the part of Claude Code's `SandboxSettings` Kite sets. */
+export interface ClaudeSandboxOption {
+  enabled: true
+  failIfUnavailable: true
+  allowUnsandboxedCommands: false
+  autoAllowBashIfSandboxed: false
+  filesystem: { allowWrite: string[]; denyWrite?: string[]; denyRead: string[] }
+  network: {
+    allowedDomains?: string[]
+    strictAllowlist?: boolean
+    httpProxyPort?: number
+    socksProxyPort?: number
+  }
 }
 
 export interface QueryOptions {
@@ -603,29 +617,4 @@ export interface ClaudeSdk {
     settingSources?: SettingSource[]
   }): Promise<ResolvedSettings>
   filterEscalatingDefaultMode(resolved: ResolvedSettings): Record<string, unknown>
-}
-
-const EXPORTS = [
-  'query',
-  'listSessions',
-  'getSessionInfo',
-  'getSessionMessages',
-  'getSubagentMessages',
-  'deleteSession',
-  'forkSession',
-  'resolveSettings',
-  'filterEscalatingDefaultMode',
-] as const
-
-/** Loads the SDK from its installed entry module, checking that it has what Kettu calls. */
-export async function loadClaudeSdk(entry: string): Promise<ClaudeSdk> {
-  const module = (await import(/* @vite-ignore */ pathToFileURL(entry).href)) as Record<
-    string,
-    unknown
-  >
-  const missing = EXPORTS.filter((name) => typeof module[name] !== 'function')
-  if (missing.length > 0) {
-    throw new Error(t('agent.sdkLacks', { entry, missing: missing.join(', ') }))
-  }
-  return module as unknown as ClaudeSdk
 }

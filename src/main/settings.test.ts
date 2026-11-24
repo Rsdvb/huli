@@ -460,6 +460,7 @@ describe('the mode new sessions start in', () => {
     'claude-code': 'bypassPermissions',
     codex: 'agent-full-access',
     deepseek: 'danger-full-access',
+    antigravity: 'dangerously-skip-permissions',
   }
 
   it('keeps any mode the user chose on load, full access included', async () => {
@@ -531,6 +532,22 @@ describe('the model of lightweight tasks', () => {
       general: { lightModel: { mode: 'session' } },
     })
     expect(hostSettings(settings, 'en').lightModel).toEqual({ mode: 'session' })
+  })
+})
+
+describe('letting agents type passwords', () => {
+  it('is off until the user turns it on', () => {
+    expect(DEFAULT_SETTINGS.general.agentPasswords).toBe(false)
+    expect(hostSettings(DEFAULT_SETTINGS, 'en').agentPasswords).toBe(false)
+  })
+
+  it('is kept by the host, so a client never turns it on for its own computer instead', () => {
+    expect(splitSettingsPatch({ general: { agentPasswords: true } })).toEqual({
+      host: { general: { agentPasswords: true } },
+      client: null,
+    })
+    const settings = mergeSettings(DEFAULT_SETTINGS, { general: { agentPasswords: true } })
+    expect(hostSettings(settings, 'en').agentPasswords).toBe(true)
   })
 })
 

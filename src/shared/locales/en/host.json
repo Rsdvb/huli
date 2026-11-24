@@ -772,19 +772,6 @@
     "plan": {
       "title": "Plan"
     },
-    "tool": {
-      "sendMessage": "Message {{to}}",
-      "mainAgent": "the main agent",
-      "manageSubagents": "Manage subagents",
-      "manageSubagentsAction": "Manage subagents: {{action}}",
-      "manageTask": "Manage a background task",
-      "manageTaskAction": "Manage a background task: {{action}}",
-      "defineSubagent": "Define a subagent",
-      "defineSubagentNamed": "Define the subagent {{name}}",
-      "generateImage": "Generate an image",
-      "schedule": "Set a timer",
-      "finish": "Finish"
-    },
     "mode": {
       "default": {
         "name": "Default",
@@ -804,7 +791,7 @@
       },
       "fullAccess": {
         "name": "Full access",
-        "description": "Never asks. Applies between turns, restarting agy"
+        "description": "Never asks. Applies between turns, once its commands end, restarting agy"
       }
     },
     "fullAccess": {

@@ -1283,6 +1283,11 @@ export interface LastTurn {
   error?: string
   /** The window that stopped it, for `limit`. */
   limit?: LastTurnLimit
+  /**
+   * When Kettu sends the session a message to carry on once the window has reset, in ms since the
+   * epoch; null once the user chose not to, absent when none is planned.
+   */
+  continuesAt?: number | null
 }
 
 export interface LastTurnLimit {
@@ -2094,6 +2099,8 @@ export interface HostContract {
   // ones, as Codex, stops them all.
   'sessions.cleanTasks': { params: { sessionId: string }; result: void }
   'sessions.retry': { params: { sessionId: string }; result: void }
+  // Drops the continuation Kettu planned after the plan window that stopped the last turn resets.
+  'sessions.cancelContinue': { params: { sessionId: string }; result: void }
   // Asks a side question, answered beside the session; the answer arrives in `sideChat` patches.
   // `agentId` picks the agent that answers for a session whose own agent cannot, and is kept.
   'sessions.sideAsk': {
@@ -2619,6 +2626,11 @@ export interface HostContract {
     params: { id: string; threadId: string; resolved: boolean }
     result: CommentThread
   }
+  // Pins the user's thread, whose element is gone, to another place of the latest version.
+  'artifacts.repin': {
+    params: { id: string; threadId: string; anchor: CommentAnchor }
+    result: CommentThread
+  }
   // The user sent the threads to a session.
   'artifacts.markSent': {
     params: { id: string; threadIds: string[]; sessionId: string }
@@ -3130,6 +3142,7 @@ export const HOST_METHODS = [
   'sessions.sideClear',
   'sessions.sideAgents',
   'sessions.retry',
+  'sessions.cancelContinue',
   'sessions.rewind',
   'sessions.putBack',
   'sessions.fork',
@@ -3306,6 +3319,7 @@ export const HOST_METHODS = [
   'artifacts.reply',
   'artifacts.resolve',
   'artifacts.markSent',
+  'artifacts.repin',
   'artifacts.editElement',
   'artifacts.view',
   'artifacts.seen',

@@ -49,6 +49,7 @@ import { layoutStorage } from '@renderer/lib/storage'
 import {
   activateTab,
   activeFile,
+  filePanelKey,
   closeDiff,
   openDiff,
   openFile,
@@ -126,7 +127,8 @@ function FilesPane({
   const { t } = useTranslation(['files', 'common'])
   const columnKey = `${panel}\0${projectPath}`
   const tabs = useFilesStore((s) => s.open[projectPath] ?? null)
-  const open = activeFile(tabs)
+  const selected = useFilesStore((s) => s.selected[filePanelKey(projectPath, panel)])
+  const open = activeFile(tabs && selected ? { ...tabs, active: selected } : null)
   const diff = useFilesStore((s) => s.diffs[projectPath] ?? null)
   // The session whose side panel this is takes comments on the diff's lines.
   const sessionId = useSessionsStore((s) => {
@@ -250,6 +252,7 @@ function FilesPane({
       ) : (
         <FilePreview
           projectPath={projectPath}
+          panel={panel}
           file={open}
           changes={changes.byPath}
           onShowDiff={
@@ -407,7 +410,9 @@ function FilesPane({
             </ResizablePanel>
           </ResizablePanelGroup>
         )}
-        {mode === 'changes' && !bare && <ChangesFoot projectPath={projectPath} changes={changes} />}
+        {mode === 'changes' && !bare && (
+          <ChangesFoot projectPath={projectPath} panel={panel} changes={changes} />
+        )}
       </div>
       <UnsavedPrompt projectPath={projectPath} />
     </PaneSheet>
@@ -531,10 +536,18 @@ function ChangeRow({
 }
 
 /** Under the changes: how many and how large, with Discard for the shown one and Commit… */
-function ChangesFoot({ projectPath, changes }: { projectPath: string; changes: FileChanges }) {
+function ChangesFoot({
+  projectPath,
+  panel,
+  changes,
+}: {
+  projectPath: string
+  panel: string
+  changes: FileChanges
+}) {
   const { t } = useTranslation('files')
   const diff = useFilesStore((s) => s.diffs[projectPath] ?? null)
-  const openPath = useFilesStore((s) => s.open[projectPath]?.active ?? null)
+  const openPath = useFilesStore((s) => s.selected[filePanelKey(projectPath, panel)] ?? null)
   const totals = useGitStore((s) => s.status[projectPath]?.changes ?? null)
   const blocked = useGitStore(
     (s) =>

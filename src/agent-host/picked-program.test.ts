@@ -45,6 +45,8 @@ async function manager(
     claudeTestEntrypoint: null,
     claudeRuns: {},
     promptSuggestions: true,
+    continueAfterLimit: true,
+    agentPasswords: false,
     lightModel: { mode: 'small' },
     defaultAgent: null,
     computerUse: DEFAULT_SETTINGS.computerUse,
