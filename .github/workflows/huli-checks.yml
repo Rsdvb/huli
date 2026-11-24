@@ -3,9 +3,9 @@ name: Huli checks
 # Every push, to main or any branch, and every pull request from a fork: what the release run would
 # fail on, checked before a merge rather than after it, on Linux. The `changes` job picks the jobs
 # from the files changed: the desktop app's types and tests, Huli Cloud's types, tests and bundle as
-# the release builds it, the phone app's types from its own fresh install alone, as the release's
-# phone jobs check them, and lint and formatting for every change. A change to docs alone runs
-# nothing. Kettu's own ci.yml stays disabled in this repository (huli-sync.yml keeps it so); this
+# the release builds it, the phone app's types and its iOS and Android bundles from its own fresh
+# install alone, as the release's phone jobs check and bundle them, and lint and formatting for
+# every change. A change to docs alone runs nothing. Kettu's own ci.yml stays disabled in this repository (huli-sync.yml keeps it so); this
 # one runs instead, so a sync never has to change it.
 on:
   push:
@@ -159,3 +159,31 @@ jobs:
           cache-dependency-path: mobile/package-lock.json
       - run: npm ci --legacy-peer-deps --no-audit --no-fund
       - run: npx tsc --noEmit
+      # Metro bundles as the release's builds do, so a module the bundle cannot resolve fails here
+      # rather than there. Expo reads Metro's cache from the restore folder and writes only what this
+      # bundle used to the output one, which is kept for the next run in its place.
+      - name: Restore Metro's cache
+        id: metro
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/metro-cache
+          key: metro-${{ runner.os }}-${{ hashFiles('mobile/package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            metro-${{ runner.os }}-${{ hashFiles('mobile/package-lock.json') }}-
+            metro-${{ runner.os }}-
+      - name: Bundle for iOS and Android
+        env:
+          EXPO_METRO_CACHE_RESTORE_DIR: ${{ runner.temp }}/metro-cache
+          EXPO_METRO_CACHE_OUTPUT_DIR: ${{ runner.temp }}/metro-output
+        run: |
+          mkdir -p "$EXPO_METRO_CACHE_RESTORE_DIR" "$EXPO_METRO_CACHE_OUTPUT_DIR"
+          npx expo export --platform ios --output-dir "$RUNNER_TEMP/expo-ios" > /dev/null
+          npx expo export --platform android --output-dir "$RUNNER_TEMP/expo-android" > /dev/null
+          rm -rf "$EXPO_METRO_CACHE_RESTORE_DIR"
+          mv "$EXPO_METRO_CACHE_OUTPUT_DIR" "$EXPO_METRO_CACHE_RESTORE_DIR"
+      - name: Keep Metro's cache
+        if: steps.metro.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/metro-cache
+          key: ${{ steps.metro.outputs.cache-primary-key }}
