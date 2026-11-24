@@ -12,6 +12,7 @@ import {
 } from '@renderer/app/actions'
 import { onAppEvent } from '@renderer/app/events'
 import { launchTarget } from '@renderer/app/restore'
+import { followCaretHold } from '@renderer/app/caret-hold'
 import { followWindowFront } from '@renderer/app/window-front'
 import { restoreDraftAttachments } from '@renderer/features/session/composer/attachments'
 import { allPanes } from '@renderer/features/split/layout'
@@ -420,6 +421,7 @@ export function bootstrap(): Promise<unknown> {
   document.documentElement.dataset.platform = platform
   document.documentElement.dataset.client = window.kettu.client
   followWindowFront()
+  followCaretHold()
   const agents = window.kettu.agents
   agents.onEvent((event) => onHostEvent(event))
   agents.onConnection((state) => {

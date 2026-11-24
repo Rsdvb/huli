@@ -126,6 +126,7 @@ const api: KettuApi = {
   app: {
     getInfo: () => invoke('app:get-info'),
     defaultBrowser: () => invoke('app:default-browser'),
+    caretBlink: () => invoke('app:caret-blink'),
     captureRect: (rect) => invoke('app:capture-rect', rect),
     respondQuit: (id, answer) => invoke('app:respond-quit', id, answer),
     onConfirmQuit: (listener) => {

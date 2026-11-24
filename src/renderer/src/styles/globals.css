@@ -733,6 +733,13 @@
   [contenteditable] {
     caret-color: var(--control-on);
   }
+  /* Huli: a caret left alone holds still after the system's time (app/caret-hold.ts). */
+  [data-caret-held] {
+    caret-animation: manual;
+  }
+  .cm-editor[data-caret-held] > .cm-scroller > .cm-cursorLayer {
+    animation: none !important;
+  }
   /* Keyboard focus only: a pointer never shows the ring. */
   :focus-visible {
     outline: 1.5px solid var(--focus-ring-color);

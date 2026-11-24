@@ -117,6 +117,7 @@ import { MarketKeys, marketKeysFile } from './market-keys'
 import { ChatBridgeStore, chatBridgeFile } from './chat-bridge'
 import { MarketUnauthorized, runMarketCall } from './market-api'
 import { computerModelForRun } from './system-model'
+import { caretBlinkForRun } from './caret'
 import { ComputerOverlay } from './computer-overlay'
 import { computerAppIcon, serveComputerCapture } from './computer-use'
 import { systemReleaseForRun } from './system-name'
@@ -1424,6 +1425,8 @@ async function start(): Promise<void> {
   void remoteHost.setEnabled(settings.get().remote.enabled)
   watchPresence((present) => remoteHost.setPresent(present))
   const window = createMainWindow(start)
+  // Read while the page loads, so its first focused field finds it.
+  void caretBlinkForRun()
   window.once('show', () => {
     updater.start()
     island.firstWindowShown()
