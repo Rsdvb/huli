@@ -3,7 +3,8 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { SettingFacts, SettingsSnapshot } from '@shared/host-control'
 import { DEFAULT_SETTINGS, type SettingsFile, type SettingsPatch } from '@shared/settings'
 import type { SettingChangeItem, SettingsChangeOutcome } from '@shared/thread'
-import { setLocale, tSettings, tSettingsEnglish } from '../i18n'
+import { setLocale } from '../i18n'
+import { tSettings, tSettingsEnglish } from '../settings-words'
 import { mergeSettings, validateSettingsPatch } from '../../main/settings-schema'
 import {
   CHANGE_SETTINGS,

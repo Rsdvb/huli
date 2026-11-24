@@ -2,42 +2,12 @@
 
 import i18next, { type ParseKeys } from 'i18next'
 import { i18nOptions, type Locale } from '@shared/locale'
-import enAgentHistory from '@shared/locales/en/agentHistory.json'
 import en from '@shared/locales/en/host.json'
-import enHuliAccount from '@shared/locales/en/huliAccount.json'
-import enSettings from '@shared/locales/en/settings.json'
-import enUsage from '@shared/locales/en/usage.json'
-import zhCNAgentHistory from '@shared/locales/zh-CN/agentHistory.json'
 import zhCN from '@shared/locales/zh-CN/host.json'
-import zhCNHuliAccount from '@shared/locales/zh-CN/huliAccount.json'
-import zhCNSettings from '@shared/locales/zh-CN/settings.json'
-import zhCNUsage from '@shared/locales/zh-CN/usage.json'
 
-// English until host:init, which is also what the tests see. The settings' catalogs name the
-// rows the settings tools list and change; Huli's account and import rows take their words from
-// catalogs of their own.
-void i18next.init(
-  i18nOptions(
-    'en',
-    {
-      en: {
-        host: en,
-        settings: enSettings,
-        usage: enUsage,
-        huliAccount: enHuliAccount,
-        agentHistory: enAgentHistory,
-      },
-      'zh-CN': {
-        host: zhCN,
-        settings: zhCNSettings,
-        usage: zhCNUsage,
-        huliAccount: zhCNHuliAccount,
-        agentHistory: zhCNAgentHistory,
-      },
-    },
-    'host',
-  ),
-)
+// English until host:init, which is also what the tests see. The settings rows' words are in
+// settings-words.ts.
+void i18next.init(i18nOptions('en', { en: { host: en }, 'zh-CN': { host: zhCN } }, 'host'))
 
 export const t = i18next.getFixedT(null, 'host')
 
@@ -45,14 +15,6 @@ export const t = i18next.getFixedT(null, 'host')
 export const tEnglish = i18next.getFixedT('en', 'host')
 
 export type HostKey = ParseKeys<'host'>
-
-type Loose = (key: string, params?: Record<string, string | number>) => string
-
-/** A settings row's words in the user's language, from `settings` or as `usage:key`. */
-export const tSettings = i18next.getFixedT(null, 'settings') as unknown as Loose
-
-/** The same words in English, for the English name agents also get. */
-export const tSettingsEnglish = i18next.getFixedT('en', 'settings') as unknown as Loose
 
 /** A message kept untranslated, for text that is shown again after the language changes. */
 export interface HostMessage {
