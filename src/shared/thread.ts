@@ -2245,9 +2245,9 @@ export function coalescePatches(patches: readonly Patch[]): Patch[] {
         open.delete(patch.entry.id)
         out.push(patch)
         break
+      // Huli: `entry.remove` too, as a reverted turn's entries leave.
       case 'thread.reset':
       case 'thread.truncate':
-      // Huli: a reverted turn's entries leave.
       case 'entry.remove':
         open.clear()
         out.push(patch)
