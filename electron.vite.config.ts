@@ -76,6 +76,8 @@ export default defineConfig({
           mini: resolve('src/renderer/mini.html'),
           capture: resolve('src/renderer/capture.html'),
         },
+        // As main's: a page keeps each script's text, at two bytes a character once one is not ASCII.
+        output: { charset: 'ascii' },
       },
     },
   },
