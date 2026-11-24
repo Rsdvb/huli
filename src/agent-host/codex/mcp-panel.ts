@@ -64,13 +64,15 @@ function layerOf(name: string, origins: Record<string, ConfigLayerMetadata>): st
 
 /**
  * The servers as the panel lists them. `kite` are the names of Kite's own as Codex has them;
- * `failure` gives the startup error Codex last reported for a server.
+ * `failure` gives the startup error Codex last reported for a server; `desktop` names the Codex
+ * desktop app's servers the thread started turned off.
  */
 export function codexMcpServers(
   servers: readonly McpServerStatus[],
   kite: ReadonlySet<string>,
   origins: Record<string, ConfigLayerMetadata>,
   failure: (name: string) => string | null,
+  desktop: ReadonlySet<string> = new Set(),
 ): SessionMcpServer[] {
   return servers.map((server): SessionMcpServer => {
     const state = stateOf(server)
@@ -92,6 +94,7 @@ export function codexMcpServers(
       source,
       plugin: source === 'plugin' ? plugin : null,
       tools: state === 'connected' ? Object.keys(server.tools ?? {}) : null,
+      ...(state === 'disabled' && desktop.has(server.name) ? { desktopApp: true as const } : {}),
     }
   })
 }

@@ -102,6 +102,7 @@ import {
   tierFor,
 } from './config'
 import { estimateMcpServers, estimateSkills } from './context'
+import { desktopConfig, desktopServers, readPluginServers, type DesktopServer } from './desktop-mcp'
 import { childThreads, childTurnEffect, ThreadMapper } from './mapper'
 import { codexApps, codexMcpServers, codexServerName } from './mcp-panel'
 import {
@@ -172,6 +173,23 @@ const INVALID_REQUEST = -32600
 const METHOD_NOT_FOUND = -32601
 /** Huli: the first Codex whose app-server was checked to take a denied action back. */
 const APPEALS_VERSION = '0.171.0'
+/**
+ * Huli: the first Codex checked to start a thread with servers of its configuration and of its
+ * plugins turned off, and to unload a thread at once, through the thread's own configuration.
+ */
+const DESKTOP_MCP_VERSION = '0.172.0'
+/** Huli: how long a thread let go of may take to unload; one still busy stays as it was. */
+const UNLOAD_TIMEOUT_MS = 10_000
+const NO_SERVERS: ReadonlySet<string> = new Set()
+
+/** Huli: the Codex desktop app's servers a thread started turned off, and how to open it again. */
+interface DesktopThread {
+  servers: DesktopServer[]
+  /** The servers the user let start in the session anyway. */
+  allowed: Set<string>
+  cwd: string
+  options: SessionOptions
+}
 
 /** Huli: the most background terminals of a thread one listing reads, and its page's size. */
 const MAX_TERMINALS = 100
@@ -393,11 +411,17 @@ function sandboxMode(policy: SandboxPolicy): SandboxMode {
 /**
  * Per-session config Codex takes at start: the folder trusted, as codex-acp did, Kettu's MCP, the
  * question tool in Default mode, where Codex otherwise asks in plain text, and with Kettu's memory
- * Codex's own off, so it neither reads its memories nor makes them from it.
+ * Codex's own off, so it neither reads its memories nor makes them from it. Huli: `desktop` turns
+ * the Codex desktop app's servers off, under any of Kite's own of the same name.
  */
-function sessionConfig(cwd: string, options: SessionOptions): Record<string, JsonValue> {
+function sessionConfig(
+  cwd: string,
+  options: SessionOptions,
+  desktop: Record<string, JsonValue> | null = null,
+): Record<string, JsonValue> {
   const features: Record<string, JsonValue> = { default_mode_request_user_input: true }
   const config: Record<string, JsonValue> = {
+    ...desktop,
     projects: { [cwd]: { trust_level: 'trusted' } },
     features,
     // Codex warns in the thread that an under-development feature is on.
@@ -407,7 +431,11 @@ function sessionConfig(cwd: string, options: SessionOptions): Record<string, Jso
     const entry = codexServer(server)
     return entry ? [[server.name.replace(/\s+/g, '_'), entry] as const] : []
   })
-  if (entries.length > 0) config.mcp_servers = Object.fromEntries(entries)
+  const servers = {
+    ...(desktop?.mcp_servers as Record<string, JsonValue> | undefined),
+    ...Object.fromEntries(entries),
+  }
+  if (Object.keys(servers).length > 0) config.mcp_servers = servers
   if (options.memory) {
     features.memories = false
     config.memories = { use_memories: false, generate_memories: false }
@@ -642,6 +670,15 @@ export class CodexConnection implements AgentConnection {
   /** Huli: the MCP sign-ins a session's panel started, by Codex's login id, until they end. */
   private readonly logins = new Map<string, { threadId: string; name: string }>()
   private mcpReloading: Promise<void> | null = null
+  /** Huli: this Codex starts a thread's servers turned off as the thread's configuration says. */
+  private desktopMcp = false
+  private codexHome: string | null = null
+  /** Huli: the servers each plugin version declares, by the folder Codex installed it in. */
+  private readonly pluginDeclarations = new Map<string, Promise<Record<string, unknown>>>()
+  /** Huli: the threads that started servers of the Codex desktop app turned off. */
+  private readonly desktop = new Map<string, DesktopThread>()
+  /** Huli: who waits for a thread to unload, by its id. */
+  private readonly unloads = new Map<string, () => void>()
   /** Huli: warnings about Codex itself, by key, with the thread each concerns, null for all. */
   private readonly notices = new Map<string, { threadId: string | null; notice: CodexNotice }>()
   /** Huli: the warnings each session has shown. */
@@ -691,6 +728,8 @@ export class CodexConnection implements AgentConnection {
   request<T>(method: string, params?: unknown): Promise<T> {
     // Huli: a write of the configuration may change what workspace turns may do.
     if (method.startsWith('config/') && method !== 'config/read') this.workspaceRead = null
+    // Huli: an install may put a plugin's version back with other servers.
+    if (method.startsWith('plugin/')) this.pluginDeclarations.clear()
     return this.call<T>(method, params)
   }
 
@@ -768,6 +807,11 @@ export class CodexConnection implements AgentConnection {
     // `<client>/<Codex version> (...)`, the only place app-server says its version.
     const version = /^[^/\s]+\/(\S+)/.exec(response.userAgent ?? '')?.[1] ?? null
     this.appeals = versionAtLeast(version, APPEALS_VERSION)
+    this.desktopMcp = versionAtLeast(version, DESKTOP_MCP_VERSION)
+    this.codexHome =
+      typeof response.codexHome === 'string' && response.codexHome !== ''
+        ? response.codexHome
+        : null
     void this.refreshAccount()
     return {
       name: 'Codex',
@@ -982,6 +1026,46 @@ export class CodexConnection implements AgentConnection {
     return sandbox
   }
 
+  /**
+   * Huli: the Codex desktop app's servers a thread opened in `cwd` would start; none for a Codex
+   * not checked to turn them off, or when its configuration cannot be read.
+   */
+  private async desktopServers(cwd: string): Promise<DesktopServer[]> {
+    const home = this.codexHome
+    if (!this.desktopMcp || home === null) return []
+    try {
+      const read = await this.call<{ config?: Record<string, unknown> }>('config/read', {
+        includeLayers: false,
+        cwd,
+      })
+      return await desktopServers(read.config ?? {}, (id) =>
+        readPluginServers(home, id, this.pluginDeclarations),
+      )
+    } catch (error) {
+      if (this.isClosed) throw error
+      this.hooks.log('warn', `Could not read Codex's MCP servers: ${(error as Error).message}`)
+      return []
+    }
+  }
+
+  /** Huli: a hidden fork's configuration of the app's servers, as its source thread has them. */
+  private desktopOf(threadId: string): Record<string, JsonValue> | null {
+    const desktop = this.desktop.get(threadId)
+    return desktop ? desktopConfig(desktop.servers, desktop.allowed) : null
+  }
+
+  /** Huli: what the panel and a reload need of a thread that turned the app's servers off. */
+  private keepDesktop(
+    threadId: string,
+    cwd: string,
+    options: SessionOptions,
+    servers: DesktopServer[],
+    allowed: Set<string>,
+  ): void {
+    if (servers.length === 0 && allowed.size === 0) this.desktop.delete(threadId)
+    else this.desktop.set(threadId, { servers, allowed, cwd, options })
+  }
+
   async newSession(cwd: string, options: SessionOptions = {}): Promise<OpenedSession> {
     await this.requireSignIn()
     // A read of the agent's options has nobody waiting on it, so it lists what Codex offers now.
@@ -989,13 +1073,16 @@ export class CodexConnection implements AgentConnection {
     const mode = modeOf(DEFAULT_MODE)!
     const hidden = options.hidden !== undefined
     const sandbox = await this.sandboxReady(options)
-    await this.setSkillRoots(options.skillRoots)
+    const [desktop] = await Promise.all([
+      this.desktopServers(cwd),
+      this.setSkillRoots(options.skillRoots),
+    ])
     const response = await this.call<ThreadResponse>('thread/start', {
       cwd,
       approvalPolicy: mode.approvalPolicy,
       approvalsReviewer: mode.approvalsReviewer,
       sandbox: sandboxMode(heldPolicy(mode.sandbox, sandbox)),
-      config: sessionConfig(cwd, options),
+      config: sessionConfig(cwd, options, desktopConfig(desktop, NO_SERVERS)),
       ...developerInstructions(options),
       ...workspaceRoots(cwd, options.folders),
       ephemeral: hidden,
@@ -1005,6 +1092,7 @@ export class CodexConnection implements AgentConnection {
     record.settings = { ...record.settings, mode: DEFAULT_MODE }
     record.sandbox = sandbox
     record.folders = [...(options.folders ?? [])]
+    this.keepDesktop(record.id, cwd, options, desktop, new Set())
     return { sessionId: record.id, config: await this.config(record) }
   }
 
@@ -1019,7 +1107,11 @@ export class CodexConnection implements AgentConnection {
     // Huli: full access runs in no sandbox, so a sandboxed session goes on in the default mode.
     const known = seen?.known ? sandboxedSettings(seen.settings, sandbox) : undefined
     const mode = known ? modeOf(known.mode) : null
-    await this.setSkillRoots(options.skillRoots)
+    const allowed = this.desktop.get(threadId)?.allowed ?? new Set<string>()
+    const [desktop] = await Promise.all([
+      this.desktopServers(cwd),
+      this.setSkillRoots(options.skillRoots),
+    ])
     const response = await this.call<ThreadResponse>('thread/resume', {
       threadId,
       cwd,
@@ -1032,7 +1124,7 @@ export class CodexConnection implements AgentConnection {
         : sandbox
           ? { sandbox: sandboxMode(heldPolicy(modeOf(DEFAULT_MODE)!.sandbox, sandbox)) }
           : {}),
-      config: sessionConfig(cwd, options),
+      config: sessionConfig(cwd, options, desktopConfig(desktop, allowed)),
       ...developerInstructions(options),
       ...workspaceRoots(cwd, options.folders),
       excludeTurns: true,
@@ -1042,6 +1134,7 @@ export class CodexConnection implements AgentConnection {
     record.sandbox = sandbox
     record.folders = [...(options.folders ?? [])]
     record.prompted = true
+    this.keepDesktop(threadId, cwd, options, desktop, allowed)
     return record
   }
 
@@ -1120,7 +1213,12 @@ export class CodexConnection implements AgentConnection {
     const sandbox = await this.sandboxReady(options)
     const held = source ? sandboxedSettings(source, sandbox) : undefined
     const mode = modeOf(held?.mode ?? DEFAULT_MODE)!
-    await this.setSkillRoots(options.skillRoots)
+    // Huli: the fork lets start what its source's session let start.
+    const allowed = new Set(this.desktop.get(sessionId)?.allowed)
+    const [desktop] = await Promise.all([
+      this.desktopServers(cwd),
+      this.setSkillRoots(options.skillRoots),
+    ])
     const response = await this.call<ThreadResponse>('thread/fork', {
       threadId: sessionId,
       ...(lastTurnId ? { lastTurnId } : {}),
@@ -1130,7 +1228,7 @@ export class CodexConnection implements AgentConnection {
       sandbox: sandboxMode(heldPolicy(mode.sandbox, sandbox)),
       // A fork takes the model and effort of the configuration, not of its source.
       ...(source ? { model: source.model } : {}),
-      config: sessionConfig(cwd, options),
+      config: sessionConfig(cwd, options, desktopConfig(desktop, allowed)),
       ...developerInstructions(options),
       ...workspaceRoots(cwd, options.folders),
       ephemeral: hidden,
@@ -1140,6 +1238,7 @@ export class CodexConnection implements AgentConnection {
     record.sandbox = sandbox
     record.folders = [...(options.folders ?? [])]
     record.prompted = true
+    this.keepDesktop(record.id, cwd, options, desktop, allowed)
     return { sessionId: record.id, config: await this.config(record) }
   }
 
@@ -1273,7 +1372,7 @@ export class CodexConnection implements AgentConnection {
       approvalPolicy: 'never',
       sandbox: 'read-only',
       ...(source ? { model: source.model } : {}),
-      config: sessionConfig(cwd, { ...options, mcpServers: servers }),
+      config: sessionConfig(cwd, { ...options, mcpServers: servers }, this.desktopOf(sessionId)),
       developerInstructions: own ? `${own}\n\n${SIDE_INSTRUCTIONS}` : SIDE_INSTRUCTIONS,
       ...workspaceRoots(cwd, parent.folders),
       ephemeral: true,
@@ -1347,7 +1446,7 @@ export class CodexConnection implements AgentConnection {
       approvalPolicy: 'never',
       sandbox: 'read-only',
       ...(source ? { model: source.model } : {}),
-      config: sessionConfig(cwd, { ...options, mcpServers: servers }),
+      config: sessionConfig(cwd, { ...options, mcpServers: servers }, this.desktopOf(sessionId)),
       ...developerInstructions(options),
       ...workspaceRoots(cwd, parent.folders),
       ephemeral: true,
@@ -1385,6 +1484,7 @@ export class CodexConnection implements AgentConnection {
   async deleteSession(sessionId: string): Promise<void> {
     await this.call('thread/delete', { threadId: sessionId })
     this.threads.delete(sessionId)
+    this.desktop.delete(sessionId)
   }
 
   async listSessions(
@@ -1672,6 +1772,9 @@ export class CodexConnection implements AgentConnection {
       return
     }
     switch (method) {
+      case 'thread/closed':
+        this.unloads.get(threadId)?.()
+        break
       case 'turn/started':
         this.turnStarted(threadId, p.turn as Turn)
         break
@@ -2365,13 +2468,74 @@ export class CodexConnection implements AgentConnection {
       this.mcpOrigins(record?.cwd ?? null),
       this.apps(threadId),
     ])
+    const desktop = this.desktop.get(threadId)
+    const off = new Set(
+      (desktop?.servers ?? [])
+        .filter((server) => !desktop?.allowed.has(server.name))
+        .map((server) => server.name),
+    )
     return {
-      servers: codexMcpServers(servers, new Set(kite.map(codexServerName)), origins, (name) =>
-        this.startup.failure(name, threadId),
+      servers: codexMcpServers(
+        servers,
+        new Set(kite.map(codexServerName)),
+        origins,
+        (name) => this.startup.failure(name, threadId),
+        off,
       ),
       apps,
       can: { reconnect: 'all', toggle: false, login: true, reload: true },
     }
+  }
+
+  /**
+   * Huli: starts one of the Codex desktop app's servers that the thread started turned off, for the
+   * session alone: Codex takes a thread's configuration only as it loads the thread, so Kite lets go
+   * of the thread, which unloads at once, and opens it again without that server turned off. A thread
+   * never prompted has nothing saved to open again, and one busy with a turn is left to finish.
+   */
+  async toggleMcp(threadId: string, server: string, enabled: boolean): Promise<void> {
+    const record = this.threads.get(threadId)
+    const desktop = this.desktop.get(threadId)
+    const off = desktop?.servers.some((s) => s.name === server) && !desktop.allowed.has(server)
+    if (!enabled || !record || !desktop || !off) {
+      throw new AgentRequestError('agent_error', t('sessionMcp.cannotToggle', { agent: 'Codex' }))
+    }
+    if (record.prompting || record.running || record.command) {
+      throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
+    }
+    if (!record.prompted) throw new AgentRequestError('agent_error', t('codex.desktopMcp.notSaved'))
+    desktop.allowed.add(server)
+    try {
+      await this.reloadThread(threadId, desktop)
+    } catch (error) {
+      desktop.allowed.delete(server)
+      throw error
+    }
+  }
+
+  /** Huli: lets go of the thread and opens it again once Codex unloaded it, with its options. */
+  private async reloadThread(threadId: string, desktop: DesktopThread): Promise<void> {
+    // Waited for first: Codex may say the thread closed before it answers the unsubscribe.
+    const unloaded = this.unloaded(threadId)
+    await this.call('thread/unsubscribe', { threadId })
+    const gone = await unloaded
+    // Kite follows the thread again either way; one Codex kept loaded keeps its configuration.
+    await this.resume(threadId, desktop.cwd, desktop.options)
+    if (!gone) throw new AgentRequestError('agent_error', t('codex.desktopMcp.stillLoaded'))
+  }
+
+  /** Huli: whether Codex unloads the thread before `UNLOAD_TIMEOUT_MS` passes. */
+  private unloaded(threadId: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const end = (gone: boolean): void => {
+        clearTimeout(timer)
+        if (this.unloads.get(threadId) === unload) this.unloads.delete(threadId)
+        resolve(gone)
+      }
+      const unload = (): void => end(true)
+      const timer = setTimeout(() => end(false), UNLOAD_TIMEOUT_MS)
+      this.unloads.set(threadId, unload)
+    })
   }
 
   /** The layer each key of the configuration comes from, as the thread's folder sees it. */
@@ -2883,6 +3047,7 @@ export class CodexConnection implements AgentConnection {
     this.unregister(sessionId)
     const record = this.threads.get(sessionId)
     this.threads.delete(sessionId)
+    this.desktop.delete(sessionId)
     const failed = (error: unknown): void => {
       if (!this.isClosed) log((error as Error).message)
     }

@@ -974,6 +974,10 @@
     "noForkPoint": "Codex can't find this reply in its history",
     "noRevertPoint": "Codex can't find this turn in its history",
     "revertOlderThread": "Codex can undo turns only in sessions a newer Codex started",
+    "desktopMcp": {
+      "notSaved": "Codex hasn't saved this session yet. Send a message first, then choose Start anyway.",
+      "stillLoaded": "Codex is still busy with this session and couldn't reopen it. Try again once it's idle."
+    },
     "option": {
       "mode": "Mode",
       "modeDescription": "Approval and sandboxing preset for the session",
