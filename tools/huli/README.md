@@ -2290,6 +2290,11 @@ more kind and whose days now follow the bin's.
 - Requests: `bin.list`, `bin.restore` (`keys`, optional `project`), `bin.purge`, `bin.empty`,
   validated in `validate.ts` (keys `kind:id`, at most `MAX_BIN_KEYS`), open to paired devices;
   `memory.remove` now answers its `binKey`.
+- The simulator's `89-recycle-bin` flow taps 撤销 within the toast's five seconds, which one
+  Maestro tap outlasted on a runner busy with work earlier flows left running (no `bin.restore`
+  reached the host). A developer build's `-huliNoticeMs` launch argument (`ui/NoticeBar.tsx`)
+  keeps a notice with an action longer for it, and the flow waits for one to go before it opens
+  the bin page.
 
 Huli's own files: `src/shared/recycle-bin.ts`, `src/agent-host/recycle-bin.ts` (the bin and its
 timer), `recycle-bin-sources.ts` (each kind), their tests (`recycle-bin*.test.ts`),

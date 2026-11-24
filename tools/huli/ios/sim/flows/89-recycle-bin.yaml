@@ -1,5 +1,8 @@
 # 回收站 on the phone: a deleted session says 已移到回收站 with 撤销, which brings it back; deleted
 # again, it waits in 设置 › 回收站, comes back from there, and a delete for good asks twice.
+# Undo shows for five seconds, and after flows that left work running one Maestro tap took ten, so
+# the developer build's huliNoticeMs launch argument keeps a notice with an action for 20 s; the
+# flow waits for one to go before it leaves the list, so it covers no row of the bin's page.
 # Ends: the recycle bin empty after a delete for good
 appId: io.github.rsdvb.huli
 ---
@@ -7,6 +10,8 @@ appId: io.github.rsdvb.huli
     stopApp: true
     arguments:
       huliNoAsk: 'YES'
+      huliDev: 'YES'
+      huliNoticeMs: '20000'
 - tapOn:
     text: '允许'
     optional: true
@@ -40,7 +45,7 @@ appId: io.github.rsdvb.huli
 - extendedWaitUntil:
     visible: '.*已移到回收站'
     timeout: 10000
-# The notice stays 5 s; a screenshot first can outlast it, so 撤销 is tapped at once.
+# A screenshot first could outlast the notice, so 撤销 is tapped at once.
 - tapOn:
     text: '撤销'
     waitToSettleTimeoutMs: 500
@@ -61,6 +66,9 @@ appId: io.github.rsdvb.huli
 - extendedWaitUntil:
     visible: '.*已移到回收站'
     timeout: 10000
+- extendedWaitUntil:
+    notVisible: '.*已移到回收站'
+    timeout: 30000
 - tapOn: '账户与设置'
 - scrollUntilVisible:
     element: '回收站'
@@ -92,7 +100,12 @@ appId: io.github.rsdvb.huli
 - tapOn: '删除…'
 - waitForAnimationToEnd
 - tapOn: '删除'
-- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible: '.*已移到回收站'
+    timeout: 10000
+- extendedWaitUntil:
+    notVisible: '.*已移到回收站'
+    timeout: 30000
 - tapOn: '账户与设置'
 - scrollUntilVisible:
     element: '回收站'

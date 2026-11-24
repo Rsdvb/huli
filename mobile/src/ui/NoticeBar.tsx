@@ -2,8 +2,9 @@
 // went with its next step, or a session archived with Undo. One at a time; it leaves on its own.
 
 import { useEffect, useRef, useState } from 'react'
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Animated, Platform, Pressable, Settings, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { devMode } from '../dev/devMode'
 import { Glass } from './Glass'
 import { useReduceMotion } from './Press'
 import { HEADER_BAR } from './ScrollHeader'
@@ -20,6 +21,18 @@ export interface Notice {
 }
 
 const SHOWN_MS = 6000
+
+/**
+ * How long a notice shows: its own time, or for one with an action, such as Undo, the milliseconds
+ * a developer build's `-huliNoticeMs` launch argument gives the simulator scripts, which a phone's
+ * user cannot pass. On a busy runner one Maestro tap took 10 s, past Undo's five.
+ */
+function shownMs(notice: Notice): number {
+  const own = notice.ms ?? SHOWN_MS
+  if (!notice.action || !devMode() || Platform.OS !== 'ios') return own
+  const given = Number(Settings.get('huliNoticeMs'))
+  return Number.isFinite(given) && given > 0 ? given : own
+}
 
 /** The action's text grows to a 44pt target over the capsule's height. */
 const ACTION_SLOP = { top: 13, bottom: 13, left: 10, right: 10 }
@@ -72,7 +85,7 @@ export function NoticeBar() {
           if (finished && current?.id === notice.id) hideNotice()
         },
       )
-    }, notice.ms ?? SHOWN_MS)
+    }, shownMs(notice))
     return () => clearTimeout(timer)
   }, [notice, shown, reduce])
 
