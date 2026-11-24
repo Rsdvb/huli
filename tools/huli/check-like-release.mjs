@@ -41,7 +41,9 @@ function parse(argv) {
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     // npm and npx are .cmd scripts on Windows, which only a shell starts; the arguments are fixed.
-    const child = spawn(command, args, { stdio: 'inherit', shell: WINDOWS, ...options })
+    const child = WINDOWS
+      ? spawn([command, ...args].join(' '), { stdio: 'inherit', shell: true, ...options })
+      : spawn(command, args, { stdio: 'inherit', ...options })
     child.on('error', reject)
     child.on('close', (code) => resolve(code ?? 1))
   })
