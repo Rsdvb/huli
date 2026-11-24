@@ -348,7 +348,9 @@ describe("agy's tool calls", () => {
     connection.close()
   })
 
-  it("title agy's own tools it sends untitled and keep what any call says it does", async () => {
+  // Huli: the thread names agy's own tools when it draws them (entries/agy-tools.ts); the host
+  // keeps their title and shows what a message says.
+  it("keep agy's own tools' titles, show a message and keep what any call says it does", async () => {
     // As agy 1.5.12 sends them: its own tools as "Run <name>", Kettu's with a `toolSummary`.
     const calls = [
       {
@@ -406,11 +408,11 @@ describe("agy's tool calls", () => {
     })
     expect(rows).toEqual([
       {
-        title: 'Message c34bb3a8',
+        title: 'Run send_message',
         content: [{ type: 'markdown', markdown: 'Carry on with the rest.' }],
         description: undefined,
       },
-      { title: 'Manage subagents: list', content: [], description: undefined },
+      { title: 'Run manage_subagents', content: [], description: undefined },
       { title: 'mcp__kettu__list_sessions', content: [], description: 'List the recent sessions' },
       { title: '"vaultwarden arm64" on Web', content: [], description: undefined },
     ])

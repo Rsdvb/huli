@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DOCX_TYPE, XLS_TYPE, XLSX_TYPE } from '@shared/media'
+import { FILE_LINKS } from '../agent-host/testing/links'
 import { MediaGrants, respondMedia } from './media'
 
 const TOKEN = 'abcdefghijklmnopqrstuvwxyz'
@@ -71,7 +72,7 @@ describe('respondMedia for a PDF', () => {
     expect(response.status).toBe(404)
   })
 
-  it('refuses a file swapped for a link since it was granted', async () => {
+  it.skipIf(!FILE_LINKS)('refuses a file swapped for a link since it was granted', async () => {
     await rm(file)
     await writeFile(path.join(folder, 'other.pdf'), PDF)
     const { symlink } = await import('node:fs/promises')

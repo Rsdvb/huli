@@ -377,16 +377,20 @@ describe("agy's questions in the question card", () => {
     expect(rows[0]).toMatchObject({ status: 'failed' })
   })
 
-  it('asks nothing of a version it was not measured on', async () => {
-    const { seen, requests } = await ask('1.5.14', async () => ({ answers: [] }))
-    expect(requests).toEqual([])
-    expect(seen.responses).toEqual([{ action: 'decline' }])
+  // Huli: Kite shows any agent's form as a card of its fields, so a version the question card was
+  // not measured on gets that card, and every agent is told it takes forms.
+  it('shows a version it was not measured on its form, not the question card', async () => {
+    const { seen, requests } = await ask('1.5.14', async () => 'cancelled')
+    expect(requests).toHaveLength(1)
+    expect(requests[0]!.questions).toBeUndefined()
+    expect(requests[0]!.elicitation?.kind).toBe('form')
+    expect(seen.responses).toEqual([{ action: 'cancel' }])
   })
 
-  it('declares forms for agy alone', async () => {
+  it('declares forms for every agent', async () => {
     const { connection, seen } = connect('1.5.15', 'gemini')
     await connection.initialize('1.0.0')
-    expect(seen.capabilities.elicitation).toEqual({ url: {} })
+    expect(seen.capabilities.elicitation).toEqual({ form: {}, url: {} })
     connection.close()
   })
 })
