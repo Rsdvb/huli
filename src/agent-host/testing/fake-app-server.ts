@@ -107,6 +107,7 @@ export class FakeAppServer {
   mcpServers: McpServerStatus[] = []
   private readonly handlers = new Map<string, Handler>()
   private readonly answers = new Map<number | string, (result: unknown) => void>()
+  private readonly waiters = new Set<{ check: () => boolean; resolve: () => void }>()
   private readonly writer: WritableStreamDefaultWriter<unknown>
   private threads = 0
   private turns = 0
@@ -148,6 +149,22 @@ export class FakeAppServer {
     return { id, answer }
   }
 
+  /**
+   * Resolves once `check` holds, as tried after each message the server takes and answers: what
+   * a test waits for comes when the host gets to it, as late as a loaded machine makes it.
+   */
+  until(check: () => boolean, timeoutMs = 10_000): Promise<void> {
+    if (check()) return Promise.resolve()
+    return new Promise<void>((resolve, reject) => {
+      const waiter = { check, resolve: () => (clearTimeout(timer), resolve()) }
+      const timer = setTimeout(() => {
+        this.waiters.delete(waiter)
+        reject(new Error(`Timed out waiting: ${check.toString()}`))
+      }, timeoutMs)
+      this.waiters.add(waiter)
+    })
+  }
+
   nextTurnId(): string {
     return `turn-${++this.turns}`
   }
@@ -168,6 +185,14 @@ export class FakeAppServer {
     this.close()
   }
 
+  private settle(): void {
+    for (const waiter of [...this.waiters]) {
+      if (!waiter.check()) continue
+      this.waiters.delete(waiter)
+      waiter.resolve()
+    }
+  }
+
   private async receive(message: Record<string, unknown>): Promise<void> {
     const { id, method, params, result, error } = message as {
       id?: number
@@ -181,18 +206,22 @@ export class FakeAppServer {
       return
     }
     this.requests.push({ method, params: params ?? {} })
+    this.settle()
     if (id === undefined) return
     const handler = this.handlers.get(method)
+    let reply: Record<string, unknown>
     try {
       if (!handler) throw new FakeRpcError(-32601, `method not found: ${method}`)
-      const answer = await handler(params ?? {}, this)
-      if (!this.closed) await this.writer.write({ id, result: answer ?? {} })
+      reply = { id, result: (await handler(params ?? {}, this)) ?? {} }
     } catch (failure) {
       const code = failure instanceof FakeRpcError ? failure.code : -32603
-      if (!this.closed) {
-        await this.writer.write({ id, error: { code, message: (failure as Error).message } })
-      }
+      reply = { id, error: { code, message: (failure as Error).message } }
     }
+    if (this.closed) return
+    // Queued before a waiter goes on, so what the test sends next comes after the answer.
+    const written = this.writer.write(reply)
+    this.settle()
+    await written.catch(() => {})
   }
 
   private defaults(): void {

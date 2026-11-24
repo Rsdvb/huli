@@ -1,7 +1,7 @@
 // Huli: a Codex call its auto-review denied, allowed by the user anyway: the host checks the
 // appeal and its risk, hands Codex its own record of the denial, and asks the model to retry.
 
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it } from 'vitest'
 import type { ToolEntry } from '@shared/thread'
 import { FakeAppServer, turn } from './testing/fake-app-server'
 import { startTestHost, type TestHost } from './testing/harness'
@@ -48,7 +48,7 @@ async function deniedCall(version: string) {
     content: [{ type: 'text', text: PROMPT }],
   })
   const first = () => fake.turns.find((item) => item.text === PROMPT)
-  await vi.waitFor(() => expect(first()).toBeDefined())
+  await fake.server.until(() => first() !== undefined)
   const { threadId, turnId } = first()!
   fake.server.notify('item/autoApprovalReview/completed', {
     threadId,
@@ -103,8 +103,8 @@ it('allows a denied call once its high risk is confirmed, and asks Codex to retr
   ])
   await window.until(() => tool()?.review?.appeal?.allowed === true)
   // With the turn over, a message asks the model to try the step again.
-  await vi.waitFor(() =>
-    expect(fake.turns.filter((item) => item.threadId === threadId)).toHaveLength(2),
+  await fake.server.until(
+    () => fake.turns.filter((item) => item.threadId === threadId).length === 2,
   )
   expect(fake.turns.filter((item) => item.threadId === threadId)[1]!.text).toContain('try it again')
   await expect(

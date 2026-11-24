@@ -70,7 +70,7 @@ it('gives a thread rebuilt from the agent history back who sent each message, an
   // Each message is one turn, ended before the next is sent.
   const send = async (text: string, go: () => Promise<unknown>) => {
     await go()
-    await vi.waitFor(() => expect(started.has(text)).toBe(true))
+    await server.until(() => started.has(text))
     const { threadId, turnId } = started.get(text)!
     server.notify('turn/completed', { threadId, turn: turn(turnId, 'completed') })
     await window.until(
@@ -112,7 +112,8 @@ it('gives a thread rebuilt from the agent history back who sent each message, an
     [PHONE, { device: expect.objectContaining({ name: 'Phone' }) }],
     [MESSAGE, { from: FROM }],
   ]
-  await vi.waitFor(() => expect(users(reopened.entries(id))).toEqual(expected))
+  // Rebuilt from the agent's history after the host starts again, so it comes when that is read.
+  await vi.waitFor(() => expect(users(reopened.entries(id))).toEqual(expected), { timeout: 10_000 })
   await second.stop()
   hosts.splice(0)
 
