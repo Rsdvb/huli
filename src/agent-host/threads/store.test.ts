@@ -72,8 +72,11 @@ function busy(worker: ThreadWorker, held: Promise<void>): ThreadWorker {
   }
 }
 
-function open(createWorker: (data: ThreadWorkerData) => ThreadWorker): ThreadStore {
-  const store = new ThreadStore({ file: tempFile(), createWorker, log: () => {} })
+function open(
+  createWorker: (data: ThreadWorkerData) => ThreadWorker,
+  options: { readerIdleMs?: number } = {},
+): ThreadStore {
+  const store = new ThreadStore({ file: tempFile(), createWorker, log: () => {}, ...options })
   stores.push(store)
   return store
 }
@@ -111,6 +114,40 @@ it('answers a page read while a full load is still running', async () => {
   expect(page).toMatchObject({ entries: [{ id: 'v0' }] })
   release()
   expect((await load)?.entries).toHaveLength(1)
+})
+
+it('stops the reader once unused and reads the latest writes through another', async () => {
+  const readers: { stopped: boolean }[] = []
+  const store = open(
+    (data) => {
+      const worker = inThreadWorker(data)
+      if (!data.reader) return worker
+      const seen = { stopped: false }
+      readers.push(seen)
+      return {
+        ...worker,
+        terminate: () => {
+          seen.stopped = true
+          return worker.terminate()
+        },
+      }
+    },
+    { readerIdleMs: 50 },
+  )
+  await store.ready
+  await store.write('s1', change('u0'))
+  expect((await store.page('s1'))?.entries.map((e) => e.id)).toEqual(['u0'])
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  expect(readers.map((r) => r.stopped)).toEqual([true])
+  await store.write('s1', change('u0', 'u1'))
+  // The writer answers while the next reader starts.
+  expect((await store.page('s1'))?.entries.map((e) => e.id)).toEqual(['u0', 'u1'])
+  for (let tries = 0; readers.length < 2 && tries < 50; tries++) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  expect(readers.map((r) => r.stopped)).toEqual([true, false])
+  await store.write('s1', change('u0', 'u1', 'u2'))
+  expect((await store.page('s1'))?.entries.map((e) => e.id)).toEqual(['u0', 'u1', 'u2'])
 })
 
 it('reads what a write of the same session sent before it stored', async () => {
