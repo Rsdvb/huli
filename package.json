@@ -96,6 +96,7 @@
     "codemirror": "6.0.2",
     "country-flag-icons": "^1.6.20",
     "docx": "9.15.2",
+    "docx-preview": "0.4.1",
     "electron": "^44.9.2",
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
@@ -110,6 +111,7 @@
     "katex": "0.16.47",
     "material-icon-theme": "5.39.0",
     "motion": "^14.4.0",
+    "pdfjs-dist": "6.5.438",
     "perfect-freehand": "^1.2.3",
     "pptxgenjs": "4.0.1",
     "prettier": "^3.9.10",
@@ -134,6 +136,7 @@
     "vite": "^8.3.4",
     "vitest": "5.0.5",
     "ws": "8.22.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "yaml": "^2.9.1",
     "zustand": "^5.0.15"
   },

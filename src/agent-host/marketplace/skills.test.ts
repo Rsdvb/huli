@@ -217,6 +217,7 @@ describe("Kettu's own skills", () => {
     devices: true,
     secrets: true,
     theme: true,
+    passwords: false,
   }
   const handed = [
     'kettu-artifacts',

@@ -227,6 +227,11 @@ export interface BackgroundTaskView {
   pid?: number
   /** Huli: the tool call that started it, where the agent names it rather than the task. */
   toolCallId?: string
+  /**
+   * Set for a command that runs on in its own tool call: that call's entry, which stays running
+   * while it does. Kettu can neither stop it nor read its output before the call ends.
+   */
+  entryId?: string
 }
 
 /** Huli: a command or subagent that holds up the tool call that started it. */
@@ -345,6 +350,7 @@ export interface PromptCache {
 
 export interface TokenTotals {
   total: number
+  /** Input neither read from nor written to the cache, which `cacheRead` and `cacheWrite` count. */
   input: number
   output: number
   thought: number | null
@@ -713,6 +719,8 @@ export interface SurfaceAccessEntry {
   targetName: string
   /** The session planned when it asked, so the agent would only read it. */
   readOnly?: true
+  /** The user let agents type passwords when it asked, so the terminal's are not theirs alone. */
+  passwords?: true
   /** It asked to give the terminal this name, which an allow does this once, and nothing else. */
   rename?: string
   decision: SurfaceAccessAnswer | null
@@ -1241,6 +1249,9 @@ export interface PendingPermission {
   // Huli: how risky the host judges the request, with why in its words; absent for an ask's
   // questions, a plan, an MCP server's form and from a host older than it.
   risk?: PermissionRisk
+  // Whether the card labels the request Risky, as the host judged it; a request stored without
+  // it is judged by its tool kind alone.
+  risky?: boolean
 }
 
 export interface PermissionOption {
@@ -2180,19 +2191,67 @@ function isTaskDeliverable(value: unknown): value is TaskDeliverable {
   }
 }
 
-/** Merges consecutive text appends to the same entry, as the host does before a flush. */
+/**
+ * Merges what applies the same as one patch, as the host does before a flush: consecutive text
+ * appends to an entry, consecutive session updates, and an entry update into the entry's earlier
+ * update when no patch between them touches that entry or removes entries. Patches keep their
+ * order and none is changed; a merged one is a new object.
+ */
 export function coalescePatches(patches: readonly Patch[]): Patch[] {
   const out: Patch[] = []
+  // The index in `out` of each entry's latest update that nothing has touched since.
+  const open = new Map<string, number>()
   for (const patch of patches) {
     const last = out[out.length - 1]
-    if (
-      patch.op === 'entry.appendText' &&
-      last?.op === 'entry.appendText' &&
-      last.id === patch.id
-    ) {
-      out[out.length - 1] = { op: 'entry.appendText', id: patch.id, text: last.text + patch.text }
-    } else {
-      out.push(patch)
+    switch (patch.op) {
+      case 'entry.appendText':
+        open.delete(patch.id)
+        if (last?.op === 'entry.appendText' && last.id === patch.id) {
+          out[out.length - 1] = {
+            op: 'entry.appendText',
+            id: patch.id,
+            text: last.text + patch.text,
+          }
+        } else {
+          out.push(patch)
+        }
+        break
+      case 'entry.update': {
+        const at = open.get(patch.id)
+        const earlier = at === undefined ? undefined : out[at]
+        if (at !== undefined && earlier?.op === 'entry.update') {
+          out[at] = {
+            op: 'entry.update',
+            id: patch.id,
+            changes: { ...earlier.changes, ...patch.changes } as EntryChanges,
+          }
+        } else {
+          open.set(patch.id, out.length)
+          out.push(patch)
+        }
+        break
+      }
+      case 'session.update':
+        if (last?.op === 'session.update') {
+          out[out.length - 1] = {
+            op: 'session.update',
+            changes: { ...last.changes, ...patch.changes },
+          }
+        } else {
+          out.push(patch)
+        }
+        break
+      case 'entry.add':
+        open.delete(patch.entry.id)
+        out.push(patch)
+        break
+      // Huli: `entry.remove` too, as a reverted turn's entries leave.
+      case 'thread.reset':
+      case 'thread.truncate':
+      case 'entry.remove':
+        open.clear()
+        out.push(patch)
+        break
     }
   }
   return out

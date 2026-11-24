@@ -1,6 +1,6 @@
 import { access, constants } from 'node:fs/promises'
-import { resolve } from 'node:path'
-import { app } from 'electron'
+import { join, resolve } from 'node:path'
+import { app, autoUpdater as squirrel, shell } from 'electron'
 import type { AppUpdater, CancellationToken, ProgressInfo, UpdateFileInfo } from 'electron-updater'
 import type { SettingsFile } from '@shared/settings'
 import { UPDATE_CHANNEL_READY, type UpdateStatus } from '@shared/updates'
@@ -11,6 +11,7 @@ import { t } from './i18n'
 import { createLogger } from './log'
 import { sessionProxy } from './proxy'
 import type { SettingsSection } from './settings-schema'
+import { diskImageFor, downloadDiskImage, type DownloadFile } from './update-dmg'
 import {
   GITHUB_SOURCE,
   sourceChoiceFor,
@@ -20,8 +21,8 @@ import {
   type SourceChoice,
 } from './update-sources'
 import {
+  compareVersions,
   dismissTarget,
-  dmgDownloadUrl,
   errorMessage,
   installOnQuit,
   moveCancelled,
@@ -52,14 +53,25 @@ function githubUnreachable(error: unknown): boolean {
 
 const FIRST_CHECK_MS = 30_000
 const CHECK_INTERVAL_MS = 60 * 60 * 1000
+// A restart waiting for sessions looks this often, and goes once two looks in a row find none, so a
+// turn that ends and wakes another session at once is not cut off between the two.
+const WAIT_POLL_MS = 3_000
+const IDLE_POLLS = 2
 // Electron copies the app synchronously, so the window gets a few frames to show the move first.
 const MOVE_PAINT_MS = 100
+// Squirrel.Mac unpacks and verifies a downloaded update in seconds; past this, a restart goes on.
+const SQUIRREL_PREPARE_MS = 60_000
 
 export interface UpdaterDeps {
   appState: AppStateStore
   settings(): SettingsFile
-  /** Restarts through the quit flow, which confirms and then calls `installNow`. */
-  requestRestart(): void
+  /**
+   * Restarts through the quit flow, which asks about running work unless `confirmed`, and then
+   * calls `installNow`. False when another quit or restart is in progress.
+   */
+  requestRestart(confirmed: boolean): boolean
+  /** How many sessions are working in a way a restart can wait for. */
+  waitableSessions(): Promise<number>
   /** Moves the app through the quit flow, which confirms and then calls `moveNow`. */
   requestMove(): void
   /** The status changed, which the windows hear too. */
@@ -77,12 +89,13 @@ export class Updater {
   private manual = false
   private lastCheckedAt: number | null = null
   private lastAvailable: string | null = null
-  private lastDownloadUrl: string | null = null
   private lastFiles: readonly UpdateFileInfo[] = []
   /** The sources of the last check that found an update; a download moves along them. */
   private run: SourceRun | null = null
   /** Stops the download attempt on a source other than GitHub, while one runs. */
   private leaveSource: (() => void) | null = null
+  /** The provider's way to download one file, once electron-updater has loaded. */
+  private downloadFile: DownloadFile | null = null
   private checking: Promise<void> | null = null
   private started = false
   private errorEvents = 0
@@ -99,6 +112,17 @@ export class Updater {
   private readonly located: Promise<void>
   /** The version of an Update that moved the app, which this launch carries on with. */
   private afterMove: string | null
+  /** The next look while a restart waits for sessions to finish. */
+  private waitTimer: ReturnType<typeof setTimeout> | null = null
+  /** Counts each wait and each end of one, so a look an earlier wait started stops. */
+  private waitRun = 0
+  /** Looks in a row that found no session to wait for. */
+  private idlePolls = 0
+  /**
+   * macOS: Squirrel.Mac preparing the update just downloaded. Until it has, a restart would install
+   * the update it prepared before, as electron-updater only knows that one was prepared.
+   */
+  private squirrelPreparing: Promise<void> | null = null
 
   constructor(private readonly deps: UpdaterDeps) {
     const current = app.getVersion()
@@ -115,6 +139,7 @@ export class Updater {
       current,
       updatedFrom: updatedFrom(lastRunVersion, current),
       dismissed: dismissedUpdate,
+      restartWhenIdle: null,
     }
     this.afterMove = updateAfterMove
     deps.appState.update({ lastRunVersion: current, updateAfterMove: null })
@@ -137,12 +162,13 @@ export class Updater {
     }, FIRST_CHECK_MS).unref()
   }
 
-  /** A check the user asked for; its errors are shown. Resolves once it has finished. */
+  /**
+   * A check the user asked for; its errors are shown, except while an update is ready, which a
+   * failed check leaves as it was. Resolves once it has finished.
+   */
   async check(): Promise<UpdateStatus> {
     const { kind } = this.status.state
-    if (kind === 'off' || kind === 'ready' || kind === 'downloading' || kind === 'moving') {
-      return this.status
-    }
+    if (kind === 'off' || kind === 'downloading' || kind === 'moving') return this.status
     await this.runCheck(true)
     return this.status
   }
@@ -154,9 +180,6 @@ export class Updater {
       throw new Error(
         off.reason === 'development' ? t('updater.offDevelopment') : t('updater.offPackageManager'),
       )
-    }
-    if (this.mode === 'link') {
-      throw new Error(t('updater.linkOnly'))
     }
     const { state } = this.status
     if (state.kind !== 'available') throw new Error(t('updater.nothingToDownload'))
@@ -212,7 +235,70 @@ export class Updater {
 
   restart(): void {
     if (this.status.state.kind !== 'ready') throw new Error(t('updater.nothingReady'))
-    this.deps.requestRestart()
+    this.deps.requestRestart(false)
+  }
+
+  /** Restart now, from the update dialog, which already showed the work it stops. */
+  restartConfirmed(): void {
+    if (this.status.state.kind !== 'ready') throw new Error(t('updater.nothingReady'))
+    this.stopWaiting()
+    this.deps.requestRestart(true)
+  }
+
+  /**
+   * Restarts into the update by itself once no session works in a way that ends by itself, as the
+   * user chose; a newer update downloading then is waited for too.
+   */
+  async restartWhenIdle(): Promise<void> {
+    if (this.status.state.kind !== 'ready') throw new Error(t('updater.nothingReady'))
+    if (this.status.restartWhenIdle) return
+    log.info('The restart to update waits for the working sessions to finish')
+    const run = ++this.waitRun
+    this.idlePolls = 0
+    await this.lookForIdle(run)
+  }
+
+  /** Stops waiting to restart; the update stays ready. */
+  cancelRestartWhenIdle(): void {
+    if (this.status.restartWhenIdle) log.info('The restart to update no longer waits')
+    // Also before the first look has answered, when nothing shows the wait yet.
+    this.stopWaiting()
+  }
+
+  private stopWaiting(): void {
+    this.waitRun++
+    if (this.waitTimer) clearTimeout(this.waitTimer)
+    this.waitTimer = null
+    this.idlePolls = 0
+    if (this.status.restartWhenIdle) this.publish({ ...this.status, restartWhenIdle: null })
+  }
+
+  private async lookForIdle(run: number): Promise<void> {
+    this.waitTimer = null
+    const sessions = await this.deps.waitableSessions()
+    // Cancelled, or restarted now, while the agent host answered.
+    if (run !== this.waitRun) return
+    const { kind } = this.status.state
+    if (kind !== 'ready' && kind !== 'downloading') {
+      log.info(`The restart to update no longer waits: the update is ${kind}`)
+      this.stopWaiting()
+      return
+    }
+    if (this.status.restartWhenIdle?.sessions !== sessions) {
+      this.publish({ ...this.status, restartWhenIdle: { sessions } })
+    }
+    const idle = sessions === 0 && kind === 'ready' && !this.squirrelPreparing
+    this.idlePolls = idle ? this.idlePolls + 1 : 0
+    if (this.idlePolls >= IDLE_POLLS) {
+      if (this.deps.requestRestart(true)) {
+        log.info('The working sessions finished: restarting to update')
+        this.stopWaiting()
+        return
+      }
+      log.info('Another quit or restart is in progress; the restart to update waits on')
+    }
+    this.waitTimer = setTimeout(() => void this.lookForIdle(run), WAIT_POLL_MS)
+    this.waitTimer.unref()
   }
 
   dismiss(): void {
@@ -225,8 +311,36 @@ export class Updater {
   /** The last step of a restart to update, after the hosts stopped and files were flushed. */
   async installNow(): Promise<void> {
     const updater = await this.load()
+    if (this.squirrelPreparing) {
+      log.info('Waiting for Squirrel.Mac to prepare the update before restarting')
+      await this.squirrelPreparing
+    }
     // Silent, and start the new version afterwards.
     updater.quitAndInstall(true, true)
+  }
+
+  /** Follows Squirrel.Mac preparing the update just downloaded, which electron-updater asked for. */
+  private followSquirrel(version: string): void {
+    const preparing = new Promise<void>((done) => {
+      const finish = (message: string): void => {
+        clearTimeout(timer)
+        squirrel.off('update-downloaded', prepared)
+        squirrel.off('error', failed)
+        log.info(message)
+        if (this.squirrelPreparing === preparing) this.squirrelPreparing = null
+        done()
+      }
+      const prepared = (): void => finish(`Squirrel.Mac prepared ${version}`)
+      // electron-updater reports the error itself.
+      const failed = (): void => finish(`Squirrel.Mac could not prepare ${version}`)
+      const timer = setTimeout(
+        () => finish(`Squirrel.Mac did not prepare ${version} in ${SQUIRREL_PREPARE_MS / 1000} s`),
+        SQUIRREL_PREPARE_MS,
+      )
+      squirrel.on('update-downloaded', prepared)
+      squirrel.on('error', failed)
+    })
+    this.squirrelPreparing = preparing
   }
 
   /** The system is shutting down, which could kill an installer halfway. */
@@ -262,9 +376,8 @@ export class Updater {
   }
 
   /**
-   * Once GitHub only is chosen, an update a check found elsewhere downloads from GitHub, and Link
-   * mode's link names GitHub's disk image, so nothing more goes to another source. Once it is not,
-   * a check that GitHub failed runs again.
+   * Once GitHub only is chosen, an update a check found elsewhere downloads from GitHub, so nothing
+   * more goes to another source. Once it is not, a check that GitHub failed runs again.
    */
   private sourceChanged(): void {
     const { state } = this.status
@@ -276,15 +389,6 @@ export class Updater {
     if (this.sourceChoice() !== 'github' || !this.run || this.run.githubOnly) return
     this.run = SourceRun.githubOnly(this.run.stallMs)
     this.leaveSource?.()
-    if (state.kind !== 'available' || this.mode !== 'link') return
-    this.lastDownloadUrl = this.linkUrl()
-    this.publish({ ...this.status, state: { ...state, downloadUrl: this.lastDownloadUrl } })
-  }
-
-  /** Link mode's disk image for the update found, on the source that served the check. */
-  private linkUrl(): string | null {
-    if (this.mode !== 'link' || !this.run || !this.lastAvailable) return null
-    return dmgDownloadUrl(this.run.current.url, this.lastAvailable, this.lastFiles, process.arch)
   }
 
   private autoDownload(settings: SettingsFile): boolean {
@@ -380,6 +484,9 @@ export class Updater {
               this.run = run
             },
             downloadSource: () => this.run?.current ?? null,
+            downloader: (download) => {
+              this.downloadFile = download
+            },
           }),
         })
         autoUpdater.allowPrerelease = false
@@ -393,9 +500,12 @@ export class Updater {
           this.dispatch({ type: 'checking', manual: this.manual }),
         )
         autoUpdater.on('update-available', (info) => {
+          if (!this.newerThanReady(info.version)) {
+            log.info(`${info.version} is downloaded already and waits for a restart`)
+            return
+          }
           this.lastAvailable = info.version
           this.lastFiles = info.files
-          this.lastDownloadUrl = this.linkUrl()
           // An automatic download, which the check starts as it ends, is the updater's own.
           this.startedBy = 'auto'
           this.dispatch({ type: 'available', version: info.version })
@@ -403,7 +513,6 @@ export class Updater {
         })
         autoUpdater.on('update-not-available', () => {
           this.lastAvailable = null
-          this.lastDownloadUrl = null
           this.lastCheckedAt = Date.now()
           this.dispatch({ type: 'not-available', at: this.lastCheckedAt })
         })
@@ -411,6 +520,11 @@ export class Updater {
           this.dispatch({ type: 'progress', percent: progress.percent }),
         )
         autoUpdater.on('update-downloaded', (info) => {
+          // electron-updater hands the file to Squirrel.Mac right after this event while
+          // autoInstallOnAppQuit is on, which the microtask below may turn off only afterwards.
+          if (process.platform === 'darwin' && autoUpdater.autoInstallOnAppQuit) {
+            this.followSquirrel(info.version)
+          }
           this.dispatch({
             type: 'downloaded',
             version: info.version,
@@ -419,13 +533,17 @@ export class Updater {
           // electron-updater adds its quit handler right after this event, so the choice applies
           // once it has.
           queueMicrotask(() => this.applyInstallOnQuit(autoUpdater, this.deps.settings()))
-          if (this.startedBy === 'user') this.deps.requestRestart()
+          if (this.startedBy === 'user') this.deps.requestRestart(false)
         })
         autoUpdater.on('error', (error) => {
           if (this.downloadActive) return
           this.errorEvents++
           const message = errorMessage(error)
           const said = error instanceof SourcesFailed ? error.log : message
+          if (this.checkPastReady()) {
+            log.warn(`Checking past the ready update failed: ${said}`)
+            return
+          }
           log.warn(`${this.manual ? 'Manual' : 'Automatic'} update step failed: ${said}`)
           this.dispatch({
             type: 'error',
@@ -456,9 +574,8 @@ export class Updater {
   private async automaticCheck(): Promise<void> {
     if (this.deps.settings().updates.automatic === 'off') return
     const { kind } = this.status.state
-    if (kind === 'ready' || kind === 'downloading' || kind === 'checking' || kind === 'moving') {
-      return
-    }
+    // A ready update is checked past too, so a newer release replaces it before the restart.
+    if (kind === 'downloading' || kind === 'checking' || kind === 'moving') return
     await this.runCheck(false)
   }
 
@@ -479,6 +596,7 @@ export class Updater {
       .then(
         (result) => {
           if (!result?.isUpdateAvailable || !this.autoDownload(this.deps.settings())) return
+          if (!this.newerThanReady(result.updateInfo.version)) return
           // The download outlives the check; its failures reach the state on their own.
           void this.startDownload(result.updateInfo.version, 'auto').catch(() => undefined)
         },
@@ -486,6 +604,10 @@ export class Updater {
           const message = errorMessage(error)
           if (!loaded) {
             this.dispatch({ type: 'load-failed', message, manual: this.manual })
+          } else if (this.checkPastReady()) {
+            if (this.errorEvents === errorsBefore) {
+              log.warn(`Checking past the ready update failed: ${message}`)
+            }
           } else if (this.errorEvents === errorsBefore) {
             // electron-updater reports its own failures through 'error' as well; anything else
             // has to reach the state here.
@@ -507,16 +629,28 @@ export class Updater {
   private async startDownload(version: string, startedBy: StartedBy): Promise<void> {
     if (this.downloadActive) return
     this.downloadActive = true
+    const { state } = this.status
+    // A newer release found while an update waited for its restart replaces it.
+    const replaces =
+      state.kind === 'ready'
+        ? state.version
+        : state.kind === 'downloading'
+          ? state.replaces
+          : undefined
     // Before anything waits: a second Update then finds the download started, and the cancel
-    // button that shows with it has a token to cancel.
-    const token = startedBy === 'user' && this.Token ? new this.Token() : null
+    // button that shows with it has a token to cancel; so does a download that replaces, whose
+    // card stays up.
+    const token = (startedBy === 'user' || replaces) && this.Token ? new this.Token() : null
     this.startedBy = startedBy
     this.cancellation = token
-    this.dispatch({ type: 'download-started', version, manual: startedBy === 'user' })
+    if (replaces)
+      log.info(`Downloading ${version} to replace ${replaces}, which waits for a restart`)
+    this.dispatch({ type: 'download-started', version, manual: startedBy === 'user', replaces })
     try {
       const updater = await this.load()
       this.applyInstallOnQuit(updater, this.deps.settings())
-      await this.downloadFromSources(updater, token)
+      if (this.mode === 'link') await this.downloadDiskImage(token)
+      else await this.downloadFromSources(updater, token)
     } catch (error) {
       if (token?.cancelled) {
         this.dispatch({ type: 'download-cancelled' })
@@ -529,6 +663,48 @@ export class Updater {
       this.downloadActive = false
       if (this.cancellation === token) this.cancellation = null
     }
+  }
+
+  /**
+   * Link mode's Update: downloads the release's disk image from the sources, checks it against the
+   * checksum of the signed update file and opens it, so the user drags the app into Applications.
+   */
+  private async downloadDiskImage(cancellation: CancellationToken | null): Promise<void> {
+    const { run, downloadFile, lastAvailable: version } = this
+    if (!run || !downloadFile || !version) throw new Error(t('updates.checkFirst'))
+    const image = diskImageFor(this.lastFiles, process.arch)
+    if (!image) throw new Error(t('updater.noDiskImage'))
+    const abort = new AbortController()
+    const cancel = (): void => abort.abort()
+    cancellation?.once('cancel', cancel)
+    let file: string
+    try {
+      file = await downloadDiskImage({
+        run: run.again(),
+        version,
+        image,
+        folder: join(app.getPath('userData'), 'updates'),
+        download: downloadFile,
+        signal: abort.signal,
+        githubOnly: () => this.sourceChoice() === 'github',
+        setLeave: (leave) => {
+          this.leaveSource = leave
+        },
+        progress: (percent) => this.dispatch({ type: 'progress', percent }),
+        log,
+      })
+    } finally {
+      cancellation?.off('cancel', cancel)
+    }
+    // Cancel pressed while the file was being checked.
+    if (abort.signal.aborted) throw new Error('Download cancelled')
+    const failure = await shell.openPath(file)
+    if (failure) {
+      log.warn(`Could not open ${file}: ${failure}`)
+      throw new Error(t('updater.openFailed', { reason: failure }))
+    }
+    log.info(`Opened ${file}`)
+    this.dispatch({ type: 'disk-image-opened' })
   }
 
   /**
@@ -615,13 +791,23 @@ export class Updater {
     }
   }
 
+  /** Whether a version found is newer than the update waiting for a restart, if one is. */
+  private newerThanReady(version: string): boolean {
+    const { state } = this.status
+    return state.kind !== 'ready' || compareVersions(version, state.version) > 0
+  }
+
+  /** A check runs while an update is ready, whose failure leaves the ready update as it was. */
+  private checkPastReady(): boolean {
+    return this.checking !== null && this.status.state.kind === 'ready'
+  }
+
   private dispatch(event: UpdaterEvent): void {
     const state = nextState(this.status.state, event, {
       mode: this.mode,
       autoDownload: this.autoDownload(this.deps.settings()),
       lastCheckedAt: this.lastCheckedAt,
       lastAvailable: this.lastAvailable,
-      downloadUrl: this.lastDownloadUrl,
     })
     if (state !== this.status.state) this.publish({ ...this.status, state })
   }

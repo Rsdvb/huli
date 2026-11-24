@@ -764,19 +764,6 @@
     "plan": {
       "title": "计划"
     },
-    "tool": {
-      "sendMessage": "发消息给{{to}}",
-      "mainAgent": "主代理",
-      "manageSubagents": "管理子代理",
-      "manageSubagentsAction": "管理子代理：{{action}}",
-      "manageTask": "管理后台任务",
-      "manageTaskAction": "管理后台任务：{{action}}",
-      "defineSubagent": "定义子代理",
-      "defineSubagentNamed": "定义子代理 {{name}}",
-      "generateImage": "生成图片",
-      "schedule": "设定时器",
-      "finish": "结束"
-    },
     "mode": {
       "default": {
         "name": "默认",
@@ -796,7 +783,7 @@
       },
       "fullAccess": {
         "name": "完全访问",
-        "description": "什么都不问。两轮之间生效，会重启 agy"
+        "description": "什么都不问。两轮之间、它在跑的命令结束后生效，会重启 agy"
       }
     },
     "fullAccess": {

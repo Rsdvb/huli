@@ -2766,16 +2766,24 @@ conflict, someone on a branch:
 - `src/main/update-keys.json` keeps Kite's `release` and `sources` keys and takes Kettu's
   `harnesses`.
 - `git grep` for Kettu's domain (`kettu` dot `sh`) must find no more lines than
-  before: 185 after the 2026-11-23 merge, its dot also matching the code's `window.kettu` shell
-  calls. New code that calls Kettu's services points at Kite Cloud or stays off.
+  before: 185 after the 2026-11-23 merge and again after the 2026-11-24 one, its dot also matching
+  the code's `window.kettu` shell calls and names such as the sharing partition's. New code that calls
+  Kettu's services points at Kite Cloud or stays off; a test that spells out its download service
+  as a place of its own takes one of its own (`downloads.example`); Kettu's own Android download
+  lines stay out of the READMEs.
 - `node tools/huli/rebrand.mjs --no-update-path`, then the tree put back: a `no longer holds …`
   warning means upstream changed a spelling `CODE` lists; add the new one there.
 - Kettu's scheduled workflows run only in `KettuAI/Kettu` (`if: github.repository == ...`).
 - Test `HostSettings` objects carry every field of both sides (Kite's `claudeTestEntrypoint`,
-  `claudeRuns`, `promptSuggestions`, `agentNetwork`, …).
+  `claudeRuns`, `promptSuggestions`, `agentNetwork`, …; Kettu's `continueAfterLimit`,
+  `agentPasswords`, …).
 - The thread database: Kite's schema 10 is `MEDIA`, so each of Kettu's migrations takes the next
-  number up, and `SCHEMA_VERSION` with them (Kettu's 10–12 are Kite's 11–13: `ORIGINS`,
-  `SET_ASIDE`, `ARTIFACT_SEEN`). Never renumber a migration an installed Kite has run.
+  number up, and `SCHEMA_VERSION` with them (Kettu's 10–13 are Kite's 11–14: `ORIGINS`,
+  `SET_ASIDE`, `ARTIFACT_SEEN`, `TOKENS_APART`), and so does a test that builds a database
+  at the version before one (`schemaAt(13)` for `TOKENS_APART`). Never renumber a migration an
+  installed Kite has run.
+- Code of Kettu's that lists the kinds of a union Kite extended drops Kite's: `coalescePatches`
+  dropped Kite's `entry.remove` until it got its case. Read such switches in a merge's diff.
 
 Where both had built the same thing, as the 2026-11-23 merge settled it:
 
@@ -2806,6 +2814,30 @@ Where both had built the same thing, as the 2026-11-23 merge settled it:
   turn's Edit message uses it.
 - The notch island (macOS) never runs in a test copy (`KITE_TEST_WINDOW`).
 - `.github/ISSUE_TEMPLATE` leaves out Kettu's lines on earning points with a Kettu account.
+
+And as the 2026-11-24 merge settled it:
+
+- Antigravity's sub-agents are Kettu's (`acp/agy-subagents.ts`: agy's conversation store and a
+  `session/load` of each child in its parent's process, agy 1.5.15 on); Kite's reader of agy's
+  brain folder is gone. Its questions are Kettu's `acp/agy-questions.ts` (1.5.15 on); Kite's
+  `acp/elicitation.ts` keeps the form and page cards of every other form, an older agy's ask
+  among them, so every agent is told it takes forms.
+- agy's own tools are named as the thread draws them (`entries/agy-tools.ts`, Kettu's), which
+  also names `define_subagent`, `generate_image` and `finish` for Kite; the host keeps agy's
+  "Run <tool>" title and adds the message, prompt or result as the call's content when it shows
+  none, and `toolSummary` as its description.
+- The Risky label: the host marks `risky` as Kettu does; the card follows Kite's level
+  (`permission.risk`, high as destructive) where the host gives one, since its high level holds
+  every request `risky` marks, and `risky` otherwise.
+- The composer's model picker is affectUI's as Kettu restored it, without Kite's plan and balance
+  note; Kite's rows (`actions`, such as the API profile) come before Switch agent.
+- A device in the foreground is Kettu's `foreground` (the server's `inFront` is gone); the
+  notifier's Live Activities read it. A turn's Live Activity never goes to a browser's Web Push.
+- After a plan limit, Kite's resume (`limit-resume.ts`, `supervisor.resumeAfterLimit`) is the
+  one engine: `hostSettings` hands the agent host `continueAfterLimit: false`, so Kettu's
+  continuation never runs, and its Settings row and catalog entry are left out.
+- `claude/sdk.ts` imports nothing of Kite's either (the harness checks compile it alone), so it
+  holds `ClaudeSandboxOption`, which `sandbox/native.ts` takes from it.
 
 ## Tests
 

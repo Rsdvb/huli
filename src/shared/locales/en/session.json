@@ -249,6 +249,26 @@
     "read_theme": "Read theme colors",
     "set_theme_colors": "Change theme colors"
   },
+  "agyTool": {
+    "invoke_subagent": "Start sub-agent",
+    "send_message": "Send message",
+    "wait": "Wait",
+    "cron": "Schedule",
+    "manage_task": {
+      "list": "List background tasks",
+      "status": "Check background task",
+      "kill": "Stop background task",
+      "send_input": "Type into background task"
+    },
+    "manage_subagents": {
+      "list": "List sub-agents",
+      "kill": "Stop sub-agents",
+      "kill_all": "Stop all sub-agents"
+    },
+    "define_subagent": "Define sub-agent",
+    "generate_image": "Generate image",
+    "finish": "Finish"
+  },
   "permission": {
     "outsideScope": "Outside this routine's permissions: {{level}}.",
     "answer": {
@@ -346,6 +366,7 @@
       "revoked": "Allowed for this session, then taken back"
     },
     "where": "Reads its recent output and types commands into it. Passwords stay yours to type.",
+    "whereTypes": "Reads its recent output and types commands into it.",
     "whereRead": "Reads its recent output only, since this session is planning."
   },
   "tabAccess": {
@@ -604,8 +625,6 @@
       "frames_other": "{{count}} frames changed",
       "files_one": "{{count}} file changed",
       "files_other": "{{count}} files changed",
-      "sections_one": "{{count}} section changed",
-      "sections_other": "{{count}} sections changed",
       "slides_one": "{{count}} slide changed",
       "slides_other": "{{count}} slides changed",
       "slide": "Slide {{number}}",
@@ -1008,6 +1027,12 @@
     "short": "Type at least 2 characters",
     "indexing": "Indexing conversations, results may be incomplete",
     "unsupported": "This computer can't find in a session yet"
+  },
+  "continueLimit": {
+    "planned": "Continues {{time}} · {{limit}} limit",
+    "off": "Won't carry on by itself",
+    "cancel": "Don't continue",
+    "cancelFailed": "Couldn't stop the continuation"
   },
   "thread": {
     "label": "Thread",

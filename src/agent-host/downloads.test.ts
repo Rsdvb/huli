@@ -141,6 +141,8 @@ describe("the agent manager's downloads", () => {
       claudeTestEntrypoint: null,
       claudeRuns: {},
       promptSuggestions: true,
+      continueAfterLimit: true,
+      agentPasswords: false,
     }
     const env = new EnvironmentService({
       platform,

@@ -1,8 +1,24 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { File01Icon, FileNotFoundIcon, FloppyDiskIcon } from '@hugeicons/core-free-icons'
+import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import type { ChangeStatus } from '@shared/git'
-import type { MediaGrant } from '@shared/media'
+import {
+  DOCX_TYPE,
+  OFFICE_PREVIEW_LIMIT,
+  XLS_TYPE,
+  XLSX_TYPE,
+  type MediaGrant,
+} from '@shared/media'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { PaneEmpty, PaneIcon, PanelButton } from '@renderer/features/shell/panel-button'
 import { bytes, clock } from '@renderer/lib/format'
@@ -44,13 +60,19 @@ import { ChangeBadge } from './change-badge'
 import { DiffFileToggle, PathCopy, PreviewEditToggle } from './file-header'
 import { openInEditor } from './open-in-editor'
 import { nameOf } from './paths'
+import type { DocumentFailure } from './document-failure'
 
 const CodeEditor = lazy(() => import('./code-editor'))
+const PdfStage = lazy(() => import('./pdf-viewer'))
+const WordStage = lazy(() => import('./word-viewer'))
+const SheetStage = lazy(() => import('./sheet-viewer'))
 
 /** The picture's controls and zoom, which its stage hands up to the header. */
-interface Picture {
+export interface Picture {
   controls: PictureControls
   zoom: ZoomLevel
+  /** The page a document is at, for the header to say. */
+  pages?: { current: number; total: number }
 }
 
 /** The room a fitted picture leaves on each side of the pane, as it always has. */
@@ -59,11 +81,13 @@ const PANE_FIT_MARGIN = 24
 /** The open file in the editor, or what stands in for it, under its bar. */
 export function FilePreview({
   projectPath,
+  panel,
   file,
   changes,
   onShowDiff,
 }: {
   projectPath: string
+  panel: string
   file: OpenFile | null
   changes: ReadonlyMap<string, ChangeStatus>
   /** Shows the file's uncommitted change instead, offered while it has one. */
@@ -118,6 +142,11 @@ export function FilePreview({
               <PaneIcon icon={FloppyDiskIcon} />
             </PanelButton>
           )}
+          {picture?.pages && (
+            <span className="px-1.5 text-xs text-tertiary tabular">
+              {t('preview.pageOf', picture.pages)}
+            </span>
+          )}
           {picture && <ZoomControls zoom={picture.zoom} controls={picture.controls} size="xs" />}
           {onShowDiff && (
             <DiffFileToggle value="file" onChange={(next) => next === 'diff' && onShowDiff()} />
@@ -142,7 +171,7 @@ export function FilePreview({
       </div>
       <Notes projectPath={projectPath} file={file} />
       <div className="kp-doc__body">
-        <Body projectPath={projectPath} file={file} onPicture={onPicture} />
+        <Body projectPath={projectPath} panel={panel} file={file} onPicture={onPicture} />
       </div>
     </div>
   )
@@ -282,10 +311,12 @@ function Bar({ tone, children }: { tone: 'notice' | 'error' | 'muted'; children:
 
 function Body({
   projectPath,
+  panel,
   file,
   onPicture,
 }: {
   projectPath: string
+  panel: string
   file: OpenFile
   onPicture: (path: string, picture: Picture | null) => void
 }) {
@@ -340,6 +371,18 @@ function Body({
       </Notice>
     )
   }
+  if (content.kind === 'media' && content.grant.kind === 'document') {
+    return (
+      <FileDocument
+        key={`${content.path}\0${mediaVersion(content.grant.url)}`}
+        projectPath={projectPath}
+        panel={panel}
+        path={content.path}
+        grant={content.grant}
+        onPicture={onPicture}
+      />
+    )
+  }
   if (content.kind === 'media') {
     return (
       <FileMedia
@@ -354,21 +397,36 @@ function Body({
   }
   if (rendered(file, source)) {
     return (
-      <div
-        className="absolute inset-0 overflow-y-auto overscroll-contain px-6 py-5"
-        data-selectable=""
-      >
-        <Markdown
-          markdown={editedText(projectPath, file) ?? content.text}
-          className="mx-auto max-w-[50em]"
-        />
-      </div>
+      <RenderedMarkdown
+        key={`${projectPath}\0${panel}\0${file.path}`}
+        viewKey={`${projectPath}\0${panel}\0${file.path}`}
+        text={editedText(projectPath, file) ?? content.text}
+      />
     )
   }
   return (
     <Suspense fallback={<Lines />}>
-      <CodeEditor projectPath={projectPath} file={file} content={content} />
+      <CodeEditor projectPath={projectPath} panel={panel} file={file} content={content} />
     </Suspense>
+  )
+}
+
+const markdownScroll = new Map<string, number>()
+
+function RenderedMarkdown({ viewKey, text }: { viewKey: string; text: string }) {
+  const box = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (box.current) box.current.scrollTop = markdownScroll.get(viewKey) ?? 0
+  }, [viewKey])
+  return (
+    <div
+      ref={box}
+      className="absolute inset-0 overflow-y-auto overscroll-contain px-6 py-5"
+      data-selectable=""
+      onScroll={(event) => markdownScroll.set(viewKey, event.currentTarget.scrollTop)}
+    >
+      <Markdown markdown={text} className="mx-auto max-w-[50em]" />
+    </div>
   )
 }
 
@@ -380,6 +438,118 @@ export function Lines() {
       <Skeleton className="h-3 w-2/5" />
     </div>
   )
+}
+
+/**
+ * A document from the media scheme: a PDF's or a Word file's pages, or a workbook's sheets, on a
+ * stage of their own. One that is protected, damaged or too large to show says why and offers the
+ * file to another app; one that cannot be read is asked for again once first, since main may have
+ * dropped its grant.
+ */
+function FileDocument({
+  projectPath,
+  panel,
+  path,
+  grant,
+  onPicture,
+}: {
+  projectPath: string
+  panel: string
+  path: string
+  grant: MediaGrant
+  onPicture: (path: string, picture: Picture | null) => void
+}) {
+  const { t } = useTranslation('files')
+  const [renewed, setRenewed] = useState(false)
+  const [failure, setFailure] = useState<'encrypted' | 'damaged' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const failed = (reason: DocumentFailure) => {
+    if (reason === 'unreadable' && !renewed) {
+      setRenewed(true)
+      renewOpenFile(projectPath, path)
+    } else setFailure(reason === 'encrypted' ? 'encrypted' : 'damaged')
+  }
+  const kind = documentKind(grant.mimeType)
+  if (!kind) {
+    return (
+      <Notice
+        title={t('preview.binaryTitle')}
+        description={t('preview.binaryDescription', { size: bytes(grant.size) })}
+      />
+    )
+  }
+  const tooLarge = grant.tooLarge || (kind !== 'pdf' && grant.size > OFFICE_PREVIEW_LIMIT)
+  if (tooLarge || failure) {
+    const [title, text] = tooLarge
+      ? tooLargeText(t, kind, grant.size)
+      : failureText(t, kind, failure === 'encrypted')
+    return (
+      <PaneEmpty
+        className="absolute inset-0"
+        icon={<PaneIcon icon={FileNotFoundIcon} size={20} />}
+        title={title}
+        text={text}
+      >
+        <span className="mt-3 flex flex-wrap justify-center gap-1.5">
+          <PlayElsewhere url={grant.url} projectPath={projectPath} onError={setError} />
+        </span>
+        {error && <span className="text-xs text-danger">{error}</span>}
+      </PaneEmpty>
+    )
+  }
+  const stage = {
+    viewKey: `${projectPath}\0${panel}\0${path}`,
+    url: grant.url,
+    name: nameOf(path),
+    onFailed: failed,
+  }
+  return (
+    <Suspense fallback={<Lines />}>
+      {kind === 'pdf' && <PdfStage {...stage} path={path} onPicture={onPicture} />}
+      {kind === 'word' && <WordStage {...stage} path={path} onPicture={onPicture} />}
+      {kind === 'sheet' && <SheetStage {...stage} />}
+    </Suspense>
+  )
+}
+
+type DocumentKind = 'pdf' | 'word' | 'sheet'
+
+function documentKind(mimeType: MediaGrant['mimeType']): DocumentKind | null {
+  if (mimeType === 'application/pdf') return 'pdf'
+  if (mimeType === DOCX_TYPE) return 'word'
+  return mimeType === XLSX_TYPE || mimeType === XLS_TYPE ? 'sheet' : null
+}
+
+/** The title and the words under it for a document too large to preview. */
+function tooLargeText(t: TFunction<'files'>, kind: DocumentKind, size: number): [string, string] {
+  if (kind === 'pdf') return [t('preview.mediaTooLargeTitle'), bytes(size)]
+  const description = t('preview.tooLargeDescription', {
+    size: bytes(size),
+    limit: bytes(OFFICE_PREVIEW_LIMIT),
+  })
+  return [t('preview.tooLargeTitle'), description]
+}
+
+/** The title and the words under it for a document that is protected or cannot be read. */
+function failureText(
+  t: TFunction<'files'>,
+  kind: DocumentKind,
+  protectedFile: boolean,
+): [string, string] {
+  if (kind === 'pdf') {
+    return protectedFile
+      ? [t('preview.pdfEncryptedTitle'), t('preview.pdfEncryptedDescription')]
+      : [t('preview.pdfFailedTitle'), t('preview.pdfFailedDescription')]
+  }
+  if (kind === 'word') {
+    return protectedFile
+      ? [t('preview.wordEncryptedTitle'), t('preview.wordEncryptedDescription')]
+      : [t('preview.wordFailedTitle'), t('preview.wordFailedDescription')]
+  }
+  return protectedFile
+    ? [t('preview.sheetEncryptedTitle'), t('preview.sheetEncryptedDescription')]
+    : [t('preview.sheetFailedTitle'), t('preview.sheetFailedDescription')]
 }
 
 /**

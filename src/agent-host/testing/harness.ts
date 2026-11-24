@@ -344,6 +344,10 @@ export function testSettings(agentIds: readonly AgentId[]): HostSettings {
     claudeTestEntrypoint: null,
     claudeRuns: {},
     promptSuggestions: true,
+    // Huli: Kite's own resume after a plan limit carries sessions on; Kettu's stays off, as in
+    // the app.
+    continueAfterLimit: false,
+    agentPasswords: false,
     lightModel: { mode: 'small' },
     initialSetupDone: true,
     defaultAgent: null,

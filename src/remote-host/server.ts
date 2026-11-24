@@ -93,6 +93,7 @@ import {
   PUSH_VERSION,
   parseNotificationsUpdate,
 } from '@shared/remote/push'
+import { WEB_PUSH_FEATURE, type NotificationsWithdrawn } from '@shared/remote/web-push'
 import { removalAt } from '@shared/remote/status'
 import {
   BYTES_FEATURE,
@@ -336,12 +337,19 @@ export class RemoteServer {
     return false
   }
 
-  /** Whether the device is connected and in the foreground, where it keeps its Live Activity. */
-  inFront(deviceId: string): boolean {
+  /** Whether the device is connected and in the foreground now, as a page in view. */
+  foreground(deviceId: string): boolean {
     for (const session of this.sessions) {
-      if (session.device.id === deviceId && session.inFront) return true
+      if (session.device.id === deviceId && session.foreground) return true
     }
     return false
+  }
+
+  /** Tells the device's sessions that go on which notifications it should close. */
+  withdrawn(deviceId: string, message: NotificationsWithdrawn): void {
+    for (const session of this.sessions) {
+      if (session.device.id === deviceId) session.withdrawn(message)
+    }
   }
 
   /** The ids of the devices connected to a session now. */
@@ -1175,19 +1183,21 @@ class DeviceSession {
     return this.state === 'open'
   }
 
-  /** Whether the device shows the session in front: connected, in the foreground and showing it. */
-  showing(sessionId: string): boolean {
-    return this.inFront && this.shown.has(sessionId)
-  }
-
-  /** Whether the device is connected and in the foreground. */
-  get inFront(): boolean {
+  /** Whether the device is connected and in the foreground, not asking for the background pace. */
+  get foreground(): boolean {
     return this.connected && this.paceMs < BACKGROUND_PACE_MS
   }
 
-  /** The device came to the front or left it: the host's part in its Live Activity follows. */
+  /** Whether the device shows the session in front: connected, in the foreground and showing it. */
+  showing(sessionId: string): boolean {
+    return this.foreground && this.shown.has(sessionId)
+  }
+
+  /** Huli: the device came to the front or left it: the host's part in its Live Activity follows. */
   private frontChanged(before: boolean): void {
-    if (this.inFront !== before) this.server.options.notifications?.()?.frontChanged(this.device.id)
+    if (this.foreground !== before) {
+      this.server.options.notifications?.()?.frontChanged(this.device.id)
+    }
   }
 
   /** Whether the session goes on, connected or waiting for its device. */
@@ -1360,7 +1370,7 @@ class DeviceSession {
   /** Ends the session at once: its device's next hello finds no session to resume. */
   end(): void {
     if (this.state === 'closed') return
-    const before = this.inFront
+    const before = this.foreground
     this.state = 'closed'
     this.frontChanged(before)
     if (this.awayTimer) clearTimeout(this.awayTimer)
@@ -1415,6 +1425,10 @@ class DeviceSession {
     if (this.live) this.send({ type: 'host.renamed', name } satisfies HostRenamed)
   }
 
+  withdrawn(message: NotificationsWithdrawn): void {
+    if (this.live) this.send(message)
+  }
+
   /** The device's name changed: its sessions hear the new one. */
   renamed(name: string): void {
     this.device = { ...this.device, name }
@@ -1452,7 +1466,7 @@ class DeviceSession {
       features: [
         BYTES_FEATURE,
         ...(this.version >= PUSH_VERSION && this.server.options.notifications?.()
-          ? [PUSH_FEATURE]
+          ? [PUSH_FEATURE, WEB_PUSH_FEATURE]
           : []),
         ...(this.regionsOffered ? [REGIONS_CHANNEL_FEATURE] : []),
         ...(this.standbys ? [STANDBY_FEATURE] : []),
@@ -1481,7 +1495,7 @@ class DeviceSession {
       case 'ack':
         return this.outbox.ack(received)
       case 'pace': {
-        const before = this.inFront
+        const before = this.foreground
         if (typeof ms === 'number' && Number.isFinite(ms)) this.paceMs = ms
         this.frontChanged(before)
         return this.outbox.pace(ms)
@@ -1617,6 +1631,7 @@ class DeviceSession {
     const update = parseNotificationsUpdate(params)
     if (!update) return fail('invalid_params', 'The target or the choices are not ones')
     const state = await notifications.update(this.device.id, update)
+    if (state === 'invalid') return fail('invalid_params', 'The subscription keys are not ones')
     if (!state) return fail('not_found', t('remote.notPaired'))
     reply({ type: 'response', id, result: state })
   }

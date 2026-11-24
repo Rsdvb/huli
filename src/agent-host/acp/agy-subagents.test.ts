@@ -1,16 +1,15 @@
-// agy 1.5.12's subagents, recorded: its `invoke_subagent` call, and what it wrote of the subagent
-// in its brain folder, as the subagent session Kettu shows.
+// agy 1.5.15's sub-agents over ACP: a child agy's store lists under the session that started it,
+// shown as a sub-agent and opened in the parent's process, its updates in its own thread and its
+// questions in its own card; a session's replay shows its children again.
 
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import {
   agent,
   methods,
   type AgentContext,
+  type CreateElicitationResponse,
   type SessionUpdate,
 } from '@agentclientprotocol/sdk/unstable'
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   applyPatches,
   threadEntries,
@@ -18,101 +17,172 @@ import {
   type ThreadEntry,
   type ThreadState,
 } from '@shared/thread'
-import type { ConnectionHooks, SessionTarget } from '../connection'
+import type {
+  ConnectionHooks,
+  McpServer,
+  PermissionAnswer,
+  PermissionRequest,
+  SessionTarget,
+} from '../connection'
 import { newTurnScope, type MapperEffect } from '../session-updates'
-import {
-  fileBrain,
-  parseStep,
-  subagentSessionId,
-  subagentTitle,
-  type AgyBrain,
-} from './agy-subagents'
+import type { AgyChild } from './agy-subagents'
 import { AcpConnection, inProcessTransport } from './connection'
-import recorded from './fixtures/agy-subagent.json'
 
-const { parent, child } = recorded
-const CALL_ID = recorded.updates[0]!.toolCallId
-const CHILD_SESSION = subagentSessionId(CALL_ID)
+const PARENT = 's-1'
+const CHILD = 'c-1'
+const GRANDCHILD = 'g-1'
+const CWD = '/tmp/agy-probe'
+const PROMPT = 'Ask the user to pick a letter, A or B, then report the letter back.'
+const RUNNING = 'CASCADE_RUN_STATUS_RUNNING'
+const IDLE = 'CASCADE_RUN_STATUS_IDLE'
+const SERVERS: McpServer[] = [
+  { type: 'http', name: 'kettu', url: 'http://127.0.0.1:1/mcp', headers: [] },
+]
 
-type SubagentEffect = Extract<MapperEffect, { kind: 'subagent' }>
-
-/** A thread for a session, applying what it is given. */
-function thread(id: string, acpSessionId: string, ids: Record<string, string>) {
-  let state: ThreadState = threadFromSnapshot({
-    session: {
-      id,
-      agentId: 'antigravity',
-      projectPath: '/tmp/agy-probe',
-      acpSessionId,
-      status: 'running',
-      title: null,
-      config: [],
-      commands: [],
-      usage: null,
-      error: null,
-      turnStartedAt: null,
-      turnStartUsed: null,
-      createdAt: 0,
-      updatedAt: 0,
-      parentId: null,
-      origin: 'user',
-      subagent: null,
-      routine: null,
-      queue: [],
-      queuePaused: false,
+// The calls as agy 1.5.15 sent them.
+const START = {
+  toolCallId: 'call_start',
+  name: 'invoke_subagent',
+  kind: 'other',
+  title: 'Run invoke_subagent',
+  rawInput: { Prompt: PROMPT, Role: 'Asker', TypeName: 'self', Model: 'inherit' },
+}
+const ASK = {
+  toolCallId: 'call_ask',
+  name: 'ask_question',
+  kind: 'other',
+  title: 'Run ask_question',
+  rawInput: {
+    questions: [{ is_multi_select: false, options: ['A', 'B'], question: 'Pick a letter' }],
+  },
+}
+const REPORT = {
+  toolCallId: 'call_report',
+  name: 'send_message',
+  kind: 'other',
+  title: 'Run send_message',
+  rawInput: { Message: 'The user picked B', Recipient: PARENT },
+}
+const SCHEMA = {
+  type: 'object',
+  properties: {
+    q1: {
+      type: 'string',
+      title: 'Pick a letter',
+      oneOf: [
+        { const: '1', title: 'A' },
+        { const: '2', title: 'B' },
+      ],
     },
-    entries: [],
-    seq: 0,
-  })
-  let n = 0
-  const scope = newTurnScope()
-  const effects: MapperEffect[] = []
-  const target: SessionTarget = {
-    context: () => ({
-      thread: state,
-      replaying: false,
-      cancelling: false,
-      scope,
-      now: 5_000,
-      nextId: () => `e:${++n}`,
-      sessionIdFor: (acpId) => ids[acpId] ?? null,
-    }),
-    apply: (output) => {
-      state = applyPatches(state, output.patches)
-      effects.push(...output.effects)
+    q1_other: {
+      type: 'string',
+      title: 'Other',
+      description: 'Optional free-form answer to: Pick a letter',
     },
-    requestPermission: async () => 'cancelled',
-    send: () => {},
-    startMode: () => null,
-  }
-  return { target, effects, entries: (): ThreadEntry[] => threadEntries(state) }
+  },
 }
 
-const until = async (done: () => boolean): Promise<void> => {
-  for (let i = 0; i < 400 && !done(); i++) await new Promise((r) => setTimeout(r, 5))
-  expect(done()).toBe(true)
+const child = (id: string, parentId: string, status: string, agent = 'self'): AgyChild => ({
+  id,
+  parentId,
+  status,
+  killed: false,
+  agent,
+  title: '',
+})
+
+const update = (sessionId: string, value: object) => ({
+  sessionId,
+  update: value as SessionUpdate,
+})
+
+const AGAIN = {
+  toolCallId: 'call_again',
+  name: 'send_message',
+  kind: 'other',
+  title: 'Run send_message',
+  rawInput: { Message: 'Ask once more.', Recipient: CHILD },
 }
 
 /**
- * The recorded call in a turn of agy, its brain folder `brain`, and the parent's thread, which
- * holds a subagent session as the host does: registered under the id its first effect names.
+ * A fake agy whose turn starts one sub-agent, or with `again` messages the one it has, and waits
+ * for its report, as 1.5.15 does: the child asks its question only once a `session/load` opened
+ * it, and reports once it is answered.
  */
-async function run(brain: AgyBrain, updates: unknown[] = recorded.updates) {
+function connect(version: string, again = false) {
+  const rows: AgyChild[] = []
+  const reads: string[][] = []
+  const loads: Record<string, unknown>[] = []
+  const answers: CreateElicitationResponse[] = []
+  let reported: (() => void) | null = null
+
+  const askAndReport = async (client: AgentContext) => {
+    const answer = await client.request(methods.client.elicitation.create, {
+      sessionId: CHILD,
+      toolCallId: ASK.toolCallId,
+      mode: 'form',
+      message: 'The agent has a question.',
+      requestedSchema: SCHEMA,
+    } as never)
+    answers.push(answer)
+    const send = (value: object) =>
+      client.notify(methods.client.session.update, update(CHILD, value))
+    await send({ sessionUpdate: 'tool_call_update', ...ASK, status: 'completed' })
+    await send({ sessionUpdate: 'tool_call', ...REPORT, status: 'completed' })
+    await send({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Reported B to the caller.' },
+    })
+    rows[0]!.status = IDLE
+    reported?.()
+  }
+
   const app = agent({ name: 'agy-test' })
     .onRequest(methods.agent.initialize, () => ({
       protocolVersion: 1,
-      agentCapabilities: {},
-      agentInfo: { name: 'Antigravity ACP Server', version: '1.5.12' },
+      agentCapabilities: { loadSession: true, sessionCapabilities: { close: {}, load: {} } },
+      agentInfo: { name: 'Antigravity ACP Server', version },
       authMethods: [],
     }))
-    .onRequest(methods.agent.session.new, () => ({ sessionId: parent }))
-    .onRequest(methods.agent.session.prompt, async (ctx) => {
-      for (const value of updates) {
-        await (ctx.client as AgentContext).notify(methods.client.session.update, {
-          sessionId: ctx.params.sessionId,
-          update: value as SessionUpdate,
+    .onRequest(methods.agent.session.new, () => ({ sessionId: PARENT }))
+    .onRequest(methods.agent.session.resume, () => ({}))
+    .onRequest(methods.agent.session.load, async (ctx) => {
+      const { sessionId } = ctx.params
+      loads.push(ctx.params as unknown as Record<string, unknown>)
+      const send = (value: object) =>
+        ctx.client.notify(methods.client.session.update, update(sessionId, value))
+      if (sessionId === PARENT) {
+        await send({ sessionUpdate: 'tool_call', ...START, status: 'completed' })
+        return {}
+      }
+      // What the child did so far, before the answer, as agy replays it.
+      await send({
+        sessionUpdate: 'agent_thought_chunk',
+        content: { type: 'text', text: 'Asking for a letter.' },
+      })
+      if (rows.find((row) => row.id === sessionId)?.status === RUNNING) {
+        await send({ sessionUpdate: 'tool_call', ...ASK, status: 'pending' })
+        setTimeout(() => void askAndReport(ctx.client), 10)
+      } else {
+        await send({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: `Done in ${sessionId}.` },
         })
       }
+      return {}
+    })
+    .onRequest(methods.agent.session.prompt, async (ctx) => {
+      const send = (value: object) =>
+        ctx.client.notify(methods.client.session.update, update(PARENT, value))
+      const call = again ? AGAIN : START
+      await send({ sessionUpdate: 'tool_call', ...call, status: 'in_progress' })
+      await send({ sessionUpdate: 'tool_call_update', ...call, status: 'completed' })
+      const done = new Promise<void>((resolve) => (reported = resolve))
+      if (again) rows[0]!.status = RUNNING
+      else rows.push(child(CHILD, PARENT, RUNNING))
+      // agy holds the turn until the child reports back.
+      await done
+      await send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'B' } })
       return { stopReason: 'end_turn' }
     })
   const hooks: ConnectionHooks = {
@@ -124,234 +194,278 @@ async function run(brain: AgyBrain, updates: unknown[] = recorded.updates) {
   const connection = AcpConnection.connect(inProcessTransport(app), {
     ...hooks,
     agentId: 'antigravity',
-    agyBrain: brain,
-    agyPollMs: 5,
+    name: 'Google Antigravity',
+    agyStore: async (parents) => {
+      reads.push([...parents])
+      return rows.filter((row) => parents.includes(row.parentId)).map((row) => ({ ...row }))
+    },
   })
-  const ids = { [parent]: 'kettu-parent' }
-  const main = thread('kettu-parent', parent, ids)
-  const children = new Map<string, ReturnType<typeof thread>>()
-  const apply = main.target.apply
-  main.target.apply = (output) => {
-    apply(output)
-    for (const effect of output.effects) {
-      if (effect.kind !== 'subagent' || children.has(effect.sessionId)) continue
-      const sub = thread(`kettu-${effect.sessionId}`, effect.sessionId, ids)
-      children.set(effect.sessionId, sub)
-      connection.register(effect.sessionId, sub.target)
-    }
-  }
-  await connection.initialize('1.0.0')
-  const { sessionId } = await connection.newSession('/tmp/agy-probe')
-  connection.register(sessionId, main.target)
-  await connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
-  const subagentEffects = () =>
-    main.effects.filter((effect): effect is SubagentEffect => effect.kind === 'subagent')
-  return { connection, main, children, subagentEffects }
+  return { connection, rows, reads, loads, answers }
 }
 
-/** The recorded folder, its transcript written up to `lines` lines so far. */
-function recordedBrain(written: { lines: number; killed?: boolean }): AgyBrain {
-  return {
-    subagents: async (id) =>
-      id === parent
-        ? [{ conversationId: child, role: 'Echo Tester', killed: written.killed === true }]
-        : [],
-    spawnedBy: async (id) =>
-      id === child ? recorded.message.sourceMetadata.tool.toolCall.id : null,
-    transcript: async (id, from) =>
-      id === child
-        ? { lines: recorded.transcript.slice(from, written.lines), next: written.lines }
-        : null,
-  }
+interface Session {
+  target: SessionTarget
+  effects: MapperEffect[]
+  requests: PermissionRequest[]
+  entries(): ThreadEntry[]
+  replaying: boolean
 }
 
-const rows = (entries: ThreadEntry[]) =>
-  entries.map((entry) => {
-    switch (entry.kind) {
-      case 'tool':
-        return { tool: entry.title, status: entry.status, content: entry.content }
-      case 'agent':
-        return { agent: entry.markdown }
-      case 'thought':
-        return 'thought'
-      case 'session_message':
-        return { from: entry.senderId, content: entry.content }
-      default:
-        return entry.kind
-    }
-  })
-
-describe("agy's subagents", () => {
-  it('title a subagent by its prompt, as plain words', () => {
-    expect(subagentTitle('# Echo test\nReply with pong')).toBe('Echo test')
-    expect(subagentTitle('\n\n你负责完成全部 **14 张吊筒（diaotong）** 图片的标注。')).toBe(
-      '你负责完成全部 14 张吊筒（diaotong） 图片的标注。',
-    )
-    expect(subagentTitle('x'.repeat(90))).toBe(`${'x'.repeat(80)}…`)
-    expect(subagentTitle('  \n ')).toBe(null)
-  })
-
-  it("read agy's steps, its calls' arguments as the values they are written as", () => {
-    const step = parseStep(recorded.transcript[1]!)
-    expect(step).toMatchObject({
-      index: 1,
-      type: 'PLANNER_RESPONSE',
-      model: 'gemini-4-neon-high',
-      calls: [{ name: 'send_message', args: { Message: 'pong', Recipient: parent } }],
+/**
+ * A session's thread, which opens a sub-agent's thread on the connection as the host does when it
+ * shows one, and answers every question with B.
+ */
+function sessions(connection: AcpConnection) {
+  const byId = new Map<string, Session>()
+  const open = (acpSessionId: string): Session => {
+    let thread: ThreadState = threadFromSnapshot({
+      session: {
+        id: `k-${acpSessionId}`,
+        agentId: 'antigravity',
+        projectPath: CWD,
+        acpSessionId,
+        status: 'running',
+        title: null,
+        config: [],
+        commands: [],
+        usage: null,
+        error: null,
+        turnStartedAt: null,
+        turnStartUsed: null,
+        createdAt: 0,
+        updatedAt: 0,
+        parentId: null,
+        origin: 'user',
+        subagent: null,
+        routine: null,
+        queue: [],
+        queuePaused: false,
+      },
+      entries: [],
+      seq: 0,
     })
-    expect(parseStep('not json')).toBe(null)
-    expect(parseStep('{"type":"GENERIC"}')).toBe(null)
-  })
+    let n = 0
+    const scope = newTurnScope()
+    const session: Session = {
+      effects: [],
+      requests: [],
+      entries: () => threadEntries(thread),
+      replaying: false,
+      target: {
+        context: () => ({
+          thread,
+          replaying: session.replaying,
+          cancelling: false,
+          scope,
+          now: 5_000,
+          nextId: () => `e:${++n}`,
+          sessionIdFor: (id) => `k-${id}`,
+        }),
+        apply: (output) => {
+          thread = applyPatches(thread, output.patches)
+          for (const effect of output.effects) {
+            session.effects.push(effect)
+            if (effect.kind === 'subagent' && !byId.has(effect.sessionId)) {
+              open(effect.sessionId).replaying = session.replaying
+            }
+          }
+        },
+        requestPermission: async (request): Promise<PermissionAnswer> => {
+          session.requests.push(request)
+          session.target.apply(request.output)
+          return { answers: [{ question: 0, choices: [1] }] }
+        },
+        send: () => {},
+        startMode: () => null,
+      },
+    }
+    byId.set(acpSessionId, session)
+    connection.register(acpSessionId, session.target)
+    return session
+  }
+  return { open, get: (id: string) => byId.get(id) }
+}
 
-  it('show the call as the subagent session, its prompt, then its work from the transcript', async () => {
-    const written = { lines: 2 }
-    const { connection, main, children, subagentEffects } = await run(recordedBrain(written))
-    // No row for the call: its card stands in the parent's thread instead.
-    expect(main.entries()).toEqual([])
-    expect(subagentEffects()[0]).toEqual({
+const subagentEffects = (session: Session) =>
+  session.effects.filter((effect) => effect.kind === 'subagent')
+
+describe("agy's sub-agents", () => {
+  it("open a running child in its parent's process, with its updates and questions in its thread", async () => {
+    const { connection, loads, answers, reads } = connect('1.5.15')
+    await connection.initialize('1.0.0')
+    await connection.newSession(CWD, { mcpServers: SERVERS })
+    const shown = sessions(connection)
+    const parent = shown.open(PARENT)
+
+    // The turn ends only because the child's question was answered.
+    await connection.prompt(PARENT, [{ type: 'text', text: 'start a sub-agent that asks me' }])
+
+    expect(subagentEffects(parent)[0]).toEqual({
       kind: 'subagent',
-      sessionId: CHILD_SESSION,
-      title: 'Echo test',
-      description: 'Echo Tester',
+      sessionId: CHILD,
+      title: 'Asker',
+      description: PROMPT,
       canCancel: false,
       state: { kind: 'running' },
     })
-    const sub = children.get(CHILD_SESSION)!
-    await until(() => sub.entries().some((entry) => entry.kind === 'tool'))
-    expect(rows(sub.entries())).toEqual([
+    expect(reads[0]).toEqual([PARENT])
+    expect(loads).toEqual([
       {
-        from: 'kettu-parent',
-        content: [
-          {
-            type: 'text',
-            text: '# Echo test\nReply with the single word pong and nothing else. Use no tools.',
-          },
-        ],
-      },
-      'thought',
-      {
-        tool: 'Message the main agent',
-        status: 'in_progress',
-        content: [{ type: 'markdown', markdown: 'pong' }],
+        sessionId: CHILD,
+        cwd: CWD,
+        mcpServers: [{ type: 'http', name: 'kettu', url: 'http://127.0.0.1:1/mcp', headers: [] }],
+        _meta: { 'sh.kettu/parent-session': PARENT },
       },
     ])
-
-    written.lines = recorded.transcript.length
-    await until(() => subagentEffects().some((effect) => effect.state?.kind === 'idle'))
-    expect(rows(sub.entries()).slice(2)).toEqual([
-      {
-        tool: 'Message the main agent',
-        status: 'completed',
-        content: [
-          {
-            type: 'markdown',
-            markdown: 'Message sent to "6f67d676-9184-4f6a-a4b8-f67fee282d19".',
-          },
-        ],
-      },
-      { agent: 'pong' },
+    const sub = shown.get(CHILD)!
+    expect(sub.requests.map((request) => request.questions?.map((q) => q.question))).toEqual([
+      ['Pick a letter'],
     ])
-    // The card names the model once a step does, and the subagent ends with its last step.
-    expect(
-      subagentEffects()
-        .map((effect) => effect.description)
-        .filter(Boolean),
-    ).toEqual(['Echo Tester', 'Echo Tester · gemini-4-neon-high'])
-    expect(subagentEffects().at(-1)?.state).toEqual({
-      kind: 'idle',
-      stopReason: 'end_turn',
-      error: null,
-      tokens: null,
+    expect(answers).toEqual([{ action: 'accept', content: { q1: '2' } }])
+    const entries = sub.entries()
+    // What the parent asked of it comes first, from the parent.
+    expect(entries[0]).toEqual({
+      kind: 'session_message',
+      id: 'sm:call_start',
+      senderId: `k-${PARENT}`,
+      content: [{ type: 'text', text: PROMPT }],
     })
-    connection.close()
-  })
-
-  it('end a subagent agy killed as cancelled', async () => {
-    const { connection, subagentEffects } = await run(recordedBrain({ lines: 2, killed: true }))
-    await until(() => subagentEffects().some((effect) => effect.state?.kind === 'idle'))
-    expect(subagentEffects().at(-1)?.state).toMatchObject({ kind: 'idle', stopReason: 'cancelled' })
-    connection.close()
-  })
-
-  it('keep only the prompt, ending with the call, when the folder has nothing of it', async () => {
-    const empty: AgyBrain = {
-      subagents: async () => [],
-      spawnedBy: async () => null,
-      transcript: async () => null,
-    }
-    const { connection, children, subagentEffects } = await run(empty)
-    await until(() => subagentEffects().some((effect) => effect.state?.kind === 'idle'))
-    expect(subagentEffects().at(-1)?.state).toEqual({
-      kind: 'idle',
-      stopReason: 'end_turn',
-      error: null,
-      tokens: null,
+    expect(entries.find((entry) => entry.id === 't:call_ask')).toMatchObject({
+      title: 'Pick a letter',
+      status: 'completed',
     })
-    expect(rows(children.get(CHILD_SESSION)!.entries())).toEqual([
-      expect.objectContaining({ from: 'kettu-parent' }),
-    ])
-    connection.close()
-  })
+    expect(entries.some((entry) => entry.kind === 'agent')).toBe(true)
+    // Nothing of the child went into the parent's thread.
+    expect(parent.entries().some((entry) => entry.id === 't:call_ask')).toBe(false)
 
-  it('fail the subagent whose call failed', async () => {
-    const [started] = recorded.updates
-    const failed = { ...started, sessionUpdate: 'tool_call_update', status: 'failed' }
-    const { connection, subagentEffects } = await run(recordedBrain({ lines: 0 }), [
-      started,
-      failed,
-    ])
-    expect(subagentEffects().map((effect) => effect.state)).toEqual([
-      { kind: 'running' },
-      expect.objectContaining({ kind: 'idle', error: { message: 'Run invoke_subagent' } }),
-    ])
-    connection.close()
-  })
-})
-
-describe("agy's brain folder", () => {
-  let home: string | null = null
-  afterEach(async () => {
-    if (home) await rm(home, { recursive: true, force: true })
-    home = null
-  })
-
-  async function folder(): Promise<string> {
-    home = await mkdtemp(path.join(tmpdir(), 'agy-brain-'))
-    const brain = path.join(home, '.gemini', 'antigravity-cli', 'brain')
-    const own = (id: string, ...parts: string[]) =>
-      path.join(brain, id, '.system_generated', ...parts)
-    await mkdir(own(parent, 'subagents'), { recursive: true })
-    await mkdir(own(child, 'messages'), { recursive: true })
-    await mkdir(own(child, 'logs'), { recursive: true })
-    await writeFile(own(parent, 'subagents', `${child}.json`), JSON.stringify(recorded.subagent))
-    await writeFile(
-      own(child, 'messages', `${recorded.message.id}.json`),
-      JSON.stringify(recorded.message),
+    // The store's idle ends it.
+    await vi.waitFor(
+      () =>
+        expect(subagentEffects(parent).at(-1)).toEqual({
+          kind: 'subagent',
+          sessionId: CHILD,
+          state: { kind: 'idle', stopReason: 'end_turn', error: null, tokens: null },
+        }),
+      { timeout: 3_000 },
     )
-    await writeFile(own(child, 'messages', 'read.json'), '{}')
-    // The last line is still being written.
-    const [a, b] = recorded.transcript
-    await writeFile(own(child, 'logs', 'transcript.jsonl'), `${a}\n${b}\n{"step_index":2,`)
-    return home
-  }
-
-  it("names a conversation's subagents, the call that started one and its transcript so far", async () => {
-    const brain = fileBrain(await folder())
-    expect(await brain.subagents(parent)).toEqual([
-      { conversationId: child, role: 'Echo Tester', killed: false },
-    ])
-    expect(await brain.spawnedBy(child)).toBe(CALL_ID)
-    const read = await brain.transcript(child, 0)
-    expect(read?.lines).toEqual(recorded.transcript.slice(0, 2))
-    expect(await brain.transcript(child, read!.next)).toEqual({ lines: [], next: read!.next })
+    connection.close()
   })
 
-  it('reads nothing for a conversation that is not one folder, or is not there', async () => {
-    const brain = fileBrain(await folder())
-    for (const id of ['..', `../${child}`, `${child}/..`, '', 'missing-conversation']) {
-      expect(await brain.subagents(id)).toEqual([])
-      expect(await brain.spawnedBy(id)).toBe(null)
-      expect(await brain.transcript(id, 0)).toBe(null)
-    }
+  it("show a session's children and theirs again as it is replayed, before its load answers", async () => {
+    const { connection, rows, loads } = connect('1.5.15')
+    rows.push(child(CHILD, PARENT, IDLE), child(GRANDCHILD, CHILD, IDLE, 'teamwork_interviewer'))
+    await connection.initialize('1.0.0')
+    const shown = sessions(connection)
+    const parent = shown.open(PARENT)
+    parent.replaying = true
+    await connection.loadSession(PARENT, CWD, { mcpServers: SERVERS })
+
+    expect(loads.map((load) => [load.sessionId, load._meta])).toEqual([
+      [PARENT, undefined],
+      [CHILD, { 'sh.kettu/parent-session': PARENT }],
+      [GRANDCHILD, { 'sh.kettu/parent-session': CHILD }],
+    ])
+    expect(subagentEffects(parent)).toEqual([
+      {
+        kind: 'subagent',
+        sessionId: CHILD,
+        title: 'Asker',
+        description: PROMPT,
+        canCancel: false,
+        state: { kind: 'idle', stopReason: 'end_turn', error: null, tokens: null },
+      },
+    ])
+    const sub = shown.get(CHILD)!
+    // A child started without a call Kettu saw is named by its type, with no task.
+    expect(subagentEffects(sub)).toEqual([
+      {
+        kind: 'subagent',
+        sessionId: GRANDCHILD,
+        title: 'teamwork_interviewer',
+        canCancel: false,
+        state: { kind: 'idle', stopReason: 'end_turn', error: null, tokens: null },
+      },
+    ])
+    expect(sub.entries().map((entry) => entry.kind)).toEqual([
+      'session_message',
+      'thought',
+      'agent',
+    ])
+    expect(
+      shown
+        .get(GRANDCHILD)!
+        .entries()
+        .map((entry) => entry.kind),
+    ).toEqual(['thought', 'agent'])
+    connection.close()
+  })
+
+  it('carry on a child Kettu kept from before its parent was let go, without replaying it', async () => {
+    const { connection, rows, loads, answers } = connect('1.5.15', true)
+    rows.push(child(CHILD, PARENT, IDLE))
+    await connection.initialize('1.0.0')
+    await connection.resumeSession(PARENT, CWD, { mcpServers: SERVERS })
+    const shown = sessions(connection)
+    const parent = shown.open(PARENT)
+    const kept = shown.open(CHILD)
+    kept.target.apply({
+      patches: [
+        {
+          op: 'entry.add',
+          entry: {
+            kind: 'agent',
+            id: 'm:earlier',
+            markdown: 'Reported A to the caller.',
+            attachments: [],
+            streaming: false,
+          },
+        },
+      ],
+      effects: [],
+    })
+
+    await connection.prompt(PARENT, [{ type: 'text', text: 'ask the same sub-agent again' }])
+
+    // Its name and task are not cleared by a child the turn did not start.
+    expect(subagentEffects(parent)[0]).toEqual({
+      kind: 'subagent',
+      sessionId: CHILD,
+      canCancel: false,
+      state: { kind: 'running' },
+    })
+    expect(loads.map((load) => load.sessionId)).toEqual([CHILD])
+    expect(answers).toEqual([{ action: 'accept', content: { q1: '2' } }])
+    const texts = kept
+      .entries()
+      .map((entry) =>
+        entry.kind === 'agent' || entry.kind === 'thought'
+          ? entry.markdown
+          : entry.kind === 'tool'
+            ? entry.title
+            : entry.kind,
+      )
+    // What agy replays as it opens the child again is not added twice.
+    expect(texts).not.toContain('Asking for a letter.')
+    expect(texts).toEqual([
+      'Reported A to the caller.',
+      'Pick a letter',
+      'Run send_message',
+      'Reported B to the caller.',
+    ])
+    connection.close()
+  })
+
+  it('are not followed on a version they were not measured on', async () => {
+    const { connection, reads, rows } = connect('1.5.14')
+    await connection.initialize('1.0.0')
+    await connection.newSession(CWD)
+    const parent = sessions(connection).open(PARENT)
+    const turn = connection.prompt(PARENT, [{ type: 'text', text: 'start a sub-agent' }])
+    await vi.waitFor(() => expect(rows).toHaveLength(1))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(reads).toEqual([])
+    expect(subagentEffects(parent)).toEqual([])
+    connection.close()
+    await turn.catch(() => {})
   })
 })

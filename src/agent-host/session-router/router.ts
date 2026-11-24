@@ -8,7 +8,9 @@
 // With `--session-flag=<flag>`, a session the host asks for starts with `<flag>` added, once the
 // program's `--help` lists it, as agy's own full access does. With `--dir-flag=<flag>`, a session
 // the host names further folders for starts with `<flag> <folder>` for each, once the help lists
-// it, as agy's `--add-dir` takes them. It imports Node's built-ins only, so its bundle is one file.
+// it, as agy's `--add-dir` takes them. A load or resume that names a parent session goes to the
+// parent's process, where the program runs its sub-agents. It imports Node's built-ins only, so its
+// bundle is one file.
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { statSync } from 'node:fs'
@@ -102,6 +104,9 @@ const DIR_FLAG = '--dir-flag='
 // request names its further folders, as `DIR_FLAG_META` and `DIRS_META` in the host's connection.
 const DIR_FLAG_META = 'sh.kettu/dir-flag'
 const DIRS_META = 'sh.kettu/dirs'
+// Where `session/load` and `session/resume` name the session whose process runs the one they open,
+// as `PARENT_SESSION_META` in the host's agy sub-agents.
+const PARENT_SESSION_META = 'sh.kettu/parent-session'
 
 /**
  * Takes the router's asks out of a request: the request to pass on, whether it asked for the
@@ -129,6 +134,20 @@ function takeFlag(params: unknown): { params: unknown; flagged: boolean; dirs: s
     ? named.filter((dir): dir is string => typeof dir === 'string' && path.isAbsolute(dir))
     : []
   return { params: forward, flagged: asked === true, dirs }
+}
+
+/** Takes the parent session out of a request: the request to pass on, and the parent, or null. */
+function takeParent(params: unknown): { params: unknown; parent: string | null } {
+  if (typeof params !== 'object' || params === null) return { params, parent: null }
+  const meta = (params as { _meta?: unknown })._meta
+  if (typeof meta !== 'object' || meta === null || !(PARENT_SESSION_META in meta)) {
+    return { params, parent: null }
+  }
+  const { [PARENT_SESSION_META]: parent, ...rest } = meta as Record<string, unknown>
+  const forward: Record<string, unknown> = { ...(params as Record<string, unknown>) }
+  if (Object.keys(rest).length > 0) forward._meta = rest
+  else delete forward._meta
+  return { params: forward, parent: typeof parent === 'string' && parent !== '' ? parent : null }
 }
 
 /** Whether a program's help lists `flag` as a word of its own. */
@@ -220,6 +239,8 @@ export class SessionRouter {
   private readonly children = new Set<Child>()
   /** Each live session's child, by the session id it opened. */
   private readonly sessions = new Map<string, Child>()
+  /** Sessions that run in another session's child, such as its sub-agents, by their id. */
+  private readonly guests = new Map<string, Child>()
   /** The requests the router made to the host for its children, by the id it gave them. */
   private readonly hostRequests = new Map<JsonRpcId, Deferred>()
   private control: Child | null = null
@@ -293,7 +314,7 @@ export class SessionRouter {
       if (method === 'session/delete') return await this.deleteSession(id, params)
       const sessionId = sessionIdOf(params)
       if (sessionId !== null) {
-        const child = this.sessions.get(sessionId)
+        const child = this.childOf(sessionId)
         if (!child) {
           return this.sendError(id, {
             code: INVALID_PARAMS,
@@ -316,7 +337,7 @@ export class SessionRouter {
   private hostNotification(method: string, params: unknown): void {
     const sessionId = sessionIdOf(params)
     if (sessionId !== null) {
-      const child = this.sessions.get(sessionId)
+      const child = this.childOf(sessionId)
       // A notification for a session without a child is dropped.
       if (child) this.send(child, { jsonrpc: '2.0', method, params })
       return
@@ -332,6 +353,16 @@ export class SessionRouter {
   }
 
   // Sessions.
+
+  /** The child a session runs in: its own, or the one of the session it was loaded under. */
+  private childOf(sessionId: string): Child | undefined {
+    return this.sessions.get(sessionId) ?? this.guests.get(sessionId)
+  }
+
+  /** Forgets the sessions that ran in `child`, which went or is going. */
+  private dropGuests(child: Child): void {
+    for (const [id, host] of this.guests) if (host === child) this.guests.delete(id)
+  }
 
   private async newSession(id: JsonRpcId, params: unknown): Promise<void> {
     let child: Child | null = null
@@ -374,14 +405,20 @@ export class SessionRouter {
         message: `${method} names no session`,
       })
     }
+    const parented = takeParent(params)
+    if (parented.parent !== null) {
+      return this.loadGuest(id, method, sessionId, parented.parent, parented.params)
+    }
     let child: Child | null = null
     try {
       const flag = takeFlag(params)
       // Refused before the session's process ends, so a refusal leaves the session as it was.
       const extra = [...(await this.flagFor(flag.flagged)), ...(await this.dirsFor(flag.dirs))]
+      this.guests.delete(sessionId)
       const existing = this.sessions.get(sessionId)
       if (existing) {
         this.sessions.delete(sessionId)
+        this.dropGuests(existing)
         await this.endChildAndWait(existing, REPLACE_KILL_MS)
       }
       child = await this.startSessionChild(params, extra)
@@ -398,11 +435,42 @@ export class SessionRouter {
     }
   }
 
+  /**
+   * Opens a session in the child of `parent`, which runs it, such as a sub-agent the parent's
+   * program started: no process starts or ends for it, and its messages go through that child.
+   */
+  private async loadGuest(
+    id: JsonRpcId,
+    method: 'session/load' | 'session/resume',
+    sessionId: string,
+    parent: string,
+    params: unknown,
+  ): Promise<void> {
+    const host = this.childOf(parent)
+    if (!host || this.sessions.has(sessionId)) {
+      return this.sendError(id, {
+        code: INVALID_PARAMS,
+        message: host ? `${sessionId} has a process of its own` : `Unknown session ${parent}`,
+      })
+    }
+    try {
+      const answer = await this.request(host, method, params)
+      if (answer.error) return this.sendError(id, answer.error)
+      if (!host.gone) this.guests.set(sessionId, host)
+      this.sendResult(id, answer.result)
+    } catch (error) {
+      this.sendError(id, failureOf(error))
+    }
+  }
+
   private closeSession(id: JsonRpcId, params: unknown): void {
     const sessionId = sessionIdOf(params)
+    // A session in another's process is only forgotten: ending the process would end its host.
+    if (sessionId !== null && this.guests.delete(sessionId)) return this.sendResult(id, {})
     const child = sessionId === null ? undefined : this.sessions.get(sessionId)
     if (sessionId !== null && child) {
       this.sessions.delete(sessionId)
+      this.dropGuests(child)
       // Its stdin closes, so pi-acp exits; a child that does not is killed after the limit.
       this.endChild(child)
       const timer = setTimeout(() => this.killChild(child), CLOSE_KILL_MS)
@@ -414,9 +482,11 @@ export class SessionRouter {
   private async deleteSession(id: JsonRpcId, params: unknown): Promise<void> {
     const sessionId = sessionIdOf(params)
     const child = sessionId === null ? undefined : this.sessions.get(sessionId)
+    if (sessionId !== null) this.guests.delete(sessionId)
     try {
       if (sessionId !== null && child) {
         this.sessions.delete(sessionId)
+        this.dropGuests(child)
         // Wait for it to exit, so nothing writes the session again before the delete.
         await this.endChildAndWait(child, REPLACE_KILL_MS)
       }
@@ -683,6 +753,7 @@ export class SessionRouter {
     child.gone = true
     child.exited = true
     this.children.delete(child)
+    this.dropGuests(child)
     for (const deferred of child.outgoing.values()) {
       deferred.reject(new Error('The agent process exited'))
     }

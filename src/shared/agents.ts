@@ -194,6 +194,7 @@ export const START_MODE_HARNESSES: readonly HarnessId[] = [
   'codex',
   'deepseek',
   'doubao',
+  'antigravity',
 ]
 
 /** Google Antigravity's full access, Kettu's mode for agy's `--dangerously-skip-permissions`. */

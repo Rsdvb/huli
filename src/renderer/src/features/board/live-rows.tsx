@@ -117,7 +117,8 @@ export function AgentLive({
 /**
  * A command or monitor the agent left running: its mark, name and clock, and under them the last
  * line it printed. A click opens it in place, where the second line is the command itself and
- * its output follows; Stop shows beside the clock on hover and stops this one task.
+ * its output follows; Stop shows beside the clock on hover and stops this one task. A command
+ * that runs on in its tool call has neither, so its row only names the command.
  */
 export function TaskLive({
   sessionId,
@@ -132,6 +133,42 @@ export function TaskLive({
   /** Huli: what the board's latest reading found of its processes. */
   stats?: TaskProcess | null
   block?: PortBlock | null
+}) {
+  if (task.entryId !== undefined) return <CallLive task={task} compact={compact} />
+  return <TaskRow sessionId={sessionId} task={task} compact={compact} stats={stats} block={block} />
+}
+
+function CallLive({ task, compact }: { task: BackgroundTaskView; compact: boolean }) {
+  return (
+    <div className="kb-item">
+      <div className="kb-live" data-kind="task" data-one={compact || undefined}>
+        <span className="kb-mark">
+          <PaneIcon icon={ComputerTerminal01Icon} size={14} />
+        </span>
+        <span className="kb-live__name">{task.title}</span>
+        <span className="kb-live__end">
+          <Clock since={task.startedAt} />
+        </span>
+        {!compact && (
+          <span className="kb-live__what kb-live__what--mono">{task.command ?? task.title}</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TaskRow({
+  sessionId,
+  task,
+  compact,
+  stats,
+  block,
+}: {
+  sessionId: string
+  task: BackgroundTaskView
+  compact: boolean
+  stats: TaskProcess | null
+  block: PortBlock | null
 }) {
   const { t } = useTranslation('board')
   const id = useId()

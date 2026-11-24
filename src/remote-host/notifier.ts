@@ -130,6 +130,11 @@ export interface NotifierOptions {
   showing(deviceId: string, sessionId: string): boolean
   /** Whether the device is connected in the foreground, where it keeps its own Live Activity. */
   inFront?(deviceId: string): boolean
+  /**
+   * Whether the device shows the host's notifications itself now, as a browser's page does while
+   * it is connected: it is pushed nothing meanwhile.
+   */
+  notifiesItself?(deviceId: string): boolean
   send(job: PushJob): void
   /** How long a device's notifications of one subject wait to merge into one. */
   mergeMs?: number
@@ -200,6 +205,8 @@ interface Activity {
 /** A kind about an agent rather than a session. */
 const ofAgent = (kind: AttentionKind): kind is 'routine-paused' | 'plan-limit' =>
   kind === 'routine-paused' || kind === 'plan-limit'
+/** Whether a push reaches the device: through APNs or Web Push. */
+const reachable = (push: DevicePush): boolean => push.target !== null || push.web !== undefined
 
 const subjectOf = (attention: Attention): string =>
   attention.kind === 'routine-paused'
@@ -451,8 +458,9 @@ export class Notifier {
 
   /** Queues the attention for a device that wants it now. */
   private consider(device: NotifierDevice, subject: string, attention: Attention): void {
-    const { target, choices } = device.push
-    if (!target || !wants(choices, attention.kind) || this.held(choices)) return
+    const { choices } = device.push
+    if (!reachable(device.push) || !wants(choices, attention.kind) || this.held(choices)) return
+    if (this.options.notifiesItself?.(device.id)) return
     const { sessionId } = attention
     if (sessionId !== undefined) {
       if (choices.muted.includes(sessionId)) return
@@ -472,7 +480,8 @@ export class Notifier {
 
   private deliver(deviceId: string, subject: string, attention: Attention): void {
     const device = this.options.devices().find((entry) => entry.id === deviceId)
-    if (!device?.push.target || this.held(device.push.choices)) return
+    if (!device || !reachable(device.push) || this.held(device.push.choices)) return
+    if (this.options.notifiesItself?.(deviceId)) return
     if (attention.sessionId !== undefined && this.options.showing(deviceId, attention.sessionId)) {
       return
     }

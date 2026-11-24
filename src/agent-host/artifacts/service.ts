@@ -561,6 +561,7 @@ export class ArtifactService {
       theme: this.deps.theme !== undefined && this.featureOn('agentTheme'),
       webReader: this.deps.webReader !== undefined && this.featureOn('webReader'),
       notify: this.deps.notify !== undefined && this.featureOn('agentNotify'),
+      passwords: this.deps.terminals?.passwords?.() === true,
     }
   }
 
@@ -598,7 +599,7 @@ export class ArtifactService {
         : this.serviceTools
     return [
       guideTool(this.guideFlags),
-      ...service,
+      ...(this.terminalTools?.listed(service) ?? service),
       ...managing,
       ...(this.memoryOn ? MEMORY_TOOLS : []),
       ...(this.marketOn ? MARKET_TOOLS : []),

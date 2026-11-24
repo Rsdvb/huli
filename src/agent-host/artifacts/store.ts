@@ -7,7 +7,8 @@ import { readFile } from 'node:fs/promises'
 import { isStrictDeclaration } from '@shared/artifact-capabilities'
 import type { CommentAnchor, CommentAuthor, CommentThread } from '@shared/artifact-comments'
 import { ARTIFACT_ENTRY, DISK_FILE_BYTES, isHtmlPath } from '@shared/artifact-files'
-import { CANVAS_FILE } from '@shared/canvas-doc'
+import { CANVAS_FILE, parseCanvasDoc } from '@shared/canvas-doc'
+import { DOCUMENT_ENTRY, findDocumentAnchor } from '@shared/artifact-document-anchors'
 import { findAnchor, startTagAt } from '@shared/artifact-source'
 import {
   ARTIFACT_KEEP_DELETED_MS,
@@ -557,19 +558,33 @@ export class ArtifactStore {
 
   /**
    * The artifact's threads, oldest first, each anchored in its latest version: an element a new
-   * version moved is found again by its tag, text and page, and one no longer there is marked so.
+   * version moved is found again by its tag, text and page, a document's block by its element and
+   * words, and one no longer there, or in a frame its canvas no longer lists, is marked so until a
+   * later version has it again.
    */
   async threads(id: string, { project }: Reach = {}): Promise<CommentThread[]> {
     const threads = await this.call('threads', { id, project: project ?? null })
-    const stale = threads.filter((t) => t.anchor.offset !== null && !t.anchor.missing)
+    const stale = threads.filter((t) => t.anchor.offset !== null)
     if (stale.length === 0) return threads
     const found = await this.get(id, project ? { project } : {}).catch(() => null)
     if (!found) return threads
     const head = found.version.version
     const texts = new Map<string, string | null>()
+    // A frame removed from a canvas leaves its file in the version, so the file alone cannot tell.
+    const sheet = found.type ? undefined : found.files.find((f) => f.path === CANVAS_FILE)
+    let frames: Set<string> | null = null
+    if (sheet && stale.some((t) => t.anchor.version !== head)) {
+      try {
+        const doc = parseCanvasDoc((await this.bytes(found, sheet)).toString('utf8'))
+        frames = new Set(doc.pages.map((page) => page.file))
+      } catch {
+        // A canvas that does not read leaves the files to tell.
+      }
+    }
     const textOf = async (path: string): Promise<string | null> => {
       if (!texts.has(path)) {
-        const file = found.files.find((f) => f.path === path)
+        const file =
+          frames && !frames.has(path) ? undefined : found.files.find((f) => f.path === path)
         texts.set(path, file ? (await this.bytes(found, file)).toString('utf8') : null)
       }
       return texts.get(path)!
@@ -581,18 +596,23 @@ export class ArtifactStore {
       const text = await textOf(anchor.path)
       const old = { offset: anchor.offset!, tag: anchor.tag ?? '', text: anchor.text }
       const offset =
-        text === null ? null : findAnchor(text, { ...old, page: anchor.page?.number ?? null })
+        text === null
+          ? null
+          : anchor.path === DOCUMENT_ENTRY
+            ? findDocumentAnchor(text, old)
+            : findAnchor(text, { ...old, page: anchor.page?.number ?? null })
       // Without text to match, an element whose tag is still where it was stays.
       const kept =
         offset === null &&
         text !== null &&
+        anchor.path !== DOCUMENT_ENTRY &&
         anchor.text === '' &&
         startTagAt(text, old.offset)?.name === anchor.tag
       const next: CommentAnchor =
         offset !== null
-          ? { ...anchor, version: head, offset }
+          ? { ...anchor, version: head, offset, missing: false }
           : kept
-            ? { ...anchor, version: head }
+            ? { ...anchor, version: head, missing: false }
             : { ...anchor, version: head, missing: true }
       moved.push({ threadId: thread.id, anchor: next })
       thread.anchor = next
@@ -656,6 +676,19 @@ export class ArtifactStore {
     })
     this.commented(id)
     return thread
+  }
+
+  /** Pins a thread to another place, where it is found again from now on. */
+  async repin(id: string, threadId: string, anchor: CommentAnchor): Promise<CommentThread> {
+    const threads = await this.call('threads', { id, project: null })
+    const thread = threads.find((one) => one.id === threadId)
+    if (!thread) {
+      throw new HostError('not_found', t('artifacts.noThread', { id, thread: threadId }))
+    }
+    const placed: CommentAnchor = { ...anchor, missing: false }
+    await this.call('reanchor', { id, anchors: [{ threadId, anchor: placed }] })
+    this.commented(id)
+    return { ...thread, anchor: placed }
   }
 
   /** The user sent the threads to the session; they wait no more until the user writes again. */

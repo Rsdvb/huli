@@ -1,439 +1,347 @@
 import { useEffect, useRef, useState } from 'react'
-import {
-  Copy01Icon,
-  Delete02Icon,
-  MoreHorizontalIcon,
-  PencilEdit02Icon,
-  PlusSignIcon,
-  Tick02Icon,
-} from '@hugeicons/core-free-icons'
-import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
+import { SlidersHorizontalIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
-import { paramsRange, parseParams, type PageParam, type ParamValue } from '@shared/artifact-params'
-import { canvasId, type CanvasDoc, type CanvasOp, type CanvasPage } from '@shared/canvas-doc'
-import { Dropdown } from '@renderer/components/affect/app-shell'
+import type { PageParam, ParamValue } from '@shared/artifact-params'
+import type { CanvasPage } from '@shared/canvas-doc'
+import { Button } from '@renderer/components/affect/button'
+import { SegmentedControl } from '@renderer/components/affect/segmented-control'
 import { Switch } from '@renderer/components/ui/switch'
-import { errorCode, host } from '@renderer/lib/host'
-import { toast } from '@renderer/components/ui/toast'
-import { FRAME_ICON, NOTE_ICONS } from './canvas-tools'
-import { ViewerSlot } from './viewer-shell'
-import type { DocLayout } from './canvas-model'
+import { errorCode, errorMessage, host } from '@renderer/lib/host'
+import { dropUnsaved, keepUnsaved, unsavedAt, unsavedSlot } from '@renderer/stores/artifact-unsaved'
+import { ColorInput } from './edit-panel'
 import type { EditorFrame } from './editor'
+import { CardHead, KeptNote, Notice, SaveChip, UndoButton } from './tool-parts'
+import { useEditRun } from './use-edit-run'
 
 /** A tweak is written once the user stops changing it this long. */
 const PARAMS_SAVE_MS = 1000
 
-/** A row of the left card: its icon and name, renamed in place by a double click where it can be. */
-function NavRow({
-  icon,
-  name,
-  meta,
-  selected,
-  renaming,
-  onRename,
-  onRenamed,
-  onClick,
-}: {
-  icon: IconSvgElement
-  name: string
-  meta?: string
-  selected: boolean
-  renaming: boolean
-  onRename: (() => void) | null
-  onRenamed: (name: string | null) => void
-  onClick: (event: React.MouseEvent) => void
-}) {
-  return (
-    <div role="treeitem" aria-selected={selected} className="k-ce-row">
-      <HugeiconsIcon icon={icon} size={14} strokeWidth={1.9} className="k-ce-row__icon" />
-      {renaming ? (
-        <input
-          autoFocus
-          defaultValue={name}
-          className="k-ce-row__name rounded bg-surface px-1 outline-none"
-          onBlur={(event) => {
-            const value = event.target.value.trim()
-            onRenamed(value && value !== name ? value : null)
-          }}
-          onKeyDown={(event) => {
-            event.stopPropagation()
-            if (event.key === 'Enter' || event.key === 'Escape')
-              (event.target as HTMLInputElement).blur()
-          }}
-        />
-      ) : (
-        <button
-          type="button"
-          className="k-ce-row__name text-start"
-          onClick={onClick}
-          onDoubleClick={onRename ?? undefined}
-        >
-          {name}
-        </button>
-      )}
-      {meta && <span className="k-ce-row__meta">{meta}</span>}
-    </div>
-  )
-}
+type Values = Record<string, ParamValue>
+
+const valuesOf = (params: readonly PageParam[]): Values =>
+  Object.fromEntries(params.map((p) => [p.name, p.value]))
 
 /**
- * The left card of a canvas: its pages, to switch between and manage, then what the page on screen
- * holds, to find, select and rename.
+ * The Tweak card for one frame: a row for each setting it declares, a control by the setting's
+ * type, changed rows marked with a dot that puts them back, and Reset all. A change shows at once
+ * and is written as the user's version a moment after they stop.
  */
-export function CanvasNavigator({
-  doc,
-  canvasKey,
-  onCanvas,
-  layout,
-  selection,
-  onSelect,
-  apply,
-  readOnly,
-}: {
-  doc: CanvasDoc
-  canvasKey: string
-  onCanvas: (id: string) => void
-  layout: DocLayout
-  selection: readonly string[]
-  onSelect: (ids: string[], reveal: boolean) => void
-  apply: (ops: CanvasOp[]) => void
-  readOnly: boolean
-}) {
-  const { t } = useTranslation('artifacts')
-  const [renaming, setRenaming] = useState<string | null>(null)
-  const current = doc.canvases.find((c) => c.id === canvasKey)
-  const pagesOn = (id: string) => doc.pages.filter((p) => p.canvas === id).length
-  const renamed = (id: string) => (name: string | null) => {
-    if (name) apply([{ op: 'set', id, key: 'name', value: name }])
-    setRenaming(null)
-  }
-  const pick = (id: string) => (event: React.MouseEvent) =>
-    onSelect(event.shiftKey ? [...selection.filter((s) => s !== id), id] : [id], true)
-  const addCanvas = (copyOf: string | null) => {
-    const id = canvasId('c')
-    const ops: CanvasOp[] = [
-      {
-        op: 'add',
-        object: {
-          type: 'canvas',
-          id,
-          name: copyOf
-            ? `${current?.name ?? ''} 2`
-            : t('board.canvases.newName', { number: doc.canvases.length + 1 }),
-        },
-      },
-    ]
-    if (copyOf) {
-      for (const p of doc.pages.filter((x) => x.canvas === copyOf)) {
-        ops.push({ op: 'add', object: { type: 'page', ...p, id: canvasId('p'), canvas: id } })
-      }
-    }
-    apply(ops)
-    onCanvas(id)
-  }
-  return (
-    <div className="k-ce-nav">
-      {!readOnly && (
-        <ViewerSlot slot="leftHead">
-          <Dropdown
-            align="end"
-            items={[
-              {
-                label: t('board.canvases.new'),
-                icon: PlusSignIcon,
-                onSelect: () => addCanvas(null),
-              },
-              {
-                label: t('board.canvases.rename'),
-                icon: PencilEdit02Icon,
-                onSelect: () => setRenaming(canvasKey),
-              },
-              {
-                label: t('board.canvases.duplicate'),
-                icon: Copy01Icon,
-                onSelect: () => addCanvas(canvasKey),
-              },
-              {
-                label: t('board.canvases.delete'),
-                icon: Delete02Icon,
-                danger: true,
-                // The last page stays: a canvas artifact keeps at least one.
-                disabled: doc.canvases.length < 2,
-                onSelect: () => {
-                  const next = doc.canvases.find((c) => c.id !== canvasKey)
-                  apply([{ op: 'remove', id: canvasKey }])
-                  if (next) onCanvas(next.id)
-                },
-              },
-            ]}
-            trigger={({ open, toggle }) => (
-              <button
-                type="button"
-                aria-label={t('board.canvases.actions')}
-                title={t('board.canvases.actions')}
-                aria-haspopup="menu"
-                aria-expanded={open}
-                onClick={toggle}
-                className="k-ce-tool"
-              >
-                <HugeiconsIcon icon={MoreHorizontalIcon} size={14} strokeWidth={1.9} />
-              </button>
-            )}
-          />
-        </ViewerSlot>
-      )}
-      <div role="tree" aria-label={t('board.canvases.menu')}>
-        {doc.canvases.map((c) => (
-          <NavRow
-            key={c.id}
-            icon={NOTE_ICONS.canvas}
-            name={c.name}
-            meta={String(pagesOn(c.id))}
-            selected={c.id === canvasKey}
-            renaming={renaming === c.id}
-            onRename={readOnly ? null : () => setRenaming(c.id)}
-            onRenamed={renamed(c.id)}
-            onClick={() => onCanvas(c.id)}
-          />
-        ))}
-      </div>
-      <div className="k-ce-nav__head">
-        <span>{t('board.layers.title')}</span>
-      </div>
-      <div role="tree" aria-label={t('board.layers.title')}>
-        {layout.pages.map((p) => (
-          <NavRow
-            key={p.id}
-            icon={FRAME_ICON}
-            name={p.name}
-            selected={selection.includes(p.id)}
-            renaming={renaming === p.id}
-            onRename={readOnly ? null : () => setRenaming(p.id)}
-            onRenamed={renamed(p.id)}
-            onClick={pick(p.id)}
-          />
-        ))}
-        {layout.notes.map((n) => (
-          <NavRow
-            key={n.id}
-            icon={NOTE_ICONS[n.kind]}
-            name={
-              n.kind === 'text' || n.kind === 'sticky'
-                ? n.text || t(`board.layers.notes.${n.kind}`)
-                : t(`board.layers.notes.${n.kind}`)
-            }
-            selected={selection.includes(n.id)}
-            renaming={false}
-            onRename={null}
-            onRenamed={() => {}}
-            onClick={pick(n.id)}
-          />
-        ))}
-        {layout.pages.length === 0 && layout.notes.length === 0 && (
-          <p className="k-ce-nav__empty">{t('board.layers.empty')}</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-/** The parameters a page declares, with controls that preview at once and write a moment later. */
-function PageParams({
+export function TweakCard({
   artifactId,
   version,
   page,
-  frame,
-  selected,
-  onSelect,
+  params,
+  frameOf,
+  readOnly,
+}: {
+  artifactId: string
+  version: number
+  /** The frame's link, read when a change is shown on it. */
+  page: CanvasPage | null
+  params: readonly PageParam[] | null
+  frameOf: () => EditorFrame | null
+  readOnly: boolean
+}) {
+  const { t } = useTranslation('artifacts')
+  return (
+    <aside aria-label={t('tweak.title')} className="k-av-side k-vt-card">
+      {page && params ? (
+        <TweakBody
+          key={`${artifactId}:${page.id}`}
+          artifactId={artifactId}
+          version={version}
+          page={page}
+          params={params}
+          frameOf={frameOf}
+          readOnly={readOnly}
+        />
+      ) : (
+        <>
+          <CardHead icon={SlidersHorizontalIcon} title={t('tweak.title')} />
+          <div className="k-vt-body">
+            <Notice>{t('tweak.none')}</Notice>
+          </div>
+        </>
+      )}
+    </aside>
+  )
+}
+
+function TweakBody({
+  artifactId,
+  version,
+  page,
+  params,
+  frameOf,
+  readOnly,
 }: {
   artifactId: string
   version: number
   page: CanvasPage
-  frame: EditorFrame | null
-  /** The frame is the one selected, which its group shows. */
-  selected: boolean
-  onSelect: () => void
+  params: readonly PageParam[]
+  frameOf: () => EditorFrame | null
+  readOnly: boolean
 }) {
   const { t } = useTranslation('artifacts')
-  const [params, setParams] = useState<PageParam[] | null>(null)
-  const [values, setValues] = useState<Record<string, ParamValue>>({})
-  const [saving, setSaving] = useState<'idle' | 'saving' | number>('idle')
-  const pending = useRef<Record<string, ParamValue>>({})
+  // What the frame held when the card opened, which a row's dot and Reset all put back.
+  const [baseline] = useState<Values>(() => valuesOf(params))
+  // Tweaks of this frame that did not save before the viewer was left, shown again.
+  const slot = unsavedSlot({ kind: 'params', frame: page.id })
+  const [kept] = useState(() => {
+    const change = unsavedAt(artifactId, slot)
+    return change?.kind === 'params' ? change : null
+  })
+  const [values, setValues] = useState<Values>(() => ({ ...baseline, ...kept?.values }))
+  const run = useEditRun(artifactId, kept ? { state: 'failed', error: kept.error } : null)
+  const pending = useRef<Values>({ ...kept?.values })
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-
+  const wrote = useRef(0)
+  // The version kept tweaks were made on, so a newer one is a conflict before it is written over.
+  const keptBase = useRef(kept?.version ?? null)
+  // The frame shows the kept tweaks again, on the page it loads too, until they change or save.
   useEffect(() => {
-    let live = true
-    host('artifacts.file', { id: artifactId, version, path: page.file }).then(
-      ({ bytes }) => {
-        if (!live) return
-        const html = new TextDecoder().decode(bytes)
-        const range = paramsRange(html)
-        const found = range ? parseParams(html.slice(range.start, range.end)) : []
-        setParams(found)
-        setValues(Object.fromEntries(found.map((p) => [p.name, p.value])))
-      },
-      () => {
-        if (live) setParams([])
-      },
-    )
-    return () => {
-      live = false
+    if (!kept) return
+    let tries = 0
+    const show = (): boolean => {
+      const frame = frameOf()
+      frame?.params(kept.values, true)
+      return !!frame
     }
-  }, [artifactId, version, page.file])
-
+    if (show()) return
+    const poll = setInterval(() => {
+      if (show() || ++tries > 40) clearInterval(poll)
+    }, 100)
+    return () => clearInterval(poll)
+    // Once, for the frame the card opened on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const versionRef = useRef(version)
+  useEffect(() => {
+    versionRef.current = version
+  })
   useEffect(() => () => clearTimeout(timer.current), [])
 
-  if (!params || params.length === 0) return null
-
-  const change = (name: string, value: ParamValue) => {
-    setValues((v) => ({ ...v, [name]: value }))
-    frame?.params({ [name]: value })
-    pending.current = { ...pending.current, [name]: value }
-    clearTimeout(timer.current)
-    timer.current = setTimeout(() => {
-      const send = pending.current
-      pending.current = {}
-      setSaving('saving')
-      host('artifacts.setParams', {
-        id: artifactId,
-        baseVersion: version,
-        path: page.file,
-        values: send,
-      }).then(
-        ({ version: written }) => setSaving(written),
-        (reason: unknown) => {
-          setSaving('idle')
-          toast(t('board.props.paramsFailed', { error: errorCode(reason) ?? '' }), undefined, {
-            tone: 'warning',
-          })
-        },
-      )
-    }, PARAMS_SAVE_MS)
+  const write = () => {
+    const send = pending.current
+    if (Object.keys(send).length === 0) return
+    const base = keptBase.current ?? Math.max(versionRef.current, wrote.current)
+    host('artifacts.setParams', {
+      id: artifactId,
+      baseVersion: base,
+      path: page.file,
+      values: send,
+    })
+      .then(({ version: made }) => {
+        wrote.current = made
+        keptBase.current = null
+        // Only what was sent is written; a change typed since waits for its own turn.
+        for (const name of Object.keys(send)) {
+          if (pending.current[name] === send[name]) delete pending.current[name]
+        }
+        dropUnsaved(artifactId, slot)
+        run.wrote(made, base)
+      })
+      // Nothing changed is lost: the values stay on screen and the chip offers to try again.
+      .catch((reason: unknown) => {
+        // The next try is made on the version shown by then.
+        if (errorCode(reason) === 'conflict') keptBase.current = null
+        // Kept beyond this card, which may be gone by now, until it saves or is discarded.
+        keepUnsaved(artifactId, {
+          kind: 'params',
+          frame: page.id,
+          values: { ...pending.current },
+          version: base,
+          error: errorMessage(reason),
+        })
+        run.failed(reason)
+      })
   }
+
+  const change = (next: Values) => {
+    if (readOnly) return
+    setValues((was) => ({ ...was, ...next }))
+    frameOf()?.params(next)
+    pending.current = { ...pending.current, ...next }
+    run.pending()
+    clearTimeout(timer.current)
+    timer.current = setTimeout(write, PARAMS_SAVE_MS)
+  }
+
+  const changed = params.filter((p) => values[p.name] !== baseline[p.name])
+  const reset = (names: readonly string[]) =>
+    change(Object.fromEntries(names.map((name) => [name, baseline[name]!])))
+
+  const undo = run.undo
+    ? () => {
+        clearTimeout(timer.current)
+        pending.current = {}
+        dropUnsaved(artifactId, slot)
+        void run.undo?.().then(
+          (made) => {
+            if (made === null) return
+            wrote.current = made
+            setValues(baseline)
+            frameOf()?.params(baseline)
+          },
+          (reason: unknown) => run.failed(reason),
+        )
+      }
+    : null
 
   return (
     <>
-      <div className="k-ce-psec" data-selected={selected ? '' : undefined}>
-        <h5>
-          <button type="button" className="k-ce-psec__frame" onClick={onSelect}>
-            <HugeiconsIcon icon={FRAME_ICON} size={13} strokeWidth={1.9} />
-            <span className="truncate">{page.name}</span>
-          </button>
-        </h5>
-        {params.map((p) => (
-          <div key={p.name} className="k-ce-prow">
-            <span className="truncate">{p.label}</span>
-            {p.type === 'color' && (
-              <input
-                type="color"
-                aria-label={p.label}
-                value={String(values[p.name])}
-                onChange={(event) => change(p.name, event.target.value)}
-                className="size-6 cursor-pointer rounded-md border-0 bg-transparent"
-              />
-            )}
-            {p.type === 'boolean' && (
-              <Switch
-                checked={Boolean(values[p.name])}
-                onCheckedChange={(on) => change(p.name, on)}
-                aria-label={p.label}
-              />
-            )}
-            {p.type === 'number' && (
-              <input
-                type="range"
-                aria-label={p.label}
-                min={p.min}
-                max={p.max}
-                step={p.step}
-                value={Number(values[p.name])}
-                onChange={(event) => change(p.name, Number(event.target.value))}
-                className="w-28 accent-(--control-on)"
-              />
-            )}
-            {p.type === 'choice' && (
-              <label className="k-ce-field w-32">
-                <select
-                  value={String(values[p.name])}
-                  onChange={(event) => change(p.name, event.target.value)}
-                >
-                  {p.options.map((o) => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {p.type === 'text' && (
-              <label className="k-ce-field w-32">
-                <input
-                  value={String(values[p.name])}
-                  onChange={(event) => change(p.name, event.target.value)}
-                />
-              </label>
-            )}
-          </div>
-        ))}
-      </div>
-      {saving !== 'idle' && (
-        <div className="k-ce-savebar">
-          {typeof saving === 'number' && (
-            <HugeiconsIcon icon={Tick02Icon} size={14} strokeWidth={1.9} className="text-success" />
-          )}
-          {saving === 'saving'
-            ? t('board.props.saving')
-            : t('board.props.saved', { version: saving })}
+      <CardHead
+        icon={SlidersHorizontalIcon}
+        title={t('tweak.title')}
+        sub={page.name}
+        status={<SaveChip save={run.save} onRetry={write} />}
+      >
+        <UndoButton onUndo={undo} />
+      </CardHead>
+      <div className="k-vt-body">
+        <KeptNote save={run.save} />
+        <div className="k-vt-fields">
+          {params.map((p) => {
+            const value = values[p.name]
+            const dirty = value !== baseline[p.name]
+            return (
+              <div key={p.name} className="k-vt-field-row" data-changed={dirty || undefined}>
+                <span className="k-vt-field-row__label">
+                  {dirty && (
+                    <button
+                      type="button"
+                      className="k-vt-dot"
+                      aria-label={t('tweak.resetOne', { name: p.label })}
+                      title={t('tweak.resetOne', { name: p.label })}
+                      onClick={() => reset([p.name])}
+                    />
+                  )}
+                  <span aria-hidden>{p.label}</span>
+                </span>
+                <span className="k-vt-field-row__ctl">
+                  <Control param={p} value={value} onChange={(v) => change({ [p.name]: v })} />
+                </span>
+              </div>
+            )
+          })}
         </div>
-      )}
+      </div>
+      <div className="k-vt-foot">
+        <span>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={changed.length === 0 || readOnly}
+            onClick={() => reset(changed.map((p) => p.name))}
+          >
+            {t('tweak.resetAll')}
+          </Button>
+        </span>
+        <p className="k-vt-foot__note">{t('tweak.note')}</p>
+      </div>
     </>
   )
 }
 
-/**
- * The Tweaks tab: the parameters each frame of the page declares, to change them live; the
- * selected frame's group is marked, and a frame's name selects it.
- */
-export function CanvasTweaks({
-  layout,
-  params,
-  selection,
-  onSelect,
-  editorFrame,
-  artifactId,
-  version,
+function Control({
+  param,
+  value,
+  onChange,
 }: {
-  layout: DocLayout
-  params: ReadonlyMap<string, PageParam[]>
-  selection: readonly string[]
-  onSelect: (id: string) => void
-  editorFrame: (page: string) => EditorFrame | null
-  artifactId: string
-  version: number
+  param: PageParam
+  value: ParamValue | undefined
+  onChange: (value: ParamValue) => void
 }) {
-  const { t } = useTranslation('artifacts')
-  const frames = layout.pages.filter((p) => params.has(p.id))
-  if (frames.length === 0) {
-    return (
-      <div className="k-ce-side__empty">
-        <p>{t('board.tweaks.empty')}</p>
-        <p>{t('board.tweaks.hint')}</p>
-      </div>
-    )
+  switch (param.type) {
+    case 'color':
+      return <ParamColor label={param.label} value={String(value ?? '')} onChange={onChange} />
+    case 'boolean':
+      return (
+        <Switch
+          checked={Boolean(value)}
+          onCheckedChange={(on) => onChange(on)}
+          aria-label={param.label}
+        />
+      )
+    case 'choice':
+      return param.options.length <= 3 ? (
+        <SegmentedControl<string>
+          aria-label={param.label}
+          variant="tray"
+          size="sm"
+          fullWidth
+          value={String(value)}
+          onChange={onChange}
+          options={param.options.map((o) => ({ value: o, label: o }))}
+        />
+      ) : (
+        <select
+          aria-label={param.label}
+          value={String(value)}
+          onChange={(event) => onChange(event.target.value)}
+          className="k-vt-select"
+        >
+          {param.options.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      )
+    case 'number':
+      return (
+        <span className="k-vt-num">
+          <input
+            type="number"
+            aria-label={param.label}
+            min={param.min}
+            max={param.max}
+            step={param.step}
+            value={Number(value)}
+            onChange={(event) => {
+              const n = Number(event.target.value)
+              if (Number.isFinite(n)) onChange(Math.min(param.max, Math.max(param.min, n)))
+            }}
+          />
+          {param.unit && <span className="k-vt-num__unit">{param.unit}</span>}
+        </span>
+      )
+    case 'text':
+      return (
+        <input
+          aria-label={param.label}
+          value={String(value ?? '')}
+          onChange={(event) => onChange(event.target.value)}
+          className="k-vt-input"
+        />
+      )
+  }
+}
+
+/** A color setting: what is typed stays until it is a color, which is then set. */
+function ParamColor({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  const [typed, setTyped] = useState(value.toUpperCase())
+  const [shown, setShown] = useState(value)
+  if (shown !== value) {
+    setShown(value)
+    setTyped(value.toUpperCase())
   }
   return (
-    <>
-      {frames.map((page) => (
-        <PageParams
-          key={page.id}
-          artifactId={artifactId}
-          version={version}
-          page={page}
-          frame={editorFrame(page.id)}
-          selected={selection.includes(page.id)}
-          onSelect={() => onSelect(page.id)}
-        />
-      ))}
-    </>
+    <ColorInput
+      label={label}
+      value={typed}
+      onChange={(next) => {
+        setTyped(next)
+        if (/^#[0-9a-f]{6}$/i.test(next)) onChange(next.toLowerCase())
+      }}
+    />
   )
 }

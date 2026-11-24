@@ -33,6 +33,7 @@ import { AccountComputersPairing, type AccountPairingOptions } from './account-p
 import { accountUrl, regionListKeys, relayUrl } from './config'
 import { HOSTED_FEATURES, HostedRelay } from './relay-regions'
 import { clearBrowser } from './clear'
+import { handPushToOthers } from './push-hosts'
 import {
   currentHost,
   loadHosts,
@@ -485,6 +486,20 @@ async function showApp(
       features: HOSTED_FEATURES,
       key: device.key,
       hostKey: shown.hostKey,
+      relayId: shown.relay.id,
+      others: {
+        has: (id) => id !== shown.relay.id && kept.hosts.some((h) => h.relay.id === id),
+        open,
+      },
+      pushSynced: () =>
+        void handPushToOthers({
+          shown,
+          others: kept.hosts.filter((h) => h.relay.id !== shown.relay.id),
+          relays,
+          key: device.key,
+          client: base.client,
+          settings: base.settings.current(),
+        }),
       known: { name: shown.name, deviceName: shown.deviceName },
       paired,
       client: base.client,

@@ -5,6 +5,7 @@
 import path from 'node:path'
 import type { Platform } from '@shared/platform'
 import type { SandboxNetwork } from '@shared/sandbox'
+import type { ClaudeSandboxOption } from '../claude/sdk'
 
 /** A sandboxed session's choice as its driver gets it. */
 export interface SessionSandbox {
@@ -48,20 +49,7 @@ const SECRET_DIRS: readonly string[][] = [
   ['.config', 'gcloud'],
 ]
 
-/** The part of Claude Code's `SandboxSettings` Kite sets. */
-export interface ClaudeSandboxOption {
-  enabled: true
-  failIfUnavailable: true
-  allowUnsandboxedCommands: false
-  autoAllowBashIfSandboxed: false
-  filesystem: { allowWrite: string[]; denyWrite?: string[]; denyRead: string[] }
-  network: {
-    allowedDomains?: string[]
-    strictAllowlist?: boolean
-    httpProxyPort?: number
-    socksProxyPort?: number
-  }
-}
+export type { ClaudeSandboxOption }
 
 /**
  * Claude Code's sandbox for a session: its shell commands write only inside the session's folders

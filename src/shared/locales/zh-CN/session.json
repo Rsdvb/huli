@@ -238,6 +238,26 @@
     "read_theme": "读取主题颜色",
     "set_theme_colors": "更换主题颜色"
   },
+  "agyTool": {
+    "invoke_subagent": "启动子智能体",
+    "send_message": "发送消息",
+    "wait": "等待",
+    "cron": "定时",
+    "manage_task": {
+      "list": "列出后台任务",
+      "status": "查看后台任务",
+      "kill": "停止后台任务",
+      "send_input": "向后台任务输入"
+    },
+    "manage_subagents": {
+      "list": "列出子智能体",
+      "kill": "停止子智能体",
+      "kill_all": "停止所有子智能体"
+    },
+    "define_subagent": "定义子智能体",
+    "generate_image": "生成图片",
+    "finish": "完成"
+  },
   "permission": {
     "outsideScope": "超出此定时任务的权限：{{level}}。",
     "answer": {
@@ -335,6 +355,7 @@
       "revoked": "本次会话已允许，后来收回"
     },
     "where": "读它最近的输出，并在里面输入命令；密码仍然只由你输入",
+    "whereTypes": "读它最近的输出，并在里面输入命令",
     "whereRead": "只读它最近的输出，因为这个会话在计划模式"
   },
   "tabAccess": {
@@ -588,7 +609,6 @@
     "changes": {
       "frames_other": "{{count}} 个画框有改动",
       "files_other": "{{count}} 个文件有改动",
-      "sections_other": "{{count}} 个小节有改动",
       "slides_other": "{{count}} 页有改动",
       "slide": "第 {{number}} 页",
       "start": "开头",
@@ -979,6 +999,12 @@
     "short": "至少输入 2 个字",
     "indexing": "正在为对话建立索引，结果可能不全",
     "unsupported": "这台电脑还不能在会话中查找"
+  },
+  "continueLimit": {
+    "planned": "{{time}} 自动继续 · {{limit}}限额",
+    "off": "不会自动继续",
+    "cancel": "不继续",
+    "cancelFailed": "没能取消自动继续"
   },
   "thread": {
     "label": "对话",

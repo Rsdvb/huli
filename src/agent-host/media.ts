@@ -4,20 +4,25 @@
 import { addLogSecret } from '@shared/log/process-log'
 import { randomBytes } from 'node:crypto'
 import type { Stats } from 'node:fs'
-import { open, realpath, stat } from 'node:fs/promises'
+import { open, realpath, stat, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  DOCX_TYPE,
+  MEDIA_DOCUMENT_NAME,
   mediaKindOfName,
   mediaUrl,
   type MediaAudioType,
   type MediaAuthorization,
+  type MediaDocumentType,
   type MediaFile,
   type MediaGrant,
   type MediaGrantRecord,
   type MediaImageType,
   type MediaOpenResult,
   type MediaVideoType,
+  XLS_TYPE,
+  XLSX_TYPE,
 } from '@shared/media'
 import type { Platform } from '@shared/platform'
 import { readBytes } from './files'
@@ -241,6 +246,98 @@ export function avType(b: Buffer, name: string): AvType | null {
   return null
 }
 
+/** A PDF reader looks for `%PDF-` within the first kilobyte, so a header may precede it. */
+const PDF_SIGNATURE_BYTES = 1024
+
+const ZIP_LOCAL_HEADER = Buffer.from('PK\x03\x04', 'latin1')
+const ZIP_END_RECORD = Buffer.from('PK\x05\x06', 'latin1')
+const ZIP_DIRECTORY_ENTRY = Buffer.from('PK\x01\x02', 'latin1')
+/** Password-protected and legacy Office files are OLE2 containers, not archives. */
+const OLE2_SIGNATURE = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])
+/** The end record is 22 bytes and is followed by a comment of at most 65535. */
+const ZIP_END_SEARCH_BYTES = 22 + 0xffff
+/** The most of a central directory read; an Office file lists far fewer entries than this holds. */
+const ZIP_DIRECTORY_MAX_BYTES = 1024 * 1024
+
+/** The entry that makes an archive a Word or an Excel file, for the names that nominate them. */
+const OFFICE_ENTRY = {
+  docx: { name: /\.docx$/i, mimeType: DOCX_TYPE, entry: 'word/document.xml' },
+  xlsx: { name: /\.xlsx$/i, mimeType: XLSX_TYPE, entry: 'xl/workbook.xml' },
+} as const
+
+/** The names of the entries in the archive at `file`, by its central directory; null if unreadable. */
+async function zipEntryNames(file: string, size: number): Promise<Set<string> | null> {
+  const handle = await open(file, 'r')
+  try {
+    const tailLength = Math.min(size, ZIP_END_SEARCH_BYTES)
+    const tail = await readAt(handle, size - tailLength, tailLength)
+    // The end record is the last one whose comment length reaches exactly the end of the file.
+    let end = tail.lastIndexOf(ZIP_END_RECORD)
+    while (
+      end >= 0 &&
+      (end + 22 > tail.length || end + 22 + tail.readUInt16LE(end + 20) !== tail.length)
+    ) {
+      end = end === 0 ? -1 : tail.lastIndexOf(ZIP_END_RECORD, end - 1)
+    }
+    if (end < 0) return null
+    const count = tail.readUInt16LE(end + 10)
+    const length = tail.readUInt32LE(end + 12)
+    const offset = tail.readUInt32LE(end + 16)
+    // ZIP64 marks these with all ones; an Office file this small never needs it.
+    if (count === 0xffff || length === 0xffffffff || offset === 0xffffffff) return null
+    if (length > ZIP_DIRECTORY_MAX_BYTES || offset + length > size) return null
+    const directory = await readAt(handle, offset, length)
+    const names = new Set<string>()
+    for (let entry = 0, at = 0; entry < count; entry++) {
+      if (
+        at + 46 > directory.length ||
+        !directory.subarray(at, at + 4).equals(ZIP_DIRECTORY_ENTRY)
+      ) {
+        return null
+      }
+      const nameLength = directory.readUInt16LE(at + 28)
+      const next =
+        at + 46 + nameLength + directory.readUInt16LE(at + 30) + directory.readUInt16LE(at + 32)
+      if (next > directory.length) return null
+      names.add(directory.toString('utf8', at + 46, at + 46 + nameLength))
+      at = next
+    }
+    return names
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * A document's format by its first bytes and its name; null when it is none the pane shows. A
+ * Word or Excel archive is confirmed by its central directory, which lists the entry that makes
+ * it one, so a `.docx` that is some other archive is refused.
+ */
+export async function documentType(
+  file: string,
+  size: number,
+  head: Buffer,
+  name: string,
+): Promise<{ kind: 'document'; mimeType: MediaDocumentType } | null> {
+  if (/\.pdf$/i.test(name)) {
+    return head.subarray(0, PDF_SIGNATURE_BYTES).includes('%PDF-', 0, 'latin1')
+      ? { kind: 'document', mimeType: 'application/pdf' }
+      : null
+  }
+  const ole2 = head.subarray(0, OLE2_SIGNATURE.length).equals(OLE2_SIGNATURE)
+  if (/\.xls$/i.test(name)) {
+    return ole2 ? { kind: 'document', mimeType: XLS_TYPE } : null
+  }
+  for (const office of Object.values(OFFICE_ENTRY)) {
+    if (!office.name.test(name)) continue
+    if (ole2) return { kind: 'document', mimeType: office.mimeType }
+    if (!head.subarray(0, ZIP_LOCAL_HEADER.length).equals(ZIP_LOCAL_HEADER)) return null
+    const names = await zipEntryNames(file, size)
+    return names?.has(office.entry) ? { kind: 'document', mimeType: office.mimeType } : null
+  }
+  return null
+}
+
 function isMissing(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException | undefined)?.code
   return code === 'ENOENT' || code === 'ENOTDIR'
@@ -276,17 +373,23 @@ export class MediaService {
   ): Promise<MediaAuthorization> {
     const found = await this.find(root, written, sessionId)
     if (found.kind !== 'found') return found
-    const file = await this.describe(found.real, found.info)
+    // Without a session the read is the Files pane's, which alone shows documents.
+    const file = await this.describe(found.real, found.info, sessionId === null)
     return file ? { kind: 'granted', file: { path: found.real, ...file } } : { kind: 'not_media' }
   }
 
   /**
    * A grant for the regular file at `real`, a real path the caller has allowed, when its name
    * nominates it as media and its first bytes say which kind; null when it is no media. The
-   * Files pane's grants have no session.
+   * Files pane's grants have no session, and only they may be for `documents`.
    */
-  async grantFile(real: string, info: Stats, sessionId: string | null): Promise<MediaGrant | null> {
-    const file = await this.describe(real, info)
+  async grantFile(
+    real: string,
+    info: Stats,
+    sessionId: string | null,
+    documents = false,
+  ): Promise<MediaGrant | null> {
+    const file = await this.describe(real, info, documents)
     if (!file) return null
     const { name, ...grant } = file
     const token = mediaToken((this.deps.random ?? randomBytes)(16))
@@ -346,14 +449,22 @@ export class MediaService {
 
   /**
    * The regular file at `real`, a real path the caller has allowed, as media, by its name and its
-   * first bytes; null when it is none. Nothing is granted.
+   * first bytes; null when it is none. Nothing is granted. A document is one only for the Files
+   * pane, which asks for `documents`; a thread never names one.
    */
-  async describe(real: string, info: Stats): Promise<Omit<MediaFile, 'path'> | null> {
+  async describe(
+    real: string,
+    info: Stats,
+    documents = false,
+  ): Promise<Omit<MediaFile, 'path'> | null> {
     const name = this.paths.basename(real)
     const nominated = mediaKindOfName(name)
-    if (!nominated) return null
+    if (!nominated && !(documents && MEDIA_DOCUMENT_NAME.test(name))) return null
     const head = await readHead(real, Math.min(info.size, HEAD_BYTES))
-    const type = nominated === 'image' ? imageOf(head) : avType(head, name)
+    let type
+    if (nominated === 'image') type = imageOf(head)
+    else if (nominated) type = avType(head, name)
+    else type = await documentType(real, info.size, head, name)
     if (!type) return null
     return {
       name,
@@ -409,6 +520,17 @@ export class MediaService {
 function imageOf(head: Buffer): { kind: 'image'; mimeType: MediaImageType } | null {
   const mimeType = imageType(head) ?? (isSvg(head) ? 'image/svg+xml' : null)
   return mimeType ? { kind: 'image', mimeType } : null
+}
+
+async function readAt(handle: FileHandle, position: number, length: number): Promise<Buffer> {
+  const buffer = Buffer.allocUnsafe(length)
+  let filled = 0
+  while (filled < length) {
+    const { bytesRead } = await handle.read(buffer, filled, length - filled, position + filled)
+    if (bytesRead === 0) break
+    filled += bytesRead
+  }
+  return buffer.subarray(0, filled)
 }
 
 async function readHead(file: string, length: number): Promise<Buffer> {

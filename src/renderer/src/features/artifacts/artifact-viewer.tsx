@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertCircleIcon,
   ArrowLeft01Icon,
   ArrowRight01Icon,
   ArrowShrink01Icon,
   Delete02Icon,
-  LinkSquare02Icon,
   MinusSignIcon,
   PlusSignIcon,
-  RefreshIcon,
   RotateLeft01Icon,
+  SidebarLeftIcon,
+  ArrowReloadHorizontalIcon,
+  LinkSquare02Icon,
+  SparklesIcon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
+import { DOCUMENT_ENTRY } from '@shared/artifact-document-anchors'
 import { ARTIFACT_ENTRY } from '@shared/artifact-files'
 import { NO_SESSION } from '@shared/artifacts'
 import { Icon, type MenuItem } from '@renderer/components/affect/app-shell'
@@ -19,50 +22,71 @@ import { Button } from '@renderer/components/affect/button'
 import { AgentCursorStyles } from '@renderer/components/affect/agent-cursors'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { toast } from '@renderer/components/ui/toast'
+import { useChanges } from '@renderer/features/session/entries/artifact-changes'
 import { usePhoneWindow } from '@renderer/features/shell/narrow'
 import { PaneSheet } from '@renderer/features/shell/panel-button'
-import { artifactRefOf, errorMessage, host, learnArtifactHost } from '@renderer/lib/host'
-import { useHostHas } from '@renderer/lib/host-features'
+import {
+  artifactHost,
+  artifactRefOf,
+  errorMessage,
+  host,
+  learnArtifactHost,
+} from '@renderer/lib/host'
+import { useDark } from '@renderer/hooks/use-dark'
+import { useHostHas, useHostHasRecord } from '@renderer/lib/host-features'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { longAgo } from '@renderer/lib/format'
 import { isWeb } from '@renderer/lib/platform'
 import { useNow } from '@renderer/lib/use-now'
-import { cn } from '@renderer/lib/utils'
 import {
   setViewerState,
   useViewerState,
   viewerStateOf,
-  type RightCard,
   type ViewerMode,
 } from '@renderer/stores/artifact-viewer'
+import { useSaysHostAway } from '@renderer/features/shell/host-notice'
+import { setDeckSlide, useDeckSlide } from '@renderer/stores/artifact-deck'
+import { unsavedOf } from '@renderer/stores/artifact-unsaved'
 import {
   restoreArtifact,
   restoreVersion,
   setPaneSelection,
   useArtifactsStore,
 } from '@renderer/stores/artifacts'
+import { agentName } from '@renderer/stores/agents'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import {
   artifactPageShown,
   closeArtifact,
+  MAIN_ARTIFACT_PANEL,
   openSessionWithArtifact,
   toggleSidePane,
   useViewStore,
 } from '@renderer/stores/view'
-import { anchorOf, pinsOf } from './anchors'
-import { useArtifactShares } from './artifact-host'
+import { anchorOf } from './anchors'
+import { useArtifactHostConnected, useArtifactHostName, useArtifactShares } from './artifact-host'
+import { useArtifactWalk } from '@renderer/stores/artifact-walk'
+import { useChangeWalk } from './use-change-walk'
+import { ChangePill } from './change-pill'
 import { atMaxZoom, atMinZoom } from './camera'
-import { CanvasEditor } from './canvas-editor'
+import { CanvasEditor, type CanvasStates } from './canvas-editor'
 import { CanvasControls, useCanvasState } from './canvas-controls'
+import { changeCount } from './change-words'
 import type { PageActions } from './canvas-view'
-import { CommentBox, CommentsPanel } from './comments'
-import { EditPanel } from './edit-panel'
+import { DeckPresent } from './deck-present'
+import { DeckSheet } from './deck-sheet'
+import { DocumentSheet } from './document-sheet'
 import { ArtifactEditor, useEditorState, type EditorMode } from './editor'
 import { isEditable, modeKey } from './keys'
 import { artifactKind, daysLeft } from './model'
+import { mayLeave } from './unsaved'
+import { HeldCard } from './edit-panel'
+import { handOffPageErrors, handOffRepair } from './page-error-handoff'
 import { Waiting } from './page-frame'
+import { PageSheet, type SheetAgent } from './page-sheet'
 import { PresenceFaces } from './presence-faces'
-import { Presenter } from './present'
+import { CanvasPresent } from './canvas-present'
+import { canvasSheets } from './canvas-sheets'
 import { PreviewOnly } from './preview-only'
 import {
   canvasPageName,
@@ -72,15 +96,23 @@ import {
   useListsRead,
 } from './use-artifact'
 import { useComments } from './use-comments'
+import { useDeck } from './use-deck'
 import { staticCanvas, useCanvasDoc } from './use-canvas-doc'
 import { clampSize, useDocActions } from './use-doc-actions'
-import { noteAuthor, usePresentAgents, useVisitors } from './use-present-agents'
+import {
+  noteAuthor,
+  usePresentAgents,
+  useVisitors,
+  useWriter,
+  type Writer,
+} from './use-present-agents'
 import { useVersions } from './use-versions'
-import { VersionHistory } from './version-history'
+import { canvasContent, useViewerTools, type ToolContent } from './viewer-tools'
 import { ViewerBar, type BarPage } from './viewer-bar'
 import { ArtifactSurface, ViewerEmpty } from './viewer-parts'
 import { ArtifactShell, DockButton, DockRule, ViewerSlot, type RightContent } from './viewer-shell'
 import { useShell } from './viewer-shell-context'
+import { SkeletonRows, StageNote } from './viewer-states'
 import './viewer.css'
 
 /** Where the viewer shows: the main area, or a session's side panel beside its thread. */
@@ -114,7 +146,8 @@ export default function ArtifactViewer(place: ViewerPlace) {
 
   const state = useViewerState(id, (s) => s)
   const picked = state.version
-  const [presenting, setPresenting] = useState<number | null>(null)
+  // What is presented, from: a document's frame by its id, or a page's place as a string.
+  const [presenting, setPresenting] = useState<string | null>(null)
   const frame = useRef<HTMLDivElement>(null)
   const area = useRef<HTMLDivElement>(null)
   const [since] = useState(() => performance.now())
@@ -126,21 +159,125 @@ export default function ArtifactViewer(place: ViewerPlace) {
   const head = summary?.version ?? null
   const { versions, error: versionsError } = useVersions(id, head)
   const states = useArtifactStates(artifact, listsRead)
+  // Offline: the computer the artifact is kept on, another host or this one's agent host.
+  const offline = !useArtifactHostConnected(id)
+  const hostName = useArtifactHostName(id)
   const earlier = picked !== null && head !== null && picked < head ? picked : null
   const title = summary?.title ?? shown?.title ?? ''
   const kind = summary ? artifactKind(summary) : null
+  // A web page: one page of its own, neither a canvas nor a typed document or deck.
+  const webPage = !!shown && !shown.canvas && !summary?.type
+  const isDocument = !!shown && summary?.type === 'document'
+  const isDeck = !!shown && summary?.type === 'slides'
+  const deck = useDeck(id, isDeck && shown ? shown.version : null)
+  const deckSlide = useDeckSlide(id)
+  // An agent's newest version, which what it changed compares with the version before: a frame,
+  // the web page, a slide.
+  const lastWrite = versions?.[0] ?? null
+  const agentWrite =
+    lastWrite && lastWrite.author !== null && lastWrite.version > 1 && lastWrite.version === head
+      ? { before: lastWrite.version - 1, after: lastWrite.version }
+      : null
+  // While the pill counts a range, before and after compares the same versions.
+  const walkRange = useArtifactWalk((s) => s.ranges[id] ?? null)
+  const compareRange =
+    walkRange && walkRange.to === head
+      ? { before: walkRange.from, after: walkRange.to }
+      : agentWrite
+  const pageChanges = useChanges(
+    id,
+    compareRange?.before ?? null,
+    compareRange?.after ?? null,
+    (webPage || isDeck || !!shown?.canvas) && compareRange !== null,
+  )
+  // A web page compares when the agent changed it at all, a deck when it changed the slide shown.
+  const pageCompare =
+    compareRange && pageChanges && changeCount(pageChanges).count > 0
+      ? webPage ||
+        (isDeck &&
+          pageChanges.kind === 'slides' &&
+          pageChanges.slides.some((s) => s.number === deckSlide))
+        ? compareRange
+        : null
+      : null
+  const comparing = pageCompare !== null && earlier === pageCompare.before
+  // The slide "before" was asked on: turning to another goes back to the latest, as leaving a
+  // compared frame does.
+  const comparedSlide = useRef<number | null>(null)
+  useEffect(() => {
+    if (comparedSlide.current === null || comparedSlide.current === deckSlide) return
+    comparedSlide.current = null
+    setViewerState(id, { version: null })
+  }, [id, deckSlide])
   // Publishing takes the account the host keeps, which the daemon has none of.
   const shares = useArtifactShares(id)
   // Only a desktop host renders a page apart from the window.
   const renders = useHostHas('thumbnails') === true
   const editor = useMemo(() => (url ? new ArtifactEditor(url.slice(0, -1)) : null), [url])
   useEffect(() => () => editor?.dispose(), [editor])
+  // A change that did not save before the viewer was left shows again where it was made.
+  useEffect(() => {
+    const kept = unsavedOf(id)
+    if (kept.length === 0) return
+    const params = kept.find((change) => change.kind === 'params')
+    if (params?.kind === 'params')
+      setViewerState(id, { right: 'tweaks', selection: [params.frame] })
+    if (kept.some((change) => change.kind !== 'params')) setViewerState(id, { mode: 'edit' })
+    const element = kept.find((change) => change.kind === 'element')
+    if (editor && element?.kind === 'element') editor.repick(element.page, element.src)
+  }, [id, editor])
+  // Pins and the picked outline take the theme's colors, again when the color mode changes.
+  const dark = useDark()
+  useEffect(() => editor?.restyle(), [editor, dark])
   const editing = useEditorState(editor)
   const { threads, error: commentsError } = useComments(id)
   // A version just written counts as the latest while it loads, so editing goes on across it.
-  const latest = !!shown && earlier === null && !states.inTrash
-  // Comment and Edit act on the latest version only; elsewhere the viewer only shows.
-  const mode: ViewerMode = latest ? state.mode : 'view'
+  const latest = !!shown && earlier === null && !states.inTrash && !states.gone
+  const pageAsked = useViewStore((s) => {
+    const asked = s.sideArtifactPage[panel?.panel ?? MAIN_ARTIFACT_PANEL]
+    return asked?.artifactId === id ? asked : null
+  })
+  // What changed, walked by the one pill every kind shares, and where the viewer lands.
+  const changeWalk = useChangeWalk({
+    id,
+    panel: panel?.panel ?? MAIN_ARTIFACT_PANEL,
+    summary: summary ?? null,
+    versions,
+    ready: !!shown && (latest || comparing) && !states.error,
+    positioned: pageAsked !== null,
+    latest: !states.inTrash && (earlier === null || comparing),
+  })
+  const walk = changeWalk.walk
+  const walkAsk = changeWalk.ask
+  const sheetWalk = useMemo(
+    () =>
+      walk
+        ? {
+            from: walk.range.from,
+            to: walk.range.to,
+            changes: walk.changes,
+            at: walk.at,
+            marks: walk.marks,
+          }
+        : null,
+    [walk],
+  )
+  const [docChangesShown, setDocChangesShown] = useState(false)
+  const doneAsk = changeWalk.done
+  const askShown = useCallback(
+    (seq: number) => {
+      if (seq < 0) doneAsk(seq)
+      else artifactPageShown(panel?.panel ?? MAIN_ARTIFACT_PANEL, seq)
+    },
+    [doneAsk, panel?.panel],
+  )
+  // Comment and Edit act on the latest version only; elsewhere the viewer only shows. Edit pauses
+  // while the computer is away, and comes back on its own when it returns.
+  const mode: ViewerMode = !latest
+    ? 'view'
+    : offline && state.mode === 'edit'
+      ? 'comment'
+      : state.mode
   // A canvas document: the latest is edited live on the host, an earlier one only shown.
   const docShown = shown?.doc ?? null
   const legacyCanvas = !!shown?.canvas && !docShown
@@ -152,13 +289,11 @@ export default function ArtifactViewer(place: ViewerPlace) {
   const doc = shownCanvas.doc
   const [following, setFollowing] = useState<string | null>(null)
   const agents = usePresentAgents(artifact.presence, summary?.deletedAt != null)
+  const writer = useWriter(artifact.presence, summary?.deletedAt != null)
   const visitors = useVisitors(id)
   const followingNow = following && agents.some((a) => a.sessionId === following) ? following : null
-  const pageAsked = useViewStore((s) => {
-    const asked = panel ? s.sideArtifactPage[panel.panel] : undefined
-    return asked?.artifactId === id ? asked : null
-  })
-  const showing = !!(url && shown) && !states.error && !states.gone && !artifact.stopped
+  // Deleted while it shows, it stays on screen, dimmed, until it is restored or left.
+  const showing = !!(url && shown) && !states.error && !artifact.stopped
 
   // The canvas document sets the editor's mode itself, as a frame it enters is picked in.
   useEffect(() => {
@@ -166,11 +301,10 @@ export default function ArtifactViewer(place: ViewerPlace) {
     editor.setMode(editorMode(mode))
   }, [editor, mode, docShown])
 
-  const pinsShown = latest && (state.right === 'comments' || mode === 'comment')
-  useEffect(() => {
-    if (!editor || !shown) return
-    editor.setPins(pinsShown ? pinsOf(threads, shown) : () => [])
-  }, [editor, shown, threads, pinsShown])
+  // A document lays out its own pins beside its blocks, on a host that anchors threads on them.
+  const docBlocks = useHostHasRecord('documentSheet') === true
+  const [docHeadings, setDocHeadings] = useState(0)
+  const [docFocus, setDocFocus] = useState<{ thread: string; seq: number } | null>(null)
 
   // What is picked beside a session is the context its composer offers, until something else is.
   const projectPath = panel?.projectPath ?? null
@@ -244,7 +378,10 @@ export default function ArtifactViewer(place: ViewerPlace) {
     [shown, id, title, pageName, t],
   )
   const actions = useMemo<PageActions>(
-    () => ({ download: renders ? downloadPng : null, present: (index) => setPresenting(index) }),
+    () => ({
+      download: renders ? downloadPng : null,
+      present: (index) => setPresenting(String(index)),
+    }),
     [renders, downloadPng],
   )
   const docActions = useDocActions({
@@ -256,38 +393,151 @@ export default function ArtifactViewer(place: ViewerPlace) {
     agents,
     present: setPresenting,
   })
+  // Which frames count as changed: those the pill walks, else those the agent's last write changed.
+  const frameChanges = walk?.changes ?? pageChanges
+  const changedFrames = useMemo<ReadonlySet<string>>(
+    () => new Set(frameChanges?.kind === 'frames' ? frameChanges.frames.map((f) => f.id) : []),
+    [frameChanges],
+  )
+  const frameComments = useMemo(() => {
+    const out = new Map<string, number>()
+    if (!doc || !threads) return out
+    for (const thread of threads) {
+      if (thread.resolvedAt !== null) continue
+      for (const page of doc.pages) {
+        if (page.file === thread.anchor.path) out.set(page.id, (out.get(page.id) ?? 0) + 1)
+      }
+    }
+    return out
+  }, [doc, threads])
 
-  // The right card: an element picked in Edit shows its look; otherwise the card chosen.
-  const propsShown =
-    mode === 'edit' && editing.mode === 'select' && !!editing.picked && !!editor && !!head
-  const chosen: RightCard | null =
-    state.right === 'tweaks' && !docShown
-      ? null
-      : state.right === 'comments' && !summary
-        ? null
-        : state.right
-  const rightKey = propsShown ? 'props' : chosen
+  const content = useMemo<ToolContent>(
+    () =>
+      shown?.canvas
+        ? canvasContent({
+            id,
+            doc,
+            shown,
+            panel: panel?.panel ?? MAIN_ARTIFACT_PANEL,
+            editor,
+            focusLegacy: (index) => controls.commands?.focus(index),
+          })
+        : isDocument || isDeck
+          ? {
+              reveal: (_anchor, thread) => {
+                if (thread) setDocFocus((was) => ({ thread, seq: (was?.seq ?? 0) + 1 }))
+              },
+            }
+          : { reveal: (anchor) => anchor.offset !== null && editor?.reveal(null, anchor.offset) },
+    [id, doc, shown, panel?.panel, editor, controls, isDocument, isDeck],
+  )
+  const tools = useViewerTools({
+    id,
+    title,
+    summary: summary ?? null,
+    shown: shown ?? null,
+    head,
+    latest,
+    editable: states.inTrash || states.gone ? 'deleted' : earlier !== null ? 'earlier' : 'yes',
+    mode,
+    right: state.right,
+    picked,
+    editor,
+    editing,
+    threads,
+    commentsError,
+    versions,
+    versionsError,
+    presence: artifact.presence ?? null,
+    doc,
+    page: state.page,
+    beside: panel && projectPath ? { panel: panel.panel, projectPath } : null,
+    content,
+    area,
+    root: frame,
+  })
+  // The frame bar's and the sheets' Ask open the tools' Ask, beside what it is about or above the
+  // composer; read when pressed, so what holds them is not made again on every render.
+  const toolsNow = useRef(tools)
+  useEffect(() => {
+    toolsNow.current = tools
+  })
+  const canvasActions = useMemo<typeof docActions>(
+    () => ({ ...docActions, handOff: (ids) => toolsNow.current.askFrames(ids) }),
+    [docActions],
+  )
+  const compareBefore = compareRange?.before ?? null
+  const compareAfter = compareRange?.after ?? null
+  const compare = useMemo(
+    () =>
+      latest && compareBefore !== null && compareAfter !== null
+        ? { before: compareBefore, after: compareAfter }
+        : null,
+    [latest, compareBefore, compareAfter],
+  )
+  // Edit on a document section or a slide an agent is writing: the card says it is locked, until
+  // closed for this writer.
+  const [heldClosed, setHeldClosed] = useState<string | null>(null)
+  const heldPiece = writer?.pieces?.find(
+    (p) => p.kind === 'section' || (p.kind === 'slide' && p.number === deckSlide),
+  )
+  const heldShown =
+    mode === 'edit' &&
+    !!writer &&
+    (isDocument || isDeck) &&
+    !!heldPiece &&
+    heldClosed !== writer.sessionId
+  const heldRight: RightContent | null =
+    heldShown && writer && heldPiece
+      ? {
+          key: `held:${writer.sessionId}`,
+          body: (
+            <HeldCard
+              heldBy={{
+                sessionId: writer.sessionId,
+                piece: heldPiece.kind === 'slide' ? 'slide' : 'section',
+                agent: {
+                  name: writer.name,
+                  id: writer.agentId,
+                  hostId: writer.hostId,
+                },
+              }}
+              onOpenSession={(sessionId) => {
+                const session = useSessionsStore.getState().byId[sessionId]
+                if (session) openSessionWithArtifact(session.id, session.projectPath, id)
+              }}
+            />
+          ),
+          onClose: () => setHeldClosed(writer.sessionId),
+        }
+      : null
+  const right: RightContent | null =
+    tools.right ??
+    heldRight ??
+    (state.right === 'tweaks' && docShown
+      ? { key: 'tweaks', body: null, onClose: () => setViewerState(id, { right: null }) }
+      : null)
+  const rightKey = right?.key ?? null
 
   const setMode = useCallback(
-    (next: ViewerMode) =>
+    (next: ViewerMode) => {
+      tools.leftComment(next)
       setViewerState(id, (s) => ({
         mode: next,
         // Comment opens the comments, and leaving it puts them away.
         right: next === 'comment' ? 'comments' : s.right === 'comments' ? null : s.right,
-      })),
-    [id],
+      }))
+    },
+    [id, tools],
   )
+  // Read when called, from a key or the Outline opening in its place.
+  const rightNow = useRef(right)
+  useEffect(() => {
+    rightNow.current = right
+  })
   const closeRight = useCallback(() => {
-    if (rightKey === 'props') {
-      editor?.clearPick()
-      return
-    }
-    setViewerState(id, (s) => ({
-      right: null,
-      // Closing the history goes back to the latest version.
-      version: s.right === 'history' ? null : s.version,
-    }))
-  }, [rightKey, editor, id])
+    if (mayLeave(id)) rightNow.current?.onClose()
+  }, [id])
   const toggleHistory = () =>
     setViewerState(id, (s) =>
       s.right === 'history' ? { right: null, version: null } : { right: 'history' },
@@ -314,9 +564,17 @@ export default function ArtifactViewer(place: ViewerPlace) {
         setMode(key)
         return
       }
+      // Enter types the picked element's text in place.
+      if (event.key === 'Enter' && mode === 'edit' && editor?.get().picked?.selection.textOnly) {
+        event.preventDefault()
+        editor.textEdit(true)
+        return
+      }
       if (event.key !== 'Escape') return
       const now = viewerStateOf(id)
-      if (editor?.escape()) {
+      if (tools.escape()) {
+        // A popover closed.
+      } else if (editor?.escape()) {
         // The pick let go of.
       } else if (now.opened !== null) setViewerState(id, { opened: null })
       else if (now.selection.length > 0) setViewerState(id, { selection: [] })
@@ -339,6 +597,8 @@ export default function ArtifactViewer(place: ViewerPlace) {
     maximized,
     phone,
     place.where,
+    tools,
+    mode,
   ])
 
   // One restore at a time: a second click would restore over the version the first one wrote.
@@ -351,9 +611,77 @@ export default function ArtifactViewer(place: ViewerPlace) {
       .finally(() => setRestoring(false))
   }
 
-  // The pill at the content's top: an earlier version, Recently deleted, or an old canvas.
+  // The pill at the content's top, one at a time and in this order for every kind: the computer
+  // offline, the artifact deleted while it shows, an earlier version picked in History, Recently
+  // deleted, an agent writing it, an old canvas, then what changed, which stays while the
+  // before-and-after switch shows the version before, since it says what that compares.
   let pill: React.ReactNode = null
-  if (shown && earlier !== null && head !== null) {
+  const changePill =
+    walk && !walk.dismissed ? (
+      <ChangePill
+        walk={{
+          ...walk,
+          dismiss: () => {
+            if (comparing) setViewerState(id, { version: null })
+            walk.dismiss()
+          },
+        }}
+        label={
+          isDocument && docChangesShown
+            ? t(phone ? 'doc.changesFrom' : 'doc.showingFrom', { version: walk.range.from })
+            : undefined
+        }
+        onStep={(direction) => changeWalk.step(direction, state.opened !== null)}
+      />
+    ) : null
+  const remoteHost = artifactHost(id)
+  // The pill says the agent host is away, so the window's notice leaves the bar alone.
+  useSaysHostAway(offline && !states.error && remoteHost === null)
+  if (offline && !states.error) {
+    pill = (
+      <Pill
+        lead={hostName ? t('viewer.offline.named', { host: hostName }) : t('viewer.offline.local')}
+        rest={<span>{t('viewer.offline.reconnecting')}</span>}
+        keepRest
+        mark={<span aria-hidden className="k-vs-pulse" />}
+        actions={
+          remoteHost !== null && !isWeb
+            ? [
+                {
+                  label: t('viewer.offline.retryNow'),
+                  quiet: true,
+                  run: () =>
+                    void window.kettu.hosts
+                      .reconnect(remoteHost)
+                      .catch((error: unknown) =>
+                        console.error(`Could not reach ${remoteHost}`, error),
+                      ),
+                },
+              ]
+            : []
+        }
+      />
+    )
+  } else if (states.gone && summary?.deletedAt != null) {
+    pill = (
+      <Pill
+        lead={t('viewer.deletedLead')}
+        rest={<DeletedAgo deletedAt={summary.deletedAt} />}
+        mark={
+          <span aria-hidden className="avs-pill__icon">
+            <Icon icon={Delete02Icon} size={15} />
+          </span>
+        }
+        actions={[
+          {
+            label: t('menu.restore'),
+            busy: restoring,
+            run: () => restore(() => restoreArtifact(id)),
+          },
+        ]}
+      />
+    )
+  } else if (shown && earlier !== null && head !== null && !comparing) {
     const record = versions?.find((v) => v.version === earlier)
     pill = (
       <Pill
@@ -365,9 +693,26 @@ export default function ArtifactViewer(place: ViewerPlace) {
             busy: restoring,
             restores: true,
             run: () =>
-              restore(() =>
-                restoreVersion(id, earlier, head).then(() => setViewerState(id, { version: null })),
-              ),
+              restore(async () => {
+                // No dialog: the version is written as the newest, which Undo takes back.
+                const { version: made } = await host('artifacts.restoreVersion', {
+                  id,
+                  version: earlier,
+                  baseVersion: head,
+                })
+                setViewerState(id, { version: null })
+                toast(
+                  t('history.restored', { version: earlier, made }),
+                  {
+                    label: t('edit.undo'),
+                    onClick: () =>
+                      void restoreVersion(id, head, made).catch((error: unknown) =>
+                        toast(errorMessage(error), undefined, { tone: 'warning' }),
+                      ),
+                  },
+                  { tone: 'success' },
+                )
+              }),
           },
           { label: t('viewer.backToLatest'), run: () => setViewerState(id, { version: null }) },
         ]}
@@ -388,6 +733,28 @@ export default function ArtifactViewer(place: ViewerPlace) {
         ]}
       />
     )
+  } else if (writer && latest && head !== null) {
+    pill = (
+      <Pill
+        lead={writingLead(t, writer, head, doc?.pages ?? null)}
+        rest={null}
+        mark={<span aria-hidden className="k-vs-pulse" data-tone="writing" />}
+        actions={
+          panel?.panel === writer.sessionId
+            ? []
+            : [
+                {
+                  label: t('viewer.writing.openSession'),
+                  quiet: true,
+                  run: () => {
+                    const session = useSessionsStore.getState().byId[writer.sessionId]
+                    if (session) openSessionWithArtifact(session.id, session.projectPath, id)
+                  },
+                },
+              ]
+        }
+      />
+    )
   } else if (showing && latest && legacyCanvas && liveCanvas.legacy) {
     pill = (
       <Pill
@@ -402,70 +769,192 @@ export default function ArtifactViewer(place: ViewerPlace) {
         ]}
       />
     )
+  } else if (changePill) {
+    pill = changePill
   }
+
+  // Chat opens the session writing it, or the one that wrote it last, with it beside the thread.
+  const sessionId =
+    artifact.presence?.sessions.find((s) => s.editing)?.sessionId ??
+    (summary && summary.sessionId !== NO_SESSION ? summary.sessionId : null)
+  const chatSession = useSessionsStore((s) => (sessionId ? (s.byId[sessionId] ?? null) : null))
+
+  // A web page asks, and hands its errors to, the session it sits beside, or else the chat's.
+  const besideSession = useSessionsStore((s) => (panel ? (s.byId[panel.panel] ?? null) : null))
+  const target = besideSession ?? chatSession
+  const sheetAgent = useMemo<SheetAgent | null>(() => {
+    if (!target || !summary || !shown) return null
+    const hostId = hostOfPath(target.projectPath)
+    return {
+      name: agentName(target.agentId, hostId),
+      mark: <AgentMark agent={target.agentId} size={14} hostId={hostId} />,
+      ask: () => toolsNow.current.askWhole(),
+      fixErrors: (pages) =>
+        handOffPageErrors({
+          artifact: { id, title, version: shown.version, project: summary.project },
+          pages,
+          session: target.id,
+        }),
+    }
+  }, [target, summary, shown, id, title])
+  const targetName = target ? agentName(target.agentId, hostOfPath(target.projectPath)) : ''
+  const repair = useCallback(
+    (file: string | null, reason: string) => {
+      if (!summary || !shown) return
+      void handOffRepair({
+        artifact: { id, title, version: shown.version, project: summary.project },
+        file,
+        reason,
+        session: target?.id ?? null,
+      })
+        .then((sent) => {
+          if (sent) toast(t('viewer.repairSent', { agent: targetName }))
+        })
+        .catch((error: unknown) => toast(errorMessage(error), undefined, { tone: 'warning' }))
+    },
+    [summary, shown, id, title, target, targetName, t],
+  )
+  const writerMark = writer ? (
+    <AgentMark agent={writer.agentId} size={13} hostId={writer.hostId} mono dot={null} />
+  ) : null
+  // What a document or a deck marks while an agent writes it; a piece of another kind holds all.
+  const writerName = writer && latest ? writer.name : null
+  const writerPieces = writer?.pieces ?? null
+  const docWriting = useMemo(() => {
+    if (writerName === null) return null
+    const section = writerPieces?.find((p) => p.kind === 'section')
+    return {
+      section: section?.kind === 'section' ? section.slug : null,
+      tag: t('viewer.writing.tag', { agent: writerName }),
+    }
+  }, [writerName, writerPieces, t])
+  const deckWriting = useMemo(() => {
+    if (writerName === null) return null
+    const slides = (writerPieces ?? []).flatMap((p) => (p.kind === 'slide' ? [p.number] : []))
+    return slides.length ? slides : null
+  }, [writerName, writerPieces])
+  const waitingFor = offline
+    ? hostName
+      ? t('viewer.offline.waiting', { host: hostName })
+      : t('viewer.offline.waitingLocal')
+    : null
+  const hasDoc = !!docShown
+  const askWhole = useCallback(() => toolsNow.current.askWhole(), [])
+  const canvasStates = useMemo<CanvasStates | null>(() => {
+    if (!hasDoc) return null
+    const mark = writer ? (
+      <AgentMark agent={writer.agentId} size={13} hostId={writer.hostId} mono dot={null} />
+    ) : null
+    return {
+      held: new Map(
+        writer && latest && mark
+          ? (writer.pieces ?? []).flatMap((piece) =>
+              piece.kind === 'frame' ? [[piece.id, { name: writer.name, mark }] as const] : [],
+            )
+          : [],
+      ),
+      waitingFor,
+      ask:
+        target && summary
+          ? {
+              agent: targetName,
+              mark: (
+                <AgentMark
+                  agent={target.agentId}
+                  size={14}
+                  hostId={hostOfPath(target.projectPath)}
+                />
+              ),
+              whole: askWhole,
+              repair,
+            }
+          : null,
+    }
+  }, [hasDoc, writer, latest, waitingFor, target, summary, targetName, askWhole, repair])
 
   let body: React.ReactNode
   let layout: 'float' | 'beside' = 'beside'
   let ground: 'dots' | 'plain' = 'plain'
   if (states.error === 'previewOnly') {
     body = <PreviewOnly id={id} title={title} summary={summary ?? null} />
-  } else if (states.error === 'missing') {
-    // Trying again reads the same missing files; an earlier version may still have its own.
-    body = (
-      <ViewerEmpty
-        icon={AlertCircleIcon}
-        danger
-        title={t('viewer.missingTitle')}
-        text={t('viewer.error.missing')}
-      >
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => setViewerState(id, { right: 'history' })}
-        >
-          {t('menu.versionHistory')}
-        </Button>
-        <Button variant="secondary" size="sm" onClick={() => reportMissing(id, picked)}>
-          {t('viewer.reportProblem')}
-        </Button>
-      </ViewerEmpty>
-    )
   } else if (states.error) {
+    if (kind === 'canvas' || kind === 'slides') ground = 'dots'
+    // The shell stays: the kind's sketch, why, Retry or what else may open, and the agent's repair.
+    const missing = states.error === 'missing'
+    const shownNumber = picked ?? head
+    const previous = shownNumber !== null && shownNumber > 1 ? shownNumber - 1 : null
+    const reason = t(`viewer.error.${states.error}`)
     body = (
-      <ViewerEmpty
-        icon={AlertCircleIcon}
+      <StageNote
+        kind={kind}
         danger
-        title={t('viewer.errorTitle')}
-        text={t(`viewer.error.${states.error}`)}
+        title={kind ? t(`viewer.failed.${kind}`) : t('viewer.errorTitle')}
+        text={missing ? t('viewer.error.missing') : reason}
+        quiet={
+          summary && target && states.error !== 'notFound' ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() =>
+                void handOffRepair({
+                  artifact: {
+                    id,
+                    title,
+                    version: shownNumber ?? summary.version,
+                    project: summary.project,
+                  },
+                  file: null,
+                  reason,
+                  session: target.id,
+                })
+                  .then((sent) => {
+                    if (sent) toast(t('viewer.repairSent', { agent: targetName }))
+                  })
+                  .catch((error: unknown) =>
+                    toast(errorMessage(error), undefined, { tone: 'warning' }),
+                  )
+              }
+            >
+              {t('viewer.repair', { agent: targetName })}
+            </Button>
+          ) : null
+        }
       >
-        <Button variant="secondary" size="sm" onClick={artifact.retry}>
-          {t('viewer.retry')}
-        </Button>
-      </ViewerEmpty>
-    )
-  } else if (states.gone) {
-    body = (
-      <ViewerEmpty
-        icon={Delete02Icon}
-        title={t('viewer.goneTitle')}
-        text={t('viewer.goneDescription')}
-      >
-        {place.where === 'main' && (
+        {missing ? (
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setViewerState(id, { right: 'history' })}
+            >
+              {t('menu.versionHistory')}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => reportMissing(id, picked)}>
+              {t('viewer.reportProblem')}
+            </Button>
+          </>
+        ) : (
+          states.error !== 'notFound' && (
+            <Button size="sm" onClick={artifact.retry}>
+              {t('viewer.retry')}
+            </Button>
+          )
+        )}
+        {previous !== null && states.error !== 'notFound' && (
           <Button
             variant="secondary"
             size="sm"
-            icon={<Icon icon={ArrowLeft01Icon} size={14} />}
-            onClick={closeArtifact}
+            onClick={() => {
+              artifact.retry()
+              setViewerState(id, { version: previous })
+            }}
           >
-            {t('viewer.back')}
+            {t('viewer.openVersion', { version: previous })}
           </Button>
         )}
-        <Button size="sm" loading={restoring} onClick={() => restore(() => restoreArtifact(id))}>
-          {t('menu.restore')}
-        </Button>
-      </ViewerEmpty>
+      </StageNote>
     )
-  } else if (artifact.stopped) {
+  } else if (artifact.stopped && !(url && webPage)) {
     body = (
       <ViewerEmpty title={t('viewer.stoppedTitle')} text={t('viewer.stoppedDescription')}>
         <Button variant="secondary" size="sm" onClick={artifact.restart}>
@@ -477,7 +966,7 @@ export default function ArtifactViewer(place: ViewerPlace) {
     const typed = !!summary?.type
     // A canvas document draws its own dots, which follow its camera.
     if (docShown) layout = 'float'
-    else if (shown.canvas) {
+    else if (shown.canvas || isDeck) {
       layout = 'float'
       ground = 'dots'
     }
@@ -496,15 +985,30 @@ export default function ArtifactViewer(place: ViewerPlace) {
             mode={mode}
             controls={controls}
             editor={latest ? (editor ?? undefined) : undefined}
-            actions={docActions}
+            actions={canvasActions}
             agents={latest ? agents : []}
             following={followingNow}
             onFollowDone={() => setFollowing(null)}
             onViewPage={(page) => void host('artifacts.view', { id, page }).catch(() => {})}
             sessionName={(session) => noteAuthor(agents, session, t('board.note.agent'))}
             reloads={artifact.reloads}
-            show={pageAsked}
-            onShown={panel ? (seq) => artifactPageShown(panel.panel, seq) : undefined}
+            show={
+              walkAsk?.frame
+                ? {
+                    pageId: walkAsk.frame,
+                    seq: walkAsk.seq,
+                    open: walkAsk.open,
+                    flash: walkAsk.flash,
+                  }
+                : pageAsked
+            }
+            onShown={askShown}
+            pill={pill !== null}
+            changed={changedFrames}
+            marks={walk?.marks}
+            comments={frameComments}
+            compare={compare}
+            states={canvasStates}
           />
         ) : shown.canvas ? (
           <ArtifactSurface
@@ -520,8 +1024,84 @@ export default function ArtifactViewer(place: ViewerPlace) {
             actions={actions}
             onPageChosen={choosePage}
           />
-        ) : (
-          <div className={cn('avs-paper', typed && 'avs-paper--typed')}>
+        ) : isDeck ? (
+          <DeckSheet
+            id={id}
+            url={url}
+            shown={shown}
+            title={title}
+            reloads={artifact.reloads}
+            since={since}
+            band={pill !== null}
+            latest={latest}
+            mode={mode}
+            where={place.where}
+            deck={deck ?? null}
+            walk={sheetWalk}
+            comments={{
+              threads,
+              shown: latest && (state.right === 'comments' || mode === 'comment'),
+              draft: tools.docDraft,
+              thread: tools.docThread,
+            }}
+            agent={sheetAgent}
+            onAsk={(anchor) => toolsNow.current.askAnchor(anchor, null)}
+            onPresent={(slide) => setPresenting(String(slide))}
+            asked={walkAsk?.slide !== undefined ? walkAsk : pageAsked}
+            onAsked={askShown}
+            focusThread={docFocus}
+            writing={
+              writerName !== null && writerMark
+                ? { slides: deckWriting, name: writerName, mark: writerMark }
+                : null
+            }
+            compare={
+              pageCompare && (earlier === null || comparing)
+                ? {
+                    from: pageCompare.before,
+                    to: pageCompare.after,
+                    showingBefore: comparing,
+                    onChange: (before) => {
+                      comparedSlide.current = before ? deckSlide : null
+                      setViewerState(id, { version: before ? pageCompare.before : null })
+                    },
+                  }
+                : null
+            }
+          />
+        ) : isDocument ? (
+          <DocumentSheet
+            id={id}
+            url={url}
+            shown={shown}
+            title={title}
+            reloads={artifact.reloads}
+            since={since}
+            band={pill !== null}
+            latest={latest}
+            mode={mode}
+            onMode={setMode}
+            walk={sheetWalk}
+            asked={walkAsk?.at !== undefined || walkAsk?.section !== undefined ? walkAsk : null}
+            onAsked={askShown}
+            onChangesShown={setDocChangesShown}
+            comments={{
+              threads,
+              shown: latest && (state.right === 'comments' || mode === 'comment'),
+              blocks: docBlocks,
+              draft: tools.docDraft,
+              thread: tools.docThread,
+            }}
+            agent={sheetAgent}
+            onAsk={(anchor, at) =>
+              toolsNow.current.askAnchor(anchor, at, docBlocks ? DOCUMENT_ENTRY : ARTIFACT_ENTRY)
+            }
+            onHeadings={setDocHeadings}
+            focusThread={docFocus}
+            writing={docWriting}
+          />
+        ) : typed ? (
+          <div className="avs-paper avs-paper--typed">
             <ArtifactSurface
               url={url}
               shown={shown}
@@ -533,10 +1113,19 @@ export default function ArtifactViewer(place: ViewerPlace) {
               editor={latest ? (editor ?? undefined) : undefined}
             />
           </div>
-        )}
-        {legacyCanvas && pageName && <LegacyCanvasDock controls={controls} />}
-        {!shown.canvas && !typed && (
-          <PageDock
+        ) : (
+          <PageSheet
+            id={id}
+            url={url}
+            shown={shown}
+            title={title}
+            reloads={artifact.reloads}
+            since={since}
+            editor={latest ? (editor ?? undefined) : undefined}
+            band={pill !== null || comparing}
+            before={earlier}
+            stopped={artifact.stopped}
+            onRestart={artifact.restart}
             onReload={artifact.reload}
             onBrowser={
               isWeb
@@ -546,87 +1135,38 @@ export default function ArtifactViewer(place: ViewerPlace) {
                       .openExternal(artifactRefOf(id), shown.version)
                       .catch((error: unknown) => console.error(`Could not open ${id}`, error))
             }
+            compare={
+              pageCompare && (earlier === null || comparing)
+                ? {
+                    from: pageCompare.before,
+                    to: pageCompare.after,
+                    showingBefore: comparing,
+                    onChange: (before) =>
+                      setViewerState(id, { version: before ? pageCompare.before : null }),
+                  }
+                : null
+            }
+            agent={sheetAgent}
+            writer={writer && latest && writerMark ? { name: writer.name, mark: writerMark } : null}
           />
         )}
-        {editor && mode === 'comment' && editing.picked?.point && (
-          <CommentBox
-            key={`${editing.picked.point.x},${editing.picked.point.y}`}
-            anchor={anchorOf(editing.picked, shown)}
-            point={editing.picked.point}
-            onCancel={() => editor.clearPick()}
-            onSubmit={async (text) => {
-              await host('artifacts.comment', {
-                id,
-                anchor: anchorOf(editing.picked!, shown),
-                body: text,
-              })
-              editor.clearPick()
-            }}
-          />
+        {legacyCanvas && pageName && <LegacyCanvasDock controls={controls} />}
+        {/* A document's own dock asks its session's agent; without one, this asks. */}
+        {typed && latest && summary && !(isDocument && target) && (
+          <AskDock onAsk={() => tools.askWhole()} />
         )}
       </>
     )
   } else {
-    body = <Waiting since={since} />
-  }
-
-  let right: RightContent | null = null
-  if (rightKey === 'props' && editor && shown && editing.picked) {
-    right = {
-      key: `props:${editing.picked.page}:${editing.picked.selection.path}:${editing.picked.selection.src}`,
-      body: (
-        <EditPanel
-          id={id}
-          version={shown.version}
-          editable={states.inTrash ? 'deleted' : earlier !== null ? 'earlier' : 'yes'}
-          picked={editing.picked}
-          editor={editor}
-        />
-      ),
-      onClose: closeRight,
-    }
-  } else if (rightKey === 'history') {
-    right = {
-      key: 'history',
-      body: (
-        <VersionHistory
-          versions={versions}
-          error={versionsError}
-          shown={picked}
-          onPick={(version) => setViewerState(id, { version: version === head ? null : version })}
-        />
-      ),
-      onClose: closeRight,
-    }
-  } else if (rightKey === 'comments' && summary) {
-    right = {
-      key: 'comments',
-      body: (
-        <aside aria-label={t('comments.title')} className="k-av-side">
-          <div className="k-av-side__head">
-            <h2 className="k-av-side__title">{t('comments.title')}</h2>
-          </div>
-          <CommentsPanel
-            artifact={{ id, title, version: head ?? summary.version, project: summary.project }}
-            threads={threads}
-            error={commentsError}
-            preferred={[
-              ...(artifact.presence?.sessions.filter((s) => s.editing).map((s) => s.sessionId) ??
-                []),
-              summary.sessionId,
-            ]}
-            onFocus={(thread) => {
-              const number = thread.anchor.page?.number
-              const index = shown?.canvas?.pages.findIndex((p) => p.number === number) ?? -1
-              if (index >= 0) controls.commands?.focus(index)
-            }}
-          />
-        </aside>
-      ),
-      onClose: closeRight,
-    }
-  } else if (rightKey === 'tweaks') {
-    right = { key: 'tweaks', body: null, onClose: closeRight }
+    // The ground the canvas opens on, so nothing jumps when it arrives.
+    if (kind === 'canvas' || kind === 'slides') ground = 'dots'
+    body = (
+      <Waiting
+        since={since}
+        id={id}
+        look={kind === 'web' || kind === 'document' ? 'sheet' : 'card'}
+      />
+    )
   }
 
   // The page on screen after the title, for a canvas: a document's page, or the frame in focus.
@@ -670,13 +1210,11 @@ export default function ArtifactViewer(place: ViewerPlace) {
     }
   }
 
-  // Chat opens the session writing it, or the one that wrote it last, with it beside the thread.
-  const sessionId =
-    artifact.presence?.sessions.find((s) => s.editing)?.sessionId ??
-    (summary && summary.sessionId !== NO_SESSION ? summary.sessionId : null)
-  const chatSession = useSessionsStore((s) => (sessionId ? (s.byId[sessionId] ?? null) : null))
-
   const present = (): void => {
+    if (isDeck) {
+      if (deck) setPresenting(String(Math.min(deckSlide, deck.slides.length)))
+      return
+    }
     if (!shown?.canvas) return
     if (docShown) {
       const target = state.opened ?? state.selection[0] ?? null
@@ -685,8 +1223,9 @@ export default function ArtifactViewer(place: ViewerPlace) {
         const placed = doc?.pages.find((d) => d.id === p.id)
         return placed && placed.canvas === (state.page ?? doc?.canvases[0]?.id)
       })
-      setPresenting(Math.max(0, index >= 0 ? index : first))
-    } else setPresenting(canvasState.focused ?? canvasState.selected)
+      const from = shown.canvas.pages[Math.max(0, index >= 0 ? index : first)]
+      setPresenting(from?.id ?? null)
+    } else setPresenting(String(canvasState.focused ?? canvasState.selected))
   }
 
   const presenceItems: MenuItem[] = agents.map((agent) => ({
@@ -696,17 +1235,96 @@ export default function ArtifactViewer(place: ViewerPlace) {
     onSelect: () => setFollowing(followingNow === agent.sessionId ? null : agent.sessionId),
   }))
 
+  const [besideSlides, setBesideSlides] = useState<boolean | null>(null)
+  // Waiting for the content: the shell shows, its cards hold placeholder rows.
+  const opening = !showing && !states.error && !artifact.stopped
   const leftCard = useMemo(
     () =>
-      showing && docShown
-        ? {
-            title: t('board.canvases.menu'),
-            byDefault: latest,
-            open: state.left,
-            onOpenChange: (open: boolean) => setViewerState(id, { left: open }),
-          }
-        : null,
-    [showing, docShown, latest, state.left, id, t],
+      showing && isDocument
+        ? docHeadings > 0
+          ? {
+              title: (
+                <>
+                  {t('outline.title')}
+                  <small className="ads-count">{t('outline.count', { count: docHeadings })}</small>
+                </>
+              ),
+              // Open from six headings up, except beside a session; a right card folds it.
+              byDefault: docHeadings >= 6 && place.where === 'main',
+              open: rightKey !== null ? false : state.left,
+              onOpenChange: (open: boolean) => {
+                // The Outline comes back in place of a right card at every width.
+                if (open && rightKey !== null) closeRight()
+                setViewerState(id, { left: open })
+              },
+            }
+          : null
+        : showing && isDeck && deck
+          ? {
+              title: (
+                <>
+                  {t('deck.slides')}
+                  <small className="ads-count">{deck.slides.length}</small>
+                </>
+              ),
+              // Open in the main area; beside a session it waits to be asked for there, whatever
+              // the main area last did with it.
+              byDefault: place.where === 'main',
+              open: place.where === 'main' ? state.left : besideSlides,
+              onOpenChange: (open: boolean) =>
+                place.where === 'main' ? setViewerState(id, { left: open }) : setBesideSlides(open),
+            }
+          : showing && docShown
+            ? {
+                title: doc
+                  ? t('pages.heading', {
+                      pages: doc.canvases.length,
+                      frames: t('pages.frames', { count: doc.pages.length }),
+                    })
+                  : t('pages.title'),
+                // Open by default where there is more than one page or many frames to find.
+                byDefault: !!doc && (doc.canvases.length > 1 || doc.pages.length > 8),
+                open: state.left,
+                onOpenChange: (open: boolean) => setViewerState(id, { left: open }),
+              }
+            : opening && summary && kind !== 'web'
+              ? {
+                  title:
+                    kind === 'document'
+                      ? t('outline.title')
+                      : kind === 'slides'
+                        ? t('deck.slides')
+                        : t('pages.title'),
+                  // As each kind opens it once it shows, so nothing jumps when it does.
+                  byDefault:
+                    kind === 'canvas'
+                      ? summary.canvas && summary.pages > 8
+                      : kind === 'slides'
+                        ? place.where === 'main'
+                        : false,
+                  open: state.left,
+                  onOpenChange: (open: boolean) => setViewerState(id, { left: open }),
+                }
+              : null,
+    [
+      opening,
+      summary,
+      kind,
+      showing,
+      isDocument,
+      isDeck,
+      deck,
+      docHeadings,
+      rightKey,
+      closeRight,
+      place.where,
+      docShown,
+      doc,
+      state.left,
+      besideSlides,
+      id,
+      t,
+    ],
   )
 
   const bar = (
@@ -731,11 +1349,18 @@ export default function ArtifactViewer(place: ViewerPlace) {
       modesOff={
         !showing
           ? t('viewer.modes.off')
-          : states.inTrash
+          : states.inTrash || states.gone
             ? t('viewer.modes.deleted')
             : earlier !== null
               ? t('viewer.modes.earlier', { version: head })
               : null
+      }
+      editOff={
+        offline
+          ? hostName
+            ? t('viewer.offline.editPaused', { host: hostName })
+            : t('viewer.offline.editPausedLocal')
+          : null
       }
       presence={
         showing ? (
@@ -757,9 +1382,9 @@ export default function ArtifactViewer(place: ViewerPlace) {
           ? () => openSessionWithArtifact(chatSession.id, chatSession.projectPath, id)
           : null
       }
-      onPresent={showing && shown?.canvas ? present : null}
+      onPresent={showing && !states.gone && (shown?.canvas || (isDeck && deck)) ? present : null}
       share={
-        showing && shown && shares
+        showing && shown && shares && !states.gone && !states.inTrash
           ? { id, title, shown: shown.version, head: head ?? shown.version }
           : null
       }
@@ -792,7 +1417,9 @@ export default function ArtifactViewer(place: ViewerPlace) {
           ? {
               maximized,
               onExpand: phone ? null : () => setMaximized(!maximized),
-              onClose: () => toggleSidePane(panel.panel, 'artifact', false),
+              onClose: () => {
+                if (mayLeave(id)) toggleSidePane(panel.panel, 'artifact', false)
+              },
             }
           : null
       }
@@ -809,11 +1436,28 @@ export default function ArtifactViewer(place: ViewerPlace) {
       right={right}
       expanded={maximized}
     >
-      <div ref={area} className="avs-stage">
+      <div ref={area} className="avs-stage" data-fault={states.gone ? 'deleted' : undefined}>
         {showing && <AgentCursorStyles />}
         {body}
+        {showing && tools.overlay}
       </div>
       {pill && <ViewerSlot slot="pill">{pill}</ViewerSlot>}
+      {opening && (
+        <>
+          <ViewerSlot slot="left">
+            <SkeletonRows nested={kind === 'canvas'} />
+          </ViewerSlot>
+          <OpeningDock
+            kind={
+              kind === 'canvas' || kind === 'slides'
+                ? 'canvas'
+                : kind === 'document'
+                  ? 'document'
+                  : 'web'
+            }
+          />
+        </>
+      )}
     </ArtifactShell>
   )
 
@@ -831,14 +1475,32 @@ export default function ArtifactViewer(place: ViewerPlace) {
       ) : (
         <div className="avs-main">{shell}</div>
       )}
-      {presenting !== null && url && shown && (
-        <Presenter
+      {presenting !== null && url && isDeck && deck && (
+        <DeckPresent
+          artifactId={id}
           url={url}
-          version={shown.version}
+          deck={deck}
           title={title}
-          pages={shown.canvas?.pages ?? null}
+          start={Number(presenting) || 1}
+          onExit={(last) => {
+            setDeckSlide(id, last)
+            setPresenting(null)
+          }}
+        />
+      )}
+      {presenting !== null && url && shown && !isDeck && (
+        <CanvasPresent
+          artifactId={id}
+          url={url}
+          shown={shown}
+          title={title}
+          sheets={canvasSheets(
+            docShown ? doc : null,
+            shown.canvas?.pages ?? null,
+            pageName ?? (() => title),
+            title,
+          )}
           start={presenting}
-          pageName={pageName ?? (() => title)}
           onExit={() => setPresenting(null)}
         />
       )}
@@ -850,28 +1512,42 @@ export default function ArtifactViewer(place: ViewerPlace) {
 const PILL_ROOM = 56
 const DOCK_ROOM = 48
 
-/** The pill at the content's top: what shows instead of the latest version, and what to do. */
+/**
+ * The pill at the content's top: what shows instead of the latest version, or what happens to the
+ * whole artifact, and what to do. `mark` takes the dot's place; a quiet action is a ghost button.
+ */
 function Pill({
   lead,
   rest,
+  mark,
+  keepRest = false,
   actions,
 }: {
   lead: string
   rest: React.ReactNode
-  actions: Array<{ label: string; busy?: boolean; restores?: boolean; run: () => void }>
+  mark?: React.ReactNode
+  /** Keep the rest when narrow too, as a short word that something is under way. */
+  keepRest?: boolean
+  actions: Array<{
+    label: string
+    busy?: boolean
+    restores?: boolean
+    quiet?: boolean
+    run: () => void
+  }>
 }) {
   const { tier } = useShell()
   return (
-    <div role="status" className="avs-pill__in">
-      <span className="avs-pill__dot" aria-hidden />
+    <div role="status" className="avs-pill__in" data-actions={actions.length > 0 || undefined}>
+      {mark ?? <span className="avs-pill__dot" aria-hidden />}
       <span className="avs-pill__text">
         <b>{lead}</b>
-        {tier !== 'narrow' && rest}
+        {(keepRest || tier !== 'narrow') && rest}
       </span>
       {actions.map((action, i) => (
         <Button
           key={action.label}
-          variant={i === 0 ? 'secondary' : 'ghost'}
+          variant={i === 0 && !action.quiet ? 'secondary' : 'ghost'}
           size="sm"
           icon={action.restores ? <Icon icon={RotateLeft01Icon} size={14} /> : undefined}
           loading={action.busy}
@@ -888,6 +1564,33 @@ function Pill({
 function EarlierRest({ createdAt, note }: { createdAt: number; note: string | null }) {
   const now = useNow()
   return <span>{` · ${longAgo(createdAt, now)}${note ? ` · ${note}` : ''}`}</span>
+}
+
+/** " · just now", after "Deleted". */
+function DeletedAgo({ deletedAt }: { deletedAt: number }) {
+  const now = useNow()
+  return <span>{` · ${longAgo(deletedAt, now)}`}</span>
+}
+
+/** What the writing pill says: the slide, section or frame the agent holds, else its next version. */
+function writingLead(
+  t: TFunction<['artifacts', 'common']>,
+  writer: Writer,
+  head: number,
+  frames: readonly { id: string; name: string }[] | null,
+): string {
+  const piece = writer.pieces?.find((p) => p.kind !== 'whole')
+  if (piece?.kind === 'slide') {
+    return t('viewer.writing.slide', { agent: writer.name, number: piece.number })
+  }
+  if (piece?.kind === 'frame') {
+    const name = frames?.find((f) => f.id === piece.id)?.name
+    if (name) return t('viewer.writing.piece', { agent: writer.name, name })
+  }
+  if (piece?.kind === 'section') {
+    return t('viewer.writing.section', { agent: writer.name })
+  }
+  return t('viewer.writing.version', { agent: writer.name, version: head + 1 })
 }
 
 function DaysLeft({ deletedAt, purgeAt }: { deletedAt: number; purgeAt?: number | null }) {
@@ -952,22 +1655,92 @@ function LegacyCanvasDock({ controls }: { controls: CanvasControls }) {
     </ViewerSlot>
   )
 }
+/** The dock while the content loads: what its kind will offer, dimmed and out of reach. */
+function OpeningDock({ kind }: { kind: 'canvas' | 'document' | 'web' }) {
+  const { t } = useTranslation('artifacts')
+  const none = () => {}
+  const { tier, leftCard: left } = useShell()
+  const narrow = tier === 'narrow'
+  const ask = (
+    <>
+      <DockRule />
+      <DockButton label={t('ask.whole')} icon={SparklesIcon} disabled onClick={none}>
+        {t('ask.short')}
+      </DockButton>
+    </>
+  )
+  return (
+    <ViewerSlot slot="dock">
+      {kind !== 'web' && left && (
+        <>
+          <DockButton
+            label={t(kind === 'canvas' ? 'pages.title' : 'outline.title')}
+            icon={SidebarLeftIcon}
+            pressed={left.shown}
+            onClick={() => left.setShown(!left.shown)}
+          />
+          <DockRule />
+        </>
+      )}
+      <span className="avs-dock__off" aria-disabled>
+        {kind === 'canvas' ? (
+          <>
+            {tier === 'wide' && (
+              <DockButton label={t('canvas.fitWidth')} disabled onClick={none}>
+                {t('canvas.fitWidth')}
+              </DockButton>
+            )}
+            <DockButton label={t('canvas.zoomOut')} icon={MinusSignIcon} disabled onClick={none} />
+            <span className="avs-dock__pct">{t('canvas.zoom', { percent: 100 })}</span>
+            <DockButton label={t('canvas.zoomIn')} icon={PlusSignIcon} disabled onClick={none} />
+          </>
+        ) : kind === 'document' ? (
+          <>
+            {!narrow && (
+              <DockButton label={t('doc.smaller')} icon={MinusSignIcon} disabled onClick={none} />
+            )}
+            <span className="avs-dock__pct">{t('doc.size', { percent: 100 })}</span>
+            {!narrow && (
+              <DockButton label={t('doc.larger')} icon={PlusSignIcon} disabled onClick={none} />
+            )}
+            {!narrow && ask}
+          </>
+        ) : (
+          <>
+            <DockButton label={t('sheet.width.label')} disabled onClick={none}>
+              {t('sheet.width.fill')}
+            </DockButton>
+            <DockRule />
+            <DockButton
+              label={t('viewer.reload')}
+              icon={ArrowReloadHorizontalIcon}
+              disabled
+              onClick={none}
+            />
+            {!narrow && (
+              <DockButton
+                label={t('viewer.openInBrowser')}
+                icon={LinkSquare02Icon}
+                disabled
+                onClick={none}
+              />
+            )}
+            {!narrow && ask}
+          </>
+        )}
+      </span>
+    </ViewerSlot>
+  )
+}
 
-/** A web page's dock: load it again, or open it in the browser. */
-function PageDock({
-  onReload,
-  onBrowser,
-}: {
-  onReload: () => void
-  onBrowser: (() => void) | null
-}) {
+/** A document's or a deck's dock: asking an agent about the whole of it. */
+function AskDock({ onAsk }: { onAsk: () => void }) {
   const { t } = useTranslation('artifacts')
   return (
     <ViewerSlot slot="dock">
-      <DockButton label={t('viewer.reload')} icon={RefreshIcon} onClick={onReload} />
-      {onBrowser && (
-        <DockButton label={t('viewer.openInBrowser')} icon={LinkSquare02Icon} onClick={onBrowser} />
-      )}
+      <DockButton label={t('ask.whole')} icon={SparklesIcon} onClick={onAsk}>
+        {t('ask.short')}
+      </DockButton>
     </ViewerSlot>
   )
 }

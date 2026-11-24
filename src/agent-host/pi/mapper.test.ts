@@ -424,7 +424,7 @@ describe('other events', () => {
 })
 
 describe('the usage', () => {
-  it("counts a reply's cached input in its input, as Kettu's totals do", () => {
+  it("keeps a reply's cached input out of its input, as Kettu's totals do", () => {
     expect(
       tokenTotals({
         input: 100,
@@ -434,10 +434,23 @@ describe('the usage', () => {
         reasoning: 5,
         totalTokens: 3170,
       }),
-    ).toEqual({ total: 3170, input: 3150, output: 20, thought: 5, cacheRead: 3000, cacheWrite: 50 })
+    ).toEqual({ total: 3170, input: 100, output: 20, thought: 5, cacheRead: 3000, cacheWrite: 50 })
     expect(
       tokenTotals({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 }),
     ).toBeNull()
+  })
+
+  it("sums a reply's total from its parts when the provider reported none", () => {
+    expect(
+      tokenTotals({ input: 100, output: 20, cacheRead: 3000, cacheWrite: 50, totalTokens: 0 }),
+    ).toEqual({
+      total: 3170,
+      input: 100,
+      output: 20,
+      thought: null,
+      cacheRead: 3000,
+      cacheWrite: 50,
+    })
   })
 
   it("takes pi's own count of the context and the session's cost once a turn settled", () => {

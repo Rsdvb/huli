@@ -388,3 +388,147 @@ describe('the pieces an agent holds while its turn writes', () => {
     ).resolves.toEqual({ version: 3 })
   })
 })
+
+describe('pinning a thread again', () => {
+  it('keeps the thread with its new anchor, found again from then on', async () => {
+    const id = await create({ html: '<h1>Title</h1><p>Body</p>' })
+    const anchor = {
+      version: 1,
+      path: 'index.html',
+      page: null,
+      offset: null,
+      tag: null,
+      text: '',
+      missing: false,
+    }
+    const thread = await store.addThread(id, {
+      anchor,
+      author: { person: 'owner', session: null },
+      body: 'Shorter',
+    })
+    const placed = await store.repin(id, thread.id, {
+      ...anchor,
+      offset: 0,
+      tag: 'h1',
+      text: 'Title',
+      missing: true,
+    })
+    expect(placed.anchor).toMatchObject({ offset: 0, tag: 'h1', missing: false })
+    const [kept] = await store.threads(id)
+    expect(kept).toMatchObject({ id: thread.id, anchor: { offset: 0, tag: 'h1', missing: false } })
+    expect(kept?.comments).toHaveLength(1)
+    await expect(store.repin(id, 'thr_01J9Z3K4V5W6X7Y8Z9A0B1C2D3', anchor)).rejects.toMatchObject({
+      code: 'not_found',
+    })
+  })
+})
+
+describe('a thread whose element a version removed', () => {
+  it('is looked for again in each new version, and placed once the element is back', async () => {
+    const id = await create({ html: '<h1>Title</h1><p>Body</p>' })
+    const thread = await store.addThread(id, {
+      anchor: {
+        version: 1,
+        path: 'index.html',
+        page: null,
+        offset: 14,
+        tag: 'p',
+        text: 'Body',
+        missing: false,
+      },
+      author: { person: 'owner', session: null },
+      body: 'Shorter',
+    })
+    await call('update_artifact', { id, base_version: 1, html: '<h1>Title</h1>' })
+    const [gone] = await store.threads(id)
+    expect(gone?.anchor).toMatchObject({ version: 2, missing: true })
+
+    // A version that still lacks the element is recorded once, not on every read.
+    await call('update_artifact', { id, base_version: 2, html: '<h1>Other</h1>' })
+    await store.threads(id)
+    const calls: string[] = []
+    const threads = (store as unknown as { deps: { threads: ThreadStore } }).deps.threads
+    const artifact = threads.artifact
+    threads.artifact = ((name: string, params: unknown) => {
+      calls.push(name)
+      return artifact(name as never, params as never)
+    }) as ThreadStore['artifact']
+    const [still] = await store.threads(id)
+    expect(still?.anchor).toMatchObject({ version: 3, missing: true })
+    expect(calls).not.toContain('reanchor')
+
+    await store.restore({ id, version: 1, baseVersion: 3, author: null })
+    const [back] = await store.threads(id)
+    expect(back).toMatchObject({
+      id: thread.id,
+      anchor: { version: 4, offset: 14, tag: 'p', text: 'Body', missing: false },
+    })
+    const [stored] = await store.threads(id)
+    expect(stored?.anchor).toMatchObject({ version: 4, offset: 14, missing: false })
+  })
+})
+
+describe('a thread in a frame the canvas no longer lists', () => {
+  it('is marked removed though the file stays, and placed once the frame is back', async () => {
+    const page = (id: string, file: string) => ({
+      id,
+      canvas: 'c1',
+      name: id,
+      file,
+      x: 0,
+      y: 0,
+      width: 390,
+      height: 844,
+      locked: false,
+    })
+    const doc = {
+      format: 1,
+      canvases: [{ id: 'c1', name: 'Home' }],
+      pages: [page('pa', 'a.html'), page('pb', 'b.html')],
+      notes: [],
+    }
+    const id = await create({
+      files: [
+        { path: 'canvas.json', content: JSON.stringify(doc) },
+        { path: 'a.html', content: '<p>a</p>' },
+        { path: 'b.html', content: '<h1>B</h1><p>Body</p>' },
+      ],
+    })
+    const anchor = { version: 1, page: null, missing: false }
+    const author = { person: 'owner' as const, session: null }
+    const inB = await store.addThread(id, {
+      anchor: { ...anchor, path: 'b.html', offset: 10, tag: 'p', text: 'Body' },
+      author,
+      body: 'Shorter',
+    })
+    const inA = await store.addThread(id, {
+      anchor: { ...anchor, path: 'a.html', offset: 0, tag: 'p', text: 'a' },
+      author,
+      body: 'Longer',
+    })
+    const removed = await call('update_artifact', {
+      id,
+      base_version: 1,
+      canvas: [{ op: 'remove', id: 'pb' }],
+    })
+    expect(removed.error).toBeNull()
+    const found = await store.get(id)
+    expect(found.files.map((f) => f.path)).toContain('b.html')
+
+    const gone = await store.threads(id)
+    expect(gone.find((t) => t.id === inB.id)?.anchor).toMatchObject({ version: 2, missing: true })
+    expect(gone.find((t) => t.id === inA.id)?.anchor).toMatchObject({
+      version: 2,
+      offset: 0,
+      missing: false,
+    })
+
+    await store.restore({ id, version: 1, baseVersion: 2, author: null })
+    const back = await store.threads(id)
+    expect(back.find((t) => t.id === inB.id)?.anchor).toMatchObject({
+      version: 3,
+      offset: 10,
+      missing: false,
+    })
+  })
+})

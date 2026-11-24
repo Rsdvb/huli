@@ -268,13 +268,18 @@ function resultContent(
   return [{ type: 'markdown', markdown: fence ? fenced(cut(text)) : cut(text) }, ...pictures]
 }
 
-/** A reply's tokens in Kettu's totals: pi counts cached input apart from `input`. */
+/** A reply's tokens in Kettu's totals, which count cached input apart from `input` as pi does. */
 export function tokenTotals(usage: PiUsage | undefined): TokenTotals | null {
-  if (!usage || !(usage.totalTokens > 0)) return null
-  const input = usage.input + usage.cacheRead + usage.cacheWrite
+  if (!usage) return null
+  // pi takes some providers' own total and reports 0 when one leaves it out.
+  const total =
+    usage.totalTokens > 0
+      ? usage.totalTokens
+      : usage.input + usage.output + usage.cacheRead + usage.cacheWrite
+  if (!(total > 0)) return null
   return {
-    total: usage.totalTokens,
-    input,
+    total,
+    input: usage.input,
     output: usage.output,
     thought: usage.reasoning ?? null,
     cacheRead: usage.cacheRead,

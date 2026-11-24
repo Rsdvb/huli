@@ -189,8 +189,11 @@ export function PermissionEntry({
   useDiffStats(entry.content)
   const permission = entry.permission
   const result = entry.permissionResult
-  // Huli: the host's judgment of the request, which a host older than it does not send.
+  // Huli: the host's judgment of the request, which a host older than it does not send. Its high
+  // level holds every request `risky` marks, so it decides the card where it is given.
   const risk = permission?.risk ?? null
+  // A request stored before the host marked it keeps the old rule: every command and deletion.
+  const risky = permission?.risky ?? (entry.toolKind === 'execute' || entry.toolKind === 'delete')
   const answers = useMemo(() => answersOf(permission?.options ?? []), [permission])
   const label = toolLabel(entry, projectPath)
   const command = label.kind === 'command' ? label.target : null
@@ -361,15 +364,7 @@ export function PermissionEntry({
           action={action}
           target={target ?? undefined}
           toolIcon={<Icon icon={KIND_GLYPH[entry.toolKind]} size={12} />}
-          risk={
-            risk
-              ? risk.level === 'high'
-                ? 'destructive'
-                : 'safe'
-              : entry.toolKind === 'execute' || entry.toolKind === 'delete'
-                ? 'risky'
-                : 'safe'
-          }
+          risk={risk ? (risk.level === 'high' ? 'destructive' : 'safe') : risky ? 'risky' : 'safe'}
           badge={risk ? <RiskBadge level={risk.level} /> : undefined}
           reason={
             // Huli: why the host rates it so, then why the agent asks, beside what a command

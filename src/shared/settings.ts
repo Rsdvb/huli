@@ -71,6 +71,8 @@ export interface SettingsFile {
     // Replaced whole.
     claudeRuns: Partial<Record<AgentId, ClaudeRunSettings>>
     promptSuggestions: boolean // Claude Code's sessions predict the next prompt for the composer
+    continueAfterLimit: boolean // a session carries on when the window that stopped it resets
+    agentPasswords: boolean // agents type passwords and codes the user gave them or the project holds
     lightModel: LightModel // replaced whole
     // Huli: the agent host runs below normal priority, and so does every program it starts.
     lowerAgentPriority: boolean
@@ -96,6 +98,7 @@ export interface SettingsFile {
     sidebarOrder: SidebarPage[] // every page once, as the sidebar lists them; replaced whole
     sidebarHidden: SidebarPage[] // pages the sidebar leaves out; replaced whole
     fonts: UserFonts // replaced whole; a role left out keeps the theme's face
+    effortControl: 'dial' | 'segments' // how the model and agent menus show the effort levels
   }
   notifications: {
     permission: boolean
@@ -428,6 +431,8 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     claudeTestEntrypointLabel: 'huli-test',
     claudeRuns: {},
     promptSuggestions: true,
+    continueAfterLimit: true,
+    agentPasswords: false,
     lightModel: { mode: 'small' },
     lowerAgentPriority: true,
     keepAwake: true,
@@ -449,6 +454,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     sidebarOrder: [...SIDEBAR_PAGES],
     sidebarHidden: [],
     fonts: {},
+    effortControl: 'segments',
   },
   notifications: {
     permission: true,
@@ -651,6 +657,8 @@ export interface HostSettings {
   claudeTestEntrypoint: string | null
   claudeRuns: SettingsFile['general']['claudeRuns']
   promptSuggestions: boolean // Claude Code's sessions predict the user's next prompt
+  continueAfterLimit: boolean // carry a session on when the window that stopped it resets
+  agentPasswords: boolean // agents may type passwords and codes, at a terminal's password prompt too
   lightModel: LightModel // which model Kettu's own requests ask
   defaultAgent: AgentId | null // the agent new sessions start with, which answers artifacts' questions
   computerUse: ComputerUseSettings

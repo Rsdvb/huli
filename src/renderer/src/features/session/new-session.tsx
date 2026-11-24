@@ -32,7 +32,7 @@ import { useModeControl } from '@renderer/features/session/composer/mode-control
 import { isSelect } from '@renderer/features/session/composer/options'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { NO_PROJECT_ICON } from '@renderer/features/shell/no-project-icon'
-import { ModelMenu } from '@renderer/features/session/composer/model-menu'
+import { ModelMenu, ModelMenuLoading } from '@renderer/features/session/composer/model-menu'
 import { SendButton } from '@renderer/features/session/composer/send-button'
 import type { SelectOption } from '@renderer/features/session/composer/levels'
 import { tightestLimit } from '@shared/session-groups'
@@ -50,6 +50,7 @@ import { useClock, useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
 import { useAccountStore } from '@renderer/stores/account'
 import {
+  agentKey,
   optionsLoaded,
   optionsOn,
   pickOption,
@@ -470,6 +471,13 @@ ${parent?.projectPath ?? project?.path ?? ''}`
     const prepared = agentId ? preparedFor(s, hostId, agentId) : null
     return !prepared || (!prepared.summary && !prepared.error)
   })
+  // The agent's options are on their way: its prepared session or, without a folder, a first read.
+  const readingOptions = useAgentOptionsStore((s) => {
+    if (!agentId) return false
+    const prepared = preparedFor(s, hostId, agentId)
+    if (prepared) return prepared.opening && !prepared.summary && !prepared.error
+    return s.firstReads[agentKey(hostId, agentId)]?.reading === true
+  })
   const task = !!workflow
   // Kettu's `/btw` asks about a conversation, and there is none yet; a task's message is its
   // requirement, never a command.
@@ -794,12 +802,11 @@ ${parent?.projectPath ?? project?.path ?? ''}`
             ))}
           models={[]}
           modelSlot={
-            hasModelMenu &&
-            agentId && (
+            !hasModelMenu || !agentId ? (
+              config === null && readingOptions && <ModelMenuLoading />
+            ) : (
               <ModelMenu
                 agentId={agentId}
-                hostId={hostId}
-                agentName={name ?? ''}
                 harness={status?.harnessName ?? name ?? ''}
                 config={config ?? []}
                 onSelect={pick}
@@ -816,10 +823,6 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                   }
                   if (status.state === 'ready') refreshOnMenu(hostId, [agentId])
                 }}
-                account={status?.account ?? null}
-                limits={limits ?? []}
-                balances={status?.balances}
-                wallet={status?.balance?.balances}
                 source={status?.version ? `${status.harnessName} ${status.version}` : null}
               />
             )
