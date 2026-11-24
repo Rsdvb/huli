@@ -303,3 +303,42 @@ function bracketBlock(
   }
   return { text, end: lines.length - 1, closed: false }
 }
+
+interface MathNode {
+  type: string
+  children?: MathNode[]
+  position?: { start: { offset?: number }; end: { offset?: number } }
+  data?: { hChildren?: { type: string; properties?: Record<string, unknown> }[] }
+}
+
+/** The metastring the code of a `$$` block whose closing fence has not come yet is given. */
+export const OPEN_MATH = 'kite-open'
+
+const CLOSING_FENCE = /^(?:[ \t]*>)*[ \t]*\${2,}[ \t]*$/
+
+/**
+ * The remark plugin, after remark-math: marks each `$$` block whose closing fence has not come,
+ * which a message still being written shows as its source until it does (code-frame.tsx). The
+ * fence is never closed for it in the meantime, so KaTeX draws the formula once, whole, rather
+ * than at every chunk.
+ */
+export function openMath() {
+  return (tree: MathNode, file: { value: unknown }) => {
+    const source = String(file.value)
+    const visit = (node: MathNode): void => {
+      if (node.type !== 'math') {
+        for (const child of node.children ?? []) visit(child)
+        return
+      }
+      const start = node.position?.start.offset ?? 0
+      const end = node.position?.end.offset ?? 0
+      const text = source.slice(start, end)
+      const cut = text.lastIndexOf('\n')
+      const code = node.data?.hChildren?.[0]
+      if (code && (cut === -1 || !CLOSING_FENCE.test(text.slice(cut + 1)))) {
+        code.properties = { ...code.properties, metastring: OPEN_MATH }
+      }
+    }
+    visit(tree)
+  }
+}

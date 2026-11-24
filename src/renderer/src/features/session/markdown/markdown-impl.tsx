@@ -335,6 +335,10 @@ const linkSafety = { enabled: false }
 // The blocks and tables draw their own actions (code-frame.tsx, markdown-table.tsx).
 const controls = false
 
+// A `$$` still open is left open, so it shows as its source and KaTeX draws it once it closes
+// (maths.ts, openMath), instead of being closed for KaTeX at every chunk.
+const repair = { katex: false }
+
 /**
  * The text's chunks, kept from the previous render while the text only grows. A long message's are
  * kept while it is not shown too, with the places its chunks were laid out at (in-parts.ts).
@@ -456,6 +460,7 @@ const Chunk = memo(function Chunk({
         className="markdown-chunk"
         mode="streaming"
         parseIncompleteMarkdown={live}
+        remend={repair}
         isAnimating={live}
         animated={false}
         skipHtml

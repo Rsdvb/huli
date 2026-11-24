@@ -16,21 +16,28 @@ function Fallback({ tex, error }: { tex: string; error: TexError }) {
   )
 }
 
-/** KaTeX's drawing of `tex` in an element React leaves to it, or its source (formulaView). */
+/**
+ * KaTeX's drawing of `tex` in an element React leaves to it, or its source (formulaView). It
+ * draws when the formula changes, not when the message finishes: a drawing that failed then only
+ * shows its source marked, and its last drawing goes as it would have.
+ */
 function Formula({ tex, display }: { tex: string; display: boolean }) {
   const live = useContext(LiveContext)
   const ref = useRef<HTMLSpanElement>(null)
-  const [failed, setFailed] = useState<{ tex: string; error: TexError; view: FormulaView } | null>(
+  const [failed, setFailed] = useState<{ tex: string; error: TexError; drawn: boolean } | null>(
     null,
   )
   useLayoutEffect(() => {
     const element = ref.current
     if (!element) return
-    const error = drawTex(tex, display, element, live)
-    const view = formulaView(!!error, live, element.childNodes.length > 0)
-    setFailed(error ? { tex, error, view } : null)
-  }, [tex, display, live])
-  const view = failed?.view ?? 'drawing'
+    // A half-typed formula keeps its last drawing while the message is written (below).
+    const error = drawTex(tex, display, element, true)
+    setFailed(error ? { tex, error, drawn: element.childNodes.length > 0 } : null)
+  }, [tex, display])
+  useLayoutEffect(() => {
+    if (!live && failed && ref.current) ref.current.textContent = ''
+  }, [live, failed])
+  const view: FormulaView = failed ? formulaView(true, live, failed.drawn) : 'drawing'
   return (
     <>
       <span ref={ref} hidden={view !== 'drawing'} data-math-inline={display ? undefined : ''} />
