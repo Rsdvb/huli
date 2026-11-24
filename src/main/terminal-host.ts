@@ -7,7 +7,7 @@ import {
   type TerminalCall,
   type TerminalCallAnswer,
 } from '@shared/terminal-agent'
-import terminalHostPath from '../terminal-host/index?modulePath'
+import terminalHostPath from '../terminal-host/entry?modulePath'
 import { locale as currentLocale, t } from './i18n'
 import { createLogger } from './log'
 import { UtilityHost, type UtilityHostEvent, type UtilityHostState } from './utility-host'

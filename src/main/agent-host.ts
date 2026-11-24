@@ -57,7 +57,7 @@ import { isPortError, PortRequestError } from '@shared/port-rpc'
 import type { PortDevice } from '@shared/remote/device'
 import { reportBuildResult, type ReportBuildResult } from '@shared/report'
 import type { HostSettings } from '@shared/settings'
-import agentHostPath from '../agent-host/index?modulePath'
+import agentHostPath from '../agent-host/entry?modulePath'
 // The host's own bundle is built without electron-vite's worker plugin, so main builds this one.
 import clineHostPath from '../agent-host/cline/cline-host?modulePath'
 import sessionRouterPath from '../agent-host/session-router/router?modulePath'
