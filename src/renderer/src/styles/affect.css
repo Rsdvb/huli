@@ -7082,6 +7082,15 @@ li[data-row-exit='dust'] > * {
 .kettu-model-picker .ui-mdpc__trigger .ui-mdpc__swap-item[data-out] {
   display: none;
 }
+/* Huli: a model's description takes up to two lines, ending in an ellipsis, and its row grows to
+   hold them, highlight and all; the full text is the description's tooltip. */
+.kettu-model-picker .ui-mdpc__desc {
+  display: -webkit-box;
+  white-space: normal;
+  overflow-wrap: break-word;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
 /* The Model Picker's last row keeps one line, ending in an ellipsis, so the menu never changes height. */
 .kettu-model-picker .ui-mdpc__caption .ui-mdpc__swap-item {
   display: block;
