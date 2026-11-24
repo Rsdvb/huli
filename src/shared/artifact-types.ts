@@ -34,6 +34,16 @@ export const CONTENT_ENTRIES: Readonly<Record<ArtifactTypeName, string>> = {
 /** Where both types keep their pictures. */
 export const IMAGES_FOLDER = 'images/'
 
+/** The kinds of picture both types hold: what Word, PowerPoint and every browser show. */
+export const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif'] as const
+
+/** Whether `path` is where a type keeps a picture: under `images/`, with a picture's extension. */
+export function isImagePath(path: string): boolean {
+  if (!path.startsWith(IMAGES_FOLDER) || path.length === IMAGES_FOLDER.length) return false
+  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
+  return path.includes('.') && (IMAGE_EXTENSIONS as readonly string[]).includes(extension)
+}
+
 /** What a type exports to; each is one file, except Markdown with pictures, a folder. */
 export type ArtifactExportFormat = 'docx' | 'md' | 'pptx' | 'pdf'
 

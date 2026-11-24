@@ -84,7 +84,6 @@ import type { HostMedia } from './host-media'
 import type { HostSessions } from './host-sessions'
 import type { HostPairingListener, RemoteHost } from './remote-host'
 import { isRendererUrl, rendererPage } from './renderer'
-import { exportSession } from './session-export'
 import { MoveFailed, type SessionMover } from './session-move'
 import type { TrayPanel } from './tray-panel'
 import type { SettingsStore } from './settings'
@@ -1291,8 +1290,10 @@ export function registerSessionMoveIpc(mover: SessionMover): void {
 
 /** Huli: Export… in a session's menu; the request is checked before the save dialog. */
 export function registerSessionExportIpc(): void {
-  handle('session:export', 1, ({ window }, request) => {
+  handle('session:export', 1, async ({ window }, request) => {
     actionLog.info('session.export')
+    // Its zip and Markdown code loads the first time a session is exported.
+    const { exportSession } = await import('./session-export')
     return exportSession(window, request)
   })
 }

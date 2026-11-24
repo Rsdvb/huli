@@ -2,19 +2,10 @@
 // by the host, which checks and exports it, and by the viewer, which shows and edits it.
 
 import { GFM, parser } from '@lezer/markdown'
-import { IMAGES_FOLDER } from './artifact-types'
+
+export { IMAGE_EXTENSIONS, isImagePath } from './artifact-types'
 
 const markdown = parser.configure(GFM)
-
-/** The kinds of picture both types hold: what Word, PowerPoint and every browser show. */
-export const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif'] as const
-
-/** Whether `path` is where a type keeps a picture: under `images/`, with a picture's extension. */
-export function isImagePath(path: string): boolean {
-  if (!path.startsWith(IMAGES_FOLDER) || path.length === IMAGES_FOLDER.length) return false
-  const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
-  return path.includes('.') && (IMAGE_EXTENSIONS as readonly string[]).includes(extension)
-}
 
 /** A top-level block of the Markdown: where its source starts and ends. */
 export interface MarkdownBlock {
