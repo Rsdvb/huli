@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 're
 import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { AppShell } from '@renderer/components/affect/app-shell'
+import { DragWarmup } from '@renderer/components/drag-warmup'
 import { Toaster, useToastArea } from '@renderer/components/ui/toast'
 import { TooltipProvider } from '@renderer/components/ui/tooltip'
 import { ArtifactDialogs } from '@renderer/features/artifacts/artifact-dialogs'
@@ -157,6 +158,7 @@ export function App() {
           )}
         </AnimatePresence>
         <LaunchCover />
+        <DragWarmup />
         <QuitConfirm />
         <UpdateDialog />
         <CommandConfirmDialog />
