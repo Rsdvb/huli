@@ -1,10 +1,12 @@
 // Doubao CLI's driver: one `doubao -p - --output-format stream-json` per turn, spawned by the
 // agent host (see connection.ts).
 
-import type { HostedDriver } from '../driver'
-import { DoubaoConnection } from './connection'
+import { lazyCode, type HostedDriver } from '../driver'
+
+const code = lazyCode(() => import('./connection'))
 
 export const DOUBAO_DRIVER: HostedDriver = {
   kind: 'hosted',
-  connect: (context) => new DoubaoConnection(context),
+  load: code.load,
+  connect: (context) => new (code.get().DoubaoConnection)(context),
 }

@@ -266,7 +266,7 @@ import {
 import { routeFor } from './node-proxy/download'
 import { httpTransport, ownProxyVariables, type Transport } from './node-runtime/transport'
 import { OpenCodeClient } from './opencode/client'
-import { OpenCodeConnection } from './opencode/connection'
+import type { OpenCodeConnection } from './opencode/connection'
 import type { OpenCodeSessions } from './model-requests/opencode'
 import type { ProviderUsage } from './opencode/provider-usage'
 import { claudeJsonPath, readClaudeProfile } from './plan-tier'
@@ -1623,6 +1623,7 @@ export class AgentManager {
     if (this.driver(slot).kind === 'hosted' && !slot.h.detection?.cli) {
       await slot.h.binaryVersionAsked
     }
+    await this.driver(slot).load?.()
     this.registeredSlot(agentId)
     this.assertEnabled(agentId)
     if (this.stopped) throw new Error(t('agent.hostStopping', { agent: slot.name }))
@@ -5609,9 +5610,9 @@ export class AgentManager {
     const slot = this.slots.get(agentId)
     if (!slot || harnessOf(agentId) !== 'opencode') return null
     const connection = slot.stopping ? null : slot.runtime?.connection
-    return connection instanceof OpenCodeConnection && !connection.isClosed
-      ? connection.stored
-      : this.openCodeClient(slot)
+    // Only the server's connection keeps them; OpenCode's ACP fallback reads none.
+    const server = connection && 'stored' in connection ? (connection as OpenCodeConnection) : null
+    return server && !server.isClosed ? server.stored : this.openCodeClient(slot)
   }
 
   private openCodeClient(slot: Slot): OpenCodeClient {

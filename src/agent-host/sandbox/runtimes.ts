@@ -93,6 +93,7 @@ export async function startContainerRuntime(start: ContainerStart): Promise<Cont
   if (start.network === 'agent' && start.proxyPort === null) {
     throw new ContainerError('noExit', 'network')
   }
+  await start.driver.load?.()
   const engine = await containers.prepare(start.agent)
   const project = await containers.engineFolder(engine, folder)
   const hasGitDir = (at: string): Promise<boolean> =>

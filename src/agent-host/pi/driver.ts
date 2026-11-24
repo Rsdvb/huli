@@ -1,10 +1,12 @@
 // Pi's driver: its RPC mode, run in the agent host, which spawns one `pi --mode rpc` per open
 // session.
 
-import type { HostedDriver } from '../driver'
-import { PiConnection } from './connection'
+import { lazyCode, type HostedDriver } from '../driver'
+
+const code = lazyCode(() => import('./connection'))
 
 export const PI_DRIVER: HostedDriver = {
   kind: 'hosted',
-  connect: (context) => new PiConnection(context),
+  load: code.load,
+  connect: (context) => new (code.get().PiConnection)(context),
 }

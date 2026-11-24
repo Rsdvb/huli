@@ -48,6 +48,33 @@ export interface DriverContext {
 export interface StoredConfig {
   /** Upgrades stored options without starting the agent. */
   restoreConfig?(config: readonly ConfigOption[], legacy?: unknown): ConfigOption[]
+  /**
+   * Loads the code `connect` runs, which the host reads only once an agent of the driver starts;
+   * the launcher waits for it before it starts the agent.
+   */
+  load?(): Promise<void>
+}
+
+/** A driver's connection module, read the first time `load` is called. */
+export function lazyCode<T>(read: () => Promise<T>): { load(): Promise<void>; get(): T } {
+  let code: T | null = null
+  let reading: Promise<void> | null = null
+  return {
+    load: () =>
+      (reading ??= read().then(
+        (module) => {
+          code = module
+        },
+        (error: unknown) => {
+          reading = null
+          throw error
+        },
+      )),
+    get: () => {
+      if (code === null) throw new Error('The driver connects before its code loaded')
+      return code
+    },
+  }
 }
 
 export interface ProcessDriver extends StoredConfig {
