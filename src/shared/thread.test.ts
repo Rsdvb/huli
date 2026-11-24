@@ -11,6 +11,7 @@ import {
   prependEntries,
   retryableTurn,
   shareEntries,
+  textStep,
   threadEntries,
   threadFromSnapshot,
   UnknownEntryError,
@@ -224,6 +225,56 @@ describe('pages', () => {
     expect(after.order).toEqual(['e:1', 'm:1'])
     expect(after.byId['m:1']).toBe(before.byId['m:1'])
     expect(prependEntries(after, [user])).toBe(after)
+  })
+})
+
+describe('textStep', () => {
+  const textOf = (s: ThreadState): string => {
+    const entry = s.byId['m:1']
+    return entry?.kind === 'agent' ? entry.markdown : ''
+  }
+
+  it('names the text an append was made from and what it added', () => {
+    const before = state()
+    const was = textStep(before.byId['m:1']!)
+    const after = applyPatches(before, [{ op: 'entry.appendText', id: 'm:1', text: 'lo' }])
+    const step = textStep(after.byId['m:1']!)
+    expect(step).toEqual({ id: expect.any(Number), after: was.id, appended: 'lo' })
+    expect(step.id).not.toBe(was.id)
+    expect(textOf(before) + step.appended).toBe(textOf(after))
+  })
+
+  it('goes back to the text before the call across appends no one could read between', () => {
+    const before = state()
+    const was = textStep(before.byId['m:1']!)
+    const after = applyPatches(before, [
+      { op: 'entry.appendText', id: 'm:1', text: 'l' },
+      { op: 'session.update', changes: { title: 'Greeting' } },
+      { op: 'entry.appendText', id: 'm:1', text: 'o' },
+    ])
+    expect(textStep(after.byId['m:1']!)).toMatchObject({ after: was.id, appended: 'lo' })
+  })
+
+  it('follows each call from the text the one before made', () => {
+    const first = applyPatches(state(), [{ op: 'entry.appendText', id: 'm:1', text: 'l' }])
+    const was = textStep(first.byId['m:1']!)
+    const second = applyPatches(first, [{ op: 'entry.appendText', id: 'm:1', text: 'o' }])
+    expect(textStep(second.byId['m:1']!)).toMatchObject({ after: was.id, appended: 'o' })
+  })
+
+  it('has no step for a text that was not appended to', () => {
+    const before = state()
+    const updated = applyPatches(before, [
+      { op: 'entry.appendText', id: 'm:1', text: 'lo' },
+      { op: 'entry.update', id: 'm:1', changes: { markdown: 'Bye' } },
+    ])
+    expect(textStep(before.byId['m:1']!).after).toBeNull()
+    expect(textStep(updated.byId['m:1']!)).toMatchObject({ after: null, appended: '' })
+    const appended = applyPatches(updated, [{ op: 'entry.appendText', id: 'm:1', text: '!' }])
+    expect(textStep(appended.byId['m:1']!)).toMatchObject({
+      after: textStep(updated.byId['m:1']!).id,
+      appended: '!',
+    })
   })
 })
 
