@@ -11,6 +11,8 @@ import AppKit
 //                  click, collapse or answer (the first request's first option)
 //   floating       draw the island as on a screen without a notch
 //   notch          keep to the screen with the notch, whichever display is in use
+//   fakenotch      draw a notch in the middle of a screen without one, and the island in it
+//   room=L:R       take L and R points as the menu bar's room beside the notch, unmeasured
 
 struct Debug {
   var log = false
@@ -19,6 +21,8 @@ struct Debug {
   var drive = false
   var floating = false
   var notch = false
+  var fakeNotch = false
+  var room: BarRoom?
 
   init(_ value: String?) {
     for part in (value ?? "").split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) })
@@ -33,6 +37,11 @@ struct Debug {
         floating = true
       } else if part == "notch" {
         notch = true
+      } else if part == "fakenotch" {
+        fakeNotch = true
+      } else if part.hasPrefix("room=") {
+        let sides = part.dropFirst("room=".count).split(separator: ":").compactMap { Double($0) }
+        if sides.count == 2 { room = BarRoom(left: sides[0], right: sides[1]) }
       } else if part.hasPrefix("answer=") {
         answerStyle = String(part.dropFirst("answer=".count))
       }
@@ -107,6 +116,7 @@ func handle(_ line: Data) {
   switch message.type {
   case "hello":
     store.hello(message)
+    setSides(message.sides)
     if let version = message.protocolVersion, version != islandProtocol {
       log("Kettu speaks protocol \(version), this helper \(islandProtocol)")
     }
@@ -147,7 +157,8 @@ func handle(_ line: Data) {
     log("Words now in \(store.locale)")
   case "appearance":
     if let mode = message.colorMode { store.setColorMode(mode) }
-    log("Color mode now \(store.colorMode)")
+    setSides(message.sides)
+    log("Color mode now \(store.colorMode), beside the notch \(model.sides.rawValue)")
   case "debug":
     guard debug.drive else { return log("Ignored a debug message") }
     switch message.kind {
@@ -170,6 +181,12 @@ func handle(_ line: Data) {
   }
 }
 
+/// What Settings shows beside the notch; a helper keeps its own while main sends none.
+func setSides(_ value: String?) {
+  guard let value, let sides = IslandSides(rawValue: value), sides != model.sides else { return }
+  model.sides = sides
+}
+
 /// Shrinks the island back into the notch, then ends; main waits a second before it kills a helper
 /// that is still running.
 func leave() {
@@ -180,7 +197,9 @@ func leave() {
 // An accessory app: no Dock icon, no menu bar of its own, never the active app.
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let controller = IslandController(model: model, floating: debug.floating, notchScreen: debug.notch)
+let controller = IslandController(
+  model: model, floating: debug.floating, notchScreen: debug.notch, fakeNotch: debug.fakeNotch,
+  fixedRoom: debug.room)
 channel.start(
   onLine: handle,
   onEnd: {

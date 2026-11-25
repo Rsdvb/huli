@@ -68,6 +68,12 @@ enum Metrics {
   static let wingMark: CGFloat = 18
   static let markOverlap: CGFloat = 5
   static let wingMin: CGFloat = 30
+  /// Huli: the widest wing beside the notch, however much room the menu bar leaves.
+  static let maxWing: CGFloat = 180
+  /// The signal's width, the same for every kind.
+  static let signal: CGFloat = 14
+  /// The corners where a grown island's body steps out from a band narrower than it.
+  static let step: CGFloat = 10
   static let maxHeightShare: CGFloat = 0.7
   /// Room around the island inside its window, for the shoulders and the shadow.
   static let margin: CGFloat = 28
@@ -77,7 +83,7 @@ enum Metrics {
   static let listRows = 6
   /// Up to this many sessions, each row takes a second line.
   static let twoLineRows = 4
-  /// The middle of the collapsed island where no notch is in the way, which holds the title.
+  /// The middle of a grown island where no notch is in the way.
   static let plainMiddle: CGFloat = 185
 }
 
