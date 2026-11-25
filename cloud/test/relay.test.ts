@@ -239,6 +239,15 @@ describe('joining a device to a host', () => {
     const t = await startHost(signedIn())
     await expect.poll(connected(t)).toBe('connected')
     expect((await dial(t.id, 'no-such-token')).kind).toBe('forbidden')
+    // A device with no token at all, as one dials a relay the owner runs, is no account's.
+    const bare = await dialRelay({
+      relays: [base],
+      id: t.id,
+      token: null,
+      openSocket,
+      timeoutMs: 5000,
+    })
+    expect(bare.kind).toBe('forbidden')
     t.stop()
   })
 

@@ -230,6 +230,8 @@ export class Relay {
       protocol: RELAY_PROTOCOL,
       regions: [{ id: this.options.regionId, url: this.options.origin }],
       features,
+      // Only a relay the owner runs says its program's version.
+      version: null,
     }
   }
 
@@ -543,7 +545,8 @@ export class Relay {
       if (!message) return this.refuse(ws, RELAY_CLOSE.malformed)
       asked = true
       clearTimeout(timer)
-      const grant = this.options.tokens.check(message.token)
+      // A device of an account's computer comes with its token; one without is no account's.
+      const grant = message.token === undefined ? null : this.options.tokens.check(message.token)
       if (!grant) {
         this.refusals.hit(address)
         return this.refuse(ws, RELAY_CLOSE.forbidden)
