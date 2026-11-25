@@ -983,13 +983,13 @@ export function WebhookPort() {
 
 // ---- Notifications
 
-export function NotificationSwitch({
-  field,
-  label,
-}: {
-  field: keyof SettingsFile['notifications']
-  label: string
-}) {
+type Notifications = SettingsFile['notifications']
+/** The notifications' switches, which leaves out Huli's choice of what the island shows. */
+type NotificationFlag = {
+  [K in keyof Notifications]: Notifications[K] extends boolean ? K : never
+}[keyof Notifications]
+
+export function NotificationSwitch({ field, label }: { field: NotificationFlag; label: string }) {
   const checked = useSettings().notifications[field]
   const [apply, error] = useApply()
   return (
