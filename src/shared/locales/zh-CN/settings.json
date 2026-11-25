@@ -3560,6 +3560,13 @@
       "off": "已关闭",
       "open": "打开"
     },
+    "promptSuggestions": {
+      "name": "建议下一条消息",
+      "description": "一轮结束后，空着的输入框给出你接下来可能要说的话。它的开关在「通用」里。",
+      "on": "已打开",
+      "off": "已关闭",
+      "open": "打开"
+    },
     "computerElevated": {
       "name": "以管理员身份运行的程序",
       "description": "属于电脑操控，在它的页面里选择。",

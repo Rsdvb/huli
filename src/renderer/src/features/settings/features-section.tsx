@@ -13,7 +13,12 @@ import {
 } from '@shared/settings-catalog'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { platform } from '@renderer/lib/platform'
-import { ComputerElevatedLink, ComputerUseLink, FeatureSwitch } from './features-rows'
+import {
+  ComputerElevatedLink,
+  ComputerUseLink,
+  FeatureSwitch,
+  PromptSuggestionsLink,
+} from './features-rows'
 import { WebReaderSwitch } from './web-reader-rows'
 import type { GroupDef, RowDef, SectionDef } from './model'
 import { GroupNote } from './rows'
@@ -54,6 +59,16 @@ export function useFeaturesSection(): SectionDef {
           />
         ),
     })),
+    ...(group === 'work'
+      ? [
+          {
+            id: 'prompt-suggestions',
+            setting: 'features.prompt-suggestions',
+            group: groups.work,
+            render: () => <PromptSuggestionsLink />,
+          } satisfies RowDef,
+        ]
+      : []),
     ...(group === 'agents'
       ? [
           {

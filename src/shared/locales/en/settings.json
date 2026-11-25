@@ -3624,6 +3624,13 @@
       "off": "Off",
       "open": "Open"
     },
+    "promptSuggestions": {
+      "name": "Next-message suggestions",
+      "description": "After a turn, the empty message box offers what you might say next. Its switch is in General.",
+      "on": "On",
+      "off": "Off",
+      "open": "Open"
+    },
     "computerElevated": {
       "name": "Programs run as administrator",
       "description": "Part of computer use, chosen on its page.",

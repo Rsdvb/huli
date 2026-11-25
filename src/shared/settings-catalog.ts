@@ -2760,6 +2760,17 @@ const ENTRIES = {
     part: 'desktop',
     kind: 'action',
   },
+  // Huli: Kettu's next-message suggestions keep their switch in General; this row leads there.
+  'features.prompt-suggestions': {
+    section: 'features',
+    row: 'prompt-suggestions',
+    group: 'features.groups.work',
+    name: 'features.promptSuggestions.name',
+    description: 'features.promptSuggestions.description',
+    keywords: 'general.promptSuggestions.keywords',
+    part: 'desktop',
+    kind: 'action',
+  },
   // Huli: administrator use lives on computer use's page; this row says how it stands and leads there.
   'features.computer-elevated': {
     section: 'features',
