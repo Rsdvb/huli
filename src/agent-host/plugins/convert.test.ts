@@ -211,8 +211,10 @@ describe('converting a folder', () => {
     expect(await readFile(path.join(converted.path, 'plugin.json'), 'utf8')).toContain(
       'agent-plugins.org',
     )
-    // The server's script keeps its run bit.
-    expect((await stat(path.join(converted.path, 'bin', 'server'))).mode & 0o111).not.toBe(0)
+    // The server's script keeps its run bit, where files have one.
+    if (process.platform !== 'win32') {
+      expect((await stat(path.join(converted.path, 'bin', 'server'))).mode & 0o111).not.toBe(0)
+    }
   })
 
   it('takes the next name when the folder is taken, leaving what is there', async () => {

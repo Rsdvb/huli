@@ -228,12 +228,18 @@ it('fires the same hooks for Codex, and puts what a plugin attached in the messa
   server.on('turn/start', (params, self) => {
     for (const item of params.input as { text?: string }[]) inputs.push(item.text ?? '')
     const started = turn(self.nextTurnId())
-    // Only the user's message asks for an approval, not the title the host asks for after it.
-    if (asked) return { turn: started }
+    // Only the user's message asks for an approval, not the title the host asks for beside it,
+    // which Kite asks for as the message goes: the message is the one the plugin added to.
+    const message = (params.input as { text?: string }[]).some((item) =>
+      item.text?.startsWith('[Added by the plugin'),
+    )
+    if (asked || !message) return { turn: started }
     asked = true
-    const at = { threadId: 'thread-1', turnId: started.id }
+    // The session's own thread, whichever the host's other sessions took before it.
+    const threadId = params.threadId as string
+    const at = { threadId, turnId: started.id }
     setTimeout(() => {
-      self.notify('turn/started', { threadId: 'thread-1', turn: started })
+      self.notify('turn/started', { threadId, turn: started })
       const command = {
         type: 'commandExecution',
         id: 'exec-1',
@@ -258,7 +264,7 @@ it('fires the same hooks for Codex, and puts what a plugin attached in the messa
           ...at,
           item: { ...command, status: 'completed', aggregatedOutput: '', exitCode: 0 },
         })
-        self.notify('turn/completed', { threadId: 'thread-1', turn: turn(started.id, 'completed') })
+        self.notify('turn/completed', { threadId, turn: turn(started.id, 'completed') })
       })
     }, 0)
     return { turn: started }

@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { FILE_LINKS, linkFolder } from '../testing/links'
 import { expand, serverSpec } from './mcp'
 import { readPackage, readPackageFolder, safePackagePath, type PackageFile } from './package'
 
@@ -259,7 +260,8 @@ describe('a package folder', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  it('refuses a link, so nothing outside the folder is read', async () => {
+  // A link to a file needs a right Windows gives only administrators and Developer Mode.
+  it.skipIf(!FILE_LINKS)('refuses a link to a file, so nothing outside is read', async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'kettu-plugin-folder-'))
     const outside = path.join(root, 'secret')
     const folder = path.join(root, 'plugin')
@@ -268,8 +270,14 @@ describe('a package folder', () => {
     await writeFile(path.join(folder, 'plugin.json'), manifest().data)
     await symlink(outside, path.join(folder, 'skills', 'leak'))
     await expect(readPackageFolder(folder)).rejects.toMatchObject({ code: 'invalid_params' })
-    await rm(path.join(folder, 'skills', 'leak'))
-    await symlink(root, path.join(folder, 'up'), 'dir')
+  })
+
+  it('refuses a link to a folder, so nothing outside the folder is read', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'kettu-plugin-folder-'))
+    const folder = path.join(root, 'plugin')
+    await mkdir(folder, { recursive: true })
+    await writeFile(path.join(folder, 'plugin.json'), manifest().data)
+    await linkFolder(root, path.join(folder, 'up'))
     await expect(readPackageFolder(folder)).rejects.toMatchObject({ code: 'invalid_params' })
   })
 

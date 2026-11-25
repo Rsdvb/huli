@@ -2,6 +2,7 @@ import { mkdir, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { expect, it, vi } from 'vitest'
 import type { PluginResource } from '@shared/plugins'
+import { FILE_LINKS } from '../testing/links'
 import { tempFolder } from '../testing/temp'
 import { PluginTemplates } from './plugin-templates'
 
@@ -80,47 +81,59 @@ it('reads a template and its starter files, and a description with no files', as
   ])
 })
 
-it('refuses a template that adds code, links out of its folder, or is not a plain description', async () => {
-  const root = await tempFolder('kettu-templates-')
-  const outside = path.join(root, 'secret.md')
-  await writeFile(outside, 'secret')
-  const resources = [
-    await folderTemplate(root, 'code', { type: 'document' }, { 'document.md': '#', 'x.js': '1' }),
-    await folderTemplate(root, 'html', { type: 'document' }, { 'index.html': '<p>' }),
-    await folderTemplate(root, 'deep', { type: 'document' }, { 'notes/more.md': 'a' }),
-    await folderTemplate(root, 'mine', { type: 'viewer' }, { 'document.md': '#' }),
-    await folderTemplate(root, 'junk', 'not json'),
-    await folderTemplate(root, 'long', { type: 'document', guidance: 'x'.repeat(9_000) }),
-    await folderTemplate(root, 'link', { type: 'document' }),
-    await folderTemplate(root, 'fine', { type: 'document' }, { 'document.md': '#' }),
-  ]
-  const link = resources.find((resource) => resource.name === 'link')!
-  await symlink(outside, path.join(path.dirname(link.file), 'document.md'))
-  const { reader, log } = templates(resources)
-  expect((await reader.list()).map((template) => template.id)).toEqual(['acme:fine'])
-  const told = log.mock.calls.map((call) => String(call[1]))
-  expect(told.some((line) => line.includes('acme:code') && line.includes('adds no code'))).toBe(
-    true,
-  )
-  expect(told.some((line) => line.includes('acme:link') && line.includes('is a link'))).toBe(true)
-  expect(told.some((line) => line.includes('acme:mine') && line.includes('its type must be'))).toBe(
-    true,
-  )
-  // Each refusal is logged once however often the list is read.
-  const before = log.mock.calls.length
-  await reader.list()
-  expect(log.mock.calls.length).toBe(before)
-})
+// A link to a file needs a right Windows gives only administrators and Developer Mode.
+it.skipIf(!FILE_LINKS)(
+  'refuses a template that adds code, links out of its folder, or is not a plain description',
+  async () => {
+    const root = await tempFolder('kettu-templates-')
+    const outside = path.join(root, 'secret.md')
+    await writeFile(outside, 'secret')
+    const resources = [
+      await folderTemplate(root, 'code', { type: 'document' }, { 'document.md': '#', 'x.js': '1' }),
+      await folderTemplate(root, 'html', { type: 'document' }, { 'index.html': '<p>' }),
+      await folderTemplate(root, 'deep', { type: 'document' }, { 'notes/more.md': 'a' }),
+      await folderTemplate(root, 'mine', { type: 'viewer' }, { 'document.md': '#' }),
+      await folderTemplate(root, 'junk', 'not json'),
+      await folderTemplate(root, 'long', { type: 'document', guidance: 'x'.repeat(9_000) }),
+      await folderTemplate(root, 'link', { type: 'document' }),
+      await folderTemplate(root, 'fine', { type: 'document' }, { 'document.md': '#' }),
+    ]
+    const link = resources.find((resource) => resource.name === 'link')!
+    await symlink(outside, path.join(path.dirname(link.file), 'document.md'))
+    const { reader, log } = templates(resources)
+    expect((await reader.list()).map((template) => template.id)).toEqual(['acme:fine'])
+    const told = log.mock.calls.map((call) => String(call[1]))
+    expect(told.some((line) => line.includes('acme:code') && line.includes('adds no code'))).toBe(
+      true,
+    )
+    expect(told.some((line) => line.includes('acme:link') && line.includes('is a link'))).toBe(true)
+    expect(
+      told.some((line) => line.includes('acme:mine') && line.includes('its type must be')),
+    ).toBe(true)
+    // Each refusal is logged once however often the list is read.
+    const before = log.mock.calls.length
+    await reader.list()
+    expect(log.mock.calls.length).toBe(before)
+  },
+)
 
-it('does not read a starter file that became a link after the template was listed', async () => {
-  const root = await tempFolder('kettu-templates-')
-  const outside = path.join(root, 'secret.md')
-  await writeFile(outside, 'secret')
-  const resource = await folderTemplate(root, 'later', { type: 'document' }, { 'document.md': '#' })
-  const { reader } = templates([resource])
-  const [template] = await reader.list()
-  const file = path.join(path.dirname(resource.file), 'document.md')
-  await rm(file)
-  await symlink(outside, file)
-  await expect(reader.starters(template!)).rejects.toThrow(/changed since the template was read/)
-})
+it.skipIf(!FILE_LINKS)(
+  'does not read a starter file that became a link after the template was listed',
+  async () => {
+    const root = await tempFolder('kettu-templates-')
+    const outside = path.join(root, 'secret.md')
+    await writeFile(outside, 'secret')
+    const resource = await folderTemplate(
+      root,
+      'later',
+      { type: 'document' },
+      { 'document.md': '#' },
+    )
+    const { reader } = templates([resource])
+    const [template] = await reader.list()
+    const file = path.join(path.dirname(resource.file), 'document.md')
+    await rm(file)
+    await symlink(outside, file)
+    await expect(reader.starters(template!)).rejects.toThrow(/changed since the template was read/)
+  },
+)

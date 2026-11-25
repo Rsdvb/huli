@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Caller } from '../artifacts/tools'
+import { FILE_LINKS } from '../testing/links'
 import {
   LIST_SKILLS,
   READ_SKILL,
@@ -104,7 +105,8 @@ describe('the skill tools', () => {
     }
   })
 
-  it('refuse a SKILL.md that is a link', async () => {
+  // A link to a file needs a right Windows gives only administrators and Developer Mode.
+  it.skipIf(!FILE_LINKS)('refuse a SKILL.md that is a link', async () => {
     const secret = path.join(root, 'secret')
     await writeFile(secret, 'outside')
     const dir = path.join(root, 'link-0123', 'link')
