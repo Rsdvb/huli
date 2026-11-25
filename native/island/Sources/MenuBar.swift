@@ -44,7 +44,10 @@ final class MenuBarWatcher {
       return
     }
     running = true
-    let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+    // The app whose menus the menu bar shows, which need not be the front one.
+    let workspace = NSWorkspace.shared
+    let front =
+      (workspace.menuBarOwningApplication ?? workspace.frontmostApplication)?.processIdentifier
     let ownPid = ownPid
     let statusLayer = statusLayer
     let trace = !traced
@@ -122,18 +125,18 @@ final class MenuBarWatcher {
   }
 
   /// Where the last of an app's menus in the menu bar ends, through Accessibility; nil when the
-  /// app does not say.
+  /// app names none there, which leaves the left side taken.
   private static func menuEnd(of pid: pid_t, band: CGRect) -> CGFloat? {
     let app = AXUIElementCreateApplication(pid)
     guard let bar = copy(app, kAXMenuBarAttribute), CFGetTypeID(bar) == AXUIElementGetTypeID(),
       let menus = copy(bar as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement]
     else { return nil }
-    var end = band.minX
+    var end: CGFloat?
     for menu in menus {
       guard let frame = frame(of: menu), frame.width > 0,
         frame.midY >= band.minY, frame.midY <= band.maxY
       else { continue }
-      end = max(end, frame.maxX)
+      end = max(end ?? frame.maxX, frame.maxX)
     }
     return end
   }
