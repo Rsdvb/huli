@@ -55,7 +55,9 @@
     "defaultAgent": {
       "name": "Default agent",
       "description": "Which agent New session starts with.",
-      "askEachTime": "Ask each time"
+      "askEachTime": "Ask each time",
+      "notAdded": "Not added",
+      "removed": "Removed"
     },
     "newSessionList": {
       "name": "Under the New session input",

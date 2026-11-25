@@ -54,7 +54,9 @@
     "defaultAgent": {
       "name": "默认智能体",
       "description": "新建会话时默认使用的智能体。",
-      "askEachTime": "每次询问"
+      "askEachTime": "每次询问",
+      "notAdded": "未添加",
+      "removed": "已移除"
     },
     "newSessionList": {
       "name": "新会话页输入框下面",

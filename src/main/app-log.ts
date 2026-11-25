@@ -122,13 +122,26 @@ function safeUrl(webContents: WebContents): string {
   }
 }
 
+/**
+ * Chromium's notice that a ResizeObserver callback changed a layout it observes, so the rest of
+ * its notifications wait for the next frame. The page reports it as an uncaught error, but nothing
+ * failed: it comes from panes resizing as they open and close.
+ */
+const RESIZE_OBSERVER_NOTICE =
+  /^(Uncaught )?ResizeObserver loop (completed with undelivered notifications|limit exceeded)\.?$/
+
 /** The app's own pages' warnings and errors, which otherwise only DevTools would show. */
 export function watchConsole(webContents: WebContents, name: string): void {
   webContents.on('console-message', (event) => {
     const { level, message, sourceId, lineNumber } = event
     if (level !== 'warning' && level !== 'error') return
     const where = sourceId ? ` (${shortSource(sourceId)}:${lineNumber})` : ''
-    writeLog(level === 'error' ? 'error' : 'warn', name, `${message}${where}`)
+    const recordLevel = RESIZE_OBSERVER_NOTICE.test(message)
+      ? 'debug'
+      : level === 'error'
+        ? 'error'
+        : 'warn'
+    writeLog(recordLevel, name, `${message}${where}`)
   })
 }
 
