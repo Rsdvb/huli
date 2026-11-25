@@ -1,11 +1,26 @@
-import { useCallback, useMemo, useRef, useState, type RefObject } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 import type { SelectedLineRange } from '@pierre/diffs'
-import { ArrowDown01Icon, ArrowUp01Icon, AtIcon, BubbleChatIcon } from '@hugeicons/core-free-icons'
+import {
+  ArrowDown01Icon,
+  ArrowUp01Icon,
+  AtIcon,
+  BubbleChatIcon,
+  File01Icon,
+} from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { FileDiff } from '@shared/git'
 import { RenderCount } from '@renderer/features/diff-notes/notes'
 import { NotesLayer, type NoteEditing } from '@renderer/features/diff-notes/notes-layer'
 import { NotesTray } from '@renderer/features/diff-notes/notes-tray'
+import { LineCounts } from '@renderer/features/git/rows'
 import {
   FindingDetailLayer,
   FindingFocus,
@@ -16,53 +31,66 @@ import { FindingsStrip } from '@renderer/features/review/findings-strip'
 import { PaneReviewButton } from '@renderer/features/review/review-button'
 import { useReview } from '@renderer/features/review/review'
 import { useNoteCount } from '@renderer/features/session/composer/drafts'
-import { PaneIcon, PanelButton } from '@renderer/features/shell/panel-button'
-import { closeDiff, openFile, type DiffView } from '@renderer/stores/files'
-import { DiffFileToggle, PathCopy } from './file-header'
+import { PaneContext, PaneIcon, PanelButton } from '@renderer/features/shell/panel-button'
+import {
+  diffId,
+  diffKey,
+  openFile,
+  showOpenDiff,
+  useFilesStore,
+  type DiffTarget,
+  type DiffView,
+} from '@renderer/stores/files'
+import type { DocTab } from '@renderer/stores/view'
+import { PathCopy } from './file-header'
 import { Lines, Notice } from './file-preview'
 import { stepChange, useParsedDiff } from './diff-nav'
 import { FilesDiff } from './files-diff'
 import { mentionLines, selectedLines, type MentionMiss } from './mention-lines'
 
+const UNREAD: DiffView = { result: null, error: null }
+const FROM_PANEL = { fromPanel: true }
+
 /**
- * A file's change: uncommitted against `HEAD` from the Changes list, or at a commit. Its lines take
- * comments for `sessionId`'s agent, the session whose side panel shows it, when there is one.
+ * A diff tab's content: its context bar, then a file's change, uncommitted against `HEAD` or at a
+ * commit. Huli: its lines take comments for `sessionId`'s agent, the session whose side panel
+ * shows it, when there is one, and show that session's review findings.
  */
 export function DiffPreview({
   projectPath,
-  diff,
+  tab,
   sessionId,
 }: {
   projectPath: string
-  diff: DiffView
+  tab: Extract<DocTab, { kind: 'diff' }>
   sessionId: string | null
 }) {
-  const showFile = (): void => {
-    if (diff.projectFile === null) return
-    openFile(projectPath, diff.projectFile)
-    closeDiff(projectPath)
-  }
-  const { result, error } = diff
+  const { path, oldPath, ref, projectFile } = tab
+  const view = useFilesStore((s) => s.diffs[diffKey(projectPath, diffId(tab))] ?? UNREAD)
+  // Read as the tab shows: again after it was left, and after a restart brought it back.
+  useEffect(() => {
+    showOpenDiff(projectPath, { path, oldPath, ref, projectFile })
+  }, [projectPath, path, oldPath, ref, projectFile])
+  const { result, error } = view
   const drawn =
     result && !result.binary && !result.tooLarge && result.oldText !== result.newText
       ? result
       : null
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="kp-doc">
       {drawn ? (
         <Changes
-          key={`${drawn.path}\0${diff.ref ?? ''}`}
+          key={`${drawn.path}\0${ref ?? ''}`}
           projectPath={projectPath}
-          diff={diff}
+          diff={tab}
           result={drawn}
           sessionId={sessionId}
-          onShowFile={showFile}
         />
       ) : (
         <>
-          <Bar diff={diff} onShowFile={showFile} sessionId={sessionId} />
+          <Bar projectPath={projectPath} diff={tab} sessionId={sessionId} />
           <div className="kp-doc__body">
-            <Body diff={diff} error={error} />
+            <Body result={result} error={error} />
           </div>
         </>
       )}
@@ -71,55 +99,72 @@ export function DiffPreview({
 }
 
 /**
- * The diff's bar: its path, the commit, the change steps, Huli's Review changes for the session
- * whose side panel shows it, and the Diff and File toggle.
+ * The diff's context bar: its path, the commit and line counts, the change steps, Huli's Review
+ * changes for the session whose side panel shows it, and Open file.
  */
 function Bar({
+  projectPath,
   diff,
-  onShowFile,
+  counts,
   hunks = 0,
   scroller,
   sessionId,
 }: {
-  diff: DiffView
-  onShowFile: () => void
+  projectPath: string
+  diff: DiffTarget
+  counts?: ReactNode
   hunks?: number
   scroller?: RefObject<HTMLDivElement | null>
   sessionId: string | null
 }) {
   const { t } = useTranslation('files')
+  // Where the last step went, among the runs of changed lines the diff draws.
+  const [at, setAt] = useState<{ current: number; total: number } | null>(null)
+  const step = (direction: 1 | -1): void => {
+    if (scroller) setAt(stepChange(scroller, direction))
+  }
   return (
-    <div className="kp-doc__bar">
+    <PaneContext
+      tools={
+        <>
+          {scroller && hunks > 0 && (
+            <span className="kp-doc__hunks">
+              <span className="px-1.5 tabular">
+                {at ? t('diff.position', at) : t('diff.hunks', { count: hunks })}
+              </span>
+              <PanelButton label={t('diff.previous')} onClick={() => step(-1)}>
+                <PaneIcon icon={ArrowUp01Icon} />
+              </PanelButton>
+              <PanelButton label={t('diff.next')} onClick={() => step(1)}>
+                <PaneIcon icon={ArrowDown01Icon} />
+              </PanelButton>
+            </span>
+          )}
+          {sessionId && diff.ref === null && <PaneReviewButton sessionId={sessionId} />}
+          <PanelButton
+            label={t('diff.openFile')}
+            disabled={diff.projectFile === null}
+            onClick={() =>
+              diff.projectFile !== null && openFile(projectPath, diff.projectFile, null, FROM_PANEL)
+            }
+          >
+            <PaneIcon icon={File01Icon} />
+          </PanelButton>
+        </>
+      }
+    >
       <PathCopy
         path={diff.path}
         shown={diff.oldPath ? `${diff.oldPath} → ${diff.path}` : diff.path}
       />
       {diff.ref && <span className="kp-doc__ref">{diff.ref.slice(0, 7)}</span>}
-      <span className="kp-doc__tools">
-        {scroller && hunks > 1 && (
-          <span className="kp-doc__hunks" title={t('diff.hunks', { count: hunks })}>
-            <PanelButton label={t('diff.previous')} onClick={() => stepChange(scroller, -1)}>
-              <PaneIcon icon={ArrowUp01Icon} />
-            </PanelButton>
-            <PanelButton label={t('diff.next')} onClick={() => stepChange(scroller, 1)}>
-              <PaneIcon icon={ArrowDown01Icon} />
-            </PanelButton>
-          </span>
-        )}
-        {sessionId && diff.ref === null && <PaneReviewButton sessionId={sessionId} />}
-        <DiffFileToggle
-          value="diff"
-          disabled={diff.projectFile === null}
-          onChange={(next) => next === 'file' && onShowFile()}
-        />
-      </span>
-    </div>
+      {counts}
+    </PaneContext>
   )
 }
 
-function Body({ diff, error }: { diff: DiffView; error: string | null }) {
+function Body({ result, error }: DiffView) {
   const { t } = useTranslation('files')
-  const { result } = diff
   if (error && !result) return <Notice title={t('diff.failed')} description={error} />
   if (!result) return <Lines />
   if (result.binary) {
@@ -136,13 +181,11 @@ function Changes({
   diff,
   result,
   sessionId,
-  onShowFile,
 }: {
   projectPath: string
-  diff: DiffView
+  diff: DiffTarget
   result: FileDiff
   sessionId: string | null
-  onShowFile: () => void
 }) {
   const { t } = useTranslation(['files', 'composer'])
   const scroller = useRef<HTMLDivElement>(null)
@@ -183,10 +226,17 @@ function Changes({
   return (
     <>
       <Bar
+        projectPath={projectPath}
         diff={diff}
-        onShowFile={onShowFile}
         hunks={fileDiff.hunks.length}
         scroller={scroller}
+        counts={
+          <LineCounts
+            insertions={fileDiff.hunks.reduce((sum, hunk) => sum + hunk.additionLines, 0)}
+            deletions={fileDiff.hunks.reduce((sum, hunk) => sum + hunk.deletionLines, 0)}
+            className="ml-1"
+          />
+        }
         sessionId={sessionId}
       />
       {sessionId && (

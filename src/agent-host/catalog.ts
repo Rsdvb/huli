@@ -238,6 +238,8 @@ export interface AgentDefinition {
   terminalSignIn?: { replaces: readonly string[] }
   /** Huli: its own CLI's interactive UI, which a terminal of Kite's runs (`agent-terminal.ts`). */
   terminal?: TerminalCli
+  /** 是否在上下文弹窗中展示可加载 Skills 与 MCP 工具定义的 token 估算。 */
+  contextEstimates?: boolean
 }
 
 /**

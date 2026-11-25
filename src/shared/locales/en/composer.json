@@ -49,6 +49,13 @@
     "modelsFrom": "From {{source}}",
     "optionValue": "{{name}}: {{value}}",
     "permissionMode": "Permission mode",
+    "modePendingTurn": "Switches to {{mode}} after this turn.",
+    "modePendingBackground": "Switches to {{mode}} once background work ends.",
+    "modeSwitching": "Switching to {{mode}}…",
+    "modePendingTurnShort": "Switches after this turn",
+    "modePendingBackgroundShort": "Switches after background work",
+    "modeSwitchingShort": "Switching…",
+    "cancelModeSwitch": "Cancel",
     "selected": "{{label}} selected",
     "effortHint": "Higher thinks longer, uses more of your plan · {{shortcut}}",
     "modelSettings": "Model settings",
@@ -228,9 +235,15 @@
       "title": "Plan limits",
       "paceUsed": "At an even pace, {{percent}}% would be used by now",
       "paceLeft": "At an even pace, {{percent}}% would be left by now",
-      "switchTo": "Click to show {{view}}",
       "trayLeft": "{{percent}}% left",
-      "trayUsed": "{{percent}}% used"
+      "trayUsed": "{{percent}}% used",
+      "allModels": "All models",
+      "modelWeekly": "Model weekly",
+      "modelWindow": "Model · {{window}}",
+      "current": "Current",
+      "models_one": "{{count}} model",
+      "models_other": "{{count}} models",
+      "toggleView": "Switch to {{view}}"
     },
     "cache": {
       "title": "Prompt cache",
@@ -358,8 +371,11 @@
     "putBackFailed": "Could not put back: {{error}}"
   },
   "slash": {
+    "heading": "Commands",
     "loading": "Listing commands…",
-    "chooseProject": "Choose a project to list its commands"
+    "chooseProject": "Choose a project to list its commands",
+    "yours": "Yours",
+    "kettu": "Kettu"
   },
   "mentions": {
     "used": "Used in this session",
@@ -373,7 +389,20 @@
     "keysInsert": "↵ to insert",
     "keysFolder": "Tab opens a folder",
     "sessions": "Sessions",
-    "noProject": "No project"
+    "noProject": "No project",
+    "pluginSearching": "Searching…",
+    "pluginLimit_one": "A message can mention {{count}} item from plugins at most",
+    "pluginLimit_other": "A message can mention {{count}} items from plugins at most",
+    "pluginError": {
+      "not_found": "This source isn’t available",
+      "disabled": "The plugin was turned off after it crashed too often",
+      "crashed": "The plugin was stopped for using too much time or memory",
+      "timeout": "The plugin took too long to answer",
+      "unavailable": "Plugins aren’t running right now",
+      "failed": "The plugin couldn’t search",
+      "invalid": "The plugin sent something Kettu can’t use",
+      "request_failed": "Couldn’t search"
+    }
   },
   "chips": {
     "pastedLink": "Pasted as a link",

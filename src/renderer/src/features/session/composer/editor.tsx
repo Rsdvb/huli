@@ -127,12 +127,15 @@ const theme = EditorView.theme({
     whiteSpace: 'nowrap',
     color: 'var(--text-placeholder)',
   },
-  // A predicted prompt is cut on its line too, but its key stays in view.
+  // A predicted prompt is cut on its line too, but its key stays in view, its edge too.
+  '.cm-placeholder:has(.cm-ghost)': { overflow: 'visible' },
   '.cm-ghost': {
     display: 'inline-flex',
     maxWidth: '100%',
     alignItems: 'center',
     gap: '8px',
+    // Room for the key's ring and shadow at the right edge of the box, which clips them.
+    paddingRight: 'calc(var(--spacing) * 0.5)',
     verticalAlign: 'top',
   },
   '.cm-ghost-text': { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' },

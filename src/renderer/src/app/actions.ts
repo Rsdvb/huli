@@ -31,6 +31,7 @@ import { i18n } from '@renderer/lib/i18n'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { adoptedPrepared } from '@renderer/features/session/new-session/prepared'
 import { clearManagerDraft, managerStart } from '@renderer/features/manager/draft'
+import { roleStarted } from '@renderer/features/session/new-session/role-choice'
 import { clearPicks, type OptionValues } from '@renderer/stores/agent-options'
 import {
   draftAttachments,
@@ -88,6 +89,8 @@ export interface PendingSession {
   profileId?: string | null
   /** Huli: the sandbox New session chose; absent for the host's own default. */
   sandbox?: SandboxChoice
+  /** The role New session chose, by its reference. */
+  role?: string
   error: { message: string; code: string | null } | null
 }
 
@@ -224,13 +227,24 @@ export async function createSession(
   worktree: { base: string; branch?: string } | null = null,
   profileId?: string | null,
   sandbox?: SandboxChoice,
+  role: string | null = null,
 ): Promise<void> {
   const profile = {
     ...(profileId === undefined ? {} : { profileId }),
     ...(sandbox ? { sandbox } : {}),
   }
   usePendingSession.setState({
-    pending: { paneId, agentId, projectPath, parentId, prompt, options, ...profile, error: null },
+    pending: {
+      paneId,
+      agentId,
+      projectPath,
+      parentId,
+      prompt,
+      options,
+      ...profile,
+      ...(role ? { role } : {}),
+      error: null,
+    },
   })
   useViewStore.setState((s) => ({
     projectPath: projectPath ?? s.projectPath,
@@ -258,11 +272,14 @@ export async function createSession(
       ...(preparedId && !manager ? { preparedId } : {}),
       ...(worktree ? { worktree } : {}),
       ...profile,
+      ...(role ? { role } : {}),
       ...(manager ? { manager } : {}),
     })
     if (manager) clearManagerDraft()
-    // A session in a new worktree starts its own agent; the prepared one stays the window's.
-    if (preparedId && !worktree && !manager) adoptedPrepared(summary.id)
+    // A session in a new worktree, as a role or a manager starts its own agent; the prepared one
+    // stays the window's.
+    if (preparedId && !worktree && !role && !manager) adoptedPrepared(summary.id)
+    if (role) roleStarted()
     if (worktree) writeSlug(null)
     // The host now remembers what carries over; the rest starts afresh next time.
     if (options) clearPicks(projectPath === null ? null : hostOfPath(projectPath), agentId)
@@ -479,6 +496,7 @@ export function startNewSession(
   worktree: { base: string; branch?: string } | null = null,
   profileId?: string | null,
   sandbox?: SandboxChoice,
+  role: string | null = null,
 ): Promise<void> {
   const { main } = useViewStore.getState()
   const parent =
@@ -497,6 +515,7 @@ export function startNewSession(
         null,
         profileId,
         sandbox,
+        role,
       )
     : createSession(
         agentId,
@@ -509,6 +528,7 @@ export function startNewSession(
         worktree,
         profileId,
         sandbox,
+        role,
       )
 }
 
@@ -555,6 +575,7 @@ export function retryPendingSession(): void {
       null,
       pending.profileId,
       pending.sandbox,
+      pending.role ?? null,
     )
   }
 }

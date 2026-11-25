@@ -17,10 +17,12 @@ beforeEach(async () => {
   const themes = new ThemeStore(
     await readThemeFolder(join(dir, 'themes')),
     await readThemeSources(join(dir, 'theme-sources.json')),
+    { installed: [], failed: new Map() },
     BUILTIN_THEME_ID,
     {
       dir: join(dir, 'themes'),
       sourcesFile: join(dir, 'theme-sources.json'),
+      pluginFile: join(dir, 'plugin-themes.json'),
       catalog: {} as never,
       select: () => {},
       changed: () => {},

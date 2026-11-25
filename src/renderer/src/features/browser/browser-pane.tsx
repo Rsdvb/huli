@@ -21,13 +21,7 @@ import { fitViewport, type BrowserNotice, type BrowserViewport } from '@shared/b
 import { onAppEvent } from '@renderer/app/events'
 import { useControlAgent } from '@renderer/components/control/use-control-agent'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
-import {
-  PaneEmpty,
-  PaneHead,
-  PaneIcon,
-  PaneSheet,
-  PanelButton,
-} from '@renderer/features/shell/panel-button'
+import { PaneBody, PaneEmpty, PaneIcon, PanelButton } from '@renderer/features/shell/panel-button'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { isMac } from '@renderer/lib/platform'
 import { agentName } from '@renderer/stores/agents'
@@ -37,7 +31,6 @@ import { useOverlayOpen } from '@renderer/stores/overlays'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { panelSession } from '@renderer/stores/view'
 import { AddressField } from './address-field'
-import { SurfaceTabs } from '@renderer/features/shell/surface-tabs'
 import { OriginBar } from './origin-bar'
 import { startPicking, stopPicking } from './pick'
 import { PortsButton } from '@renderer/features/ports/ports-button'
@@ -58,18 +51,10 @@ const PickToggle = lazy(() => pickMode().then((m) => ({ default: m.PickToggle })
 const PickTray = lazy(() => pickMode().then((m) => ({ default: m.PickTray })))
 
 /**
- * The side panel's Browser pane: a session's tabs, the selected one's page drawn by main over the
- * pane's page area.
+ * What a page's tab shows in the side panel: the context bar with its navigation and address,
+ * and the selected tab's page, drawn by main over the page area.
  */
-export function BrowserPane({
-  panel,
-  projectPath,
-  maximized,
-}: {
-  panel: string
-  projectPath: string
-  maximized: boolean
-}) {
+export function BrowserPane({ panel, maximized }: { panel: string; maximized: boolean }) {
   const { t } = useTranslation(['browser', 'common'])
   const sessionId = panelSession(panel)
   const pickOn = useEntry('browser.pick')
@@ -254,28 +239,12 @@ export function BrowserPane({
   const agentHasPage = state?.control.kind === 'agent' && state.selected === state.agentTab
 
   return (
-    <PaneSheet pane="browser" maximized={maximized} data-browser-panel="">
-      <PaneHead
-        panel={panel}
-        pane="browser"
-        maximized={maximized}
-        tools={
-          <PanelButton
-            label={t('actions.openExternal')}
-            disabled={!url}
-            onClick={() => sessionId && void window.kettu.browser.openExternal(sessionId)}
-          >
-            <PaneIcon icon={LinkSquare02Icon} />
-          </PanelButton>
-        }
-      >
-        <SurfaceTabs panel={panel} projectPath={projectPath} />
-      </PaneHead>
+    <PaneBody data-browser-panel="">
       <div className="kp-body">
         {/* A page without an address, such as a popup still at about:blank, is on screen too. */}
         {state && (url || state.page) ? (
           <>
-            <div className="kp-addr-row">
+            <div className="kp-ctx kp-addr-row">
               <PanelButton
                 label={t('actions.back')}
                 shortcut={isMac ? '⌘[' : 'Ctrl+['}
@@ -339,6 +308,13 @@ export function BrowserPane({
                   canSave={!!url && !agentHasPage}
                 />
               )}
+              <PanelButton
+                label={t('actions.openExternal')}
+                disabled={!url}
+                onClick={() => sessionId && void window.kettu.browser.openExternal(sessionId)}
+              >
+                <PaneIcon icon={LinkSquare02Icon} />
+              </PanelButton>
               {state.loading && (
                 <span role="progressbar" aria-label={t('loading')} className="kp-load" />
               )}
@@ -431,7 +407,7 @@ export function BrowserPane({
           </>
         )}
       </div>
-    </PaneSheet>
+    </PaneBody>
   )
 }
 

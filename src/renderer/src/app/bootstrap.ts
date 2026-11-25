@@ -73,12 +73,21 @@ import {
   useGitStore,
 } from '@renderer/stores/git'
 import { loadGitHubStar, receiveGitHubStar } from '@renderer/stores/github-star'
-import { marketConnectionChanged, marketKeysChanged } from '@renderer/stores/marketplace'
+import {
+  marketConnectionChanged,
+  marketKeysChanged,
+  marketPluginsChanged,
+} from '@renderer/stores/marketplace'
 import { marketPublishedChanged } from '@renderer/stores/market-published'
+import { loadKettuCommands } from '@renderer/stores/kettu-commands'
+import { pluginSurfacesChanged } from '@renderer/stores/plugin-surfaces'
+import { loadKettuRoles } from '@renderer/stores/kettu-roles'
+import { loadPluginRefs } from '@renderer/stores/plugin-refs'
 import { memoryChanged } from '@renderer/stores/memory'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { routinesHostClosed, routinesHostOpened, useRoutinesStore } from '@renderer/stores/routines'
 import { useIdleReleaseStore } from '@renderer/stores/idle-release'
+import { hostLoadClosed, hostLoadOpened, receiveLoad } from '@renderer/stores/host-load'
 import { useWorkflowsStore } from '@renderer/stores/workflows'
 import { useSuggestionsStore } from '@renderer/stores/workflow-suggestions'
 import { tasksHostClosed, tasksHostOpened, useTasksStore } from '@renderer/stores/tasks'
@@ -225,10 +234,19 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
     case 'webReader.changed':
       if (hostId === null) receiveWebReader(event.status)
       return
+    case 'host.load':
+      receiveLoad(hostId, event.load)
+      return
   }
   receiveArtifactEvent(event, hostId)
   if (event.type === 'artifacts.changed') artifactsChanged(hostId)
   if (event.type === 'memory.changed') memoryChanged(hostId)
+  if (event.type === 'plugins.changed') {
+    void loadKettuCommands(hostId)
+    void loadKettuRoles(hostId)
+    pluginSurfacesChanged(hostId)
+    void loadPluginRefs(hostId)
+  }
   // The rest is each host's own: another host's goes to its Settings, if they have shown it.
   if (hostId !== null && event.type === 'usage.changed') usageChanged(hostId)
   // Only this window's own host is asked to star, as the prompts show its record.
@@ -255,6 +273,9 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
       break
     case 'market.connectionChanged':
       marketConnectionChanged(event)
+      break
+    case 'plugins.changed':
+      marketPluginsChanged()
       break
     case 'market.publishedChanged':
       marketPublishedChanged(null)
@@ -306,6 +327,7 @@ function loadAgents(): Promise<void> {
 /** Loads everything the shell shows; also runs after the agent host comes back. */
 export async function loadHostState(): Promise<void> {
   useIdleReleaseStore.getState().reload(null)
+  hostLoadOpened(null)
   await Promise.allSettled([
     loadSessionState(),
     loadAgents(),
@@ -474,6 +496,7 @@ export function bootstrap(): Promise<unknown> {
         foldersHostOpened(hostId)
         hostScopeOpened(hostId)
         hostRestarted(hostId)
+        hostLoadOpened(hostId)
         rewatchAll((sessionId) => sessionHost(sessionId) === hostId)
         showFront(true)
         rewatchGit(hostId)
@@ -483,6 +506,7 @@ export function bootstrap(): Promise<unknown> {
         artifactsHostClosed(hostId)
         routinesHostClosed(hostId)
         tasksHostClosed(hostId)
+        hostLoadClosed(hostId)
       },
       resync: (hostId) => rewatchAll((sessionId) => sessionHost(sessionId) === hostId),
     })
