@@ -1,18 +1,20 @@
-/* The spreadsheet grid: white in both themes, like the pages of a document, with the labels
-   and the sheet tabs around it following the theme's own surfaces. */
+/* The spreadsheet grid on the document's card, as the editor is: the theme's surface, text and
+   lines in both themes. Only the shown text of the cells is drawn, never their own fills or font
+   colors, so nothing of the workbook's can fall out of contrast with the theme. The labels and
+   lines are mixed opaque, since cells scroll under the sticky labels. */
 .kp-sheet__tabs {
   border-bottom: var(--hairline) solid var(--border-subtle);
 }
 .kp-sheet__scroll {
-  --sheet-head: color-mix(in srgb, var(--canvas-ink) 5%, var(--canvas));
-  --sheet-line: color-mix(in srgb, var(--canvas-ink) 12%, var(--canvas));
+  --sheet-head: color-mix(in srgb, var(--text-primary) 5%, var(--bg-surface));
+  --sheet-line: color-mix(in srgb, var(--text-primary) 12%, var(--bg-surface));
   position: absolute;
   inset: 0;
   overflow: auto;
   overscroll-behavior: contain;
   outline: none;
-  background: var(--canvas);
-  color: var(--canvas-ink);
+  background: var(--bg-surface);
+  color: var(--text-primary);
   font-size: var(--text-meta);
 }
 .kp-sheet__scroll:focus-visible {
@@ -64,7 +66,7 @@
   background: var(--sheet-head);
   border-right: var(--hairline) solid var(--sheet-line);
   border-bottom: var(--hairline) solid var(--sheet-line);
-  color: color-mix(in srgb, var(--canvas-ink) 60%, var(--canvas));
+  color: var(--text-tertiary);
   display: flex;
   align-items: center;
   justify-content: center;
