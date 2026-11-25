@@ -236,7 +236,7 @@ export function FilePreview({
                 )}
                 {local && (
                   <DropdownMenuItem
-                    onClick={() => openOutside(window.kettu.shell.showItem, projectPath, file.path)}
+                    onClick={() => openOutside(showInFolder, projectPath, file.path)}
                   >
                     <PaneIcon icon={FolderOpenIcon} size={16} />
                     {t('preview.showIn', { name: fileManagerName() })}
@@ -373,6 +373,9 @@ function pathOnDisk(projectPath: string, path: string): string {
   return `${projectPath.replace(/[\\/]+$/, '')}${sep}${path.split('/').join(sep)}`
 }
 
+/** Shows the file in the system's file manager. */
+const showInFolder = (path: string): Promise<void> => window.kettu.shell.showItem(path)
+
 /** Shows the file in the editor or the file manager; a failure says why in a toast. */
 function openOutside(open: (path: string) => Promise<void>, projectPath: string, path: string) {
   open(pathOnDisk(projectPath, path)).catch((failure: unknown) => toast(errorMessage(failure)))
@@ -424,7 +427,7 @@ function Body({
           <button
             type="button"
             className="kp-btn"
-            onClick={() => openOutside(window.kettu.shell.showItem, projectPath, file.path)}
+            onClick={() => openOutside(showInFolder, projectPath, file.path)}
           >
             {t('preview.showIn', { name: fileManagerName() })}
           </button>

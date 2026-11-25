@@ -8,6 +8,7 @@ import {
   sameSshAddress,
   type KnownHost,
 } from './hosts'
+import { RELAY_URL } from './relay'
 
 describe('parseSshPort', () => {
   it('takes a whole number from 1 to 65535', () => {
@@ -136,18 +137,18 @@ describe('parseHostStatus', () => {
       relay: 'https://relay.example.com',
       own: true,
     })
-    expect(connection({ state: 'online', relay: 'https://relay.kettu.sh' })).toEqual({
+    expect(connection({ state: 'online', relay: RELAY_URL })).toEqual({
       state: 'online',
-      relay: 'https://relay.kettu.sh',
+      relay: RELAY_URL,
     })
-    expect(connection({ state: 'online', relay: 'https://relay.kettu.sh', own: 'yes' })).toEqual({
+    expect(connection({ state: 'online', relay: RELAY_URL, own: 'yes' })).toEqual({
       state: 'online',
-      relay: 'https://relay.kettu.sh',
+      relay: RELAY_URL,
     })
   })
 
   it('keeps the relay region a host is reached through', () => {
-    const relay = 'https://relay.kettu.sh'
+    const relay = RELAY_URL
     expect(connection({ state: 'online', relay, region: 'Tokyo' })).toEqual({
       state: 'online',
       relay,

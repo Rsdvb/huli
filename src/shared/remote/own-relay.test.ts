@@ -24,6 +24,7 @@ import {
   relayHostId,
 } from './relay'
 import { dialRelay } from './relay-device'
+import { RELAY_URL } from './relay'
 import { RelayHost } from './relay-host'
 import vectors from './relay-vectors.json'
 
@@ -63,9 +64,9 @@ describe('the owner’s own relay', () => {
     expect(ownRelayProblem('http://127.0.0.1:8798')).toBeNull()
     expect(ownRelayProblem('http://[::1]:8798')).toBeNull()
     expect(ownRelayProblem('http://localhost:8798')).toBeNull()
-    expect(ownRelayProblem('https://relay.kettu.sh')).toBe('kettu')
-    expect(ownRelayProblem('https://hk-1.relay.kettu.sh')).toBe('kettu')
-    expect(ownRelayProblem('https://kettu.sh')).toBe('kettu')
+    expect(ownRelayProblem(RELAY_URL)).toBe('kettu')
+    expect(ownRelayProblem(RELAY_URL.replace('https://', 'https://hk-1.'))).toBe('kettu')
+    expect(ownRelayProblem('https://kettu.page')).toBe('kettu')
     expect(ownRelayProblem('http://203.0.113.7:8080')).toBe('http')
     expect(ownRelayProblem('http://relay.example.com')).toBe('http')
     expect(ownRelayProblem(`${RELAY}/path`)).toBe('address')
@@ -85,8 +86,8 @@ describe('the owner’s own relay', () => {
     const id = 'a'.repeat(26)
     expect(parseHostRelay({ id, urls: [RELAY], pin: PIN })?.pin).toBe(PIN)
     expect(parseHostRelay({ id, urls: ['http://127.0.0.1:8798'], pin: PIN })?.pin).toBeUndefined()
-    expect(isOwnRelay({ id, urls: [RELAY] }, 'https://relay.kettu.sh')).toBe(true)
-    expect(isOwnRelay({ id, urls: ['https://relay.kettu.sh'] }, 'https://relay.kettu.sh')).toBe(
+    expect(isOwnRelay({ id, urls: [RELAY] }, RELAY_URL)).toBe(true)
+    expect(isOwnRelay({ id, urls: [RELAY_URL] }, RELAY_URL)).toBe(
       false,
     )
   })
@@ -162,7 +163,7 @@ describe('checking a relay before switching to it', () => {
     relays.relay(RELAY).useAccessKey(KEY)
     expect(await check(relays, { key: `${KEY}x` })).toEqual({ ok: false, problem: 'key_refused' })
     expect(await check(relays, { key: null })).toEqual({ ok: false, problem: 'key' })
-    expect(await check(relays, { url: 'https://relay.kettu.sh' })).toEqual({
+    expect(await check(relays, { url: RELAY_URL })).toEqual({
       ok: false,
       problem: 'kettu',
     })
