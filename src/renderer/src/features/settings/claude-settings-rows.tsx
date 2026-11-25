@@ -112,7 +112,6 @@ export function ClaudeSettingsRows({ status }: { status: AgentStatus }) {
         styles={settings?.outputStyles ?? null}
         ownStyle={settings?.outputStyle ?? null}
       />
-      <PromptSuggestionsRow />
       {hostId === null && <ClaudeTestEntrypointRow />}
     </>
   )
@@ -324,39 +323,6 @@ function ClaudeRunRows({
         )}
       </RowShell>
     </>
-  )
-}
-
-/** Claude Code's predicted next prompt in the composer, for every Claude Code agent. */
-function PromptSuggestionsRow() {
-  const { useSettingsStore } = useHostScope()
-  const { t } = useTranslation('settings')
-  const [save, busy, error] = useAction()
-  // An older host sends none, and offers them as the default does.
-  const checked = useSettingsStore((s) => s.settings.general.promptSuggestions) ?? true
-  const name = t('agents.claudeSettings.suggestions.name')
-  return (
-    <RowShell>
-      <RowLine
-        text={
-          <RowText name={name} description={t('agents.claudeSettings.suggestions.description')} />
-        }
-      >
-        <SettingSwitch
-          label={name}
-          checked={checked}
-          disabled={busy}
-          onChange={(next) =>
-            save(() => useSettingsStore.getState().update({ general: { promptSuggestions: next } }))
-          }
-        />
-      </RowLine>
-      {error && (
-        <p role="status" className="k-row-note k-error" data-wrap="">
-          {error}
-        </p>
-      )}
-    </RowShell>
   )
 }
 
