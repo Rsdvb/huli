@@ -172,6 +172,29 @@ describe("the agents' lower priority", () => {
   })
 })
 
+// Huli: what the notch island shows beside the notch.
+describe('the island beside the notch', () => {
+  it('avoids the menu bar for a file from before it, keeps a choice and drops the rest', async () => {
+    await save({ version: 1, notifications: { island: true } })
+    expect((await SettingsStore.load(dir)).get().notifications.islandSides).toBe('auto')
+    await save({ version: 1, notifications: { islandSides: 'notch' } })
+    expect((await SettingsStore.load(dir)).get().notifications.islandSides).toBe('notch')
+    for (const islandSides of ['off', 'left', true, null, 'NOTCH']) {
+      await save({ version: 1, notifications: { islandSides } })
+      expect((await SettingsStore.load(dir)).get().notifications.islandSides).toBe('auto')
+    }
+  })
+
+  it('takes only its two choices in a change', () => {
+    for (const islandSides of ['auto', 'notch']) {
+      expect(() => validateSettingsPatch({ notifications: { islandSides } })).not.toThrow()
+    }
+    for (const islandSides of ['off', ' notch', 1, null, false]) {
+      expect(() => validateSettingsPatch({ notifications: { islandSides } })).toThrow()
+    }
+  })
+})
+
 // Huli: who may drive apps run as administrator.
 describe('administrator use of computer use', () => {
   it('is off for a file from before it, and the old switch turns nothing on', async () => {

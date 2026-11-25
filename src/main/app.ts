@@ -531,6 +531,7 @@ async function start(): Promise<void> {
         : settings.get().notifications[ATTENTION_SETTING[kind]],
     windowFocused: () => BrowserWindow.getFocusedWindow() !== null,
     colorMode: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
+    sides: () => settings.get().notifications.islandSides,
     version: app.getVersion(),
     locale: () => currentLocale(),
     strings: () => islandHelperStrings(),

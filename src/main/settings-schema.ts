@@ -372,6 +372,7 @@ const SECTION_FIELDS = {
     sound: isBoolean,
     badge: isBoolean,
     island: isBoolean,
+    islandSides: oneOf('auto', 'notch'),
   },
   git: { backgroundFetch: isBoolean, worktreeRoot: isWorktreeRoot, portBase: isPortBaseValue },
   updates: {

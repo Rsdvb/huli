@@ -666,6 +666,23 @@ const ENTRIES = {
     on: (ctx) => ctx.desktop && ctx.platform === 'darwin',
     ...flag('notifications', 'island', (file) => file.notifications.island),
   },
+  // Huli: what the island shows beside the notch; the page's own menu also offers turning it off.
+  'notifications.island-sides': {
+    section: 'notifications',
+    row: 'island-sides',
+    name: 'notifications.islandSides.name',
+    description: 'notifications.islandSides.description',
+    keywords: 'notifications.islandSides.keywords',
+    part: 'desktop',
+    access: 'change',
+    on: (ctx) => ctx.desktop && ctx.platform === 'darwin',
+    ...pick(
+      'notifications',
+      'islandSides',
+      (file) => file.notifications.islandSides,
+      choices(['auto', 'notch'], (mode) => `notifications.islandSides.${mode}`),
+    ),
+  },
   'notifications.permission': {
     section: 'notifications',
     row: 'permission',
