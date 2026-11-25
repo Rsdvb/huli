@@ -1,0 +1,44 @@
+name: Huli island helper
+
+# The notch island's macOS helper, on a push that changes it: its layout tests (swift test), a build
+# of the whole helper as the release compiles it, without the marks, which need the repository's
+# packages, and screenshots of it on the runner's screen, which has no notch, and beside a notch it
+# draws there (native/island/shots.mjs). The release run builds the real helper. Huli's own; see
+# tools/huli/README.md.
+on:
+  push:
+    branches: ['**']
+    paths: ['native/island/**', '.github/workflows/huli-island.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: huli-island-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  helper:
+    name: Island helper
+    # GitHub's own runner, never the owner's Mac.
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Layout tests
+        working-directory: native/island
+        run: swift test
+      - name: Build the helper
+        run: node native/island/build.mjs --no-marks "$RUNNER_TEMP/island"
+      - name: Screenshots
+        run: node native/island/shots.mjs "$RUNNER_TEMP/island" "$RUNNER_TEMP/island-shots"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: island-shots
+          path: ${{ runner.temp }}/island-shots
+          if-no-files-found: warn
