@@ -66,6 +66,7 @@ Code (kept small so upstream merges stay clean):
 | `eslint.config.mjs`, `.prettierignore`                                                                                                                 | lint and formatting reach the phone app in `mobile/` (see Workflows)                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `src/agent-host/{agents,host,validate}.ts`, `acp/connection.ts`, `src/shared/agent-host.ts`, `agents-section.tsx`, `mobile/src/app/settings/agent.tsx` | an agent added, turned on or whose page opens is started (never installed) to learn its sign-in methods and state (`agents.readSignIn`, `readingSignIn` while it runs), asked once without a session that would stay in an unchecked agent's history; a sign-in waiting on a browser or terminal is checked every 4 s for 3 minutes, at once when its page is done and when the window comes back, and a check that finds it signed in ends a pending `authenticate` as signed in (`sign-in-watch.test.ts`) |
 | ----------------------------------------------------------------------------------------------------------------------------------------               | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------                                                                                                                                                                                         |
+| `native/island/Sources/*.swift`, `src/main/island/{bridge,protocol}.ts`, `island-row.tsx`, `sections.tsx`                                              | the notch island's wings take only the room the menu bar leaves, let clicks through to it, and stay out of a menu bar without a notch; Settings › Notifications chooses `notifications.islandSides` (see The island beside the menu bar)                                                                                                                                                                                                                                                                    |
 | `src/agent-host/{agents,host,validate}.ts`, `src/shared/{agent-host,host-request-limits}.ts`, `agents-section.tsx`, `app/bootstrap.ts`                 | an agent's Remove… also offers to uninstall its program from the computer and to delete its own data there (see Removing an agent from the computer)                                                                                                                                                                                                                                                                                                                                                        |
 | `src/agent-host/{agents,sessions,started-mode}.ts`, `agents-section.tsx`, `agent-sign-in.ts`, `sign-in-actions.tsx`, `new-session.tsx`                 | a signed-out agent's status leaves out the account, plan and balances an earlier sign-in read, which go once it names another account; a changed key or a reset reads the sign-in again (`readingSignIn`); a sign-in stops after 5 minutes; a session's sign-in notice leaves once it no longer waits (`signed-out-readings.test.ts`); New session and a waiting session offer the sign-in in place                                                                                                         |
 
@@ -1754,6 +1755,53 @@ windows and may read a private registry hive file in place of the user's) and ru
 environment checks, the broker and its checks end to end without elevation or touching the real
 registry.
 
+### The island beside the menu bar (灵动岛避开菜单栏)
+
+Kettu's notch island drew wings beside the notch while something needed a mark (the agent's marks
+on the left, the turn's dots and a fact such as "2/5" on the right) and caught the pointer over
+them, so on a MacBook the status icons right of the notch and the app's last menus left of it were
+hidden and could not be clicked. Kite's island takes only the room the menu bar leaves free:
+
+- **Measuring.** The helper (`native/island/Sources/MenuBar.swift`) reads the window list
+  (`CGWindowListCopyWindowInfo`, no permission needed) for the status items, which are windows of
+  their own at the status level inside the menu bar's band, other than its own; the right room ends
+  10 pt before the first of them. The left room ends 10 pt after the menu bar owner's last menu,
+  read through Accessibility only when `AXIsProcessTrusted()` already says yes (Kite has it once
+  computer use was allowed; the helper is Kite's child, so it shares the grant) and never asked
+  for; without it the left side counts as taken. A menu bar with no status item on it (hidden, as
+  in a full-screen app, or unreadable) and one that hides itself (`_HIHideMenuBar`) leave no room.
+  The arithmetic is `native/island/Sources/Layout.swift`, pure, with `swift test` cases in
+  `native/island/Tests` (`Package.swift` builds that file alone for them).
+- **When.** On events only, never on a timer: the active app or Space changing (and once more
+  0.5 s later, as menus settle), the screens changing, an app launching (1.5 s later, when its
+  status item is up) or quitting, the island about to collapse or grow, Settings' choice changing,
+  and the pointer coming into or leaving the menu bar, at most once a second, so an item that
+  appeared under a wing since comes out before the pointer reaches it. Each measurement runs off
+  the main thread, one at a time, and Accessibility gives up on an app after 0.25 s.
+- **Collapsed.** The marks go left and the signal with its fact right while both sides have room
+  (both wings as wide as the wider when both fit, else each its own); otherwise all go to the side
+  with room, the marks dropped first, then the fact; with no room on either side the island stays
+  in the notch, drawn as at rest, and the pointer resting on the notch or a click on it opens it.
+  The open panel's top then shows the fact beside the signal.
+- **Clicks.** Beside the notch the island never takes the pointer: the menu bar under a wing gets
+  every click, and resting there opens nothing. The notch itself, a pop's body under the menu bar
+  and the open panel answer as before.
+- **Pops.** A grown island's band narrows to its content on a side with less room, or stops at the
+  notch, and the mark or the state moves under it beside the session's title; its body steps out
+  under the menu bar.
+- **No notch.** Collapsed, the island stays out of the menu bar altogether, and the menu bar icon
+  shows the sessions as at rest. A pop meets the menu bar only where both its wings are free, which
+  needs Accessibility to know where the menus end; otherwise it hangs just below the menu bar for
+  its few seconds. A pill sitting under the menu bar while agents run would cover the front
+  window's tabs and toolbar for as long as they run, which is worse than a pop now and then.
+- **Setting.** Settings › Notifications › 灵动岛两侧显示状态 (`notifications.islandSides`,
+  validated in main): 自动避开菜单栏 (`auto`, the default), 只在刘海里 (`notch`: no wings, and pops
+  that stop at the notch) or 关闭灵动岛, which turns `notifications.island` off. Main sends the
+  choice in the helper's `hello` and `appearance` as `sides`; an older helper ignores it.
+
+`huli-island.yml` builds and runs the helper on GitHub's macOS runner (see Workflows); its
+`fakenotch` and `room=L:R` debug switches draw a notch on a screen without one and give the room.
+
 ### Kite in development
 
 `pnpm dev` runs the tree as committed, yet looks like Kite: `tools/huli/dev-brand.mjs`, a Vite
@@ -3007,6 +3055,14 @@ disables every other workflow after each merge, new ones included.
   the monitor could not report, which GitHub mails as a failed run. To try the issue without an
   outage: `gh workflow run huli-monitor.yml -R Rsdvb/huli -f rehearse=true`, which reports a
   made-up failure that the next run closes.
+
+- `huli-island.yml`, on a push that changes `native/island/` and by hand, on GitHub's `macos-26`
+  runner only: the notch island helper's `swift test`, a build of the whole helper as the release
+  compiles it but without the marks (`build.mjs --no-marks`, which needs no packages; the marks
+  show as initials), and `native/island/shots.mjs`, which runs it on a grey desktop with a made-up
+  view: without a notch, and beside a notch it draws (`fakenotch`) with the room measured from
+  the runner's own menu bar or given (`room=L:R`). The screenshots are the run's `island-shots`
+  artifact. The release run still builds the real helper.
 
 - `huli-sim.yml`, only by hand (`gh workflow run huli-sim.yml --ref <branch> -f ref=<branch>`):
   checks the phone app in an iOS simulator on a `macos-26` runner instead of the owner's Mac.

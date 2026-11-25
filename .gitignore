@@ -20,3 +20,6 @@ cloud/dist/
 # Kite's artwork renderer's dependencies, installed only when the artwork changes
 tools/huli/brand/node_modules/
 tools/huli/brand/package-lock.json
+
+# The island helper's layout tests (swift test)
+native/island/.build/

@@ -180,6 +180,7 @@ function setup(
     allowed: () => true,
     windowFocused: () => false,
     colorMode: () => 'light',
+    sides: () => 'auto',
     version: '0.1.13',
     locale: () => 'en',
     strings: () => ({ 'status.running': 'Running' }),
@@ -311,6 +312,22 @@ describe('handshake', () => {
     s.bridge.settingsChanged()
     await vi.advanceTimersByTimeAsync(0)
     expect(s.helpers).toEqual([])
+  })
+
+  // Huli: what shows beside the notch, which a helper without the field ignores.
+  it('says what shows beside the notch in its hello and once more when it changes', async () => {
+    let sides: 'auto' | 'notch' = 'notch'
+    const s = setup([], {}, [], { sides: () => sides })
+    await started(s)
+    expect(s.helper().of('hello')[0]).toMatchObject({ sides: 'notch' })
+    s.bridge.settingsChanged()
+    expect(s.helper().of('appearance')).toEqual([])
+    sides = 'auto'
+    s.bridge.settingsChanged()
+    s.bridge.settingsChanged()
+    expect(s.helper().of('appearance')).toEqual([
+      { type: 'appearance', colorMode: 'light', sides: 'auto' },
+    ])
   })
 })
 

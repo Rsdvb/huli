@@ -28,6 +28,7 @@ import {
   type ColorMode,
   type IslandHost,
   type IslandMark,
+  type IslandSides,
   type IslandToMain,
   type IslandView,
   type MainToIsland,
@@ -88,6 +89,8 @@ export interface IslandBridgeDeps {
   allowed(kind: HostAttention['kind'] | 'update'): boolean
   windowFocused(): boolean
   colorMode(): ColorMode
+  /** Huli: Settings' choice of what the island shows beside the notch. */
+  sides(): IslandSides
   version: string
   locale(): string
   strings(): Record<string, string>
@@ -177,12 +180,14 @@ export class IslandBridge {
   private local: IslandConnection | null = null
   private locale: string
   private colorMode: ColorMode
+  private sides: IslandSides
   /** The other hosts this computer knows, by id, with their names. */
   private known = new Map<string, string>()
 
   constructor(private readonly deps: IslandBridgeDeps) {
     this.locale = deps.locale()
     this.colorMode = deps.colorMode()
+    this.sides = deps.sides()
   }
 
   private now(): number {
@@ -222,7 +227,7 @@ export class IslandBridge {
     this.apply()
   }
 
-  /** The settings changed: the switch, the language or the color mode. */
+  /** The settings changed: the switch, the language, the color mode or what shows beside the notch. */
   settingsChanged(): void {
     this.apply()
     const locale = this.deps.locale()
@@ -238,9 +243,11 @@ export class IslandBridge {
 
   appearanceChanged(): void {
     const colorMode = this.deps.colorMode()
-    if (colorMode === this.colorMode) return
+    const sides = this.deps.sides()
+    if (colorMode === this.colorMode && sides === this.sides) return
     this.colorMode = colorMode
-    if (this.phase === 'running') this.send({ type: 'appearance', colorMode })
+    this.sides = sides
+    if (this.phase === 'running') this.send({ type: 'appearance', colorMode, sides })
   }
 
   /** Settings' Try again after the island stopped. */
@@ -478,6 +485,7 @@ export class IslandBridge {
       strings: this.deps.strings(),
       colorMode: this.colorMode,
       stuckAfterMs: STUCK_AFTER_MS,
+      sides: this.sides,
     })
   }
 

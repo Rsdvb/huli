@@ -140,6 +140,8 @@ struct MainMessage: Decodable {
   let strings: [String: String]?
   let colorMode: String?
   let stuckAfterMs: Double?
+  /// Huli: what the island shows beside the notch, in hello and appearance; older helpers skip it.
+  let sides: String?
   // view and change
   let seq: Int?
   let rows: [IslandRow]?
@@ -166,7 +168,7 @@ struct MainMessage: Decodable {
   enum CodingKeys: String, CodingKey {
     case type, version, locale, strings, colorMode, stuckAfterMs, seq, rows, requests, summary
     case removedRows, order, removedRequests, requestOrder, row, kind, title, body, id, result
-    case message, notices, mark, percent, action
+    case message, notices, mark, percent, action, sides
     case protocolVersion = "protocol"
   }
 }

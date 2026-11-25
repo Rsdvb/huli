@@ -132,6 +132,12 @@ export interface IslandView {
 
 export type ColorMode = 'light' | 'dark'
 
+/**
+ * Huli: what the island shows beside the notch, as Settings chooses: wings only where the menu bar
+ * leaves room (`auto`), or nothing beside the notch at all. A helper without it takes `auto`.
+ */
+export type IslandSides = 'auto' | 'notch'
+
 export type PopKind =
   | 'permission'
   | 'turn-ended'
@@ -156,6 +162,7 @@ export type MainToIsland =
       strings: Record<string, string>
       colorMode: ColorMode
       stuckAfterMs: number
+      sides: IslandSides
     }
   | ({ type: 'view'; seq: number } & IslandView)
   | {
@@ -187,7 +194,7 @@ export type MainToIsland =
     }
   | ({ type: 'answered'; id: string } & AnswerResult)
   | { type: 'strings'; locale: string; strings: Record<string, string> }
-  | { type: 'appearance'; colorMode: ColorMode }
+  | { type: 'appearance'; colorMode: ColorMode; sides: IslandSides }
   | { type: 'quit' }
 
 export type IslandToMain =

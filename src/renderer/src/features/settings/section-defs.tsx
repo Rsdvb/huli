@@ -60,7 +60,7 @@ import { useSandboxRows } from './sandbox'
 import { ResumeAfterLimit, ResumeText, StallMinutesChoice } from './supervisor-rows'
 import { AutoSettle, SettleDaysChoice, SettleMerged } from './tidy-rows'
 import { ToolCallsChoice } from './zen-rows'
-import { IslandSwitch } from './island-row'
+import { IslandSidesSelect, IslandSwitch } from './island-row'
 import { useIslandDescription } from './island-state'
 import { useWorkflowRows } from './workflow-settings'
 import {
@@ -589,6 +589,12 @@ export function useNotificationsSection(): SectionDef {
       group: how,
       description: islandDescription,
       render: () => <IslandSwitch label={t('notifications.island.name')} />,
+    })
+    rows.push({
+      id: 'island-sides',
+      setting: 'notifications.island-sides',
+      group: how,
+      render: () => <IslandSidesSelect label={t('notifications.islandSides.name')} />,
     })
   }
   // Linux desktops differ in how they show a count, so the row is left out there.

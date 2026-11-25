@@ -2,7 +2,8 @@
 // Builds kettu-island, the macOS helper that draws the notch island from the view main sends,
 // for this Mac's architecture and copies it into the directory given as the first argument.
 // Elsewhere it builds nothing. It reads the agent marks and colors from the renderer's sources, so
-// the repository's packages must be installed.
+// the repository's packages must be installed. Huli: with `--no-marks` it leaves the marks out and
+// needs no packages, as a CI job builds it; the marks then show as initials.
 
 import { spawnSync } from 'node:child_process'
 import console from 'node:console'
@@ -20,7 +21,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { generatedSwift } from './generate.mjs'
+import { generatedSwift, generatedSwiftWithoutMarks } from './generate.mjs'
 
 const NAME = 'kettu-island'
 // Electron 44's own minimum.
@@ -28,9 +29,11 @@ const MINIMUM_MACOS = '13.0'
 const ARCHITECTURES = { arm64: 'arm64', x64: 'x86_64' }
 
 async function main() {
-  const destination = process.argv[2]
+  const args = process.argv.slice(2)
+  const noMarks = args.includes('--no-marks')
+  const destination = args.find((arg) => !arg.startsWith('--'))
   if (!destination) {
-    console.error('usage: node build.mjs <destination directory>')
+    console.error('usage: node build.mjs [--no-marks] <destination directory>')
     return 2
   }
   if (process.platform !== 'darwin') {
@@ -62,7 +65,11 @@ async function main() {
   const work = mkdtempSync(join(tmpdir(), `${NAME}-`))
   try {
     const generated = join(work, 'Generated.swift')
-    writeFileSync(generated, await generatedSwift(resolve(here, '..', '..')))
+    const root = resolve(here, '..', '..')
+    writeFileSync(
+      generated,
+      noMarks ? generatedSwiftWithoutMarks(root) : await generatedSwift(root),
+    )
     sources.push(generated)
     const output = join(work, NAME)
     const result = spawnSync(

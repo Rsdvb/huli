@@ -502,6 +502,14 @@
         "missing": "This build has no Dynamic Island. Notifications show as before."
       }
     },
+    "islandSides": {
+      "name": "Status beside the notch",
+      "description": "It never covers the menu bar’s icons or menus. With no room beside the notch it stays in the notch, and pointing at the notch opens it.",
+      "keywords": "notch menu bar status icons wings dynamic island",
+      "auto": "Avoid the menu bar",
+      "notch": "In the notch only",
+      "off": "Turn off the Dynamic Island"
+    },
     "footer": "Shows only while no Kettu window is in front.",
     "groups": {
       "preview": "Preview",

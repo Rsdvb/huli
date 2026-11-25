@@ -11,6 +11,13 @@ struct IslandGeometry: Equatable {
   var maxHeight: CGFloat = 600
 }
 
+/// Huli: what the island shows beside the notch, as Settings › Notifications chooses: wings only
+/// where the menu bar leaves room, or nothing beside the notch at all.
+enum IslandSides: String {
+  case auto
+  case notch
+}
+
 enum Mode: Equatable {
   case hidden
   /// Shrunk into the notch while nothing needs a mark; resting on the notch still opens it.
@@ -53,7 +60,7 @@ enum Fact: Equatable {
 
 /// What the collapsed island shows: who it is about, the marks of its most urgent group or Kettu's
 /// fox for a task's request, that group's signal and one fact, and the title of the session it is
-/// about where no notch is in the way.
+/// about.
 struct Collapsed: Equatable {
   let agents: [IslandAgent]
   let signal: Signal?
@@ -82,6 +89,14 @@ final class IslandModel: ObservableObject {
   @Published private(set) var revision = 0
   @Published private(set) var now = Date()
   @Published var geometry = IslandGeometry()
+  /// Huli: the room the menu bar leaves beside the notch, which the controller measures.
+  @Published var room = BarRoom()
+  @Published var sides = IslandSides.auto {
+    didSet { if sides != oldValue { onSidesChange?() } }
+  }
+  var onSidesChange: (() -> Void)?
+  /// Development: draws a notch on a screen without one, to see the island as on a notched Mac.
+  var drawsNotch = false
   @Published var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
   @Published var selected: String?
   /// The expanded panel's content height, as last laid out.

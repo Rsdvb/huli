@@ -113,6 +113,9 @@ export interface SettingsFile {
     // macOS: the notch island shows what needs the user, in place of the notifications of the
     // kinds it shows, while it runs
     island: boolean
+    // Huli: what the island shows beside the notch: wings only where the menu bar leaves room
+    // (auto), or nothing beside it (notch)
+    islandSides: 'auto' | 'notch'
   }
   // Keyed by harness: the program picked for it, and its default agent's folder and visibility.
   // configDir: a folder picked before agents could be added, which the default agent keeps.
@@ -467,6 +470,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     sound: false,
     badge: true,
     island: true,
+    islandSides: 'auto',
   },
   agents: {},
   addedAgents: [],

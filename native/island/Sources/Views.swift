@@ -2,24 +2,52 @@ import AppKit
 import SwiftUI
 
 /// The island's outline: flat along the top, where two small concave shoulders meet the menu bar
-/// or the notch, with round bottom corners.
+/// or the notch, with round bottom corners. Huli: a grown island's top band, as tall as the menu
+/// bar, may be narrower than its body on either side, so it keeps clear of the menu bar's items;
+/// the body then steps out under the menu bar, and with no band left it hangs below it.
 struct IslandShape: Shape {
   var radius: CGFloat
   var shoulders = true
+  var band: CGFloat = 0
+  var insetLeft: CGFloat = 0
+  var insetRight: CGFloat = 0
 
-  var animatableData: CGFloat {
-    get { radius }
-    set { radius = newValue }
+  var animatableData: AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>> {
+    get { AnimatablePair(radius, AnimatablePair(insetLeft, insetRight)) }
+    set {
+      radius = newValue.first
+      insetLeft = newValue.second.first
+      insetRight = newValue.second.second
+    }
   }
 
   func path(in rect: CGRect) -> Path {
-    let r = max(0, min(radius, rect.height / 2, rect.width / 2))
     let s = shoulders ? Metrics.shoulder : 0
+    let bandY = rect.minY + min(max(band, 0), rect.height)
+    let body = rect.maxY - bandY
+    let stepLeft = insetLeft > 0.5 && body > 0.5
+    let stepRight = insetRight > 0.5 && body > 0.5
+    let bl = stepLeft ? rect.minX + insetLeft : rect.minX
+    let br = stepRight ? rect.maxX - insetRight : rect.maxX
+    if br - bl < 1, body > 1 {
+      let below = CGRect(x: rect.minX, y: bandY, width: rect.width, height: body)
+      return Path(roundedRect: below, cornerRadius: max(0, min(radius, body / 2, rect.width / 2)))
+    }
+    let cl = stepLeft ? min(Metrics.step, insetLeft / 2, body / 2) : 0
+    let cr = stepRight ? min(Metrics.step, insetRight / 2, body / 2) : 0
+    var r = max(0, min(radius, rect.height / 2, rect.width / 2))
+    if stepLeft || stepRight { r = max(0, min(r, body - max(cl, cr))) }
     var p = Path()
-    p.move(to: CGPoint(x: rect.minX - s, y: rect.minY))
-    p.addLine(to: CGPoint(x: rect.maxX + s, y: rect.minY))
-    p.addQuadCurve(
-      to: CGPoint(x: rect.maxX, y: rect.minY + s), control: CGPoint(x: rect.maxX, y: rect.minY))
+    p.move(to: CGPoint(x: bl - s, y: rect.minY))
+    p.addLine(to: CGPoint(x: br + s, y: rect.minY))
+    p.addQuadCurve(to: CGPoint(x: br, y: rect.minY + s), control: CGPoint(x: br, y: rect.minY))
+    if stepRight {
+      p.addLine(to: CGPoint(x: br, y: bandY - cr))
+      p.addQuadCurve(to: CGPoint(x: br + cr, y: bandY), control: CGPoint(x: br, y: bandY))
+      p.addLine(to: CGPoint(x: rect.maxX - cr, y: bandY))
+      p.addQuadCurve(
+        to: CGPoint(x: rect.maxX, y: bandY + cr), control: CGPoint(x: rect.maxX, y: bandY))
+    }
     p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
     p.addArc(
       tangent1End: CGPoint(x: rect.maxX, y: rect.maxY),
@@ -28,11 +56,33 @@ struct IslandShape: Shape {
     p.addArc(
       tangent1End: CGPoint(x: rect.minX, y: rect.maxY),
       tangent2End: CGPoint(x: rect.minX, y: rect.maxY - r), radius: r)
-    p.addLine(to: CGPoint(x: rect.minX, y: rect.minY + s))
-    p.addQuadCurve(
-      to: CGPoint(x: rect.minX - s, y: rect.minY), control: CGPoint(x: rect.minX, y: rect.minY))
+    if stepLeft {
+      p.addLine(to: CGPoint(x: rect.minX, y: bandY + cl))
+      p.addQuadCurve(
+        to: CGPoint(x: rect.minX + cl, y: bandY), control: CGPoint(x: rect.minX, y: bandY))
+      p.addLine(to: CGPoint(x: bl - cl, y: bandY))
+      p.addQuadCurve(to: CGPoint(x: bl, y: bandY - cl), control: CGPoint(x: bl, y: bandY))
+    }
+    p.addLine(to: CGPoint(x: bl, y: rect.minY + s))
+    p.addQuadCurve(to: CGPoint(x: bl - s, y: rect.minY), control: CGPoint(x: bl, y: rect.minY))
     p.closeSubpath()
     return p
+  }
+}
+
+/// Development: the notch of a notched Mac, drawn on a screen without one.
+struct NotchStandIn: View {
+  let width: CGFloat
+  let height: CGFloat
+
+  var body: some View {
+    ZStack(alignment: .top) {
+      RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.black)
+      Rectangle().fill(Color.black).frame(height: height / 2)
+    }
+    .frame(width: width, height: height)
+    .allowsHitTesting(false)
+    .accessibilityHidden(true)
   }
 }
 
@@ -51,13 +101,17 @@ struct IslandRoot: View {
   @ObservedObject var model: IslandModel
 
   var body: some View {
+    let g = model.geometry
     let size = model.frameSize()
     let radius = model.radius()
+    let insets = model.bandInsets()
     VStack(spacing: 0) {
       ZStack(alignment: .top) {
-        IslandShape(radius: radius)
-          .fill(Theme.surface)
-          .shadow(color: .black.opacity(model.mode == .open ? 0.35 : 0), radius: 18, y: 8)
+        IslandShape(
+          radius: radius, band: g.notchHeight, insetLeft: insets.left, insetRight: insets.right
+        )
+        .fill(Theme.surface)
+        .shadow(color: .black.opacity(model.mode == .open ? 0.35 : 0), radius: 18, y: 8)
         ZStack(alignment: .top) {
           switch model.mode {
           case .hidden, .rest:
@@ -71,16 +125,27 @@ struct IslandRoot: View {
           }
         }
         .frame(width: size.width, height: size.height, alignment: .top)
-        .clipShape(IslandShape(radius: radius, shoulders: false))
+        .clipShape(
+          IslandShape(
+            radius: radius, shoulders: false, band: g.notchHeight, insetLeft: insets.left,
+            insetRight: insets.right))
       }
       .frame(width: size.width, height: size.height)
-      .opacity(model.mode == .hidden || model.mode == .rest ? 0 : 1)
+      .offset(x: model.offsetX())
+      .opacity(model.mode == .hidden || model.mode == .rest || model.inNotch ? 0 : 1)
       .animation(model.animation(to: .collapsed), value: model.parts)
+      .animation(model.animation(to: .collapsed), value: model.room)
+      .animation(model.animation(to: .collapsed), value: model.sides)
       .animation(model.animation(to: .open), value: model.panelHeight)
       .animation(model.animation(to: model.mode), value: model.mode)
       Spacer(minLength: 0)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    .background(alignment: .top) {
+      if model.drawsNotch && model.mode != .hidden {
+        NotchStandIn(width: g.notchWidth, height: g.notchHeight)
+      }
+    }
     // The panel laid out unseen before it opens, so the island grows to its height in one move.
     .overlay(alignment: .top) {
       if model.measuring && model.mode != .open {
@@ -109,26 +174,79 @@ struct IslandRoot: View {
 extension IslandModel {
   var openWidth: CGFloat { max(Metrics.openWidth, geometry.notchWidth + Metrics.openWings) }
 
-  /// The middle of the collapsed island: the notch, or where no notch is in the way the band the
-  /// title sits in, so the island keeps one outline on every screen.
+  /// The middle of the island's band: the notch, or on a screen without one the room a grown
+  /// island's band leaves between its mark and its state.
   var middleWidth: CGFloat { geometry.hasNotch ? geometry.notchWidth : Metrics.plainMiddle }
 
-  /// The island's size in each mode. Collapsed, its two wings match so the middle stays centred
-  /// and follow their content, so it never shows empty black.
+  /// Huli: the room the island may take beside the notch, none when Settings keeps it in the notch.
+  var usableRoom: BarRoom {
+    sides == .notch ? .none : room.capped(at: Metrics.maxWing)
+  }
+
+  /// Huli: the collapsed island's wings, only where the menu bar leaves room for them. Without a
+  /// notch the collapsed island never takes the menu bar, so it stays out of sight.
+  var wings: WingPlan {
+    guard geometry.hasNotch, let c = collapsed else { return .notchOnly }
+    return WingPlan.collapsed(
+      room: usableRoom, marks: parts["marks"] ?? Metrics.wingMark + 4,
+      signal: c.signal == nil ? 0 : Metrics.signal,
+      fact: c.fact == nil ? 0 : parts["fact"] ?? 40, minimum: Metrics.wingMin)
+  }
+
+  /// Collapsed with no room beside the notch: drawn as the island at rest, and like it, opened by
+  /// the pointer resting on the notch or a click on it.
+  var inNotch: Bool { mode == .collapsed && wings.inNotch }
+
+  /// How the grown island's band meets the menu bar.
+  var grownPlan: GrownPlan {
+    let markSize: CGFloat = geometry.hasNotch ? 20 : 17
+    return GrownPlan.grown(
+      room: usableRoom, notch: geometry.notchWidth, width: grownWidth, mark: 14 + markSize + 8,
+      state: 8 + (parts["state"] ?? 80) + 10, hasNotch: geometry.hasNotch)
+  }
+
+  var grownWidth: CGFloat { max(Metrics.grownWidth, middleWidth + 160) }
+
+  /// Whether the open panel's top fits the collapsed island's fact beside the marks and the
+  /// signal, left of the notch.
+  var headerFact: Bool {
+    guard collapsed?.fact != nil else { return false }
+    let used =
+      10 + (parts["marks"] ?? Metrics.wingMark + 4) + 8 + Metrics.signal + 8 + (parts["fact"] ?? 40)
+    return used <= (openWidth - middleWidth) / 2
+  }
+
+  /// The island's size in each mode. Collapsed, it is the notch and the wings beside it, which
+  /// follow their content, so it never shows empty black.
   func frameSize() -> CGSize {
     let g = geometry
     switch mode {
     case .hidden, .rest:
       return CGSize(width: max(g.notchWidth, 1), height: g.notchHeight)
     case .collapsed:
-      return CGSize(width: middleWidth + 2 * wing(), height: g.notchHeight)
+      let w = wings
+      if w.inNotch { return CGSize(width: max(g.notchWidth, 1), height: g.notchHeight) }
+      return CGSize(width: w.left + middleWidth + w.right, height: g.notchHeight)
     case .grown:
-      return CGSize(
-        width: max(Metrics.grownWidth, middleWidth + 160), height: g.notchHeight + Metrics.grownBody)
+      return CGSize(width: grownWidth, height: g.notchHeight + Metrics.grownBody)
     case .open:
       let body = min(max(panelHeight, 60), g.maxHeight - g.notchHeight)
       return CGSize(width: openWidth, height: g.notchHeight + body)
     }
+  }
+
+  /// How far the island's middle sits right of the notch's: uneven wings move it.
+  func offsetX() -> CGFloat {
+    guard mode == .collapsed else { return 0 }
+    let w = wings
+    return (w.right - w.left) / 2
+  }
+
+  /// How much narrower than the island its top band is on each side.
+  func bandInsets() -> (left: CGFloat, right: CGFloat) {
+    guard mode == .grown else { return (0, 0) }
+    let plan = grownPlan
+    return (plan.insetLeft, plan.insetRight)
   }
 
   func radius() -> CGFloat {
@@ -137,13 +255,6 @@ extension IslandModel {
     case .grown: return Metrics.grownRadius
     case .open: return Metrics.openRadius
     }
-  }
-
-  /// The collapsed island's wings: each side's content as laid out, plus its padding; both wings
-  /// take the wider, so the middle stays centred.
-  func wing() -> CGFloat {
-    max(
-      10 + (parts["left"] ?? Metrics.wingMark) + 8, 8 + (parts["right"] ?? 0) + 12, Metrics.wingMin)
   }
 }
 
@@ -218,51 +329,73 @@ struct FactView: View {
   }
 }
 
-/// The signal and its fact, as the right of the collapsed island.
-struct TrailingStatus: View {
-  let collapsed: Collapsed?
-  let reduceMotion: Bool
-
-  var body: some View {
-    HStack(spacing: 7) {
-      if let signal = collapsed?.signal { SignalView(signal: signal, reduceMotion: reduceMotion) }
-      if let fact = collapsed?.fact { FactView(fact: fact).monospacedDigit().lineLimit(1) }
-    }
-  }
-}
-
+/// The collapsed island: the notch, and beside it the wings the menu bar leaves room for. Huli:
+/// each wing holds what the plan puts on its side, against its outer end; with no room at all
+/// nothing shows, and the notch alone opens the island.
 struct CollapsedContent: View {
   @ObservedObject var model: IslandModel
 
   var body: some View {
     let g = model.geometry
     let c = model.collapsed
+    let plan = model.wings
     HStack(spacing: 0) {
-      LeadMarks(collapsed: c).fixedSize().measured("left", model).padding(.leading, 10)
-      Spacer(minLength: 8)
-      Group {
-        if !g.hasNotch, let title = c?.title {
-          Text(title)
-            .font(Fonts.ui(13, .medium))
-            .foregroundColor(c?.signal == nil ? Theme.secondary : Theme.text)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .padding(.horizontal, 6)
-        }
-      }
-      .frame(width: model.middleWidth)
-      Spacer(minLength: 8)
-      TrailingStatus(collapsed: c, reduceMotion: model.reduceMotion)
-        .fixedSize()
-        .measured("right", model)
-        .padding(.trailing, 12)
+      WingParts(model: model, side: .left, plan: plan)
+      Color.clear.frame(width: plan.inNotch ? max(g.notchWidth, 1) : model.middleWidth)
+      WingParts(model: model, side: .right, plan: plan)
     }
     .frame(height: g.notchHeight)
+    // The parts are measured unseen, wherever they go, so the plan knows them before they show.
+    .background(alignment: .topLeading) {
+      HStack(spacing: 0) {
+        LeadMarks(collapsed: c).fixedSize().measured("marks", model)
+        if let fact = c?.fact {
+          FactView(fact: fact).monospacedDigit().lineLimit(1).fixedSize().measured("fact", model)
+        }
+      }
+      .hidden()
+      .accessibilityHidden(true)
+    }
     .contentShape(Rectangle())
     .onTapGesture { model.expand(byClick: true) }
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(model.islandLabel)
     .accessibilityAddTraits(.isButton)
+  }
+}
+
+/// One wing of the collapsed island: the parts the plan puts on its side.
+private struct WingParts: View {
+  @ObservedObject var model: IslandModel
+  let side: WingSide
+  let plan: WingPlan
+
+  var body: some View {
+    let c = model.collapsed
+    let width = side == .left ? plan.left : plan.right
+    HStack(spacing: 0) {
+      if side == .right { Spacer(minLength: 0) }
+      if width > 0 {
+        HStack(spacing: WingPlan.gap) {
+          if plan.marks == side { LeadMarks(collapsed: c).fixedSize() }
+          if plan.signal == side || plan.fact == side {
+            HStack(spacing: WingPlan.factGap) {
+              if plan.signal == side, let signal = c?.signal {
+                SignalView(signal: signal, reduceMotion: model.reduceMotion)
+              }
+              if plan.fact == side, let fact = c?.fact {
+                FactView(fact: fact).monospacedDigit().lineLimit(1)
+              }
+            }
+            .fixedSize()
+          }
+        }
+        .padding(.leading, side == .left ? 10 : WingPlan.inner)
+        .padding(.trailing, side == .left ? WingPlan.inner : WingPlan.outer)
+      }
+      if side == .left { Spacer(minLength: 0) }
+    }
+    .frame(width: width)
   }
 }
 
@@ -345,44 +478,55 @@ struct GrownContent: View {
 
   var body: some View {
     let g = model.geometry
+    // Huli: the band beside the notch holds the mark and the state only where the menu bar leaves
+    // room; otherwise they go under it, beside the session's title.
+    let plan = model.grownPlan
     VStack(alignment: .leading, spacing: 0) {
       if let pop = model.pop {
         let row = model.row(pop.row)
         let (label, color) = model.pill(for: pop.kind)
+        let markSize: CGFloat = g.hasNotch ? 20 : 17
+        let lead = Group {
+          if let row {
+            MarkView(agent: row.agent, size: markSize)
+          } else if let popMark = pop.mark {
+            MarkView(agent: popMark.agent, size: markSize)
+          } else {
+            BrandFox(size: markSize)
+          }
+        }
+        let state = HStack(spacing: 6) {
+          if model.queued > 0 { Pill(text: "+\(model.queued)", color: Theme.secondary, dot: false) }
+          if pop.kind == "limit-near", let percent = pop.percent {
+            LimitPill(percent: percent)
+          } else {
+            Pill(text: label, color: color)
+          }
+        }
+        .fixedSize()
+        .measured("state", model)
         HStack(spacing: 0) {
-          Group {
-            if let row {
-              MarkView(agent: row.agent, size: g.hasNotch ? 20 : 17)
-            } else if let mark = pop.mark {
-              MarkView(agent: mark.agent, size: g.hasNotch ? 20 : 17)
-            } else {
-              BrandFox(size: g.hasNotch ? 20 : 17)
-            }
-          }
-          .padding(.leading, 14)
+          if plan.markInBand { lead.padding(.leading, 14 + plan.insetLeft) }
           Spacer(minLength: model.middleWidth)
-          HStack(spacing: 6) {
-            if model.queued > 0 { Pill(text: "+\(model.queued)", color: Theme.secondary, dot: false) }
-            if pop.kind == "limit-near", let percent = pop.percent {
-              LimitPill(percent: percent)
-            } else {
-              Pill(text: label, color: color)
-            }
-          }
-          .padding(.trailing, 10)
+          if plan.stateInBand { state.padding(.trailing, 10 + plan.insetRight) }
         }
         .frame(height: g.notchHeight)
-        VStack(alignment: .leading, spacing: 1) {
-          HStack(spacing: 5) {
-            // The session's own title: the pop's is the notification's, which names its state too.
-            (Text(row.map { model.title(of: $0) } ?? pop.title).foregroundColor(Theme.text)
-              + Text(row.map { $0.project.isEmpty ? "" : " · \($0.project)" } ?? "")
-              .foregroundColor(Theme.secondary).fontWeight(.medium))
-              .font(Fonts.ui(13, .semibold))
-              .lineLimit(1)
-            if let host = row?.host { HostTag(host: host, offline: model.text("offline")) }
+        HStack(spacing: 10) {
+          if !plan.markInBand { lead }
+          VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 5) {
+              // The session's own title: the pop's is the notification's, which names its state too.
+              (Text(row.map { model.title(of: $0) } ?? pop.title).foregroundColor(Theme.text)
+                + Text(row.map { $0.project.isEmpty ? "" : " · \($0.project)" } ?? "")
+                .foregroundColor(Theme.secondary).fontWeight(.medium))
+                .font(Fonts.ui(13, .semibold))
+                .lineLimit(1)
+              if let host = row?.host { HostTag(host: host, offline: model.text("offline")) }
+            }
+            Text(pop.body).font(Fonts.ui(12)).foregroundColor(Theme.secondary).lineLimit(1)
           }
-          Text(pop.body).font(Fonts.ui(12)).foregroundColor(Theme.secondary).lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          if !plan.stateInBand { state }
         }
         .padding(.horizontal, 16)
         .padding(.top, 5)
@@ -457,6 +601,11 @@ struct PanelContent: View {
         }
         if let signal = model.collapsed?.signal {
           SignalView(signal: signal, reduceMotion: model.reduceMotion)
+        }
+        // Huli: the collapsed island's fact, such as the plan's step, which a collapsed island
+        // kept in the notch never showed.
+        if model.headerFact, let fact = model.collapsed?.fact {
+          FactView(fact: fact).monospacedDigit().lineLimit(1).fixedSize()
         }
         Spacer(minLength: model.middleWidth)
         Text(model.summaryText)
