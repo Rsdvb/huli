@@ -4,13 +4,15 @@
 // which has no notch, and beside a notch drawn in its menu bar (`fakenotch`), with the menu bar's
 // room measured or given (`room=L:R`). Usage: node shots.mjs <helper directory> <output directory>
 
+import { Buffer } from 'node:buffer'
 import { spawn, spawnSync } from 'node:child_process'
 import console from 'node:console'
-import { mkdirSync, readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import process from 'node:process'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
+import { crc32, deflateSync } from 'node:zlib'
 
 const [helperDir, outDir] = process.argv.slice(2)
 if (!helperDir || !outDir) {
@@ -101,6 +103,49 @@ function screenWidth() {
 const width = screenWidth()
 console.log(`Main screen: ${width ?? '?'} points wide`)
 
+/** A PNG of one color, `rgb` as three bytes. */
+function solidPng(/** @type {number[]} */ rgb) {
+  const chunk = (/** @type {string} */ type, /** @type {Buffer} */ data) => {
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data])
+    const out = Buffer.alloc(8 + data.length + 4)
+    out.writeUInt32BE(data.length, 0)
+    body.copy(out, 4)
+    out.writeUInt32BE(crc32(body), 8 + data.length)
+    return out
+  }
+  const size = 16
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(size, 0)
+  header.writeUInt32BE(size, 4)
+  header.set([8, 2, 0, 0, 0], 8)
+  const row = Buffer.from([0, ...Array.from({ length: size }, () => rgb).flat()])
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(Buffer.concat(Array.from({ length: size }, () => row)))),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
+}
+
+// The runner's desktop is black, as the island is: a grey one shows the island's outline.
+const wallpaper = join(resolve(outDir), '..', 'island-wallpaper.png')
+writeFileSync(wallpaper, solidPng([0x7a, 0x86, 0x96]))
+const set = spawnSync(
+  'osascript',
+  [
+    '-l',
+    'JavaScript',
+    '-e',
+    'function run(argv) { ObjC.import("AppKit"); return $.NSWorkspace.sharedWorkspace' +
+      '.setDesktopImageURLForScreenOptionsError($.NSURL.fileURLWithPath(argv[0]),' +
+      ' $.NSScreen.mainScreen, $({}), null) }',
+    wallpaper,
+  ],
+  { encoding: 'utf8' },
+)
+console.log(`Grey desktop: ${set.stdout.trim() || set.stderr.trim()}`)
+await sleep(1000)
+
 function shoot(/** @type {string} */ name, whole = false) {
   const file = join(outDir, `${name}.png`)
   const region = !whole && width ? [`-R${Math.round(width / 2 - 360)},0,720,150`] : []
@@ -136,8 +181,14 @@ await run('log,drive,fakenotch', [
   { shot: 'notch-measured' },
   { shot: 'notch-measured-screen', whole: true },
 ])
-// Given rooms: both sides free, one side, too little for the marks, none.
-await run('drive,fakenotch,room=200:200', [{ shot: 'notch-room-200-200' }])
+// Given rooms: both sides free, one side, too little for the marks, none. Settings' "in the
+// notch only" comes as main sends it, in an appearance message.
+await run('drive,fakenotch,room=200:200', [
+  { shot: 'notch-room-200-200' },
+  { type: 'appearance', colorMode: 'dark', sides: 'notch' },
+  700,
+  { shot: 'notch-room-200-200-sides-notch' },
+])
 await run('drive,fakenotch,room=0:130', [{ shot: 'notch-room-0-130' }])
 await run('drive,fakenotch,room=0:90', [{ shot: 'notch-room-0-90' }])
 await run('drive,fakenotch,room=0:0', [
