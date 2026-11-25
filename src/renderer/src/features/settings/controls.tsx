@@ -367,7 +367,13 @@ export function SettingSelect<T extends string>({
             disabled={disabled}
             onClick={toggle}
           >
-            <SelectFace mark={chosen?.icon} value={chosen?.label ?? ''} danger={chosen?.danger} />
+            <SelectFace
+              mark={chosen?.icon}
+              // A value outside the options still shows, rather than a blank field.
+              value={chosen?.label ?? value}
+              note={chosen?.disabled ? chosen.hint : undefined}
+              danger={chosen?.danger}
+            />
           </button>
         )}
       />
@@ -382,10 +388,13 @@ export function SettingSelect<T extends string>({
 export function SelectFace({
   mark,
   value,
+  note,
   danger,
 }: {
   mark?: ReactNode
   value: string
+  /** Why the chosen value cannot be used now, such as an agent that is not installed. */
+  note?: string
   danger?: boolean
 }) {
   return (
@@ -393,6 +402,7 @@ export function SelectFace({
       <SecurityStyles />
       {mark && <span className="k-select__lead">{mark}</span>}
       <span className={cn('k-select__value', danger && 'text-danger')}>{value}</span>
+      {note && <span className="k-select__note">{note}</span>}
       <Icon icon={ArrowDown01Icon} size={14} />
     </>
   )

@@ -36,7 +36,7 @@ import {
   type SettingsFile,
   type ZoomStep,
 } from '@shared/settings'
-import type { AgentOptions, LightAgent } from '@shared/agent-host'
+import type { AgentOptions, AgentStatus, LightAgent } from '@shared/agent-host'
 import type { AgentId, ConfigOption } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Icon } from '@renderer/components/affect/app-shell'
@@ -68,7 +68,7 @@ import {
 import { Kbd } from '@renderer/components/ui/kbd'
 import { toast } from '@renderer/components/ui/toast'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
-import { harnessReason, shortLabel } from '@renderer/features/agents/harness-problem'
+import { harnessReason, programHere, shortLabel } from '@renderer/features/agents/harness-problem'
 import { forgetSite } from '@renderer/features/session/link-open'
 import { terminalFontStack } from '@renderer/features/terminal/font-stack'
 import { errorMessage } from '@renderer/lib/host'
@@ -78,7 +78,13 @@ import { formatShortcut, hostPlatform, isMac, isWeb, isWindows } from '@renderer
 import { useAppInfo } from '@renderer/lib/use-app-info'
 import { readFirstOptions } from '@renderer/features/session/new-session/prepared'
 import { agentKey, optionsOn, useAgentOptionsStore } from '@renderer/stores/agent-options'
-import { agentName, isInstalled, usableAgents, useAgentsStore } from '@renderer/stores/agents'
+import {
+  agentName,
+  awaitsPackage,
+  isInstalled,
+  usableAgents,
+  useAgentsStore,
+} from '@renderer/stores/agents'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { useOtherHost } from '@renderer/stores/hosts'
 import { homeStart } from '@renderer/web/host-path'
@@ -156,21 +162,49 @@ export function DefaultAgent() {
   const agents = useAgentsStore(
     useShallow((s) => usableAgents(s.order, s.byId).filter((a) => a.id !== 'fake-agent')),
   )
+  const current = useAgentsStore((s) => (value ? s.byId[value] : undefined))
+  const loaded = useAgentsStore((s) => s.loaded)
   const [apply, error] = useApply()
+  // Why an agent cannot start a session now; undefined when it can.
+  const unavailable = (agent: AgentStatus): string | undefined => {
+    if (agent.registered === false) {
+      // A catalog entry is no agent: its harness is not installed, or installed and never added.
+      const here = programHere(agent) && !awaitsPackage(agent) && !agent.uninstalled
+      return here ? t('general.defaultAgent.notAdded') : shortLabel({ kind: 'not-installed' })
+    }
+    const reason = isInstalled(agent) ? null : harnessReason(agent)
+    if (reason) return shortLabel(reason)
+    return agent.disabled === true ? t('agents.turnedOff') : undefined
+  }
   const options = [
     { value: 'ask', label: t('general.defaultAgent.askEachTime') },
     ...agents.map((agent) => {
-      const reason = isInstalled(agent) ? null : harnessReason(agent)
-      const off = agent.disabled === true
+      const hint = unavailable(agent)
       return {
         value: agent.id as string,
         label: agent.name,
         icon: <AgentMark agent={agent.id} className="size-4" />,
-        disabled: !!reason || off,
-        hint: reason ? shortLabel(reason) : off ? t('agents.turnedOff') : undefined,
+        disabled: !!hint,
+        hint,
       }
     }),
   ]
+  // The list leaves out the fake agent, harnesses that are not agents here and removed agents, but
+  // the setting may still hold one; the field names it, and why it cannot start, all the same.
+  if (value && !options.some((option) => option.value === value)) {
+    const hint = !loaded
+      ? undefined
+      : current
+        ? unavailable(current)
+        : t('general.defaultAgent.removed')
+    options.push({
+      value,
+      label: current?.name ?? agentName(value),
+      icon: <AgentMark agent={value} className="size-4" />,
+      disabled: !!hint,
+      hint,
+    })
+  }
   return (
     <>
       <ControlError error={error} />
