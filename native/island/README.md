@@ -4,18 +4,24 @@ The macOS helper behind the Dynamic Island. Kettu's main process starts it as a 
 window shows, while Settings › Notifications › Dynamic Island is on, and talks to it over
 its standard input and output. Main builds the whole view, every word included; the helper only keeps
 it and sends back what the user did. It reads no files, opens no sockets, uses no network and asks
-for no system permission. Reaching the end of stdin, as when Kettu quits or crashes, makes it exit.
+for no system permission. Huli: it reads the window list for the menu bar's status items, and the
+menu bar owner's menus through Accessibility only when Kettu already has that permission (see
+tools/huli/README.md, The island beside the menu bar). Reaching the end of stdin, as when Kettu
+quits or crashes, makes it exit.
 
 It draws the island at the top middle of the screen whose menu bar is in use: in the notch, or on a
-screen without one, in the middle of the menu bar, growing down from the top as from a notch. It
-shows while it is on:
+screen without one, growing down from the top as from a notch. Huli: beside the notch it takes only
+the room the menu bar leaves free, measured on events, and lets every click there through to the
+menu bar. It shows while it is on:
 
 - **Collapsed**, while something needs a mark: one signal and one fact. On the left the agent marks
   of the most urgent group, waiting, failed, running, done, or held by a plan limit; on the right
   that group's signal (the waiting dot, the error alert, the turn's nine dots acting out its phase
   as the thread's do, a clock once every running call is stuck, the unread dot, the limit ring) and
-  a count past one, the running session's plan, the minutes stuck or the reset day. Without a notch,
-  the same outline, with the title of the session it is about in the middle. Failed and done rows
+  a count past one, the running session's plan, the minutes stuck or the reset day. Huli: only where
+  the menu bar leaves room: all on the side that has it, without the marks, then without the fact,
+  or with no room nothing beside the notch, drawn as at rest. Without a notch the collapsed island
+  stays out of the menu bar. Failed and done rows
   mark it until they are read in Kettu or the island is opened, a used-up limit until the island is
   opened, once per window.
 - **At rest**, with nothing to mark, the island shrinks back into the notch and draws nothing. The
@@ -23,7 +29,9 @@ shows while it is on:
   and the menu bar icon shows the sessions.
 - **Grown**: main's pops, one at a time, for 6 seconds (2 for a finished turn), unless a Kettu window
   in front shows that session: the marks in the
-  left wing and the state in the right, the session and what happened under them. A request is no
+  left wing and the state in the right, the session and what happened under them. Huli: a wing
+  without room narrows to its content or stops at the notch, its content moving under it; without
+  a notch, a pop whose wings are not both free hangs below the menu bar. A request is no
   pop: it opens the island at its card, without the keyboard, and the island stays open until the
   last request is answered or a click elsewhere dismisses it.
 - **Expanded**, once the pointer rests on it for 120 ms and moves slower than 1.2 pt per ms, or on a
@@ -63,13 +71,13 @@ helper and starts it again after several in a row. `src/main/island/protocol.ts`
 
 | Direction      | `type`        | Carries                                                                                                                                                                      |
 | -------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| main to helper | `hello`       | `protocol`, Kettu's `version`, `locale`, `strings`, `colorMode`, `stuckAfterMs`                                                                                              |
+| main to helper | `hello`       | `protocol`, Kettu's `version`, `locale`, `strings`, `colorMode`, `stuckAfterMs`, `sides` (Huli: `auto` or `notch`, which older helpers ignore)                               |
 | main to helper | `view`        | `seq`, `rows` in the order to show, `requests` oldest first, `notices`, `summary`, `focus`                                                                                   |
 | main to helper | `change`      | `seq`, changed `rows` and `requests`, `removedRows`, `removedRequests`, new `order` and `requestOrder` when they changed, `notices` and `summary` when they changed, `focus` |
 | main to helper | `pop`         | `row` or null, `kind`, `title`, `body`; without a row, the `mark`, a limit's `percent` and the `action` a click sends back                                                   |
 | main to helper | `answered`    | the answer's `id`; `result` `answered`, `elsewhere` or `failed` with `message`                                                                                               |
 | main to helper | `strings`     | `locale` and `strings`, followed by a `view`                                                                                                                                 |
-| main to helper | `appearance`  | `colorMode`                                                                                                                                                                  |
+| main to helper | `appearance`  | `colorMode`, `sides`                                                                                                                                                         |
 | main to helper | `quit`        | nothing; main ends the helper a second later if it is still there                                                                                                            |
 | helper to main | `ready`       | `protocol`, the helper's `version`                                                                                                                                           |
 | helper to main | `answer`      | its own `id`, a `request` key and an `option` id main sent                                                                                                                   |
@@ -88,7 +96,9 @@ A development run of Kettu passes `KETTU_ISLAND_DEBUG` on to the helper, a comma
 `log` logs every row and request after each message, `answer=allow_once` answers each new request once with its
 first option of that style, through the same message a click would send, and `expand` sends one
 `expanded` after the first view. `notch` keeps the island on the screen with the notch whichever
-display is in use, and `floating` draws the island there as on a screen without a notch. `drive` lets a test script
+display is in use, and `floating` draws the island there as on a screen without a notch. Huli:
+`fakenotch` draws a notch in the middle of a screen without one and the island beside it, and
+`room=L:R` takes L and R points as the menu bar's room instead of measuring it. `drive` lets a test script
 on the helper's stdin send `{ "type": "debug", "kind": ... }` with `expand`, `click`, `collapse` or
 `answer`. A packaged Kettu passes nothing on.
 
@@ -97,5 +107,6 @@ on the helper's stdin send `{ "type": "debug", "kind": ... }` with `expand`, `cl
 `build.mjs` compiles `Sources/*.swift`, with the Swift source `generate.mjs` writes, using `swiftc -O`
 for this Mac's architecture, for macOS 13 and later, and copies `kettu-island` into the
 destination. It needs Xcode or the Command Line Tools and the repository's packages, Electron
-included, and does nothing on other platforms. `tools/install/device-helpers.mjs`, which the release run calls,
+included, and does nothing on other platforms. Huli: `--no-marks` leaves the marks out and needs
+no packages, as `huli-island.yml` builds it; `swift test` in this folder runs the layout tests. `tools/install/device-helpers.mjs`, which the release run calls,
 builds it with the other helpers.
