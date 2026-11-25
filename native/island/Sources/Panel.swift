@@ -317,9 +317,10 @@ final class IslandController {
     model.pointerInside = over
     // The menu bar is measured again as the pointer comes into it, so an item that appeared under
     // a wing since comes out before the user reaches it, and as it leaves a menu bar that hides.
+    let band = area?.band ?? .zero
     let bar =
-      point.y >= top.y - model.geometry.notchHeight && point.y <= top.y
-      && area.map { point.x >= $0.band.minX && point.x <= $0.band.maxX } ?? false
+      point.y >= top.y - model.geometry.notchHeight && point.y <= top.y && point.x >= band.minX
+      && point.x <= band.maxX
     if bar != inBar {
       inBar = bar
       if model.mode == .collapsed || model.mode == .grown { watcher.pointerCrossed() }

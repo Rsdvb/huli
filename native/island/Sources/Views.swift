@@ -107,9 +107,11 @@ struct IslandRoot: View {
     let insets = model.bandInsets()
     VStack(spacing: 0) {
       ZStack(alignment: .top) {
-        IslandShape(radius: radius, band: g.notchHeight, insetLeft: insets.left, insetRight: insets.right)
-          .fill(Theme.surface)
-          .shadow(color: .black.opacity(model.mode == .open ? 0.35 : 0), radius: 18, y: 8)
+        IslandShape(
+          radius: radius, band: g.notchHeight, insetLeft: insets.left, insetRight: insets.right
+        )
+        .fill(Theme.surface)
+        .shadow(color: .black.opacity(model.mode == .open ? 0.35 : 0), radius: 18, y: 8)
         ZStack(alignment: .top) {
           switch model.mode {
           case .hidden, .rest:
@@ -484,11 +486,11 @@ struct GrownContent: View {
         let row = model.row(pop.row)
         let (label, color) = model.pill(for: pop.kind)
         let markSize: CGFloat = g.hasNotch ? 20 : 17
-        let mark = Group {
+        let lead = Group {
           if let row {
             MarkView(agent: row.agent, size: markSize)
-          } else if let mark = pop.mark {
-            MarkView(agent: mark.agent, size: markSize)
+          } else if let popMark = pop.mark {
+            MarkView(agent: popMark.agent, size: markSize)
           } else {
             BrandFox(size: markSize)
           }
@@ -504,13 +506,13 @@ struct GrownContent: View {
         .fixedSize()
         .measured("state", model)
         HStack(spacing: 0) {
-          if plan.markInBand { mark.padding(.leading, 14 + plan.insetLeft) }
+          if plan.markInBand { lead.padding(.leading, 14 + plan.insetLeft) }
           Spacer(minLength: model.middleWidth)
           if plan.stateInBand { state.padding(.trailing, 10 + plan.insetRight) }
         }
         .frame(height: g.notchHeight)
         HStack(spacing: 10) {
-          if !plan.markInBand { mark }
+          if !plan.markInBand { lead }
           VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 5) {
               // The session's own title: the pop's is the notification's, which names its state too.

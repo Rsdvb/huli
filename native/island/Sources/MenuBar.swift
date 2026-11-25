@@ -94,14 +94,14 @@ final class MenuBarWatcher {
       in: listedWindows(statusLayer: statusLayer), band: area.band, statusLayer: statusLayer,
       ownPid: ownPid)
     let trusted = AXIsProcessTrusted()
-    let menuEnd = trusted ? front.flatMap { menuEnd(of: $0, band: area.band) } : nil
+    var menus: CGFloat?
+    if trusted, let front { menus = Self.menuEnd(of: front, band: area.band) }
     if trace {
       log(
         "Menu bar: \(items.count) status items, Accessibility \(trusted ? "allowed" : "not allowed")"
-          + (menuEnd.map { ", menus end at \(Int($0))" } ?? ""))
+          + (menus.map { ", menus end at \(Int($0))" } ?? ""))
     }
-    return MenuBarRoom.room(
-      notch: area.notch, band: area.band, statusItems: items, menuEnd: menuEnd)
+    return MenuBarRoom.room(notch: area.notch, band: area.band, statusItems: items, menuEnd: menus)
   }
 
   /// The windows on screen at the status level, as the window list has them.
