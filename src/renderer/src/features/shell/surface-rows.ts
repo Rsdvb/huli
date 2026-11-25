@@ -173,17 +173,15 @@ export function useSurfaceRows(panel: string, projectPath: string): SurfaceRow[]
       (!subagent || (row.id !== 'board' && row.id !== 'sideChat')) &&
       (row.id !== 'devices' || devicesOn) &&
       (row.id !== 'workers' || workers),
-  ).map(
-    (row) => ({
-      ...row,
-      icon: SURFACE_ICON[row.id],
-      label: t(`surfaces.list.${row.id}`),
-      shortcut: row.id === 'sideChat' ? formatShortcut(sideChatKeys) : null,
-      off: reasons[row.id] ? t(OFF_TEXT[reasons[row.id]!]) : null,
-      live: row.id === 'computer' && computer,
-      open: !!tabs?.some((tab) => tab === row.id),
-    }),
-  )
+  ).map((row) => ({
+    ...row,
+    icon: SURFACE_ICON[row.id],
+    label: t(`surfaces.list.${row.id}`),
+    shortcut: row.id === 'sideChat' ? formatShortcut(sideChatKeys) : null,
+    off: reasons[row.id] ? t(OFF_TEXT[reasons[row.id]!]) : null,
+    live: row.id === 'computer' && computer,
+    open: !!tabs?.some((tab) => tab === row.id),
+  }))
 }
 
 /** An artifact the session wrote, as the list offers it. */

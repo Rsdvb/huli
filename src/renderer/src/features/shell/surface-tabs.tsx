@@ -815,8 +815,7 @@ export function SurfaceTabs({
         asksBeforeClose(panel, docRoot(item.doc, projectPath), item.id)
       ) {
         return
-      }
-      else if (item.kind !== 'artifact' || mayLeave(item.id)) close(item)
+      } else if (item.kind !== 'artifact' || mayLeave(item.id)) close(item)
     },
     [close, panel, projectPath],
   )

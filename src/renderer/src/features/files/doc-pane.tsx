@@ -20,12 +20,7 @@ export default function DocPane({ projectPath, panel }: { projectPath: string; p
   if (tab?.kind === 'diff') {
     return (
       <PaneBody>
-        <DiffPreview
-          key={tab.id}
-          projectPath={root}
-          tab={tab}
-          sessionId={panelSession(panel)}
-        />
+        <DiffPreview key={tab.id} projectPath={root} tab={tab} sessionId={panelSession(panel)} />
       </PaneBody>
     )
   }

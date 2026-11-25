@@ -105,11 +105,7 @@ interface FilesRoots {
   folders: ProjectFolder[]
 }
 
-function FilesPane({
-  projectPath,
-  panel,
-  roots,
-}: FilesPanelProps & { roots: FilesRoots | null }) {
+function FilesPane({ projectPath, panel, roots }: FilesPanelProps & { roots: FilesRoots | null }) {
   const { t } = useTranslation(['files', 'common'])
   const columnKey = `${panel}\0${projectPath}`
   // The file the panel showed last, which the lists mark.

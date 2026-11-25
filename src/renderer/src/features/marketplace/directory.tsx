@@ -344,7 +344,12 @@ function communitySections(
     const skills = (src.skills?.catalog ?? []).filter((s) => s.trust === 'community')
     if (skills.length === 0) return []
     return [
-      { id: 'community', title: t('sections.community'), entries: skills.map(skillEntry), pending: 0 },
+      {
+        id: 'community',
+        title: t('sections.community'),
+        entries: skills.map(skillEntry),
+        pending: 0,
+      },
     ]
   }
   const scope: CommunityScope = kind ? { kind } : {}

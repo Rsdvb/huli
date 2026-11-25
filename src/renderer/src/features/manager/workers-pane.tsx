@@ -24,12 +24,7 @@ import { Textarea } from '@renderer/components/ui/textarea'
 import { PermissionEntry } from '@renderer/features/session/entries/permission-card'
 import { SecretCard } from '@renderer/features/session/entries/secret-request-entry'
 import { Glyph } from '@renderer/features/shell/glyph'
-import {
-  PaneBody,
-  PaneContext,
-  PaneEmpty,
-  PaneIcon,
-} from '@renderer/features/shell/panel-button'
+import { PaneBody, PaneContext, PaneEmpty, PaneIcon } from '@renderer/features/shell/panel-button'
 import { clockTime } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'

@@ -87,9 +87,7 @@ describe('the owner’s own relay', () => {
     expect(parseHostRelay({ id, urls: [RELAY], pin: PIN })?.pin).toBe(PIN)
     expect(parseHostRelay({ id, urls: ['http://127.0.0.1:8798'], pin: PIN })?.pin).toBeUndefined()
     expect(isOwnRelay({ id, urls: [RELAY] }, RELAY_URL)).toBe(true)
-    expect(isOwnRelay({ id, urls: [RELAY_URL] }, RELAY_URL)).toBe(
-      false,
-    )
+    expect(isOwnRelay({ id, urls: [RELAY_URL] }, RELAY_URL)).toBe(false)
   })
 
   it('sends a device’s connect with no token at all', () => {
