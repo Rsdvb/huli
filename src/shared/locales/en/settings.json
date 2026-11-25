@@ -502,7 +502,7 @@
     },
     "islandSides": {
       "name": "Status beside the notch",
-      "description": "What the Dynamic Island shows beside the notch while something needs a mark. It never covers the menu bar’s items: with no room left, it stays in the notch, and pointing at the notch opens it.",
+      "description": "It never covers the menu bar’s icons or menus. With no room beside the notch it stays in the notch, and pointing at the notch opens it.",
       "keywords": "notch menu bar status icons wings dynamic island",
       "auto": "Avoid the menu bar",
       "notch": "In the notch only",
