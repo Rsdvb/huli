@@ -6,7 +6,9 @@
 
 import type { CodexFeature, CodexSettingChange, CodexSettings } from '@shared/agent-host'
 import { t } from '../i18n'
-import type { CodexRequest } from '../marketplace/codex-plugins'
+
+/** A request to the agent's `codex app-server`. */
+export type CodexRequest = <T>(method: string, params?: unknown) => Promise<T>
 
 export const MEMORIES_FEATURE = 'memories'
 const KEYS = {

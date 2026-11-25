@@ -81,7 +81,7 @@ const REPLACE_KILL_MS = 2_000
 /** How long the router waits for its children once its own input ends. */
 const STOP_MS = 1_500
 /** How long the program's `--help` may take, and how much of it is read. */
-const HELP_MS = 5_000
+const HELP_MS = 10_000
 const HELP_CHARS = 256 * 1024
 
 // cmd.exe quoting for a `.cmd` or `.bat` child, which Node.js refuses to spawn without a shell.
@@ -521,7 +521,7 @@ export class SessionRouter {
       .flatMap((dir) => [flag, dir])
   }
 
-  /** Whether the program's `--help` lists the session flag, read once. */
+  /** Whether the program's `--help` lists the session flag. */
   private flagListed(): Promise<boolean> {
     return this.listsOwn(this.sessionFlag)
   }
@@ -533,11 +533,17 @@ export class SessionRouter {
     return help !== null && listsFlag(help, flag)
   }
 
-  /** The program's `--help`, read once; null when it could not run. */
+  /**
+   * The program's `--help`, read once; null when it could not run. A run that failed, timed out
+   * or was killed is not kept, so a busy computer's slow start does not keep a flag off for good.
+   */
   private readHelp(): Promise<string | null> {
-    this.help ??= new Promise((resolve) => {
+    if (this.help) return this.help
+    let keep = true
+    const reading = new Promise<string | null>((resolve) => {
       const { command, args } = this.spawnWords(this.childCommand, [...this.childArgs, '--help'])
       let help = ''
+      let timedOut = false
       let proc: ChildProcess
       try {
         proc = spawn(command, args, {
@@ -547,6 +553,7 @@ export class SessionRouter {
           windowsHide: true,
         })
       } catch {
+        keep = false
         resolve(null)
         return
       }
@@ -555,17 +562,23 @@ export class SessionRouter {
       }
       proc.stdout?.on('data', read)
       proc.stderr?.on('data', read)
-      const timer = setTimeout(() => proc.kill(), HELP_MS)
+      const timer = setTimeout(() => {
+        timedOut = true
+        proc.kill()
+      }, HELP_MS)
       proc.on('error', () => {
         clearTimeout(timer)
+        if (this.help === reading) this.help = null
         resolve(null)
       })
-      proc.on('close', () => {
+      proc.on('close', (code) => {
         clearTimeout(timer)
+        if ((timedOut || code === null) && this.help === reading) this.help = null
         resolve(help)
       })
     })
-    return this.help
+    if (keep) this.help = reading
+    return reading
   }
 
   /**

@@ -4,7 +4,13 @@ import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import { StarLine } from '@renderer/features/github-star/star-prompts'
-import type { AgentStatus, Project, SessionSummary, StartNotice } from '@shared/agent-host'
+import type {
+  AgentStatus,
+  KettuRole,
+  Project,
+  SessionSummary,
+  StartNotice,
+} from '@shared/agent-host'
 import type { AgentId, SlashCommand, UserContent } from '@shared/thread'
 import { resolveSandbox, type SandboxChoice } from '@shared/sandbox'
 import { usableWorkflow, type Workflow, type WireWorkflowEntry } from '@shared/workflow'
@@ -37,6 +43,7 @@ import { SendButton } from '@renderer/features/session/composer/send-button'
 import type { SelectOption } from '@renderer/features/session/composer/levels'
 import { tightestLimit } from '@shared/session-groups'
 import { useHostLabel } from '@renderer/features/sidebar/host-label'
+import { ClosePaneButton } from '@renderer/features/shell/header-tools'
 import { NoDrag, TopBar } from '@renderer/features/shell/top-bar'
 import { usePane } from '@renderer/features/split/pane-context'
 import { useEntry } from '@renderer/lib/features'
@@ -70,6 +77,7 @@ import { shownHosts, useOtherHosts } from '@renderer/stores/hosts'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { hostOfSession, sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { useKettuRoles } from '@renderer/stores/kettu-roles'
 import { useHostWorkflows } from '@renderer/stores/workflows'
 import { useTasksStore } from '@renderer/stores/tasks'
 import { branchHold, useWorktreeChoice, worktreeRequest } from '@renderer/stores/worktree-choice'
@@ -87,7 +95,8 @@ import {
 import { DropOverlay } from './attachments/drop-overlay'
 import { useFileDrop } from './attachments/use-file-drop'
 import { attachmentContent, attachmentsBlock } from './composer/attachments'
-import { mentionResolver, NO_SURFACES, surfaceRefs } from './composer/chips'
+import { mentionResolver, NO_SURFACES, pluginRefs, surfaceRefs } from './composer/chips'
+import { draftMentions } from './composer/plugin-mentions'
 import { mentionSurfacesOf } from './composer/mention-surfaces'
 import { hasMessage, NEW_SESSION_DRAFT, readDraft, readDraftAttachments } from './composer/drafts'
 import { useAddMenu } from './composer/add-menu'
@@ -96,6 +105,7 @@ import { PromptBox, type SlashNote } from './composer/prompt-box'
 import { QuotaStrip } from './composer/quota-strip'
 import { useFallback } from './plan-quota'
 import { useBlockedEnter } from './composer/use-blocked-enter'
+import { useSlashCommands } from './composer/use-slash-commands'
 import { useBoxText, usePromptBox } from './composer/use-prompt-box'
 import { AgentPicker } from './new-session/agent-picker'
 import { ProfileChip } from './composer/profile-chip'
@@ -133,6 +143,7 @@ import {
   startValues,
   type NoAgentReason,
 } from './new-session/start-options'
+import { applyRole, suggestedAgent, toggleRole, useRoleChoice } from './new-session/role-choice'
 import { useStartConfig } from './new-session/use-start-config'
 import { openTask } from './new-session/open-task'
 import { chooseWorkflow, taskStarted, useWorkflowChoice } from './new-session/workflow-choice'
@@ -215,6 +226,9 @@ export function NewSessionView({
           </NoDrag>
         )}
         <span className="flex-1" />
+        <NoDrag className="kp-bar-tools">
+          <ClosePaneButton />
+        </NoDrag>
       </TopBar>
       <ColumnScroller className="flex flex-col pb-(--top-bar)">
         <section className="ui-as-start" data-phase="start">
@@ -446,6 +460,14 @@ ${parent?.projectPath ?? project?.path ?? ''}`
           !firstOff
         : !!agentId && ready && holdsMessage && !held && !branchHeld)
   const config = useStartConfig(agentId, undefined, hostId)
+  // The role chosen for the next session, which a workflow's steps replace with their own.
+  const roles = useKettuRoles(hostId)
+  const roleRef = useRoleChoice((s) => s.ref)
+  const role = workflow ? null : (roles.find((r) => r.ref === roleRef) ?? null)
+  const roleAgents = useMemo(() => (onAgents ?? []).filter(canStart), [onAgents])
+  useEffect(() => {
+    if (role) applyRole(role, agentId, roleAgents, hostId, config)
+  }, [role, agentId, roleAgents, hostId, config])
   const model = config?.find((o) => o.category === 'model' && isSelect(o))
   // A used-up window of another model does not hold the picked one back.
   const tightest = limits ? tightestLimit(limitsForModel(limits, model), now) : null
@@ -481,10 +503,12 @@ ${parent?.projectPath ?? project?.path ?? ''}`
   const task = !!workflow
   // Kettu's `/btw` asks about a conversation, and there is none yet; a task's message is its
   // requirement, never a command.
-  const commands = useMemo(
+  const agentCommands = useMemo(
     () => (task || !reported ? NO_COMMANDS : reported.filter((c) => c.name !== 'btw')),
     [task, reported],
   )
+  const slashCommands = useSlashCommands(hostId, NO_COMMANDS, agentCommands)
+  const commands = task ? NO_COMMANDS : slashCommands
   const commandsNote: SlashNote | null =
     !agentId || signIn || task ? null : !ready ? 'chooseProject' : opening ? 'loading' : null
   const add = useAddMenu({
@@ -635,6 +659,10 @@ ${parent?.projectPath ?? project?.path ?? ''}`
           type: 'ref' as const,
           ref,
         })),
+        ...pluginRefs(
+          text,
+          mentionResolver([], null, NO_SURFACES, draftMentions(NEW_SESSION_DRAFT)),
+        ).map((ref) => ({ type: 'ref' as const, ref: { kind: 'plugin' as const, ...ref } })),
       ]
       // A worktree chosen before the project's status is read is still a worktree.
       const worktree =
@@ -650,6 +678,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
         worktree,
         profileId,
         sandbox,
+        role?.ref ?? null,
       )
     } finally {
       sending.current = false
@@ -701,6 +730,15 @@ ${parent?.projectPath ?? project?.path ?? ''}`
 
   const choose = (id: AgentId) => {
     if (paneId) choosePaneAgent(paneId, id)
+    requestAnimationFrame(() => editor.current?.focus())
+  }
+
+  // The role's suggested agent, when this computer has it, is the tray's agent; the user may change it.
+  const chooseRole = (picked: KettuRole, suggested: AgentId | null) => {
+    toggleRole(picked.ref)
+    if (useRoleChoice.getState().ref !== null && suggested && paneId) {
+      choosePaneAgent(paneId, suggested)
+    }
     requestAnimationFrame(() => editor.current?.focus())
   }
 
@@ -870,7 +908,14 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                     />
                   </>
                 )}
-                {!several && <AgentPicker agentId={agentId} onChoose={choose} hostId={hostId} />}
+                {!several && (
+                  <AgentPicker
+                    agentId={agentId}
+                    onChoose={choose}
+                    onChooseRole={chooseRole}
+                    hostId={hostId}
+                  />
+                )}
                 {agentId && profileId !== undefined && !workflow && !several && (
                   <ProfileChip
                     agentId={agentId}
@@ -980,6 +1025,9 @@ ${parent?.projectPath ?? project?.path ?? ''}`
             onSignedIn={() => setTriedAnyway(agentId)}
           />
         )}
+        {agentId && role && (
+          <RoleNotices role={role} agentId={agentId} agents={roleAgents} hostId={hostId} />
+        )}
         {agentId && <StartNotices agentId={agentId} hostId={hostId} />}
         {stopped && !(noAgent && guide) && <NoAgentLine stopped={stopped} hostId={hostId} />}
       </div>
@@ -1034,6 +1082,53 @@ function StartSignIn({
 }
 
 const NO_NOTICES: StartNotice[] = []
+
+/** What the chosen role suggests that the tray could not take, and what the session starts with. */
+function RoleNotices({
+  role,
+  agentId,
+  agents,
+  hostId,
+}: {
+  role: KettuRole
+  agentId: AgentId
+  agents: readonly { id: AgentId }[]
+  hostId: string | null
+}) {
+  const { t } = useTranslation('session')
+  const notices = useRoleChoice((s) => s.notices)
+  const { agent } = role.suggests
+  const lines = [
+    ...(agent && !suggestedAgent(agents, agent)
+      ? [
+          t('newSession.role.notice.agent', {
+            role: role.title,
+            wanted: agent,
+            actual: agentName(agentId, hostId),
+          }),
+        ]
+      : []),
+    ...notices.map((notice) =>
+      t(`newSession.role.notice.${notice.kind}`, {
+        role: role.title,
+        wanted: notice.wanted,
+        actual: notice.actual,
+        agent: agentName(agentId, hostId),
+      }),
+    ),
+  ]
+  if (lines.length === 0) return null
+  return (
+    <ul className="flex flex-col gap-0.5 px-2.75">
+      {lines.map((line) => (
+        <li key={line} className="flex min-w-0 items-start gap-1.5 text-xs text-secondary">
+          <Glyph icon={Alert02Icon} size={12} className="mt-0.5 shrink-0 text-warning" />
+          <span className="min-w-0">{line}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 /** Each value the session will not start with as chosen, and why, before the first message. */
 function StartNotices({ agentId, hostId }: { agentId: AgentId; hostId: string | null }) {

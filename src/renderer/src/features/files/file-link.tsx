@@ -136,7 +136,7 @@ function LinkBody({ path, line }: { path: string; line: number | null }) {
 export function FileLink({ file }: { file: FileRef & { projectPath: string } }) {
   const { t } = useTranslation('files')
   const target = file.line ? `${file.path}:${file.line}` : file.path
-  const open = () => openFile(file.projectPath, file.path, file.line)
+  const open = () => openFile(file.projectPath, file.path, file.line, { preview: true })
   return (
     <FileLinkMenu
       projectPath={file.projectPath}
@@ -165,6 +165,7 @@ export function AgentFileLink({ file }: { file: AgentFileRef }) {
   const target = file.line ? `${file.path}:${file.line}` : file.path
   const open = () =>
     openFile(file.projectPath, file.path, file.line, {
+      preview: true,
       agent: { sessionId: file.sessionId, agentId: file.agentId },
     })
   return (

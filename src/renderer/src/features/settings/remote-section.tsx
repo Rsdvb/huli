@@ -184,7 +184,7 @@ export function RemoteStatusRow({ status }: { status: RemoteStatus | null }) {
     return (
       <StatusLine>
         <Spin />
-        {t('remote.relay.connecting')}
+        {relay.connecting}
       </StatusLine>
     )
   }

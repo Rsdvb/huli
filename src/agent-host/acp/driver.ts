@@ -7,11 +7,13 @@ const code = lazyCode(() => import('./connection'))
 export const ACP_DRIVER: ProcessDriver = {
   kind: 'process',
   load: code.load,
-  connect: (transport, { def, hooks }) =>
+  connect: (transport, { def, hooks, spec, env }) =>
     code.get().AcpConnection.connect(transport, {
       ...hooks,
       agentId: def.id,
       name: def.name,
       ...(def.movedAccounts ? { movedAccounts: def.movedAccounts } : {}),
+      ...(spec ? { spec } : {}),
+      ...(env ? { env } : {}),
     }),
 }

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
-  Cancel01Icon,
   ComputerTerminal01Icon,
   DashboardSquare02Icon,
   UserMultiple02Icon,
@@ -12,12 +11,10 @@ import { RefreshIcon } from '@renderer/components/refresh-icon'
 import { Button } from '@renderer/components/ui/button'
 import { errorMessage, host } from '@renderer/lib/host'
 import { subagentRunning, useSubagentDigests } from '@renderer/features/session/subagent/progress'
-import { PaneEmpty, PaneIcon } from '@renderer/features/shell/panel-button'
+import { PaneBody, PaneEmpty, PaneIcon } from '@renderer/features/shell/panel-button'
 import { artifactListShown, artifactStanding, useArtifactsStore } from '@renderer/stores/artifacts'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { useThreadsStore } from '@renderer/stores/threads'
-import { cn } from '@renderer/lib/utils'
-import { toggleBoard } from '@renderer/stores/view'
 import { ArtifactRow } from './artifact-row'
 import {
   backgroundOrder,
@@ -41,19 +38,11 @@ const NO_HELD: ForegroundTaskView[] = []
 const ROOMY = 6
 
 /**
- * The session's board, at the right of its thread and composer on the same sheet. It answers
- * what the session has going: Now is one card of what is live, those waiting for the user first,
+ * What the session's Board tab shows in the side panel. It answers what the session has going: Now is one card of what is live, those waiting for the user first,
  * then sub-agents, then commands; Earlier counts what ended, a line a kind; Artifacts is what
  * the session wrote.
  */
-export default function BoardRail({
-  sessionId,
-  overlay = false,
-}: {
-  sessionId: string
-  /** Too narrow for the thread beside it: laid over the thread's right side, as the side chat. */
-  overlay?: boolean
-}) {
+export default function BoardPane({ sessionId }: { sessionId: string }) {
   const { t } = useTranslation('board')
   const background = useThreadsStore(
     (s) => s.replicas[sessionId]?.state?.session.background ?? NO_TASKS,
@@ -264,13 +253,8 @@ export default function BoardRail({
   }
 
   return (
-    <aside
-      className={cn('kb-rail animate-in fade-in', overlay && 'kb-rail--over')}
-      aria-label={t('title')}
-    >
+    <PaneBody className="kb-pane" aria-label={t('title')}>
       <div className="kb-head">
-        <PaneIcon icon={DashboardSquare02Icon} size={15} />
-        <span className="kb-head__title">{t('title')}</span>
         <span className="kb-head__sum" aria-live="polite">
           {parts.running === null && parts.needs === null ? (
             t('summary.idle')
@@ -294,16 +278,8 @@ export default function BoardRail({
             <RefreshIcon phase={processes.reading ? 'turning' : 'idle'} className="size-[15px]" />
           </button>
         )}
-        <button
-          type="button"
-          className="kp-tool kb-head__close"
-          aria-label={t('actions.close')}
-          onClick={() => toggleBoard(sessionId, false)}
-        >
-          <PaneIcon icon={Cancel01Icon} size={15} />
-        </button>
       </div>
       <div className="kb-body">{body}</div>
-    </aside>
+    </PaneBody>
   )
 }

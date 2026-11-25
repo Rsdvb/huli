@@ -247,6 +247,7 @@ export function GeneralSwitch({
     | 'restoreLastSession'
     | 'confirmQuitWhileRunning'
     | 'sessionTitles'
+    | 'promptSuggestions'
     | 'agentPasswords'
     | 'background'
     | 'lowerAgentPriority'

@@ -54,6 +54,26 @@ export function ComputerElevatedLink() {
   )
 }
 
+/** The next-message suggestions keep their switch in General; this row says where and how. */
+export function PromptSuggestionsLink() {
+  const { t } = useTranslation('settings')
+  // An older host sends none, and offers them as the default does.
+  const on = useSettingsStore((s) => s.settings.general.promptSuggestions ?? true)
+  return (
+    <span className="flex items-center gap-2">
+      <Pill tone={on ? 'success' : 'neutral'}>
+        {on ? t('features.promptSuggestions.on') : t('features.promptSuggestions.off')}
+      </Pill>
+      <SetButton
+        variant="ghost"
+        onClick={() => openSettingsRow('general', null, 'prompt-suggestions')}
+      >
+        {t('features.promptSuggestions.open')}
+      </SetButton>
+    </span>
+  )
+}
+
 /** Computer use keeps its own switch on its own page; this row says where and how it is. */
 export function ComputerUseLink() {
   const { t } = useTranslation('settings')

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { CodexRequest } from '../marketplace/codex-plugins'
-import { checkCodexChange, readCodexSettings, workspaceWrite, writeCodexSetting } from './settings'
+import {
+  checkCodexChange,
+  readCodexSettings,
+  workspaceWrite,
+  writeCodexSetting,
+  type CodexRequest,
+} from './settings'
 
 const FEATURES = [
   { name: 'memories', stage: 'stable', enabled: true, defaultEnabled: false },

@@ -146,6 +146,8 @@ function contentText(content: readonly UserContent[]): string {
           return `[the device ${ref.name}]`
         case 'session':
           return `[the user's session "${ref.name}", id ${ref.sessionId}]`
+        case 'plugin':
+          return `[${ref.name}, from a plugin]`
         case 'image':
           return '[an image]'
         case 'audio':

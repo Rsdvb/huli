@@ -124,6 +124,7 @@ async function manager(setup: Setup) {
     workflow: DEFAULT_SETTINGS.workflow,
     usage: { fromComputer: false },
     sessionTitles: true,
+    promptSuggestions: true,
     continueAfterLimit: true,
     agentPasswords: false,
     lightModel: { mode: 'small' },
@@ -133,7 +134,6 @@ async function manager(setup: Setup) {
     downloadService: !setup.noDownloads,
     claudeTestEntrypoint: null,
     claudeRuns: {},
-    promptSuggestions: true,
   }
   const def = setup.def ?? DEF
   const vendor = def.launch.kind === 'package' && !!def.launch.fromVendor

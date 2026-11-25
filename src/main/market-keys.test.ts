@@ -147,8 +147,14 @@ describe('the Marketplace key store', () => {
     await keys.set({ serverId: github.id, values: { Authorization: TOKEN } })
     await keys.set({ serverId: github.id, values: { Authorization: null } })
     expect(pushed).toEqual([
-      { values: { [github.id]: { Authorization: TOKEN } }, oauth: {}, agentEnv: {}, profiles: {} },
-      { values: {}, oauth: {}, agentEnv: {}, profiles: {} },
+      {
+        values: { [github.id]: { Authorization: TOKEN } },
+        oauth: {},
+        agentEnv: {},
+        profiles: {},
+        pluginSecrets: {},
+      },
+      { values: {}, oauth: {}, agentEnv: {}, profiles: {}, pluginSecrets: {} },
     ])
     expect(keys.state()).toEqual({})
   })
@@ -200,6 +206,7 @@ describe('the Marketplace key store', () => {
       oauth: {},
       agentEnv: {},
       profiles: {},
+      pluginSecrets: {},
     })
     expect((await load()).values()).toEqual({ [notes.id]: { NOTES_TOKEN: 'n0tes' } })
   })
@@ -270,7 +277,13 @@ describe('the Marketplace key store', () => {
 })
 
 describe('OAuth sign-ins in the key store', () => {
-  const empty: MarketKeysPush = { values: {}, oauth: {}, agentEnv: {}, profiles: {} }
+  const empty: MarketKeysPush = {
+    values: {},
+    oauth: {},
+    agentEnv: {},
+    profiles: {},
+    pluginSecrets: {},
+  }
 
   it('keeps a sign-in encrypted beside the keys and reads it back', async () => {
     const keys = await load()
@@ -281,6 +294,7 @@ describe('OAuth sign-ins in the key store', () => {
       oauth: { [linear.id]: SIGN_IN },
       agentEnv: {},
       profiles: {},
+      pluginSecrets: {},
     }
     expect(pushed.at(-1)).toEqual(pushedLast)
     expect(await fileText()).not.toContain('SECRET')
@@ -370,7 +384,13 @@ describe('OAuth sign-ins in the key store', () => {
     )
     const keys = await load()
     await keys.flush()
-    expect(keys.contentsForHost()).toEqual({ values, oauth: {}, agentEnv: {}, profiles: {} })
+    expect(keys.contentsForHost()).toEqual({
+      values,
+      oauth: {},
+      agentEnv: {},
+      profiles: {},
+      pluginSecrets: {},
+    })
     const stored = JSON.parse(await fileText()) as Record<string, unknown>
     expect(stored.version).toBe(3)
     expect((await load()).values()).toEqual(values)
@@ -557,5 +577,76 @@ describe("Huli: webhook routines' secrets", () => {
     await expect(refused).rejects.toThrow(MarketKeysError)
     await refused.catch((error: Error) => expect(error.message).not.toContain('SECRET'))
     expect(keys.contentsForHost().webhookSecrets).toBeUndefined()
+  })
+})
+
+describe('the secrets of plugins in the key store', () => {
+  const PLUGIN = 'p0123456789ab'
+  const OTHER = 'pba9876543210'
+  const SECRET = 'sk-plugin-SECRET-value'
+
+  it('keeps a secret encrypted by plugin and key, and gives it to the agent host alone', async () => {
+    const keys = await load()
+    await keys.setPluginSecret(PLUGIN, 'token', SECRET)
+    await keys.setPluginSecret(OTHER, 'token', 'other-SECRET')
+    const held = { [PLUGIN]: { token: SECRET }, [OTHER]: { token: 'other-SECRET' } }
+    expect(pushed.at(-1)).toMatchObject({ pluginSecrets: held })
+    expect(await fileText()).not.toContain('SECRET')
+    expect((await load()).contentsForHost().pluginSecrets).toEqual(held)
+    // A client is told nothing of it: neither the inputs of servers nor anything else.
+    expect(keys.state()).toEqual({})
+    expect(JSON.stringify(keys.agentEnvState())).not.toContain('SECRET')
+  })
+
+  it('clears one secret, or with no key every secret of the plugin, and writes no file when none is left', async () => {
+    const keys = await load()
+    await keys.setPluginSecret(PLUGIN, 'one', 'a')
+    await keys.setPluginSecret(PLUGIN, 'two', 'b')
+    await keys.setPluginSecret(PLUGIN, 'one', null)
+    expect(pushed.at(-1)?.pluginSecrets).toEqual({ [PLUGIN]: { two: 'b' } })
+    await keys.setPluginSecret(PLUGIN, null, null)
+    expect(pushed.at(-1)?.pluginSecrets).toEqual({})
+    await expect(stat(marketKeysFile(dir))).rejects.toThrow()
+  })
+
+  it('keeps them through the pruning of servers, which only drops what a server no longer has', async () => {
+    const keys = await load()
+    await keys.setPluginSecret(PLUGIN, 'token', SECRET)
+    servers = []
+    keys.prune()
+    await keys.flush()
+    expect((await load()).contentsForHost().pluginSecrets).toEqual({ [PLUGIN]: { token: SECRET } })
+  })
+
+  it.each([
+    ['an id that is no plugin', 'not-a-plugin', 'token', SECRET],
+    ['a plugin that is no string', 7, 'token', SECRET],
+    ['an empty key', PLUGIN, '', SECRET],
+    ['a key that is no string', PLUGIN, 3, SECRET],
+    ['a value that is no string', PLUGIN, 'token', 5],
+    ['an empty value', PLUGIN, 'token', ''],
+    ['a value past 8 KB', PLUGIN, 'token', 'x'.repeat(8193)],
+    ['a value with a NUL', PLUGIN, 'token', 'a\0b'],
+  ])('refuses %s and keeps nothing', async (_, id, key, value) => {
+    const keys = await load()
+    await expect(keys.setPluginSecret(id, key, value)).rejects.toMatchObject({
+      code: 'invalid_params',
+    })
+    expect(keys.contentsForHost().pluginSecrets).toEqual({})
+    await expect(stat(marketKeysFile(dir))).rejects.toThrow()
+  })
+
+  it('refuses to keep one where the system cannot encrypt it', async () => {
+    const keys = await load({ cipher: cipher(false) })
+    await expect(keys.setPluginSecret(PLUGIN, 'token', SECRET)).rejects.toMatchObject({
+      code: 'unavailable',
+    })
+    expect(keys.contentsForHost().pluginSecrets).toEqual({})
+  })
+
+  it('reads a file from before plugins had secrets as holding none', async () => {
+    const keys = await load()
+    await keys.set({ serverId: github.id, values: { Authorization: TOKEN } })
+    expect((await load()).contentsForHost().pluginSecrets).toEqual({})
   })
 })

@@ -174,7 +174,8 @@ import { readOutputStyles } from './claude/output-styles'
 import { readCodexSettings, writeCodexSetting } from './codex/settings'
 import { readCodebuddySite, shellOverrides, writeCodebuddySite } from './codebuddy/user-settings'
 import { readAutoCompact, writeAutoCompact, type CompactPlace } from './auto-compact/settings'
-import type { CodexRequest } from './marketplace/codex-plugins'
+import type { CodexRequest } from './codex/rpc'
+import { takesSkills } from './marketplace/skill-tools'
 import {
   globalInstallOf,
   installedFolder,
@@ -7055,6 +7056,7 @@ export class AgentManager {
         runs: this.kettuOn(slot.id),
         active: this.running(slot) ? (slot.runtime?.kettu ?? null) : null,
       },
+      skills: takesSkills(slot.id, this.kettuOn(slot.id)),
       capabilities: {
         loadSession: capabilities?.loadSession ?? false,
         listSessions: capabilities?.listSessions ?? false,
@@ -7069,7 +7071,9 @@ export class AgentManager {
         reports: this.hasLimits(slot.id) && !consoleSignIn,
         context: this.hasContext(slot.id),
         liveContext: this.driver(slot).reads?.context === true,
-        ...(this.driver(slot).reads?.contextEstimates ? { contextEstimates: true } : {}),
+        ...(this.driver(slot).reads?.contextEstimates || slot.def.contextEstimates
+          ? { contextEstimates: true }
+          : {}),
         account:
           slot.def.id === 'opencode' ||
           slot.def.id === 'deepseek' ||

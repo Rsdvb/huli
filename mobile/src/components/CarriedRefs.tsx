@@ -237,6 +237,9 @@ export function RefTiles(props: { refs: Tiled[]; align: 'start' | 'end' }) {
                 onPress={() => router.push(`/session/${ref.sessionId}`)}
               />
             )
+          // An item a plugin of the computer's added to the message.
+          case 'plugin':
+            return <Tile key={i} icon={G.info} name={ref.name} detail="插件" onPress={null} />
           default:
             return <Tile key={i} icon={G.info} name={ref.label} detail={null} onPress={null} />
         }

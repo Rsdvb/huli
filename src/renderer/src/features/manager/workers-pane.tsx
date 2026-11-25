@@ -24,7 +24,7 @@ import { Textarea } from '@renderer/components/ui/textarea'
 import { PermissionEntry } from '@renderer/features/session/entries/permission-card'
 import { SecretCard } from '@renderer/features/session/entries/secret-request-entry'
 import { Glyph } from '@renderer/features/shell/glyph'
-import { PaneEmpty, PaneHead, PaneIcon, PaneSheet } from '@renderer/features/shell/panel-button'
+import { PaneBody, PaneContext, PaneEmpty, PaneIcon } from '@renderer/features/shell/panel-button'
 import { clockTime } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
@@ -59,7 +59,7 @@ const STATE_GLYPH: Record<WorkerState, IconSvgElement> = {
   idle: CheckmarkCircle02Icon,
 }
 
-export default function WorkersPane({ panel, maximized }: { panel: string; maximized: boolean }) {
+export default function WorkersPane({ panel }: { panel: string }) {
   const { t } = useTranslation('session')
   const managerId = panelSession(panel) ?? ''
   const summary = useSessionsStore((s) => s.byId[managerId])
@@ -70,10 +70,9 @@ export default function WorkersPane({ panel, maximized }: { panel: string; maxim
   const spent = manager ? manager.turns >= manager.maxTurns : false
 
   return (
-    <PaneSheet pane="workers" maximized={maximized}>
-      <PaneHead panel={panel} pane="workers" maximized={maximized}>
+    <PaneBody>
+      <PaneContext>
         <span className="km-head">
-          <PaneIcon icon={UserGroupIcon} />
           <b>{t('manager.pane.title')}</b>
           {manager && (
             <span>
@@ -83,7 +82,7 @@ export default function WorkersPane({ panel, maximized }: { panel: string; maxim
             </span>
           )}
         </span>
-      </PaneHead>
+      </PaneContext>
       <div className="kp-body km-body">
         {!manager ? (
           <PaneEmpty
@@ -163,7 +162,7 @@ export default function WorkersPane({ panel, maximized }: { panel: string; maxim
           </>
         )}
       </div>
-    </PaneSheet>
+    </PaneBody>
   )
 }
 

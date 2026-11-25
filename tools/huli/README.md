@@ -2543,7 +2543,8 @@ feature already loaded leaves memory at the next launch).
 | 会话的 MCP 服务器 (`mcpPanel`)         | the More menu's and the phone's MCP 服务器, the notices' link to it; `sessions.mcp`, `sessions.mcpAct`, `sessions.mcpLogin`             |
 
 Computer use (电脑操控) already has its own switch (`computerUse.enabled`), so the page links to it
-rather than repeating it. These stay on for good, as Kite's core: sessions, the terminal, the
+rather than repeating it, and so it does to Kettu's next-message suggestions (建议下一条消息,
+`general.promptSuggestions`, a row of General). These stay on for good, as Kite's core: sessions, the terminal, the
 browser, Git, the Marketplace (it holds the workflow library, the only page for installed MCP
 servers and skills and the Kettu MCP switch, and the code that hands agents Kite's own skills) and
 artifacts (Kite's MCP server is the artifacts service itself, and workflow steps hand in their
@@ -2824,7 +2825,7 @@ conflict, someone on a branch:
 - `src/main/update-keys.json` keeps Kite's `release` and `sources` keys and takes Kettu's
   `harnesses`.
 - `git grep` for Kettu's domain (`kettu` dot `sh`) must find no more lines than
-  before: 185 after the 2026-11-23 merge and again after the 2026-11-24 one, its dot also matching
+  before: 185 after the 2026-11-23 merge and again after the 2026-11-24 and 2026-11-25 ones, its dot also matching
   the code's `window.kettu` shell calls and names such as the sharing partition's. New code that calls
   Kettu's services points at Kite Cloud or stays off; a test that spells out its download service
   as a place of its own takes one of its own (`downloads.example`); Kettu's own Android download
@@ -2896,6 +2897,43 @@ And as the 2026-11-24 merge settled it:
   continuation never runs, and its Settings row and catalog entry are left out.
 - `claude/sdk.ts` imports nothing of Kite's either (the harness checks compile it alone), so it
   holds `ClaudeSandboxOption`, which `sandbox/native.ts` takes from it.
+
+And as the 2026-11-25 merge settled it:
+
+- Main's entry `src/main/index.ts` only loads `./app`: Kettu's changes to its `index.ts` go into
+  `src/main/app.ts` (three-way, with the merge base's `index.ts` as base).
+- The side panel is Kettu's one tab row (#2390) with files, diffs and artifacts as tabs (#2408).
+  Kite's workers pane is a tab of the row (`SINGLE_TABS`, `surface-rows.ts`) and, in a manager
+  session, the bar's first button; the devices and workers rows follow Settings › Features; the
+  side chat's row shows its rebound keys. The board and the side chat are tabs, so Kite's rails
+  beside the thread are gone; the board's pane keeps the processes' refresh.
+- A diff tab keeps Kite's review findings, line comments and Review changes: `DocPane` hands
+  `DiffPreview` the panel's session. Kettu's Open file replaces Kite's Diff/File toggle.
+- A project's further folders: a file or diff tab opened from the Files or Git pane's other folder
+  carries that folder as `root` (`DocTarget`, `docRoot` in `stores/view.ts`; `panelIn` in
+  `stores/files.ts` takes the panel whose `filesRoot` or `gitRoot` it is), and reads from there.
+- Next-message suggestions (#2412) are Kite's engine (`claude/connection.ts` `suggested`, the
+  `PromptSuggestion` with its id, the ghost in the composer, the phone's chip); Kettu's effect,
+  `SessionOptions.suggestions` and its editor facet are left out, and so are its tests of them.
+  Its General row and catalog entry are the one switch (`general.promptSuggestions`); Kite's row
+  on Claude Code's page is gone, and Settings › Features links to it.
+- Plan limits are Kettu's cards (#2483) with its Used/Left switch; Kite's pace tick sits on each
+  card's bar, and another provider's account shows no plan chip.
+- Kettu plugins (#2466) are taken whole. Kettu removed Claude Code and Codex plugins from the
+  Marketplace (`claude-plugins.ts`, `codex-plugins.ts`), so Kite's Anthropic community
+  marketplace went with them and the Community section lists the community's skills alone;
+  `CodexRequest` moved to `codex/settings.ts`. A plugin's secrets are a fourth kind in the key
+  store beside the profiles, project and webhook secrets. A plugin's denial runs before Kite's
+  auto-approval of low risk; the composer's `@` list has sessions, then files, then plugin items.
+  An agent's own note reaches a plugin's channel as a turn's end (`noticeKindOf`).
+- A relay of its own (#2444): `remote.relay` is `'kettu' | 'own' | 'off'`; `'kettu'` is Huli
+  Cloud's relay (`RELAY_URL`), the default, and a file's old `true` reads as it. Huli Cloud's
+  address is never taken as the owner's own relay, as Kettu's is not.
+- `session-router` keeps Kite's one read of `--help` for both flags; as Kettu's fix does, a read
+  that failed, timed out or was killed is not kept.
+- The thread database took no migration (still 14). New dependencies: `quickjs-emscripten-core`
+  and `@jitl/quickjs-wasmfile-release-sync` (the plugin host); the lockfile keeps SheetJS's
+  integrity, which Kettu's lost.
 
 ## Tests
 

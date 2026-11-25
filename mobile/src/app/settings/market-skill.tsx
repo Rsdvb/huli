@@ -44,6 +44,7 @@ const SOURCE_TEXT: Record<MarketSkill['source'], string> = {
   github: 'GitHub',
   local: '文件夹',
   kettu: '插件市场',
+  plugin: '插件',
 }
 
 export default function MarketSkillPage() {

@@ -3,6 +3,7 @@
 
 import {
   HOST_METHODS,
+  REMOVED_PLUGIN_METHODS,
   type DeviceResult,
   type HostEvent,
   type HostMethod,
@@ -46,6 +47,7 @@ export interface PortHubDeps {
 }
 
 const METHODS: ReadonlySet<string> = new Set(HOST_METHODS)
+const REMOVED: ReadonlySet<string> = new Set(REMOVED_PLUGIN_METHODS)
 
 /** Huli: the port id main's own requests run under; no window's port has it. */
 export const MAIN_PORT = 'main'
@@ -72,6 +74,8 @@ const LIVE_METHODS: ReadonlySet<string> = new Set<HostMethod>([
   'sessions.watch',
   'sessions.unwatch',
   'sessions.show',
+  'host.load.watch',
+  'host.load.unwatch',
   'sessions.cancel',
   'permissions.respond',
   'settings.answerChange',
@@ -332,6 +336,15 @@ export class PortHub {
       return sent
     }
     const method = message.method
+    // Clients from before still ask for these: they learn why instead of taking it for an empty list.
+    if (typeof method === 'string' && REMOVED.has(method)) {
+      reply({
+        type: 'error',
+        id,
+        error: { code: 'unavailable', message: t('marketPlugins.removed') },
+      })
+      return
+    }
     if (typeof method !== 'string' || !METHODS.has(method)) {
       reply({
         type: 'error',

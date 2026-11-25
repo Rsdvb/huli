@@ -23,11 +23,9 @@ import GitPane from './git-pane'
 export default function GitReposPane({
   panel,
   projectPath,
-  maximized,
 }: {
   panel: string
   projectPath: string
-  maximized: boolean
 }) {
   const owner = useSessionsStore((s) => {
     const id = panelSession(panel)
@@ -43,7 +41,6 @@ export default function GitReposPane({
       key={root}
       panel={panel}
       projectPath={root}
-      maximized={maximized}
       repos={
         live.length > 0 ? (
           <RepoPicker panel={panel} home={projectPath} folders={live} root={root} />
