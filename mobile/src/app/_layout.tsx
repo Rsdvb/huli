@@ -35,7 +35,6 @@ const MANAGE_PAGES = [
   'agent-reset',
   'harness',
   'market',
-  'market-plugin',
   'market-skill',
   'mcp',
   'memory',

@@ -25,7 +25,13 @@ import {
 
 type Entry = Extract<ThreadEntry, { kind: 'market_publish' }>
 
-const KIND = { skill: 'Skill', plugin: '插件', 'mcp-server': 'MCP 服务器', workflow: '工作流' }
+const KIND = {
+  skill: 'Skill',
+  plugin: '插件',
+  'agent-plugin': '插件',
+  'mcp-server': 'MCP 服务器',
+  workflow: '工作流',
+}
 const VISIBILITY = { public: '所有人', private: '只有我', unlisted: '已下架' }
 const VISIBILITY_HINT = {
   public: '列进插件市场，登录 Kite Cloud 的人都能看到。',
