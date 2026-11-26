@@ -1964,7 +1964,7 @@
     "account": "Your Kettu account, for Kettu’s cloud services.",
     "agents": "An agent runs on a harness with one account and configuration. Kettu adds one for each harness it finds on first start and for each one you install in Kettu; add any other you want to use.",
     "agents_web": "An agent on {{host}} runs there on a harness with one account and configuration. Kettu adds one there for each harness it finds when {{host}} first starts and for each one you install on it; add any other you want to use.",
-    "terminal": "Which shell the side panel’s terminal runs, and how it looks.",
+    "terminal": "Which shell the side panel’s terminal runs, when idle agent terminals close, and how it looks.",
     "git": "The top bar’s branch and changes, pull requests and their checks all come from these two tools.",
     "advanced": "Network proxy, diagnostics and the data Kettu keeps on this computer.",
     "advanced_web": "Network proxy, diagnostics and the data Kettu keeps on {{host}}.",

@@ -154,6 +154,9 @@ const BUSY_LISTING_MS = 1_500
 // Huli: at most one check for idle terminals a minute once a host holds more agent terminals
 // than AGENT_TERMINAL_CAP.
 const CAP_CHECK_GAP_MS = 60_000
+// Huli: how much later than the setting says a check comes, so terminals whose shells printed
+// their last output a little apart, as many started at once do, close together.
+const IDLE_GROUP_MS = 60_000
 // Huli: how long after an agent's command is typed its echo is looked for, in how many of the
 // last lines, by how many of its first characters.
 const ECHO_WINDOW_MS = 10_000
@@ -511,7 +514,9 @@ export class TerminalManager {
         sessions.add(session)
       }
     }
-    for (const session of sessions) this.scheduleIdleCheck(session, this.now() + idleMs)
+    for (const session of sessions) {
+      this.scheduleIdleCheck(session, this.now() + idleMs + IDLE_GROUP_MS)
+    }
   }
 
   /**
@@ -1031,7 +1036,7 @@ export class TerminalManager {
     try {
       const { nextAt } = await this.closeIdleNow(sessionId, idleMs, true)
       for (const [session, at] of nextAt) {
-        if (!this.idleTimers.has(session)) this.scheduleIdleCheck(session, at)
+        if (!this.idleTimers.has(session)) this.scheduleIdleCheck(session, at + IDLE_GROUP_MS)
       }
     } catch (error) {
       this.options.warn?.(`Could not close idle terminals: ${(error as Error).message}`)
