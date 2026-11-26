@@ -1,3 +1,4 @@
+import { threadQueue } from '@shared/permission-queue'
 import { answeredUnasked, type ThreadEntry, type ThreadState } from '@shared/thread'
 import { isArtifactWrite } from './entries/artifact-writes'
 import { workflowCardOf } from './entries/workflow-tools'
@@ -10,28 +11,32 @@ import { FOLDED_LINES, FOLD_OVER } from './markdown/code-meta'
 // card's answer, which the thread leaves out as the card shows it, x a finished write to an
 // artifact, which the thread leaves out as its artifact's card stands for it, d a notice the user
 // dismissed, which the thread leaves out, e turn end, m an agent's write to project memory, which
-// folds as work, o anything else, which a new site's request, an agent's question and a proposed
-// write to global memory are: of their own, never folded into a run.
+// folds as work, q a request that waits behind an older one (Huli: the older one's card counts it
+// until its turn comes), which the thread leaves out, o anything else, which a new site's request,
+// an agent's question and a proposed write to global memory are: of their own, never folded into
+// a run.
 export function signatureOf(state: ThreadState | null | undefined): string {
   if (!state) return ''
+  const queue = threadQueue(state)
+  const behind = queue.length > 1 ? new Set(queue.slice(1).map((entry) => entry.id)) : null
   let signature = ''
-  for (const id of state.order) signature += charOf(state.byId[id])
+  for (const id of state.order) signature += behind?.has(id) ? 'q' : charOf(state.byId[id])
   return signature
 }
 
-const HIDDEN = /[nvxd]/g
+const HIDDEN = /[nvxdq]/g
 
 /**
  * The entries and their signature without the ones the thread does not draw: the plans, which
- * only the top bar shows, the messages Kettu sent as a card's answer, and the finished writes to
- * artifacts, whose cards show them.
+ * only the top bar shows, the messages Kettu sent as a card's answer, the finished writes to
+ * artifacts, whose cards show them, and the requests waiting behind an older one.
  */
 export function withoutHidden(
   order: string[],
   signature: string,
 ): { order: string[]; signature: string } {
   if (signature.search(HIDDEN) === -1) return { order, signature }
-  const shown = order.filter((_, i) => !'nvxd'.includes(signature[i]!))
+  const shown = order.filter((_, i) => !'nvxdq'.includes(signature[i]!))
   return { order: shown, signature: signature.replace(HIDDEN, '') }
 }
 

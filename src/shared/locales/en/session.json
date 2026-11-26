@@ -279,8 +279,8 @@
       "rejectAlways": "Always denied",
       "allowedByRoutine": "Allowed by the routine",
       "autoApproved": "Approved automatically · {{level}}",
-      "cancelled": "Cancelled",
-      "withdrawn": "No longer needed",
+      "cancelled": "Expired",
+      "withdrawn": "Expired",
       "onDevice": "{{answer}} · {{device}}",
       "relayedAllow": "You allowed once, relayed by {{plugin}}",
       "relayedAllowFrom": "You allowed once, from {{from}}, relayed by {{plugin}}",
@@ -295,6 +295,29 @@
       "low": "Low risk",
       "medium": "Medium risk",
       "high": "High risk"
+    },
+    "queue": {
+      "later_one": "{{count}} more request waiting",
+      "later_other": "{{count}} more requests waiting",
+      "allowAll": "Allow all",
+      "denyAll": "Deny all",
+      "confirm": {
+        "allow_one": "Allow all: this request, once",
+        "allow_other": "Allow all: each of these {{count}} requests, once",
+        "deny_one": "Deny all: this request",
+        "deny_other": "Deny all: these {{count}} requests"
+      },
+      "skipped": {
+        "allow": "Not allowed together; answer each when its turn comes:",
+        "deny": "Answer each when its turn comes:"
+      },
+      "do": {
+        "allow_one": "Allow {{count}}",
+        "allow_other": "Allow {{count}}",
+        "deny_one": "Deny {{count}}",
+        "deny_other": "Deny {{count}}"
+      },
+      "cancel": "Cancel"
     },
     "answeredOn": "Already answered on {{device}}.",
     "answeredInWindow": "Already answered in another window.",

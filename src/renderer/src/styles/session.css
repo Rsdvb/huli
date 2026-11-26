@@ -1578,6 +1578,116 @@
   font-size: 12px;
   color: var(--thread-muted);
 }
+/* Huli: the requests that wait behind the one answered now, as the edge of a stack under its
+   card: one line that opens to list them, with 全部同意 / 全部拒绝 where they apply. */
+.ks-queue {
+  margin: 0 10px;
+  padding: 0 6px 0 10px;
+  border-radius: 0 0 10px 10px;
+  background: var(--bg-subtle);
+  box-shadow: 0 0 0 0.5px var(--border-subtle);
+  font-size: 12px;
+  color: var(--thread-muted);
+}
+.ks-queue__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+}
+.ks-queue__toggle {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 34px;
+  text-align: start;
+  color: var(--thread-muted);
+}
+.ks-queue__toggle:hover {
+  color: var(--thread-ink);
+}
+.ks-queue__toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+.ks-queue__chevron {
+  display: inline-flex;
+  transition: transform var(--duration-fast) ease-out;
+}
+.ks-queue[data-open] .ks-queue__chevron {
+  transform: rotate(180deg);
+}
+.ks-queue__actions,
+.ks-queue__buttons {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+.ks-queue__buttons {
+  justify-content: flex-end;
+  padding: 8px 0 10px;
+}
+.ks-queue__confirm {
+  padding-top: 2px;
+}
+.ks-queue__title {
+  margin: 4px 0 2px;
+  color: var(--thread-ink);
+}
+.ks-queue__list {
+  margin: 0;
+  padding: 0 0 8px;
+  list-style: none;
+}
+.ks-queue__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  color: var(--thread-quiet);
+}
+.ks-queue__what {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font: 12px/18px var(--font-mono);
+  color: var(--thread-ink);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ks-queue .ks-risk {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 6px 0 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.ks-queue .ks-risk[data-level='low'] {
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+}
+.ks-queue .ks-risk[data-level='medium'] {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+}
+.ks-queue .ks-risk[data-level='high'] {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ks-queue__chevron {
+    transition: none;
+  }
+}
+
 /* Huli: the level the host judged a request at, on the card's tag in its tone. */
 .ks-risk[data-level='low'] {
   background: var(--ui-prc-ok-bg);

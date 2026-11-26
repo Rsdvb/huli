@@ -268,8 +268,8 @@
       "rejectAlways": "已始终拒绝",
       "allowedByRoutine": "由定时任务允许",
       "autoApproved": "已自动批准 · {{level}}",
-      "cancelled": "已取消",
-      "withdrawn": "已不再需要",
+      "cancelled": "已失效",
+      "withdrawn": "已失效",
       "onDevice": "{{answer}} · {{device}}",
       "relayedAllow": "你已允许一次，由 {{plugin}} 转达",
       "relayedAllowFrom": "你已允许一次（来自 {{from}}），由 {{plugin}} 转达",
@@ -284,6 +284,24 @@
       "low": "低风险",
       "medium": "中风险",
       "high": "高风险"
+    },
+    "queue": {
+      "later_other": "后面还有 {{count}} 个请求",
+      "allowAll": "全部同意",
+      "denyAll": "全部拒绝",
+      "confirm": {
+        "allow_other": "全部同意：以下 {{count}} 个请求各允许一次",
+        "deny_other": "全部拒绝：以下 {{count}} 个请求都拒绝"
+      },
+      "skipped": {
+        "allow": "这些不会一起同意，等轮到时逐个回答：",
+        "deny": "这些要等轮到时逐个回答："
+      },
+      "do": {
+        "allow_other": "同意 {{count}} 个",
+        "deny_other": "拒绝 {{count}} 个"
+      },
+      "cancel": "取消"
     },
     "answeredOn": "已在 {{device}} 上回答过。",
     "answeredInWindow": "已在另一个窗口中回答过。",

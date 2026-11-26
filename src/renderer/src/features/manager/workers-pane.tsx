@@ -3,7 +3,7 @@
 // controls for one worker or all of them. It draws from the session list and fetches a worker's
 // requests only while that worker waits, so nothing here runs while the workers are idle.
 
-import { memo, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { Fragment, memo, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import {
   Alert02Icon,
   CheckmarkCircle02Icon,
@@ -17,11 +17,13 @@ import {
 import type { IconSvgElement } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import type { SessionSummary } from '@shared/agent-host'
+import { requestQueue, waitsBehind } from '@shared/permission-queue'
 import type { SecretRequestEntry, ThreadEntry, ToolEntry } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Button } from '@renderer/components/ui/button'
 import { Textarea } from '@renderer/components/ui/textarea'
 import { PermissionEntry } from '@renderer/features/session/entries/permission-card'
+import { RequestQueue } from '@renderer/features/session/entries/request-queue'
 import { SecretCard } from '@renderer/features/session/entries/secret-request-entry'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { PaneBody, PaneContext, PaneEmpty, PaneIcon } from '@renderer/features/shell/panel-button'
@@ -363,21 +365,32 @@ function WorkerRequests({ summary }: { summary: SessionSummary }) {
   if (error) return <p className="km-note km-note--warn">{error}</p>
   if (!entries) return null
   const name = agentName(summary.agentId, hostOfPath(summary.projectPath))
+  // Huli: the worker's requests in turn, as its thread shows them.
+  const queue = requestQueue(entries)
   return (
     <div ref={ref} className="km-requests">
       {entries.map((entry) =>
         entry.kind === 'secret_request' ? (
           <SecretCard key={entry.id} sessionId={id} entry={entry} agentName={name} />
-        ) : (
-          <PermissionEntry
-            key={entry.permission?.requestId ?? entry.id}
-            ref={ref}
-            sessionId={id}
-            entry={entry}
-            projectPath={summary.projectPath}
-            agentName={name}
-            media={[]}
-          />
+        ) : waitsBehind(queue, entry.id) ? null : (
+          <Fragment key={entry.permission?.requestId ?? entry.id}>
+            <PermissionEntry
+              ref={ref}
+              sessionId={id}
+              entry={entry}
+              projectPath={summary.projectPath}
+              agentName={name}
+              media={[]}
+            />
+            {queue.length > 1 && queue[0]!.id === entry.id && (
+              <RequestQueue
+                key={queue.map((queued) => queued.id).join(' ')}
+                sessionId={id}
+                queue={queue}
+                projectPath={summary.projectPath}
+              />
+            )}
+          </Fragment>
         ),
       )}
     </div>

@@ -373,9 +373,10 @@ export const Thread = memo(function Thread({
     view === 'all' ? '' : zenSignatureOf(s.replicas[sessionId]?.state),
   )
   const [openTurns, setOpenTurns] = useState<ReadonlySet<string>>(NO_TURNS)
+  // The view's characters follow every entry, those the thread leaves out among them.
   const zenned = useMemo(
-    () => zenItems(built, order, zen, view, openTurns),
-    [built, order, zen, view, openTurns],
+    () => zenItems(built, allOrder ?? [], zen, view, openTurns),
+    [built, allOrder, zen, view, openTurns],
   )
   const items = zenned.items
   const openTurn = useCallback(
