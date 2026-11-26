@@ -2,7 +2,6 @@
 # back to pairing, saying it was removed. The screen used to throw as it closed, when it read the
 # link the phone had just dropped, and the app crashed. It removes the phone for good, so it runs
 # last; run.sh starts removal-server.mjs for it.
-# Ends: both appearances
 appId: io.github.rsdvb.huli
 ---
 - launchApp:
