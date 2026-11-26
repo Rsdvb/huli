@@ -1959,24 +1959,119 @@ describe('agy 托管 Auto 模式、本会话总是允许与插件预检', () => 
     connection.close()
   })
 
-  it.skipIf(ON_WINDOWS)('托管 Auto 放行日常操作、拦截删核心文件与改 .env 并透传 destructive 风险与原因，支持本会话总是允许', async () => {
-    const requestsSeen: PermissionRequest[] = []
-    const answersSent: unknown[] = []
-    const { connection } = connect('1.5.17', async (client, sessionId) => {
-      const ask = async (
-        toolCallId: string,
-        name: string,
-        rawInput: Record<string, unknown>,
-        kind: ToolCallUpdate['kind'] = 'other',
-      ) => {
+  it.skipIf(ON_WINDOWS)(
+    '托管 Auto 放行日常操作、拦截删核心文件与改 .env 并透传 destructive 风险与原因，支持本会话总是允许',
+    async () => {
+      const requestsSeen: PermissionRequest[] = []
+      const answersSent: unknown[] = []
+      const { connection } = connect('1.5.17', async (client, sessionId) => {
+        const ask = async (
+          toolCallId: string,
+          name: string,
+          rawInput: Record<string, unknown>,
+          kind: ToolCallUpdate['kind'] = 'other',
+        ) => {
+          const tc = {
+            sessionUpdate: 'tool_call',
+            toolCallId,
+            name,
+            kind,
+            status: 'pending',
+            title: `Run ${name}`,
+            rawInput,
+          }
+          await client.notify(methods.client.session.update, update(sessionId, tc))
+          answersSent.push(
+            await client.request(methods.client.session.requestPermission, {
+              sessionId,
+              toolCall: tc,
+              options: OPTIONS,
+            } as never),
+          )
+        }
+        // 1. 工作区常规编辑、写 /tmp、安全命令、只读外部 MCP -> 全部自动放行（不弹窗）
+        await ask('tc-edit-ok', 'edit_file', { Path: '/repo/src/app.ts' }, 'edit')
+        await ask('tc-tmp-ok', 'write_file', { Path: '/tmp/driver/verify.mjs' }, 'edit')
+        await ask(
+          'tc-cmd-ok',
+          'run_command',
+          { CommandLine: 'du -sh /tmp/ 2>/dev/null | head -n 5' },
+          'execute',
+        )
+        await ask('tc-mcp-ok', 'mcp_github_get_commit', { owner: 'a', repo: 'b', sha: '1' })
+        // 2. 删除核心文件 & 修改 .env -> destructive 拦截，且不提供本会话总是允许
+        await ask('tc-rm-core', 'run_command', { CommandLine: 'rm -f package.json' }, 'execute')
+        await ask('tc-edit-env', 'edit_file', { Path: '/repo/.env' }, 'edit')
+        // 3. 工作区外普通目录写入 -> risky 拦截 + 合成「本会话总是允许」，选中后同目录第二次 0 弹窗
+        await ask('tc-outside-1', 'write_file', { Path: '/Users/dev/Desktop/a.txt' }, 'edit')
+        await ask('tc-outside-2', 'write_file', { Path: '/Users/dev/Desktop/b.txt' }, 'edit')
+      })
+
+      await connection.initialize('1.0.0')
+      const { sessionId, config } = await connection.newSession('/repo')
+      const base = threadTarget()
+      const target: SessionTarget = {
+        ...base.target,
+        requestPermission: async (req) => {
+          requestsSeen.push(req)
+          base.target.apply(req.output)
+          // 对工作区外普通目录写入选择合成的「本会话总是允许」选项。
+          const always = req.options.find((o) => o.kind === 'allow_always')
+          if (req.toolCallId === 'tc-outside-1' && always) return { optionId: always.id }
+          return { optionId: 'deny' }
+        },
+      }
+      target.apply({ patches: [{ op: 'session.update', changes: { config } }], effects: [] })
+      connection.register(sessionId, target)
+      await connection.setConfigOption(sessionId, 'mode', 'auto')
+      await connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
+
+      // 只有 rm-core、edit-env 和首次 outside 写入弹出审批卡；其余全部自动放行。
+      expect(requestsSeen.map((r) => r.toolCallId)).toEqual([
+        'tc-rm-core',
+        'tc-edit-env',
+        'tc-outside-1',
+      ])
+      // 删除核心文件与改 .env 均为 destructive，带拦截原因，且禁止 allow_always。
+      expect(requestsSeen[0]).toMatchObject({ risk: 'destructive' })
+      expect(requestsSeen[0]!.reason).toContain('package.json')
+      expect(requestsSeen[0]!.options.some((o) => o.kind === 'allow_always')).toBe(false)
+
+      expect(requestsSeen[1]).toMatchObject({ risk: 'destructive' })
+      expect(requestsSeen[1]!.reason).toContain('.env')
+      expect(requestsSeen[1]!.options.some((o) => o.kind === 'allow_always')).toBe(false)
+
+      // 首次工作区外写入为 risky，并带有合成的 allow_always 选项；回传给 agy 的必须是原 allow_once ID。
+      expect(requestsSeen[2]).toMatchObject({ risk: 'risky' })
+      expect(requestsSeen[2]!.options.some((o) => o.kind === 'allow_always')).toBe(true)
+
+      expect(answersSent).toEqual([
+        { outcome: { outcome: 'selected', optionId: 'allow' } },
+        { outcome: { outcome: 'selected', optionId: 'allow' } },
+        { outcome: { outcome: 'selected', optionId: 'allow' } },
+        { outcome: { outcome: 'selected', optionId: 'allow' } },
+        { outcome: { outcome: 'selected', optionId: 'deny' } },
+        { outcome: { outcome: 'selected', optionId: 'deny' } },
+        { outcome: { outcome: 'selected', optionId: 'allow' } },
+        { outcome: { outcome: 'selected', optionId: 'allow' } },
+      ])
+      connection.close()
+    },
+  )
+
+  it.skipIf(ON_WINDOWS)(
+    '遵循 PLUG-7：即便在 Auto 模式下命中自动放行，插件预检钩子仍可拒绝工具调用',
+    async () => {
+      const answersSent: unknown[] = []
+      const { connection } = connect('1.5.17', async (client, sessionId) => {
         const tc = {
           sessionUpdate: 'tool_call',
-          toolCallId,
-          name,
-          kind,
-          status: 'pending',
-          title: `Run ${name}`,
-          rawInput,
+          toolCallId: 'tc-plugin-block',
+          name: 'edit_file',
+          kind: 'edit' as const,
+          status: 'pending' as const,
+          title: 'Edit src/app.ts',
+          rawInput: { Path: '/repo/src/app.ts' },
         }
         await client.notify(methods.client.session.update, update(sessionId, tc))
         answersSent.push(
@@ -1986,117 +2081,28 @@ describe('agy 托管 Auto 模式、本会话总是允许与插件预检', () => 
             options: OPTIONS,
           } as never),
         )
+      })
+
+      await connection.initialize('1.0.0')
+      const { sessionId } = await connection.newSession('/repo')
+      const base = threadTarget()
+      const pluginChecks: string[] = []
+      const target: SessionTarget = {
+        ...base.target,
+        hasPermissionPlugins: () => true,
+        checkPermissionPlugin: async (req) => {
+          pluginChecks.push(req.toolCallId)
+          return { optionId: 'deny' }
+        },
       }
-      // 1. 工作区常规编辑、写 /tmp、安全命令、只读外部 MCP -> 全部自动放行（不弹窗）
-      await ask('tc-edit-ok', 'edit_file', { Path: '/repo/src/app.ts' }, 'edit')
-      await ask('tc-tmp-ok', 'write_file', { Path: '/tmp/driver/verify.mjs' }, 'edit')
-      await ask(
-        'tc-cmd-ok',
-        'run_command',
-        { CommandLine: 'du -sh /tmp/ 2>/dev/null | head -n 5' },
-        'execute',
-      )
-      await ask('tc-mcp-ok', 'mcp_github_get_commit', { owner: 'a', repo: 'b', sha: '1' })
-      // 2. 删除核心文件 & 修改 .env -> destructive 拦截，且不提供本会话总是允许
-      await ask('tc-rm-core', 'run_command', { CommandLine: 'rm -f package.json' }, 'execute')
-      await ask('tc-edit-env', 'edit_file', { Path: '/repo/.env' }, 'edit')
-      // 3. 工作区外普通目录写入 -> risky 拦截 + 合成「本会话总是允许」，选中后同目录第二次 0 弹窗
-      await ask('tc-outside-1', 'write_file', { Path: '/Users/dev/Desktop/a.txt' }, 'edit')
-      await ask('tc-outside-2', 'write_file', { Path: '/Users/dev/Desktop/b.txt' }, 'edit')
-    })
+      connection.register(sessionId, target)
+      await connection.setConfigOption(sessionId, 'mode', 'auto')
+      await connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
 
-    await connection.initialize('1.0.0')
-    const { sessionId, config } = await connection.newSession('/repo')
-    const base = threadTarget()
-    const target: SessionTarget = {
-      ...base.target,
-      requestPermission: async (req) => {
-        requestsSeen.push(req)
-        base.target.apply(req.output)
-        // 对工作区外普通目录写入选择合成的「本会话总是允许」选项。
-        const always = req.options.find((o) => o.kind === 'allow_always')
-        if (req.toolCallId === 'tc-outside-1' && always) return { optionId: always.id }
-        return { optionId: 'deny' }
-      },
-    }
-    target.apply({ patches: [{ op: 'session.update', changes: { config } }], effects: [] })
-    connection.register(sessionId, target)
-    await connection.setConfigOption(sessionId, 'mode', 'auto')
-    await connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
-
-    // 只有 rm-core、edit-env 和首次 outside 写入弹出审批卡；其余全部自动放行。
-    expect(requestsSeen.map((r) => r.toolCallId)).toEqual([
-      'tc-rm-core',
-      'tc-edit-env',
-      'tc-outside-1',
-    ])
-    // 删除核心文件与改 .env 均为 destructive，带拦截原因，且禁止 allow_always。
-    expect(requestsSeen[0]).toMatchObject({ risk: 'destructive' })
-    expect(requestsSeen[0]!.reason).toContain('package.json')
-    expect(requestsSeen[0]!.options.some((o) => o.kind === 'allow_always')).toBe(false)
-
-    expect(requestsSeen[1]).toMatchObject({ risk: 'destructive' })
-    expect(requestsSeen[1]!.reason).toContain('.env')
-    expect(requestsSeen[1]!.options.some((o) => o.kind === 'allow_always')).toBe(false)
-
-    // 首次工作区外写入为 risky，并带有合成的 allow_always 选项；回传给 agy 的必须是原 allow_once ID。
-    expect(requestsSeen[2]).toMatchObject({ risk: 'risky' })
-    expect(requestsSeen[2]!.options.some((o) => o.kind === 'allow_always')).toBe(true)
-
-    expect(answersSent).toEqual([
-      { outcome: { outcome: 'selected', optionId: 'allow' } },
-      { outcome: { outcome: 'selected', optionId: 'allow' } },
-      { outcome: { outcome: 'selected', optionId: 'allow' } },
-      { outcome: { outcome: 'selected', optionId: 'allow' } },
-      { outcome: { outcome: 'selected', optionId: 'deny' } },
-      { outcome: { outcome: 'selected', optionId: 'deny' } },
-      { outcome: { outcome: 'selected', optionId: 'allow' } },
-      { outcome: { outcome: 'selected', optionId: 'allow' } },
-    ])
-    connection.close()
-  })
-
-  it.skipIf(ON_WINDOWS)('遵循 PLUG-7：即便在 Auto 模式下命中自动放行，插件预检钩子仍可拒绝工具调用', async () => {
-    const answersSent: unknown[] = []
-    const { connection } = connect('1.5.17', async (client, sessionId) => {
-      const tc = {
-        sessionUpdate: 'tool_call',
-        toolCallId: 'tc-plugin-block',
-        name: 'edit_file',
-        kind: 'edit' as const,
-        status: 'pending' as const,
-        title: 'Edit src/app.ts',
-        rawInput: { Path: '/repo/src/app.ts' },
-      }
-      await client.notify(methods.client.session.update, update(sessionId, tc))
-      answersSent.push(
-        await client.request(methods.client.session.requestPermission, {
-          sessionId,
-          toolCall: tc,
-          options: OPTIONS,
-        } as never),
-      )
-    })
-
-    await connection.initialize('1.0.0')
-    const { sessionId } = await connection.newSession('/repo')
-    const base = threadTarget()
-    const pluginChecks: string[] = []
-    const target: SessionTarget = {
-      ...base.target,
-      hasPermissionPlugins: () => true,
-      checkPermissionPlugin: async (req) => {
-        pluginChecks.push(req.toolCallId)
-        return { optionId: 'deny' }
-      },
-    }
-    connection.register(sessionId, target)
-    await connection.setConfigOption(sessionId, 'mode', 'auto')
-    await connection.prompt(sessionId, [{ type: 'text', text: 'go' }])
-
-    expect(pluginChecks).toEqual(['tc-plugin-block'])
-    expect(base.asked).toEqual([])
-    expect(answersSent).toEqual([{ outcome: { outcome: 'selected', optionId: 'deny' } }])
-    connection.close()
-  })
+      expect(pluginChecks).toEqual(['tc-plugin-block'])
+      expect(base.asked).toEqual([])
+      expect(answersSent).toEqual([{ outcome: { outcome: 'selected', optionId: 'deny' } }])
+      connection.close()
+    },
+  )
 })
