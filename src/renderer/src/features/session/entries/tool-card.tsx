@@ -10,10 +10,11 @@ import { revealWaiting } from './helpers'
 import { PermissionEntry } from './permission-card'
 import { PlanCard, PlanSettled } from './plan-card'
 import { AnsweredAsk, OptionQuestionCard, QuestionCard } from './question-card'
-import { ThreadRequestQueue, useQueueKey } from './request-queue'
+import { ThreadRequestQueue } from './request-queue'
 import { WorkflowToolCard } from './workflow-cards'
 import { workflowCardOf } from './workflow-tools'
 import { StepCard } from './tool-call'
+import { useQueueKey } from './use-queue-key'
 import { stepFacts, useToolCallLabels } from './tool-call-model'
 
 export interface ToolCardProps {

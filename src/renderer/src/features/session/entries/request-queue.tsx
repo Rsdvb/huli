@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import { bulkSplit, inQueue, threadQueue, type QueuedRequest } from '@shared/permission-queue'
+import { bulkSplit, inQueue, type QueuedRequest } from '@shared/permission-queue'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { Button } from '@renderer/components/ui/button'
 import { host } from '@renderer/lib/host'
@@ -13,20 +13,6 @@ import { KIND_GLYPH } from './tool-call-model'
 import { useAnswering } from './use-answering'
 
 type Decision = 'allow' | 'deny'
-
-/**
- * Huli: the queue's request ids, oldest first, when `entryId` is the request answered now and
- * others wait behind it; '' otherwise. A key, so a card renders again only when its queue does.
- */
-export function useQueueKey(sessionId: string, entryId: string): string {
-  return useThreadsStore((s) => {
-    const state = s.replicas[sessionId]?.state
-    const entry = state?.byId[entryId]
-    if (entry?.kind !== 'tool' || !entry.permission) return ''
-    const queue = threadQueue(state)
-    return queue.length > 1 && queue[0]!.id === entryId ? queue.map((e) => e.id).join('\n') : ''
-  })
-}
 
 /** The line under the thread's oldest request, from the entries of the replica. */
 export function ThreadRequestQueue({
