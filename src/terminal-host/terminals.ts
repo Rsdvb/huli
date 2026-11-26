@@ -1076,7 +1076,9 @@ export class TerminalManager {
   private runsInShell(terminal: Terminal): boolean {
     if (this.options.platform !== 'win32') return terminal.info.busy
     const mark = terminal.promptMark
-    return mark !== null && !cursorLine(terminal.tail).endsWith(mark)
+    // The last line with text, not the cursor's: ConPTY repaints the screen on a resize and leaves
+    // the cursor below on a blank line.
+    return mark !== null && !plainTail(terminal.tail, 1).endsWith(mark)
   }
 
   /**
@@ -1091,7 +1093,16 @@ export class TerminalManager {
     const text = plainTail(terminal.tail, ECHO_LINES)
     const at = text.lastIndexOf(echo.probe)
     if (at < 0) return
-    const before = text.slice(text.lastIndexOf('\n', at) + 1, at).trimEnd()
+    let before = text.slice(text.lastIndexOf('\n', at) + 1, at)
+    // The shell drew part of the command, then moved back and drew all of it, which reads as the
+    // part followed by the whole once the cursor moves are gone.
+    for (let length = Math.min(before.length, echo.probe.length); length > 0; length--) {
+      if (before.endsWith(echo.probe.slice(0, length))) {
+        before = before.slice(0, -length)
+        break
+      }
+    }
+    before = before.trimEnd()
     if (before) terminal.promptMark = before.slice(-1)
   }
 

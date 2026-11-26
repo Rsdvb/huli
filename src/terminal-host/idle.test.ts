@@ -360,6 +360,30 @@ describe('the prompt of an agent terminal on Windows', () => {
     await vi.advanceTimersByTimeAsync(11 * MINUTE)
     expect(await ids()).toEqual([])
   })
+
+  it('reads through a redrawn echo and a repaint that leaves the cursor on a blank line', async () => {
+    const { manager, ptys, ids, root } = idleHost('win32')
+    await manager.agentCall({
+      kind: 'run',
+      sessionId: 's1',
+      agentId: 'claude-code',
+      folder: root,
+      command: 'echo idle-1',
+    })
+    const pty = ptys[0]!
+    pty.emit('PS C:\\work\\app> ')
+    await vi.advanceTimersByTimeAsync(500)
+    // As ConPTY sent it: part of the echo, a cursor move back, the whole echo, the output.
+    pty.emit(
+      '\x1b[93mecho \x1b[37mi\x1b[m\x1b[93m\x1b[5;42Hecho \x1b[37midle-1\r\n\x1b[midle-1\r\nPS C:\\work\\app> ',
+    )
+    await vi.advanceTimersByTimeAsync(1000)
+    // A resize repaints the screen and leaves the cursor on a blank line below the prompt.
+    pty.emit('\x1b[HPS C:\\work\\app>\x1b[K\r\n\x1b[K\r\n\x1b[K\x1b[10;26H\x1b[?25h')
+    manager.turnEnded('s1')
+    await vi.advanceTimersByTimeAsync(11 * MINUTE)
+    expect(await ids()).toEqual([])
+  })
 })
 
 describe("the user's typing", () => {
