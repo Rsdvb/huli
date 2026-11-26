@@ -460,6 +460,7 @@ import {
   SUGGEST_TIMEOUT_MS,
   suggestionRoute,
   suggestionText,
+  suggestsWith,
   type SuggestionRoute,
 } from './next-message'
 import { SIDE_ENTRIES, type StoredSideChat } from './threads/side-chat'
@@ -5559,9 +5560,12 @@ export class SessionManager {
 
   /** Whether the session is given the next-message tool: its agent suggests by it, and it is on. */
   private suggestsByTool(record: SessionRecord, runtime: AgentRuntime | null | undefined): boolean {
-    return (
-      this.deps.settings().promptSuggestions && this.suggestionRouteOf(record, runtime) === 'tool'
-    )
+    const route = this.suggestionRouteOf(record, runtime)
+    return route === 'tool' && this.suggestsOn(route)
+  }
+
+  private suggestsOn(route: SuggestionRoute): boolean {
+    return suggestsWith(route, this.deps.settings())
   }
 
   private libraryServers(
@@ -13367,9 +13371,11 @@ export class SessionManager {
    */
   noteSuggestion(sessionId: string, message: string): boolean {
     const live = this.live.get(sessionId)
-    if (!live?.turn || !this.deps.settings().promptSuggestions) return false
+    if (!live?.turn) return false
     const runtime = this.deps.agents.runtime(live.record.agentId)
-    if (this.suggestionRouteOf(live.record, runtime) !== 'tool') return false
+    if (this.suggestionRouteOf(live.record, runtime) !== 'tool' || !this.suggestsOn('tool')) {
+      return false
+    }
     live.turn.suggestion = message
     return true
   }
@@ -13381,16 +13387,15 @@ export class SessionManager {
   private suggestNext(live: Live, turn: Turn, stopReason: StopReason): void {
     // A queued message that went on is the next one already.
     if (stopReason !== 'end_turn' || live.turn || live.closing) return
-    if (!this.deps.settings().promptSuggestions || planModeOn(live.thread.session.config)) return
+    if (planModeOn(live.thread.session.config)) return
     const route = this.suggestionRouteOf(live.record, this.deps.agents.runtime(live.record.agentId))
+    if (route === null || route === 'claude' || !this.suggestsOn(route)) return
     if (route === 'tool') {
       if (turn.suggestion !== null) this.offerSuggestion(live, turn.suggestion)
       return
     }
     // A fork is a request of its own, which a plan near its limit is better kept for.
-    if ((route === 'codex' || route === 'fork') && !this.nearPlanLimit(live)) {
-      void this.suggestByFork(live, route)
-    }
+    if (!this.nearPlanLimit(live)) void this.suggestByFork(live, route)
   }
 
   /**
@@ -13438,7 +13443,7 @@ export class SessionManager {
       this.recordSuggestUsage(live, result)
       if (signal.aborted || live.turn || this.live.get(live.id) !== live) return
       const text = result.synthetic ? null : suggestionText(result.text)
-      if (text && this.deps.settings().promptSuggestions) this.offerSuggestion(live, text)
+      if (text && this.suggestsOn(route)) this.offerSuggestion(live, text)
     } catch (error) {
       if (!controller.signal.aborted) {
         this.deps.diagnostics.log(

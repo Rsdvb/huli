@@ -38,6 +38,18 @@ export function suggestionRoute(
   return allowsKettuTools ? 'tool' : null
 }
 
+/**
+ * Huli: whether suggestions given this way are on. Claude Code's own follow the main switch alone;
+ * every other way costs a request of the user's plan each turn, so it takes the second switch too.
+ */
+export function suggestsWith(
+  route: SuggestionRoute | null,
+  settings: { promptSuggestions: boolean; otherAgentSuggestions?: boolean },
+): boolean {
+  if (route === null || !settings.promptSuggestions) return false
+  return route === 'claude' || settings.otherAgentSuggestions === true
+}
+
 /** Whether the session is in plan mode, where no suggestion is given, as Claude Code gives none. */
 export function planModeOn(config: readonly ConfigOption[]): boolean {
   return config.some((option) => option.category === 'mode' && option.value === 'plan')
