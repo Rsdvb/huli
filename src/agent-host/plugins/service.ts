@@ -548,8 +548,12 @@ export class PluginsService {
       source,
       contents: fetched.pkg.contents,
       replaces: file.plugins[id] ? id : null,
-      // Older clients keep Install off for any reason given here.
-      blocked: null,
+      // Older clients keep Install off for any reason given here. Huli: a conversion that
+      // carried nothing would install an empty plugin.
+      blocked:
+        fetched.conversion && fetched.conversion.carried.length === 0
+          ? t('plugins.invalid', { reason: t('plugins.convert.nothing') })
+          : null,
       skipped: taken(id, fetched.pkg.contents.skills, skills),
       ...(fetched.conversion ? { conversion: fetched.conversion } : {}),
     }

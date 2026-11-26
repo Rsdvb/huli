@@ -1904,10 +1904,11 @@
         "serverNone": "It has neither a command nor a web address.",
         "nameTaken": "Another one is named {{name}}.",
         "nameTakenFile": "A Kettu plugin’s own files have this name."
-      }
+      },
+      "nothing": "nothing of it works in Kite, since everything it holds was left out, as listed below."
     },
-    "isSkill": "This is a skill, not a plugin: it has a SKILL.md and no plugin.json. Add it with Add › Skill from GitHub, or Skill from a folder.",
-    "isMarketplace": "This is a plugin marketplace, which lists several plugins. Paste its github.com link in Add › Plugin from GitHub to pick one, or pick the folder of one plugin in it.",
+    "isSkill": "This is a skill, not a plugin (it has a SKILL.md and no plugin.json). Add it with Add › A skill from GitHub, or A skill from a folder.",
+    "isMarketplace": "This is a plugin marketplace, which lists several plugins. Paste its github.com link in Add › A plugin from GitHub to pick one, or pick the folder of one plugin in it.",
     "noPluginAt": "{{url}} holds no plugin: there’s no plugin.json, no Claude Code .claude-plugin/plugin.json and no Codex .codex-plugin/plugin.json."
   },
   "commands": {

@@ -1122,3 +1122,19 @@ describe('Huli: a Claude Code or Codex plugin, converted when it is installed', 
     expect(plan.contents.name).toBe('review-kit')
   })
 })
+
+describe('Huli: a converted plugin that carries nothing', () => {
+  it('keeps Install off and says why', async () => {
+    const h = await host()
+    const folder = path.join(root, 'hooks-only')
+    await writeTree(folder, {
+      '.claude-plugin/plugin.json': '{"name":"hooks-only"}',
+      'hooks/hooks.json': JSON.stringify({
+        hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo bye' }] }] },
+      }),
+    })
+    const plan = await h.plugins.inspect({ kind: 'local', path: folder })
+    expect(plan.conversion?.carried).toEqual([])
+    expect(plan.blocked).toMatch(/left out/)
+  })
+})

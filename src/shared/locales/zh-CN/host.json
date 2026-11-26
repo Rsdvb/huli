@@ -1885,9 +1885,10 @@
         "serverNone": "它既没有命令，也没有网址。",
         "nameTaken": "另一项也叫 {{name}}。",
         "nameTakenFile": "这个名字是 Kettu 插件自己的文件占着的。"
-      }
+      },
+      "nothing": "它在纸鸢里什么都用不了，里面的东西都没能带过来，原因见下面。"
     },
-    "isSkill": "这是一个技能，不是插件：里面有 SKILL.md，没有 plugin.json。请用「添加 › 来自 GitHub 的技能」或「来自文件夹的技能」添加。",
+    "isSkill": "这是一个技能，不是插件（里面有 SKILL.md，没有 plugin.json）。请用「添加 › 来自 GitHub 的技能」或「来自文件夹的技能」添加。",
     "isMarketplace": "这是一个插件市场，里面列着好几个插件。把它的 github.com 链接粘贴到「添加 › 来自 GitHub 的插件」里挑一个，或者选它里面某一个插件的文件夹。",
     "noPluginAt": "{{url}} 里没有插件：既没有 plugin.json，也没有 Claude Code 的 .claude-plugin/plugin.json 或 Codex 的 .codex-plugin/plugin.json。"
   },
