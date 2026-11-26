@@ -2995,7 +2995,9 @@ And as the 2026-11-26 merge settled it:
   ephemeral fork, a fork agy makes and removes, or the `suggest_next_message` tool) come in, and
   fill Kite's `PromptSuggestion` (`offerSuggestion` in `sessions.ts`: one cleaned line, an id);
   Claude Code's are Kite's engine as before (`claude` route). A fork is a request of its own on the
-  user's plan, skipped near a plan limit.
+  user's plan, skipped near a plan limit. Every route but Claude Code's also waits for a second
+  switch under the main one, `general.otherAgentSuggestions` (也为 Codex 等其他 Agent 生成), off by
+  default (`suggestsWith` in `next-message.ts`); the main switch alone still runs Claude Code's.
 - Work that runs on after a turn (#2645) is Kettu's line, dots and row status (`stillRunning`);
   Kite's board, background tasks and the away host's status stay, and the concise thread never
   hides the line. Its dots are Kite's stepped Web Animations, not CSS animations.
