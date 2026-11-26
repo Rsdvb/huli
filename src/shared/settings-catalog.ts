@@ -544,6 +544,18 @@ const ENTRIES = {
     access: 'change',
     ...flag('general', 'promptSuggestions', (file) => file.general.promptSuggestions),
   },
+  // Huli: the suggestions of agents without their own, which cost a request of the plan each turn.
+  'general.other-agent-suggestions': {
+    section: 'general',
+    row: 'other-agent-suggestions',
+    group: 'general.groups.sessions',
+    name: 'general.otherAgentSuggestions.name',
+    description: 'general.otherAgentSuggestions.description',
+    keywords: 'general.otherAgentSuggestions.keywords',
+    part: 'host',
+    access: 'change',
+    ...flag('general', 'otherAgentSuggestions', (file) => file.general.otherAgentSuggestions),
+  },
   'general.agent-passwords': {
     section: 'general',
     row: 'agent-passwords',

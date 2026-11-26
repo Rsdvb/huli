@@ -115,8 +115,13 @@
     },
     "promptSuggestions": {
       "name": "Suggest the next message",
-      "description": "After a turn, the empty message box shows what you might say next; Tab fills it in. The agent guesses from the conversation, mostly from its prompt cache.",
+      "description": "After a turn, the empty message box shows what you might say next; Tab fills it in. Claude Code makes its own from its prompt cache; other agents need the option below.",
       "keywords": "suggestion predict next message prompt tab autocomplete composer"
+    },
+    "otherAgentSuggestions": {
+      "name": "Also for Codex and other agents (one more request per turn)",
+      "description": "Codex and other agents make no suggestions of their own, so after every turn the agent is asked once more: each turn uses one more request of your plan. Claude Code's suggestions follow only the switch above.",
+      "keywords": "suggestion next message codex other agents extra request quota plan limit usage cost"
     },
     "agentPasswords": {
       "name": "Let agents type passwords",

@@ -170,6 +170,7 @@ import {
   EffortControl,
   FontSize,
   GeneralSwitch,
+  OtherAgentSuggestions,
   LightModelChoice,
   GhTool,
   GitTool,
@@ -308,6 +309,12 @@ export function useGeneralSection(): SectionDef {
         render: () => (
           <GeneralSwitch field="promptSuggestions" label={t('general.promptSuggestions.name')} />
         ),
+      },
+      {
+        id: 'other-agent-suggestions',
+        setting: 'general.other-agent-suggestions',
+        group: sessions,
+        render: () => <OtherAgentSuggestions label={t('general.otherAgentSuggestions.name')} />,
       },
       {
         id: 'agent-passwords',

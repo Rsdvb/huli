@@ -249,6 +249,7 @@ export function GeneralSwitch({
     | 'confirmQuitWhileRunning'
     | 'sessionTitles'
     | 'promptSuggestions'
+    | 'otherAgentSuggestions'
     | 'agentPasswords'
     | 'background'
     | 'lowerAgentPriority'
@@ -270,6 +271,14 @@ export function GeneralSwitch({
       />
     </>
   )
+}
+
+/** Huli: other agents' suggestions, which only take effect while the main switch is on. */
+export function OtherAgentSuggestions({ label }: { label: string }) {
+  const main = useHostScope().useSettingsStore(
+    (s) => s.settings.general.promptSuggestions ?? DEFAULT_SETTINGS.general.promptSuggestions,
+  )
+  return <GeneralSwitch field="otherAgentSuggestions" label={label} disabled={!main} />
 }
 
 /** An agent's models as last read, each listed once, in the agent's groups. */

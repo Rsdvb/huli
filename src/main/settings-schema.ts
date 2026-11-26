@@ -349,6 +349,7 @@ const SECTION_FIELDS = {
         : `"${path}" must be a valid custom Claude entrypoint label`,
     claudeRuns: isClaudeRuns,
     promptSuggestions: isBoolean,
+    otherAgentSuggestions: isBoolean,
     continueAfterLimit: isBoolean,
     agentPasswords: isBoolean,
     lightModel: isLightModel,
@@ -2132,6 +2133,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
       : null,
     claudeRuns: structuredClone(settings.general.claudeRuns),
     promptSuggestions: settings.general.promptSuggestions,
+    otherAgentSuggestions: settings.general.otherAgentSuggestions,
     // Huli: Kite's own resume after a plan limit (`supervisor.resumeAfterLimit`) carries sessions
     // on, so Kettu's continuation never runs beside it.
     continueAfterLimit: false,
