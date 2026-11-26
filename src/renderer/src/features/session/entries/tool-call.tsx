@@ -165,6 +165,7 @@ export function StepCard({
     return (
       <ToolCallCard
         {...facts}
+        className={cn(facts.className, 'ks-thought')}
         name={t('summary.thought')}
         summary={thoughtTitle(entry.markdown) ?? undefined}
       >

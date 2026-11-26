@@ -190,7 +190,9 @@ export function serviceInstructions(flags: GuideFlags): string {
     "Sessions: start_session hands work to another Kettu session, on another of the user's agents " +
       'from list_agents when it fits, such as a review in a read-only mode. Start one when the ' +
       'user asks for a review or parallel work; after a substantial change, offer one in your ' +
-      'reply. Kettu tells you when its turn ends, so never wait for it in a loop. Topic sessions.' +
+      'reply. Kettu tells you when its turn ends, so never wait for it in a loop. A long reply ' +
+      'comes in parts: read on with get_session and the next_offset it gives, never by asking ' +
+      'the session to resend. Topic sessions.' +
       (flags.board
         ? " When you finish work for the user to check, set_board_status moves your session to review on the user's task board."
         : ''),

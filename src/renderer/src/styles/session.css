@@ -752,6 +752,12 @@
   }
 }
 
+/* Huli: an open thought shows its text below, so its row drops the line that previews it, which
+   for a short thought is the whole text again. */
+.ks-thread .ks-thought[data-open] > .ui-tcc__top > .ui-tcc__head .ui-tcc__summary {
+  display: none;
+}
+
 /* An open step is the Tool Call Card's own white card. Its ground lies under the row and the
    details and starts where the row's hover well does, so the well lifts into the card as the step
    opens and the card sinks back into the row as it closes. */

@@ -584,7 +584,8 @@ export const ThoughtRow = memo(function ThoughtRow(props: {
     <StepLine
       icon={G.thought}
       name="思考"
-      summary={thoughtTitle(entry.markdown)}
+      // Opened, the card below shows the text, which a short thought's heading repeats whole.
+      summary={open && has ? null : thoughtTitle(entry.markdown)}
       mark={
         <StepMark status={entry.streaming ? 'running' : 'success'} duration={entry.durationMs} />
       }
