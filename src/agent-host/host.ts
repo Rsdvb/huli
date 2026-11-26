@@ -10,6 +10,7 @@ import {
   type TerminalCallAnswer,
   type TerminalCallErrorCode,
 } from '@shared/terminal-agent'
+import type { ClosedTerminal } from '@shared/terminal-idle'
 import { DeviceAccessStore } from './devices/access'
 import os from 'node:os'
 import path from 'node:path'
@@ -4350,6 +4351,11 @@ export class AgentHost {
   /** `host:terminal-handed-back`: the user handed a terminal back; the thread says for how long. */
   terminalHandedBack(sessionId: string, durationMs: number): void {
     this.sessions.controlHandedBack(sessionId, 'terminal', durationMs)
+  }
+
+  /** Huli: `host:terminals-idle-closed`: the thread says which and what they last printed. */
+  terminalsIdleClosed(sessionId: string, terminals: ClosedTerminal[]): void {
+    void this.sessions.terminalsIdleClosed(sessionId, terminals)
   }
 
   /** `host:plugin-port`: the plugin host is ready and this is its port. */

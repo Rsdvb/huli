@@ -178,7 +178,7 @@ function useHostWork(host: HostStatus, asking: boolean): HostWork | null {
 
 function WorkList({ items }: { items: string[] }) {
   return (
-    <ul className="flex flex-col gap-1 rounded-code bg-subtle px-3 py-2.5 text-ui text-primary">
+    <ul className="flex max-h-60 flex-col gap-1 overflow-y-auto rounded-code bg-subtle px-3 py-2.5 text-ui text-primary">
       {items.map((item, i) => (
         <li key={i} className="truncate" title={item}>
           {item}

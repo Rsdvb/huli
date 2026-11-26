@@ -352,7 +352,7 @@ export const NoticeEntry = memo(function NoticeEntry({ sessionId, entryId }: Ent
       <HugeiconsIcon icon={glyph} strokeWidth={1.9} aria-hidden />
       <AlertTitle>{entry.title}</AlertTitle>
       {entry.description && (
-        <AlertDescription className="whitespace-pre-wrap" data-selectable="">
+        <AlertDescription className="wrap-anywhere whitespace-pre-wrap" data-selectable="">
           {splitLinks(entry.description).map((part, i) =>
             part.type === 'link' ? <ConfirmedLink key={i} url={part.url} /> : part.text,
           )}

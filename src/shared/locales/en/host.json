@@ -190,6 +190,15 @@
       "title": "The session closed before your message was sent",
       "description": "It waits in the queue until you resume it."
     },
+    "idleTerminals": {
+      "title_one": "Closed {{count}} idle agent terminal",
+      "title_other": "Closed {{count}} idle agent terminals",
+      "line": "{{title}} · idle for {{minutes}} min",
+      "more_one": "and {{count}} more: {{names}}",
+      "more_other": "and {{count}} more: {{names}}",
+      "separator": ", ",
+      "setting": "Nothing ran in them. Settings › Terminal › Close idle agent terminals changes when this happens."
+    },
     "outOfCredit": {
       "title": "{{model}} is out of credit",
       "titleNoModel": "{{agent}}'s model provider is out of credit",

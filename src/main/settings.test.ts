@@ -12,6 +12,7 @@ import {
   effectiveDirect,
   hostSettings,
   mergeSettings,
+  terminalSettings,
   validateSettingsPatch,
   withOwnRelay,
 } from './settings-schema'
@@ -1040,10 +1041,14 @@ describe('the terminal font', () => {
     expect((await SettingsStore.load(dir)).get().terminal).toEqual({
       fontSize: 14,
       fontFamily: 'Maple Mono NF CN',
+      idleAgentMinutes: 10,
     })
     for (const bad of ['', ' padded ', 'A", evil', "A'; x", 'A\nB', 'a{b}', 7, 'x'.repeat(101)]) {
       await save({ version: 1, terminal: { fontSize: 14, fontFamily: bad } })
-      expect((await SettingsStore.load(dir)).get().terminal).toEqual({ fontSize: 14 })
+      expect((await SettingsStore.load(dir)).get().terminal).toEqual({
+        fontSize: 14,
+        idleAgentMinutes: 10,
+      })
     }
   })
 
@@ -1069,6 +1074,41 @@ describe('the terminal font', () => {
   it('stays with the window that draws the terminal, never on the host', () => {
     const { host, client } = splitSettingsPatch({ terminal: { fontFamily: 'Menlo' } })
     expect(host).toBeNull()
+    expect(client).toEqual({ terminal: { fontFamily: 'Menlo' } })
+  })
+})
+
+// Huli: Settings › Terminal › Close idle agent terminals.
+describe('closing idle agent terminals', () => {
+  it('is on at ten minutes until the file says otherwise, and keeps a stored choice', async () => {
+    expect((await SettingsStore.load(dir)).get().terminal.idleAgentMinutes).toBe(10)
+    await save({ version: 1, terminal: { fontSize: 13, idleAgentMinutes: 0 } })
+    expect((await SettingsStore.load(dir)).get().terminal.idleAgentMinutes).toBe(0)
+    for (const bad of [7, '10', -5, null, 10.5]) {
+      await save({ version: 1, terminal: { fontSize: 13, idleAgentMinutes: bad } })
+      expect((await SettingsStore.load(dir)).get().terminal.idleAgentMinutes).toBe(10)
+    }
+  })
+
+  it('takes only the offered choices in a change', () => {
+    for (const minutes of [0, 5, 10, 30]) {
+      expect(validateSettingsPatch({ terminal: { idleAgentMinutes: minutes } })).toEqual({
+        terminal: { idleAgentMinutes: minutes },
+      })
+    }
+    for (const bad of [1, 60, '5', null, true, -10]) {
+      expect(() => validateSettingsPatch({ terminal: { idleAgentMinutes: bad } })).toThrow()
+    }
+  })
+
+  it("is the host's, which its terminal host receives", () => {
+    const next = mergeSettings(DEFAULT_SETTINGS, { terminal: { idleAgentMinutes: 30 } })
+    expect(next.terminal.idleAgentMinutes).toBe(30)
+    expect(terminalSettings(next).idleAgentMinutes).toBe(30)
+    const { host, client } = splitSettingsPatch({
+      terminal: { idleAgentMinutes: 5, fontFamily: 'Menlo' },
+    })
+    expect(host).toEqual({ terminal: { idleAgentMinutes: 5 } })
     expect(client).toEqual({ terminal: { fontFamily: 'Menlo' } })
   })
 })

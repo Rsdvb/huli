@@ -1104,6 +1104,41 @@ session's menus, in its folder. 复制继续会话的命令 copies the same resu
   `host-request-limits.ts`, `features/agents/agent-terminal.ts`, `agents-section.tsx`,
   `project-menu.tsx`, `session-menu(-model).ts(x)` and `locales/*/{host,settings,sidebar}.json`.
 
+### Idle agent terminals (空闲的 Agent 终端)
+
+An agent's `terminal_run` types its command into an interactive shell, which stays open after the
+command ends (on Windows it never exits by itself), so agents' terminals piled up until their
+session was archived: 34 in one session, and the update dialog listed every one as running.
+
+- What runs under a shell comes from one listing of the system's processes
+  (`src/terminal-host/processes.ts`: `ps` on macOS and Linux, a CIM query through PowerShell on
+  Windows, about a second): a shell with a child is running something, its whole tree followed
+  and a process older than the shell (a reused pid) left out, zsh's `gitstatusd` too. A shell's
+  check is kept until it prints or is typed into, and a listing is shared and reused for 5 s, so
+  the quit and update dialogs' polls list rarely. node-pty's console list, used before, always
+  holds the agent node-pty forks to read it, so every Windows shell counted as running.
+- Windows tells no foreground process, so a command that runs inside PowerShell (Start-Sleep) has
+  no child: an agent's terminal remembers the prompt its command was echoed after (PSReadLine
+  redraws the line after each key and ConPTY repaints on a resize, which the reading skips) and
+  counts as running while its last line with text does not end with that prompt's mark.
+- Idle (`idleState` in `terminals.ts`): opened by an agent's tools, never typed into or taken over
+  by the user, not used by the running turn, no command waiting to be typed, no password prompt,
+  nothing running, and no output for Settings › 终端 › 自动关闭空闲的 Agent 终端 (5, 10 or 30
+  minutes, or 关闭; 10 by default, `terminal.idleAgentMinutes`, a host setting). Typing is told
+  from the terminal's own answers (cursor reports, focus, colours) by `isTyping`.
+- When: no timer while idle. A turn's end schedules one check per session a minute after the limit
+  (so shells started together close together), which waits again for terminals that printed
+  later; the 21st agent terminal checks every session (at most once a minute); and the tab list's
+  count menu checks its session as it opens (`terminals.activity`). Closed terminals' names and
+  last lines go to the session's thread as one notice (`terminalsIdleClosed` in `sessions.ts`,
+  joined with the previous one while nothing came between).
+- The count menu shows each terminal as running or idle for how long, and offers 关闭空闲的 Agent
+  终端（N 个）(`terminals.closeIdle`, idle for a minute). The update and quit dialogs list only
+  terminals that run something, under their session, with folder and run time, in a capped box
+  with a filter past 8 rows.
+- Tests: `idle.test.ts`, `processes.test.ts`, `validate.test.ts`, `terminal-idle.test.ts`, the
+  setting in `settings.test.ts`.
+
 ### File preview on the phone
 
 A document an agent made on the computer opens on the phone with a tap: PDF, Word, Excel and

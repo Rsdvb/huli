@@ -2,7 +2,12 @@ import { useMemo } from 'react'
 import { create } from 'zustand'
 import { IDLE_CONTROL, type ActiveControl } from '@shared/control'
 import type { PortConnectionState } from '@shared/port-rpc'
-import type { TerminalCommand, TerminalEvent, TerminalInfo } from '@shared/terminal-host'
+import type {
+  TerminalActivity,
+  TerminalCommand,
+  TerminalEvent,
+  TerminalInfo,
+} from '@shared/terminal-host'
 import { emitAppEvent } from '@renderer/app/events'
 import { errorCode, errorMessage, terminalHost, terminals, terminalsAt } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
@@ -699,6 +704,31 @@ export function moveTerminal(panel: string, id: string, toIndex: number): void {
     ids.splice(to, 0, ...ids.splice(from, 1))
     return { order: { ...s.order, [panel]: ids } }
   })
+}
+
+/**
+ * Huli: what each terminal of a session does now, as its tab list opens; its host first closes the
+ * session's agent terminals that sat idle as long as its settings say. Null from a host before it.
+ */
+export async function terminalActivity(
+  projectPath: string,
+  sessionId: string,
+): Promise<TerminalActivity[] | null> {
+  try {
+    return await terminalsAt(hostOfPath(projectPath), 'terminals.activity', { sessionId })
+  } catch (error) {
+    if (errorCode(error) !== 'unknown_method') setError([sessionId], error)
+    return null
+  }
+}
+
+/** Huli: Close idle agent terminals in a session's tab list. */
+export async function closeIdleTerminals(projectPath: string, sessionId: string): Promise<void> {
+  try {
+    await terminalsAt(hostOfPath(projectPath), 'terminals.closeIdle', { sessionId })
+  } catch (error) {
+    setError([sessionId], error)
+  }
 }
 
 export async function killTerminal(id: string): Promise<void> {

@@ -202,6 +202,7 @@ import {
   appealConfirms,
   PROMPT_SUGGESTION_CHARS,
 } from '@shared/thread'
+import { MAX_CLOSED_TERMINALS, type ClosedTerminal } from '@shared/terminal-idle'
 import type { SessionProcesses } from '@shared/task-processes'
 import { readTaskProcesses } from './task-processes'
 import {
@@ -556,6 +557,29 @@ export interface SessionTimings {
 
 /** The longest a thread's write waits after writes that failed. */
 const MAX_RETRY_MS = 5 * 60_000
+
+/** Huli: how many closed idle terminals a notice shows with their output; the rest by name. */
+const IDLE_NOTE_TERMINALS = 3
+/** Huli: how long after a notice of idle terminals closed the next close joins it. */
+const IDLE_NOTE_MERGE_MS = 15 * 60_000
+
+/** Huli: what a notice of idle terminals closed says: each with its last output, then the rest. */
+function idleNoticeText(terminals: readonly ClosedTerminal[]): string {
+  const parts = terminals.slice(0, IDLE_NOTE_TERMINALS).map((terminal) => {
+    const line = t('notice.idleTerminals.line', {
+      title: terminal.title,
+      minutes: Math.max(1, Math.round(terminal.idleMs / 60_000)),
+    })
+    return terminal.output ? `${line}\n${terminal.output}` : line
+  })
+  const rest = terminals.slice(IDLE_NOTE_TERMINALS)
+  if (rest.length > 0) {
+    const names = rest.map((terminal) => terminal.title).join(t('notice.idleTerminals.separator'))
+    parts.push(t('notice.idleTerminals.more', { count: rest.length, names }))
+  }
+  parts.push(t('notice.idleTerminals.setting'))
+  return parts.join('\n\n')
+}
 
 export const SESSION_TIMINGS: SessionTimings = {
   flushMs: 16,
@@ -1621,6 +1645,11 @@ export class SessionManager {
   /** Huli: what each session's pull request automation saw last; in memory, read again at start. */
   private readonly prFlowStates = new Map<string, PrFlowState>()
   private readonly live = new Map<string, Live>()
+  // Huli: each session's latest notice of idle terminals closed, which the next close may join.
+  private readonly idleNotes = new Map<
+    string,
+    { entryId: string; terminals: ClosedTerminal[]; at: number }
+  >()
   // Reports each session got since the user last wrote there; PAUSED once its notice is shown, so
   // a limit raised later lets none through before the user writes. In memory: a restart lets a
   // few more through, which the limit tolerates.
@@ -3831,6 +3860,59 @@ export class SessionManager {
   /** The user handed a surface back after taking it over: the thread says for how long. */
   controlHandedBack(sessionId: string, surface: ControlSurface, durationMs: number): void {
     this.controlNote(sessionId, surface, { event: 'handed_back', durationMs })
+  }
+
+  /**
+   * Huli: the terminal host closed agent terminals of the session that sat idle: a notice says
+   * which, with what each last printed, in place of the output the closed tabs took with them.
+   */
+  async terminalsIdleClosed(
+    sessionId: string,
+    terminals: readonly ClosedTerminal[],
+  ): Promise<void> {
+    if (!this.has(sessionId)) return
+    let live: Live
+    try {
+      live = await this.revive(sessionId)
+    } catch (error) {
+      this.deps.diagnostics.log(
+        'warn',
+        `Could not note the idle terminals closed in ${sessionId}: ${(error as Error).message}`,
+      )
+      return
+    }
+    const now = Date.now()
+    for (const [id, note] of this.idleNotes) {
+      if (now - note.at > IDLE_NOTE_MERGE_MS) this.idleNotes.delete(id)
+    }
+    // Closes a little apart, with nothing in the thread between them, make one notice.
+    const last = this.idleNotes.get(sessionId)
+    const merged =
+      last && live.thread.order.at(-1) === last.entryId && live.thread.byId[last.entryId]
+        ? last
+        : null
+    const all = [...(merged?.terminals ?? []), ...terminals].slice(-MAX_CLOSED_TERMINALS)
+    const fields = {
+      title: t('notice.idleTerminals.title', { count: all.length }),
+      description: idleNoticeText(all),
+    }
+    const entryId = merged?.entryId ?? this.nextId(live)
+    this.emit(live, [
+      merged
+        ? { op: 'entry.update', id: entryId, changes: fields }
+        : {
+            op: 'entry.add',
+            entry: {
+              kind: 'notice',
+              id: entryId,
+              severity: 'info',
+              ...fields,
+              after: agentEntryBefore(live.thread),
+            },
+          },
+    ])
+    this.idleNotes.set(sessionId, { entryId, terminals: all, at: now })
+    this.touch(live.id)
   }
 
   /** The user's own click or key in the app the agent used took it over: the thread says so. */

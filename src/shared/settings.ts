@@ -9,6 +9,7 @@ import type { DirectAddress } from './remote/protocol'
 import type { AutoApprove } from './risk'
 import { DEFAULT_SANDBOX_SETTINGS, type SandboxSettings } from './sandbox'
 import { DEFAULT_SUPERVISOR, type SupervisorSettings } from './supervisor'
+import { DEFAULT_IDLE_TERMINAL_MINUTES, type IdleTerminalMinutes } from './terminal-idle'
 import { DEFAULT_TIDY, type TidySettings } from './session-tidy'
 import { DEFAULT_RECYCLE_BIN, type RecycleBinSettings } from './recycle-bin'
 import type { ToolCallView } from './zen-view'
@@ -148,6 +149,8 @@ export interface SettingsFile {
     shellPath?: string // picked in a native dialog; the platform default when absent
     fontSize: 12 | 13 | 14
     fontFamily?: string // an installed face tried before the theme's code font
+    // Huli: after how many minutes the host closes an agent's terminal that sits idle; 0 never.
+    idleAgentMinutes: IdleTerminalMinutes
   }
   // worktreeRoot: where sessions' worktrees go; null puts them beside each project. Huli:
   // portBase: the first port of the blocks worktree sessions hold (KITE_PORT).
@@ -504,7 +507,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   addedAgents: [],
   disabledAgents: [],
   proxy: { mode: 'environment' },
-  terminal: { fontSize: 13 },
+  terminal: { fontSize: 13, idleAgentMinutes: DEFAULT_IDLE_TERMINAL_MINUTES },
   git: { backgroundFetch: false, worktreeRoot: null, portBase: DEFAULT_PORT_BASE },
   mcp: { kettu: { off: [] } },
   marketplace: { mcp: [], skills: [] },
@@ -612,6 +615,7 @@ export interface SettingsPatch {
     shellPath?: null
     fontSize?: SettingsFile['terminal']['fontSize']
     fontFamily?: string | null // null goes back to the theme's code font
+    idleAgentMinutes?: IdleTerminalMinutes
   }
   git?: Partial<SettingsFile['git']>
   mcp?: { kettu: { off: AgentId[] } } // the list is replaced whole
@@ -726,4 +730,7 @@ export interface TerminalSettings {
   shellPath: string | null
   fontSize: SettingsFile['terminal']['fontSize']
   allowDevices: boolean // `remote.terminal`: paired devices' ports may use the terminals
+  // Huli: minutes an agent's terminal sits idle before the host closes it; 0 never. Absent from
+  // an older parent, which means the default.
+  idleAgentMinutes?: IdleTerminalMinutes
 }

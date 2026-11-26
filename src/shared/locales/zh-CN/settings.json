@@ -414,8 +414,17 @@
       "name": "字号",
       "description": "单位：像素。"
     },
+    "idleAgent": {
+      "name": "自动关闭空闲的 Agent 终端",
+      "description": "Agent 打开的终端里没有程序在跑、并且这么久没有输出，就把它关掉。你自己打开或输入过的、正在进行的这一轮在用的、还有命令、服务或监听在跑的，都不会关。会话里会留下它最后的输出。",
+      "keywords": "空闲 智能体 Agent 终端 自动关闭 清理 后台 powershell 堆积",
+      "off": "关闭",
+      "after_one": "{{count}} 分钟后",
+      "after_other": "{{count}} 分钟后"
+    },
     "groups": {
       "shell": "Shell",
+      "agents": "Agent 的终端",
       "display": "显示"
     }
   },
@@ -1930,7 +1939,7 @@
     "account": "你的 Kettu 账号，用于 Kettu 的云服务。",
     "agents": "智能体用一个 Harness 和一份账号配置运行。首次启动时找到的 Harness，以及你在 Kettu 里安装的 Harness，Kettu 会各添加一个智能体；其他的，你需要哪个就添加哪个。",
     "agents_web": "{{host}} 上的智能体用那里的一个 Harness 和一份账号配置运行。{{host}} 首次启动时找到的 Harness，以及你在它上面安装的 Harness，Kettu 会各添加一个智能体；其他的，你需要哪个就添加哪个。",
-    "terminal": "侧边面板的终端运行哪个 shell，以及它的外观。",
+    "terminal": "侧边面板的终端运行哪个 shell、Agent 的终端空闲多久后关闭，以及它的外观。",
     "git": "顶栏的分支与更改、PR 和它的检查结果，都靠下面两个工具。",
     "advanced": "网络代理、诊断信息，以及 Kettu 保存在这台电脑上的数据。",
     "advanced_web": "网络代理、诊断信息，以及 Kettu 保存在 {{host}} 上的数据。",

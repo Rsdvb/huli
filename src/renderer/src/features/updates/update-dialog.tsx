@@ -120,7 +120,7 @@ export function UpdateDialog() {
     <AlertDialog open={shown} onOpenChange={(next) => openUpdateDialog(next)}>
       <AlertDialogContent
         initialFocus={defaultButton}
-        className="gap-0 px-5.5 pt-5 pb-4.5 data-[size=default]:sm:max-w-[460px]"
+        className="max-h-[calc(100dvh-2rem)] gap-0 overflow-y-auto overscroll-contain px-5.5 pt-5 pb-4.5 data-[size=default]:sm:max-w-[460px]"
       >
         <AlertDialogHeader>
           <AlertDialogTitle>

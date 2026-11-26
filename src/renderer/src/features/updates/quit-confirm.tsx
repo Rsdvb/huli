@@ -91,7 +91,7 @@ export function QuitConfirm() {
     <AlertDialog open={open} onOpenChange={(open) => !open && !saving && answer(false)}>
       <AlertDialogContent
         initialFocus={keepRunning ? keep : whenIdle ? wait : true}
-        className="gap-0 px-5.5 pt-5 pb-4.5 data-[size=default]:sm:max-w-[440px]"
+        className="max-h-[calc(100dvh-2rem)] gap-0 overflow-y-auto overscroll-contain px-5.5 pt-5 pb-4.5 data-[size=default]:sm:max-w-[440px]"
       >
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>

@@ -169,6 +169,7 @@ import {
   DefaultAgent,
   EffortControl,
   FontSize,
+  IdleAgentTerminals,
   GeneralSwitch,
   OtherAgentSuggestions,
   LightModelChoice,
@@ -984,6 +985,12 @@ export function useTerminalSection(): SectionDef {
           : t('terminal.shell.description'),
         group: group('shell', t('terminal.groups.shell')),
         render: () => <ShellPicker />,
+      },
+      {
+        id: 'idle-agent',
+        setting: 'terminal.idle-agent',
+        group: group('agents', t('terminal.groups.agents')),
+        render: () => <IdleAgentTerminals label={t('terminal.idleAgent.name')} />,
       },
       {
         id: 'font-family',

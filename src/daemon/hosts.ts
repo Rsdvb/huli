@@ -43,6 +43,7 @@ import { accessKeyEnd, relayChoiceInit } from '@shared/remote/own-relay'
 import type { MarketAccount, MarketCall, MarketCallAnswer } from '@shared/market-publish'
 import { reportBuildResult, type ReportBuildResult } from '@shared/report'
 import type { DirectSettings, SettingsFile } from '@shared/settings'
+import { parseClosedTerminals } from '@shared/terminal-idle'
 import { processControl, stopTrees, type ProcessId } from '../agent-host/process-tree'
 import { t } from '../main/i18n'
 import { createLogger } from '../main/log'
@@ -308,6 +309,15 @@ export class Hosts {
             durationMs >= 0
           ) {
             this.agent.post({ type: 'host:terminal-handed-back', sessionId, durationMs })
+          }
+        } else if (message.type === 'terminal-host:idle-closed') {
+          const terminals = parseClosedTerminals(message.terminals)
+          if (typeof message.sessionId === 'string' && message.sessionId && terminals) {
+            this.agent.post({
+              type: 'host:terminals-idle-closed',
+              sessionId: message.sessionId,
+              terminals,
+            })
           }
         } else {
           log.warn(`Ignored terminal host message "${message.type}"`)

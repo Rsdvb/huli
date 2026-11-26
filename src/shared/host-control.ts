@@ -39,6 +39,7 @@ import type { PairingState } from './remote/pairing'
 import type { DirectAddress } from './remote/protocol'
 import type { ReportBuildResult, ReportRequest } from './report'
 import type { TerminalCall, TerminalCallAnswer } from './terminal-agent'
+import type { ClosedTerminal } from './terminal-idle'
 import type { RelayStatus } from './remote/relay-host'
 import type { ProgressPhase } from './remote/push'
 import type {
@@ -95,6 +96,15 @@ export interface BusyTerminal {
   id: string
   projectPath: string
   title: string // the foreground command
+  /**
+   * Huli: the session it belongs to, the name its tab shows, the folder its shell started in, who
+   * opened it, and when its command started when that is known; absent from an older host.
+   */
+  sessionId?: string | null
+  name?: string | null
+  folder?: string
+  opener?: 'user' | 'agent' | 'reply'
+  since?: number | null
 }
 
 /** What the floating label and the stop shortcut ask of the session holding the computer. */
@@ -241,6 +251,9 @@ export type MainToHost =
   | { type: 'host:device-handed-back'; sessionId: string; durationMs: number }
   // The user handed back a terminal the session's agent started.
   | { type: 'host:terminal-handed-back'; sessionId: string; durationMs: number }
+  // Huli: the terminal host closed agent terminals of the session that sat idle; the thread says
+  // which, and what they last printed.
+  | { type: 'host:terminals-idle-closed'; sessionId: string; terminals: ClosedTerminal[] }
   // The plugin host is ready. In the desktop app its port travels in the transfer list; under
   // Node.js `socketPath` names the socket to connect to.
   | { type: 'host:plugin-port'; socketPath?: string }
@@ -583,6 +596,8 @@ export type TerminalHostToMain =
   | { type: 'terminal-host:busy'; requestId: number; terminals: BusyTerminal[] }
   | { type: 'terminal-host:answer'; callId: number; answer: TerminalCallAnswer }
   | { type: 'terminal-host:handed-back'; sessionId: string; durationMs: number }
+  // Huli: agent terminals of the session sat idle as Settings › Terminal says, and were closed.
+  | { type: 'terminal-host:idle-closed'; sessionId: string; terminals: ClosedTerminal[] }
   | { type: 'terminal-host:stopped' }
 
 export type MainToDeviceHost =

@@ -57,7 +57,7 @@ export const HOST_SETTING_KEYS = {
   addedAgents: 'all',
   disabledAgents: 'all',
   proxy: 'all',
-  terminal: ['shellPath'],
+  terminal: ['shellPath', 'idleAgentMinutes'],
   git: 'all',
   mcp: 'all',
   marketplace: 'all',
@@ -88,7 +88,7 @@ export interface HostSettingsPart {
   addedAgents: SettingsFile['addedAgents']
   disabledAgents: SettingsFile['disabledAgents']
   proxy: SettingsFile['proxy']
-  terminal: Pick<SettingsFile['terminal'], 'shellPath'>
+  terminal: Pick<SettingsFile['terminal'], 'shellPath' | 'idleAgentMinutes'>
   git: SettingsFile['git']
   mcp: SettingsFile['mcp']
   marketplace: SettingsFile['marketplace']
