@@ -320,18 +320,23 @@ describe('idle agent terminals on Windows', () => {
       sessionId: 's1',
       agentId: 'claude-code',
       folder: root,
-      command: 'Start-Sleep 3600',
+      command: 'Start-Sleep 3000',
     })
     expect('result' in answer).toBe(true)
     const pty = ptys[0]!
     pty.emit('PS C:\\work\\app> ')
     await vi.advanceTimersByTimeAsync(500)
-    expect(pty.written).toEqual(['Start-Sleep 3600\r'])
-    pty.emit('Start-Sleep 3600\r\n')
+    expect(pty.written).toEqual(['Start-Sleep 3000\r'])
+    // As PSReadLine draws it: the line again after each key, the cursor moved back first. Its
+    // parts end in the digit the command ends in, which no prompt mark may be taken from.
+    pty.emit(
+      '\x1b[93mStart-Sle\x1b[m\x1b[93m\x1b[5;42HStart-Sleep \x1b[97m30\x1b[m\x1b[93m\x1b[5;42H' +
+        'Start-Sleep \x1b[97m300\x1b[m\x1b[93m\x1b[5;42HStart-Sleep \x1b[97m3000\r\n\x1b[?25h',
+    )
     manager.turnEnded('s1')
     await vi.advanceTimersByTimeAsync(30 * MINUTE)
     expect(await ids()).toHaveLength(1)
-    expect((await manager.busy()).map((terminal) => terminal.title)).toEqual(['Start-Sleep 3600'])
+    expect((await manager.busy()).map((terminal) => terminal.title)).toEqual(['Start-Sleep 3000'])
     pty.emit('PS C:\\work\\app> ')
     await vi.advanceTimersByTimeAsync(2 * MINUTE)
     expect(await manager.closeIdle('s1')).toEqual({ closed: 1 })

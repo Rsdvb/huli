@@ -156,7 +156,7 @@ const BUSY_LISTING_MS = 1_500
 const CAP_CHECK_GAP_MS = 60_000
 // Huli: how long after an agent's command is typed its echo is looked for, in how many of the
 // last lines, by how many of its first characters.
-const ECHO_WINDOW_MS = 3_000
+const ECHO_WINDOW_MS = 10_000
 const ECHO_LINES = 4
 const ECHO_PROBE_CHARS = 40
 // An agent's command and text are typed as they are; a control character could act as a key.
@@ -1093,17 +1093,12 @@ export class TerminalManager {
     const text = plainTail(terminal.tail, ECHO_LINES)
     const at = text.lastIndexOf(echo.probe)
     if (at < 0) return
-    let before = text.slice(text.lastIndexOf('\n', at) + 1, at)
-    // The shell drew part of the command, then moved back and drew all of it, which reads as the
-    // part followed by the whole once the cursor moves are gone.
-    for (let length = Math.min(before.length, echo.probe.length); length > 0; length--) {
-      if (before.endsWith(echo.probe.slice(0, length))) {
-        before = before.slice(0, -length)
-        break
-      }
-    }
-    before = before.trimEnd()
-    if (before) terminal.promptMark = before.slice(-1)
+    // PSReadLine draws the line again after each key, moving the cursor back first, so without the
+    // moves the prompt reads as followed by each part of the command in turn.
+    const before = withoutParts(text.slice(text.lastIndexOf('\n', at) + 1, at), echo.probe)
+    const mark = before.trimEnd().slice(-1)
+    // A prompt ends in a sign such as > $ # %; a letter or digit is what was left of the command.
+    if (mark && !/[\p{L}\p{N}]/u.test(mark)) terminal.promptMark = mark
   }
 
   /** Huli: the terminal printed or was typed into, which may have started or ended a program. */
@@ -1504,4 +1499,20 @@ function latestTouch(terminals: readonly Terminal[]): number {
 /** The line the cursor waits on at the end of `tail`, as plain text. */
 function cursorLine(tail: string): string {
   return plainTail(tail.slice(tail.lastIndexOf('\n') + 1), 1)
+}
+
+/** `text` without the beginnings of `probe` it ends with, one after another. */
+function withoutParts(text: string, probe: string): string {
+  let rest = text
+  for (;;) {
+    let cut = 0
+    for (let length = Math.min(rest.length, probe.length); length > 0; length--) {
+      if (rest.endsWith(probe.slice(0, length))) {
+        cut = length
+        break
+      }
+    }
+    if (cut === 0) return rest
+    rest = rest.slice(0, -cut)
+  }
 }
