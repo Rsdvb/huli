@@ -307,6 +307,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'tasks.saveWorkflow': HOST_MS,
   'tasks.publishWorkflow': AGENT_MS,
   'permissions.respond': HOST_MS,
+  'permissions.respondAll': HOST_MS,
   'git.status': AGENT_MS,
   'git.unwatch': HOST_MS,
   'git.fetch': NONE,

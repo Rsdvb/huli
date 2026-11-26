@@ -1,0 +1,73 @@
+# Huli: requests that wait at once, answered in turn. The fake agent asks for three at once (low,
+# medium, high): the dock shows the oldest as its card and the others as one line under it, which
+# opens to list them. 全部同意 lists what it allows and what it leaves (the high one), then allows
+# the low and medium ones, and the high one's card comes up alone. A second turn ends on the
+# stacked dock.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/parallel-permissions'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+# The keyboard goes first, as in 40-cards.
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible: '后面还有 2 个请求'
+    timeout: 120000
+- takeScreenshot: rq01-stacked
+- tapOn: '后面还有 2 个请求'
+- extendedWaitUntil:
+    visible:
+      text: '删除 .*'
+    timeout: 10000
+- takeScreenshot: rq02-listed
+- tapOn: '全部同意'
+- extendedWaitUntil:
+    visible:
+      text: '全部同意：.*'
+    timeout: 10000
+- takeScreenshot: rq03-confirm
+- tapOn: '同意 2 个'
+- extendedWaitUntil:
+    notVisible:
+      text: '后面还有.*'
+    timeout: 30000
+- extendedWaitUntil:
+    visible: '高风险'
+    timeout: 30000
+- takeScreenshot: rq04-high-alone
+- tapOn: '拒绝'
+- extendedWaitUntil:
+    visible:
+      text: '.*Answers.*'
+    timeout: 60000
+# A second turn, left waiting on the stacked dock.
+- tapOn:
+    text: '给 .* 发消息.*'
+- inputText: '/parallel-permissions'
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible: '后面还有 2 个请求'
+    timeout: 60000
+- takeScreenshot: rq05-stacked-again

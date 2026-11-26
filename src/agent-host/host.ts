@@ -5126,6 +5126,8 @@ export class AgentHost {
               : { optionId: optionId!, ...(note === undefined ? {} : { note }) },
           fromDevice(device),
         ),
+      'permissions.respondAll': ({ sessionId, requestIds, decision }, { device }) =>
+        sessions.respondAll(sessionId, requestIds, decision, fromDevice(device)),
       'git.status': async ({ projectPath, watcher }, { portId }) => {
         const git = this.requireGit()
         const canonical = await this.gitProject(projectPath)

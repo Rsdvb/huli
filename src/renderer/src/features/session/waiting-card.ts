@@ -1,14 +1,19 @@
+import { threadQueue, waitsBehind } from '@shared/permission-queue'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { openSuggestion } from './entries/workflow-tools'
 
-/** The first card in the thread that waits for the user's answer. */
+/**
+ * The first card in the thread that waits for the user's answer; a request waiting behind an older
+ * one has no card of its own until its turn.
+ */
 export function firstWaiting(sessionId: string): string | null {
   const state = useThreadsStore.getState().replicas[sessionId]?.state
   if (!state) return null
+  const queue = threadQueue(state)
   for (const id of state.order) {
     const entry = state.byId[id]
     const waiting =
-      (entry?.kind === 'tool' && !!entry.permission) ||
+      (entry?.kind === 'tool' && !!entry.permission && !waitsBehind(queue, id)) ||
       (entry?.kind === 'browser_origin' && entry.decision === null) ||
       (entry?.kind === 'device_access' && entry.decision === null) ||
       (entry?.kind === 'surface_access' && entry.decision === null) ||

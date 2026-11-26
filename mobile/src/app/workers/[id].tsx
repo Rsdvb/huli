@@ -2,12 +2,14 @@
 // each worker with its role, agent, state, review round and last report line, and 暂停 and
 // 全部停止 at the foot. It reads the session list, and a worker's requests only while it waits.
 
-import { memo, useEffect, useMemo, useState } from 'react'
+import { Fragment, memo, useEffect, useMemo, useState } from 'react'
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { SessionSummary } from '@shared/agent-host'
+import { requestQueue, waitsBehind } from '@shared/permission-queue'
 import type { SecretRequestEntry as SecretEntry, ThreadEntry, ToolEntry } from '@shared/thread'
 import { CardButton } from '../../components/entries/kit'
+import { RequestQueue } from '../../components/entries/RequestQueue'
 import { SecretRequestEntry } from '../../components/entries/SecretRequestEntry'
 import { managerLine } from '../../components/ManagerBanner'
 import { call } from '../../git'
@@ -259,53 +261,66 @@ function WorkerRequests({ worker }: { worker: SessionSummary }) {
       .catch((error: unknown) => Alert.alert('没能回答', errorText(error)))
       .finally(() => setAnswering(null))
   }
+  // Huli: the worker's requests in turn, as its own page shows them.
+  const asked = requestQueue(entries)
   return (
     <>
       {secrets.map((entry) => (
         <SecretRequestEntry key={entry.id} entry={entry} sessionId={id} place="dock" />
       ))}
-      {entries.map((entry) => (
-        <View
-          key={entry.id}
-          style={[styles.ask, { backgroundColor: s.dockCard, borderColor: c.borderStrong }]}
-        >
-          <Text style={[styles.name, { color: c.text }]}>{worker.worker?.name} 想要</Text>
-          <Text style={[styles.command, { color: c.text }]} numberOfLines={3}>
-            {(entry.rawInput ?? entry.title).split('\n')[0]}
-          </Text>
-          {entry.permission?.risk && (
-            <Text
-              style={[
-                styles.meta,
-                { color: entry.permission.risk.level === 'low' ? c.textSecondary : c.warning },
-              ]}
+      {entries.map((entry) =>
+        waitsBehind(asked, entry.id) ? null : (
+          <Fragment key={entry.id}>
+            <View
+              style={[styles.ask, { backgroundColor: s.dockCard, borderColor: c.borderStrong }]}
             >
-              {entry.permission.risk.level === 'low'
-                ? '低风险'
-                : entry.permission.risk.level === 'medium'
-                  ? '中风险'
-                  : '高风险'}
-              {' · '}
-              {entry.permission.risk.reason}
-            </Text>
-          )}
-          <View style={styles.askButtons}>
-            <CardButton
-              label="拒绝"
-              tone="danger"
-              disabled={answering !== null}
-              onPress={() => answer(entry, 'reject_once')}
-            />
-            <CardButton
-              label="允许一次"
-              tone="primary"
-              busy={answering === entry.id}
-              disabled={answering !== null}
-              onPress={() => answer(entry, 'allow_once')}
-            />
-          </View>
-        </View>
-      ))}
+              <Text style={[styles.name, { color: c.text }]}>{worker.worker?.name} 想要</Text>
+              <Text style={[styles.command, { color: c.text }]} numberOfLines={3}>
+                {(entry.rawInput ?? entry.title).split('\n')[0]}
+              </Text>
+              {entry.permission?.risk && (
+                <Text
+                  style={[
+                    styles.meta,
+                    { color: entry.permission.risk.level === 'low' ? c.textSecondary : c.warning },
+                  ]}
+                >
+                  {entry.permission.risk.level === 'low'
+                    ? '低风险'
+                    : entry.permission.risk.level === 'medium'
+                      ? '中风险'
+                      : '高风险'}
+                  {' · '}
+                  {entry.permission.risk.reason}
+                </Text>
+              )}
+              <View style={styles.askButtons}>
+                <CardButton
+                  label="拒绝"
+                  tone="danger"
+                  disabled={answering !== null}
+                  onPress={() => answer(entry, 'reject_once')}
+                />
+                <CardButton
+                  label="允许一次"
+                  tone="primary"
+                  busy={answering === entry.id}
+                  disabled={answering !== null}
+                  onPress={() => answer(entry, 'allow_once')}
+                />
+              </View>
+            </View>
+            {asked.length > 1 && asked[0]!.id === entry.id ? (
+              <RequestQueue
+                key={asked.map((queued) => queued.id).join(' ')}
+                queue={asked}
+                sessionId={id}
+                link={link}
+              />
+            ) : null}
+          </Fragment>
+        ),
+      )}
     </>
   )
 }

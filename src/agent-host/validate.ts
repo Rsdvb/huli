@@ -290,6 +290,26 @@ function none(params: unknown): void {
   if (Object.keys(fields(params)).length > 0) throw invalidParams('This method takes no params')
 }
 
+/** Huli: more requests than a session ever waits on at once, which 全部同意 answers together. */
+const MAX_BULK_REQUESTS = 100
+
+function requestIds(o: Fields): string[] {
+  const ids = o.requestIds
+  if (!Array.isArray(ids) || ids.length === 0 || ids.length > MAX_BULK_REQUESTS) {
+    throw invalidParams(`requestIds must be an array of 1 to ${MAX_BULK_REQUESTS} request ids`)
+  }
+  return [
+    ...new Set(
+      ids.map((id: unknown, index) => {
+        if (typeof id !== 'string' || id.length === 0 || id.length > ID_CHARS) {
+          throw invalidParams(`requestIds[${index}] must be a request id`)
+        }
+        return id
+      }),
+    ),
+  ]
+}
+
 function string(o: Fields, key: string, max: number): string {
   const value = o[key]
   if (typeof value !== 'string') throw invalidParams(`${key} must be a string`)
@@ -3117,6 +3137,13 @@ export function createValidators(platform: Platform): Validators {
       return o.answers !== undefined
         ? { ...base, answers: questionAnswers(o.answers) }
         : { ...base, values: formValues(o.values) }
+    },
+    'permissions.respondAll': (params) => {
+      const o = fields(params)
+      if (o.decision !== 'allow' && o.decision !== 'deny') {
+        throw invalidParams('decision must be allow or deny')
+      }
+      return { sessionId: sessionId(o), requestIds: requestIds(o), decision: o.decision }
     },
     'git.status': watching,
     'git.unwatch': watching,

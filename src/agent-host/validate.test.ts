@@ -818,6 +818,35 @@ describe('createValidators', () => {
     )
   })
 
+  it('takes the requests 全部同意 answers and only allow or deny for them', () => {
+    const all = posix['permissions.respondAll']
+    expect(all({ sessionId: 's', requestIds: ['a', 'b', 'a'], decision: 'allow' })).toEqual({
+      sessionId: 's',
+      requestIds: ['a', 'b'],
+      decision: 'allow',
+    })
+    expect(all({ sessionId: 's', requestIds: ['a'], decision: 'deny' })).toMatchObject({
+      decision: 'deny',
+    })
+    rejects(() => all({ sessionId: 's', requestIds: ['a'] }))
+    // Never an answer that lasts, or one of the agent's own options.
+    rejects(() => all({ sessionId: 's', requestIds: ['a'], decision: 'allow_always' }))
+    rejects(() => all({ sessionId: 's', requestIds: ['a'], decision: 'allow-once' }))
+    rejects(() => all({ sessionId: 's', requestIds: [], decision: 'allow' }))
+    rejects(() => all({ sessionId: 's', requestIds: 'a', decision: 'allow' }))
+    rejects(() => all({ sessionId: 's', requestIds: [''], decision: 'allow' }))
+    rejects(() => all({ sessionId: 's', requestIds: [1], decision: 'allow' }))
+    rejects(() => all({ sessionId: 's', requestIds: ['x'.repeat(257)], decision: 'allow' }))
+    rejects(() =>
+      all({
+        sessionId: 's',
+        requestIds: Array.from({ length: 101 }, (_, i) => `r${i}`),
+        decision: 'allow',
+      }),
+    )
+    rejects(() => all({ requestIds: ['a'], decision: 'allow' }))
+  })
+
   it('wants absolute paths by the platform rules', () => {
     expect(posix['projects.add']({ path: '/Users/me/app' })).toEqual({ path: '/Users/me/app' })
     rejects(() => posix['projects.add']({ path: 'app' }))

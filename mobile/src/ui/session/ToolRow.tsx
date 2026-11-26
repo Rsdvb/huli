@@ -74,10 +74,10 @@ export function answerWords(
   const result = entry.permissionResult
   if (!result) return null
   if (result === 'cancelled') {
-    return { headline: '已取消', note: '回合在回答前已结束', allowed: false }
+    return { headline: '已失效', note: '回合在回答前已结束', allowed: false }
   }
   if (result === 'withdrawn') {
-    return { headline: '已不再需要', note: `${agent} 已不再需要`, allowed: false }
+    return { headline: '已失效', note: `${agent} 已不再需要`, allowed: false }
   }
   const allowed = result.kind === 'allow_once' || result.kind === 'allow_always'
   if (result.by === 'routine') return { headline: '由定时任务允许', note: '', allowed }

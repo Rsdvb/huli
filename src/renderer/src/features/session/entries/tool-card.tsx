@@ -10,9 +10,11 @@ import { revealWaiting } from './helpers'
 import { PermissionEntry } from './permission-card'
 import { PlanCard, PlanSettled } from './plan-card'
 import { AnsweredAsk, OptionQuestionCard, QuestionCard } from './question-card'
+import { ThreadRequestQueue } from './request-queue'
 import { WorkflowToolCard } from './workflow-cards'
 import { workflowCardOf } from './workflow-tools'
 import { StepCard } from './tool-call'
+import { useQueueKey } from './use-queue-key'
 import { stepFacts, useToolCallLabels } from './tool-call-model'
 
 export interface ToolCardProps {
@@ -24,14 +26,26 @@ export interface ToolCardProps {
 
 /**
  * A tool call on its own: a request waiting for the user as its card, an answered question, plan or
- * form as what it settled on, and anything else as its Tool Call Card.
+ * form as what it settled on, and anything else as its Tool Call Card. Huli: the request answered
+ * now has what waits behind it collapsed under its card.
  */
-export const ToolCard = memo(function ToolCard({
-  sessionId,
-  entryId,
-  projectPath,
-  agentName,
-}: ToolCardProps) {
+export const ToolCard = memo(function ToolCard(props: ToolCardProps) {
+  const queueKey = useQueueKey(props.sessionId, props.entryId)
+  return (
+    <>
+      <ToolCardBody {...props} />
+      {queueKey && (
+        <ThreadRequestQueue
+          sessionId={props.sessionId}
+          queueKey={queueKey}
+          projectPath={props.projectPath}
+        />
+      )}
+    </>
+  )
+})
+
+function ToolCardBody({ sessionId, entryId, projectPath, agentName }: ToolCardProps) {
   const { t } = useTranslation('session')
   const entry = useEntry(sessionId, entryId, 'tool')
   const animation = useEntryAnimation(sessionId, entryId)
@@ -141,4 +155,4 @@ export const ToolCard = memo(function ToolCard({
       />
     </div>
   )
-})
+}

@@ -1375,6 +1375,11 @@ export interface PendingPermission {
   // Whether the card labels the request Risky, as the host judged it; a request stored without
   // it is judged by its tool kind alone.
   risky?: boolean
+  // Huli: the request's place among those the session's agent waits on, in the order they reached
+  // the host (`permission-queue.ts`): the lowest is answered first, the others wait behind it.
+  // Absent for a request no turn waits on and from a host older than it; such a card is answered
+  // on its own.
+  queue?: number
 }
 
 export interface PermissionOption {
