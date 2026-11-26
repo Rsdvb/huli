@@ -16,6 +16,7 @@ import {
   removeTree,
   renameWithRetry,
 } from './adapter-install'
+import { discard, TRASH_PREFIX, type DiscardDeps } from './discard'
 import { staleInstalls } from './harness-versions'
 import { t } from './i18n'
 import { HttpStatusError, StalledError, type Transport } from './node-runtime/transport'
@@ -241,7 +242,7 @@ export async function listArchiveInstalls(
   const names = await readdir(agentDir).catch(() => [] as string[])
   const found = await Promise.all(
     names
-      .filter((name) => !name.startsWith(PARTIAL_PREFIX))
+      .filter((name) => !name.startsWith(PARTIAL_PREFIX) && !name.startsWith(TRASH_PREFIX))
       .map((name) => readRecord(path.join(agentDir, name))),
   )
   return found.filter((install) => install !== null).sort((a, b) => a.installedAt - b.installedAt)
@@ -249,16 +250,22 @@ export async function listArchiveInstalls(
 
 /**
  * Deletes the installs `staleInstalls` names once `keep` runs, so the one before it stays to fall
- * back to, and returns their folder names. Any folder that holds no install record stays.
+ * back to, and returns their folder names. Any folder that holds no install record stays. Huli:
+ * each is moved aside into `root` and deleted in the background; one still in use stays whole.
  */
 export async function removeStaleArchives(
   root: string,
   agentId: AgentId,
   keep: InstalledArchive,
+  options: { platform?: Platform; deps?: DiscardDeps } = {},
 ): Promise<string[]> {
-  const stale = staleInstalls(await listArchiveInstalls(root, agentId), keep)
-  await Promise.all(stale.map((install) => removeTree(install.dir)))
-  return stale.map((install) => path.basename(install.dir))
+  const removed: string[] = []
+  for (const install of staleInstalls(await listArchiveInstalls(root, agentId), keep)) {
+    if (await discard(install.dir, { ...options, trashRoot: root })) {
+      removed.push(path.basename(install.dir))
+    }
+  }
+  return removed
 }
 
 /**

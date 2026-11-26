@@ -114,6 +114,11 @@ export async function resolveSteps(
 export interface RunContext extends ResolveContext {
   /** Moves the paths to the system's trash; null to delete them for good. */
   trash: ((paths: string[]) => Promise<void>) | null
+  /**
+   * Takes a folder of Kite's own installs away at once, to delete in the background, rather than
+   * to the trash: it holds only what Install downloads again.
+   */
+  discard?(folder: string): Promise<void>
   /** Runs a command step's program: why it failed or null, and the last lines it printed. */
   run(program: string, args: string[]): Promise<{ error: string | null; output: string }>
   progress(step: RemovalStep, state: 'running' | 'done' | 'failed', error?: string): void
@@ -160,7 +165,9 @@ async function runStep(resolved: ResolvedStep, ctx: RunContext): Promise<string 
     case 'file':
     case 'folder':
       check(planned.path)
-      await removePaths([planned.path], ctx)
+      if (planned.kite && planned.kind === 'folder' && ctx.discard) {
+        await ctx.discard(planned.path)
+      } else await removePaths([planned.path], ctx)
       break
     case 'contents': {
       check(planned.path)
