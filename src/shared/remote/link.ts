@@ -2,7 +2,8 @@
 // channel over what the caller dials (a WebSocket to the host's direct port, or the relay), then
 // hello and welcome, then the host protocol as a window's port carries it, with binary values going
 // as byte streams both ways. It reconnects with backoff while the client is visible, and stops for
-// good once the host says this device may not connect.
+// good only once the host says, inside the encrypted channel, that this device may not connect: a
+// dropped handshake or a timeout is never that word, however often it comes.
 // A host of version 2 keeps the session through a drop for a while: the link acknowledges what it
 // receives, resumes with the welcome's token, and sends again the requests the host did not read.
 // Given several routes, as a relay's regions, it races them to a finished handshake, says hello on
@@ -14,7 +15,7 @@
 import type { PortError, PortErrorCode } from '../port-rpc'
 import { Acknowledger } from './acks'
 import { BYTES_PER_FRAME, type ChannelMessage } from './channel'
-import { HandshakeDropped, startDeviceChannel, type DeviceChannel } from './device-channel'
+import { startDeviceChannel, type DeviceChannel } from './device-channel'
 import { isHostAdminEvent, type HostAdminEvent } from './host-admin'
 import {
   DEVICE_KEEPALIVE,
@@ -73,12 +74,6 @@ const MAX_RETRY_MS = 30_000
 
 /** Deeper than any request or result nests, so nothing below it is looked at. */
 const MAX_DEPTH = 64
-
-/**
- * Handshakes the host dropped in a row before this browser counts as unknown there, as after it
- * was removed while away; one alone can be a host busy with other handshakes.
- */
-const DROPS_UNKNOWN = 2
 
 /** The path the host takes the channel's WebSocket on. */
 export const CHANNEL_PATH = '/channel'
@@ -289,7 +284,6 @@ export class HostLink {
   private failures = 0
   /** A try under way when `reconnectNow` was asked: the next failure tries again at once. */
   private hurry = false
-  private drops = 0
   /** The sessions the host began for this link, which `connected` names. */
   private sessions = 0
   private timer: ReturnType<typeof setTimeout> | null = null
@@ -533,16 +527,13 @@ export class HostLink {
       void opened.channel
         .send(resume ? { ...this.options.hello, resume } : this.options.hello)
         .catch(() => opened.channel.close())
-    } catch (error) {
+    } catch {
       this.connecting = false
-      // The host took the WebSocket and dropped the handshake: it may not know this key now.
-      if (error instanceof HandshakeDropped && ++this.drops >= DROPS_UNKNOWN) {
-        return this.end('removed')
-      }
+      // A dropped handshake proves nothing: a host or a phone too busy to answer in time, a relay
+      // or a proxy ends one too, and no one but the host's key can say this device was removed.
       this.expireKept()
       return this.retry()
     }
-    this.drops = 0
     this.times.sample(route.key, opened.channel.handshakeMs)
     const answer = await awaitWelcome(opened, WELCOME_TIMEOUT_MS)
     this.connecting = false
@@ -781,7 +772,6 @@ export class HostLink {
   private race(routes: LinkRoute[]): Promise<{ opened: Opened; route: LinkRoute }> {
     return new Promise((resolve, reject) => {
       let failed = 0
-      let dropped = false
       let done = false
       for (const route of routes) {
         void (async () => {
@@ -801,10 +791,9 @@ export class HostLink {
             resolve({ opened: { channel, transport }, route })
           } catch (error) {
             transport?.close()
-            if (error instanceof HandshakeDropped) dropped = true
             if (++failed === routes.length && !done) {
               done = true
-              reject(dropped ? new HandshakeDropped() : error)
+              reject(error)
             }
           }
         })()
