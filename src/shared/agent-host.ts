@@ -111,6 +111,7 @@ import type {
   PluginViewResult,
 } from './plugin-views'
 import type { InstalledKettuPlugin, PluginPlan, PluginResource, PluginSource } from './plugins'
+import type { CatalogPluginRef, MarketPluginCatalog, PluginLink } from './plugin-catalog'
 import type { MediaAuthorization, MediaOpenResult } from './media'
 import type { ModelRequestRaw, ModelRequestsOverview, ModelRequestsPage } from './model-requests'
 import type {
@@ -1701,6 +1702,13 @@ export interface HostContract {
   }
   // Copies a skill's files onto the host; the caller then adds the entry to settings.marketplace.skills.
   'market.addSkill': { params: { source: SkillSource }; result: MarketSkill }
+  // Huli: the Plugins tab's directory, read from GitHub; see plugin-catalog. `cached` reads none.
+  'market.pluginCatalog': {
+    params: { refresh?: boolean; cached?: boolean }
+    result: MarketPluginCatalog
+  }
+  // Huli: whether a github.com link names one plugin or a marketplace, and its plugins if so.
+  'market.pluginLink': { params: { url: string }; result: PluginLink }
   // Any window's or device's answer to a Marketplace card: Publish (or Unlist) or Not now; the
   // first counts. On a first publish, Publish carries the publisher name, which is set before
   // anything else and refused with the reason when the service does not take it.
@@ -1911,7 +1919,11 @@ export interface HostContract {
   'plugins.list': { params: void; result: { plugins: InstalledKettuPlugin[] } }
   // Reads a package from its source and says what it holds and would run. Nothing is installed
   // and nothing of it runs; the answer's token names the package for plugins.install.
-  'plugins.inspect': { params: { source: PluginSource }; result: PluginPlan }
+  // Huli: `catalog` names a plugin of the Plugins tab's directory, whose folder is read instead.
+  'plugins.inspect': {
+    params: { source: PluginSource; catalog?: CatalogPluginRef }
+    result: PluginPlan
+  }
   // Installs the package an inspection showed, once the user confirmed it: its skills and MCP
   // servers go into settings.marketplace marked with the plugin, its workflows into the library.
   'plugins.install': { params: { token: string }; result: InstalledKettuPlugin }
@@ -3234,6 +3246,8 @@ export const HOST_METHODS = [
   'market.skills',
   'market.skillRepository',
   'market.addSkill',
+  'market.pluginCatalog',
+  'market.pluginLink',
   'market.answerPublish',
   'settings.answerChange',
   'settings.undoChange',

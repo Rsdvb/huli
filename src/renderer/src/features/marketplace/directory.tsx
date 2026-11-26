@@ -32,6 +32,7 @@ import type {
 import { displayTitle } from '@shared/marketplace'
 import type { WireWorkflowEntry } from '@shared/workflow'
 import type { CommunityItem } from '@shared/market-community'
+import type { ListedPlugin, MarketPluginCatalog, PluginCatalogSource } from '@shared/plugin-catalog'
 import type { PublishKind } from '@shared/market-publish'
 import {
   Dropdown,
@@ -67,6 +68,14 @@ import { CommunityRow, CommunitySignedOut } from './community'
 import { AddServerDialog, AddSkillDialog } from './dialogs'
 import { usePluginInstall } from './plugin-hooks'
 import { AddPluginGithubDialog } from './plugin-install'
+import { DirectoryNote, ListedPluginRow } from './plugin-directory'
+import {
+  PluginInstallContext,
+  listedMatches,
+  listedSubject,
+  listedTitle,
+  sourceTitle,
+} from './plugin-directory-model'
 import { MarketAway } from './parts'
 import { InstalledView } from './installed'
 import { PublishedView, PublishMenu } from './published'
@@ -145,6 +154,14 @@ type Entry =
       workflow: WireWorkflowEntry
     }
   | { kind: 'community'; key: string; title: string; subject: TileSubject; item: CommunityItem }
+  | {
+      kind: 'listed'
+      key: string
+      title: string
+      subject: TileSubject
+      plugin: ListedPlugin
+      source: PluginCatalogSource
+    }
 
 interface Section {
   id: string
@@ -201,6 +218,15 @@ const communityEntry = (item: CommunityItem): Entry => ({
   item,
 })
 
+const listedEntry = (plugin: ListedPlugin, source: PluginCatalogSource): Entry => ({
+  kind: 'listed',
+  key: `listed:${plugin.id}`,
+  title: listedTitle(plugin, currentLocale()),
+  subject: listedSubject(plugin, source),
+  plugin,
+  source,
+})
+
 /** The lists taken in turn, one item from each, so a section mixes its kinds. */
 function interleave<T>(...lists: T[][]): T[] {
   const out: T[] = []
@@ -221,6 +247,9 @@ interface Sources {
   communityPages: Record<string, CommunityPages>
   loadMoreCommunity(scope: CommunityScope): void
   retrySkillRepository(id: string): Promise<void>
+  pluginCatalog: MarketPluginCatalog | null
+  pluginCatalogPending: boolean
+  refreshPluginCatalog(): Promise<void>
 }
 
 /** The Community kind a tab lists; null for all of them. */
@@ -241,9 +270,8 @@ const tabKind = (tab: MarketplaceTab): PublishKind | null =>
  * section, and the tab its empty state.
  */
 function pluginSections(src: Sources, t: TFunction<'marketplace'>): Section[] {
-  // Huli: Kite reads no Kettu community service, so it lists nothing to wait for; the tab shows
-  // its empty state, which points at Add.
-  if (!COMMUNITY_MARKETPLACE) return []
+  // Huli: Kite reads no Kettu community service; the tab lists the plugins on GitHub instead.
+  if (!COMMUNITY_MARKETPLACE) return directorySections(src, t, '')
   const scope = communityScope('plugins', '')
   const pages = src.communityPages[communityScopeKey(scope)]
   if (!pages || (pages.at === 0 && pages.loading)) {
@@ -286,6 +314,48 @@ function pluginSections(src: Sources, t: TFunction<'marketplace'>): Section[] {
   ]
 }
 
+/**
+ * Huli: the directory's plugins, a section for each repository with how far it is trusted and
+ * where it is; with a query, only the plugins it finds. A repository not read yet shows its rows
+ * on their way, and one that failed says so with Retry.
+ */
+function directorySections(src: Sources, t: TFunction<'marketplace'>, query: string): Section[] {
+  const catalog = src.pluginCatalog
+  if (!catalog) {
+    return src.pluginCatalogPending
+      ? [{ id: 'plugins-pending', title: null, entries: [], pending: 6 }]
+      : []
+  }
+  const locale = currentLocale()
+  const bySource = new Map<string, ListedPlugin[]>()
+  for (const plugin of catalog.plugins) {
+    if (query && !listedMatches(plugin, query, locale)) continue
+    const list = bySource.get(plugin.source) ?? []
+    list.push(plugin)
+    bySource.set(plugin.source, list)
+  }
+  return catalog.sources.map((source): Section => {
+    const plugins = bySource.get(source.id) ?? []
+    const title = sourceTitle(source, locale)
+    const failure = source.error !== null && !query && (
+      <QuietNote action={<Retry onRetry={src.refreshPluginCatalog} />}>
+        {t(source.read ? 'directory.failedStale' : 'directory.failed', {
+          source: title,
+          error: source.error,
+        })}
+      </QuietNote>
+    )
+    return {
+      id: `${query ? 'found-' : ''}plugins-${source.id}`,
+      title,
+      caption: `${t(`sections.trust.${source.trust}`)} \u00b7 ${source.id}`,
+      entries: plugins.map((plugin) => listedEntry(plugin, source)),
+      pending: !source.read && source.error === null ? 3 : 0,
+      ...(failure && { note: failure }),
+    }
+  })
+}
+
 /** The part of the Kettu Marketplace's directory a tab shows for a query, or without one. */
 function communityScope(tab: MarketplaceTab, query: string): CommunityScope {
   const kind = tabKind(tab)
@@ -303,6 +373,8 @@ function useSources(): Sources {
   const { entries: workflows, loaded: workflowsLoaded } = useWorkflows()
   const workflowsPending = !workflowsLoaded
   const communityPages = useMarketplaceStore((s) => s.communityPages)
+  const pluginCatalog = useMarketplaceStore((s) => s.pluginCatalog)
+  const pluginCatalogPending = useMarketplaceStore((s) => !s.pluginCatalog && !s.pluginCatalogError)
   return useMemo(
     () => ({
       catalog,
@@ -317,6 +389,9 @@ function useSources(): Sources {
         void useMarketplaceStore.getState().loadMoreCommunity(scope),
       retrySkillRepository: (id: string) =>
         useMarketplaceStore.getState().loadSkillRepository(id, true),
+      pluginCatalog,
+      pluginCatalogPending,
+      refreshPluginCatalog: () => useMarketplaceStore.getState().loadPluginCatalog(true),
     }),
     [
       catalog,
@@ -327,6 +402,8 @@ function useSources(): Sources {
       workflowsPending,
       search,
       communityPages,
+      pluginCatalog,
+      pluginCatalogPending,
       useMarketplaceStore,
     ],
   )
@@ -638,6 +715,8 @@ function foundSections(
       })
     }
   }
+  if (tab === 'plugins' && !COMMUNITY_MARKETPLACE)
+    sections.push(...directorySections(src, t, query))
   const scope = communityScope(tab, query)
   const found = src.communityPages[communityScopeKey(scope)]
   if (
@@ -720,6 +799,15 @@ export function Directory({ tab: asked }: { tab: MarketplaceTab }) {
     // communityKey stands for tab and filter together.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [communityKey, useMarketplaceStore])
+
+  // Huli: the directory is read each time the Plugins tab opens, and let go when it closes; the
+  // host checks GitHub at most once in a while, and Refresh checks at once.
+  useEffect(() => {
+    if (tab !== 'plugins' || COMMUNITY_MARKETPLACE) return
+    const store = useMarketplaceStore.getState()
+    void store.loadPluginCatalog()
+    return () => store.dropPluginCatalog()
+  }, [tab, useMarketplaceStore])
 
   // Signing in or out of this computer's account changes what the Community shows.
   const accountState = useAccountStore((s) => s.status?.state ?? null)
@@ -876,7 +964,9 @@ export function Directory({ tab: asked }: { tab: MarketplaceTab }) {
           </div>
         ) : (
           <div key={`${tab}|${filter}`}>
-            <Sections tab={tab} query={filter} registry={registry} />
+            <PluginInstallContext.Provider value={pluginInstall}>
+              <Sections tab={tab} query={filter} registry={registry} />
+            </PluginInstallContext.Provider>
           </div>
         )}
         <AddServerDialog
@@ -1066,6 +1156,17 @@ function EntryRow({
   if (entry.kind === 'community') {
     return <CommunityRow item={entry.item} tab={tab} fresh={fresh} card={card} />
   }
+  if (entry.kind === 'listed') {
+    return (
+      <ListedPluginRow
+        plugin={entry.plugin}
+        source={entry.source}
+        tab={tab}
+        fresh={fresh}
+        card={card}
+      />
+    )
+  }
   if (entry.kind === 'skill') {
     return <SkillRow skill={entry.skill} tab={tab} fresh={fresh} card={card} />
   }
@@ -1152,6 +1253,9 @@ function Notes({
         {t('notes.community', { error: communityFailure })}
       </QuietNote>,
     )
+  }
+  if (tab === 'plugins' && !COMMUNITY_MARKETPLACE && !query) {
+    notes.push(<DirectoryNote key="directory" />)
   }
   const search = registry !== null && src.search?.query === registry ? src.search : null
   const searchError = search?.error ?? search?.result?.error ?? null

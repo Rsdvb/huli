@@ -3,6 +3,7 @@
 
 import type { AgentId } from '@shared/agents'
 import type { InstalledKettuPlugin, PluginPlan, PluginSource } from '@shared/plugins'
+import type { CatalogPluginRef } from '@shared/plugin-catalog'
 import { toast } from '@renderer/components/ui/toast'
 import { errorMessage } from '@renderer/lib/host'
 import { currentLocale, i18n } from '@renderer/lib/i18n'
@@ -27,9 +28,16 @@ export function sourceKey(source: PluginSource): string {
       : `kettu:${source.id}`
 }
 
-/** Reads a package without installing anything; the answer waits for the user's confirmation. */
-export function inspectPlugin(scope: HostScope, source: PluginSource): Promise<PluginPlan> {
-  return scope.request('plugins.inspect', { source })
+/**
+ * Reads a package without installing anything; the answer waits for the user's confirmation.
+ * Huli: `catalog` names a plugin of the Plugins tab's directory, which the host reads as it says.
+ */
+export function inspectPlugin(
+  scope: HostScope,
+  source: PluginSource,
+  catalog?: CatalogPluginRef,
+): Promise<PluginPlan> {
+  return scope.request('plugins.inspect', catalog ? { source, catalog } : { source })
 }
 
 /** Forgets an inspected package the user did not install. */

@@ -15,8 +15,9 @@ import {
   type MarketSkills,
 } from '@shared/marketplace'
 import type { CommunityInstalled, CommunityItem, CommunityListing } from '@shared/market-community'
+import type { MarketPluginCatalog } from '@shared/plugin-catalog'
 import type { PublishKind } from '@shared/market-publish'
-import { errorMessage, host, type HostRequest } from '@renderer/lib/host'
+import { errorCode, errorMessage, host, type HostRequest } from '@renderer/lib/host'
 
 /** How long the directory's Community and the installed items' standings are shown before a visit reads them again. */
 /** Huli: Kettu's community marketplace lives on Kettu's own service, which Huli does not use. */
@@ -114,6 +115,10 @@ export interface MarketplaceStore {
   communityListings: Record<string, CommunityListingState>
   /** What was installed from the Kettu Marketplace and where each stands; null until read. */
   communityInstalled: CommunityInstalled | null
+  /** Huli: the Plugins tab's directory from GitHub; null until the host answers. */
+  pluginCatalog: MarketPluginCatalog | null
+  pluginCatalogError: string | null
+  pluginCatalogLoading: boolean
   /** What is being installed or changed, by `busyKey`. */
   busy: string[]
   /** What the directory's search field holds, kept while a listing shows. */
@@ -151,6 +156,13 @@ export interface MarketplaceStore {
   clearCommunitySearch(): void
   loadCommunityListing(id: string, refresh?: boolean): Promise<void>
   loadCommunityInstalled(refresh?: boolean): Promise<void>
+  /**
+   * Huli: reads the Plugins tab's directory: the host's copy at once the first time, then the
+   * host checks GitHub for what moved; `refresh` checks even what it checked a moment ago.
+   */
+  loadPluginCatalog(refresh?: boolean): Promise<void>
+  /** Huli: lets the directory go once its tab closes; it holds thousands of plugins. */
+  dropPluginCatalog(): void
 }
 
 export type MarketplaceStoreHook = UseBoundStore<StoreApi<MarketplaceStore>>
@@ -187,6 +199,7 @@ export function createMarketplaceStore(
   let ownPluginsRead = 0
   let pluginsRead = 0
   let skillsRead = 0
+  let pluginCatalogRead = 0
   // By scope key; a first page read voids any read of the same scope still on its way.
   const communityReads = new Map<string, number>()
   // The search asked for last; an answer to an earlier one is dropped, never kept over it.
@@ -219,6 +232,9 @@ export function createMarketplaceStore(
     communityPages: {},
     communityListings: {},
     communityInstalled: null,
+    pluginCatalog: null,
+    pluginCatalogError: null,
+    pluginCatalogLoading: false,
     busy: [],
     query: '',
     more: {},
@@ -489,6 +505,33 @@ export function createMarketplaceStore(
       } catch (e) {
         if (id === skillsRead) set({ skillsError: errorMessage(e), skillsLoading: false })
       }
+    },
+    async loadPluginCatalog(refresh = false) {
+      const id = ++pluginCatalogRead
+      set({ pluginCatalogLoading: true, pluginCatalogError: null })
+      try {
+        if (!get().pluginCatalog && !refresh) {
+          const cached = await request('market.pluginCatalog', { cached: true })
+          if (id !== pluginCatalogRead) return
+          set({ pluginCatalog: cached })
+          if (!cached.stale) {
+            set({ pluginCatalogLoading: false })
+            return
+          }
+        }
+        const pluginCatalog = await request('market.pluginCatalog', refresh ? { refresh } : {})
+        if (id === pluginCatalogRead) set({ pluginCatalog, pluginCatalogLoading: false })
+      } catch (e) {
+        if (id !== pluginCatalogRead) return
+        // A host from before the directory lists none, and the tab shows its empty state.
+        if (errorCode(e) === 'unknown_method') {
+          set({ pluginCatalog: { sources: [], plugins: [] }, pluginCatalogLoading: false })
+        } else set({ pluginCatalogError: errorMessage(e), pluginCatalogLoading: false })
+      }
+    },
+    dropPluginCatalog() {
+      pluginCatalogRead++
+      set({ pluginCatalog: null, pluginCatalogError: null, pluginCatalogLoading: false })
     },
     async loadSkillRepository(repositoryId, refresh = false) {
       let read: MarketSkillRepository

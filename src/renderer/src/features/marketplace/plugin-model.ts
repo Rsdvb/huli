@@ -248,7 +248,11 @@ export function isPluginItem(id: string): boolean {
 
 /** The host name and path of a GitHub address, without the scheme. */
 export function githubShort(url: string): string {
-  return url.replace(/^https?:\/\//, '').replace(/\/$/, '')
+  // Huli: a folder at a commit, as the Plugins tab installs one, shows its commit short.
+  return url
+    .replace(/^https?:\/\//, '')
+    .replace(/\/$/, '')
+    .replace(/\/tree\/([0-9a-f]{7})[0-9a-f]{33}(?=\/|$)/, '/tree/$1')
 }
 
 /** Whether text is a github.com address the host can read a plugin from. */

@@ -28,6 +28,7 @@ import type {
   PluginPlan,
   PluginSource,
 } from '@shared/plugins'
+import type { CatalogPluginRef, PluginLink } from '@shared/plugin-catalog'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { Dialog, DialogClose } from '@renderer/components/ui/dialog'
 import { languageText } from '@renderer/features/plugin-views/plugin-text'
@@ -40,12 +41,15 @@ import {
   SettingsDialogHeader,
   SettingsField,
 } from '@renderer/features/settings/settings-dialog'
-import { errorMessage } from '@renderer/lib/host'
+import { errorCode, errorMessage } from '@renderer/lib/host'
 import { currentLocale } from '@renderer/lib/i18n'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { setMarketplaceTab } from '@renderer/stores/view'
 import { applyHeldUpdate, declineHeldUpdate, discardPlan, installPlan } from './plugin-actions'
 import { landOnPlugin } from './plugin-landing'
+import { ConversionLines } from './plugin-conversion'
+import { MarketplacePick } from './plugin-directory'
+import { toast } from '@renderer/components/ui/toast'
 import {
   ITEM_ICON,
   SCRIPT_ICON,
@@ -70,7 +74,12 @@ export interface PluginMeta {
 export interface PluginInstall {
   start: (
     source: PluginSource,
-    options?: { meta?: PluginMeta; onInstalled?: (plugin: InstalledKettuPlugin) => void },
+    options?: {
+      meta?: PluginMeta
+      onInstalled?: (plugin: InstalledKettuPlugin) => void
+      /** Huli: a plugin of the Plugins tab's directory, which the host reads as it says. */
+      catalog?: CatalogPluginRef
+    },
   ) => Promise<boolean>
   dialogs: ReactNode
 }
@@ -416,6 +425,7 @@ export function PluginConsent({
             </p>
           ))}
           <ConnectsLines contents={contents} />
+          {plan.conversion && <ConversionLines conversion={plan.conversion} />}
           {contents.script && (
             <Group heading={t('plugin.script.heading')} icon={SCRIPT_ICON}>
               {rows.length > 0 ? (
@@ -439,7 +449,16 @@ export function PluginConsent({
           )}
           <div className="k-plug-note">
             <Icon icon={contents.script ? LockIcon : InformationCircleIcon} size={15} />
-            <span>{t(contents.script ? 'plugin.note.script' : 'plugin.note.noScript')}</span>
+            <span>
+              {t(
+                contents.script
+                  ? 'plugin.note.script'
+                  : // Huli: its MCP servers' programs run once an agent uses them.
+                    contents.servers.some((server) => server.type === 'stdio')
+                    ? 'plugin.note.runsServers'
+                    : 'plugin.note.noScript',
+              )}
+            </span>
           </div>
           {error && (
             <p className="k-plug-problem" role="alert" data-selectable="">
@@ -633,21 +652,57 @@ export function AddPluginGithubDialog({
 function AddPluginGithubForm({ install, onDone }: { install: PluginInstall; onDone: () => void }) {
   const { t } = useTranslation(['marketplace', 'common'])
   const id = useId()
+  const scope = useHostScope()
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState(false)
+  // Huli: a marketplace the link named, whose plugins the dialog lists to pick from.
+  const [market, setMarket] = useState<Extract<PluginLink, { kind: 'marketplace' }> | null>(null)
   const trimmed = url.trim()
   const ready = isGithubAddress(trimmed)
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!ready || busy) return
     setBusy(true)
+    const onInstalled = () => setMarketplaceTab('installed')
+    let link: PluginLink
+    try {
+      link = await scope.request('market.pluginLink', { url: trimmed })
+    } catch (error) {
+      // A host from before the directory reads the link as one plugin.
+      if (errorCode(error) === 'unknown_method') link = { kind: 'plugin' }
+      else {
+        setBusy(false)
+        toast(t('plugin.toast.linkFailed', { error: errorMessage(error) }), undefined, {
+          tone: 'warning',
+        })
+        return
+      }
+    }
+    if (link.kind === 'marketplace' && link.plugins.length !== 1) {
+      setBusy(false)
+      setMarket(link)
+      return
+    }
+    const only = link.kind === 'marketplace' ? link.plugins[0]! : null
     // A failure shows as a toast, so the dialog closes only once the consent card is up.
-    const shown = await install.start(
-      { kind: 'github', url: trimmed },
-      { onInstalled: () => setMarketplaceTab('installed') },
-    )
+    const shown = only
+      ? await install.start(
+          { kind: 'github', url: only.url },
+          { catalog: { source: only.source, name: only.name }, onInstalled },
+        )
+      : await install.start({ kind: 'github', url: trimmed }, { onInstalled })
     setBusy(false)
     if (shown) onDone()
+  }
+  if (market) {
+    return (
+      <MarketplacePick
+        market={market}
+        install={install}
+        onBack={() => setMarket(null)}
+        onDone={onDone}
+      />
+    )
   }
   return (
     <form onSubmit={(event) => void submit(event)}>

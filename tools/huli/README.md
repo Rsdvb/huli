@@ -47,7 +47,7 @@ Code (kept small so upstream merges stay clean):
 | `src/main/app.ts`, `src/main/computer-use.ts`                                                                                                          | app user model id `local.huli.app`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `package.json`                                                                                                                                         | productName `Kite`, version 0.1.0                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `electron-builder.yml`                                                                                                                                 | appId `local.huli.app`, productName `Kite`, `publish` is Huli's update channel (generic), its path a placeholder as above                                                                                                                                                                                                                                                                                                                                                                                   |
-| `src/renderer/src/stores/marketplace.ts`, `features/marketplace/{directory,model}.ts(x)`, `src/agent-host/marketplace/claude-plugins.ts`               | the Marketplace never reads Kettu's community marketplace (kettu.sh) and has no Published tab; its Community section lists Anthropic's community plugin marketplace (`anthropics/claude-plugins-community`, added once to each Claude Code agent) and the community skills on GitHub                                                                                                                                                                                                                        |
+| `stores/marketplace.ts`, `features/marketplace/{directory,plugin-directory}.tsx`, `agent-host/marketplace/plugin-{sources,catalog,directory}.ts`       | the Marketplace never reads Kettu's community marketplace (kettu.sh) and has no Published tab; its Community section lists the community skills on GitHub, and its Plugins tab the plugin repositories on GitHub that `plugin-sources.ts` names, Claude Code's converted on install (see The Plugins tab's directory)                                                                                                                                                                                       |
 | `src/main/browser/{policy,views}.ts`, `src/shared/browser.ts`, `browser-pane.tsx`, `locales/*/browser.json`                                            | the side panel's browser saves a download through the system's save dialog, where the user picks, instead of dropping it; the pane then says whether it saved                                                                                                                                                                                                                                                                                                                                               |
 | `features/settings/about-section.tsx`, `locales/*/settings.json` (`about.version.basedOn`)                                                             | About says Huli is a personal build based on Kettu under the AGPL-3.0; the rebrand keeps that phrase naming Kettu                                                                                                                                                                                                                                                                                                                                                                                           |
 | `features/session/entries/refusal-end.tsx` and its uses, `locales/*/session.json` (`refusal`), `tools/fake-agent` (`/refusal`)                         | a turn the model declined (`stop_reason: "refusal"`) says the API gives no reason, quotes the model's own explanation when a longer reply holds one, and on the latest turn offers Try again (the same message through the queue; the host's retry resends only failed turns) and Edit message                                                                                                                                                                                                              |
@@ -2824,6 +2824,45 @@ Its preload (`src/preload/mini.ts`) exposes settings and themes, three host meth
 window (`markOwnPage`) or its URL, and from the overlay only `CAPTURE_CHANNELS`; the window's page
 may open the mini window but never send those pages' calls. It reads the session on open and
 then follows `session.summary` events. Tests: `ipc.test.ts`, `capture.test.ts`.
+
+### The Plugins tab's directory (插件页的社区插件)
+
+Kite reads no Kettu community service (`COMMUNITY_MARKETPLACE` is false), so the Plugins tab lists
+plugin repositories on GitHub instead, a section each with its trust label (官方 / 社区) and
+repository, searchable together; what is installed shows its check.
+
+- Sources: `src/agent-host/marketplace/plugin-sources.ts`, a list the owner may edit, each checked
+  to exist, be maintained and be licensed for listing. On 2026-11-26: KettuAI/plugins (MIT,
+  Kettu's own plugins, a folder each with its plugin.json), anthropics/claude-plugins-official and
+  anthropics/claude-plugins-community (Apache-2.0, Claude Code's official and community
+  marketplaces, the ones Kite added to Claude Code before Kettu's #2466), obra/superpowers-marketplace
+  and wshobson/agents (MIT). openai/plugins, Codex's own marketplace, has no license at its root,
+  so it is left out.
+- Reading (`plugin-directory.ts`): only when the tab opens, at most once every ten minutes
+  (`CHECK_MS`), or on 刷新. Each repository's branch commit is asked of GitHub's API with the last
+  ETag; only a moved commit downloads the list again: `.claude-plugin/marketplace.json` from the
+  raw host at that commit, or the tarball for Kettu's folders. Requests go through the host's
+  proxy (`proxyFetch`). The lists are kept in `state/market-plugin-directory.json` (2 to 3 MB)
+  and in the host's memory for two minutes after the last request; the tab drops its copy when it
+  closes. The module loads at the first request.
+- Parsing (`plugin-catalog.ts`) treats a marketplace file as untrusted: 8 MB at most, every field
+  checked and cut, a relative source joined under the repository and refused if it could leave it,
+  and only github.com sources kept (`owner/repo`, `url`, `github` and `git-subdir`), at the
+  commit the marketplace pins, else its ref; a relative one is pinned at the marketplace's commit.
+  npm and command sources are left out and counted.
+- Install: Install runs `plugins.inspect` with `catalog` naming the entry, which the host reads
+  from its own copy; the folder is a GitHub tarball at that commit, unpacked in memory with
+  `tarball.ts`'s checks (no link, nothing outside its folder, bounded in size and count). A Claude
+  Code or Codex plugin is converted in memory by `plugins/convert.ts`: a marketplace entry with
+  `strict: false`, or a folder without `.claude-plugin/plugin.json`, gives the manifest. The
+  consent card lists what it adds, its MCP servers' commands, and what the conversion left out
+  (hooks) or changed; one that carries nothing keeps Install off. Nothing runs before the user
+  installs it. A plugin installed at a commit never auto-updates; installing it again from the tab
+  replaces it.
+- Add › A plugin from GitHub first asks `market.pluginLink`: a link to a marketplace lists its
+  plugins in the dialog, one to pick. A folder that is a skill or a marketplace says so instead of
+  failing with invalid_params (the owner's failed Add on 11-26 was most likely a skill folder).
+- The phone's Marketplace has no plugin pages since the 11-25 merge; it still lists none.
 
 ### Device recordings and diagnostics (录屏、截图对比、诊断)
 
