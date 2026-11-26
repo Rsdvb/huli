@@ -219,7 +219,6 @@ describe('parseClaudeMarketplace', () => {
       AT,
     ).entries
     expect(entry!.manifest).toEqual({
-      name: 'x',
       strict: false,
       skills: ['./skills/a'],
       mcpServers: { s: { type: 'http', url: 'https://s.example/mcp' } },

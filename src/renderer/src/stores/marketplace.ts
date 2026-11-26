@@ -161,6 +161,8 @@ export interface MarketplaceStore {
    * host checks GitHub for what moved; `refresh` checks even what it checked a moment ago.
    */
   loadPluginCatalog(refresh?: boolean): Promise<void>
+  /** Huli: lets the directory go once its tab closes; it holds thousands of plugins. */
+  dropPluginCatalog(): void
 }
 
 export type MarketplaceStoreHook = UseBoundStore<StoreApi<MarketplaceStore>>
@@ -526,6 +528,10 @@ export function createMarketplaceStore(
           set({ pluginCatalog: { sources: [], plugins: [] }, pluginCatalogLoading: false })
         } else set({ pluginCatalogError: errorMessage(e), pluginCatalogLoading: false })
       }
+    },
+    dropPluginCatalog() {
+      pluginCatalogRead++
+      set({ pluginCatalog: null, pluginCatalogError: null, pluginCatalogLoading: false })
     },
     async loadSkillRepository(repositoryId, refresh = false) {
       let read: MarketSkillRepository

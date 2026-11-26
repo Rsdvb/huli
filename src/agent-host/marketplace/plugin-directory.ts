@@ -26,6 +26,7 @@ import {
   CLAUDE_MARKETPLACE,
   CODEX_MARKETPLACE,
   MARKETPLACE_BYTES,
+  entryManifest,
   folderUrl,
   githubRepo,
   parseClaudeMarketplace,
@@ -376,7 +377,7 @@ export class PluginDirectory {
       }
       return {
         url: entry.url,
-        hint: { name: entry.name, format: entry.format, manifest: entry.manifest },
+        hint: { name: entry.name, format: entry.format, manifest: entryManifest(entry) },
       }
     } finally {
       this.idle()

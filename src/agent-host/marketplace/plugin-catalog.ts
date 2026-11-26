@@ -187,14 +187,31 @@ function entryFolder(
   return { ...repo, ref, path }
 }
 
-/** The entry's own manifest fields, when they are few enough to keep. */
+/**
+ * The entry's manifest fields beyond those the catalog keeps anyway (its name, description,
+ * version, author and homepage, which `entryManifest` puts back), when they are few enough to
+ * keep; null when it has none.
+ */
 function manifestFields(raw: Record<string, unknown>): Record<string, unknown> | null {
   const kept: Record<string, unknown> = {}
-  for (const key of [...MANIFEST_FIELDS, ...COMPONENT_FIELDS, 'strict'] as const) {
+  for (const key of ['repository', 'license', 'keywords', ...COMPONENT_FIELDS, 'strict'] as const) {
     if (raw[key] !== undefined) kept[key] = raw[key]
   }
   const size = JSON.stringify(kept).length
-  return size > OVERRIDE_BYTES ? null : kept
+  return size === 2 || size > OVERRIDE_BYTES ? null : kept
+}
+
+/** A Claude Code entry's manifest fields, as the install's conversion takes them. */
+export function entryManifest(entry: CatalogEntry): Record<string, unknown> | null {
+  if (entry.format !== 'claude-code') return entry.manifest
+  return {
+    name: entry.name,
+    ...(entry.description ? { description: entry.description } : {}),
+    ...(entry.version ? { version: entry.version } : {}),
+    ...(entry.author ? { author: { name: entry.author } } : {}),
+    ...(entry.homepage ? { homepage: entry.homepage } : {}),
+    ...entry.manifest,
+  }
 }
 
 function parseJson(text: string, file: string): Record<string, unknown> {

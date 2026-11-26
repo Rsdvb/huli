@@ -800,12 +800,13 @@ export function Directory({ tab: asked }: { tab: MarketplaceTab }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [communityKey, useMarketplaceStore])
 
-  // Huli: the directory is read each time the Plugins tab opens; the host checks GitHub at most
-  // once in a while, and Refresh checks at once.
+  // Huli: the directory is read each time the Plugins tab opens, and let go when it closes; the
+  // host checks GitHub at most once in a while, and Refresh checks at once.
   useEffect(() => {
-    if (tab === 'plugins' && !COMMUNITY_MARKETPLACE) {
-      void useMarketplaceStore.getState().loadPluginCatalog()
-    }
+    if (tab !== 'plugins' || COMMUNITY_MARKETPLACE) return
+    const store = useMarketplaceStore.getState()
+    void store.loadPluginCatalog()
+    return () => store.dropPluginCatalog()
   }, [tab, useMarketplaceStore])
 
   // Signing in or out of this computer's account changes what the Community shows.
