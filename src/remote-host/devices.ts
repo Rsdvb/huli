@@ -5,6 +5,7 @@
 // when it is removed and never leave the remote host.
 
 import path from 'node:path'
+import { isAccountId } from '@shared/remote/protocol'
 import {
   deviceId,
   isDeviceField,
@@ -55,14 +56,28 @@ const isTime = (value: unknown): value is number =>
 
 function parseDevice(value: unknown): StoredDevice | null {
   if (typeof value !== 'object' || value === null) return null
-  const { id, publicKey, name, kind, platform, model, addedAt, lastConnectedAt, version, push } =
-    value as Record<string, unknown>
+  const {
+    id,
+    publicKey,
+    name,
+    kind,
+    platform,
+    model,
+    addedAt,
+    lastConnectedAt,
+    version,
+    push,
+    account,
+  } = value as Record<string, unknown>
   if (typeof id !== 'string' || publicKeyBytes(publicKey) === null) return null
   if (!isDeviceName(name) || !isDeviceField(kind) || !isDeviceField(platform)) return null
   // Devices paired before models were kept have none.
   const kept = model ?? ''
   if (!isDeviceModel(kept)) return null
   if (!isTime(addedAt) || !(lastConnectedAt === null || isTime(lastConnectedAt))) return null
+  // Devices kept before accounts were noted have none until their next hello.
+  const accountId = account ?? null
+  if (accountId !== null && !isAccountId(accountId)) return null
   // Notifications that do not read are dropped, not the device: it sets them again.
   const notifications = push === undefined ? null : parseDevicePush(push)
   return {
@@ -76,6 +91,7 @@ function parseDevice(value: unknown): StoredDevice | null {
     lastConnectedAt,
     // Absent from files written before versions were kept; one that does not read is dropped alone.
     ...(isDeviceField(version) ? { version } : {}),
+    account: accountId,
     ...(notifications ? { push: notifications } : {}),
   }
 }
@@ -185,6 +201,8 @@ export class DeviceStore {
     if (!key || !isDeviceName(device.name)) return null
     if (!isDeviceField(device.kind) || !isDeviceField(device.platform)) return null
     if (!isDeviceModel(device.model)) return null
+    const account = device.account ?? null
+    if (account !== null && !isAccountId(account)) return null
     const id = await deviceId(key)
     if (!this.byId.has(id) && this.byId.size >= MAX_DEVICES) return null
     const added: PairedDevice = {
@@ -196,6 +214,7 @@ export class DeviceStore {
       model: device.model,
       addedAt: this.now(),
       lastConnectedAt: null,
+      account,
     }
     this.put(added)
     // Paired again, it starts over and sets its notifications anew.
@@ -243,14 +262,23 @@ export class DeviceStore {
   }
 
   /**
-   * Notes a session opening or ending now, and the app version a session opens with; the write
-   * waits a moment, as connections come in bursts.
+   * Notes a session opening or ending now, the app version a session opens with, and with
+   * `account` the account its hello named; the write waits a moment, as connections come in bursts.
    */
-  connected(id: string, version?: string): void {
+  connected(id: string, version?: string, account?: string | null): void {
     const device = this.byId.get(id)
     if (!device) return
     const known = isDeviceField(version) ? { version } : {}
-    this.put({ ...device, ...known, lastConnectedAt: this.now() })
+    const kept = account === undefined ? device.account : account
+    this.put({ ...device, ...known, lastConnectedAt: this.now(), account: kept })
+    this.save()
+  }
+
+  /** Notes the account a device's hello named, as when the host turned it away for it. */
+  noteAccount(id: string, account: string | null): void {
+    const device = this.byId.get(id)
+    if (!device || device.account === account) return
+    this.put({ ...device, account })
     this.save()
   }
 

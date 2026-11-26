@@ -17,6 +17,8 @@
       "denied": "Say what to do differently",
       "runningQueue": "Queue a message · Esc stops",
       "runningTouch": "Queue a message",
+      "runningSteer": "Send into this turn · Esc stops",
+      "runningSteerTouch": "Send into this turn",
       "pickAgent": "Pick an agent to carry on with…"
     },
     "stop": "Stop",
@@ -26,6 +28,7 @@
     "stopTooltip": "Stop <shortcut>{{shortcut}}</shortcut>",
     "queueTooltip": "Queue <shortcut>{{shortcut}}</shortcut>",
     "queueHoldTooltip": "Queue <shortcut>{{shortcut}}</shortcut> · hold to send now",
+    "steerHoldTooltip": "Send now <shortcut>{{shortcut}}</shortcut> · hold to queue",
     "queueIt": "Queue it",
     "queueItHint": "Sends when this turn ends",
     "sendNow": "Send now",
@@ -47,6 +50,7 @@
     "followsAgentOn": "Follows {{agent}} · on",
     "followsAgentOff": "Follows {{agent}} · off",
     "modelsFrom": "From {{source}}",
+    "customizeModels": "Customize…",
     "optionValue": "{{name}}: {{value}}",
     "permissionMode": "Permission mode",
     "modePendingTurn": "Switches to {{mode}} after this turn.",
@@ -268,7 +272,14 @@
       "estimateLastsHours_one": "Lasts about {{count}} hour",
       "estimateLastsHours_other": "Lasts about {{count}} hours",
       "leftLine": "<time>{{time}}</time> left · {{tokens}} tokens cached",
-      "leftLineAbout": "About <time>{{time}}</time> left · {{tokens}} tokens cached"
+      "leftLineAbout": "About <time>{{time}}</time> left · {{tokens}} tokens cached",
+      "hitShort": "<word>Cache </word>{{percent}}%",
+      "hitButton": "Prompt cache: {{percent}}% hit",
+      "hitLine": "<hit>{{percent}}%</hit> hit · {{cached}} of {{total}} input tokens",
+      "uncachedInput": "Uncached input",
+      "dynamicNote": "This model’s cache lifetime is managed dynamically by the server, with no fixed countdown.",
+      "lastRequest": "Last request {{time}}",
+      "dynamicLifetime": "Dynamic lifetime"
     },
     "speed": {
       "title": "Output speed",

@@ -81,6 +81,7 @@ export const FEATURES = [
       'phone.routines',
     ],
     // What would start or change a run; listing them and stopping one stay.
+    tools: ['create_routine', 'update_routine', 'run_routine'],
     methods: ['routines.create', 'routines.update', 'routines.runNow'],
   },
   {

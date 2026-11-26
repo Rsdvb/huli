@@ -57,6 +57,14 @@
     "refusal": "模型拒绝继续",
     "withTime": "{{reason}} · {{time}}"
   },
+  "stillRunning": {
+    "line": "后台还在跑 {{work}}",
+    "lineReports_other": "后台还在跑 {{work}} · 跑完会接着汇报",
+    "subagents_other": "{{count}} 个子智能体",
+    "commands_other": "{{count}} 条命令",
+    "both": "{{subagents}}和 {{commands}}",
+    "openBoard": "打开看板"
+  },
   "tool": {
     "verb": {
       "read": "读取",
@@ -166,6 +174,7 @@
     "browser_pdf": "网页存为 PDF",
     "browser_trace": "记录网页性能",
     "browser_storage_state": "已存登录状态",
+    "browser_resize": "调整网页尺寸",
     "device_list": "列出设备",
     "device_open": "打开设备",
     "device_close": "关闭设备",
@@ -237,7 +246,12 @@
     "change_settings": "修改设置",
     "request_secrets": "索要密钥",
     "read_theme": "读取主题颜色",
-    "set_theme_colors": "更换主题颜色"
+    "set_theme_colors": "更换主题颜色",
+    "list_routines": "列出定时任务",
+    "create_routine": "新建定时任务",
+    "update_routine": "修改定时任务",
+    "delete_routine": "删除定时任务",
+    "run_routine": "运行定时任务"
   },
   "agyTool": {
     "invoke_subagent": "启动子智能体",
@@ -437,16 +451,26 @@
   },
   "projectHooks": {
     "where": "这个项目的 .claude 设置会在特定时刻自动执行这些命令，比如会话开始时，以你的权限在这台电脑上运行。允许之前，这个会话不会自动执行任何命令，包括你自己设置的。",
+    "whereEnv": "这个项目的 .claude 设置给它的会话设了这些环境变量，可能把请求和你的登录发到别的地方。允许之前，每个变量保持没有这个项目时的值，没有的就留空。",
+    "whereBoth": "这个项目的 .claude 设置会在特定时刻自动执行这些命令，比如会话开始时，以你的权限在这台电脑上运行，还设了这些环境变量，可能把请求和你的登录发到别的地方。允许之前，这个会话不会自动执行任何命令，包括你自己设置的；每个变量保持没有这个项目时的值，没有的就留空。",
     "hooks": "命令",
+    "variables": "环境变量",
+    "both": "命令和环境变量",
     "decision": {
       "use": "运行",
       "all": "总是运行",
       "skip": "不运行"
     },
+    "allow": {
+      "use": "允许",
+      "all": "总是允许",
+      "skip": "不允许"
+    },
     "answer": {
       "use": "已允许",
       "all": "已允许这个项目的全部",
       "skip": "未运行",
+      "notAllowed": "未允许",
       "timeout": "未回答"
     }
   },
@@ -695,6 +719,7 @@
     "title": "从这里重新编辑？",
     "body_other": "这条消息和它之后的对话都会拿掉，一共 {{count}} 轮。消息回到输入框。",
     "files_other": "之后改过的 {{count}} 个文件保持原样",
+    "filesBack": "之后改过的文件会退回原样，放回原处可以恢复",
     "stopsTurn": "会停掉正在跑的一轮",
     "stopsTasks_other": "会停掉 {{count}} 个后台任务",
     "cacheKept": "提示词缓存还在 · 还剩 {{time}}",
@@ -724,7 +749,8 @@
     "review": "查看",
     "commit": "提交并创建 PR",
     "more_other": "再显示 {{count}} 个文件",
-    "fewer": "收起"
+    "fewer": "收起",
+    "openInFiles": "在文件面板中打开"
   },
   "queue": {
     "label": "排队中的消息：{{count}} 条",
@@ -894,7 +920,10 @@
       "repo": "Git 仓库",
       "note": "只列文件夹。路径按 {{host}} 的格式。",
       "opens": "将打开",
-      "open": "打开"
+      "open": "打开",
+      "thisPc": "此电脑",
+      "drives": "驱动器",
+      "noDrives": "没有找到驱动器。"
     },
     "role": {
       "group": "角色",
@@ -935,6 +964,8 @@
         "fix": "解决",
         "failed": "失败",
         "signIn": "登录",
+        "signInEnding": "登录快到期",
+        "signInEnded": "登录可能已过期",
         "installing": "正在安装…",
         "setsUp": "待配置",
         "noBalance": "余额用完",
@@ -1431,7 +1462,9 @@
       "terminalRename": "给你的终端改名",
       "app": "使用应用",
       "projectMcp": "启动 MCP 服务器",
-      "projectHooks": "运行这个项目设为自动执行的命令"
+      "projectHooks": "运行这个项目设为自动执行的命令",
+      "projectEnv": "使用这个项目设置的环境变量",
+      "projectHooksEnv": "运行这个项目设为自动执行的命令，并使用它设置的环境变量"
     }
   },
   "worktree": {
@@ -1498,20 +1531,7 @@
       "balanced": "均衡",
       "thorough": "周全"
     },
-    "auto": "Auto",
-    "you": "你",
-    "youReview": "你来审",
-    "source": {
-      "first": "第一步",
-      "pinned": "已固定",
-      "task": "本需求",
-      "you": "你"
-    },
-    "reviews": "审查{{steps}}",
     "hint": "“{{hint}}”",
-    "pinnedHint": "在这个工作流的市场页面上为每个需求固定",
-    "backToAuto": "改回 Auto",
-    "whoDoes": "谁做{{step}}",
     "pinEveryTask": "为每个需求固定步骤",
     "suggest": {
       "steps_other": "{{count}} 步"
@@ -1629,6 +1649,7 @@
       "lines": {
         "report": {
           "step_open": "这一步可以报告",
+          "answered": "没有等待用户回复的问题或请求",
           "outcome": "“{{outcome}}”是这一步的结果之一",
           "outcomePlain": "报告的是这一步的结果之一",
           "note": "要交的说明已经写好",
@@ -2515,5 +2536,49 @@
       "open": "查看 MCP 服务器",
       "dismiss": "关闭提示"
     }
+  },
+  "routineChange": {
+    "title_create": "新建定时任务",
+    "title_update": "修改定时任务",
+    "title_delete": "删除定时任务",
+    "title_run": "立即运行定时任务",
+    "whoMac_create": "{{agent}} 想在这台 Mac 上新建一个定时任务",
+    "whoMac_update": "{{agent}} 想修改这台 Mac 上的一个定时任务",
+    "whoMac_delete": "{{agent}} 想删除这台 Mac 上的一个定时任务",
+    "whoMac_run": "{{agent}} 想立即运行这台 Mac 上的一个定时任务",
+    "whoComputer_create": "{{agent}} 想在这台电脑上新建一个定时任务",
+    "whoComputer_update": "{{agent}} 想修改这台电脑上的一个定时任务",
+    "whoComputer_delete": "{{agent}} 想删除这台电脑上的一个定时任务",
+    "whoComputer_run": "{{agent}} 想立即运行这台电脑上的一个定时任务",
+    "whoOther_create": "{{agent}} 想在 {{computer}} 上新建一个定时任务",
+    "whoOther_update": "{{agent}} 想修改 {{computer}} 上的一个定时任务",
+    "whoOther_delete": "{{agent}} 想删除 {{computer}} 上的一个定时任务",
+    "whoOther_run": "{{agent}} 想立即运行 {{computer}} 上的一个定时任务",
+    "rows": "定时任务的设置",
+    "name": "名称",
+    "state": "状态",
+    "on": "开启",
+    "off": "关闭",
+    "web": "使用网络",
+    "noWeb": "不联网",
+    "showAll": "展开全部",
+    "showLess": "收起",
+    "slot_other": "会占用同时运行的 {{count}} 个名额中的一个。",
+    "view": "在定时任务中查看",
+    "decline": "不做",
+    "create": "新建",
+    "change": "修改",
+    "delete": "删除",
+    "run": "运行",
+    "doing": "正在处理…",
+    "done_create": "已新建定时任务 <b>{{name}}</b>",
+    "done_update": "已修改定时任务 <b>{{name}}</b>",
+    "done_delete": "已删除定时任务 <b>{{name}}</b>",
+    "done_run": "已开始运行定时任务 <b>{{name}}</b>",
+    "notDone_create": "没有新建定时任务 <b>{{name}}</b>",
+    "notDone_update": "没有修改定时任务 <b>{{name}}</b>",
+    "notDone_delete": "没有删除定时任务 <b>{{name}}</b>",
+    "notDone_run": "没有运行定时任务 <b>{{name}}</b>",
+    "open": "打开"
   }
 }

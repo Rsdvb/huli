@@ -9,10 +9,13 @@ import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 import type { AgentAccount, ContextBreakdown, PlanLimit } from '@shared/agent-host'
 import { canonicalClaudeModel } from '@shared/agents'
+import { carriedEffort } from '@shared/effort'
 import type { SessionMcpServer } from '@shared/session-mcp'
 import type { ClaudeRunSettings } from '@shared/settings'
+import { instantOf } from '@shared/sign-in-end'
 import {
   PROMPT_SUGGESTION_CHARS,
   type ConfigOption,
@@ -107,7 +110,8 @@ import {
   riskSubject,
 } from './permissions'
 import { findClaudeTranscript } from '../prompt-cache'
-import { folderHooks } from './project-hooks'
+import { removeFlagSettings, writeFlagSettings } from './flag-settings'
+import { folderHooks, heldEnv, heldHelpers } from './project-hooks'
 import { declaredServers } from './project-mcp'
 import { claudeMcpServers, reloadBusy, signInEnd } from './mcp-panel'
 import { shownError } from '../session-mcp/text'
@@ -135,6 +139,7 @@ import type {
   PromptSuggestionMessage,
   Query,
   QueryOptions,
+  ResolvedSettings,
   ResultMessage,
   SdkMessage,
   SettingSource,
@@ -172,6 +177,9 @@ const EXIT_WAIT_MS = 5_000
 /** The most of a task's output the board reads, which is the tail Claude Code itself answers. */
 const TASK_OUTPUT_LIMIT = 8 * 1024
 const AUTH_STATUS_MS = 10_000
+/** How long a context read waits for a query it just opened to connect its MCP servers. */
+const MCP_CONNECT_MS = 10_000
+const MCP_POLL_MS = 100
 /** JSON-RPC's code for a session the agent does not have, which the host reads. */
 const RESOURCE_NOT_FOUND = -32002
 const INVALID_PARAMS = -32602
@@ -330,6 +338,8 @@ interface Session {
   stale: boolean
   /** The servers the folder declares itself that the query was started without. */
   held: string[]
+  /** Settles once the servers holding keys, added after the query started, tried to connect. */
+  adding: Promise<void> | null
   /** The hooks the folder declares itself, which the query runs only when `hooksHeld` is false. */
   hooks: FolderHooks | null
   /** The query was started with every hook off, the folder's not being allowed. */
@@ -613,6 +623,10 @@ export class ClaudeConnection implements AgentConnection {
   }
 
   get ownInstructions(): boolean {
+    return true
+  }
+
+  get reportsBack(): boolean {
     return true
   }
 
@@ -1021,28 +1035,53 @@ export class ClaudeConnection implements AgentConnection {
   // Opening a query.
 
   /**
-   * Reads the settings a session starts with, and the hooks the folder's own declare; an
-   * unreadable file only leaves the defaults.
+   * Reads the settings a session starts with, the hooks, helpers and env the folder's own declare,
+   * and what stands in for those helpers while they are held; an unreadable file only leaves the
+   * defaults.
    */
   private async settings(
     cwd: string,
     sources: SettingSource[],
-  ): Promise<{ values: Record<string, unknown>; known: boolean; hooks: FolderHooks | null }> {
+  ): Promise<{
+    values: Record<string, unknown>
+    known: boolean
+    hooks: FolderHooks | null
+    helpers: Record<string, string>
+    sources: ResolvedSettings['sources'] | null
+  }> {
     const sdk = this.requireSdk()
     try {
-      const { values, hooks } = await this.withConfigDir(async () => {
+      const { values, hooks, helpers, read } = await this.withConfigDir(async () => {
         const resolved = await sdk.resolveSettings({ cwd, settingSources: sources })
         // A mode a repository's own settings escalate to holds only once Claude Code trusts it.
         return {
           values: sdk.filterEscalatingDefaultMode(resolved),
           hooks: folderHooks(resolved.sources),
+          helpers: heldHelpers(resolved.sources),
+          read: resolved.sources,
         }
       })
-      return { values, known: true, hooks }
+      return { values, known: true, hooks, helpers, sources: read }
     } catch (error) {
       this.context.hooks.log('warn', `Could not read Claude Code's settings: ${errorText(error)}`)
-      return { values: {}, known: false, hooks: null }
+      return { values: {}, known: false, hooks: null, helpers: heldHelpers(null), sources: null }
     }
+  }
+
+  /** The flag settings in a file only the user can read, since inline they go on the command line. */
+  private async writeFlags(flags: FlagSettings): Promise<string> {
+    const dir = this.context.claudeSettingsDir
+    if (!dir) throw new AgentRequestError('agent_error', "No folder for Claude Code's settings")
+    return await writeFlagSettings(dir, flags)
+  }
+
+  private removeFlags(file: string): void {
+    removeFlagSettings(file).catch((error: unknown) =>
+      this.context.hooks.log(
+        'warn',
+        `Could not remove Claude Code's settings file: ${errorText(error)}`,
+      ),
+    )
   }
 
   private async open(
@@ -1071,7 +1110,7 @@ export class ClaudeConnection implements AgentConnection {
     const mainModel = provider
       ? (provider.model ?? ownModel)
       : (ownModel ?? this.env.ANTHROPIC_MODEL ?? null)
-    const env: Env = provider ? { ...this.env, ...provider.plain } : this.env
+    const windowEnv: Env = provider ? { ...this.env, ...provider.plain } : this.env
     const input = new Input()
     const windowOf = (model: string): number | null =>
       contextWindow(session.compact, model, ownWindow(session.totals, model))
@@ -1099,7 +1138,7 @@ export class ClaudeConnection implements AgentConnection {
       turn: null,
       resumed: how.resume,
       totals: undefined,
-      compact: settings.known ? compactWindows(settings.values, env) : NO_COMPACT_WINDOWS,
+      compact: settings.known ? compactWindows(settings.values, windowEnv) : NO_COMPACT_WINDOWS,
       states: false,
       busy: false,
       jobs: 0,
@@ -1109,6 +1148,7 @@ export class ClaudeConnection implements AgentConnection {
       terminal: new Set(),
       stale: false,
       held: [],
+      adding: null,
       hooks: settings.hooks,
       hooksHeld: false,
       titleText: '',
@@ -1128,10 +1168,37 @@ export class ClaudeConnection implements AgentConnection {
       // The user's own CLAUDE_ENV_FILE stays theirs; the session's secrets then load by hand.
       envFile: !!options.envFile && !hidden && !this.env.CLAUDE_ENV_FILE,
     }
+    const env: QueryOptions['env'] = {
+      ...this.env,
+      ...options.env,
+      CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1',
+      // Without it Claude Code sends no summary of its tool calls.
+      CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES: '1',
+      // Kettu's memory stands in for Claude Code's own, which would load and write beside it.
+      ...(options.memory ? { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } : {}),
+      ...(session.envFile && options.envFile ? { CLAUDE_ENV_FILE: options.envFile } : {}),
+    }
     const flags: Record<string, unknown> = {}
-    // Through the SDK, Claude Code runs the hooks of a folder's own settings without asking.
-    session.hooksHeld = !hidden && (await this.hooksHeld(cwd, options, settings))
-    if (hidden || session.hooksHeld) flags.disableAllHooks = true
+    // Through the SDK, Claude Code runs the hooks and the helper commands of a folder's own
+    // settings without asking, the helpers as soon as it starts, and takes its env, which may send
+    // requests and sign-ins elsewhere; a hidden session runs no hooks.
+    const held = await this.hooksHeld(cwd, options, settings, !hidden)
+    session.hooksHeld = !hidden && held
+    if (hidden || held) flags.disableAllHooks = true
+    if (held) {
+      Object.assign(flags, settings.helpers)
+      const withheld = heldEnv(settings.sources, env)
+      if (Object.keys(withheld).length > 0) {
+        flags.env = withheld
+        // The window Kettu shows follows the env the session runs with.
+        const values = settings.values.env
+        const own = typeof values === 'object' && values !== null ? values : {}
+        session.compact = compactWindows(
+          { ...settings.values, env: { ...own, ...withheld } },
+          this.env,
+        )
+      }
+    }
     // A page's question and a limits read take none of the user's settings but how they sign in,
     // which may be there: without it a gateway's token goes unseen and its limits read as a plan's.
     if (bare || hidden === 'limits') {
@@ -1144,10 +1211,18 @@ export class ClaudeConnection implements AgentConnection {
     // set empty: the command line, which other users can read, carries no key, and nothing of the
     // agent's own settings reaches the profile's provider. The key follows over the control
     // channel once the query has started, before any request.
-    if (provider) flags.env = provider.plain
+    if (provider) {
+      flags.env = { ...(flags.env as Record<string, string> | undefined), ...provider.plain }
+    }
     // Huli: the output style Kite's settings start the agent's sessions in.
     const startStyle = this.context.claudeRun?.()?.outputStyle
     if (startStyle && !hidden && !bare) flags.outputStyle = startStyle
+    // Huli: the session's shell commands in Claude Code's own sandbox, which fails the start where
+    // it cannot run rather than run them unheld. It goes in the flag settings' file, since the SDK
+    // refuses its `sandbox` option beside one.
+    if (options.sandbox?.tier === 'native' && !bare) {
+      flags.sandbox = claudeSandbox(options.sandbox, os.homedir(), process.platform)
+    }
     const off = this.mcpOff.get(sessionId)
     const servers = bare
       ? []
@@ -1170,19 +1245,14 @@ export class ClaudeConnection implements AgentConnection {
           ...(options.memory ? [options.memory.text] : []),
           ...(options.role ? [options.role] : []),
         ]
+    const cli = await this.runnableCli()
+    // Written last, so nothing that could still fail leaves it behind.
+    const settingsFile = Object.keys(flags).length > 0 ? await this.writeFlags(flags) : null
+    let spawned = false
     const queryOptions: QueryOptions = {
       cwd,
-      env: {
-        ...this.env,
-        ...options.env,
-        CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1',
-        // Without it Claude Code sends no summary of its tool calls.
-        CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES: '1',
-        // Kettu's memory stands in for Claude Code's own, which would load and write beside it.
-        ...(options.memory ? { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' } : {}),
-        ...(session.envFile && options.envFile ? { CLAUDE_ENV_FILE: options.envFile } : {}),
-      },
-      pathToClaudeCodeExecutable: await this.runnableCli(),
+      env,
+      pathToClaudeCodeExecutable: cli,
       spawnClaudeCodeProcess: (spawn) => {
         const env = spawn.env as Env
         const entrypoint = this.context.claudeTestEntrypoint?.()
@@ -1193,7 +1263,17 @@ export class ClaudeConnection implements AgentConnection {
           env: entrypoint ? { ...env, CLAUDE_CODE_ENTRYPOINT: entrypoint } : env,
           signal: spawn.signal,
         })
+        spawned = true
         session.process = child
+        // Kept while the process runs, which hands the path on to the processes it starts.
+        if (settingsFile) {
+          const remove = (): void => this.removeFlags(settingsFile)
+          child.once('exit', remove)
+          // An error without a pid is a spawn that failed; with one, 'exit' still follows.
+          child.once('error', () => {
+            if (child.pid === undefined) remove()
+          })
+        }
         return child
       },
       includePartialMessages: true,
@@ -1254,12 +1334,7 @@ export class ClaudeConnection implements AgentConnection {
       },
       ...(Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
       ...(plugins.length > 0 ? { plugins } : {}),
-      ...(Object.keys(flags).length > 0 ? { settings: flags } : {}),
-      // Huli: the session's shell commands in Claude Code's own sandbox, which fails the start
-      // where it cannot run rather than run them unheld.
-      ...(options.sandbox?.tier === 'native' && !bare
-        ? { sandbox: claudeSandbox(options.sandbox, os.homedir(), process.platform) }
-        : {}),
+      ...(settingsFile ? { settings: settingsFile } : {}),
       // Huli: the project's further folders, which its tools may read and edit as the project's.
       ...(options.folders?.length && !bare ? { additionalDirectories: [...options.folders] } : {}),
       ...runLimits(this.context.claudeRun?.() ?? null, options, mainModel),
@@ -1280,7 +1355,13 @@ export class ClaudeConnection implements AgentConnection {
           ? { resume: sessionId }
           : { sessionId }),
     }
-    const query = sdk.query({ prompt: input, options: queryOptions })
+    let query: Query
+    try {
+      query = sdk.query({ prompt: input, options: queryOptions })
+    } catch (error) {
+      if (settingsFile && !spawned) this.removeFlags(settingsFile)
+      throw error
+    }
     session.query = query
     this.context.hooks.traffic('out', { method: 'query', sessionId, resume: how.resume })
     const reading = this.read(session, query)
@@ -1291,6 +1372,7 @@ export class ClaudeConnection implements AgentConnection {
       session.query = null
       input.close()
       query.close()
+      if (settingsFile && !spawned) this.removeFlags(settingsFile)
       void reading
       if (how.resume && missingSession(error)) {
         throw new AgentRequestError('agent_error', errorText(error), RESOURCE_NOT_FOUND)
@@ -1312,7 +1394,9 @@ export class ClaudeConnection implements AgentConnection {
         throw new AgentRequestError('agent_error', errorText(error))
       }
     }
-    if (servers.some((server) => server.secret)) this.addSecretServers(session, query, servers)
+    if (servers.some((server) => server.secret)) {
+      session.adding = this.addSecretServers(session, query, servers)
+    }
     // Huli: a profile's session tells nothing of the agent's own account.
     if (!provider) this.reportAccount(init.account)
     session.models = init.models ?? []
@@ -1338,13 +1422,17 @@ export class ClaudeConnection implements AgentConnection {
 
   /**
    * Hands the query all its servers, those holding keys among them, in place of the ones its
-   * options started it with. Not awaited: the answer comes once every server has tried to connect,
-   * and a server that cannot only leaves the session without its tools.
+   * options started it with. Not awaited by a turn: the answer comes once every server has tried to
+   * connect, and a server that cannot only leaves the session without its tools. Never rejects.
    */
-  private addSecretServers(session: Session, query: Query, servers: readonly McpServer[]): void {
+  private addSecretServers(
+    session: Session,
+    query: Query,
+    servers: readonly McpServer[],
+  ): Promise<void> {
     const names = servers.map((server) => server.name)
     this.context.hooks.traffic('out', { method: 'setMcpServers', sessionId: session.id, names })
-    query.setMcpServers(claudeServers(servers)).then(
+    return query.setMcpServers(claudeServers(servers)).then(
       (result) => {
         for (const [name, error] of Object.entries(result.errors)) {
           this.context.hooks.log('warn', `MCP server ${name} did not connect: ${error}`)
@@ -1550,6 +1638,8 @@ export class ClaudeConnection implements AgentConnection {
     const turn = session.turn
     // A request still retried when its turn ends never went through.
     for (const delivery of session.mapper.retryEnded(false)) this.deliver(delivery)
+    const ends = instantOf(result.credential_expires_at)
+    if (ends !== null) this.context.hooks.signInEnds?.(ends)
     const totals = result.modelUsage ?? {}
     // The first result after a resume carries the history's totals, so only its own usage counts.
     const spent =
@@ -1855,20 +1945,21 @@ export class ClaudeConnection implements AgentConnection {
   }
 
   /**
-   * Whether the hooks of `cwd`'s own settings may not run: all of them without a gate, and those
-   * of settings that could not be read, which may declare some.
+   * Whether the hooks and helpers of `cwd`'s own settings may not run: all of them without a gate,
+   * and those of settings that could not be read, which may declare some. Only `ask` asks the user.
    */
   private async hooksHeld(
     cwd: string,
     options: SessionOptions,
     settings: { known: boolean; hooks: FolderHooks | null },
+    ask: boolean,
   ): Promise<boolean> {
     if (!settings.known) return true
     if (!settings.hooks) return false
     const gate = options.projectHooks
     if (!gate) return true
     try {
-      return await gate.hold(cwd, settings.hooks)
+      return await (ask ? gate.hold(cwd, settings.hooks) : gate.held(cwd, settings.hooks))
     } catch (error) {
       this.context.hooks.log('warn', `Could not read the answers for ${cwd}: ${errorText(error)}`)
       return true
@@ -2351,10 +2442,24 @@ export class ClaudeConnection implements AgentConnection {
         if (typeof value !== 'string') break
         await query.setModel(value === DEFAULT_MODEL ? undefined : value)
         session.choices.model = value
-        // The effort and fast mode a model offers are its own.
-        const info = modelInfo(session.models, value)
-        if (!info?.supportedEffortLevels?.includes(session.choices.effort)) {
+        // The effort and fast mode a model offers are its own: a chosen effort it lacks goes to the
+        // nearest lower level it offers, else to its default.
+        const levels = modelInfo(session.models, value)?.supportedEffortLevels ?? []
+        const effort = session.choices.effort
+        if (effort !== DEFAULT_EFFORT && !levels.includes(effort)) {
+          const carried = carriedEffort(levels, effort)
           session.choices.effort = DEFAULT_EFFORT
+          if (carried !== null) {
+            try {
+              await this.applyFlags(session, { effortLevel: carried })
+              session.choices.effort = carried
+            } catch (error) {
+              this.context.hooks.log(
+                'warn',
+                `Could not carry effort ${effort}: ${errorText(error)}`,
+              )
+            }
+          }
         }
         session.config = sessionConfig(session)
         return
@@ -2815,6 +2920,7 @@ export class ClaudeConnection implements AgentConnection {
       : await this.temporary(cwd, { ...options, hidden: 'context' }, sessionId)
     const query = (live ?? temporary)!.query!
     try {
+      if (temporary) await this.serversConnected(temporary, query)
       return mapContextUsage(await query.getContextUsage({ detail: 'summary' }), Date.now(), {
         cwd,
         home: os.homedir(),
@@ -2822,6 +2928,36 @@ export class ClaudeConnection implements AgentConnection {
     } finally {
       if (temporary) await this.closeSession(temporary.id)
     }
+  }
+
+  /**
+   * Waits, up to a bound, for a query just opened to connect its MCP servers: Claude Code connects
+   * them after it starts, and its context breakdown leaves out the tools of those still connecting.
+   */
+  private async serversConnected(session: Session, query: Query): Promise<void> {
+    const deadline = Date.now() + MCP_CONNECT_MS
+    if (session.adding) {
+      await Promise.race([session.adding, sleep(MCP_CONNECT_MS, undefined, { ref: false })])
+    }
+    // Huli: an SDK without the call is not waited for.
+    if (!query.mcpServerStatus) return
+    while (Date.now() < deadline) {
+      try {
+        const servers = await query.mcpServerStatus()
+        if (!servers.some((server) => server.status === 'pending')) return
+      } catch (error) {
+        this.context.hooks.log(
+          'warn',
+          `Claude Code's MCP servers could not be read: ${errorText(error)}`,
+        )
+        return
+      }
+      await sleep(MCP_POLL_MS)
+    }
+    this.context.hooks.log(
+      'warn',
+      `Claude Code's MCP servers were still connecting after ${MCP_CONNECT_MS} ms; the context leaves their tools out`,
+    )
   }
 
   /** A query opened only to read from, which keeps no history: of `from`, when it is given. */

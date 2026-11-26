@@ -1,7 +1,42 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef, type RefObject } from 'react'
 import { cn } from 'cn'
+import type { TurnDotPatternName } from '@shared/turn-dots'
 import { stepLoops } from '@renderer/app/window-front'
 import { BY_PHASE, CELLS, turnDotLoops, type RunningPhase } from './turn-dot-patterns'
+
+/**
+ * Runs the pattern's loops on the box's dots through the Web Animations API, held paused and
+ * stepped with every other loop of the window (app/window-front.ts); none while `still`.
+ */
+function useDotLoops(
+  ref: RefObject<HTMLSpanElement | null>,
+  pattern: TurnDotPatternName,
+  slower: number,
+  still: boolean,
+): void {
+  useLayoutEffect(() => {
+    const box = ref.current
+    if (!box || still) return
+    const animations: Animation[] = []
+    turnDotLoops(pattern, slower).forEach((loop, i) => {
+      const dot = box.children[i]
+      if (loop && dot) animations.push(dot.animate(loop.keyframes, loop.timing))
+    })
+    const release = stepLoops(animations, box)
+    return () => {
+      release()
+      for (const animation of animations) animation.cancel()
+    }
+  }, [ref, pattern, slower, still])
+}
+
+function Dots() {
+  return CELLS.map(([x, y]) => (
+    <svg key={`${x}${y}`} viewBox="0 0 12 12" className="absolute inset-0 size-full">
+      <circle cx={2 + x * 4} cy={2 + y * 4} r={1.4} />
+    </svg>
+  ))
+}
 
 /**
  * The running turn's mark: nine dots in the fox's orange acting out the phase. Each dot only
@@ -27,20 +62,7 @@ export function TurnDots({
 }) {
   const pattern = BY_PHASE[phase]
   const ref = useRef<HTMLSpanElement>(null)
-  useLayoutEffect(() => {
-    const box = ref.current
-    if (!box || still) return
-    const animations: Animation[] = []
-    turnDotLoops(pattern).forEach((loop, i) => {
-      const dot = box.children[i]
-      if (loop && dot) animations.push(dot.animate(loop.keyframes, loop.timing))
-    })
-    const release = stepLoops(animations, box)
-    return () => {
-      release()
-      for (const animation of animations) animation.cancel()
-    }
-  }, [pattern, still])
+  useDotLoops(ref, pattern, 1, still)
   return (
     <span
       key={pattern}
@@ -52,11 +74,29 @@ export function TurnDots({
         className,
       )}
     >
-      {CELLS.map(([x, y]) => (
-        <svg key={`${x}${y}`} viewBox="0 0 12 12" className="absolute inset-0 size-full">
-          <circle cx={2 + x * 4} cy={2 + y * 4} r={1.4} />
-        </svg>
-      ))}
+      <Dots />
+    </span>
+  )
+}
+
+/**
+ * Work that runs on after the turn: the running dots' walk round the edge at half its speed, in the
+ * secondary text color, so it never reads as a running turn. Huli: stepped like TurnDots.
+ */
+export function BackgroundDots({ className }: { className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  useDotLoops(ref, BY_PHASE.working, 2, false)
+  return (
+    <span
+      ref={ref}
+      data-turn-dots
+      aria-hidden
+      className={cn(
+        'relative inline-block size-3 shrink-0 animate-in fill-current text-secondary animation-duration-(--duration-base) fade-in',
+        className,
+      )}
+    >
+      <Dots />
     </span>
   )
 }

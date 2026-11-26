@@ -271,7 +271,8 @@ export function settled(entry: ThreadEntry): ThreadEntry {
       // So did a secret card, and no value went anywhere.
       return entry.outcome === null ? { ...entry, outcome: { kind: 'ended' } } : entry
     case 'theme_change':
-      // And a theme card, which changed nothing.
+    case 'routine_change':
+      // And a theme or Routine card, which changed nothing.
       return entry.outcome === null ? { ...entry, outcome: { kind: 'ended' } } : entry
     case 'tool': {
       const open = entry.status === 'pending' || entry.status === 'in_progress'

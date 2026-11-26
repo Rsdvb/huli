@@ -57,7 +57,7 @@ import { BrowserOriginStore } from './browser/origins'
 import { SiteIcons } from './browser/site-icons'
 import { startSignIns } from './browser/signins'
 import { BackupService } from './backup/service'
-import { asksForDebug, isDebugRun, lockData, startDebugMode } from './debug-mode'
+import { asksForDebug, isDebugRun, lockData, prepareRelaunch, startDebugMode } from './debug-mode'
 import { broadcast, sendCommand } from './events'
 import { HostAdmin } from './host-admin'
 import { HostMedia } from './host-media'
@@ -83,6 +83,7 @@ import {
   registerMiniIpc,
   registerCaptureIpc,
 } from './ipc'
+import { configurePageRecovery } from './page-recovery'
 import { Reports } from './report'
 import { MediaGrants, mediaScheme, serveMedia } from './media'
 import { createLogger } from './log'
@@ -93,7 +94,13 @@ import type { SessionSummary } from '@shared/agent-host'
 import { MiniWindow } from './mini-window'
 import { ScreenCapture } from './screen-capture'
 import { isOpenedAtLogin, startMode, syncLoginItem } from './login-item'
-import { notifyAttention, notifyDiscovery, notifyNotice, RepeatedNotices } from './notifications'
+import {
+  notifyAttention,
+  notifyDiscovery,
+  notifyJoined,
+  notifyNotice,
+  RepeatedNotices,
+} from './notifications'
 import { KeepAwake } from './power-save'
 import { sessionProxy } from './proxy'
 import { Sharing } from './sharing'
@@ -102,6 +109,7 @@ import { restrictPermissions } from './permissions'
 import { QuitFlow } from './quit'
 import { loadStoredDevices } from './remote-devices'
 import { RemoteHost } from './remote-host'
+import { RemoteOffers } from './remote-offer'
 import {
   loadDeviceKey,
   loadIdentity,
@@ -826,11 +834,23 @@ async function start(): Promise<void> {
       (remoteHost.hosts?.length ?? 0) > 0,
     send: (token, relay) => remoteHost.setToken(token, relay),
   })
+  // Asks once per other client of the account whether to let it use this computer.
+  // Huli: Huli Cloud lists no account's clients (Kettu's GET /api/v1/me/clients), so no offer is
+  // made and nothing is read, at start or later, until it does.
+  const remoteOffers = new RemoteOffers({
+    eligible: () => false,
+    clients: () => account.clients(),
+    asked: () => appState.get().askedClients,
+    keepAsked: (ids) => appState.update({ askedClients: ids }),
+    changed: (offer) => broadcast('remote:offer', offer),
+  })
   /** The sign-in changed: the relay's token, and the direct connections it holds on without one. */
   function accountChanged(): void {
     relayToken.update()
+    remoteHost.accountChanged()
     remoteHost.directChanged()
     remoteChanged()
+    void remoteOffers.check()
   }
   const remoteStatus = (): RemoteStatus => {
     const status = remoteHost.status
@@ -852,6 +872,7 @@ async function start(): Promise<void> {
         keyEnd: accessKeyEnd(ownRelayKey),
       }),
       ownRelayKeyEnd: accessKeyEnd(ownRelayKey),
+      account: remoteHost.account,
     }
   }
   const remoteChanged = (): void => {
@@ -859,6 +880,7 @@ async function start(): Promise<void> {
     broadcast('remote:changed', status)
     tray.setRemote(status)
     hostAdmin?.remoteChanged(status)
+    remoteOffers.refresh()
   }
   let computerModel = ''
   const hostsStatus = (): HostsStatus => ({
@@ -871,6 +893,7 @@ async function start(): Promise<void> {
     hosts: remoteHost.hosts,
     plainTextKey: remoteHost.plainTextDeviceKey,
     keyFailed: remoteHost.deviceKeyFailed,
+    otherAccount: remoteHost.otherAccountHosts,
   })
   // What an agent's settings tools read beyond the file: counts, and the account as Settings shows
   // it. A secret goes only as whether it is set.
@@ -1021,9 +1044,21 @@ async function start(): Promise<void> {
         check: checkRelayHere,
       }),
     discoverable: () => settings.get().remote.discoverable,
+    account: () => {
+      const status = account.status()
+      return accountInUse() && status.state === 'signed-in' ? status.account.id : null
+    },
     discoveryChanged: (event) => {
       broadcast('remote:discovery', event)
+      hostAdmin?.discoveryChanged(event)
       notifyDiscovery(event, settings.get(), () => void showMainWindow())
+    },
+    deviceJoined: (device, via) => {
+      hostAdmin?.deviceJoined(device, via)
+      notifyJoined(device, hostName(), settings.get(), () => {
+        void showMainWindow()
+        sendCommand({ kind: 'remove-device', deviceId: device.id })
+      })
     },
     relayTokenReady: () => relayToken.ready(),
     deviceKey: () => loadDeviceKey(userDataPath, identityCipher),
@@ -1202,6 +1237,11 @@ async function start(): Promise<void> {
       }),
   })
   const quitFlow = quit
+  configurePageRecovery({
+    restart: () => quitFlow.restart(() => prepareRelaunch(isDebugRun())),
+    quit: () => app.quit(),
+    quitting: () => quitFlow.quitting,
+  })
   checkForUpdates = () => void updater.check()
   const agentFolders = new AgentFolders(
     settings,
@@ -1265,6 +1305,8 @@ async function start(): Promise<void> {
       ownRelay: true,
       thumbnails: true,
       partThumbnails: true,
+      pinnedModels: true,
+      drives: true,
       artifactRecords: [...ARTIFACT_RECORDS],
       recycleBin: true,
     }),
@@ -1279,7 +1321,7 @@ async function start(): Promise<void> {
     printPdf: (id, version) => artifacts.printPdf(ownArtifact(id), version),
     report: (request) => reports.forDevice(request),
     submitReport: (ref) => reports.submit(ref),
-    send: (event, deviceId) => remoteHost.adminEvent(event, deviceId),
+    send: (event, deviceId, except) => remoteHost.adminEvent(event, deviceId, except),
   })
 
   const menuDeps = {
@@ -1351,10 +1393,12 @@ async function start(): Promise<void> {
       // The window signs out first, while the service can still be told; this forgets it here.
       if (!next.cloud.enabled && account.status().state !== 'signed-out') void account.signOut()
       relayToken.update()
+      remoteHost.accountChanged()
       remoteHost.relayChanged()
       remoteHost.directChanged()
       sharing.kettuChanged()
       remoteChanged()
+      void remoteOffers.check()
       agentHost.pushMarketAccount(marketAccount())
     }
     // After the remote host, so devices hear why their terminals close; it reads `remote.terminal`.
@@ -1402,6 +1446,7 @@ async function start(): Promise<void> {
     sharing,
     marketKeys,
     remoteHost,
+    remoteOffers,
     hostSessions,
     hostMedia,
     portForwards,

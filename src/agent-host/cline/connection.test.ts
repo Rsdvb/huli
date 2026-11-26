@@ -71,6 +71,7 @@ function fakeHost(options: { hello?: 'fail' | 'ok'; signedOut?: boolean } = {}) 
       post({ jsonrpc: '2.0', id, method, params })
     })
   let settings = { ...recorded.opened.settings }
+  const prompted = new Set<string>()
   const turn = async (sessionId: string, text: string): Promise<unknown> => {
     const name = text.replace(/^KP /, '').replace(/ /g, '-') as TurnName
     const script = recorded.turns[name] as (typeof recorded.turns)[TurnName] | undefined
@@ -109,8 +110,33 @@ function fakeHost(options: { hello?: 'fail' | 'ok'; signedOut?: boolean } = {}) 
         else reply({ ...recorded.opened, settings, stored: params.resume === true })
         break
       case METHOD.prompt:
+        prompted.add(params.sessionId as string)
         void turn(params.sessionId as string, params.text as string).then(reply)
         break
+      case METHOD.compact: {
+        // The notices Cline's SDK (0.2.0 and 0.2.1) sends for a compaction by hand.
+        const sessionId = params.sessionId as string
+        const empty = !prompted.has(sessionId)
+        if (!empty) {
+          for (const [message, reason, phase] of [
+            ['compacting', 'manual_compaction', 'started'],
+            ['compacted', 'manual_compaction', 'completed'],
+            ['compaction-budget-adjusted', 'compaction_budget_emergency', undefined],
+          ]) {
+            const metadata = { kind: reason, reason, phase }
+            const event = {
+              type: 'notice',
+              noticeType: 'status',
+              message,
+              reason,
+              metadata,
+            }
+            post({ jsonrpc: '2.0', method: METHOD.event, params: { sessionId, event } })
+          }
+        }
+        reply({ finishReason: 'completed', empty })
+        break
+      }
       case METHOD.set:
         settings = { ...settings, ...(params.settings as object) }
         reply({ settings, models: recorded.opened.models })
@@ -137,7 +163,7 @@ function context(host: ReturnType<typeof fakeHost>, spawned: HostedSpawnOptions[
     spec: {
       command: '/usr/bin/node',
       args: ['/data/harnesses/cline/3.0.74/node_modules/cline/bin/cline', '--acp'],
-      env: {},
+      env: { CLINE_NO_AUTO_UPDATE: '1' },
       shell: false,
       display: { command: 'node', args: [], env: {} },
     },
@@ -206,7 +232,12 @@ function target(
     send: () => {},
     startMode: () => null,
   }
-  return { target: sessionTarget, cards, entries: (): ThreadEntry[] => threadEntries(thread) }
+  return {
+    target: sessionTarget,
+    cards,
+    entries: (): ThreadEntry[] => threadEntries(thread),
+    commands: () => thread.session.commands,
+  }
 }
 
 async function started(host = fakeHost()) {
@@ -232,6 +263,8 @@ describe('Cline connection', () => {
     })
     expect(spawned[0]!.env).toMatchObject({
       HOME: '/home/u',
+      // The launch's own variables, such as the one that keeps Cline from updating itself.
+      CLINE_NO_AUTO_UPDATE: '1',
       ELECTRON_RUN_AS_NODE: '1',
       NODE_COMPILE_CACHE: path.join(
         '/data/harnesses/cline/3.0.74/node_modules/.cache/kettu-compile',
@@ -384,6 +417,25 @@ describe('Cline connection', () => {
     await expect(connection.setConfigOption(sessionId, CONFIG.mode, 'yolo')).rejects.toBeInstanceOf(
       AgentRequestError,
     )
+  })
+
+  it('offers /compact and runs it apart from a turn, as one divider', async () => {
+    const { connection, host } = await started()
+    const { sessionId } = await connection.newSession('/work/app')
+    const thread = target(() => ({ optionId: 'allow-once' }))
+    connection.register(sessionId, thread.target)
+    expect(thread.commands().map((command) => command.name)).toEqual(['compact'])
+    const compact = () => connection.prompt(sessionId, [{ type: 'text', text: '/compact' }])
+    expect(await compact()).toEqual({ stopReason: 'end_turn', tokens: null, models: [] })
+    expect(thread.entries()).toMatchObject([{ kind: 'notice', severity: 'info' }])
+    await connection.prompt(sessionId, [{ type: 'text', text: 'KP think' }])
+    const before = thread.entries().length
+    await compact()
+    expect(thread.entries().slice(before)).toMatchObject([
+      { kind: 'compaction', status: 'completed' },
+    ])
+    expect(host.requests.filter((request) => request.method === METHOD.prompt)).toHaveLength(1)
+    expect(host.requests.filter((request) => request.method === METHOD.compact)).toHaveLength(2)
   })
 
   it('closes when its process ends, failing the turn that ran', async () => {

@@ -86,7 +86,6 @@ import { useChatBridgeSection } from './chat-bridge-section'
 import { useFeaturesSection } from './features-section'
 import { useManagerSection } from './manager-section'
 import { useMemorySection } from './memory-section'
-import { usePluginsSection } from './plugins-section'
 
 const FLASH_MS = 1200
 
@@ -259,7 +258,7 @@ function SettingsLayout({
       useSharingSection(),
       useTerminalSection(),
     ],
-    [useRemoteSection(), usePluginsSection(), useAdvancedSection()],
+    [useRemoteSection(), useAdvancedSection()],
     [about],
   ]
   // The list and the page come from the same sections, so the web client lists only its own.

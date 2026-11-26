@@ -19,6 +19,7 @@ import {
   MAX_FONT_FAMILY_CHARS,
   type UserFontRole,
   NEW_SESSION_LISTS,
+  RUNNING_SENDS,
   ZOOM_LEVELS,
   type SidebarPage,
   type RelayChoice,
@@ -31,6 +32,7 @@ import { RESUME_TEXT_CHARS, STALL_MINUTES } from './supervisor'
 import { SETTLE_DAYS } from './session-tidy'
 import { BIN_KEEP_DAYS } from './recycle-bin'
 import { TOOL_CALL_VIEWS } from './zen-view'
+import { STARTED_LIMIT_MAX, STARTED_LIMIT_MIN, type StartedLimitKey } from './started-sessions'
 import type { AgentId, HarnessId } from './thread'
 import { PORT_BASE_MAX, PORT_BASE_MIN } from './worktree-ports'
 import { WEBHOOK_PORT_MAX, WEBHOOK_PORT_MIN } from './routines'
@@ -56,7 +58,6 @@ export const SETTINGS_SECTIONS = [
   'artifacts',
   'sharing',
   'remote',
-  'plugins',
   'hosts',
   'browser',
   'devices',
@@ -75,6 +76,12 @@ export const SETTINGS_SECTIONS = [
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
 /**
+ * Where a row is: a section of Settings, or `marketplace` for a plugin's settings, which are on the
+ * plugin's own page there.
+ */
+export type CatalogSection = SettingsSection | 'marketplace'
+
+/**
  * What a row's value is: one the tools may change (a switch, a choice, a number, a text), one they
  * only read (a path, an account's facts), a secret they read only as set or not, a list they count,
  * or an action the user takes on the page.
@@ -82,8 +89,11 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 export type SettingKind =
   'switch' | 'choice' | 'number' | 'text' | 'path' | 'secret' | 'list' | 'info' | 'action'
 
-/** `read`: agents never change it. `change`: as the session's mode allows. `ask`: always asks. */
-export type SettingAccess = 'read' | 'change' | 'ask'
+/**
+ * `read`: agents never change it. `change`: as the session's mode allows. `ask`: always asks.
+ * `raise`: a number that always asks when raised, and is lowered as the session's mode allows.
+ */
+export type SettingAccess = 'read' | 'change' | 'ask' | 'raise'
 
 /** `host`: on every host. `desktop`: the desktop app's own, its window's or its computer's. */
 export type SettingPart = 'host' | 'desktop'
@@ -145,7 +155,7 @@ export interface CatalogContext {
 }
 
 export interface CatalogEntry {
-  section: SettingsSection
+  section: CatalogSection
   /** The row's id on its page, which a search result scrolls to and flashes. */
   row: string
   /** The label of the group the row shows under, when it has one. */
@@ -156,7 +166,7 @@ export interface CatalogEntry {
   part: SettingPart
   kind: SettingKind
   access?: SettingAccess
-  /** For an always-asking row: what changing it opens up, said on the card. */
+  /** For a row that always asks, or asks when raised: what changing it opens up, on the card. */
   warning?: TextKey
   /** Values for its words' placeholders, such as a shortcut's keys, on the host's system. */
   params?(platform: Platform): Record<string, string>
@@ -222,10 +232,10 @@ function pluginSetting(
   rest: Pick<CatalogEntry, 'kind'> & Partial<CatalogEntry>,
 ): CatalogEntry {
   return {
-    section: 'plugins',
+    section: 'marketplace',
     row: 'setting',
     // Never read: `literal` gives the plugin's own words.
-    name: 'sections.plugins',
+    name: 'sections.marketplace',
     part: 'host',
     item: 'plugin',
     store: 'plugin',
@@ -370,7 +380,7 @@ const SHORTCUT_ENTRIES = Object.fromEntries(
 ) as unknown as Record<`shortcuts.${ShortcutId}`, CatalogEntry>
 
 /** Huli: the sections a feature switch hides whole. */
-const SECTION_FEATURES: Partial<Record<SettingsSection, FeatureId>> = {
+const SECTION_FEATURES: Partial<Record<CatalogSection, FeatureId>> = {
   manager: 'manager',
   'chat-bridge': 'chatBridge',
   devices: 'devices',
@@ -393,6 +403,20 @@ const FEATURE_ENTRIES = Object.fromEntries(
     } satisfies CatalogEntry,
   ]),
 ) as Record<`features.${FeatureId}`, CatalogEntry>
+/** A limit on the sessions agents start: raising one lets agents use more of the plan. */
+function startedLimit(
+  key: StartedLimitKey,
+): Pick<CatalogEntry, 'access' | 'warning' | 'kind' | 'min' | 'max' | 'get' | 'patch'> {
+  return {
+    access: 'raise',
+    warning: 'agentSettings.warning.startedLimits',
+    kind: 'number',
+    min: STARTED_LIMIT_MIN,
+    max: STARTED_LIMIT_MAX,
+    get: (file) => file.startedSessions[key],
+    patch: (value) => ({ startedSessions: { [key]: Number(value) } }),
+  }
+}
 
 const ENTRIES = {
   // ---- General
@@ -426,6 +450,22 @@ const ENTRIES = {
         label: { platform: { mac: '⌘ Enter', other: 'Ctrl+Enter' } },
       },
     ]),
+  },
+  'general.running-send': {
+    section: 'general',
+    row: 'running-send',
+    group: 'general.groups.input',
+    name: 'general.runningSend.name',
+    description: 'general.runningSend.description',
+    keywords: 'general.runningSend.keywords',
+    part: 'desktop',
+    access: 'change',
+    ...pick(
+      'general',
+      'runningSend',
+      (file) => file.general.runningSend,
+      choices(RUNNING_SENDS, (mode) => `general.runningSend.${mode}`),
+    ),
   },
   'general.default-agent': {
     section: 'general',
@@ -868,6 +908,18 @@ const ENTRIES = {
     access: 'change',
     on: (ctx) => ctx.desktop && ctx.platform !== 'linux',
     ...flag('notifications', 'badge', (file) => file.notifications.badge),
+  },
+  // Which notices a plugin's channel gets is set on the plugin's page, so the list only points there.
+  'notifications.plugin-channels': {
+    section: 'notifications',
+    row: 'plugin-channels',
+    group: 'notifications.groups.alsoSent',
+    name: 'notifications.groups.alsoSent',
+    description: 'notifications.alsoSent.description',
+    keywords: 'notifications.alsoSent.keywords',
+    part: 'host',
+    kind: 'list',
+    on: (ctx) => ctx.plugins.length > 0,
   },
 
   // ---- Account
@@ -1360,6 +1412,17 @@ const ENTRIES = {
     item: 'agent',
     on: (ctx, item) => isAgent(ctx, item) && takesProfiles(item as AgentId),
   },
+  'agents.favorite-models': {
+    section: 'agents',
+    row: 'favorite-models',
+    name: 'agents.favorites.name',
+    description: 'agents.favorites.description',
+    keywords: 'agents.favorites.keywords',
+    part: 'host',
+    kind: 'list',
+    item: 'agent',
+    on: isAgent,
+  },
   'agents.auto-compact': {
     section: 'agents',
     row: 'auto-compact',
@@ -1515,6 +1578,36 @@ const ENTRIES = {
     kind: 'switch',
     options: ON_OFF,
     get: (file) => file.sandbox.autoApproveEdits,
+  },
+  'agents.started-working': {
+    section: 'agents',
+    row: 'started-working',
+    group: 'agents.started.group',
+    name: 'agents.started.working.name',
+    description: 'agents.started.working.description',
+    keywords: 'agents.started.keywords',
+    part: 'host',
+    ...startedLimit('working'),
+  },
+  'agents.started-daily': {
+    section: 'agents',
+    row: 'started-daily',
+    group: 'agents.started.group',
+    name: 'agents.started.daily.name',
+    description: 'agents.started.daily.description',
+    keywords: 'agents.started.keywords',
+    part: 'host',
+    ...startedLimit('daily'),
+  },
+  'agents.started-reports': {
+    section: 'agents',
+    row: 'started-reports',
+    group: 'agents.started.group',
+    name: 'agents.started.reports.name',
+    description: 'agents.started.reports.description',
+    keywords: 'agents.started.keywords',
+    part: 'host',
+    ...startedLimit('reports'),
   },
   'agents.workflow-auto': {
     section: 'agents',
@@ -2316,6 +2409,16 @@ const ENTRIES = {
       choices(['auto', 'github'], (source) => `about.source.${source}`),
     ),
   },
+  'about.issues': {
+    section: 'about',
+    row: 'issues',
+    group: 'about.groups.contact',
+    name: 'about.issues.name',
+    description: 'about.issues.description',
+    keywords: 'about.issues.keywords',
+    part: 'host',
+    kind: 'action',
+  },
   'about.github': {
     section: 'about',
     row: 'github',
@@ -2813,13 +2916,20 @@ export function isSettingId(value: unknown): value is SettingId {
 /** Whether agents may change a row at all, as the mode allows or always asking. */
 export function changeable(entry: CatalogEntry): boolean {
   return (
-    (entry.access === 'change' || entry.access === 'ask') &&
+    (entry.access === 'change' || entry.access === 'ask' || entry.access === 'raise') &&
     (entry.patch !== undefined || entry.store === 'plugin') &&
     (entry.kind === 'switch' ||
       entry.kind === 'choice' ||
       entry.kind === 'number' ||
       entry.kind === 'text')
   )
+}
+
+/** Whether changing a row from one value to another asks the user in every mode, Full access too. */
+export function asksAlways(entry: CatalogEntry, from: SettingScalar, to: SettingScalar): boolean {
+  if (entry.access === 'ask') return true
+  if (entry.access !== 'raise') return false
+  return typeof to === 'number' && (typeof from !== 'number' || to > from)
 }
 
 /** A row's search words, as one key or several. */

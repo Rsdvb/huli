@@ -12,6 +12,7 @@ import { createLogger } from './log'
 import { sessionProxy } from './proxy'
 import type { SettingsSection } from './settings-schema'
 import { diskImageFor, downloadDiskImage, type DownloadFile } from './update-dmg'
+import { guardUpdaterHttpExecutor } from './update-http'
 import {
   GITHUB_SOURCE,
   sourceChoiceFor,
@@ -466,6 +467,7 @@ export class Updater {
         this.Token = CancellationToken
         const settings = this.deps.settings()
         const current = app.getVersion()
+        guardUpdaterHttpExecutor(autoUpdater, log)
         autoUpdater.logger = {
           info: (message?: unknown) => log.info(String(message)),
           warn: (message?: unknown) => log.warn(String(message)),

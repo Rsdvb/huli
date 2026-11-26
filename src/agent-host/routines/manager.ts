@@ -159,10 +159,11 @@ export class RoutinesManager {
     this.timings = { ...ROUTINE_TIMINGS, ...deps.timings }
     this.scheduler = new RoutineScheduler({
       clock: this.clock,
+      // A routine being deleted has no times due; if the delete fails, they come due after it.
       routines: () =>
-        [...this.routines.values()].map((routine) =>
-          schedulerRoutine(routine, this.modelOf(routine)),
-        ),
+        [...this.routines.values()]
+          .filter((routine) => !this.deleting.has(routine.id))
+          .map((routine) => schedulerRoutine(routine, this.modelOf(routine))),
       due: (routineId, at, trigger, count) => this.scheduled(routineId, at, trigger, count),
       accounted: (routineId, at) => this.account(routineId, at),
       limits: (agentId, model) => this.limitsFor(agentId, model),
@@ -285,17 +286,20 @@ export class RoutinesManager {
 
   async update(routineId: string, changes: RoutineChanges): Promise<RoutineView> {
     if (!this.loaded) await this.load()
-    const routine = this.routineOf(routineId)
+    this.presentOf(routineId)
+    const projectPath =
+      changes.projectPath === undefined || changes.projectPath === null
+        ? changes.projectPath
+        : await this.deps.resolveProject(changes.projectPath)
+    // Read again after the wait, so a routine deleted meanwhile is not saved back.
+    const routine = this.presentOf(routineId)
     const next: Routine = { ...routine }
     if (changes.name !== undefined) {
       next.name = routineName(changes.name, changes.prompt ?? routine.prompt)
     }
     if (changes.prompt !== undefined) next.prompt = changes.prompt
     if (changes.agentId !== undefined) next.agentId = changes.agentId
-    if (changes.projectPath !== undefined) {
-      next.projectPath =
-        changes.projectPath === null ? null : await this.deps.resolveProject(changes.projectPath)
-    }
+    if (projectPath !== undefined) next.projectPath = projectPath
     if (changes.options !== undefined) next.options = changes.options
     if (changes.trigger !== undefined) next.trigger = changes.trigger
     if (changes.scope !== undefined) next.scope = changes.scope
@@ -312,6 +316,8 @@ export class RoutinesManager {
     // Fewer kept sessions take effect at once, as the confirmation before it said.
     if (next.keptRunSessions < routine.keptRunSessions) await this.trim(next)
     const view = await this.viewOf(next)
+    // Deleted while it was counted: its removal is sent, and the view would bring it back.
+    this.presentOf(routineId)
     this.lastViews.set(routineId, JSON.stringify(view))
     this.deps.events.changed(view)
     this.scheduler.refresh()
@@ -428,7 +434,7 @@ export class RoutinesManager {
 
   async runNow(routineId: string): Promise<RoutineRun> {
     if (!this.loaded) await this.load()
-    const routine = this.routineOf(routineId)
+    const routine = this.presentOf(routineId)
     if (this.activeOf(routineId)) throw new HostError('busy', t('routines.busy'))
     if (this.stopped) throw new HostError('busy', t('routines.stopping'))
     const run = this.launch(routine, 'manual', null, 1)
@@ -1085,6 +1091,10 @@ export class RoutinesManager {
     let summary: SessionSummary
     try {
       const folder = routine.projectPath ?? (await this.routineFolder(routine.id))
+      if (!this.isPresent(routine.id)) {
+        this.discard(live)
+        return
+      }
       summary = await this.deps.sessions.createRun({
         agentId,
         projectPath: folder,
@@ -1104,15 +1114,15 @@ export class RoutinesManager {
       this.finish(live, 'failed', { error: { message: messageOf(error) } })
       return
     }
-    const current = this.runs.get(live.run.id)
-    if (!current) {
-      // The routine went while its session started: the session goes with it. A run that ended
-      // by itself keeps its session, which stays in the session index.
-      if (!this.routines.has(routine.id)) {
-        void this.deps.sessions.delete(summary.id).catch(() => {})
-      }
+    // The routine went or is being deleted while its session started: the session goes with it.
+    if (!this.isPresent(routine.id)) {
+      live.run.sessionId = summary.id
+      this.discard(live)
       return
     }
+    const current = this.runs.get(live.run.id)
+    // A run that ended by itself keeps its session, which stays in the session index.
+    if (!current) return
     if (current.run.status === 'starting') {
       current.run.status = 'running'
       this.resumeClock(current)
@@ -1157,6 +1167,10 @@ export class RoutinesManager {
   }
 
   private finish(live: LiveRun, status: RunStatus, result: RunEnd): void {
+    if (!this.isPresent(live.run.routineId)) {
+      this.discard(live)
+      return
+    }
     this.pauseClock(live)
     if (live.timer) clearTimeout(live.timer)
     live.timer = null
@@ -1185,6 +1199,29 @@ export class RoutinesManager {
       const routine = this.routines.get(run.routineId)
       if (routine && scheduleOf(routine.trigger)?.kind === 'once') this.finishOnce(run.routineId)
     }
+    this.startNext()
+  }
+
+  /**
+   * Ends a run of a routine that is gone or being deleted, as the delete ends its runs: no record,
+   * no notification, and its session goes with the routine, into the recycle bin beside it.
+   */
+  private discard(live: LiveRun): void {
+    this.pauseClock(live)
+    this.dequeue(live.run.id)
+    if (this.runs.get(live.run.id) === live) this.runs.delete(live.run.id)
+    const sessionId = live.run.sessionId
+    if (sessionId) {
+      if (this.bySession.get(sessionId) === live.run.id) this.bySession.delete(sessionId)
+      if (this.deps.sessions.has(sessionId)) {
+        void this.deps.sessions
+          .delete(sessionId, `routine:${live.run.routineId}`)
+          .catch((error: unknown) => {
+            this.deps.log('warn', `Could not delete the session of a run: ${messageOf(error)}`)
+          })
+      }
+    }
+    this.setWorking()
     this.startNext()
   }
 
@@ -1360,20 +1397,30 @@ export class RoutinesManager {
   }
 
   private async publish(routineId: string): Promise<void> {
-    const routine = this.routines.get(routineId)
-    if (!routine) return
+    if (!this.routines.has(routineId) || this.deleting.has(routineId)) return
     try {
       // The view counts what the database holds, so its writes come first.
       if (this.writes.size > 0) await Promise.allSettled([...this.writes])
-      const view = await this.viewOf(routine)
-      const json = JSON.stringify(view)
-      if (this.lastViews.get(routineId) === json) return
-      this.lastViews.set(routineId, json)
-      this.deps.events.changed(view)
+      for (;;) {
+        // Read after every wait: a routine deleted meanwhile has had its removal sent, and one
+        // changed meanwhile is counted again.
+        const routine = this.routines.get(routineId)
+        if (!routine || this.deleting.has(routineId)) return
+        const view = await this.viewOf(routine)
+        if (this.routines.get(routineId) !== routine || this.deleting.has(routineId)) continue
+        const json = JSON.stringify(view)
+        if (this.lastViews.get(routineId) === json) return
+        this.lastViews.set(routineId, json)
+        this.deps.events.changed(view)
+        return
+      }
     } catch (error) {
       // The thread store may be closing, as at quit; a view that cannot be counted is not sent.
       if (!this.stopped) {
-        this.deps.log('warn', `Could not update the view of ${routine.name}: ${messageOf(error)}`)
+        this.deps.log(
+          'warn',
+          `Could not update the view of ${this.nameOf(routineId)}: ${messageOf(error)}`,
+        )
       }
     }
   }
@@ -1382,6 +1429,16 @@ export class RoutinesManager {
     const routine = this.routines.get(routineId)
     if (!routine) throw new HostError('not_found', t('routines.notFound'))
     return routine
+  }
+
+  /** The routine, unless it is gone or being deleted. */
+  private presentOf(routineId: string): Routine {
+    if (this.deleting.has(routineId)) throw new HostError('not_found', t('routines.notFound'))
+    return this.routineOf(routineId)
+  }
+
+  private isPresent(routineId: string): boolean {
+    return this.routines.has(routineId) && !this.deleting.has(routineId)
   }
 
   private nameOf(routineId: string): string {
@@ -1496,7 +1553,7 @@ function isDone(routine: Routine, last: RoutineRun | null): boolean {
 }
 
 /** The user's name, or the prompt's first line cut to 60 characters. */
-function routineName(name: string, prompt: string): string {
+export function routineName(name: string, prompt: string): string {
   const trimmed = name.trim()
   if (trimmed !== '') return Array.from(trimmed).slice(0, ROUTINE_NAME_CHARS).join('')
   const line =

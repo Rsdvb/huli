@@ -10,7 +10,7 @@ import { cn } from '@renderer/lib/utils'
 import { groupExpanded, type SessionNode } from '@renderer/stores/sessions'
 import { openGroup, useViewStore } from '@renderer/stores/view'
 import { isReturning, rowVariants } from './row-exit'
-import type { RowStatus } from './row-status'
+import { joinBackground, type RowStatus } from './row-status'
 import { RowEnd, SessionIndicator } from './session-indicator'
 import { INDENT_PAD, ROW_PAD, SessionRow } from './session-row'
 
@@ -43,6 +43,7 @@ export const RunGroupRow = memo(function RunGroupRow({
     waiting: runs.reduce((n, run) => n + run.permissionCount, 0),
     failed: counts.failed > 0,
     running: runs.some((run) => run.running),
+    background: joinBackground(runs.map((run) => run.summary.stillRunning)),
     starting: runs.some((run) => run.summary.status === 'starting'),
     unread: runs.some((run) => run.summary.attention === 'unread'),
   }

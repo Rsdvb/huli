@@ -28,6 +28,7 @@ import {
   MAX_LINK_SITES,
   NEW_SESSION_LISTS,
   ONBOARDING_STEPS,
+  RUNNING_SENDS,
   SIDEBAR_PAGES,
   type AddedAgent,
   type HostSettings,
@@ -81,6 +82,7 @@ import { isWebhookPort, WEBHOOK_PORT_MAX, WEBHOOK_PORT_MIN } from '@shared/routi
 import { bindingsProblem, screenshotKeysProblem } from '@shared/shortcuts'
 import { TOOL_CALL_VIEWS } from '@shared/zen-view'
 import { isRelayPin, ownRelayProblem } from '@shared/remote/own-relay'
+import { isStartedLimit, STARTED_LIMIT_MAX, STARTED_LIMIT_MIN } from '@shared/started-sessions'
 import { THEME_ID } from '@shared/themes'
 import { WORKING_STEP_LIMITS } from '@shared/workflow'
 import { isAbsolutePath } from '../agent-host/paths'
@@ -117,6 +119,11 @@ const oneOf =
 
 const isBoolean: Check = (value, path) =>
   typeof value === 'boolean' ? null : `"${path}" must be a boolean`
+
+const isStartedLimitValue: Check = (value, path) =>
+  isStartedLimit(value)
+    ? null
+    : `"${path}" must be a whole number from ${STARTED_LIMIT_MIN} to ${STARTED_LIMIT_MAX}`
 
 /** Detailed records may be turned on for a day at most; a time in the past means off. */
 export const VERBOSE_FOR_MS = 24 * 60 * 60 * 1000
@@ -328,6 +335,7 @@ const SECTION_FIELDS = {
     language: oneOf(...LANGUAGE_SETTINGS),
     defaultAgent: isAgentChoice,
     sendKey: oneOf('enter', 'mod-enter'),
+    runningSend: oneOf(...RUNNING_SENDS),
     restoreLastSession: isBoolean,
     newSessionList: oneOf(...NEW_SESSION_LISTS),
     confirmQuitWhileRunning: isBoolean,
@@ -412,6 +420,11 @@ const SECTION_FIELDS = {
   webhooks: { port: isWebhookPortValue },
   keyboard: { shortcuts: isShortcutBindingsValue, screenshot: isScreenshotKeysValue },
   workflow: { maxWorkingSteps: oneOf(...WORKING_STEP_LIMITS) },
+  startedSessions: {
+    working: isStartedLimitValue,
+    daily: isStartedLimitValue,
+    reports: isStartedLimitValue,
+  },
   computerUse: {
     enabled: isBoolean,
     allowedApps: isComputerApps,
@@ -2111,6 +2124,7 @@ export function hostSettings(settings: SettingsFile, systemLocale: Locale): Host
     recycleBin: { ...settings.recycleBin },
     webhooks: { ...settings.webhooks },
     workflow: { ...settings.workflow },
+    startedSessions: { ...settings.startedSessions },
     usage: { fromComputer: settings.usage.fromComputer },
     sessionTitles: settings.general.sessionTitles,
     claudeTestEntrypoint: settings.general.claudeTestEntrypoint
@@ -2164,6 +2178,7 @@ const HOST_SECTIONS: ReadonlySet<SettingsSection> = new Set([
   'recycleBin',
   'webhooks',
   'workflow',
+  'startedSessions',
   'usage',
   'computerUse',
   'agentNetwork',

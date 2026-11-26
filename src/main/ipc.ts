@@ -17,6 +17,7 @@ import {
 import { ATTACHMENT_LIMIT } from '@shared/attachments'
 import { addressKey, parseDirectAddress } from '@shared/remote/address'
 import { DEVICE_ID } from '@shared/remote/device'
+import { accountComputers, parsePairGroup, type DiscoveredHosts } from '@shared/remote/discovery'
 import {
   MAX_HOST_ADDRESSES,
   parseIdentityFile,
@@ -31,7 +32,12 @@ import { isRelayHostId } from '@shared/remote/relay'
 import { parseOwnRelayInput } from './own-relay'
 import type { DirectAddress } from '@shared/remote/protocol'
 import type { RemoteStatus } from '@shared/remote/status'
-import type { BrowserBounds, BrowserOriginDecision } from '@shared/browser'
+import {
+  PAGE_SIZE_NAMES,
+  type BrowserBounds,
+  type BrowserOriginDecision,
+  type PageSizeName,
+} from '@shared/browser'
 import { isAgentId } from '@shared/agents'
 import { isControlOutcome, type ControlAgent } from '@shared/control'
 import { featureOn, type FeatureId } from '@shared/features'
@@ -39,6 +45,7 @@ import { isAgentColor } from '@shared/settings'
 import { isComputerPermissionKind } from '@shared/computer-use'
 import type {
   AppInfo,
+  DiscoveredPairOptions,
   IpcInvokeChannel,
   IpcInvokeResult,
   IpcSendContract,
@@ -85,6 +92,7 @@ import type { QuitFlow } from './quit'
 import type { HostMedia } from './host-media'
 import type { HostSessions } from './host-sessions'
 import type { HostPairingListener, RemoteHost } from './remote-host'
+import type { RemoteOffers } from './remote-offer'
 import { isRendererUrl, rendererPage } from './renderer'
 import { MoveFailed, type SessionMover } from './session-move'
 import type { TrayPanel } from './tray-panel'
@@ -99,6 +107,7 @@ import type { TerminalHost } from './terminal-host'
 import { saveCapture } from './device-captures'
 import type { DeviceHost } from './device-host'
 import { exportThemeFile, installThemeFile, revealThemeFile } from './theme-dialogs'
+import { exportConversationFile } from './conversation-export'
 import type { ThemeStore } from './themes'
 import type { HuliAccountDevices } from './huli-account'
 import type { Updater } from './updater'
@@ -127,6 +136,7 @@ export interface IpcDeps {
   sharing: Sharing
   marketKeys: MarketKeys
   remoteHost: RemoteHost
+  remoteOffers: RemoteOffers
   hostSessions: HostSessions
   hostMedia: HostMedia
   /** Huli: the ports of other hosts forwarded to this computer. */
@@ -512,6 +522,7 @@ export function registerIpcHandlers({
   sharing,
   marketKeys,
   remoteHost,
+  remoteOffers,
   hostSessions,
   hostMedia,
   portForwards,
@@ -657,6 +668,10 @@ export function registerIpcHandlers({
     if (path) settings.setShellPath(path)
     return path
   })
+
+  handle('dialog:export-conversation', 2, ({ window }, title, markdown) =>
+    exportConversationFile(window, title, markdown),
+  )
 
   handle('dialog:add-attachments', 2, async ({ window }, kind, defaultPath) => {
     if (kind !== 'files' && kind !== 'folder') throw new Error('kind must be files or folder')
@@ -903,10 +918,19 @@ export function registerIpcHandlers({
     const owned = ownCode(event.sender, codeId)
     if (owned !== null) remoteHost.answerPairing(owned, add, add ? deviceName(name) : '')
   })
-  handle('remote:discovery-pending', 0, () => remoteHost.pendingDiscovery)
-  handle('remote:discovery-answer', 3, (_, requestId, add, name) => {
+  handle('remote:discovery-pending', 0, () => remoteHost.pendingDiscovery())
+  handle('remote:discovery-answer', 3, async (_, requestId, add, name) => {
     if (typeof add !== 'boolean') throw new Error('"remote:discovery-answer" takes whether to add')
-    remoteHost.answerDiscovery(pairingCode(requestId), add, add ? deviceName(name) : '')
+    const named = add ? deviceName(name) : ''
+    return (await remoteHost.answerDiscovery(pairingCode(requestId), add, named)) ? null : 'gone'
+  })
+  handle('remote:offer', 0, () => remoteOffers.current)
+  handle('remote:answer-offer', 2, async (_, clientId, turnOn) => {
+    if (typeof clientId !== 'string' || typeof turnOn !== 'boolean') {
+      throw new Error('"remote:answer-offer" takes a client and whether to turn remote access on')
+    }
+    if (remoteOffers.answer(clientId) && turnOn)
+      await settings.update({ remote: { enabled: true } })
   })
   handle('remote:rename-device', 2, async (_, id, name) =>
     (await remoteHost.renameDevice(deviceIdArg(id), deviceName(name))) ? null : 'not_renamed',
@@ -945,15 +969,24 @@ export function registerIpcHandlers({
     })
     return { kind: 'pairing', pairId }
   }
-  handle('hosts:pair', 1, async ({ event }, value): Promise<HostPairStart> => {
+  handle('hosts:pair', 2, async ({ event }, value, target): Promise<HostPairStart> => {
     const link = typeof value === 'string' && value.length <= MAX_PAIRING_LINK ? value.trim() : ''
     const payload = parsePairingLink(link)
     if (!payload) return { kind: 'invalid' }
-    if (Buffer.from(payload.hostKey).toString('base64') === remoteHost.publicKey) {
+    if (target !== null && target !== undefined) hostIdArg(target)
+    const hostId = typeof target === 'string' ? target : undefined
+    const publicKey = Buffer.from(payload.hostKey).toString('base64')
+    if (publicKey === remoteHost.publicKey) {
       return { kind: 'self' }
     }
+    if (hostId !== undefined) {
+      const existing = remoteHost.knownHosts.find((entry) => entry.id === hostId)
+      if (!existing || existing.publicKey !== publicKey) {
+        return { kind: 'other_host' }
+      }
+    }
     const model = await computerModel()
-    return pairFor(event.sender, (listener) => remoteHost.pairHost(link, model, listener))
+    return pairFor(event.sender, (listener) => remoteHost.pairHost(link, model, listener, hostId))
   })
   handle('hosts:ssh-config', 0, () => listSshConfigHosts({ known: remoteHost.hosts ?? [] }))
   handle('hosts:add-ssh', 1, async ({ event }, value): Promise<HostPairStart> => {
@@ -973,19 +1006,57 @@ export function registerIpcHandlers({
       : await dialog.showOpenDialog(options)
     return result.canceled ? null : parseIdentityFile(result.filePaths[0])
   })
-  // With Kettu's services off there is no relay to list the account's hosts.
-  handle('hosts:discover', 0, () =>
-    settings.get().cloud.enabled ? remoteHost.discover() : { state: 'signed_out' as const },
-  )
-  handle('hosts:pair-discovered', 1, async ({ event }, relayId): Promise<HostPairStart> => {
-    if (!isRelayHostId(relayId)) return { kind: 'invalid' }
-    const model = await computerModel()
-    return pairFor(event.sender, (listener) => remoteHost.pairDiscovered(relayId, model, listener))
+  // With Kettu's services off there is no relay to list the account's hosts. The account
+  // service's clients tell why one the relay does not list cannot be connected.
+  handle('hosts:discover', 0, async (): Promise<DiscoveredHosts> => {
+    if (!settings.get().cloud.enabled) return { state: 'signed_out' }
+    const [discovered, clients] = await Promise.all([
+      remoteHost.discover(),
+      account.clients().catch(() => null),
+    ])
+    const status = account.status()
+    if (discovered.state !== 'ok' || !clients || status.state !== 'signed-in') return discovered
+    const computers = accountComputers({
+      listed: discovered.hosts,
+      // Folded hosts too: one of this account that turned this computer away is still added.
+      known: remoteHost.knownHosts.filter((host) => !host.removed),
+      clients,
+      account: status.account.id,
+      now: Date.now(),
+    })
+    // Matched by name, as the list of computers is: a renamed one says nothing.
+    const kinds = new Map(
+      clients
+        .filter(
+          (client) => !client.current && (client.kind === 'desktop' || client.kind === 'daemon'),
+        )
+        .map((client) => [client.name, client.kind as 'desktop' | 'daemon']),
+    )
+    const hosts = discovered.hosts.map((host) => {
+      const kind = kinds.get(host.name)
+      return kind ? { ...host, kind } : host
+    })
+    return { ...discovered, hosts, computers }
   })
-  handle('hosts:pair-match', 2, ({ event }, value, match) => {
-    if (typeof match !== 'boolean') throw new Error('"hosts:pair-match" takes whether they match')
+  handle('hosts:pair-discovered', 2, async ({ event }, relayId, value): Promise<HostPairStart> => {
+    if (!isRelayHostId(relayId)) return { kind: 'invalid' }
+    const options = discoveredPairOptions(value)
+    if (!options || (options.group && !options.group.hosts.includes(relayId))) {
+      return { kind: 'invalid' }
+    }
+    const model = await computerModel()
+    return pairFor(event.sender, (listener) =>
+      remoteHost.pairDiscovered(relayId, model, listener, options.group),
+    )
+  })
+  handle('hosts:pair-match', 3, ({ event }, value, match, reverse) => {
+    if (typeof match !== 'boolean' || typeof reverse !== 'boolean') {
+      throw new Error('"hosts:pair-match" takes whether they match and whether to let it in here')
+    }
     const pairId = pairingCode(value)
-    if (pairOwners.get(pairId) === event.sender) remoteHost.matchHostPairing(pairId, match)
+    // Only a computer that serves devices itself can let the host it connects to in.
+    const letIn = reverse && settings.get().remote.enabled
+    if (pairOwners.get(pairId) === event.sender) remoteHost.matchHostPairing(pairId, match, letIn)
   })
   handle('hosts:pair-close', 1, ({ event }, value) => {
     const pairId = pairingCode(value)
@@ -1072,6 +1143,13 @@ export function registerIpcHandlers({
   })
   handle('browser:stop', 1, (_, id) => browserViews.stop(sessionId(id)))
   handle('browser:open-external', 1, (_, id) => browserViews.openExternal(sessionId(id)))
+  handle('browser:page-size', 2, async (_, id, size) => {
+    if (!(PAGE_SIZE_NAMES as readonly unknown[]).includes(size)) {
+      throw new Error('A page size must be desktop, tablet or phone')
+    }
+    const page = sessionId(id)
+    if (browserViews.paneControl(page)) await browserViews.setPageSize(page, size as PageSizeName)
+  })
   handle('browser:freeze', 1, (_, id) => browserViews.freeze(sessionId(id)))
   handle('browser:thaw', 1, (_, id) => browserViews.thaw(sessionId(id)))
   handle('browser:capture', 1, (_, id) => browserViews.capture(sessionId(id)))
@@ -1366,4 +1444,13 @@ export function registerSignInIpc(signIns: SignIns): void {
   handle('sign-ins:brought', 0, () => signIns.brought())
   handle('sign-ins:remove', 1, (_, site) => signIns.remove(signInSite(site)))
   handle('sign-ins:offer', 1, (_, url) => signIns.offer(offerUrl(url)))
+}
+
+/** What a window asks of a pairing with a host of the account, or null when it is not that. */
+function discoveredPairOptions(value: unknown): DiscoveredPairOptions | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { group } = value as Record<string, unknown>
+  const parsed = group === undefined ? undefined : parsePairGroup(group)
+  if (parsed === null) return null
+  return parsed ? { group: parsed } : {}
 }

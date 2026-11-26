@@ -255,6 +255,7 @@ async function harness(
   const created: TaskStepStart[] = []
   const sent: { sessionId: string; text: string; due?: () => boolean }[] = []
   const cancelled: string[] = []
+  const withdrawn: string[] = []
   const sessions = new Set<string>(options.live ?? [])
   // Huli: the bin item each deleted session went in with.
   const binnedWith = new Map<string, string | undefined>()
@@ -309,6 +310,9 @@ async function harness(
       },
       cancel: async (sessionId) => {
         cancelled.push(sessionId)
+      },
+      withdrawPending: (sessionId) => {
+        withdrawn.push(sessionId)
       },
       delete: async (sessionId, group) => {
         sessions.delete(sessionId)
@@ -402,6 +406,7 @@ async function harness(
     created,
     sent,
     cancelled,
+    withdrawn,
     sessions,
     binnedWith,
     merges,
@@ -780,6 +785,102 @@ describe('the task engine', () => {
     await h.engine.retry(task.id, 'split', 'Please finish')
     expect(h.engine.get(task.id).rounds[0]!.state).toBe('working')
     expect(h.sent.at(-1)!.text).toContain('Please finish')
+  })
+
+  it('holds a step a used-up plan limit stopped, without a reminder, until its session goes on', async () => {
+    const h = await harness({ workflows: { parallel: PARALLEL } })
+    const task = await h.start('parallel')
+    const session = h.sessionOf(task.id, 'split')
+    const before = h.sent.length
+    const held = { kind: 'limit', agentId: 'claude-code', resetsAt: 5_000 }
+    h.engine.turnEnded(session, { byUser: false, limit: { continuesAt: 5_000 } })
+    h.engine.turnEnded(session, { byUser: false, limit: { continuesAt: 5_000 } })
+    await h.settle()
+    expect(h.sent).toHaveLength(before)
+    const view = h.engine.get(task.id)
+    expect(view.rounds[0]).toMatchObject({ state: 'working', stuck: null })
+    expect(view.needs).toEqual([{ kind: 'blocked', stepId: 'split', reason: held }])
+    expect(h.engine.list()[0]).toMatchObject({ needsYou: true, error: false, running: false })
+    expect(h.events.attention).toEqual(['Add an export button:needs-you'])
+
+    // The session's carry-on waits for a later window, then is turned off: the time follows it.
+    h.engine.turnLimit(session, { continuesAt: 9_000 })
+    await h.settle()
+    expect(h.engine.get(task.id).needs).toEqual([
+      { kind: 'blocked', stepId: 'split', reason: { ...held, resetsAt: 9_000 } },
+    ])
+    h.engine.turnLimit(session, { continuesAt: null })
+    await h.settle()
+    expect(h.engine.get(task.id).needs).toEqual([
+      { kind: 'blocked', stepId: 'split', reason: { ...held, resetsAt: null } },
+    ])
+
+    // A restart leaves the held step to its session's own carry-on.
+    const restarted = await harness({
+      workflows: { parallel: PARALLEL },
+      stored: [...h.store.values()],
+    })
+    expect(restarted.sent).toEqual([])
+    expect(restarted.engine.get(task.id).needs).toHaveLength(1)
+
+    // Its session goes on: the step works again and owes its report as before.
+    h.engine.turnLimit(session, null)
+    await h.settle()
+    expect(h.engine.get(task.id).needs).toEqual([])
+    h.engine.turnEnded(session, { byUser: false })
+    await h.settle()
+    expect(h.sent.at(-1)!.text).toContain('report_step')
+    expect((await h.engine.report(session, done)).accepted).toBe(true)
+  })
+
+  it('takes a step stuck by a turn that a plan limit turns out to have stopped for a held one', async () => {
+    const h = await harness({ workflows: { parallel: PARALLEL } })
+    const task = await h.start('parallel')
+    const session = h.sessionOf(task.id, 'split')
+    h.engine.turnEnded(session, { byUser: false })
+    h.engine.turnEnded(session, { byUser: false })
+    await h.settle()
+    expect(h.engine.get(task.id).rounds[0]!.stuck?.reason).toBe('no_report')
+    h.engine.turnLimit(session, { continuesAt: 5_000 })
+    await h.settle()
+    const view = h.engine.get(task.id)
+    expect(view.rounds[0]).toMatchObject({ state: 'working', stuck: null })
+    expect(view.needs).toEqual([
+      {
+        kind: 'blocked',
+        stepId: 'split',
+        reason: { kind: 'limit', agentId: 'claude-code', resetsAt: 5_000 },
+      },
+    ])
+  })
+
+  it('retries a held step in its session, or starts it again with someone pinned', async () => {
+    const h = await harness({ workflows: { parallel: PARALLEL } })
+    const task = await h.start('parallel')
+    const session = h.sessionOf(task.id, 'split')
+    h.engine.turnEnded(session, { byUser: false, limit: { continuesAt: null } })
+    await h.settle()
+    await h.engine.retry(task.id, 'split', 'Try again now')
+    expect(h.sent.at(-1)).toMatchObject({ sessionId: session })
+    expect(h.sent.at(-1)!.text).toContain('Try again now')
+    expect(h.engine.get(task.id).needs).toEqual([])
+
+    h.engine.turnEnded(session, { byUser: false, limit: { continuesAt: 5_000 } })
+    await h.settle()
+    const view = await h.engine.pinStep(task.id, 'split', {
+      agentId: 'codex',
+      model: 'gpt',
+      effort: null,
+    })
+    await h.settle()
+    // Its session stops, carry-on included, and the pinned agent starts the step afresh.
+    expect(h.cancelled).toContain(session)
+    expect(view.needs).toEqual([])
+    const rounds = h.engine.get(task.id).rounds.filter((r) => r.stepId === 'split')
+    expect(rounds.map((r) => r.state)).toEqual(['stopped', 'working'])
+    expect(rounds[1]).toMatchObject({ by: { agentId: 'codex', model: 'gpt' } })
+    expect(h.created.at(-1)).toMatchObject({ agentId: 'codex' })
+    expect(rounds[1]!.sessionId).not.toBe(session)
   })
 
   it('drops a reminder still queued once its step reported or picked', async () => {
@@ -1209,5 +1310,206 @@ steps:
     const h = await harness({ workflows: { parallel: PARALLEL }, stored })
     expect(h.engine.list()).toEqual([])
     expect(h.engine.binnedTasks().map((t) => t.id)).toEqual([task.id])
+  })
+
+  it('refuses report_step while a question awaits the user, then accepts once answered', async () => {
+    const h = await harness({ workflows: { parallel: PARALLEL } })
+    const task = await h.start('parallel')
+    const session = h.sessionOf(task.id, 'split')
+
+    h.engine.waiting(session, true)
+    await h.settle()
+    expect(h.engine.get(task.id).rounds[0]!.asking).toBe(true)
+
+    const refused = await h.engine.report(session, done)
+    expect(refused.accepted).toBe(false)
+    expect(refused.next).toEqual({ kind: 'retry' })
+    expect(refused.checks).toContainEqual({
+      check: 'answered',
+      ok: false,
+      detail: expect.stringContaining('report_step'),
+    })
+    expect(h.engine.get(task.id).rounds[0]).toMatchObject({ state: 'working', asking: true })
+
+    // Once the user answers, the report is accepted normally.
+    h.engine.waiting(session, false)
+    h.engine.turnStarted(session, { byUser: false })
+    await h.settle()
+    const accepted = await h.engine.report(session, done)
+    expect(accepted.accepted).toBe(true)
+    expect(accepted.checks.some((c) => c.check === 'answered')).toBe(false)
+  })
+
+  it('pauses turnEnded reminders while an async question awaits the user', async () => {
+    const h = await harness({ workflows: { parallel: PARALLEL } })
+    const task = await h.start('parallel')
+    const session = h.sessionOf(task.id, 'split')
+    const before = h.sent.length
+
+    h.engine.waiting(session, true)
+    h.engine.turnEnded(session, { byUser: false })
+    h.engine.turnEnded(session, { byUser: false })
+    await h.settle()
+
+    expect(h.sent).toHaveLength(before)
+    const view = h.engine.get(task.id)
+    expect(view.rounds[0]).toMatchObject({ state: 'working', asking: true, stuck: null })
+    expect(view.needs).toEqual([
+      { kind: 'asking', stepId: 'split', roundId: view.rounds[0]!.id, sessionId: session },
+    ])
+  })
+
+  it('starts the reply turn cleanly when answered, but wakes the step when skipped while idle', async () => {
+    const h = await harness({ workflows: { parallel: PARALLEL } })
+    const task = await h.start('parallel')
+    const session = h.sessionOf(task.id, 'split')
+
+    // Case 1: User answers the async question after turnEnded. settlePermission calls waiting(false)
+    // synchronously before the async question handler's microtask starts the reply turn.
+    h.engine.waiting(session, true)
+    h.engine.turnEnded(session, { byUser: false })
+    await h.settle()
+    const beforeAnswer = h.sent.length
+
+    h.engine.waiting(session, false)
+    queueMicrotask(() => {
+      h.engine.turnStarted(session, { byUser: false })
+    })
+    await h.settle()
+    expect(h.sent).toHaveLength(beforeAnswer)
+    expect(h.engine.get(task.id).rounds[0]).toMatchObject({
+      state: 'working',
+      asking: false,
+      stuck: null,
+    })
+
+    // Case 2: Turn ends while another async question is open, then the user skips/cancels it
+    // without starting a new turn -> the step is reminded instead of hanging silently.
+    h.engine.waiting(session, true)
+    h.engine.turnEnded(session, { byUser: false })
+    await h.settle()
+    expect(h.sent).toHaveLength(beforeAnswer)
+
+    h.engine.waiting(session, false)
+    await h.settle()
+    expect(h.sent).toHaveLength(beforeAnswer + 1)
+    expect(h.sent.at(-1)).toMatchObject({ sessionId: session })
+    expect(h.sent.at(-1)!.text).toContain('report_step')
+    expect(h.engine.get(task.id).rounds[0]).toMatchObject({
+      state: 'working',
+      asking: false,
+      stuck: null,
+    })
+  })
+
+  it('still wakes the step when a question is skipped after an unrelated user chat turn', async () => {
+    const h = await harness({ workflows: { parallel: PARALLEL } })
+    const task = await h.start('parallel')
+    const session = h.sessionOf(task.id, 'split')
+    const before = h.sent.length
+
+    h.engine.waiting(session, true)
+    h.engine.turnEnded(session, { byUser: false })
+    await h.settle()
+    // An unrelated user chat turn runs and ends while the async question card stays open.
+    h.engine.turnStarted(session, { byUser: true })
+    h.engine.turnEnded(session, { byUser: true })
+    await h.settle()
+    expect(h.sent).toHaveLength(before)
+
+    // Skipping the question card afterwards still wakes the step.
+    h.engine.waiting(session, false)
+    await h.settle()
+    expect(h.sent).toHaveLength(before + 1)
+    expect(h.sent.at(-1)!.text).toContain('report_step')
+  })
+
+  it('does not send a reminder when a question is cleared before the turn ends', async () => {
+    const h = await harness({ workflows: { parallel: PARALLEL } })
+    const task = await h.start('parallel')
+    const session = h.sessionOf(task.id, 'split')
+    const before = h.sent.length
+
+    h.engine.waiting(session, true)
+    h.engine.waiting(session, false)
+    await h.settle()
+    expect(h.sent).toHaveLength(before)
+  })
+
+  it('withdraws pending requests and clears asking whenever a round leaves working state', async () => {
+    // 1. Entering reviewing (afterReport) and done (follow)
+    const h = await harness({ workflows: { reviewed: REVIEWED } })
+    const reviewed = await h.start('reviewed')
+    const design = h.sessionOf(reviewed.id, 'design')
+    h.documents.add('art_x')
+    await h.engine.report(design, { outcome: null, note: null, artifactId: 'art_x' })
+    // Even if a non-blocking question opens during picking, moving to reviewing clears it.
+    h.engine.waiting(design, true)
+    await h.settle()
+    expect(h.engine.get(reviewed.id).rounds[0]!.asking).toBe(true)
+
+    await h.engine.pick(design, [
+      { step: 'build', agent: 'codex', model: 'gpt', effort: null, reason: 'Plain work' },
+    ])
+    const reviewingRound = h.engine.get(reviewed.id).rounds[0]!
+    expect(reviewingRound).toMatchObject({ state: 'reviewing', asking: false })
+    expect(h.withdrawn).toContain(design)
+
+    // A late waiting(true) on a non-working round does not re-mark it asking.
+    h.engine.waiting(design, true)
+    await h.settle()
+    expect(h.engine.get(reviewed.id).rounds[0]!.asking).toBe(false)
+
+    // Approving moves the round to done and withdraws pending requests.
+    const beforeApprove = h.withdrawn.length
+    await h.engine.review(reviewed.id, reviewingRound.id, true, null)
+    await h.settle()
+    expect(h.engine.get(reviewed.id).rounds[0]).toMatchObject({ state: 'done', asking: false })
+    expect(h.withdrawn.slice(beforeApprove)).toContain(design)
+
+    // 2. Cancelling a task with an idle round waiting on an async question stops it, withdraws
+    // pending requests, clears asking, and never fires a deferred reminder.
+    const build = h.sessionOf(reviewed.id, 'build')
+    h.engine.waiting(build, true)
+    h.engine.turnEnded(build, { byUser: false })
+    await h.settle()
+    const beforeCancelWithdrawn = h.withdrawn.length
+    const beforeCancelSent = h.sent.length
+    await h.engine.cancel(reviewed.id)
+    h.engine.waiting(build, false)
+    await h.settle()
+    expect(h.engine.get(reviewed.id).rounds.find((r) => r.stepId === 'build')).toMatchObject({
+      state: 'stopped',
+      asking: false,
+    })
+    expect(h.withdrawn.slice(beforeCancelWithdrawn)).toContain(build)
+    expect(h.sent).toHaveLength(beforeCancelSent)
+
+    // 3. Sticking a round also clears asking and withdraws pending requests.
+    const stuckTask = await h.start('reviewed')
+    const stuckSession = h.sessionOf(stuckTask.id, 'design')
+    const beforeStick = h.withdrawn.length
+    h.engine.turnEnded(stuckSession, { byUser: false })
+    h.engine.turnEnded(stuckSession, { byUser: false })
+    await h.settle()
+    expect(h.engine.get(stuckTask.id).rounds[0]).toMatchObject({ state: 'stuck', asking: false })
+    expect(h.withdrawn.slice(beforeStick)).toContain(stuckSession)
+  })
+
+  it('clears stale asking flags on restart', async () => {
+    const first = await harness({ workflows: { parallel: PARALLEL } })
+    const task = await first.start('parallel')
+    const session = first.sessionOf(task.id, 'split')
+    first.engine.waiting(session, true)
+    await first.settle()
+    expect(first.store.get(task.id)!.rounds[0]!.asking).toBe(true)
+
+    const second = await harness({
+      workflows: { parallel: PARALLEL },
+      stored: [...first.store.values()],
+      live: [session],
+    })
+    expect(second.engine.get(task.id).rounds[0]!.asking).toBe(false)
+    expect((await second.engine.report(session, done)).accepted).toBe(true)
   })
 })

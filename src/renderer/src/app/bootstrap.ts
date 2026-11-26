@@ -16,6 +16,7 @@ import { followCaretHold } from '@renderer/app/caret-hold'
 import { followWindowFront } from '@renderer/app/window-front'
 import { restoreDraftAttachments } from '@renderer/features/session/composer/attachments'
 import { allPanes } from '@renderer/features/split/layout'
+import { openCatalogRow } from '@renderer/features/marketplace/plugin-landing'
 import {
   foldersHostOpened,
   loadFolders,
@@ -62,6 +63,7 @@ import {
   receiveArtifactEvent,
 } from '@renderer/stores/artifacts'
 import { useConnectionStore } from '@renderer/stores/connection'
+import { filesChanged, rewatchFiles } from '@renderer/stores/files'
 import {
   loadGitTools,
   receiveCurrentPr,
@@ -93,12 +95,16 @@ import { useSuggestionsStore } from '@renderer/stores/workflow-suggestions'
 import { tasksHostClosed, tasksHostOpened, useTasksStore } from '@renderer/stores/tasks'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { initSettings, useSettingsStore } from '@renderer/stores/settings'
-import { hostScopeEvent, hostScopeOpened, useSettingsHostStore } from '@renderer/stores/host-scope'
+import { hostScopeEvent, hostScopeOpened } from '@renderer/stores/host-scope'
 import { initHosts, loadHosts, useHostsStore } from '@renderer/stores/hosts'
 import { initRemote } from '@renderer/stores/remote'
 import { initSharing } from '@renderer/stores/sharing'
 import { initTerminals } from '@renderer/stores/terminals'
-import { initThemes } from '@renderer/stores/themes'
+import {
+  followUninstalledPluginThemes,
+  initThemes,
+  leaveUninstalledPluginTheme,
+} from '@renderer/stores/themes'
 import { keepWatched, receiveBatch, rewatchAll } from '@renderer/stores/threads'
 import { forgetViewers, receiveViewers } from '@renderer/stores/viewers'
 import { initUpdates } from '@renderer/stores/updates'
@@ -118,17 +124,23 @@ import {
   resetLayout,
   restoreLayout,
   savedLayout,
-  openSettingsRow,
   shownLayoutSessions,
   useViewStore,
 } from '@renderer/stores/view'
+import {
+  hostRequestEvent,
+  hostRequestsClosed,
+  hostRequestsOpened,
+} from '@renderer/features/settings/host-requests'
 import { goneHosts, hostListed, initHostSessions } from './host-sessions'
 import { showLimitAlert } from './limit-alerts'
 import { followWindowTitle } from './window-title'
 import { mcpPanelChanged } from '@renderer/features/session/mcp/mcp-panel'
 
 /** An event of this computer's agent host, or with `hostId` of another host's. */
-function onHostEvent(event: HostEvent, hostId: string | null = null): void {
+export function onHostEvent(event: HostEvent, hostId: string | null = null): void {
+  // Another host's requests of devices of the account, which this computer may answer too.
+  if (hostId !== null && hostRequestEvent(hostId, event)) return
   switch (event.type) {
     case 'session.patches':
       receiveBatch(event.batch)
@@ -246,6 +258,8 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
     void loadKettuRoles(hostId)
     pluginSurfacesChanged(hostId)
     void loadPluginRefs(hostId)
+    // A plugin uninstalled while off takes its chosen theme with it, though no theme changed.
+    if (hostId === null) void leaveUninstalledPluginTheme()
   }
   // The rest is each host's own: another host's goes to its Settings, if they have shown it.
   if (hostId !== null && event.type === 'usage.changed') usageChanged(hostId)
@@ -254,11 +268,19 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
     if (hostId === null) receiveGitHubStar(event.state)
     return
   }
+  if (event.type === 'settings.open') {
+    // A row of the desktop app's own comes only from this computer's host.
+    openCatalogRow(event.section, event.item, event.row, hostId)
+    return
+  }
   if (hostId !== null) return hostScopeEvent(hostId, event)
   switch (event.type) {
     case 'environment.changed':
       useAgentsStore.setState({ environment: event.info })
       break
+    case 'files.changed':
+      filesChanged(event.projectPath)
+      return
     case 'git.tools':
       useGitStore.setState({ tools: event.tools })
       break
@@ -279,11 +301,6 @@ function onHostEvent(event: HostEvent, hostId: string | null = null): void {
       break
     case 'market.publishedChanged':
       marketPublishedChanged(null)
-      break
-    case 'settings.open':
-      // A row of the desktop app's own comes only from this computer's host.
-      useSettingsHostStore.setState({ hostId })
-      openSettingsRow(event.section, event.item, event.row)
       break
   }
 }
@@ -464,6 +481,7 @@ export function bootstrap(): Promise<unknown> {
     rewatchAll((sessionId) => sessionHost(sessionId) === null)
     showFront(true)
     rewatchGit(null)
+    rewatchFiles(null)
   })
   useViewStore.subscribe(() => showFront())
   followShownSession()
@@ -475,6 +493,7 @@ export function bootstrap(): Promise<unknown> {
 
   const settingsReady = initSettings()
   const themesReady = initThemes()
+  followUninstalledPluginThemes()
   void initRemote()
   // A host without them, as the daemon, is never asked.
   whenHostHas('sharing', () => void initSharing())
@@ -495,14 +514,17 @@ export function bootstrap(): Promise<unknown> {
         tasksHostOpened(hostId)
         foldersHostOpened(hostId)
         hostScopeOpened(hostId)
+        hostRequestsOpened(hostId)
         hostRestarted(hostId)
         hostLoadOpened(hostId)
         rewatchAll((sessionId) => sessionHost(sessionId) === hostId)
         showFront(true)
         rewatchGit(hostId)
+        rewatchFiles(hostId)
         if (waitingSessions.size > 0) closeUnlistedPanes(waitingSessions)
       },
       closed: (hostId) => {
+        hostRequestsClosed(hostId)
         artifactsHostClosed(hostId)
         routinesHostClosed(hostId)
         tasksHostClosed(hostId)

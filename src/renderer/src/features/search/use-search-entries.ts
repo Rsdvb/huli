@@ -5,6 +5,7 @@ import { useShallow } from 'zustand/react/shallow'
 import type { ConversationHit, SessionSummary } from '@shared/agent-host'
 import { entryOn, type FeatureEntry } from '@shared/features'
 import { artifactKind, recency } from '@renderer/features/artifacts/model'
+import { settingRow } from '@renderer/features/marketplace/plugin-model'
 import { languageText, surfaceTitle } from '@renderer/features/plugin-views/plugin-text'
 import { triggerWords } from '@renderer/features/routines/model'
 import { projectNameHints } from '@renderer/features/session/project-names'
@@ -20,7 +21,11 @@ import { useShownRoutines } from '@renderer/features/routines/window-routines'
 import { artifactHost, routineHost } from '@renderer/lib/host'
 import { useArtifactsStore } from '@renderer/stores/artifacts'
 import { isAway, useOtherHosts } from '@renderer/stores/hosts'
-import { loadPluginSurfaces, usePluginSurfacesStore } from '@renderer/stores/plugin-surfaces'
+import {
+  loadPluginSurfaces,
+  usePluginSurfacesStore,
+  type PluginSettingsSurface,
+} from '@renderer/stores/plugin-surfaces'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useSettingsStore } from '@renderer/stores/settings'
 import {
@@ -55,7 +60,6 @@ const SECTIONS: readonly SettingsSection[] = [
   'sharing',
   'terminal',
   'remote',
-  'plugins',
   'advanced',
   'about',
 ]
@@ -90,6 +94,7 @@ export function useSearchEntries(): SearchEntry[] {
   const actions = useActionEntries()
   const pluginActions = usePluginActionEntries()
   const sections = useSectionEntries()
+  const pluginSettings = usePluginSettingEntries()
   return useMemo(
     () => [
       ...sessions,
@@ -99,8 +104,9 @@ export function useSearchEntries(): SearchEntry[] {
       ...actions,
       ...pluginActions,
       ...sections,
+      ...pluginSettings,
     ],
-    [sessions, artifacts, routines, projects, actions, pluginActions, sections],
+    [sessions, artifacts, routines, projects, actions, pluginActions, sections, pluginSettings],
   )
 }
 
@@ -334,7 +340,10 @@ function useActionEntries(): SearchEntry[] {
   return useMemo(() => {
     const english = i18n.getFixedT('en', 'sidebar')
     const keys = new Map(
-      shortcutList('enter', shortcutKeysOf).map((shortcut) => [shortcut.action, shortcut.keys]),
+      shortcutList('enter', 'queue', shortcutKeysOf).map((shortcut) => [
+        shortcut.action,
+        shortcut.keys,
+      ]),
     )
     // Huli: no palette action asks to star upstream's repository.
     const listed = (action: SearchAction): boolean =>
@@ -359,24 +368,30 @@ function useActionEntries(): SearchEntry[] {
   }, [t, routinesOn])
 }
 
-/**
- * The actions the plugins that are on declare, on each host the window shows that is reachable.
- * The hosts are read when Search opens, and a plugin changing is told by the host.
- */
-function usePluginActionEntries(): SearchEntry[] {
-  const { t, i18n: language } = useTranslation('sidebar')
+/** The hosts Search reads plugins from: the narrowed host, or every reachable host. */
+function usePluginHostIds(): (string | null)[] {
   const others = useOtherHosts()
   const only = useOnlyHost()
-  const hostName = useHostName()
-  const namesHosts = useNamesHosts()
-  const byHost = usePluginSurfacesStore((s) => s.byHost)
-  const hostIds = useMemo<(string | null)[]>(
+  return useMemo<(string | null)[]>(
     () =>
       only === undefined
         ? [null, ...others.filter((host) => !isAway(host.connection)).map((host) => host.id)]
         : [only],
     [only, others],
   )
+}
+
+/**
+ * The actions the plugins that are on declare, on each host the window shows that is reachable.
+ * The hosts are read when Search opens, and a plugin changing is told by the host.
+ */
+function usePluginActionEntries(): SearchEntry[] {
+  const { t, i18n: language } = useTranslation('sidebar')
+  const only = useOnlyHost()
+  const hostName = useHostName()
+  const namesHosts = useNamesHosts()
+  const byHost = usePluginSurfacesStore((s) => s.byHost)
+  const hostIds = usePluginHostIds()
   useEffect(() => {
     for (const hostId of hostIds) {
       if (!byHost[hostId ?? '']) void loadPluginSurfaces(hostId)
@@ -414,6 +429,76 @@ function usePluginActionEntries(): SearchEntry[] {
           })
         }),
       ),
+    [hostIds, byHost, language.language, namesHosts, only, hostName, t],
+  )
+}
+
+/** Builds Search entries for plugin settings across `hostIds`, tagging each with its host. */
+export function buildPluginSettingEntries({
+  hostIds,
+  byHost,
+  language,
+  showHost,
+  hostName,
+  trailing,
+}: {
+  hostIds: readonly (string | null)[]
+  byHost: Record<string, { settings: PluginSettingsSurface[] } | undefined>
+  language: string
+  showHost: boolean
+  hostName: (hostId: string | null) => string
+  trailing: (plugin: string) => string
+}): SearchEntry[] {
+  return hostIds.flatMap((hostId) => {
+    const host = showHost ? hostName(hostId) : null
+    return (byHost[hostId ?? '']?.settings ?? []).flatMap((plugin) => {
+      const pluginTitle = surfaceTitle(plugin, language)
+      const label = host ? `${pluginTitle} \u00b7 ${host}` : pluginTitle
+      return plugin.settings.map((setting): SearchEntry => ({
+        kind: 'section',
+        key: `pluginSetting:${hostId ?? ''}/${plugin.pluginId}/${setting.key}`,
+        title: setting.title,
+        meta: setting.description ?? null,
+        trailing: trailing(label),
+        haystack: haystackOf(setting.title, setting.description, pluginTitle, host),
+        at: 0,
+        pluginSetting: {
+          hostId,
+          pluginId: plugin.pluginId,
+          row: settingRow(setting.key),
+          plugin: { name: plugin.name, title: pluginTitle, icon: plugin.icon },
+        },
+      }))
+    })
+  })
+}
+
+/**
+ * The settings plugins declare, on each host the window shows that is reachable; each opens its
+ * plugin's page on that host. A plugin that is off keeps its settings.
+ */
+function usePluginSettingEntries(): SearchEntry[] {
+  const { t, i18n: language } = useTranslation('sidebar')
+  const only = useOnlyHost()
+  const hostName = useHostName()
+  const namesHosts = useNamesHosts()
+  const byHost = usePluginSurfacesStore((s) => s.byHost)
+  const hostIds = usePluginHostIds()
+  useEffect(() => {
+    for (const hostId of hostIds) {
+      if (!byHost[hostId ?? '']) void loadPluginSurfaces(hostId)
+    }
+  }, [hostIds, byHost])
+  return useMemo(
+    () =>
+      buildPluginSettingEntries({
+        hostIds,
+        byHost,
+        language: language.language,
+        showHost: namesHosts && only === undefined,
+        hostName,
+        trailing: (plugin) => t('search.pluginSetting', { plugin }),
+      }),
     [hostIds, byHost, language.language, namesHosts, only, hostName, t],
   )
 }

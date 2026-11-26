@@ -16,17 +16,18 @@ export function ShortcutsDialog() {
   const open = useViewStore((s) => s.shortcutsOpen)
   const sendKey = useSettingsStore((s) => s.settings.general.sendKey)
   const bound = useSettingsStore((s) => s.settings.keyboard?.shortcuts)
+  const runningSend = useSettingsStore((s) => s.settings.general.runningSend)
   const [query, setQuery] = useState('')
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase()
     const keys = shortcutBindings(bound)
-    return shortcutList(sendKey, (id) => keys[id]).filter(
+    return shortcutList(sendKey, runningSend, (id) => keys[id]).filter(
       (row) =>
         needle === '' ||
         t(`shortcuts.${row.action}`).toLowerCase().includes(needle) ||
         keyCaps(row.keys).join(' ').toLowerCase().includes(needle),
     )
-  }, [query, sendKey, bound, t])
+  }, [query, runningSend, sendKey, bound, t])
 
   return (
     <Dialog

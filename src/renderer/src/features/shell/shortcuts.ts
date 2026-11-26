@@ -1,6 +1,7 @@
 // The keyboard shortcuts the dialog lists, and their key caps.
 
 import { isShortcutId, type ShortcutId } from '@shared/shortcuts'
+import type { RunningSend } from '@shared/settings'
 import { HISTORY_SHORTCUTS } from '@renderer/app/history'
 import { formatShortcut, shortcutKeys } from '@renderer/lib/platform'
 
@@ -28,6 +29,7 @@ export type ShortcutAction =
   | 'findInSession'
   | 'send'
   | 'sendNow'
+  | 'queue'
   | 'newLine'
   | 'focusComposer'
   | 'sideChat'
@@ -45,11 +47,12 @@ export interface Shortcut {
 }
 
 /**
- * Every shortcut the app has, in the dialog's order; the composer's follow the send key setting,
- * and Huli: the ones the user may rebind, `keysOf` (their keys in Settings).
+ * Every shortcut the app has, in the dialog's order; the composer's follow the send settings, and
+ * Huli: the ones the user may rebind, `keysOf` (their keys in Settings).
  */
 export function shortcutList(
   sendKey: 'enter' | 'mod-enter',
+  runningSend: RunningSend = 'queue',
   keysOf?: (id: ShortcutId) => string,
 ): Shortcut[] {
   const list: Shortcut[] = [
@@ -75,7 +78,7 @@ export function shortcutList(
     { group: 'composer', action: 'send', keys: sendKey === 'enter' ? 'Enter' : 'Mod+Enter' },
     {
       group: 'composer',
-      action: 'sendNow',
+      action: runningSend === 'steer' ? 'queue' : 'sendNow',
       keys: sendKey === 'enter' ? 'Mod+Enter' : 'Mod+Shift+Enter',
     },
     { group: 'composer', action: 'newLine', keys: sendKey === 'enter' ? 'Shift+Enter' : 'Enter' },

@@ -155,7 +155,12 @@ export function MainArea() {
     return (
       <PageSheet>
         <Suspense fallback={null}>
-          <MarketplacePage item={main.item ?? null} tab={main.tab ?? 'all'} />
+          <MarketplacePage
+            item={main.item ?? null}
+            tab={main.tab ?? 'all'}
+            hostId={main.hostId}
+            from={main.from}
+          />
         </Suspense>
       </PageSheet>
     )

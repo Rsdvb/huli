@@ -2,10 +2,12 @@ import { create } from 'zustand'
 import type { EditorState, Text } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 import type { AgentId } from '@shared/agents'
-import type { FileContent } from '@shared/files'
+import type { FileContent, FolderList } from '@shared/files'
 import type { FileDiff } from '@shared/git'
 import { errorCode, errorMessage, host } from '@renderer/lib/host'
-import { isWithin, movedPath } from '@renderer/features/files/paths'
+import { hostOfPath } from '@renderer/lib/host-paths'
+import { readJson, writeJson } from '@renderer/lib/storage'
+import { insideAny, isWithin, movedPath } from '@renderer/features/files/paths'
 import { useGitStore } from './git'
 import {
   changeDocs,
@@ -26,11 +28,19 @@ export interface ProjectFiles {
   paths: string[]
   /** Folders with nothing in them, which no path in `paths` names. */
   folders: string[]
+  /** Files git ignores, outside `ignoredFolders`; in no other list of the project. */
+  ignored: string[]
+  /** Folders git ignores as a whole, read with `readIgnoredFolder` only once opened. */
+  ignoredFolders: string[]
   /** The same paths, for telling whether a reference in a reply names a file. */
   known: ReadonlySet<string>
   truncated: boolean
   error: string | null
 }
+
+/** What was read of a folder git ignores, or one in it, whose insides the list leaves unread. */
+export type FolderRead =
+  { status: 'loading' } | ({ status: 'read' } & FolderList) | { status: 'failed'; error: string }
 
 /** Files and folders cut or copied in a project's tree, for pasting in the same project. */
 export interface FileClipboard {
@@ -105,7 +115,13 @@ interface FilesStore {
   /** By `agentFolderKey`, the folder a session's agent keeps its own files in, null for none. */
   agentFolders: Record<string, string | null>
   clipboard: FileClipboard | null
+  /** By project, then by folder, what was read of the ignored folders opened in its trees. */
+  folderReads: Record<string, Record<string, FolderRead>>
+  /** The tree leaves out what git ignores, on this device. */
+  hideIgnored: boolean
 }
+
+const HIDE_IGNORED_KEY = 'files-hide-ignored'
 
 export const useFilesStore = create<FilesStore>()(() => ({
   byProject: {},
@@ -116,7 +132,21 @@ export const useFilesStore = create<FilesStore>()(() => ({
   diffs: {},
   agentFolders: {},
   clipboard: null,
+  folderReads: {},
+  hideIgnored: readJson<unknown>(HIDE_IGNORED_KEY, false) === true,
 }))
+
+export function setHideIgnored(hide: boolean): void {
+  useFilesStore.setState({ hideIgnored: hide })
+  writeJson(HIDE_IGNORED_KEY, hide)
+}
+
+const isWebClient = (): boolean =>
+  typeof window !== 'undefined' &&
+  (window as { kettu?: { client?: string } }).kettu?.client === 'web'
+const MAX_CACHED_PROJECTS_DESKTOP = 16
+const MAX_CACHED_PROJECTS_WEB = 8
+const MAX_AGENT_FOLDERS = 100
 
 /** A session's agent folder is asked for again when the session moves to another agent. */
 export const agentFolderKey = (sessionId: string, agentId: AgentId): string =>
@@ -131,7 +161,19 @@ export function ensureAgentFolder(sessionId: string, agentId: AgentId): void {
   askedFolders.add(key)
   host('files.agentFolder', { sessionId }).then(
     (folder) =>
-      useFilesStore.setState((s) => ({ agentFolders: { ...s.agentFolders, [key]: folder } })),
+      useFilesStore.setState((s) => {
+        const agentFolders = { ...s.agentFolders }
+        if (key in agentFolders) delete agentFolders[key]
+        agentFolders[key] = folder
+        const keys = Object.keys(agentFolders)
+        for (let i = 0; keys.length - i > MAX_AGENT_FOLDERS; i++) {
+          const oldest = keys[i]!
+          if (oldest === key) continue
+          delete agentFolders[oldest]
+          askedFolders.delete(oldest)
+        }
+        return { agentFolders }
+      }),
     // Asked again by the next reply that names a file outside the project.
     () => askedFolders.delete(key),
   )
@@ -185,13 +227,29 @@ export function loadFiles(projectPath: string): Promise<void> {
   if (running) return running
   staleLists.delete(projectPath)
   const request = host('files.list', { projectPath })
-    .then(({ paths, folders = [], truncated }): ProjectFiles => {
+    .then(({ paths, folders = [], ignored = [], ignoredFolders = [], truncated }): ProjectFiles => {
       // An unchanged list keeps its arrays, so nothing that indexes them works again.
       const before = useFilesStore.getState().byProject[projectPath]
-      if (before && !before.error && before.truncated === truncated) {
-        if (samePaths(before.paths, paths) && samePaths(before.folders, folders)) return before
+      if (
+        before &&
+        !before.error &&
+        before.truncated === truncated &&
+        samePaths(before.paths, paths) &&
+        samePaths(before.folders, folders) &&
+        samePaths(before.ignored, ignored) &&
+        samePaths(before.ignoredFolders, ignoredFolders)
+      ) {
+        return before
       }
-      return { paths, folders, known: new Set(paths), truncated, error: null }
+      return {
+        paths,
+        folders,
+        ignored,
+        ignoredFolders,
+        known: new Set(paths),
+        truncated,
+        error: null,
+      }
     })
     .catch((error: unknown) => {
       // A failed refresh keeps the list it had.
@@ -199,18 +257,122 @@ export function loadFiles(projectPath: string): Promise<void> {
       return {
         paths: before?.paths ?? [],
         folders: before?.folders ?? [],
+        ignored: before?.ignored ?? [],
+        ignoredFolders: before?.ignoredFolders ?? [],
         known: before?.known ?? new Set<string>(),
         truncated: before?.truncated ?? false,
         error: errorMessage(error),
       }
     })
     .then((files) => {
-      if (useFilesStore.getState().byProject[projectPath] === files) return
-      useFilesStore.setState((s) => ({ byProject: { ...s.byProject, [projectPath]: files } }))
+      if (useFilesStore.getState().byProject[projectPath] !== files) {
+        const limit = isWebClient() ? MAX_CACHED_PROJECTS_WEB : MAX_CACHED_PROJECTS_DESKTOP
+        useFilesStore.setState((s) => {
+          const byProject = { ...s.byProject }
+          if (projectPath in byProject) delete byProject[projectPath]
+          byProject[projectPath] = files
+          let folderReads = s.folderReads
+          const keys = Object.keys(byProject)
+          for (let i = 0; keys.length - i > limit; i++) {
+            const oldest = keys[i]!
+            if (
+              oldest === projectPath ||
+              watchers.has(oldest) ||
+              (s.open[oldest]?.length ?? 0) > 0
+            ) {
+              continue
+            }
+            delete byProject[oldest]
+            staleLists.delete(oldest)
+            if (oldest in folderReads) {
+              if (folderReads === s.folderReads) folderReads = { ...s.folderReads }
+              delete folderReads[oldest]
+            }
+          }
+          return { byProject, folderReads }
+        })
+      }
+      return files.error ? undefined : readFoldersAgain(projectPath, files.ignoredFolders)
     })
     .finally(() => inFlight.delete(projectPath))
   inFlight.set(projectPath, request)
   return request
+}
+
+const readingFolders = new Map<string, Promise<FolderRead>>()
+
+function setFolderRead(projectPath: string, folder: string, read: FolderRead | null): void {
+  useFilesStore.setState((s) => {
+    const reads = { ...s.folderReads[projectPath] }
+    if (read) reads[folder] = read
+    else delete reads[folder]
+    return { folderReads: { ...s.folderReads, [projectPath]: reads } }
+  })
+}
+
+/**
+ * Reads the files and folders directly in `folder`, inside a folder git ignores, which the list
+ * leaves unread; one request at a time per folder.
+ */
+export function readIgnoredFolder(projectPath: string, folder: string): Promise<FolderRead> {
+  const key = `${projectPath}\0${folder}`
+  const running = readingFolders.get(key)
+  if (running) return running
+  setFolderRead(projectPath, folder, { status: 'loading' })
+  const request = host('files.listFolder', { projectPath, path: folder })
+    .then(
+      (list): FolderRead => ({ status: 'read', ...list }),
+      (error: unknown): FolderRead => ({ status: 'failed', error: errorMessage(error) }),
+    )
+    .then((read) => {
+      setFolderRead(projectPath, folder, read)
+      return read
+    })
+    .finally(() => readingFolders.delete(key))
+  readingFolders.set(key, request)
+  return request
+}
+
+const sameRead = (read: FolderRead | undefined, list: FolderList): boolean =>
+  read?.status === 'read' &&
+  read.truncated === list.truncated &&
+  samePaths(read.files, list.files) &&
+  samePaths(read.folders, list.folders)
+
+/**
+ * Reads again the folders read before that are still in an ignored folder of the new list, and
+ * forgets the others, which the list itself now names or which are gone. What cannot be read
+ * again for another reason keeps what it showed.
+ */
+async function readFoldersAgain(projectPath: string, ignoredFolders: string[]): Promise<void> {
+  const reads = useFilesStore.getState().folderReads[projectPath]
+  if (!reads) return
+  const roots = new Set(ignoredFolders)
+  const inIgnored = (folder: string) => roots.has(folder) || insideAny(folder, roots)
+  const again = Object.keys(reads).filter(
+    (folder) => inIgnored(folder) && reads[folder]!.status === 'read',
+  )
+  const results = await Promise.all(
+    again.map((folder) =>
+      host('files.listFolder', { projectPath, path: folder }).then(
+        (list) => ({ folder, list, gone: false }),
+        (error: unknown) => ({ folder, list: null, gone: errorCode(error) === 'not_found' }),
+      ),
+    ),
+  )
+  // All at once, so a folder and the folders gone from it change together.
+  useFilesStore.setState((s) => {
+    const before = s.folderReads[projectPath] ?? {}
+    const next = Object.fromEntries(Object.entries(before).filter(([folder]) => inIgnored(folder)))
+    for (const { folder, list, gone } of results) {
+      if (list && !sameRead(next[folder], list)) next[folder] = { status: 'read', ...list }
+      else if (gone) delete next[folder]
+    }
+    const same =
+      Object.keys(next).length === Object.keys(before).length &&
+      Object.entries(next).every(([folder, read]) => before[folder] === read)
+    return same ? s : { folderReads: { ...s.folderReads, [projectPath]: next } }
+  })
 }
 
 /** Lists the project's files unless they are already known. */
@@ -225,18 +387,55 @@ export function ensureFreshFiles(projectPath: string): void {
   }
 }
 
+// A view that goes and comes back at once, as on switching sessions, keeps the host's watch, and
+// an unwatch never overtakes the watch after it.
+const UNWATCH_DELAY_MS = 1000
+const unwatching = new Map<string, ReturnType<typeof setTimeout>>()
+
+function watchOnHost(projectPath: string): void {
+  // A host from before `files.watch` refreshes on focus and git status alone.
+  void host('files.watch', { projectPath }).catch(() => {})
+}
+
 /**
  * Keeps the project's list current while a view shows it: read now if it is unknown or stale,
  * then again after each change on disk. Returns the call that stops watching.
  */
 export function watchFiles(projectPath: string): () => void {
-  watchers.set(projectPath, (watchers.get(projectPath) ?? 0) + 1)
+  const count = watchers.get(projectPath) ?? 0
+  watchers.set(projectPath, count + 1)
+  if (count === 0) {
+    const pending = unwatching.get(projectPath)
+    if (pending === undefined) watchOnHost(projectPath)
+    else clearTimeout(pending)
+    unwatching.delete(projectPath)
+  }
   if (!useFilesStore.getState().byProject[projectPath]) void loadFiles(projectPath)
   else if (staleLists.has(projectPath)) refreshFiles(projectPath)
   return () => {
     const count = (watchers.get(projectPath) ?? 1) - 1
-    if (count > 0) watchers.set(projectPath, count)
-    else watchers.delete(projectPath)
+    if (count > 0) {
+      watchers.set(projectPath, count)
+      return
+    }
+    watchers.delete(projectPath)
+    unwatching.set(
+      projectPath,
+      setTimeout(() => {
+        unwatching.delete(projectPath)
+        void host('files.unwatch', { projectPath }).catch(() => {})
+      }, UNWATCH_DELAY_MS),
+    )
+  }
+}
+
+/**
+ * Watches again after a host restarts, or a new connection to another host opens: this computer's
+ * projects for null, that host's for its id.
+ */
+export function rewatchFiles(hostId: string | null = null): void {
+  for (const projectPath of watchers.keys()) {
+    if (hostOfPath(projectPath) === hostId) watchOnHost(projectPath)
   }
 }
 
@@ -724,23 +923,35 @@ export function openDiff(projectPath: string, target: DiffTarget, options?: Open
   showOpenDiff(projectPath, target)
 }
 
-// A new git status means the working tree changed, after an agent's edit as after one of yours,
-// or the window came back into focus; a burst of them refreshes once. Only a list a view shows is
-// read again; the others wait until one shows them.
+// A burst of changes refreshes once. Only a list a view shows is read again; the others wait
+// until one shows them.
 const REFRESH_DELAY_MS = 300
+// The host already waits for a burst on disk to settle.
+const CHANGED_DELAY_MS = 50
 const timers = new Map<string, ReturnType<typeof setTimeout>>()
+
+function refreshSoon(projectPath: string, delay: number): void {
+  if (!watchers.has(projectPath)) {
+    if (useFilesStore.getState().byProject[projectPath]) staleLists.add(projectPath)
+    return
+  }
+  clearTimeout(timers.get(projectPath))
+  timers.set(
+    projectPath,
+    setTimeout(() => refreshFiles(projectPath), delay),
+  )
+}
+
+/** The host saw the project's folder change on disk, in a repository or not. */
+export function filesChanged(projectPath: string): void {
+  refreshSoon(projectPath, CHANGED_DELAY_MS)
+}
+
+// A new git status means the working tree changed, after an agent's edit as after one of yours,
+// or the window came back into focus.
 useGitStore.subscribe((state, previous) => {
   for (const [projectPath, status] of Object.entries(state.status)) {
-    if (status === previous.status[projectPath]) continue
-    if (!watchers.has(projectPath)) {
-      if (useFilesStore.getState().byProject[projectPath]) staleLists.add(projectPath)
-      continue
-    }
-    clearTimeout(timers.get(projectPath))
-    timers.set(
-      projectPath,
-      setTimeout(() => refreshFiles(projectPath), REFRESH_DELAY_MS),
-    )
+    if (status !== previous.status[projectPath]) refreshSoon(projectPath, REFRESH_DELAY_MS)
   }
 })
 

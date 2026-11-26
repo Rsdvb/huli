@@ -44,6 +44,7 @@
     "findInSession": "Find in the session",
     "send": "Send",
     "sendNow": "Send now while running",
+    "queue": "Queue while running",
     "newLine": "New line",
     "focusComposer": "Focus the composer",
     "addFiles": "Add files or photos",
@@ -136,7 +137,7 @@
       "artifact": "Artifact",
       "plugins": "Plugins",
       "artifacts": "Artifacts",
-      "open": "Open",
+      "open": "Opened",
       "live": "In use",
       "off": {
         "terminal": "Off on this computer",
@@ -163,5 +164,12 @@
     "noMatch": "No tab matches",
     "closeExited_one": "Close {{count}} exited terminal",
     "closeExited_other": "Close {{count}} exited terminals"
+  },
+  "turnNotice": {
+    "open": "Open",
+    "finished_one": "{{count}} session finished",
+    "finished_other": "{{count}} sessions finished",
+    "waiting_one": "{{count}} session needs a look",
+    "waiting_other": "{{count}} sessions need a look"
   }
 }

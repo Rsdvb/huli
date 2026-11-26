@@ -19,13 +19,20 @@ import { isLocale } from '@shared/locale'
 import { writeLog } from '@shared/log/process-log'
 import type { ControlChannel, PortChannel } from '@shared/port-channel'
 import { isPortError } from '@shared/port-rpc'
-import type { PortDevice } from '@shared/remote/device'
+import { DEVICE_ID, type PortDevice } from '@shared/remote/device'
 import { isHostAdminEvent, type HostAdminMethod } from '@shared/remote/host-admin'
+import { isAccountId } from '@shared/remote/protocol'
 import { importKeyPair } from '@shared/remote/noise'
 import { parseSshAddress, parseSshManageAction, type SshManageResult } from '@shared/remote/hosts'
 import { parsePairingLink } from '@shared/remote/pairing'
 import { PUSH_URL } from '@shared/remote/push'
-import type { DiscoveredHosts } from '@shared/remote/discovery'
+import {
+  parsePairGroup,
+  parseReverseHost,
+  type DiscoveredHosts,
+  type ReverseGrant,
+  type ReverseHost,
+} from '@shared/remote/discovery'
 import { isAccessKey, ownRelayProblem } from '@shared/remote/own-relay'
 import {
   WEB_FEATURE,
@@ -126,6 +133,8 @@ interface Serving {
   notifications: DeviceNotifications | null
   /** Requests from devices of the account to be added. */
   discovery: DiscoveryRequests
+  /** This computer as a host another one keeps, while it serves through the Kettu relay. */
+  ownHost(): ReverseHost | null
   /** Sends the first status and every change after it. */
   report(): void
 }
@@ -199,6 +208,8 @@ export function startRemoteHost(
   let present: boolean | null = null
   // Whether devices of the account find this host on the relay, while it is signed in to it.
   let discoverable = false
+  // The Kettu account this computer is signed in to, as a host and as a device alike.
+  let account: string | null = null
   const adminCalls = new Map<number, (answer: AdminAnswer) => void>()
   let nextAdminCall = 1
 
@@ -249,7 +260,10 @@ export function startRemoteHost(
         : null
     }
     const discovery = new DiscoveryRequests({
-      send: (event) => send({ type: 'remote-host:discovery', event }),
+      send: (event) => {
+        send({ type: 'remote-host:discovery', event })
+        notifications?.discoveryChanged(event)
+      },
     })
     const pairing = new PairingCodes({
       hostKey: staticKey.publicKey,
@@ -297,6 +311,14 @@ export function startRemoteHost(
       changed,
       log,
       relay: onRelay,
+      relayId: () => relayId,
+      reverseHosts: () => init?.reverseHosts === true && client !== null,
+      joined: (device, via) => {
+        const { id, name, platform } = device
+        send({ type: 'remote-host:device-joined', device: { id, name, platform }, via })
+        notifications?.deviceJoined(device)
+      },
+      account: () => account,
       ...(regions
         ? {
             regions: {
@@ -408,6 +430,21 @@ export function startRemoteHost(
       ready = true
       changed()
     }
+    const ownHost = (): ReverseHost | null => {
+      const served = onRelay()
+      const profile = hostProfile(staticKey.publicKey, server.options.host.name, platform)
+      if (!served || served.urls.length === 0 || !profile) return null
+      return {
+        relayId: served.id,
+        publicKey,
+        name: profile.name,
+        platform,
+        relays: served.urls,
+        // The owner's own relay at an IP address, which the other computer checks by its pin.
+        ...(served.pin ? { pin: served.pin } : {}),
+        version: appVersion,
+      }
+    }
     const started: Serving = {
       server,
       direct,
@@ -416,6 +453,7 @@ export function startRemoteHost(
       loopback,
       notifications,
       discovery,
+      ownHost,
       report,
     }
     live = started
@@ -521,6 +559,7 @@ export function startRemoteHost(
       hosts,
       client: { kind: 'desktop', version: appVersion, platform: device.platform },
       name: () => hostName,
+      account: () => account,
       openMainPort: deps.openMainPort,
       ...(relayUrl
         ? {
@@ -537,6 +576,25 @@ export function startRemoteHost(
         if (ready) send({ type: 'remote-host:hosts', hosts: started.list() })
       },
       pairing: (pairId, pairing) => send({ type: 'remote-host:host-pairing', pairId, pairing }),
+      reverse: {
+        own: () => live?.ownHost() ?? null,
+        grant: async (grant) => {
+          const current = live
+          if (!current) return false
+          const added = await current.server.addDevice(
+            {
+              publicKey: grant.deviceKey,
+              name: grant.name,
+              kind: 'desktop',
+              platform: grant.platform,
+              model: '',
+              account,
+            },
+            'reverse',
+          )
+          return added !== null
+        },
+      },
       log,
     })
     started.start()
@@ -557,6 +615,7 @@ export function startRemoteHost(
     progress = parseProgress(message.progress) ?? {}
     if (typeof message.present === 'boolean') present = message.present
     discoverable = message.discoverable === true
+    account = isAccountId(message.account) ? message.account : null
     if (message.relay && typeof message.relay.url === 'string') {
       relayUrl = message.relay.url
       ownRelay = ownOf(message.relay.own)
@@ -699,12 +758,14 @@ export function startRemoteHost(
         })
         break
       }
-      case 'remote-host:add-device':
+      case 'remote-host:add-device': {
+        const via = message.via === 'reverse' ? 'reverse' : 'ssh'
         withServing(async ({ server }) => {
-          const added = await server.addDevice(message.device)
+          const added = await server.addDevice(message.device, via)
           if (!added) log('warn', 'A device to add was not valid')
         })
         break
+      }
       case 'remote-host:remove-device':
         if (typeof message.id === 'string') {
           withServing(({ server }) => server.removeDevice(message.id))
@@ -726,17 +787,46 @@ export function startRemoteHost(
         discoverable = message.enabled === true
         withServing(applyDiscovery)
         break
-      case 'remote-host:discovery-answer':
-        if (Number.isSafeInteger(message.requestId)) {
-          withServing(({ discovery }) =>
-            discovery.answer(
-              message.requestId,
-              message.add === true,
-              typeof message.name === 'string' ? message.name : '',
-            ),
-          )
+      case 'remote-host:discovery-answer': {
+        const { requestId, discoveryId, by } = message
+        if (!Number.isSafeInteger(requestId)) break
+        const reply = (counted: boolean): void =>
+          send({ type: 'remote-host:discovery-answer', requestId, counted })
+        if (!Number.isSafeInteger(discoveryId)) {
+          reply(false)
+          break
         }
+        const answered = withServing(
+          ({ discovery }) =>
+            reply(
+              discovery.answer(
+                discoveryId,
+                message.add === true,
+                typeof message.name === 'string' ? message.name : '',
+                typeof by === 'string' && by.length > 0 ? by.slice(0, 100) : null,
+              ),
+            ),
+          () => reply(false),
+        )
+        if (!answered) reply(false)
         break
+      }
+      case 'remote-host:add-reverse-host': {
+        const { requestId } = message
+        if (!Number.isSafeInteger(requestId)) break
+        const answer = (grant: ReverseGrant | null): void =>
+          send({ type: 'remote-host:reverse-host', requestId, grant })
+        const host = parseReverseHost(message.host)
+        if (!host) {
+          answer(null)
+          break
+        }
+        const started = withRunning(async () =>
+          answer(client ? await client.addReverseHost(host) : null),
+        )
+        if (!started) answer(null)
+        break
+      }
       case 'remote-host:token': {
         const had = relayCredential()
         relayToken = typeof message.token === 'string' ? message.token : null
@@ -752,6 +842,14 @@ export function startRemoteHost(
         if (!had && now) withRunning(() => client?.resume())
         // Without a token the relay may not be used, so links through it end too.
         if (had && !now) withRunning(() => client?.leaveRelay())
+        break
+      }
+      case 'remote-host:account': {
+        const next = isAccountId(message.account) ? message.account : null
+        if (next === account) break
+        account = next
+        withServing(({ server: s }) => s.accountChanged())
+        withRunning(() => client?.accountChanged())
         break
       }
       case 'remote-host:relay-retry':
@@ -831,17 +929,18 @@ export function startRemoteHost(
         break
       }
       case 'remote-host:admin-event': {
-        const { event, deviceId } = message
+        const { event, deviceId, except } = message
         const valid =
           typeof event === 'object' &&
           event !== null &&
           isHostAdminEvent(event) &&
-          (deviceId === null || typeof deviceId === 'string')
+          (deviceId === null || typeof deviceId === 'string') &&
+          (except === undefined || typeof except === 'string')
         if (!valid) {
           log('warn', 'Ignored an event for devices that is not one')
           break
         }
-        withServing(({ server: s }) => s.adminEvent(event, deviceId))
+        withServing(({ server: s }) => s.adminEvent(event, deviceId, except))
         break
       }
       case 'remote-host:attention': {
@@ -907,18 +1006,24 @@ export function startRemoteHost(
         break
       }
       case 'remote-host:pair-host': {
-        const { pairId, link, model } = message
+        const { pairId, link, model, hostId } = message
         if (!Number.isSafeInteger(pairId) || typeof link !== 'string') break
+        const target =
+          hostId === undefined
+            ? undefined
+            : typeof hostId === 'string' && DEVICE_ID.test(hostId)
+              ? hostId
+              : null
         const payload = parsePairingLink(link)
-        if (!payload) {
+        if (!payload || target === null) {
           send({
             type: 'remote-host:host-pairing',
             pairId,
-            pairing: { state: 'failed', reason: 'void' },
+            pairing: { state: 'failed', reason: target === null ? 'other_host' : 'void' },
           })
           break
         }
-        withClient((c) => c.pair(pairId, payload, typeof model === 'string' ? model : ''))
+        withClient((c) => c.pair(pairId, payload, typeof model === 'string' ? model : '', target))
         break
       }
       case 'remote-host:add-ssh-host': {
@@ -950,7 +1055,12 @@ export function startRemoteHost(
       case 'remote-host:pair-discovered': {
         const { pairId, relayId, model } = message
         if (!Number.isSafeInteger(pairId)) break
-        if (!isRelayHostId(relayId)) {
+        const group = message.group === undefined ? undefined : parsePairGroup(message.group)
+        if (
+          !isRelayHostId(relayId) ||
+          group === null ||
+          (group && !group.hosts.includes(relayId))
+        ) {
           send({
             type: 'remote-host:host-pairing',
             pairId,
@@ -959,13 +1069,19 @@ export function startRemoteHost(
           break
         }
         withClient(async (c) =>
-          c.pairDiscovered(pairId, relayId, await ownKey(), typeof model === 'string' ? model : ''),
+          c.pairDiscovered(
+            pairId,
+            relayId,
+            await ownKey(),
+            typeof model === 'string' ? model : '',
+            group ?? null,
+          ),
         )
         break
       }
       case 'remote-host:pair-match':
         if (Number.isSafeInteger(message.pairId) && typeof message.match === 'boolean') {
-          withClient((c) => c.matchPairing(message.pairId, message.match))
+          withClient((c) => c.matchPairing(message.pairId, message.match, message.reverse === true))
         }
         break
       case 'remote-host:pair-host-close':

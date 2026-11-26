@@ -62,6 +62,11 @@ export interface PermissionRequest {
   /** The shell a command runs in, when it is not a POSIX one. */
   shell?: Shell
   /**
+   * The agent's own judgment of the request, as Antigravity's Auto policy gives it: the host folds
+   * it into its risk level and never answers a risky or destructive one by itself.
+   */
+  risk?: 'safe' | 'risky' | 'destructive'
+  /**
    * The agent does not wait for the answer, so its turn goes on or ends and the card stays until
    * the user answers it or the session closes.
    */
@@ -88,6 +93,16 @@ export interface SessionTarget {
   apply(output: MapperOutput): void
   /** Resolves with the user's answer; rejects with `signal.reason` once the agent withdraws it. */
   requestPermission(request: PermissionRequest, signal: AbortSignal): Promise<PermissionAnswer>
+  /** 当前会话是否存在订阅 `session.permissionRequested` 预检钩子的插件（用于 0 开销跳过未装插件会话）。 */
+  hasPermissionPlugins?(): boolean
+  /**
+   * 在自动放行前执行已安装插件的权限预检钩子（PLUG-7）：插件可拒绝但不能批准。
+   * 未被插件拒绝时返回 null，被拒绝时记录插件拒绝条目并返回拒绝答复。
+   */
+  checkPermissionPlugin?(
+    request: PermissionRequest,
+    signal: AbortSignal,
+  ): Promise<PermissionAnswer | null>
   /**
    * Sends `text` as the user's own message, such as the note that sends a plan back: at once when
    * the session can start a turn, else behind its queue. With `approval`, the message is the
@@ -95,6 +110,11 @@ export interface SessionTarget {
    * `now`, a running turn takes it as it takes a steered message instead of after it ends.
    */
   send(text: string, options?: { approval?: true; now?: true }): void
+  /**
+   * Puts messages the agent took back unsent from a queue of its own, as on a stop, at the front
+   * of the session's queue, paused, as a stopped turn leaves it.
+   */
+  requeue?(texts: readonly string[]): void
   /** The permission mode the settings start the agent's new sessions in, or null for none. */
   startMode(): string | null
   /**
@@ -112,6 +132,8 @@ export interface SessionTarget {
 export interface ConnectionHooks {
   traffic(direction: 'in' | 'out', message: unknown): void
   account(account: AgentAccount): void
+  /** When the agent's stored subscription sign-in ends at the latest, as a turn's result says. */
+  signInEnds?(at: number): void
   /** The providers an agent that signs in to each one itself lists models from (Pi). */
   modelProviders?(providers: ModelProvider[]): void
   /**
@@ -189,6 +211,8 @@ export interface AgentInit {
     steering: boolean
     /** Cuts a session's conversation before a turn, for an edit from a message. */
     rewind?: boolean
+    /** The cut also takes back the files the agent changed since, staged as the edit goes back. */
+    rewindFiles?: boolean
     /** MCP servers over HTTP, which the artifacts service needs. */
     mcpHttp: boolean
     /** MCP servers over the older SSE transport. */
@@ -599,6 +623,8 @@ export interface AgentConnection {
    * own; where not, the host names them ahead of the session's next prompt.
    */
   takesFolders?(sessionId: string): boolean
+  /** Whether the agent starts a turn of its own to report once its background work ends. */
+  readonly reportsBack?: boolean
   readonly isClosed: boolean
   close(): void
 
@@ -654,6 +680,13 @@ export interface AgentConnection {
     point: RewindPoint,
     title: string | null,
   ): Promise<RewoundSession>
+  /**
+   * For an agent with `rewindFiles`: stages the cut before the prompt `point` names as the edit
+   * goes back, which takes back the files changed since; `rewindSession` then commits it.
+   */
+  stageRewind?(sessionId: string, cwd: string, point: RewindPoint): Promise<void>
+  /** Clears what `stageRewind` staged, which returns the files it took back. */
+  unstageRewind?(sessionId: string, cwd: string): Promise<void>
 
   /** Routes a session's updates to `target`, first replaying any that arrived early. */
   register(sessionId: string, target: SessionTarget): void
@@ -755,6 +788,11 @@ export interface AgentConnection {
    * `hiddenSessions` is.
    */
   readonly unpromptedSessions: boolean
+  /**
+   * Whether the tools Kettu's server lists in `autoAllow` run without asking the user, as the
+   * agent is told at start. False or missing where the agent asks for them as for any tool.
+   */
+  readonly allowsKettuTools?: boolean
   /** Removes such a session and drops its late updates; failures go to `log` while it is open. */
   removeHidden(sessionId: string, log: (message: string) => void): Promise<void>
 

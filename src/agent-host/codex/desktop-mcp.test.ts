@@ -114,20 +114,18 @@ describe('the thread configuration that turns them off', () => {
     { name: 'node_repl', plugin: null, command: 'C:\\a\\node_repl.exe' },
   ]
 
-  it('turns off each, keeping a configuration server’s command, and unloads the thread at once', () => {
+  it('turns off each, keeping a configuration server’s command', () => {
     expect(desktopConfig(servers, new Set())).toEqual({
       mcp_servers: { node_repl: { command: 'C:\\a\\node_repl.exe', enabled: false } },
       plugins: {
         'unified-computer-use@openai-bundled': { mcp_servers: { cua_repl: { enabled: false } } },
       },
-      thread_unload_delay_secs: 0,
     })
   })
 
   it('leaves alone those the user let start, and is nothing once none is left', () => {
     expect(desktopConfig(servers, new Set(['cua_repl']))).toEqual({
       mcp_servers: { node_repl: { command: 'C:\\a\\node_repl.exe', enabled: false } },
-      thread_unload_delay_secs: 0,
     })
     expect(desktopConfig(servers, new Set(['cua_repl', 'node_repl']))).toBeNull()
     expect(desktopConfig([], new Set())).toBeNull()

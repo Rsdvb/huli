@@ -199,6 +199,7 @@ export interface McpSetServersResult {
   errors: Record<string, string>
 }
 
+/** A server the query runs or connects to; `pending` while it is still connecting. */
 /** The settings layer a query adds on top of the files. */
 export interface FlagSettings {
   disableAllHooks?: boolean
@@ -264,9 +265,12 @@ export interface QueryOptions {
   mcpServers?: Record<string, McpServerConfig>
   /** Plugin folders loaded for the session beside the user's own plugins. */
   plugins?: { type: 'local'; path: string }[]
-  settings?: FlagSettings
-  /** Huli: the part of the SDK's `SandboxSettings` Kite sets for a sandboxed session. */
-  sandbox?: ClaudeSandboxOption
+  /**
+   * The path of a file of flag settings. The SDK writes settings given inline onto Claude Code's
+   * command line, which other accounts on the computer can read. Huli: a sandboxed session's
+   * `sandbox` goes in the file too, since the SDK refuses its sandbox option beside a file.
+   */
+  settings?: string
   /** Huli: folders Claude Code may work in beside `cwd`, as its `--add-dir` takes them. */
   additionalDirectories?: string[]
   extraArgs?: Record<string, string | null>
@@ -374,6 +378,8 @@ export interface ResultMessage {
   total_cost_usd: number
   usage: ApiUsage
   modelUsage: Record<string, ModelUsage>
+  /** When the claude.ai sign-in the process sends ends at the latest, as an ISO 8601 instant. */
+  credential_expires_at?: string
   session_id: string
 }
 

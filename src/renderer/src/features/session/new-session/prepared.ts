@@ -12,12 +12,14 @@ import {
   optionsOn,
   pickOption,
   picksOf,
+  preparedFor,
   settlePick,
   useAgentOptionsStore,
   type FirstRead,
   type PreparedState,
 } from '@renderer/stores/agent-options'
 import { agentsOn, useAgentsStore } from '@renderer/stores/agents'
+import { carryEffortPicks } from './start-options'
 
 export interface PrepareTarget {
   /** The host the session will be on, null for this computer. */
@@ -178,6 +180,12 @@ export function receivePrepared(summary: SessionSummary, hostId: string | null):
   // A replacement that answered ends the wait; a change to the one held does not.
   const opening = held?.id === summary.id ? current.opening : false
   setPrepared({ ...current, summary, opening, error: null })
+  // The host opened it again after this window's prepare failed, so the picks go to it now.
+  if (!held && current.error !== null) {
+    const picks = picksOf(useAgentOptionsStore.getState(), hostId, summary.agentId) ?? {}
+    for (const [optionId, value] of Object.entries(picks))
+      setOption(hostId, summary.agentId, optionId, value)
+  }
 }
 
 /** A prepared session the window did not discard went, as with its agent's exit. */
@@ -191,14 +199,44 @@ export function preparedRemoved(sessionId: string): boolean {
   return true
 }
 
-/** Sets an option on the prepared session, showing it at once; it stays a pick until it opens. */
+/**
+ * Sets an option on the prepared session, showing it at once; it stays a pick until it opens. A
+ * model's pick carries the effort picked before to a level the model offers, or drops it, so the
+ * first message never waits for a level the model lacks.
+ */
 export function setOption(
   hostId: string | null,
   agentId: AgentId,
   optionId: string,
   value: string | boolean,
 ): void {
+  const state = useAgentOptionsStore.getState()
+  const before = picksOf(state, hostId, agentId) ?? {}
+  const entry = optionsOn(state, hostId)[agentId]
+  const config = preparedFor(state, hostId, agentId)?.summary?.prepared?.config ?? entry?.config
+  const isModel = config?.some((o) => o.id === optionId && o.category === 'model')
   pickOption(hostId, agentId, optionId, value)
+  sendOption(hostId, agentId, optionId, value)
+  if (!config || !isModel || typeof value !== 'string') return
+  const after = carryEffortPicks(config, entry?.levels ?? {}, before, value)
+  for (const [id, effort] of Object.entries(before)) {
+    const carried = after[id]
+    if (carried === effort) continue
+    if (carried === undefined) {
+      settlePick(hostId, agentId, id, effort)
+    } else {
+      pickOption(hostId, agentId, id, carried)
+      sendOption(hostId, agentId, id, carried)
+    }
+  }
+}
+
+function sendOption(
+  hostId: string | null,
+  agentId: AgentId,
+  optionId: string,
+  value: string | boolean,
+): void {
   const { prepared } = useAgentOptionsStore.getState()
   const summary = prepared?.summary
   if (!summary || prepared.hostId !== hostId || summary.agentId !== agentId) return

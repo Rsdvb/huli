@@ -40,6 +40,7 @@ const FAILURES: Record<PairFailure, string> = {
   update_host: '电脑上的纸鸢版本太旧，请先更新电脑端。',
   relay_off: '这个配对码需要中继，而纸鸢不使用中继。请在电脑上用直连的二维码。',
   wrong_account: '这个配对码属于另一个账号。',
+  other_account: '这台电脑登录的是另一个纸鸢账号，请用同一个账号登录后再配对。',
   host_offline: '电脑现在不在线。',
   own_relay: '这台电脑用的是自己的中继，不是纸鸢的中继。请在电脑上用直连的二维码。',
   other_relay: '这个配对码不经过这台中继。请在电脑上重新显示二维码。',

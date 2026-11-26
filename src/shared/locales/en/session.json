@@ -68,6 +68,17 @@
     "refusal": "The model declined to continue",
     "withTime": "{{reason}} · {{time}}"
   },
+  "stillRunning": {
+    "line": "Still running: {{work}}",
+    "lineReports_one": "Still running: {{work}} · reports back when it finishes",
+    "lineReports_other": "Still running: {{work}} · reports back when they finish",
+    "subagents_one": "{{count}} sub-agent",
+    "subagents_other": "{{count}} sub-agents",
+    "commands_one": "{{count}} command",
+    "commands_other": "{{count}} commands",
+    "both": "{{subagents}} and {{commands}}",
+    "openBoard": "Open board"
+  },
   "tool": {
     "verb": {
       "read": "Read",
@@ -177,6 +188,7 @@
     "browser_pdf": "Save page as PDF",
     "browser_trace": "Trace page performance",
     "browser_storage_state": "Saved sign-in state",
+    "browser_resize": "Resize page",
     "device_list": "List devices",
     "device_open": "Open device",
     "device_close": "Close device",
@@ -248,7 +260,12 @@
     "change_settings": "Change settings",
     "request_secrets": "Ask for secrets",
     "read_theme": "Read theme colors",
-    "set_theme_colors": "Change theme colors"
+    "set_theme_colors": "Change theme colors",
+    "list_routines": "List routines",
+    "create_routine": "Create routine",
+    "update_routine": "Change routine",
+    "delete_routine": "Delete routine",
+    "run_routine": "Run routine"
   },
   "agyTool": {
     "invoke_subagent": "Start sub-agent",
@@ -453,16 +470,26 @@
   },
   "projectHooks": {
     "where": "This project’s .claude settings run these commands by themselves, such as when a session starts, on this computer as you. Until you allow them, this session runs no such commands, your own included.",
+    "whereEnv": "This project’s .claude settings set these environment variables for its sessions, which can send requests and your sign-in elsewhere. Until you allow them, each keeps the value it has without this project, or is left empty.",
+    "whereBoth": "This project’s .claude settings run these commands by themselves, such as when a session starts, on this computer as you, and set these environment variables, which can send requests and your sign-in elsewhere. Until you allow them, this session runs no such commands, your own included, and each variable keeps the value it has without this project, or is left empty.",
     "hooks": "Commands",
+    "variables": "Environment variables",
+    "both": "Commands and environment variables",
     "decision": {
       "use": "Run",
       "all": "Always run",
       "skip": "Don’t run"
     },
+    "allow": {
+      "use": "Allow",
+      "all": "Always allow",
+      "skip": "Don’t allow"
+    },
     "answer": {
       "use": "Allowed",
       "all": "All of this project’s allowed",
       "skip": "Not run",
+      "notAllowed": "Not allowed",
       "timeout": "Not answered"
     }
   },
@@ -719,6 +746,7 @@
     "body_other": "This message and everything after it leave the conversation, {{count}} turns in all. The message goes back to the composer.",
     "files_one": "{{count}} file changed since stays as it is",
     "files_other": "{{count}} files changed since stay as they are",
+    "filesBack": "Files changed since go back as they were; Put back restores them",
     "stopsTurn": "Stops the running turn",
     "stopsTasks_one": "Stops {{count}} background task",
     "stopsTasks_other": "Stops {{count}} background tasks",
@@ -751,7 +779,8 @@
     "commit": "Commit and open PR",
     "more_one": "Show {{count}} more file",
     "more_other": "Show {{count}} more files",
-    "fewer": "Show fewer files"
+    "fewer": "Show fewer files",
+    "openInFiles": "Open in Files"
   },
   "queue": {
     "label": "Queued messages: {{count}}",
@@ -925,7 +954,10 @@
       "repo": "Git repository",
       "note": "Only folders are listed, with paths as {{host}} writes them.",
       "opens": "Opens",
-      "open": "Open"
+      "open": "Open",
+      "thisPc": "This PC",
+      "drives": "Drives",
+      "noDrives": "No drives found."
     },
     "role": {
       "group": "Roles",
@@ -966,6 +998,8 @@
         "fix": "Fix",
         "failed": "Failed",
         "signIn": "Sign in",
+        "signInEnding": "Sign-in ending",
+        "signInEnded": "Sign-in may have ended",
         "installing": "Installing…",
         "setsUp": "Sets up",
         "noBalance": "No balance",
@@ -1491,7 +1525,9 @@
       "terminalRename": "rename your terminal",
       "app": "use an app",
       "projectMcp": "start MCP servers",
-      "projectHooks": "run commands this project sets to run automatically"
+      "projectHooks": "run commands this project sets to run automatically",
+      "projectEnv": "use environment variables this project sets",
+      "projectHooksEnv": "run commands and use environment variables this project sets"
     }
   },
   "worktree": {
@@ -1559,20 +1595,7 @@
       "balanced": "Balanced",
       "thorough": "Thorough"
     },
-    "auto": "Auto",
-    "you": "You",
-    "youReview": "You review",
-    "source": {
-      "first": "First step",
-      "pinned": "Pinned",
-      "task": "This task",
-      "you": "You"
-    },
-    "reviews": "Reviews {{steps}}",
     "hint": "“{{hint}}”",
-    "pinnedHint": "Pinned for every task of this workflow, on its Marketplace page",
-    "backToAuto": "Back to Auto",
-    "whoDoes": "Who does {{step}}",
     "pinEveryTask": "Pin steps for every task",
     "suggest": {
       "steps_one": "{{count}} step",
@@ -1696,6 +1719,7 @@
       "lines": {
         "report": {
           "step_open": "The step was open for its report",
+          "answered": "No question or request waits for the user",
           "outcome": "“{{outcome}}” is one of this step's outcomes",
           "outcomePlain": "It reported one of this step's outcomes",
           "note": "The note it hands in is there",
@@ -2626,5 +2650,50 @@
       "open": "View MCP servers",
       "dismiss": "Dismiss"
     }
+  },
+  "routineChange": {
+    "title_create": "New routine",
+    "title_update": "Change routine",
+    "title_delete": "Delete routine",
+    "title_run": "Run routine now",
+    "whoMac_create": "{{agent}} wants to create a routine on this Mac",
+    "whoMac_update": "{{agent}} wants to change a routine on this Mac",
+    "whoMac_delete": "{{agent}} wants to delete a routine on this Mac",
+    "whoMac_run": "{{agent}} wants to run a routine on this Mac now",
+    "whoComputer_create": "{{agent}} wants to create a routine on this computer",
+    "whoComputer_update": "{{agent}} wants to change a routine on this computer",
+    "whoComputer_delete": "{{agent}} wants to delete a routine on this computer",
+    "whoComputer_run": "{{agent}} wants to run a routine on this computer now",
+    "whoOther_create": "{{agent}} wants to create a routine on {{computer}}",
+    "whoOther_update": "{{agent}} wants to change a routine on {{computer}}",
+    "whoOther_delete": "{{agent}} wants to delete a routine on {{computer}}",
+    "whoOther_run": "{{agent}} wants to run a routine on {{computer}} now",
+    "rows": "The routine’s settings",
+    "name": "Name",
+    "state": "State",
+    "on": "On",
+    "off": "Off",
+    "web": "uses the web",
+    "noWeb": "no web",
+    "showAll": "Show all",
+    "showLess": "Show less",
+    "slot_one": "It takes the one slot for runs that work at once.",
+    "slot_other": "It takes one of the {{count}} slots for runs that work at once.",
+    "view": "View in Routines",
+    "decline": "Don’t",
+    "create": "Create",
+    "change": "Change",
+    "delete": "Delete",
+    "run": "Run",
+    "doing": "Working…",
+    "done_create": "Created the routine <b>{{name}}</b>",
+    "done_update": "Changed the routine <b>{{name}}</b>",
+    "done_delete": "Deleted the routine <b>{{name}}</b>",
+    "done_run": "Started a run of <b>{{name}}</b>",
+    "notDone_create": "Didn’t create the routine <b>{{name}}</b>",
+    "notDone_update": "Didn’t change the routine <b>{{name}}</b>",
+    "notDone_delete": "Didn’t delete the routine <b>{{name}}</b>",
+    "notDone_run": "Didn’t run the routine <b>{{name}}</b>",
+    "open": "Open"
   }
 }

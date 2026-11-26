@@ -20,6 +20,9 @@ import {
   fitViewport,
   MAX_SESSION_TABS,
   ORIGIN_WAIT_MS,
+  PAGE_SIZES,
+  samePageSize,
+  SIZE_LINE_ROOM,
   type BrowserBounds,
   type BrowserDownloadRequest,
   type BrowserNotice,
@@ -29,8 +32,9 @@ import {
   type BrowserProfileMode,
   type BrowserState,
   type BrowserTab,
+  type PageSize,
+  type PageSizeName,
   type UploadAnswer,
-  type BrowserViewport,
 } from '@shared/browser'
 import {
   changedEmulation,
@@ -128,16 +132,22 @@ interface Tab {
   restartWait: (() => void) | null
   /** Whether its page's file choosers go to the agent's tools rather than a system dialog. */
   intercepting: boolean
-  /** The size its page keeps once an agent uses it; null while it fills the pane's frame. */
-  viewport: BrowserViewport | null
-  /** The scale its page was last told to draw at; 0 when its page was told none yet. */
-  scale: number
+  /** An agent used it, so its page keeps a size of its own for good. */
+  used: boolean
+  /**
+   * The size the agent or the user picked for it; null for the desktop's, which only a tab an
+   * agent used keeps.
+   */
+  size: PageSize | null
+  /**
+   * What its page was last told: the size it keeps and the scale it draws at, and, Huli, whether
+   * it was an emulated device's, whose touch and user agent the emulation sends; null for none.
+   */
+  told: { size: PageSize; scale: number; emulated: boolean } | null
   /** The latest size or scale its page was told and has not confirmed yet. */
   sizing: Promise<void> | null
   /** Huli: what it emulates (browser_emulate), which its page gets again when made anew. */
   emulation: BrowserEmulation
-  /** Huli: the size it kept before a device's took over, back when the device is off. */
-  baseViewport?: BrowserViewport | null
 }
 
 /** A still of a page that its overlay draws over it while its screenshots are taken. */
@@ -262,6 +272,84 @@ export interface BrowserViewsDeps {
   profileMode?(): BrowserProfileMode
   /** Huli: a download of an agent's page said something for the agent's next result. */
   downloadNote?(sessionId: string, note: string): void
+}
+
+/** How many device pixels a CSS pixel takes on a phone and a tablet; others take the screen's. */
+const PIXEL_RATIO: Partial<Record<PageSize['name'], number>> = { phone: 3, tablet: 2 }
+
+/**
+ * `Emulation.setDeviceMetricsOverride` for a page of `size` that draws at `scale` in its view;
+ * Huli: `ratio` is an emulated device's pixel ratio.
+ */
+function metricsOf(size: PageSize, scale: number, ratio?: number): Record<string, unknown> {
+  return {
+    width: size.width,
+    height: size.height,
+    deviceScaleFactor: ratio ?? PIXEL_RATIO[size.name] ?? 0,
+    mobile: size.mobile,
+    scale,
+    // A phone's screen is as large as its page; a desktop page keeps the real screen's.
+    ...(size.mobile ? { screenWidth: size.width, screenHeight: size.height } : {}),
+    // The view keeps the box the pane has for it.
+    dontSetVisibleSize: true,
+  }
+}
+
+/** The device a size lays a page out as, beyond its size; null for a desktop's. */
+function deviceOf(size: PageSize | undefined): PageSize['name'] | null {
+  return size?.mobile ? size.name : null
+}
+
+/**
+ * What a page laid out as a phone or a tablet is told beyond its size: touch, and the user agent of
+ * Chromium on Android with its client hints, so that pages which ask either take their mobile
+ * layout. For any other size, or none, the page's own come back.
+ */
+function deviceCommands(
+  size: PageSize | null,
+  locale: string | null = null,
+  userAgent = '',
+): [string, Record<string, unknown>][] {
+  // Huli: a locale browser_emulate set keeps the languages the page is sent.
+  const languages = locale ? { acceptLanguage: locale } : {}
+  if (!size?.mobile) {
+    return [
+      ['Emulation.setTouchEmulationEnabled', { enabled: false }],
+      // An empty user agent ends the override.
+      ['Emulation.setUserAgentOverride', locale ? { userAgent, ...languages } : { userAgent: '' }],
+    ]
+  }
+  const phone = size.name === 'phone'
+  const version = process.versions.chrome
+  const major = version.split('.')[0]
+  return [
+    ['Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }],
+    [
+      'Emulation.setUserAgentOverride',
+      {
+        userAgent:
+          `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) ` +
+          `Chrome/${major}.0.0.0 ${phone ? 'Mobile ' : ''}Safari/537.36`,
+        platform: 'Linux armv8l',
+        ...languages,
+        userAgentMetadata: {
+          brands: [
+            { brand: 'Chromium', version: major },
+            { brand: 'Not_A Brand', version: '24' },
+          ],
+          fullVersionList: [
+            { brand: 'Chromium', version },
+            { brand: 'Not_A Brand', version: '24.0.0.0' },
+          ],
+          platform: 'Android',
+          platformVersion: '10.0.0',
+          architecture: '',
+          model: '',
+          mobile: phone,
+        },
+      },
+    ],
+  ]
 }
 
 let nextTab = 1
@@ -497,8 +585,8 @@ export class BrowserViews {
   }
 
   /**
-   * Huli: changes what a tab emulates. A device's size becomes the size its page lays out at, as
-   * an agent's page keeps 1280 by 800, and the size it had comes back when the device is off.
+   * Huli: changes what a tab emulates. A device's size becomes the size its page lays out at, over
+   * the size picked for it (`viewportOf`), which comes back when the device is off.
    */
   async emulate(tabId: string, change: EmulationChange): Promise<BrowserEmulation> {
     const tab = this.tabs.get(tabId)
@@ -518,19 +606,12 @@ export class BrowserViews {
     }
     tab.emulation = after
     if (JSON.stringify(before.device) !== JSON.stringify(after.device)) {
-      if (after.device) {
-        if (tab.baseViewport === undefined) tab.baseViewport = tab.viewport
-        tab.viewport = { width: after.device.width, height: after.device.height }
-      } else if (tab.baseViewport !== undefined) {
-        tab.viewport = tab.baseViewport
-        tab.baseViewport = undefined
-        if (!tab.viewport) {
-          void contents.debugger.sendCommand('Emulation.clearDeviceMetricsOverride').catch(() => {})
-        }
-      }
       this.size(tab, true)
       await tab.sizing
       this.place(tab)
+    } else if (!after.device && before.locale !== after.locale && this.viewportOf(tab)?.mobile) {
+      // A phone or tablet size's user agent goes again over the one the locale's change sent.
+      await this.sendDeviceCommands(tab, contents)
     }
     this.emitTab(tab)
     return after
@@ -871,7 +952,7 @@ export class BrowserViews {
    */
   async steady<T>(tabId: string, capture: () => Promise<T>): Promise<T> {
     const tab = this.tabs.get(tabId)
-    if (!tab?.viewport) return capture()
+    if (!tab || !this.viewportOf(tab)) return capture()
     await this.coverPage(tab)
     try {
       return await capture()
@@ -931,6 +1012,29 @@ export class BrowserViews {
     this.syncOverlay()
     await this.fix(tab)
     if (tab.released && !tab.view && tab.lastUrl) await this.navigateAndWait(tab, tab.lastUrl)
+  }
+
+  /**
+   * The user picked a size for the selected tab's page. The desktop's lets a page an agent never
+   * used fill the pane again, and keeps one it used at the agent's size.
+   */
+  async setPageSize(sessionId: string, name: PageSizeName): Promise<void> {
+    const tab = this.selected(sessionId)
+    if (!tab) return
+    await this.resize(tab, () => {
+      tab.size = name === 'desktop' ? null : PAGE_SIZES[name]
+    })
+  }
+
+  /** An agent's `browser_resize` on its tab, whose page keeps the size from then on. */
+  async resizeAgentTab(tabId: string, size: PageSize): Promise<PageSize> {
+    const tab = this.tabs.get(tabId)
+    if (!tab) throw new Error('The tab closed.')
+    await this.resize(tab, () => {
+      tab.used = true
+      tab.size = size.name === 'desktop' ? null : size
+    })
+    return this.viewportOf(tab) ?? AGENT_VIEWPORT
   }
 
   back(sessionId: string): void {
@@ -1129,8 +1233,9 @@ export class BrowserViews {
       asking: false,
       restartWait: null,
       intercepting: false,
-      viewport: how.agent ? AGENT_VIEWPORT : null,
-      scale: 0,
+      used: how.agent,
+      size: null,
+      told: null,
       sizing: null,
       emulation: NO_EMULATION,
     }
@@ -1361,8 +1466,8 @@ export class BrowserViews {
     this.place(tab)
     this.setVisible(tab, this.isShown(tab))
     this.wire(tab, view)
-    // The page has its size before its first navigation, so it never lays out at another.
-    tab.scale = 0
+    // A popup's page has its frame already; a new page takes its size once its renderer made it.
+    tab.told = null
     this.size(tab)
     // Huli: a page made anew, after its tab was released, emulates what the tab did.
     if (emulating(tab.emulation)) {
@@ -1373,9 +1478,11 @@ export class BrowserViews {
         tab.emulation,
         stripElectronUserAgent(contents.session.getUserAgent()),
         true,
-      ).catch((error: unknown) => {
-        log.warn(`Could not emulate on a page again: ${(error as Error).message}`)
-      })
+      )
+        .then(() => (this.viewportOf(tab)?.mobile ? this.sendDeviceCommands(tab, contents) : null))
+        .catch((error: unknown) => {
+          log.warn(`Could not emulate on a page again: ${(error as Error).message}`)
+        })
     }
     this.deps.created?.(tab.id, view.webContents, tab.sessionId)
     this.syncOverlay()
@@ -1429,10 +1536,42 @@ export class BrowserViews {
     if (at && this.overlayTab === tab.id) this.overlay.move(at)
   }
 
+  /**
+   * The size the tab's page keeps; null while it fills the pane's frame. Huli: a device the tab
+   * emulates (browser_emulate) lays it out at the device's size, over the one picked for it.
+   */
+  private viewportOf(tab: Tab): PageSize | null {
+    const device = tab.emulation.device
+    if (device) {
+      return { name: 'custom', width: device.width, height: device.height, mobile: device.mobile }
+    }
+    return tab.size ?? (tab.used ? AGENT_VIEWPORT : null)
+  }
+
+  /** Huli: what a page laid out at `size` is told beyond it, with the locale the tab emulates. */
+  private deviceCommandsOf(tab: Tab, size: PageSize | null): [string, Record<string, unknown>][] {
+    const contents = this.contentsOf(tab)
+    const userAgent = contents ? stripElectronUserAgent(contents.session.getUserAgent()) : ''
+    return deviceCommands(size, tab.emulation.locale, userAgent)
+  }
+
+  /** Huli: sends a phone or tablet size's touch and user agent again, over the emulation's. */
+  private async sendDeviceCommands(tab: Tab, contents: WebContents): Promise<void> {
+    if (tab.emulation.device) return
+    for (const [method, params] of this.deviceCommandsOf(tab, this.viewportOf(tab))) {
+      await contents.debugger.sendCommand(method, params).catch((error: unknown) => {
+        log.warn(`Could not size a page: ${(error as Error).message}`)
+      })
+    }
+  }
+
   /** The pane's frame for a page that fills it; a page of a fixed size fits inside it, scaled. */
   private fitOf(tab: Tab): { bounds: BrowserBounds; scale: number } {
     const frame = this.browsers.get(tab.sessionId)?.bounds ?? DEFAULT_BOUNDS
-    return tab.viewport ? fitViewport(frame, tab.viewport) : { bounds: frame, scale: 1 }
+    const viewport = this.viewportOf(tab)
+    if (!viewport) return { bounds: frame, scale: 1 }
+    // The pane's size line goes under the page, in the renderer's zoomed pixels.
+    return fitViewport(frame, viewport, Math.round(SIZE_LINE_ROOM * this.overlayZoom()))
   }
 
   private boundsOf(tab: Tab): BrowserBounds {
@@ -1441,46 +1580,72 @@ export class BrowserViews {
 
   /** The scale the tab's page was last told to draw at. */
   private drawnScale(tab: Tab): number {
-    return tab.viewport && tab.scale > 0 ? tab.scale : 1
+    return this.viewportOf(tab) && tab.told ? tab.told.scale : 1
+  }
+
+  /** A tab an agent uses keeps a size of its own from then on, however the pane's frame changes. */
+  private async fix(tab: Tab): Promise<void> {
+    await this.resize(tab, () => {
+      tab.used = true
+    })
   }
 
   /**
-   * A tab an agent uses keeps the agent's size from then on, however the pane's frame changes. Its
-   * page takes the size before its view shrinks to fit, so it never lays out at the smaller box.
+   * Changes the size a tab's page keeps. A page given a size takes it before its view shrinks to
+   * fit, so it never lays out at the smaller box; one that fills the frame again grows with it.
    */
-  private async fix(tab: Tab): Promise<void> {
-    if (tab.viewport) return
-    tab.viewport = AGENT_VIEWPORT
-    this.size(tab)
-    await tab.sizing
+  private async resize(tab: Tab, change: () => void): Promise<void> {
+    const before = this.viewportOf(tab)
+    change()
+    const after = this.viewportOf(tab)
+    if (samePageSize(before, after)) return
+    if (after) {
+      this.size(tab, true)
+      await tab.sizing
+    }
     this.place(tab)
     this.emitTab(tab)
   }
 
   /**
-   * Tells a page of a fixed size how large to lay out and how small to draw in its view, when
-   * either changed or `again` asks. It goes through the page's debugger, whose override every
-   * later navigation of the page keeps.
+   * Tells a page how large to lay out and how small to draw in its view, when either changed or
+   * `again` asks, and a page that fills the frame again to lay out at its view. It goes through
+   * the page's debugger, whose overrides every later navigation of the page keeps. `afresh` clears
+   * them first, since Chromium does not send a size it was told already again.
    */
-  private size(tab: Tab, again = false): void {
+  private size(tab: Tab, again: boolean | 'afresh' = false): void {
     const contents = this.contentsOf(tab)
-    if (!tab.viewport || !contents?.debugger.isAttached()) return
-    const { scale } = this.fitOf(tab)
-    if (!again && tab.scale === scale) return
-    tab.scale = scale
-    const command = contents.debugger
-      .sendCommand('Emulation.setDeviceMetricsOverride', {
-        ...tab.viewport,
-        // Huli: an emulated device's pixel ratio and mobile layout.
-        deviceScaleFactor: tab.emulation.device?.scale ?? 0,
-        mobile: tab.emulation.device?.mobile ?? false,
-        scale,
-        // The view keeps the box the pane has for it.
-        dontSetVisibleSize: true,
-      })
-      .catch((error: unknown) => {
-        log.warn(`Could not size a page: ${(error as Error).message}`)
-      })
+    if (!contents?.debugger.isAttached()) return
+    const viewport = this.viewportOf(tab)
+    const told = tab.told
+    // Huli: an emulated device's touch and user agent are the emulation's (emulation.ts).
+    const device = tab.emulation.device
+    const emulated = device !== null
+    const commands: [string, Record<string, unknown>][] = []
+    if (!viewport) {
+      if (!told) return
+      tab.told = null
+      commands.push(['Emulation.clearDeviceMetricsOverride', {}])
+      if (told.size.mobile && !told.emulated) commands.push(...this.deviceCommandsOf(tab, null))
+    } else {
+      const { scale } = this.fitOf(tab)
+      if (!again && told?.scale === scale && samePageSize(told.size, viewport)) return
+      tab.told = { size: viewport, scale, emulated }
+      if (again === 'afresh') commands.push(['Emulation.clearDeviceMetricsOverride', {}])
+      commands.push([
+        'Emulation.setDeviceMetricsOverride',
+        metricsOf(viewport, scale, device?.scale),
+      ])
+      const was = told?.emulated ? 'emulated' : deviceOf(told?.size)
+      if (!emulated && was !== deviceOf(viewport)) {
+        commands.push(...this.deviceCommandsOf(tab, viewport))
+      }
+    }
+    const command = Promise.all(
+      commands.map(([method, params]) => contents.debugger.sendCommand(method, params)),
+    ).catch((error: unknown) => {
+      log.warn(`Could not size a page: ${(error as Error).message}`)
+    })
     // A page that went away meanwhile may never answer, and an agent's call waits on this.
     const sent: Promise<void> = Promise.race([command, delay(SIZE_MS)]).then(() => {
       if (tab.sizing === sent) tab.sizing = null
@@ -1547,7 +1712,7 @@ export class BrowserViews {
     tab.view = null
     tab.loading = false
     tab.asking = false
-    tab.scale = 0
+    tab.told = null
     if (!view) return
     const window = this.deps.window()
     if (window && !window.isDestroyed()) window.contentView.removeChildView(view)
@@ -1639,6 +1804,14 @@ export class BrowserViews {
       // A navigation held for the user's answer settles when the answer comes.
       if (tab.asking) return
       this.endNavigation(tab, { ok: true, url: contents.getURL(), title: contents.getTitle() })
+    })
+    // Chromium sends the size only to a frame its renderer has made, and sends it again only when a
+    // navigation moves to another frame, so a new page's first frame is told here, before its
+    // document lays out.
+    contents.on('frame-created', (_event, { frame }) => {
+      if (tab.view?.webContents === contents && frame === contents.mainFrame) {
+        this.size(tab, 'afresh')
+      }
     })
     contents.on('did-start-navigation', (details) => {
       if (!details.isMainFrame) return
@@ -1759,7 +1932,7 @@ export class BrowserViews {
       tab.view = null
       tab.loading = false
       tab.asking = false
-      tab.scale = 0
+      tab.told = null
       this.endNavigation(tab, { ok: false, error: 'The page closed.' })
       this.deps.closed?.(tab.id)
       // Nothing of Kettu's closed it, so the page did: `window.close()`.
@@ -2049,7 +2222,8 @@ export class BrowserViews {
       agentTab: browser.strip.agent,
       url: selected ? this.urlOf(selected) : null,
       page: contents !== null,
-      viewport: selected?.viewport ?? null,
+      viewport: selected ? this.viewportOf(selected) : null,
+      agentUsed: selected?.used ?? false,
       title: selected?.lastTitle ?? null,
       loading: selected?.loading ?? false,
       canGoBack: contents?.navigationHistory.canGoBack() ?? false,

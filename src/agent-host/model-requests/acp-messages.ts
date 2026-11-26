@@ -13,7 +13,7 @@ import {
   type RequestTurn,
 } from '@shared/model-requests'
 import type { AgentId } from '@shared/thread'
-import { cachedInInput } from '../acp/mapper'
+import { cachedInInput, GOOSE_SESSION_UPDATE, gooseCallUsage } from '../acp/mapper'
 import { t } from '../i18n'
 import { arr, emptyTokens, num, obj, preview, str, summarizeActions } from './claude-transcript'
 import { foldAll, type ModelRequestsReader } from './reader'
@@ -128,6 +128,21 @@ function acpTokens(usage: Rec | null): RequestTokens {
   }
 }
 
+function addTokens(sum: RequestTokens | null, t: RequestTokens): RequestTokens | null {
+  if (t.input === null && t.output === null) return sum
+  const add = (a: number | null, b: number | null) =>
+    a === null && b === null ? null : (a ?? 0) + (b ?? 0)
+  const base = sum ?? emptyTokens()
+  return {
+    input: add(base.input, t.input),
+    cacheRead: add(base.cacheRead, t.cacheRead),
+    cacheWrite: add(base.cacheWrite, t.cacheWrite),
+    cacheWrite1h: null,
+    output: add(base.output, t.output),
+    reasoning: add(base.reasoning, t.reasoning),
+  }
+}
+
 const textOf = (content: unknown): string =>
   arr(content)
     .map((block) => str(obj(block)?.text) ?? '')
@@ -191,6 +206,11 @@ export function acpTurns(messages: readonly StoredMessage[]): RequestTurn[] {
     const seen: { kind: RequestActionKind; label: string; tool?: string }[] = []
     let result: Rec | null = null
     let failed: string | null = null
+    // The tokens of each model call, for an agent that reports them on a chunk of its own.
+    let chunked: RequestTokens | null = null
+    // goose's model calls, from its own notifications, each message once.
+    let called: RequestTokens | null = null
+    const calledIds = new Set<string>()
     for (const message of received) {
       let m: Rec
       try {
@@ -212,6 +232,13 @@ export function acpTurns(messages: readonly StoredMessage[]): RequestTurn[] {
       } else if (kind === 'agent_message_chunk' && !seen.some((s) => s.kind === 'reply')) {
         seen.push({ kind: 'reply', label: 'Reply' })
       }
+      const usage = kind === 'agent_message_chunk' ? obj(obj(update?._meta)?.usage) : null
+      if (usage) chunked = addTokens(chunked, acpTokens(usage))
+      const call = message.method === GOOSE_SESSION_UPDATE ? gooseCallUsage(m.params) : null
+      if (call && (call.messageId === null || !calledIds.has(call.messageId))) {
+        if (call.messageId !== null) calledIds.add(call.messageId)
+        called = addTokens(called, acpTokens({ ...call.usage }))
+      }
       if (message === end) {
         result = obj(m.result)
         failed = str(obj(m.error)?.message)
@@ -230,7 +257,8 @@ export function acpTurns(messages: readonly StoredMessage[]): RequestTurn[] {
       params: [],
       requestId: null,
       stop,
-      tokens: acpTokens(obj(result?.usage)),
+      tokens:
+        called ?? (obj(result?.usage) ? acpTokens(obj(result?.usage)) : (chunked ?? emptyTokens())),
       actions,
       sent: grouped(sent),
       received: grouped(received),
@@ -296,20 +324,7 @@ export function acpModelRequests(store: AcpMessages): ModelRequestsReader {
       const turns = acpTurns(store.of(target.agentId, target.acpSessionId))
       const tokens = turns
         .map((t) => t.requests[0]!.tokens)
-        .reduce<RequestTokens | null>((sum, t) => {
-          if (t.input === null && t.output === null) return sum
-          const add = (a: number | null, b: number | null) =>
-            a === null && b === null ? null : (a ?? 0) + (b ?? 0)
-          const base = sum ?? emptyTokens()
-          return {
-            input: add(base.input, t.input),
-            cacheRead: add(base.cacheRead, t.cacheRead),
-            cacheWrite: add(base.cacheWrite, t.cacheWrite),
-            cacheWrite1h: null,
-            output: add(base.output, t.output),
-            reasoning: add(base.reasoning, t.reasoning),
-          }
-        }, null)
+        .reduce<RequestTokens | null>(addTokens, null)
       return {
         source: 'acp',
         requests: turns.length,

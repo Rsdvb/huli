@@ -106,10 +106,6 @@ export function desktopConfig(
   return {
     ...(Object.keys(own).length > 0 ? { mcp_servers: own } : {}),
     ...(Object.keys(plugins).length > 0 ? { plugins } : {}),
-    // Codex takes a thread's configuration only as it loads the thread, and keeps one nobody
-    // follows loaded for a minute: unloaded at once, the thread takes a server the user lets
-    // start when Kite opens it again.
-    thread_unload_delay_secs: 0,
   }
 }
 

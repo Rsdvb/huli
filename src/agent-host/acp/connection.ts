@@ -29,11 +29,13 @@ import {
   type ToolCallUpdate,
 } from '@agentclientprotocol/sdk/unstable'
 import type { ContextEstimates } from '@shared/context'
+import type { Platform } from '@shared/platform'
 import type {
   AgentId,
   ConfigOption,
   PendingConfig,
   PermissionOption,
+  TokenTotals,
   ToolEntry,
 } from '@shared/thread'
 import { kiteTasks, KITE_TASKS, KITE_TASKS_META } from './kite-tasks'
@@ -61,10 +63,12 @@ import { agentEntryBefore } from '../artifacts/entries'
 import type { LaunchSpec, MovedAccounts } from '../catalog'
 import type { AgentTransport, MessageTransport } from '../driver'
 import type { Env } from '../find-command'
+import { withHome } from '../shell-env'
 import { t } from '../i18n'
 import { planRevision } from '../plan-revision'
 import {
   addEntry,
+  addTokenTotals,
   isStopReason,
   mergeConfig,
   type MapperContext,
@@ -77,7 +81,10 @@ import {
   antigravityTierSignIn,
 } from '../vendor-usage/antigravity'
 import {
+  GOOSE_SESSION_UPDATE,
   KNOWN_UPDATES,
+  chunkTokens,
+  gooseCallUsage,
   mapAuthStatus,
   mapReportedAuthStatus,
   mapConfig,
@@ -100,6 +107,7 @@ import {
   planWrite,
 } from './agy-plan'
 import {
+  AUTO_MODE,
   FULL_ACCESS,
   HELD_MODE,
   DIR_FLAG_META,
@@ -108,8 +116,15 @@ import {
   lacks,
   offersFullAccess,
   restoreOrder,
-  withFullAccess,
+  withAgyModes,
 } from './agy-access'
+import {
+  AgySessionGrants,
+  AgyUserAskRules,
+  SESSION_ALLOW_OPTION_ID,
+  buildSessionGrantOption,
+  evaluateAgyPermission,
+} from './agy-auto-policy'
 import { AgyCommands } from './agy-commands'
 import { AgyContextEstimator } from './agy-context'
 import { AgyMetrics, agyStepReader, type AgyStepReader } from './agy-metrics'
@@ -118,13 +133,13 @@ import { AGY_ELICITATION, askInCard, asksQuestions, OpenAsks } from './agy-quest
 import {
   AgySubagents,
   agyStore,
+  agyStoreFile,
   followsSubagents,
   PARENT_SESSION_META,
   type AgyStore,
 } from './agy-subagents'
 import { PromptChain, steersAgy, type ChainAnswer } from './agy-steering'
 import {
-  agyAllowOnce,
   agyAutoAllowed,
   agyQuestion,
   agySummary,
@@ -209,6 +224,11 @@ export interface AcpOptions {
   spec?: LaunchSpec
   /** 启动该代理时的环境变量。 */
   env?: Env
+  /**
+   * An added agy agent's own folder, given to its process with `--gemini-dir`: agy's files are
+   * read under it, and its print mode runs with it as the home folder.
+   */
+  home?: string
   /** 读取 agy transcript 单步用量的函数，便于单元测试注入。 */
   agyStepReader?: AgyStepReader
   /** agy 上下文定义估算器，便于单元测试注入。 */
@@ -231,6 +251,12 @@ const CLIENT_CAPABILITIES = {
   // Kilo publishes its terminal sign-in command only to a client that advertises this, and Mistral
   // Vibe its sign-in whose page the client opens.
   _meta: { 'terminal-auth': true, [DELEGATED_SIGN_IN]: true },
+}
+
+/** goose reports each model call's usage only to a client that takes its own notifications. */
+const GOOSE_CLIENT_CAPABILITIES = {
+  ...CLIENT_CAPABILITIES,
+  _meta: { ...CLIENT_CAPABILITIES._meta, goose: { customNotifications: true } },
 }
 
 type AuthMethodMeta = {
@@ -335,13 +361,17 @@ interface AgyPlans {
   last: string | null
 }
 
-/** An agy session as it was opened, to start its process again with or without agy's flag. */
+/** agy 会话的访问模式与重启状态（同时承载完全访问重启与 Kettu 托管 Auto 模式）。 */
 interface AgyAccess {
   cwd: string
   options: SessionOptions
-  /** Its process runs with the flag. */
+  /** 底层进程是否以 `--dangerously-skip-permissions` 启动。 */
   full: boolean
-  /** Its options as Kettu last showed them, Full access among them. */
+  /** 当前是否处于 Kettu 托管的 Auto 模式（底层 agy 保持 default，审批统一经 Kettu 风险引擎）。 */
+  managedAuto: boolean
+  /** 底层 agy 进程当前实际的 mode 值（未覆盖前）。 */
+  rawMode: string | null
+  /** 展示给界面的最新配置列表（含补齐的 auto 与完全访问选项）。 */
   config: ConfigOption[]
   /** 等待当前回合或后台任务结束后切换到的目标模式。 */
   pending: string | null
@@ -447,6 +477,10 @@ export class AcpConnection implements AgentConnection {
   private readonly openAsks = new OpenAsks()
   /** Sessions with a prompt in flight. */
   private readonly prompting = new Set<string>()
+  /** The tokens of the model calls of each prompt in flight, as its message chunks carried them. */
+  private readonly chunkUsage = new Map<string, TokenTotals>()
+  /** goose's model calls of each prompt in flight, from its own notifications, by message id. */
+  private readonly gooseCalls = new Map<string, { tokens: TokenTotals | null; ids: Set<string> }>()
   /** agy's plan files, by session. */
   private readonly agyPlans = new Map<string, AgyPlans>()
   /** The mode each agy session was in before it entered Plan mode, which a plan builds in. */
@@ -461,10 +495,14 @@ export class AcpConnection implements AgentConnection {
   private routesDirectories = false
   /** Huli: the sessions opened with the project's further folders as workspace roots. */
   private readonly foldered = new Set<string>()
-  /** agy's sessions while it offers full access. */
+  /** agy 会话的托管模式与完全访问状态（按 sessionId 索引）。 */
   private readonly agyAccess = new Map<string, AgyAccess>()
   /** Pages a session's elicitation opened, by its id, until the agent says they are done. */
   private readonly openPages = new Map<string, { sessionId: string; entryId: string }>()
+  /** agy 根会话（及其子智能体共享）的「本会话总是允许」授权记忆。 */
+  private readonly agySessionGrants = new Map<string, AgySessionGrants>()
+  /** agy 用户 settings.json 中 permissions.ask 规则缓存（按文件 mtime 自动刷新）。 */
+  private readonly agyUserAskRules = new AgyUserAskRules()
   /** The prompts of each agy turn running, for an agy that takes a message into one. */
   private readonly chains = new Map<string, PromptChain>()
   /** agy's commands, by session: the turn's, and those that outlived theirs. */
@@ -500,16 +538,54 @@ export class AcpConnection implements AgentConnection {
         }
         // A call through Kettu's gateway asks and shows as the tool it runs.
         const asked = this.agy ? throughGateway(ctx.params.toolCall) : ctx.params.toolCall
+        const allowOnceId =
+          ctx.params.options.find((option) => option.kind === 'allow_once')?.optionId ?? null
+        let agyDecision: ReturnType<typeof evaluateAgyPermission> | null = null
+        let agyGrants: AgySessionGrants | undefined
+
         if (this.agy) {
-          // agy 对所有 MCP 工具都会请求授权；Kettu 按全模式白名单及 Auto 模式下可回滚规则自动放行。
-          const optionId = agyAllowOnce(
-            asked,
-            ctx.params.options,
-            this.autoAllowed.get(ctx.params.sessionId),
-            this.agyMode(ctx.params.sessionId) === 'auto',
-          )
-          if (optionId) return { outcome: { outcome: 'selected', optionId } }
+          const rootId = this.agyRootOf(ctx.params.sessionId)
+          const cwd = this.agyOpened.get(rootId)?.cwd ?? null
+          const autoMode = this.agyMode(ctx.params.sessionId) === AUTO_MODE
+          agyGrants = this.agyGrantsOf(rootId)
+          const userAskRules = autoMode
+            ? await this.agyUserAskRules.read(this.hooks.home)
+            : undefined
+          agyDecision = evaluateAgyPermission(asked, {
+            cwd,
+            autoMode,
+            allowed: this.autoAllowed.get(ctx.params.sessionId),
+            sessionGrants: agyGrants,
+            userAskRules,
+            agentHome: this.hooks.home,
+          })
+          if (agyDecision.action === 'allow' && allowOnceId !== null) {
+            // 遵守 PLUG-7：即便命中自动放行，也必须先经过已安装插件的权限预检（插件可拒绝、不能批准）。
+            if (target.hasPermissionPlugins?.() && target.checkPermissionPlugin) {
+              const shaped = fromAgy(asked)
+              const context = target.context()
+              const toolCall = askedCall(shaped, this.naming, context)
+              const { entryId, output } = mapPermissionToolCall(toolCall, context)
+              const denied = await target.checkPermissionPlugin(
+                {
+                  toolCallId: ctx.params.toolCall.toolCallId,
+                  toolEntryId: entryId,
+                  output,
+                  options: mapPermissionOptions(ctx.params.options),
+                },
+                ctx.signal,
+              )
+              if (denied !== null) {
+                const picked = optionAnswer(denied)
+                return picked === 'cancelled'
+                  ? { outcome: { outcome: 'cancelled' } }
+                  : { outcome: { outcome: 'selected', optionId: picked.optionId } }
+              }
+            }
+            return { outcome: { outcome: 'selected', optionId: allowOnceId } }
+          }
         }
+
         const shaped = this.agy
           ? await inWholeFile(
               fromAgy(asked),
@@ -519,19 +595,49 @@ export class AcpConnection implements AgentConnection {
         const context = target.context()
         const toolCall = askedCall(shaped, this.naming, context)
         const { entryId, output } = mapPermissionToolCall(toolCall, context)
+        const options = mapPermissionOptions(ctx.params.options)
+        // agy ACP 仅提供 allow_once / reject_once；对非高危拦截补齐「本会话总是允许」选项。
+        if (
+          this.agy &&
+          agyDecision?.action === 'ask' &&
+          agyDecision.sessionGrant &&
+          allowOnceId !== null &&
+          !options.some((option) => option.kind === 'allow_always')
+        ) {
+          const insertAt = options.findIndex((option) => option.kind === 'allow_once')
+          const sessionOption = buildSessionGrantOption(agyDecision.sessionGrant)
+          if (insertAt >= 0) options.splice(insertAt + 1, 0, sessionOption)
+          else options.unshift(sessionOption)
+        }
         const answer = await target.requestPermission(
           {
             toolCallId: ctx.params.toolCall.toolCallId,
             toolEntryId: entryId,
             output,
-            options: mapPermissionOptions(ctx.params.options),
+            options,
+            ...(agyDecision?.action === 'ask'
+              ? {
+                  risk: agyDecision.risk,
+                  ...(agyDecision.reason ? { reason: agyDecision.reason } : {}),
+                }
+              : {}),
           },
           ctx.signal,
         )
         const picked = optionAnswer(answer)
-        return picked === 'cancelled'
-          ? { outcome: { outcome: 'cancelled' } }
-          : { outcome: { outcome: 'selected', optionId: picked.optionId } }
+        if (picked === 'cancelled') return { outcome: { outcome: 'cancelled' } }
+        // 用户点击 Kettu 合成的「本会话总是允许」时记住授权，并把原 allow_once ID 回传给 agy。
+        if (
+          this.agy &&
+          picked.optionId === SESSION_ALLOW_OPTION_ID &&
+          agyDecision?.action === 'ask' &&
+          agyDecision.sessionGrant &&
+          allowOnceId !== null
+        ) {
+          agyGrants?.add(agyDecision.sessionGrant)
+          return { outcome: { outcome: 'selected', optionId: allowOnceId } }
+        }
+        return { outcome: { outcome: 'selected', optionId: picked.optionId } }
       })
       .onRequest(methods.client.elicitation.create, async (ctx) => {
         const sessionId = (ctx.params as { sessionId?: unknown }).sessionId
@@ -597,21 +703,31 @@ export class AcpConnection implements AgentConnection {
           target.apply({ patches: [], effects: listed.effects })
         },
       )
+      // Only its per-call usage is read; its status, context and voice updates are not shown.
+      .onNotification(
+        GOOSE_SESSION_UPDATE,
+        (params: unknown) => params,
+        (ctx) => this.countGooseCall(ctx.params),
+      )
       .onNotification('*', (ctx) => {
         // `$/cancel_request` is handled by the SDK itself before it reaches here.
         if (!ctx.method.startsWith('$/')) hooks.ignored(null, `notification ${ctx.method}`)
       })
     this.connection = app.connect(this.tap(transport.stream))
     if (this.agy) {
-      this.agyMetrics = new AgyMetrics(hooks.agyStepReader ?? agyStepReader(), {
+      this.agyMetrics = new AgyMetrics(hooks.agyStepReader ?? agyStepReader(hooks.home), {
         target: (id) => this.targets.get(id),
       })
+      // agy's print mode takes no `--gemini-dir`, so an added agent's runs with its folder as home.
+      const platform = process.platform as Platform
       const estimator =
         hooks.agyContext ??
         new AgyContextEstimator({
           program: hooks.spec?.command,
           args: hooks.spec?.args.filter((arg) => arg !== 'acp'),
-          env: hooks.env,
+          env: hooks.home && hooks.env ? withHome(hooks.env, hooks.home, platform) : hooks.env,
+          platform,
+          ...(hooks.home ? { home: hooks.home } : {}),
         })
       this.readContextEstimates = (sessionId, cwd) => {
         const opened = this.agyOpened.get(sessionId)
@@ -749,15 +865,39 @@ export class AcpConnection implements AgentConnection {
     if (this.agy) this.autoAllowed.set(sessionId, agyAutoAllowed(options.mcpServers))
   }
 
+  /** 沿子智能体父链查找 agy 会话对应的根会话 ID。 */
+  private agyRootOf(sessionId: string): string {
+    let root = sessionId
+    const seen = new Set<string>()
+    while (this.subagentParents.has(root) && !seen.has(root)) {
+      seen.add(root)
+      root = this.subagentParents.get(root)!
+    }
+    return root
+  }
+
+  /** 获取或创建 agy 根会话共享的「本会话总是允许」记忆对象。 */
+  private agyGrantsOf(rootId: string): AgySessionGrants {
+    let grants = this.agySessionGrants.get(rootId)
+    if (!grants) {
+      grants = new AgySessionGrants(process.platform as Platform)
+      this.agySessionGrants.set(rootId, grants)
+    }
+    return grants
+  }
+
   /** 读取 agy 会话（含子智能体继承自父会话）当前生效的权限模式值。 */
   private agyMode(sessionId: string): string | null {
     let id: string | undefined = sessionId
     const seen = new Set<string>()
     while (id && !seen.has(id)) {
       seen.add(id)
+      const access = this.agyAccess.get(id)
+      if (access?.full) return FULL_ACCESS
+      if (access?.managedAuto) return AUTO_MODE
       const mode =
         currentMode(this.targets.get(id)?.context().thread.session.config ?? []) ??
-        currentMode(this.agyAccess.get(id)?.config ?? [])
+        currentMode(access?.config ?? [])
       if (mode !== null) return mode
       id = this.subagentParents.get(id)
     }
@@ -767,6 +907,10 @@ export class AcpConnection implements AgentConnection {
   /** Whether the agent is agy, whose tool calls take a shape of their own. */
   private get agy(): boolean {
     return this.hooks.agentId === 'antigravity'
+  }
+
+  private get goose(): boolean {
+    return this.hooks.agentId === 'goose'
   }
 
   private map(update: SessionUpdate, ctx: MapperContext): MapperOutput {
@@ -806,6 +950,7 @@ export class AcpConnection implements AgentConnection {
     if (this.muted.has(sessionId)) return
     this.learnChild(sessionId, update)
     const target = this.targets.get(sessionId)
+    this.countChunk(sessionId, update, target)
     if (target) {
       this.notePlanWrite(sessionId, update)
       const replaying = target.context().replaying
@@ -841,6 +986,31 @@ export class AcpConnection implements AgentConnection {
       this.pending.set(sessionId, entry)
     }
     if (entry.updates.length < PENDING_UPDATES) entry.updates.push(update)
+  }
+
+  /** Adds a model call's tokens that a chunk of a turn in flight carries, never a replayed one's. */
+  private countChunk(sessionId: string, update: SessionUpdate, target?: SessionTarget): void {
+    if (!this.prompting.has(sessionId) || target?.context().replaying) return
+    const tokens = chunkTokens(update)
+    if (!tokens) return
+    this.chunkUsage.set(sessionId, addTokenTotals(this.chunkUsage.get(sessionId) ?? null, tokens))
+  }
+
+  /** Adds a model call of a goose turn in flight, each message once, never a replayed one's. */
+  private countGooseCall(params: unknown): void {
+    const sessionId = (params as { sessionId?: unknown } | null | undefined)?.sessionId
+    if (typeof sessionId !== 'string' || !this.prompting.has(sessionId)) return
+    if (this.targets.get(sessionId)?.context().replaying) return
+    const call = gooseCallUsage(params)
+    if (!call) return
+    const turn = this.gooseCalls.get(sessionId) ?? { tokens: null, ids: new Set<string>() }
+    if (call.messageId !== null) {
+      if (turn.ids.has(call.messageId)) return
+      turn.ids.add(call.messageId)
+    }
+    const tokens = mapTokenTotals(call.usage)
+    if (tokens) turn.tokens = addTokenTotals(turn.tokens, tokens)
+    this.gooseCalls.set(sessionId, turn)
   }
 
   private learnChild(sessionId: string, update: SessionUpdate): void {
@@ -958,7 +1128,9 @@ export class AcpConnection implements AgentConnection {
           clientInfo: { name: 'Kettu', title: 'Kettu', version: appVersion },
           clientCapabilities: this.agy
             ? { ...CLIENT_CAPABILITIES, elicitation: AGY_ELICITATION }
-            : CLIENT_CAPABILITIES,
+            : this.goose
+              ? GOOSE_CLIENT_CAPABILITIES
+              : CLIENT_CAPABILITIES,
         },
         signal ? { cancellationSignal: signal } : undefined,
       ),
@@ -1023,7 +1195,7 @@ export class AcpConnection implements AgentConnection {
     this.subagents?.stop()
     this.subagents =
       this.agy && followsSubagents(result.version)
-        ? new AgySubagents(this.hooks.agyStore ?? agyStore(), {
+        ? new AgySubagents(this.hooks.agyStore ?? agyStore(agyStoreFile(this.hooks.home)), {
             target: (id) => this.targets.get(id),
             prompting: (id) => this.prompting.has(id),
             load: (childId, parentId, quiet) => this.loadSubagent(childId, parentId, quiet),
@@ -1303,12 +1475,15 @@ export class AcpConnection implements AgentConnection {
   private forgetSession(sessionId: string): void {
     this.autoAllowed.delete(sessionId)
     this.agyAccess.delete(sessionId)
+    this.agySessionGrants.delete(sessionId)
     this.agyCommands.delete(sessionId)
     this.agyOpened.delete(sessionId)
     this.subagentParents.delete(sessionId)
     this.subagents?.forget(sessionId)
     this.foldered.delete(sessionId)
     this.agyMetrics?.forget(sessionId)
+    this.chunkUsage.delete(sessionId)
+    this.gooseCalls.delete(sessionId)
   }
 
   async listSessions(
@@ -1365,7 +1540,11 @@ export class AcpConnection implements AgentConnection {
       this.agyPlans.set(sessionId, { calls: new Map(), written: null, last: plans?.last ?? null })
     }
     this.prompting.add(sessionId)
+    this.chunkUsage.delete(sessionId)
+    this.gooseCalls.delete(sessionId)
     let answer: ChainAnswer | null = null
+    let chunked: TokenTotals | null
+    let called: TokenTotals | null
     let failed = false
     try {
       await this.agyMetrics?.preparePrompt(sessionId)
@@ -1391,6 +1570,10 @@ export class AcpConnection implements AgentConnection {
       throw error
     } finally {
       this.prompting.delete(sessionId)
+      chunked = this.chunkUsage.get(sessionId) ?? null
+      this.chunkUsage.delete(sessionId)
+      called = this.gooseCalls.get(sessionId)?.tokens ?? null
+      this.gooseCalls.delete(sessionId)
       const aborted = failed || answer?.response.stopReason === 'cancelled'
       this.carryCommands(sessionId, aborted)
       this.subagents?.turnEnded(sessionId)
@@ -1399,7 +1582,9 @@ export class AcpConnection implements AgentConnection {
     const { response, tokens, models } = answer!
     const result: PromptResult = {
       stopReason: isStopReason(response.stopReason) ? response.stopReason : 'end_turn',
-      tokens,
+      // What the response reports wins, so a call is never counted from both; goose's response
+      // holds only its latest call, so the sum of its calls wins there.
+      tokens: (this.goose ? called : null) ?? tokens ?? (models.length === 0 ? chunked : null),
       models,
     }
     this.agyMetrics?.onPromptEnd(sessionId, result.stopReason)
@@ -1657,19 +1842,46 @@ export class AcpConnection implements AgentConnection {
     const access = this.agyAccess.get(sessionId)
     if (access) {
       await access.restarting
-      if (optionId === MODE_OPTION && typeof value === 'string') {
+    }
+    if (this.agy && optionId === MODE_OPTION && value === PLAN_MODE) {
+      const mode =
+        this.agyMode(sessionId) ??
+        currentMode(this.targets.get(sessionId)?.context().thread.session.config ?? [])
+      if (mode !== null && mode !== PLAN_MODE) this.agyBuildModes.set(sessionId, mode)
+    }
+    if (access && optionId === MODE_OPTION && typeof value === 'string') {
+      // 进入或退出完全访问（或取消挂起中的完全访问切换）需要走 switchAccess 逻辑。
+      if ((this.fullAccess && value === FULL_ACCESS) || access.full || access.pending !== null) {
         const switched = await this.switchAccess(sessionId, access, value)
         if (switched) return switched
       }
-    }
-    if (this.agy && optionId === MODE_OPTION && value === PLAN_MODE) {
-      const config = this.targets.get(sessionId)?.context().thread.session.config ?? []
-      const mode = currentMode(config)
-      if (mode !== null && mode !== PLAN_MODE) this.agyBuildModes.set(sessionId, mode)
+      // 切入 Kettu 托管 Auto 模式：底层 agy 保持 default，由 Kettu 统一做风险评估与审批拦截。
+      if (value === AUTO_MODE) {
+        let base = access.config
+        if (access.rawMode !== HELD_MODE) {
+          base = await this.requestConfig(sessionId, MODE_OPTION, HELD_MODE)
+          access.rawMode = currentMode(base) ?? HELD_MODE
+        }
+        access.managedAuto = true
+        access.config = this.formatAgyConfig(base, access, this.pendingState(sessionId, access))
+        return access.config
+      }
+      // 从托管 Auto 切回 default：底层已在 default 时无需冗余 RPC，直接还原展示值。
+      if (value === HELD_MODE && access.managedAuto && access.rawMode === HELD_MODE) {
+        access.managedAuto = false
+        access.config = this.formatAgyConfig(
+          withModeValue(access.config, HELD_MODE),
+          access,
+          this.pendingState(sessionId, access),
+        )
+        return access.config
+      }
+      access.managedAuto = false
     }
     const config = await this.requestConfig(sessionId, optionId, value)
     if (!access) return config
-    access.config = withFullAccess(config, access.full, this.pendingState(sessionId, access))
+    access.rawMode = currentMode(config) ?? access.rawMode
+    access.config = this.formatAgyConfig(config, access, this.pendingState(sessionId, access))
     return access.config
   }
 
@@ -1689,7 +1901,21 @@ export class AcpConnection implements AgentConnection {
     return this.config(response.configOptions, null)
   }
 
-  // agy's full access.
+  // agy 的托管模式与完全访问切换。
+
+  /** 按当前托管状态组装展示给 UI 的 agy 配置列表。 */
+  private formatAgyConfig(
+    config: readonly ConfigOption[],
+    access: Pick<AgyAccess, 'full' | 'managedAuto'>,
+    pending: PendingConfig | null = null,
+  ): ConfigOption[] {
+    return withAgyModes(config, {
+      full: access.full,
+      managedAuto: access.managedAuto,
+      includeFull: this.fullAccess,
+      pending,
+    })
+  }
 
   /** 计算当前会话在完全访问切换上的挂起/重启状态。 */
   private pendingState(sessionId: string, access: AgyAccess): PendingConfig | null {
@@ -1704,8 +1930,7 @@ export class AcpConnection implements AgentConnection {
   }
 
   /**
-   * Notes an agy session that was just opened, its process started with the flag when `full`, and
-   * returns its options with Full access among them.
+   * 记录刚打开的 agy 会话状态，并按托管策略补齐 Auto 与完全访问模式选项。
    */
   private opened(
     sessionId: string,
@@ -1714,12 +1939,16 @@ export class AcpConnection implements AgentConnection {
     config: ConfigOption[],
     full = false,
   ): ConfigOption[] {
-    if (!this.fullAccess) return config
-    const shown = withFullAccess(config, full)
+    if (!this.agy) return config
+    const rawMode = currentMode(config)
+    const state = { full, managedAuto: false }
+    const shown = this.formatAgyConfig(config, state)
     this.agyAccess.set(sessionId, {
       cwd,
       options,
       full,
+      managedAuto: false,
+      rawMode,
       config: shown,
       pending: null,
       switching: null,
@@ -1728,7 +1957,7 @@ export class AcpConnection implements AgentConnection {
     return shown
   }
 
-  /** 将 agy 上报的配置更新合并上完全访问选项与挂起状态，避免覆盖正在切换中的 UI 显示。 */
+  /** 将 agy 上报的配置更新合并上托管 Auto、完全访问选项与挂起状态，避免被底层 default 覆盖。 */
   private withAccess(sessionId: string, out: MapperOutput): MapperOutput {
     const access = this.agyAccess.get(sessionId)
     if (!access) return out
@@ -1740,16 +1969,13 @@ export class AcpConnection implements AgentConnection {
         const keptMode = currentMode(access.config)
         const stabilized =
           keptMode !== null && !access.full
-            ? patch.changes.config.map((option) =>
-                option.id === MODE_OPTION && option.type === 'select'
-                  ? { ...option, value: keptMode }
-                  : option,
-              )
+            ? withModeValue(patch.changes.config, keptMode)
             : patch.changes.config
-        patch.changes.config = withFullAccess(stabilized, access.full, pending)
+        patch.changes.config = this.formatAgyConfig(stabilized, access, pending)
         continue
       }
-      access.config = withFullAccess(patch.changes.config, access.full, pending)
+      access.rawMode = currentMode(patch.changes.config) ?? access.rawMode
+      access.config = this.formatAgyConfig(patch.changes.config, access, pending)
       patch.changes.config = access.config
     }
     return out
@@ -1768,12 +1994,12 @@ export class AcpConnection implements AgentConnection {
       const hadPending = access.pending !== null
       access.pending = null
       if (full) {
-        access.config = withFullAccess(access.config, true)
+        access.config = this.formatAgyConfig(access.config, access)
         return access.config
       }
       // 取消之前挂起的完全访问切换（重新选中当前已生效模式）时直接清掉 pending，无需再发 RPC。
       if (hadPending && currentMode(access.config) === mode) {
-        access.config = withFullAccess(access.config, false)
+        access.config = this.formatAgyConfig(access.config, access)
         return access.config
       }
       return null
@@ -1781,9 +2007,9 @@ export class AcpConnection implements AgentConnection {
     // 重启会中断当前回合以及跨回合运行的后台命令或子智能体，挂起并向界面同步等待原因。
     if (this.prompting.has(sessionId) || this.runsCommands(sessionId)) {
       access.pending = mode
-      access.config = withFullAccess(
+      access.config = this.formatAgyConfig(
         access.config,
-        access.full,
+        access,
         this.pendingState(sessionId, access),
       )
       return access.config
@@ -1803,7 +2029,7 @@ export class AcpConnection implements AgentConnection {
       const next = this.pendingState(sessionId, access)
       const prev = access.config.find((option) => option.id === MODE_OPTION)?.pending
       if (next && (prev?.wait !== next.wait || prev?.value !== next.value)) {
-        access.config = withFullAccess(access.config, access.full, next)
+        access.config = this.formatAgyConfig(access.config, access, next)
         this.targets.get(sessionId)?.apply({
           patches: [{ op: 'session.update', changes: { config: access.config } }],
           effects: [],
@@ -1853,7 +2079,12 @@ export class AcpConnection implements AgentConnection {
     full: boolean,
     mode: string,
   ): Promise<ConfigOption[]> {
-    const before = { full: access.full, config: withFullAccess(access.config, access.full) }
+    const before = {
+      full: access.full,
+      managedAuto: access.managedAuto,
+      rawMode: access.rawMode,
+      config: this.formatAgyConfig(access.config, access),
+    }
     const was = currentMode(before.config)
     access.switching = mode
     this.targets.get(sessionId)?.apply({
@@ -1861,7 +2092,7 @@ export class AcpConnection implements AgentConnection {
         {
           op: 'session.update',
           changes: {
-            config: withFullAccess(before.config, before.full, {
+            config: this.formatAgyConfig(before.config, before, {
               value: mode,
               wait: 'restarting',
             }),
@@ -1886,6 +2117,8 @@ export class AcpConnection implements AgentConnection {
           )
         } catch {
           access.full = before.full
+          access.managedAuto = before.managedAuto
+          access.rawMode = before.rawMode
           access.config = before.config
         } finally {
           access.switching = null
@@ -1923,7 +2156,9 @@ export class AcpConnection implements AgentConnection {
       ...this.directories(sessionId, access.options),
       ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
     })
+    const managedAuto = !full && mode === AUTO_MODE
     access.full = full
+    access.managedAuto = managedAuto
     this.subagents?.restarted(sessionId)
     this.readPlan(response._meta)
     this.allowWithoutAsking(sessionId, access.options)
@@ -1939,11 +2174,12 @@ export class AcpConnection implements AgentConnection {
         )
       }
     }
-    const wanted = full ? HELD_MODE : mode
+    const wanted = full || managedAuto ? HELD_MODE : mode
     if (currentMode(config) !== wanted) {
       config = await this.requestConfig(sessionId, MODE_OPTION, wanted)
     }
-    access.config = withFullAccess(config, full)
+    access.rawMode = currentMode(config) ?? wanted
+    access.config = this.formatAgyConfig(config, access)
     return access.config
   }
 
@@ -2025,6 +2261,11 @@ export class AcpConnection implements AgentConnection {
     return this.removal !== null
   }
 
+  /** agy asks for every MCP tool, and Kettu answers for those it allows; other agents ask the user. */
+  get allowsKettuTools(): boolean {
+    return this.agy
+  }
+
   async removeHidden(sessionId: string, log: (message: string) => void): Promise<void> {
     this.unregister(sessionId)
     this.unprompted.delete(sessionId)
@@ -2042,6 +2283,13 @@ export class AcpConnection implements AgentConnection {
       setTimeout(() => void this.deleteSession(sessionId).catch(failed), delay).unref()
     }
   }
+}
+
+/** 返回将 `mode` 选项值覆盖为 `mode` 后的配置副本。 */
+function withModeValue(config: readonly ConfigOption[], mode: string): ConfigOption[] {
+  return config.map((option) =>
+    option.id === MODE_OPTION && option.type === 'select' ? { ...option, value: mode } : option,
+  )
 }
 
 /** The `sessionUpdate` of a `session/update` notification the SDK does not know, or null. */

@@ -78,6 +78,13 @@ import {
   SETTINGS_TOOLS,
   type SettingsTools,
 } from '../settings/tools'
+import {
+  isRoutineToolName,
+  ROUTINE_ASKING_TOOLS,
+  ROUTINE_TOOL_NAMES,
+  ROUTINE_TOOLS,
+  type RoutineTools,
+} from '../routines/tools'
 import type { LogFn } from '../storage'
 import {
   SessionTools,
@@ -101,6 +108,14 @@ import {
   PLAN_TOOLS,
   type PlanToolsDeps,
 } from '../plan-tool'
+import {
+  isSuggestToolName,
+  SUGGEST_PROMPT,
+  SUGGEST_TOOL,
+  SUGGEST_TOOLS,
+  SuggestTools,
+  type SuggestToolsDeps,
+} from '../next-message'
 import {
   isWorkflowToolName,
   WORKFLOW_TOOL_NAMES,
@@ -192,6 +207,7 @@ const TOOL_GROUPS: ReadonlyMap<string, McpToolGroup> = new Map(
       [SESSION_TOOLS, 'sessions'],
       [PLAN_TOOLS, 'sessions'],
       [NOTIFY_TOOLS, 'sessions'],
+      [SUGGEST_TOOLS, 'sessions'],
       [TOOLS, 'artifacts'],
       [DATA_TOOLS, 'artifacts'],
       [BROWSER_TOOLS, 'browser'],
@@ -207,6 +223,7 @@ const TOOL_GROUPS: ReadonlyMap<string, McpToolGroup> = new Map(
       [SECRET_TOOLS, 'secrets'],
       [THEME_TOOLS, 'theme'],
       [WEB_READER_TOOLS, 'browser'],
+      [ROUTINE_TOOLS, 'routines'],
     ] as const
   )
     .flatMap(([tools, group]) => tools.map((tool) => [tool.name, group] as const))
@@ -231,6 +248,7 @@ const TOPIC_GROUPS: Partial<Record<GuideTopic, McpToolGroup>> = {
   computer: 'computer',
   marketplace: 'marketplace',
   settings: 'settings',
+  routines: 'routines',
 }
 
 /** The tools that wait for the user's answer in the session before they act. */
@@ -240,6 +258,7 @@ const ASKING_TOOLS: ReadonlySet<string> = new Set([
   CHANGE_SETTINGS,
   REQUEST_SECRETS,
   SET_THEME_COLORS,
+  ...ROUTINE_ASKING_TOOLS,
 ])
 
 /** Serves the computer use tools, on a host that carries the driver. */
@@ -294,6 +313,11 @@ export interface ArtifactServiceDeps extends ArtifactToolsDeps {
   report: ReportToolsDeps
   /** Huli: where the notify tool raises its notes; without it every call fails. */
   notify?: NotifyToolsDeps
+  /**
+   * Where the next-message tool keeps a turn's suggestion, which only the sessions that suggest by
+   * it are listed; without it none is.
+   */
+  suggest?: SuggestToolsDeps
   /** Kettu's memory behind the memory tools, listed only while it is on; without it none. */
   memory?: MemoryToolsDeps
   /** Whether the agent's session `id` is a subagent that runs under a session of its own. */
@@ -326,6 +350,8 @@ export interface ArtifactServiceDeps extends ArtifactToolsDeps {
   features?: () => Partial<Record<string, boolean>> | undefined
   /** Huli: background web reading with Moli, listed only while its feature is on; without it none. */
   webReader?: WebReaderCalls
+  /** The Routine tools of the host's Routines; without them the service lists none. */
+  routines?: RoutineTools
   /** The tools the plugins that are on give agents; without it the service lists none. */
   plugins?: PluginTools
   /** The skills behind the skill tools, which only an agent that loads no skill folders gets. */
@@ -345,6 +371,8 @@ interface SessionGrant {
   own: boolean
   /** Lists the core tools and the gateway to the rest, for an agent that drops tools. */
   gateway: boolean
+  /** Lists the next-message tool, for an agent that suggests by it. */
+  suggests: boolean
 }
 
 /** A token for one agent process and folder, whose calls name their session in `_meta`. */
@@ -356,6 +384,7 @@ interface FolderGrant {
   sessions: Set<string>
   own: boolean
   gateway: boolean
+  suggests: boolean
 }
 
 type Grant = SessionGrant | FolderGrant
@@ -376,6 +405,7 @@ function entry(url: string, token: string, prompt: string): McpServer[] {
       // Kettu 内置安全只读及自带内部确认卡的工具：在所有模式下自动放行，不重复弹出 Agent 权限卡。
       autoAllow: [
         PLAN_TOOL,
+        SUGGEST_TOOL,
         ...ARTIFACT_READ_TOOLS,
         ...DATA_READ_TOOLS,
         ...TERMINAL_READ_TOOLS,
@@ -393,6 +423,7 @@ function entry(url: string, token: string, prompt: string): McpServer[] {
         ...SETTINGS_TOOL_NAMES,
         ...SECRET_TOOL_NAMES,
         ...THEME_TOOL_NAMES,
+        ...ROUTINE_TOOL_NAMES,
       ],
       // 仅在 Auto 权限模式下自动放行的可回滚内置工具（不可逆删除、高危终端命令、桌面点击/键入与插件工具仍需确认）。
       autoModeAllow: [
@@ -446,6 +477,7 @@ export class ArtifactService {
   private readonly planTools: PlanTools
   private readonly reportTools: ReportTools
   private readonly notifyTools: NotifyTools
+  private readonly suggestTools: SuggestTools | null
   private readonly memoryTools: MemoryTools | null
   private readonly browserTools: BrowserTools
   private readonly deviceTools: DeviceTools | null
@@ -466,6 +498,7 @@ export class ArtifactService {
     this.planTools = new PlanTools(deps.plan)
     this.reportTools = new ReportTools(deps.report)
     this.notifyTools = new NotifyTools(deps.notify ?? { notify: () => 'none' })
+    this.suggestTools = deps.suggest ? new SuggestTools(deps.suggest) : null
     this.memoryTools = deps.memory ? new MemoryTools(deps.memory) : null
     this.workflowTools = deps.workflow ? new WorkflowTools(deps.workflow) : null
     this.managerTools = deps.manager ? new ManagerTools(deps.manager) : null
@@ -608,15 +641,17 @@ export class ArtifactService {
    * The paragraph that goes into an agent's own instructions, or ahead of its first prompt: where
    * Kettu's tools are, and the skills or the guide's topics that say when to use them.
    */
-  guidePrompt(skills: boolean, gateway = false): string {
+  guidePrompt(skills: boolean, gateway = false, suggests = false): string {
     const text = guidePrompt(this.guideFlags, skills, gateway)
     // Another ACP agent reads the plan's rules in set_plan's description, which this one may drop.
-    return gateway ? `${text}\n\n${PLAN_PROMPT}` : text
+    const plan = gateway ? `${text}\n\n${PLAN_PROMPT}` : text
+    return suggests && this.suggestTools ? `${plan}\n\n${SUGGEST_PROMPT}` : plan
   }
 
   /** The prompt an agent that reads the servers' prompts puts into its instructions. */
-  private prompt(gateway: boolean): string {
-    return `${guidePrompt(this.guideFlags, true, gateway)}\n\n${PLAN_PROMPT}`
+  private prompt(gateway: boolean, suggests: boolean): string {
+    const text = `${guidePrompt(this.guideFlags, true, gateway)}\n\n${PLAN_PROMPT}`
+    return suggests && this.suggestTools ? `${text}\n\n${SUGGEST_PROMPT}` : text
   }
 
   /** What `tools/list` answers now: for an agent that drops tools, the core and the gateway. */
@@ -645,6 +680,8 @@ export class ArtifactService {
       ...(skills ? SKILL_TOOLS : []),
       ...(this.terminalTools?.listed(service) ?? service),
       ...managing,
+      // Without a session, as for the Marketplace's page, while some agent may get it.
+      ...(this.suggestTools && (grant ? grant.suggests : true) ? SUGGEST_TOOLS : []),
       ...(this.memoryOn ? MEMORY_TOOLS : []),
       ...(this.marketOn ? MARKET_TOOLS : []),
       ...(this.workflowTools?.listed(sessionId) ?? []),
@@ -652,7 +689,8 @@ export class ArtifactService {
       ...(this.deps.secrets ? SECRET_TOOLS : []),
       ...(this.deps.theme ? THEME_TOOLS : []),
       ...(this.deps.webReader ? WEB_READER_TOOLS : []),
-      ...(this.deps.plugins?.listed() ?? []),
+      ...(this.deps.routines ? ROUTINE_TOOLS : []),
+      ...(this.deps.plugins?.listed(sessionId) ?? []),
     ].filter((tool) => !this.toolOff(tool.name))
   }
 
@@ -683,14 +721,16 @@ export class ArtifactService {
    * What an attach of the session passes in `mcpServers`: the service with the session's token,
    * made at its first attach and kept while it stays in memory, since Codex ignores new servers
    * when it resumes a session it still holds open. Empty while the service is not running.
-   * `gateway` lists only the core tools and the gateway to the rest, for an agent that drops tools.
+   * `gateway` lists only the core tools and the gateway to the rest, for an agent that drops tools;
+   * `suggests` the next-message tool, for an agent that suggests by it.
    */
-  servers(sessionId: string, project: string, gateway = false): McpServer[] {
+  servers(sessionId: string, project: string, gateway = false, suggests = false): McpServer[] {
     const url = this.url
     if (!url) return []
     const grant = this.sessionGrant(sessionId, project, true)
     grant.gateway = gateway
-    return entry(url, grant.token, this.prompt(gateway))
+    grant.suggests = suggests
+    return entry(url, grant.token, this.prompt(gateway, suggests))
   }
 
   /**
@@ -715,7 +755,7 @@ export class ArtifactService {
     let grant = held === undefined ? undefined : this.grants.get(held)
     if (!grant || !('sessionId' in grant) || grant.project !== project) {
       this.revoke(sessionId)
-      grant = { token: newToken(), sessionId, project, own, gateway: false }
+      grant = { token: newToken(), sessionId, project, own, gateway: false, suggests: false }
       this.sessions.set(sessionId, this.add(grant))
     }
     if (own) grant.own = true
@@ -732,12 +772,14 @@ export class ArtifactService {
     folder: string,
     sessionId: string,
     gateway = false,
+    suggests = false,
   ): McpServer[] {
     const url = this.url
     if (!url) return []
     const grant = this.folderGrant(process, folder, sessionId, true)
     grant.gateway = gateway
-    return entry(url, grant.token, this.prompt(gateway))
+    grant.suggests = suggests
+    return entry(url, grant.token, this.prompt(gateway, suggests))
   }
 
   private folderGrant(
@@ -763,6 +805,7 @@ export class ArtifactService {
         sessions: new Set(),
         own,
         gateway: false,
+        suggests: false,
       }
       key = this.add(grant)
       byFolder.set(folder, key)
@@ -1053,6 +1096,9 @@ export class ArtifactService {
         )
       }
     }
+    if (this.suggestTools && isSuggestToolName(name)) {
+      return this.suggestTools.call(caller, name, input)
+    }
     if (isReportToolName(name)) {
       try {
         return this.reportTools.call(caller, name, input)
@@ -1121,6 +1167,15 @@ export class ArtifactService {
         throw new McpError(ErrorCode.InternalError, `${name} failed: ${(error as Error).message}`)
       }
     }
+    const routines = this.deps.routines
+    if (routines && isRoutineToolName(name)) {
+      try {
+        return await routines.call(caller, name, input)
+      } catch (error) {
+        this.deps.log('error', `${name} failed: ${(error as Error).message}`)
+        throw new McpError(ErrorCode.InternalError, `${name} failed: ${(error as Error).message}`)
+      }
+    }
     const webReader = this.deps.webReader
     if (webReader && isWebReaderToolName(name)) {
       try {
@@ -1131,7 +1186,9 @@ export class ArtifactService {
       }
     }
     // A plugin that was turned off since the agent listed its tools answers that it is off.
-    if (this.deps.plugins && isPluginToolName(name)) return this.deps.plugins.call(name, input)
+    if (this.deps.plugins && isPluginToolName(name)) {
+      return this.deps.plugins.call(name, input, caller.sessionId)
+    }
     if (isBrowserToolName(name)) {
       try {
         return await this.browserTools.call(caller, name, input)

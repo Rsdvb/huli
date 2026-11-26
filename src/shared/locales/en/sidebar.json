@@ -97,7 +97,8 @@
     "hostsSlow": "Still waiting for: {{hosts}}",
     "announce_one": "{{count}} conversation found",
     "announce_other": "{{count}} conversations found",
-    "pluginAction": "Action"
+    "pluginAction": "Action",
+    "pluginSetting": "{{plugin}} · Marketplace"
   },
   "project": {
     "missing": "Missing",
@@ -136,6 +137,7 @@
       "running_one": "The one running now stops.",
       "running_other": "The {{count}} running now stop.",
       "folderStays": "The folder and its files stay on this computer.",
+      "folderStaysOn": "The folder and its files stay on {{host}}.",
       "separator": " ",
       "confirm": "Remove"
     },
@@ -284,6 +286,28 @@
     "suggestingTitle": "Writing a title…",
     "mini": "Open in mini window"
   },
+  "export": {
+    "menu": "Export conversation…",
+    "exporting": "Exporting “{{title}}”…",
+    "exported": "Exported “{{title}}”",
+    "failed": "Could not export “{{title}}”: {{error}}",
+    "agent": "Agent: {{name}}",
+    "model": "Model: {{name}}",
+    "project": "Project: {{path}}",
+    "started": "Started: {{date}}",
+    "exportedAt": "Exported: {{date}}",
+    "you": "You",
+    "fromKettu": "From Kettu",
+    "from": "From {{title}}",
+    "fromParent": "From the parent session",
+    "attachments": "Attachments",
+    "image": "Image {{number}}",
+    "audio": "Audio",
+    "video": "Video",
+    "subagent": "Sub-agent",
+    "startedSession": "Started {{title}}",
+    "startedSessionMissing": "Started a session"
+  },
   "work": {
     "turn": "Current turn",
     "waiting_one": "{{count}} request waiting",
@@ -381,6 +405,7 @@
     "error": "Error",
     "running": "Running",
     "starting": "Starting",
+    "background": "Still running in background: {{work}}",
     "unread": "Unread",
     "stalled": "May be stuck: no output for a while",
     "paused": "Paused at the plan limit; goes on once it resets",
@@ -412,6 +437,15 @@
     "signInDetail": "Open Settings › Agents to sign in",
     "noticesName": "Notices: {{list}}",
     "listSeparator": ", "
+  },
+  "signInEnds": {
+    "inDays_one": "{{name}} sign-in ends in {{count}} day",
+    "inDays_other": "{{name}} sign-in ends in {{count}} days",
+    "anyDay": "{{name}} sign-in may end any day now",
+    "ended": "{{name}} sign-in probably ended",
+    "detail": "The sign-in ends by {{latest}}, as early as {{earliest}}. Signing in again renews it.",
+    "endedDetail": "The sign-in was due to end by {{latest}}, so it has probably ended. Sign in again to keep using it.",
+    "signIn": "Sign in again"
   },
   "countdown": {
     "minutes": "{{count}}m",
@@ -514,7 +548,15 @@
     "moreReferences_other": "{{count}} more issues and pull requests",
     "moreArtifacts_one": "{{count}} more artifact",
     "moreArtifacts_other": "{{count}} more artifacts",
-    "artifactFacts": "v{{version}} · {{time}}"
+    "artifactFacts": "v{{version}} · {{time}}",
+    "background": "Background"
+  },
+  "stillRunning": {
+    "subagents_one": "{{count}} sub-agent",
+    "subagents_other": "{{count}} sub-agents",
+    "commands_one": "{{count}} command",
+    "commands_other": "{{count}} commands",
+    "both": "{{subagents}}, {{commands}}"
   },
   "subagents": {
     "title": "Sub-agents of this session",
@@ -578,6 +620,18 @@
     "waitHint": "The agent starts once the files are copied and the command has finished.",
     "save": "Save",
     "forbidden": "Only the owner of this host can change these from here, unless they let paired devices use its terminal."
+  },
+  "remoteOffer": {
+    "text": "Your {{name}} is signed in to this account too. Let it use this computer?",
+    "detail": "Turns remote access on, so devices of this account can ask to use this computer",
+    "turnOn": "Turn on",
+    "notNow": "Not now",
+    "kind": {
+      "ios": "iPhone",
+      "web": "browser",
+      "desktop": "other computer",
+      "daemon": "other computer"
+    }
   },
   "projectFolders": {
     "title": "Folders of {{project}}",

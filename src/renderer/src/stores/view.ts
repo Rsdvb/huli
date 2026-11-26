@@ -60,14 +60,25 @@ type PageView =
   // The Artifacts page, opened from the sidebar; with `deleted`, its Recently deleted view.
   | { kind: 'artifacts'; deleted?: true }
   // The Marketplace, opened from the sidebar: its directory on a tab, or with `item`, the listing
-  // of the server with that id, a step of the history of its own.
-  | { kind: 'marketplace'; item?: string; tab?: MarketplaceTab }
+  // of the server with that id, a step of the history of its own. `hostId`, when set, pins the
+  // page to that host (null being this computer) instead of following the window's host. `from` is
+  // the session whose side panel opened the listing, which its Back returns to.
+  | {
+      kind: 'marketplace'
+      item?: string
+      tab?: MarketplaceTab
+      hostId?: string | null
+      from?: SessionView
+    }
   // A task's page, opened from its row in the sidebar: its timeline, or with `flow`, its flowchart.
   | { kind: 'task'; taskId: string; flow?: true }
   // Huli: a best-of-N group's runs side by side, opened from its row or after it starts.
   | { kind: 'group'; groupId: string }
   // Huli: a project's open GitHub issues, opened from its menu.
   | { kind: 'issues'; projectPath: string }
+
+/** A session as a place to return to. */
+export type SessionView = Extract<PaneView, { kind: 'session' }>
 
 /** The Marketplace directory's tabs. */
 export type MarketplaceTab =
@@ -253,6 +264,8 @@ interface ViewStore {
   shortcutsOpen: boolean
   /** Search, over whatever the window shows. Not persisted. */
   searchOpen: boolean
+  /** Initial scope and query for the next Search open, cleared when it closes. */
+  searchInit: { scope?: string; query?: string } | null
   /** Back and Forward through what the main area showed, nearest last. Not persisted. */
   history: { back: Step[]; forward: Step[] }
   sidebarCollapsed: boolean
@@ -356,6 +369,7 @@ export const useViewStore = create<ViewStore>()(() => ({
   settings: { open: false, section: null, item: null },
   shortcutsOpen: false,
   searchOpen: false,
+  searchInit: null,
   history: { back: [], forward: [] },
   sidebarCollapsed: saved.sidebarCollapsed ?? false,
   sidebarDrawer: false,
@@ -804,27 +818,73 @@ export function openRoutine(
 
 /**
  * The Marketplace: its directory on `tab`, All unless given, or the listing of `item`. A tab
- * changes the page shown in place, so Back leaves the Marketplace rather than its tabs.
+ * changes the page shown in place, so Back leaves the Marketplace rather than its tabs. When
+ * `hostId` is given (null being this computer), the page opens on that host rather than the
+ * window's host; navigating to a listing from a pinned Marketplace view keeps its host until a
+ * directory is opened without one or the window switches hosts. A listing opened `from` a session
+ * returns there on its Back.
  */
-export function openMarketplace({ item, tab }: { item?: string; tab?: MarketplaceTab } = {}): void {
-  useViewStore.setState((s) => ({
-    main: marketplaceView(item, tab),
-    settings: { ...s.settings, open: false },
-  }))
+export function openMarketplace({
+  item,
+  tab,
+  hostId,
+  from,
+}: {
+  item?: string
+  tab?: MarketplaceTab
+  hostId?: string | null
+  from?: SessionView
+} = {}): void {
+  useViewStore.setState((s) => {
+    const keptHost =
+      hostId !== undefined
+        ? hostId
+        : item && s.main.kind === 'marketplace'
+          ? s.main.hostId
+          : undefined
+    return {
+      main: { ...marketplaceView(item, tab, keptHost), ...(item && from ? { from } : {}) },
+      settings: { ...s.settings, open: false },
+    }
+  })
 }
 
 /** Shows another tab of the Marketplace's directory in place, as the same step of the history. */
 export function setMarketplaceTab(tab: MarketplaceTab): void {
   useViewStore.setState((s) =>
-    s.main.kind === 'marketplace' && !s.main.item ? { main: marketplaceView(undefined, tab) } : s,
+    s.main.kind === 'marketplace' && !s.main.item
+      ? { main: marketplaceView(undefined, tab, s.main.hostId) }
+      : s,
   )
 }
 
-function marketplaceView(item: string | undefined, tab: MarketplaceTab | undefined): MainView {
+/** Lets a Marketplace page pinned to another host follow the window's host again, in place. */
+export function unpinMarketplaceHost(): void {
+  const main = useViewStore.getState().main
+  if (main.kind !== 'marketplace' || main.hostId === undefined) return
+  inPlace(() =>
+    useViewStore.setState((s) => {
+      if (s.main.kind !== 'marketplace' || s.main.hostId === undefined) return s
+      return {
+        main: {
+          ...marketplaceView(s.main.item, s.main.tab),
+          ...(s.main.from ? { from: s.main.from } : {}),
+        },
+      }
+    }),
+  )
+}
+
+function marketplaceView(
+  item: string | undefined,
+  tab: MarketplaceTab | undefined,
+  hostId?: string | null,
+): MainView {
   return {
     kind: 'marketplace',
     ...(item ? { item } : {}),
     ...(tab && tab !== 'all' ? { tab } : {}),
+    ...(hostId !== undefined ? { hostId } : {}),
   }
 }
 
@@ -1123,7 +1183,16 @@ export function toggleShortcuts(layerOpen: boolean): void {
 
 /** Shows Search, or closes it. */
 export function showSearch(open: boolean): void {
-  useViewStore.setState({ searchOpen: open })
+  useViewStore.setState({ searchOpen: open, ...(open ? {} : { searchInit: null }) })
+}
+
+/** Closes Settings when open and opens Search pre-set to a scope and optional query. */
+export function openSearch(init?: { scope?: string; query?: string }): void {
+  useViewStore.setState((s) => ({
+    searchOpen: true,
+    searchInit: init ?? null,
+    settings: { ...s.settings, open: false },
+  }))
 }
 
 /** Closes Search when open, and otherwise opens it unless another layer is open. */
@@ -1570,8 +1639,10 @@ export function viewKey(view: HistoryView): string {
       return `routine:${view.routineId ?? view.example ?? ''}`
     case 'artifacts':
       return view.deleted ? 'artifacts:deleted' : 'artifacts'
-    case 'marketplace':
-      return view.item ? `marketplace:${view.item}` : 'marketplace'
+    case 'marketplace': {
+      const host = view.hostId === undefined ? '' : `@${view.hostId ?? ''}`
+      return view.item ? `marketplace${host}:${view.item}` : `marketplace${host}`
+    }
     case 'artifact':
       return `artifact:${view.id}`
     case 'task':

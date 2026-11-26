@@ -26,7 +26,7 @@ import {
   type Pong,
 } from './keepalive'
 import type { KeyPair } from './noise'
-import { PathTimes, PROBE_TIMEOUT_MS, rankPaths, shouldMove } from './paths'
+import { CompareTimer, PathTimes, PROBE_TIMEOUT_MS, rankPaths, shouldMove } from './paths'
 import { bytesOf, isBinary } from './places'
 import {
   IMAGE_REFS_FEATURE,
@@ -34,6 +34,7 @@ import {
   PROTOCOL_VERSION,
   RESUME_MS,
   RESUME_VERSION,
+  TOOL_DIGESTS_FEATURE,
   parseClosing,
   parseWelcome,
   type ClosingReason,
@@ -82,7 +83,18 @@ const DROPS_UNKNOWN = 2
 /** The path the host takes the channel's WebSocket on. */
 export const CHANNEL_PATH = '/channel'
 
-export type LinkStop = 'removed' | 'update_client' | 'update_host'
+/** `other_account`: the host is signed in to another Kettu account than the one the hello named. */
+export type LinkStop = 'removed' | 'update_client' | 'update_host' | 'other_account'
+
+/** Whether a host's closing reason stops the link for good. */
+function stops(reason: ClosingReason | null): reason is LinkStop {
+  return (
+    reason === 'removed' ||
+    reason === 'update_client' ||
+    reason === 'update_host' ||
+    reason === 'other_account'
+  )
+}
 
 export type LinkState =
   | { kind: 'connecting' }
@@ -235,14 +247,20 @@ export function awaitWelcome(opened: Opened, timeoutMs: number | null): Promise<
 
 export type Answer = { welcome: Welcome; later: Later[] } | { closing: ClosingReason | null }
 
-export function hello(client: Hello['client'], device?: Hello['device']): Hello {
+/** `account`: the Kettu account the device is signed in to, which the host checks against its own. */
+export function hello(
+  client: Hello['client'],
+  device?: Hello['device'],
+  account?: string | null,
+): Hello {
   return {
     type: 'hello',
     protocol: { min: MIN_PROTOCOL_VERSION, max: PROTOCOL_VERSION },
     client,
     ...(device ? { device } : {}),
-    // The web client shows the thread with the window's components.
-    features: [IMAGE_REFS_FEATURE],
+    // The web client loads stored images by hash and expands digested tool calls on demand.
+    features: [IMAGE_REFS_FEATURE, TOOL_DIGESTS_FEATURE],
+    ...(account ? { account } : {}),
   }
 }
 
@@ -304,8 +322,7 @@ export class HostLink {
   /** Moving the session to another route, or taking it over on a connection kept aside. */
   private taking = false
   private comparing: Promise<boolean> | null = null
-  private compareTimer: ReturnType<typeof setTimeout> | null = null
-  private compareAt = 0
+  private readonly compares = new CompareTimer(() => void this.compare())
   /** The connection a move left, until its move is welcomed or it takes the session back. */
   private aside: Aside | null = null
 
@@ -375,7 +392,7 @@ export class HostLink {
   stop(): void {
     this.stopped = true
     if (this.timer) clearTimeout(this.timer)
-    if (this.compareTimer) clearTimeout(this.compareTimer)
+    this.compares.stop()
     this.acks.pause()
     if (this.keptTimer) clearTimeout(this.keptTimer)
     this.session?.channel.close()
@@ -533,7 +550,7 @@ export class HostLink {
       return this.welcomed(opened, answer.welcome, answer.later, resume !== null, route)
     }
     const reason = answer.closing
-    if (reason === 'removed' || reason === 'update_client' || reason === 'update_host') {
+    if (stops(reason)) {
       return this.end(reason)
     }
     this.expireKept()
@@ -649,7 +666,7 @@ export class HostLink {
     this.session = null
     this.acks.pause()
     const reason = session.closing
-    if (reason === 'removed' || reason === 'update_client' || reason === 'update_host') {
+    if (stops(reason)) {
       return this.end(reason)
     }
     if (reason === null) this.times.failed(session.route.key)
@@ -674,13 +691,7 @@ export class HostLink {
 
   /** Compares the routes after `delay`, once, however often it is asked meanwhile, the soonest. */
   private compareSoon(delay: number): void {
-    if (this.stopped || (this.compareTimer && this.compareAt <= Date.now() + delay)) return
-    if (this.compareTimer) clearTimeout(this.compareTimer)
-    this.compareAt = Date.now() + delay
-    this.compareTimer = setTimeout(() => {
-      this.compareTimer = null
-      void this.compare()
-    }, delay)
+    if (!this.stopped) this.compares.soon(delay)
   }
 
   /** One comparison at a time: one asked while another runs gets false. */
@@ -703,6 +714,7 @@ export class HostLink {
     if (!resumable(session) || this.resumeToken === null) return false
     const others = this.routes().filter((route) => route.key !== session.route.key)
     if (others.length === 0) return false
+    this.compares.started()
     const probed = await Promise.all(others.map((route) => this.probe(route)))
     const opened = probed.flatMap(({ opened, ...route }) => (opened ? [{ ...route, opened }] : []))
     for (const path of probed) {
@@ -837,7 +849,7 @@ export class HostLink {
     this.aside = null
     if (reason === null && aside?.open && this.resumeToken !== null) return void this.promote(aside)
     aside?.close()
-    if (reason === 'removed' || reason === 'update_client' || reason === 'update_host') {
+    if (stops(reason)) {
       return this.end(reason)
     }
     this.dropped(reason, true)
@@ -1014,8 +1026,8 @@ export class HostLink {
       if (own === 'ping') void session.channel.send({ type: 'pong' } satisfies Pong).catch(() => {})
       if (own === 'pong' && session.pingedAt !== null) {
         // A ping far slower than before: another route may do better now.
-        if (this.times.sample(session.route.key, Date.now() - session.pingedAt)) {
-          this.compareSoon(0)
+        if (this.times.sample(session.route.key, Date.now() - session.pingedAt) && !this.stopped) {
+          this.compares.slow()
         }
         session.pingedAt = null
       }

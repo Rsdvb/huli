@@ -17,6 +17,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { FileDiff } from '@shared/git'
+import { SegmentedControl } from '@renderer/components/affect/segmented-control'
 import { RenderCount } from '@renderer/features/diff-notes/notes'
 import { NotesLayer, type NoteEditing } from '@renderer/features/diff-notes/notes-layer'
 import { NotesTray } from '@renderer/features/diff-notes/notes-tray'
@@ -32,6 +33,7 @@ import { PaneReviewButton } from '@renderer/features/review/review-button'
 import { useReview } from '@renderer/features/review/review'
 import { useNoteCount } from '@renderer/features/session/composer/drafts'
 import { PaneContext, PaneIcon, PanelButton } from '@renderer/features/shell/panel-button'
+import { setDiffStyle, useDiffStyle, type DiffStyle } from '@renderer/stores/diff-style'
 import {
   diffId,
   diffKey,
@@ -99,8 +101,9 @@ export function DiffPreview({
 }
 
 /**
- * The diff's context bar: its path, the commit and line counts, the change steps, Huli's Review
- * changes for the session whose side panel shows it, and Open file.
+ * The diff's context bar: its path, the commit and line counts, and once a change is drawn the
+ * unified or side by side switch and the change steps, Huli's Review changes for the session whose
+ * side panel shows it, then Open file.
  */
 function Bar({
   projectPath,
@@ -121,12 +124,13 @@ function Bar({
   // Where the last step went, among the runs of changed lines the diff draws.
   const [at, setAt] = useState<{ current: number; total: number } | null>(null)
   const step = (direction: 1 | -1): void => {
-    if (scroller) setAt(stepChange(scroller, direction))
+    if (scroller) setAt(stepChange(scroller, direction, at?.current ?? null))
   }
   return (
     <PaneContext
       tools={
         <>
+          {scroller && <DiffStyleToggle />}
           {scroller && hunks > 0 && (
             <span className="kp-doc__hunks">
               <span className="px-1.5 tabular">
@@ -160,6 +164,25 @@ function Bar({
       {diff.ref && <span className="kp-doc__ref">{diff.ref.slice(0, 7)}</span>}
       {counts}
     </PaneContext>
+  )
+}
+
+/** Between one column and the old and new file side by side, for every diff on this device. */
+function DiffStyleToggle() {
+  const { t } = useTranslation('files')
+  const style = useDiffStyle((s) => s.style)
+  return (
+    <SegmentedControl<DiffStyle>
+      aria-label={t('diff.style')}
+      variant="tray"
+      size="md"
+      value={style}
+      onChange={setDiffStyle}
+      options={[
+        { value: 'unified', label: t('diff.unified') },
+        { value: 'split', label: t('diff.split') },
+      ]}
+    />
   )
 }
 

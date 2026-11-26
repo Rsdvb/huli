@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CommunityListing } from '@shared/market-community'
 import type { MarketListing } from '@shared/market-publish'
 import type { MarketServer, MarketSkill } from '@shared/marketplace'
-import { pluginItemId } from '@shared/plugins'
+import { PLUGIN_STATUS_CHARS, pluginItemId, pluginState } from '@shared/plugins'
 import { applyListEdit } from '@shared/settings'
 import { usableWorkflow } from '@shared/workflow'
 import { MarketSkillsService, skillFolder, skillsCatalogFile } from '../marketplace/skills'
@@ -228,9 +228,9 @@ describe('inspecting a plugin', () => {
     await expect(h.plugins.install(plan.token)).rejects.toMatchObject({ code: 'not_found' })
   })
 
-  it('blocks a package whose skill has the name of one Kettu already keeps', async () => {
+  it('installs the rest of a package whose skill has the name of one Kettu keeps, and says so', async () => {
     const h = await host()
-    h.settings.skills.push({
+    const mine: MarketSkill = {
       id: 'local:11111111-1111-4111-8111-111111111111',
       name: 'review',
       description: 'Mine.',
@@ -239,15 +239,27 @@ describe('inspecting a plugin', () => {
       version: null,
       agents: 'all',
       on: true,
-    })
+    }
+    h.settings.skills.push(mine)
     const folder = path.join(root, 'source')
     await writeTree(folder, packageFiles())
     const plan = await h.plugins.inspect({ kind: 'local', path: folder })
-    expect(plan.blocked).toContain('review')
-    await expect(h.plugins.install(plan.token)).rejects.toMatchObject({ code: 'conflict' })
-    expect(h.settings.skills).toHaveLength(1)
+    expect(plan.blocked).toBeNull()
+    expect(plan.skipped).toEqual([{ name: 'review', from: '/skills/review' }])
+    const plugin = await h.plugins.install(plan.token)
+    expect(plugin.skipped).toEqual([{ name: 'review', from: '/skills/review' }])
+    expect(plugin.kept.skills).toEqual([])
+    expect(h.settings.skills).toEqual([mine])
+    expect(existsSync(h.skillFile(pluginItemId(plugin.id, 'review'), 'review'))).toBe(false)
+    expect(h.settings.servers.map((server) => server.name).sort()).toEqual(['local', 'tracker'])
+    expect(await h.library.list()).toHaveLength(1)
+    expect(h.saved().plugins[plugin.id]!.skipped).toEqual(plugin.skipped)
+    await h.plugins.setEnabled(plugin.id, false)
+    await h.plugins.setEnabled(plugin.id, true)
+    expect(h.settings.skills).toEqual([mine])
+    await h.plugins.uninstall(plugin.id)
+    expect(h.settings.skills).toEqual([mine])
     expect(h.settings.servers).toEqual([])
-    expect(await h.plugins.list()).toEqual([])
   })
 })
 
@@ -388,7 +400,8 @@ describe('installing a plugin', () => {
     expect(h.settings.skills.every((skill) => !skill.on)).toBe(true)
     expect(h.settings.servers.every((server) => !server.on)).toBe(true)
     expect(await h.plugins.resources('roles')).toEqual([])
-    expect(usableWorkflow((await h.library.list())[0]!)).toBe(false)
+    expect(await h.library.list()).toEqual([])
+    await expect(h.library.resolve(workflow!.id)).rejects.toThrowError('turned off')
     await h.plugins.setEnabled(plugin.id, true)
     expect(h.settings.skills.every((skill) => skill.on)).toBe(true)
     expect(h.settings.servers.map((server) => [server.name, server.on])).toEqual([
@@ -531,6 +544,34 @@ describe('updating a plugin', () => {
     ])
   })
 
+  it('turns on with the plugin what an update added while it was off', async () => {
+    const { h, id } = await installed()
+    h.settings.servers = h.settings.servers.map((server) =>
+      server.name === 'local' ? { ...server, on: false } : server,
+    )
+    await h.plugins.setEnabled(id, false)
+    const files = packageFiles({
+      'skills/audit/SKILL.md': '---\nname: audit\ndescription: Audits.\n---\nAudit.\n',
+    })
+    const mcp = JSON.parse(files['mcp.json']!) as { mcpServers: Record<string, unknown> }
+    mcp.mcpServers['extra'] = { type: 'streamable-http', url: 'https://extra.example.com/mcp' }
+    next(h, '1.1.0', { ...files, 'mcp.json': JSON.stringify(mcp) })
+    expect((await h.plugins.checkUpdates())[0]).toMatchObject({ revision: '1.1.0', held: null })
+    const on = () => [
+      ...h.settings.skills.map(({ name, on }) => [name, on]),
+      ...h.settings.servers.map(({ name, on }) => [name, on]),
+    ]
+    expect(on().every(([, on]) => on === false)).toBe(true)
+    await h.plugins.setEnabled(id, true)
+    expect(Object.fromEntries(on())).toEqual({
+      review: true,
+      audit: true,
+      tracker: true,
+      local: false,
+      extra: true,
+    })
+  })
+
   it('holds an update that asks for more permissions, with what it adds', async () => {
     const h = await host()
     h.market.files = packageFiles(main, { ...script, permissions: ['tools'] })
@@ -669,6 +710,31 @@ describe('updating a plugin', () => {
       held: { revision: '1.2.0', permissions: ['tools', 'sessions.start'] },
     })
     expect(await h.plugins.applyUpdate(id)).toMatchObject({ revision: '1.2.0', held: null })
+  })
+
+  it('adds a skill it skipped once an update finds its name free', async () => {
+    const h = await host()
+    h.settings.skills.push({
+      id: 'local:11111111-1111-4111-8111-111111111111',
+      name: 'review',
+      description: 'Mine.',
+      source: 'local',
+      origin: '/skills/review',
+      version: null,
+      agents: 'all',
+      on: true,
+    })
+    const plugin = await h.plugins.install((await h.plugins.inspect(fromMarket)).token)
+    expect(plugin.skipped).toEqual([{ name: 'review', from: '/skills/review' }])
+    h.settings.skills = []
+    next(h, '1.1.0', packageFiles())
+    const [updated] = await h.plugins.checkUpdates()
+    const skillId = pluginItemId(plugin.id, 'review')
+    expect(updated).toMatchObject({ revision: '1.1.0', skipped: [], kept: { skills: [skillId] } })
+    expect(h.settings.skills).toEqual([
+      expect.objectContaining({ id: skillId, name: 'review', source: 'plugin', on: true }),
+    ])
+    expect(await readFile(h.skillFile(skillId, 'review'), 'utf8')).toContain('name: review')
   })
 
   it('keeps the version in place when the newer one cannot be installed', async () => {
@@ -887,6 +953,38 @@ describe("a plugin's tools, settings and storage", () => {
     const reloaded = await h.plugins.reload(plugin.id)
     expect(reloaded.values?.mode).toBe('fast')
     expect(h.plugins.settingValue(plugin.id, 'mode')).toBe('fast')
+  })
+
+  it('keeps the one line its script sets, which never changes the state Kettu judges', async () => {
+    const h = await host()
+    const required = SETTINGS.map((item) =>
+      item.key === 'name' ? { ...item, required: true } : item,
+    )
+    const { plugin } = await installFolder(
+      h,
+      packageFiles(
+        { 'sh.kettu/main.js': 'exports.lookup = () => 1' },
+        { ...entry, settings: required },
+      ),
+    )
+    expect(pluginState(plugin)).toBe('needsSetup')
+    h.plugins.setStatus(plugin.id, 'Sends to\n\t #release')
+    const view = await h.plugins.view(plugin.id)
+    expect(view.status).toBe('Sends to #release')
+    expect(pluginState(view)).toBe('needsSetup')
+    expect(h.saved().plugins[plugin.id]?.status).toBe('Sends to #release')
+    // Counted in characters, so a line of 120 emoji is as long as one of 120 letters.
+    h.plugins.setStatus(plugin.id, '\u{1F98A}'.repeat(PLUGIN_STATUS_CHARS))
+    expect((await h.plugins.view(plugin.id)).status).toHaveLength(PLUGIN_STATUS_CHARS * 2)
+    for (const bad of ['x'.repeat(PLUGIN_STATUS_CHARS + 1), 42, { text: 'ok' }]) {
+      expect(() => h.plugins.setStatus(plugin.id, bad)).toThrow()
+    }
+    expect(() => h.plugins.setStatus('p000000000000', 'ok')).toThrow()
+    for (const cleared of [null, '', '  \n ']) {
+      h.plugins.setStatus(plugin.id, 'ok')
+      h.plugins.setStatus(plugin.id, cleared)
+      expect((await h.plugins.view(plugin.id)).status).toBeNull()
+    }
   })
 
   it('says which secrets are set by key, for the ones declared only, never their values', async () => {

@@ -106,7 +106,7 @@ export function zenItems(
     const reply = turn.find((item) => item.type === 'reply')
     const answers = new Set(reply?.type === 'reply' ? reply.agentIds : [])
     const shows = (item: Item): boolean => {
-      if (item.type === 'reply' || item.type === 'status') return true
+      if (item.type === 'reply' || item.type === 'status' || item.type === 'still') return true
       if (item.type !== 'entry') return false
       switch (item.char) {
         case 'u':

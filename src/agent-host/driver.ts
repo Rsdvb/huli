@@ -43,6 +43,11 @@ export interface DriverContext {
   spec?: LaunchSpec
   /** The agent's environment, as its process gets it. */
   env?: Env
+  /**
+   * The agent's own folder, for a harness that takes it with a flag of its launch: its commands
+   * without the flag read it as their home folder, and Kettu reads the harness's files there.
+   */
+  home?: string
 }
 
 export interface StoredConfig {
@@ -124,6 +129,8 @@ export interface HostedContext extends DriverContext {
   nodeRuntime?: NodeRuntime
   /** The bundle of the process that runs Cline's SDK; null or absent without one. */
   clineHostPath?: string | null
+  /** Where Claude Code's flag settings are written for its processes; a test may leave it out. */
+  claudeSettingsDir?: string
 }
 
 export interface HostedDriver extends StoredConfig {

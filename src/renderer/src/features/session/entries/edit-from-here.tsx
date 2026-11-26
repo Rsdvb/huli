@@ -3,7 +3,13 @@ import { useShallow } from 'zustand/react/shallow'
 import type { FilesRestored } from '@shared/agent-host'
 import { canEditAt, lastSwitchAt, turnsFrom, usedAtEnd } from '@shared/rewind'
 import { rewindTarget, type RewindMode } from '@shared/rewind-target'
-import { harnessOf, type ThreadState, type ToolEntry } from '@shared/thread'
+import {
+  diffPathOf,
+  harnessOf,
+  toolContentItems,
+  type ThreadState,
+  type ToolEntry,
+} from '@shared/thread'
 import { editFromMessage, rewindToMessage } from '@renderer/app/actions'
 import { toast } from '@renderer/components/ui/toast'
 import { Popover, PopoverContent } from '@renderer/components/ui/popover'
@@ -72,6 +78,8 @@ function useAgentName(sessionId: string): string {
 const FILE_KINDS = new Set<ToolEntry['toolKind']>(['edit', 'delete', 'move'])
 
 function editFacts(state: ThreadState, entryId: string): EditFacts | null {
+  const { session } = state
+  const agent = agentsOn(useAgentsStore.getState(), hostOfSession(session)).byId[session.agentId]
   const at = state.order.indexOf(entryId)
   if (at < 0) return null
   const files = new Set<string>()
@@ -82,12 +90,16 @@ function editFacts(state: ThreadState, entryId: string): EditFacts | null {
     if (entry.toolKind === 'execute') commands = true
     if (!FILE_KINDS.has(entry.toolKind) || entry.status !== 'completed') continue
     for (const location of entry.locations) files.add(location.path)
-    for (const content of entry.content) if (content.type === 'diff') files.add(content.path)
+    for (const content of toolContentItems(entry)) {
+      const path = diffPathOf(content)
+      if (path !== null) files.add(path)
+    }
   }
-  const { status, background } = state.session
+  const { status, background } = session
   return {
     turns: turnsFrom(state, at),
     files: files.size,
+    filesBack: agent?.capabilities.rewindFiles === true,
     commands,
     running: status === 'running' || status === 'awaiting_permission',
     tasks: background?.filter((task) => task.status === 'running').length ?? 0,

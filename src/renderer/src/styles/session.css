@@ -267,7 +267,8 @@
   opacity: 0;
 }
 /* A turn cancelled before any reply: Edit stays in view after its end, in the primary blue. */
-.ks-user__edit {
+.ks-user__edit,
+.ks-still__open {
   height: 24px;
   margin-left: -4px;
   padding: 0 8px;
@@ -276,10 +277,12 @@
   color: var(--primary-foreground);
   transition: background-color 140ms ease;
 }
-.ks-user__edit:hover {
+.ks-user__edit:hover,
+.ks-still__open:hover {
   background: var(--primary-from);
 }
-.ks-user__edit:focus-visible {
+.ks-user__edit:focus-visible,
+.ks-still__open:focus-visible {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
 }
@@ -355,7 +358,7 @@
   max-width: none;
   font-family: inherit;
   font-size: var(--prose-size);
-  --ui-ansc-ink: var(--thread-ink);
+  --ui-ansc-ink: var(--thread-prose);
   --ui-ansc-strong: var(--thread-ink);
   --ui-ansc-text: var(--thread-muted);
 }
@@ -397,7 +400,7 @@
   display: none;
 }
 .ks-answer .markdown {
-  color: var(--thread-ink);
+  color: var(--thread-prose);
 }
 /* Huli: a running turn's row of work, its label and its status change at every step, and each
    change replayed an entrance of 260 to 460 ms; together they kept the window drawing at the
@@ -621,6 +624,8 @@
 }
 .ks-thread .ui-tcc > .ui-tcc__top {
   position: relative;
+  /* Keep the step's dot above the rail (z-index: 1) even while ks-step-rise creates a stacking context. */
+  z-index: 2;
   margin-left: var(--ks-card-x);
 }
 .ks-thread .ui-tcc > .ui-tcc__top,
@@ -1007,13 +1012,20 @@
 
 /* A step that arrives while shown: the rail draws down to it, its dot pops and its row rises. */
 .ks-thread .ui-tcc-group__list > .ui-tcc:has(+ .ks-step-new)::before {
-  animation: ks-step-draw var(--duration-slow) var(--ease-out-quint) both;
+  animation: ks-step-draw var(--duration-slow) var(--ease-out-quint) backwards;
 }
 .ks-thread .ui-tcc-group__list > .ks-step-new > .ui-tcc__top::after {
-  animation: ks-step-pop var(--duration-slow) var(--ease-out-quint) both;
+  animation: ks-step-pop var(--duration-slow) var(--ease-out-quint) backwards;
 }
 .ks-thread .ui-tcc-group__list > .ks-step-new > .ui-tcc__top {
-  animation: ks-step-rise var(--duration-slow) var(--ease-out-quint) both;
+  animation: ks-step-rise var(--duration-slow) var(--ease-out-quint) backwards;
+}
+/* Release finished affectUI entrance animations in the thread so they do not stay composited and
+   split rail segments across Overlap layers with different 1x subpixel alignment. */
+.ks-thread .ui-tcc__status,
+.ks-thread .ui-tcc-group__title,
+.ks-thread .ui-tcc-group__stack .ui-tcc__icon {
+  animation-fill-mode: backwards;
 }
 
 /* Opening a step or a run: the fold opens in 320 ms while what it holds rises out of a soft blur
@@ -1291,9 +1303,9 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ks-thread .ui-tcc-group__list > .ui-tcc::before,
+  .ks-thread .ui-tcc-group__list > .ui-tcc:has(+ .ks-step-new)::before,
   .ks-thread .ui-tcc-group__list > .ui-tcc > .ui-tcc__top,
-  .ks-thread .ui-tcc-group__list > .ui-tcc > .ui-tcc__top::before,
+  .ks-thread .ui-tcc-group__list > .ui-tcc[data-status='running'] > .ui-tcc__top::before,
   .ks-thread .ui-tcc-group__list > .ui-tcc > .ui-tcc__top::after,
   .ks-thread .ks-step-opening > .ui-tcc__body .ui-tcc__sections > *,
   .ks-thread .ks-run-opening > .ui-tcc__body .ui-tcc-group__list > *,
@@ -1317,6 +1329,10 @@
   & .ui-tcc__glint {
     display: none;
   }
+  & .ks-thread .ui-tcc-group__list > .ui-tcc::before,
+  & .ks-thread .ui-tcc-group__list > .ui-tcc > .ui-tcc__top,
+  & .ks-thread .ui-tcc-group__list > .ui-tcc > .ui-tcc__top::before,
+  & .ks-thread .ui-tcc-group__list > .ui-tcc > .ui-tcc__top::after,
   & .ks-thread .ks-step-opening > .ui-tcc__body .ui-tcc__sections > *,
   & .ks-thread .ks-run-opening > .ui-tcc__body .ui-tcc-group__list > *,
   & .ks-fold-in,
@@ -1510,6 +1526,76 @@
 .ks-settings-rows__warn > svg {
   flex: none;
   margin-top: 2px;
+}
+
+/* A Routine on the settings card's sunk block: each setting's name at the left and its value at
+   the right, then the prompt's first three lines, and a note on what goes with it. */
+.ks-routine-rows > ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ks-routine-rows__label {
+  flex: none;
+  color: var(--thread-faint);
+}
+.ks-routine-rows .ks-routine-rows__value {
+  flex: 1;
+  justify-content: flex-end;
+  max-width: none;
+  text-align: right;
+}
+.ks-routine-rows__block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 12px;
+  font-size: 13px;
+  line-height: 20px;
+}
+.ks-routine-rows__prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.ks-routine-rows__prompt-text {
+  color: var(--thread-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ks-routine-rows__old,
+.ks-routine-rows__old .ks-routine-rows__prompt-text {
+  color: var(--thread-faint);
+  text-decoration-color: currentColor;
+}
+.ks-routine-rows__prompt-text[data-clamped] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.ks-routine-rows__more {
+  font-size: 12px;
+  color: var(--thread-quiet);
+}
+.ks-routine-rows__more:hover {
+  color: var(--thread-prose);
+}
+.ks-routine-rows__note {
+  margin: 0;
+  padding: 5px 12px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--thread-quiet);
+}
+/* Delete is the danger action, as the app's destructive buttons draw it. */
+.ui-prc.ui-prc.ks-routine-card--danger {
+  --ui-prc-primary: var(--shell-danger);
+  --ui-prc-on-primary: var(--on-fill);
+}
+.ui-prc.ui-prc.ks-routine-card--danger .ui-prc__btn--primary:hover {
+  background: var(--shell-danger-hover);
 }
 
 /* What came of a settings change, as the turn's end reads: one muted line, Undo at its end. */
@@ -2823,7 +2909,8 @@
   text-align: left;
 }
 .ks-file:hover,
-.ks-file[data-panel-open] {
+.ks-file[data-panel-open],
+.ks-file[data-popup-open] {
   background: var(--thread-hover);
 }
 .ks-file__name {
@@ -2836,6 +2923,79 @@
 }
 .ks-file__dir {
   color: var(--thread-faint);
+}
+/* A changed HTML file: the row and its Preview button fill as one. */
+.ks-file-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  border-radius: 7px;
+}
+.ks-file-row > .ks-file {
+  flex: 1;
+  min-width: 0;
+}
+.ks-file-row:hover,
+.ks-file-row[data-popup-open],
+.ks-file-row:has(> .ks-file[data-panel-open]) {
+  background: var(--thread-hover);
+}
+.ks-file-row > .ks-file:hover,
+.ks-file-row > .ks-file[data-panel-open] {
+  background: none;
+}
+.ks-file-row > .ks-page-btn {
+  margin-right: 4px;
+}
+
+/* A small button that opens an HTML file's page: on a changed file's row, and after a reply's
+   reference to the file, where it stands over the text while the reference is hovered. */
+.ks-page-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 4px;
+  align-items: center;
+  height: 22px;
+  padding: 0 7px 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--thread-card);
+  box-shadow:
+    inset 0 0 0 0.5px var(--thread-line-strong),
+    var(--thread-card-shadow);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--thread-ink);
+  white-space: nowrap;
+}
+.ks-page-btn:hover {
+  /* The card's own color under the hover's tint, so the text beneath never shows through. */
+  background: linear-gradient(var(--thread-hover), var(--thread-hover)), var(--thread-card);
+}
+.ks-page-btn svg {
+  color: var(--thread-muted);
+}
+.ks-ref-page {
+  position: relative;
+  display: inline-block;
+}
+.ks-ref-page__dock {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  z-index: 1;
+  /* The pointer crosses the gap without leaving the reference. */
+  padding-left: 4px;
+  translate: 0 -50%;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast);
+}
+.ks-ref-page:hover .ks-ref-page__dock,
+.ks-ref-page:focus-within .ks-ref-page__dock {
+  opacity: 1;
+  pointer-events: auto;
 }
 .ks-changes__more[aria-expanded='true'] svg {
   transform: rotate(180deg);

@@ -48,13 +48,16 @@ import {
   type SideChatAgent,
   type LightAgent,
   type StartNotice,
+  type StillRunning,
 } from '@shared/agent-host'
 import { isFullAccessMode } from '@shared/agents'
 import { LOCALES } from '@shared/locale'
 import { PROMPT_BYTES, promptShare } from '@shared/attachments'
 import { CONTEXT_REFRESH_MS, type ContextEstimates } from '@shared/context'
+import { carriedLevel } from '@shared/effort'
 import { canEditAt, promptLine, promptOccurrence, turnsFrom, usedAtEnd } from '@shared/rewind'
 import { firstLine, outlineText } from '@shared/outline'
+import { limitLevel, limitsForModel } from '@shared/plan-limits'
 import { reachedLimit } from '@shared/session-groups'
 import { longEnough, queryWords } from '@shared/search-fold'
 import { turnPhase, turnWork, type TurnWork } from '@shared/turn-phase'
@@ -83,7 +86,7 @@ import type {
   SessionProgress,
 } from '@shared/host-control'
 import type { Platform } from '@shared/platform'
-import type { AutoApprove, PermissionRisk } from '@shared/risk'
+import { RISK_LEVELS, type AutoApprove, type PermissionRisk, type RiskLevel } from '@shared/risk'
 import {
   resolveSandbox,
   sameSandbox,
@@ -172,6 +175,9 @@ import {
   type ThemeChangeEntry,
   type ThemeChangeOutcome,
   type ThemeState,
+  type RoutineAction,
+  type RoutineChangeEntry,
+  type RoutineChangeOutcome,
   type ComputerAppEntry,
   type ComputerSetupEntry,
   type ComputerUseView,
@@ -194,6 +200,7 @@ import {
   type OutsideKind,
   type BackgroundTaskView,
   appealConfirms,
+  PROMPT_SUGGESTION_CHARS,
 } from '@shared/thread'
 import type { SessionProcesses } from '@shared/task-processes'
 import { readTaskProcesses } from './task-processes'
@@ -229,6 +236,7 @@ import type { SettingsAnswer, SettingsAsk } from './settings/tools'
 import type { AgentCopies } from './agent-copies'
 import type { DeletedSessions } from './deleted-sessions'
 import { binKey } from '@shared/recycle-bin'
+import type { RoutineAnswer, RoutineAsk } from './routines/tools'
 import { MODE_OPTION as AGY_MODE_OPTION } from './acp/agy-plan'
 import { parseContextReport } from './acp/claude-reports'
 import {
@@ -268,6 +276,7 @@ import {
   SideQuestionUnsupported,
   type AgentConnection,
   type ForkPoint,
+  type RewindPoint,
   type RewoundSession,
   type McpServer,
   type ModelTokens,
@@ -294,7 +303,7 @@ import { holdsNothing, mayBeEmpty } from './empty-sessions'
 import type { McpTransports } from './marketplace/servers'
 import { questionsResult } from './question-answers'
 import { HostError, invalidParams, notFound } from './errors'
-import { currentLocale, listOf, t } from './i18n'
+import { currentLocale, listOf, t, type HostKey } from './i18n'
 import type { CommandNeeds } from './commands/format'
 import type { CommandExpansion } from './commands/service'
 import { roleBlock } from './roles/format'
@@ -364,7 +373,6 @@ import type {
 } from '@shared/model-requests'
 import { missedCache, type IdleRelease } from './idle-release'
 import {
-  REPORT_LIMIT,
   reportOrigin,
   reportsText,
   toolAgentStatus,
@@ -386,7 +394,7 @@ import {
   type ModeRank,
 } from './started-mode'
 import type { RoutineSessionHooksRef, RoutineSessionStart } from './routines/hooks'
-import type { TaskSessionHooksRef, TaskStepStart } from './workflow/engine'
+import type { StepLimit, TaskSessionHooksRef, TaskStepStart } from './workflow/engine'
 import { assessRisk, autoApproves, entrySubject, type Assessment } from './risk/classify'
 import { riskReason } from './risk/text'
 import {
@@ -446,6 +454,14 @@ import {
   sideRoute,
   sideRouteWith,
 } from './side-chat'
+import {
+  planModeOn,
+  SUGGEST_QUESTION,
+  SUGGEST_TIMEOUT_MS,
+  suggestionRoute,
+  suggestionText,
+  type SuggestionRoute,
+} from './next-message'
 import { SIDE_ENTRIES, type StoredSideChat } from './threads/side-chat'
 import {
   parseCodexReview,
@@ -603,8 +619,16 @@ export interface SessionEvents {
 
 /** The artifacts service and the Marketplace's servers, as the sessions pass them to their agents. */
 export interface SessionMcp {
-  /** What an attach of the session through `connection` passes in `mcpServers`. */
-  servers(sessionId: string, record: SessionRecord, connection: AgentConnection): McpServer[]
+  /**
+   * What an attach of the session through `connection` passes in `mcpServers`; `suggests` lists
+   * the next-message tool and asks for it in the service's prompt.
+   */
+  servers(
+    sessionId: string,
+    record: SessionRecord,
+    connection: AgentConnection,
+    suggests: boolean,
+  ): McpServer[]
   /**
    * The Marketplace's servers an attach of the agent's session passes beside those, over the
    * transports it speaks, renamed where `taken` already has a name.
@@ -621,9 +645,10 @@ export interface SessionMcp {
   turnEnded(sessionId: string): void
   /**
    * The paragraph on where Kettu's tools are and when to use them, for an agent that takes it
-   * ahead of its prompt rather than in instructions of its own.
+   * ahead of its prompt rather than in instructions of its own; `suggests` asks for the
+   * next-message tool.
    */
-  guide(agentId: AgentId): string
+  guide(agentId: AgentId, suggests: boolean): string
 }
 
 /** Kettu's own slash commands, as sessions use them. */
@@ -875,6 +900,8 @@ interface Turn {
   byAgent: boolean
   /** Told once it has ended, as an edit from a message waits for the turn it stops. */
   ends: (() => void)[]
+  /** The next message the agent's tool suggested in the turn, shown once it ends normally. */
+  suggestion: string | null
 }
 
 /** What `sessions.prepare` asks for: the agent and where the session will work. */
@@ -909,6 +936,8 @@ interface PreparedSlot {
   next: Live | null
   /** The agent's settings changed since `current` opened, so a send waits for `next`. */
   stale: boolean
+  /** The window's last prepare, which its agent refused until it signs in, as it asked for it. */
+  refused: PrepareParams | null
 }
 
 interface PendingRequest {
@@ -1072,6 +1101,8 @@ interface Live {
   background: boolean
   /** The agent sent its full list of background work, background subagents among it. */
   backgroundListed: boolean
+  /** What runs on after its turn as its last summary said, in JSON. */
+  stillShown: string
   /** Jobs the agent scheduled to wake the session later, such as cron and /loop wakeups. */
   scheduled: number
   /** Why it last kept its agent while idle, so a change of reason is logged once. */
@@ -1155,6 +1186,8 @@ const SEARCH_SESSIONS = 100
 const FIND_MESSAGES = 500
 // Requests whose answerer a session remembers, so a late answer hears where it was answered.
 const ANSWERS_KEPT = 50
+// Marks a session whose reports are paused until the user writes there.
+const PAUSED = -1
 
 /**
  * A new origin's request by who asks it, `owner` being '' for main and a device's port for a
@@ -1213,6 +1246,14 @@ function resentOnResume(
   if (values[effort] !== undefined && values[effort] !== CLAUDE_DEFAULT_EFFORT) resent.add(effort)
   return resent
 }
+
+/** What a Routine card's notification says the agent wants, by the card's action. */
+const ROUTINE_ATTENTION = {
+  create: 'attention.routineCreate',
+  update: 'attention.routineUpdate',
+  delete: 'attention.routineDelete',
+  run: 'attention.routineRun',
+} as const satisfies Record<RoutineAction, HostKey>
 
 /** The requests that wait for the user: permissions, new sites, first uses of apps and setups. */
 function waitingCount(live: Live): number {
@@ -1579,8 +1620,9 @@ export class SessionManager {
   /** Huli: what each session's pull request automation saw last; in memory, read again at start. */
   private readonly prFlowStates = new Map<string, PrFlowState>()
   private readonly live = new Map<string, Live>()
-  // Reports each session got since the user last wrote there; one past the limit once its notice
-  // is shown. In memory: a restart lets a few more through, which the limit tolerates.
+  // Reports each session got since the user last wrote there; PAUSED once its notice is shown, so
+  // a limit raised later lets none through before the user writes. In memory: a restart lets a
+  // few more through, which the limit tolerates.
   private readonly reportsSent = new Map<string, number>()
   private readonly watchers = new Map<string, Set<string>>()
   // Port id to the sessions it shows in front, every pane of a split view in view.
@@ -1600,6 +1642,8 @@ export class SessionManager {
   private readonly secretWaits = new Map<string, (answer: SecretAnswer) => void>()
   /** Huli: theme cards that wait for the user, by entry id. */
   private readonly themeWaits = new Map<string, (answer: ThemeAnswer) => void>()
+  /** Routine cards that wait for the user, by entry id. */
+  private readonly routineWaits = new Map<string, (answer: RoutineAnswer) => void>()
   /** Each first use of an app that waits, by the computer use service's request id. */
   private readonly appRequests = new Map<number, AppRequest>()
   /** Each session's card holding its folder's own MCP servers while it waits, with the folder. */
@@ -1646,6 +1690,8 @@ export class SessionManager {
   private readonly sideRuns = new Map<string, AbortController>()
   /** Huli: the reviews running beside their sessions, stopped through their controllers. */
   private readonly reviewRuns = new Map<string, AbortController>()
+  /** The forks asked for a session's next-message suggestion, one at a time. */
+  private readonly suggestRuns = new Map<string, AbortController>()
   /** What the last clear of each session's side chat emptied, for its undo. */
   private readonly sideCleared = new Map<string, SideChatEntry[]>()
   /** Sessions whose outline titles are being written, and when the last failed for others. */
@@ -2182,6 +2228,7 @@ export class SessionManager {
           : null,
       phase: live && status === 'running' ? turnPhase(live.thread).phase : null,
       lastTurn: record.lastTurn ?? null,
+      stillRunning: live ? this.stillRunning(live) : null,
       ...(record.worktree
         ? { worktree: this.worktreeSummary(record.worktree, this.portsOf(record)) }
         : {}),
@@ -2278,9 +2325,10 @@ export class SessionManager {
     const summary = this.summary(sessionId)
     if (summary.working) this.workShown.set(sessionId, summary.working)
     else this.workShown.delete(sessionId)
+    const live = this.live.get(sessionId)
+    if (live) live.stillShown = JSON.stringify(summary.stillRunning ?? null)
     const json = JSON.stringify(summary)
     if (this.lastSummaries.get(sessionId) === json) return
-    const live = this.live.get(sessionId)
     if (live) this.flushPatches(live)
     this.lastSummaries.set(sessionId, json)
     this.updateBusy()
@@ -3587,6 +3635,118 @@ export class SessionManager {
   }
 
   /**
+   * An agent wants to create, change, delete or run a Routine: a card in the thread that waits for
+   * the user as a permission request does, in every mode, and settles with their answer,
+   * `expired` after `waitMs`, or `ended` with the turn. A Routine's own run waits for it too.
+   */
+  routineAsked(
+    sessionId: string,
+    ask: RoutineAsk,
+    waitMs: number,
+  ): { entryId: string; answer: Promise<RoutineAnswer> } | null {
+    const live = this.live.get(sessionId)
+    if (!live) return null
+    const entry: RoutineChangeEntry = {
+      kind: 'routine_change',
+      id: this.nextId(live),
+      ...ask,
+      expiresAt: Date.now() + waitMs,
+      outcome: null,
+      after: agentEntryBefore(live.thread),
+    }
+    live.origins.set(`routine:${entry.id}`, entry.id)
+    this.emit(live, [{ op: 'entry.add', entry }])
+    const status = live.thread.session.status
+    if (status === 'running' || status === 'ready')
+      this.update(live, { status: 'awaiting_permission' })
+    this.touch(live.id)
+    this.updateBadge()
+    const body = t(ROUTINE_ATTENTION[ask.action], { name: ask.routine.name })
+    if (live.record.origin === 'routine' && !live.routineTurnEnded) {
+      this.deps.routine?.current?.waiting(live.id, true, body)
+    } else {
+      this.deps.events.attention(live.id, 'permission', this.titleOf(live), body, { id: entry.id })
+    }
+    const answer = new Promise<RoutineAnswer>((resolve) => {
+      const timer = setTimeout(
+        () => this.settleRoutine(sessionId, entry.id, { decision: 'expired' }),
+        waitMs,
+      )
+      this.routineWaits.set(entry.id, (given) => {
+        clearTimeout(timer)
+        resolve(given)
+      })
+    })
+    return { entryId: entry.id, answer }
+  }
+
+  /** A window's or a device's answer to a Routine card; the first one counts. */
+  answerRoutine(
+    sessionId: string,
+    entryId: string,
+    decision: 'confirm' | 'decline',
+    device?: FromDevice,
+  ): void {
+    this.recordOf(sessionId)
+    const live = this.live.get(sessionId)
+    const entry = live?.thread.byId[entryId]
+    if (!live || entry?.kind !== 'routine_change') throw notFound(t('session.waiting.routine.gone'))
+    if (entry.outcome !== null || !this.routineWaits.has(entryId)) {
+      throw new HostError('not_found', t('session.waiting.routine.answered'), {
+        reason: ALREADY_ANSWERED,
+        device: entry.device ?? null,
+      })
+    }
+    this.settleRoutine(sessionId, entryId, { decision }, device)
+  }
+
+  /** What became of a Routine card the user approved. */
+  routineSettled(sessionId: string, entryId: string, outcome: RoutineChangeOutcome): void {
+    const live = this.live.get(sessionId)
+    if (live?.thread.byId[entryId]?.kind !== 'routine_change') return
+    this.emit(live, [{ op: 'entry.update', id: entryId, changes: { outcome } }])
+  }
+
+  private settleRoutine(
+    sessionId: string,
+    entryId: string,
+    answer: RoutineAnswer,
+    device?: FromDevice,
+  ): void {
+    const resolve = this.routineWaits.get(entryId)
+    this.routineWaits.delete(entryId)
+    const live = this.live.get(sessionId)
+    if (live) {
+      live.origins.delete(`routine:${entryId}`)
+      const entry = live.thread.byId[entryId]
+      if (entry?.kind === 'routine_change' && entry.outcome === null) {
+        // Confirm is settled by what doing it gives; the card holds until then.
+        if (answer.decision !== 'confirm') {
+          const outcome: RoutineChangeOutcome = {
+            kind: answer.decision === 'decline' ? 'declined' : answer.decision,
+          }
+          this.emit(live, [
+            {
+              op: 'entry.update',
+              id: entryId,
+              changes: { outcome, ...(device ? { device } : {}) },
+            },
+          ])
+        } else if (device) {
+          this.emit(live, [{ op: 'entry.update', id: entryId, changes: { device } }])
+        }
+      }
+      this.stopWaiting(live)
+      if (live.record.origin === 'routine' && waitingCount(live) === 0) {
+        this.deps.routine?.current?.waiting(live.id, false)
+      }
+      this.touch(live.id)
+      this.updateBadge()
+    }
+    resolve?.(answer)
+  }
+
+  /**
    * The agent asked the user to do a step on the session's page: the thread shows it, waiting, and
    * the session waits as for a permission. A call made again for the same step adds nothing.
    */
@@ -4771,7 +4931,13 @@ export class SessionManager {
       }),
       apply: (output) => this.applyOutput(live, output),
       requestPermission: (request, signal) => this.requestPermission(live, request, signal),
+      hasPermissionPlugins: () =>
+        Boolean(
+          this.deps.plugins?.wants('session.permissionRequested') && live.record.origin === 'user',
+        ),
+      checkPermissionPlugin: (request, signal) => this.checkPermissionPlugin(live, request, signal),
       send: (text, options) => this.sendForUser(live, text, options),
+      requeue: (texts) => this.requeue(live, texts),
       startMode: () => startModeIn(this.deps.settings(), record.agentId) ?? null,
       readAgentFile: (file) => this.deps.agentFile?.(record.id, file) ?? Promise.resolve(null),
       readProjectFile: (file) => this.deps.projectFile?.(record.id, file) ?? Promise.resolve(null),
@@ -4845,6 +5011,7 @@ export class SessionManager {
       unansweredCancel: null,
       background: false,
       backgroundListed: false,
+      stillShown: 'null',
       scheduled: 0,
       held: null,
       agentTurn: false,
@@ -4923,7 +5090,9 @@ export class SessionManager {
     const role = record.role ? roleBlock(record.role.title, record.role.instructions) : null
     const append = runtime?.connection.systemPromptAppend
       ? kettuAhead(
-          reached ? (this.deps.mcp?.guide(record.agentId) ?? null) : null,
+          reached
+            ? (this.deps.mcp?.guide(record.agentId, this.suggestsByTool(record, runtime)) ?? null)
+            : null,
           memory?.text ?? null,
           role,
         )
@@ -5366,8 +5535,33 @@ export class SessionManager {
   ): McpServer[] {
     if (!this.deps.mcp || !runtime) return []
     return runtime.init.capabilities.mcpHttp && runtime.kettu
-      ? this.deps.mcp.servers(sessionId, record, runtime.connection)
+      ? this.deps.mcp.servers(
+          sessionId,
+          record,
+          runtime.connection,
+          this.suggestsByTool(record, runtime),
+        )
       : []
+  }
+
+  /** How the session's agent suggests the next message; null when it gives none. */
+  private suggestionRouteOf(
+    record: SessionRecord,
+    runtime: AgentRuntime | null | undefined,
+  ): SuggestionRoute | null {
+    if (!runtime || record.origin === 'subagent') return null
+    return suggestionRoute(
+      record.agentId,
+      runtime.init.capabilities,
+      runtime.connection.allowsKettuTools === true,
+    )
+  }
+
+  /** Whether the session is given the next-message tool: its agent suggests by it, and it is on. */
+  private suggestsByTool(record: SessionRecord, runtime: AgentRuntime | null | undefined): boolean {
+    return (
+      this.deps.settings().promptSuggestions && this.suggestionRouteOf(record, runtime) === 'tool'
+    )
   }
 
   private libraryServers(
@@ -5387,6 +5581,7 @@ export class SessionManager {
   }
 
   private dropLive(live: Live): void {
+    this.stopSuggesting(live.id)
     // A card still waiting goes unanswered; the session's next start asks again.
     const card = this.projectMcpCards.get(live.id)
     const waiting = card ? live.thread.byId[card.entryId] : undefined
@@ -5638,6 +5833,7 @@ export class SessionManager {
         break
       case 'tasks':
         this.update(live, { background: effect.tasks })
+        this.showStillRunning(live)
         break
       case 'foreground':
         this.update(live, { foreground: effect.tasks })
@@ -6104,6 +6300,7 @@ export class SessionManager {
   portClosed(portId: string): void {
     const slot = this.preparedSlots.get(portId)
     for (const live of [slot?.current, slot?.next]) if (live) void this.dropPrepared(live)
+    this.preparedSlots.delete(portId)
     const shown = this.shown.get(portId)
     this.shown.delete(portId)
     for (const [sessionId, ports] of this.watchers) {
@@ -6213,8 +6410,9 @@ export class SessionManager {
     }
     const role = params.role === undefined ? null : await this.resolveRole(params.role)
     const roleTools = role ? this.deps.commands?.extra(params.agentId, role.needs) : undefined
-    // A prepared session's agent already works in the project's folder, so a worktree starts anew,
-    // and it is attached already, so a command that names more tools or a role starts anew too.
+    // A prepared session's agent already works in its folder (the project's or its parent's
+    // worktree), so a new worktree starts anew, and it is attached already, so a command that
+    // names more tools or a role starts anew too.
     if (
       params.preparedId !== undefined &&
       params.worktree === undefined &&
@@ -6225,6 +6423,7 @@ export class SessionManager {
       const adopted = await this.adopt({
         agentId: params.agentId,
         preparedId: params.preparedId,
+        parentId: params.parentId,
         prompt,
         device: params.device,
         profileId,
@@ -6628,6 +6827,7 @@ export class SessionManager {
     }
     const key = preparedKey(params)
     const slot = this.slotOf(portId)
+    slot.refused = null
     const held = slot.next ?? (slot.stale ? null : slot.current)
     if (!params.replace && held?.prepared?.key === key) {
       await held.prepared.opening
@@ -6646,6 +6846,7 @@ export class SessionManager {
       await live.prepared!.opening
     } catch (error) {
       if (slot.next === live) slot.next = null
+      this.noteRefused(portId, params, error)
       throw error
     }
     if (slot.next === live) {
@@ -6658,6 +6859,23 @@ export class SessionManager {
     return this.summary(live.id)
   }
 
+  /**
+   * Keeps a prepare the agent refused for want of a sign-in it asks no one for, as while Kettu
+   * looks for a sign-in agy already holds, to open again once the agent signs in. New session
+   * itself prepares again after a sign-in the agent asked the user for.
+   */
+  private noteRefused(portId: string, params: PrepareParams, error: unknown): void {
+    if (!(error instanceof HostError) || error.code !== 'auth_required') return
+    if (this.deps.agents.status(params.agentId).signIn === 'required') return
+    // The window asked for another meanwhile.
+    if (this.preparedSlots.get(portId)?.next) return
+    this.slotOf(portId).refused = {
+      agentId: params.agentId,
+      projectPath: params.projectPath,
+      ...(params.parentId !== undefined ? { parentId: params.parentId } : {}),
+    }
+  }
+
   /** Removes a prepared session that was not adopted; one already adopted or gone is left. */
   async discard(sessionId: string): Promise<void> {
     const live = this.live.get(sessionId)
@@ -6667,7 +6885,7 @@ export class SessionManager {
   private slotOf(portId: string): PreparedSlot {
     let slot = this.preparedSlots.get(portId)
     if (!slot) {
-      slot = { current: null, next: null, stale: false }
+      slot = { current: null, next: null, stale: false, refused: null }
       this.preparedSlots.set(portId, slot)
     }
     return slot
@@ -6680,14 +6898,17 @@ export class SessionManager {
   ): Promise<Live> {
     const { projects, scratch } = this.deps
     let projectPath: string
+    let worktree: WorktreeRecord | undefined
     if (params.parentId !== undefined) {
-      projectPath = this.recordOf(params.parentId).projectPath
+      const parent = this.recordOf(params.parentId)
+      projectPath = parent.projectPath
       if (
         params.projectPath !== null &&
         !samePath(params.projectPath, projectPath, this.deps.platform)
       ) {
         throw invalidParams(t('session.subSessionProject'))
       }
+      if (parent.worktree) worktree = { ...parent.worktree }
     } else {
       projectPath =
         params.projectPath === null
@@ -6700,6 +6921,7 @@ export class SessionManager {
       agentId: params.agentId,
       acpSessionId: '',
       projectPath,
+      ...(worktree ? { worktree } : {}),
       title: null,
       createdAt: now,
       updatedAt: now,
@@ -6757,12 +6979,16 @@ export class SessionManager {
     if (gone()) throw removedWhileStarting()
     let setup
     let attach: SessionOptions
+    let cwd: string
     try {
+      cwd = await this.cwdOf(live)
+      if (gone()) throw removedWhileStarting()
       attach = await this.attachOptions(live.id, live.record, runtime)
       if (this.startsInFullAccess(live, { ...this.startModeOf(agentId), ...picks })) {
         attach = { ...attach, fullAccess: true }
       }
-      setup = await runtime.connection.newSession(workDir(live.record), attach)
+      if (gone()) throw removedWhileStarting()
+      setup = await runtime.connection.newSession(cwd, attach)
     } catch (error) {
       if (gone()) throw removedWhileStarting()
       const mapped = agentError(error)
@@ -6772,7 +6998,7 @@ export class SessionManager {
     this.deps.prepared?.add({
       agentId,
       acpSessionId: setup.sessionId,
-      cwd: workDir(live.record),
+      cwd,
     })
     if (gone()) {
       await this.removeUnlisted(live.id, runtime, setup.sessionId)
@@ -6881,6 +7107,7 @@ export class SessionManager {
   private async adopt(params: {
     agentId: AgentId
     preparedId: string
+    parentId?: string
     prompt: UserContent[] | undefined
     device?: FromDevice
     profileId: string | undefined
@@ -6895,6 +7122,7 @@ export class SessionManager {
     if (preparedIn ? !params.sandbox || !sameSandbox(preparedIn, params.sandbox) : params.sandbox) {
       return null
     }
+    if (asked.record.parentId !== (params.parentId ?? null)) return null
     const { portId, key } = asked.prepared
     const slot = this.preparedSlots.get(portId)
     const live = slot?.stale && slot.next?.prepared?.key === key ? slot.next : asked
@@ -6905,6 +7133,20 @@ export class SessionManager {
     }
     if (!live.prepared || this.live.get(live.id) !== live || !live.connection) return null
     if (live.thread.session.status !== 'ready') return null
+    if (live.record.parentId !== null) {
+      const parent =
+        this.live.get(live.record.parentId)?.record ?? this.records.get(live.record.parentId)
+      if (!parent) return null
+      const expected = parent.worktree?.path ?? null
+      const actual = live.record.worktree?.path ?? null
+      if (
+        (expected === null) !== (actual === null) ||
+        (expected !== null && actual !== null && !samePath(expected, actual, this.deps.platform))
+      ) {
+        return null
+      }
+      if (live.record.worktree?.removed !== undefined) return null
+    }
     const prepared = live.prepared
     live.prepared = null
     prepared.unwatch?.()
@@ -6925,7 +7167,18 @@ export class SessionManager {
     const entryId = prompt ? this.addPrompt(live, prompt, now, undefined, params.device) : null
     this.save(live)
     this.touch(live.id)
-    if (prompt && entryId) this.startTurn(live, prompt, now, entryId, portId)
+    if (prompt && entryId) {
+      if (this.waitsForWorktree(live)) {
+        live.heldFirst = {
+          content: prompt,
+          entryId,
+          ...(params.device ? { device: params.device } : {}),
+          portId,
+        }
+      } else {
+        this.startTurn(live, prompt, now, entryId, portId)
+      }
+    }
     return this.summary(live.id)
   }
 
@@ -7177,13 +7430,14 @@ export class SessionManager {
 
   /**
    * Sets the values New session chose, in `startOrder`, each against the options as they stand
-   * after the one before. A value the session does not offer, or one the agent refuses, is
-   * logged and left at the agent's value, so the start itself never fails on it. With `restore`
-   * the values are ones a session already had, a fork's source's or its own as it attaches again:
-   * they are not the user's latest choice, and the model is sent again while an option is missing,
-   * since an agent can list an option only once a model is set. With `from`, the options are
-   * worked on apart from the session's and returned, for the caller to report once all are set;
-   * `stop` ends it before the next value.
+   * after the one before. A level the model then set lacks goes to the nearest lower one it
+   * offers, which is not remembered as the user's. A value the session does not offer, or one the
+   * agent refuses, is logged and left at the agent's value, so the start itself never fails on it.
+   * With `restore` the values are ones a session already had, a fork's source's or its own as it
+   * attaches again: they are not the user's latest choice, and the model is sent again while an
+   * option is missing, since an agent can list an option only once a model is set. With `from`,
+   * the options are worked on apart from the session's and returned, for the caller to report once
+   * all are set; `stop` ends it before the next value.
    */
   private async applyStartOptions(
     live: Live,
@@ -7210,9 +7464,15 @@ export class SessionManager {
     const current = (): ConfigOption[] => held ?? live.thread.session.config
     for (const id of startOrder(current(), Object.keys(options))) {
       if (stop?.()) break
-      const value = options[id]
       const config = current()
       const option = config.find((o) => o.id === id)
+      const asked = options[id]
+      const value =
+        option?.category === 'thought_level' &&
+        typeof asked === 'string' &&
+        !isValueOf(option, asked)
+          ? (carriedLevel(option, asked) ?? asked)
+          : asked
       const offerMissing =
         restore &&
         option?.category === 'model' &&
@@ -7239,8 +7499,9 @@ export class SessionManager {
         if (stop?.()) break
         if (held) held = next
         else this.update(live, { config: next })
-        if (!restore && remember) this.deps.options?.chose(agentId, option, value, next)
-        else if (!restore) this.deps.options?.seen(agentId, next)
+        if (!restore && remember && value === asked) {
+          this.deps.options?.chose(agentId, option, value, next)
+        } else if (!restore) this.deps.options?.seen(agentId, next)
       } catch (error) {
         this.deps.diagnostics.log(
           'warn',
@@ -7785,6 +8046,12 @@ export class SessionManager {
         void this.retry(live.id).catch(() => {})
       }
     }
+    for (const [portId, slot] of [...this.preparedSlots]) {
+      const refused = slot.refused
+      if (refused?.agentId !== agentId) continue
+      slot.refused = null
+      this.prepare(refused, portId).catch(() => {})
+    }
   }
 
   /**
@@ -7905,6 +8172,29 @@ export class SessionManager {
     return out
   }
 
+  /**
+   * What a top-level session runs on between turns, by its agent's reports, for its row and the
+   * end of its thread; null while a turn runs or nothing does.
+   */
+  private stillRunning(live: Live): StillRunning | null {
+    const { status } = live.thread.session
+    if (live.record.origin === 'subagent' || status !== 'ready' || live.turn || live.agentTurn) {
+      return null
+    }
+    let commands = 0
+    for (const task of live.thread.session.background ?? []) {
+      if (task.status === 'running') commands++
+    }
+    const subagents = this.workingSubagents(live).length
+    if (commands + subagents === 0) return null
+    return { commands, subagents, reportsBack: live.connection?.reportsBack === true }
+  }
+
+  /** Sends the session's summary again once what it runs on between turns changed. */
+  private showStillRunning(live: Live): void {
+    if (JSON.stringify(this.stillRunning(live)) !== live.stillShown) this.touch(live.id)
+  }
+
   /** What the session runs beside a turn, as `holdReason` counts it; null when nothing. */
   private backgroundWork(live: Live): BackgroundWork | null {
     const commands: string[] = []
@@ -7982,6 +8272,7 @@ export class SessionManager {
   private refreshRelease(from: Live): void {
     const live = this.rootOf(from)
     if (!live) return
+    this.showStillRunning(live)
     if (live.releaseTimer) {
       clearTimeout(live.releaseTimer)
       live.releaseTimer = null
@@ -8863,15 +9154,14 @@ export class SessionManager {
     let breakdown: ContextBreakdown | null
     if (connection.readContext) {
       try {
-        // Huli: a profile's session is read on its profile, so its history goes nowhere else.
-        const provider = this.providerOf(record)
-        breakdown = await connection.readContext(
-          record.acpSessionId,
-          workDir(record),
-          provider ? { provider } : {},
-        )
+        // A query opened to read gets what an attach hands the agent, so that what Kettu adds,
+        // its MCP servers above all, counts as the next turn sends it.
+        const options = await this.attachOptions(sessionId, record, runtime)
+        breakdown = await connection.readContext(record.acpSessionId, workDir(record), options)
       } catch (error) {
         throw agentError(error)
+      } finally {
+        if (!this.live.has(sessionId)) this.deps.mcp?.detached(sessionId)
       }
     } else {
       const agent = this.deps.agents.name(record.agentId)
@@ -9099,7 +9389,7 @@ export class SessionManager {
     kettu?: true,
   ): void {
     live.used = true
-    live.userTurn = kettu !== true && from === undefined
+    live.userTurn = kettu !== true && from === undefined && approval !== true
     if (live.userTurn) this.deps.options?.used(live.record.agentId, live.thread.session.config)
     const now = this.now()
     const entryId = this.addPrompt(live, content, now, from, device, approval, kettu)
@@ -9265,6 +9555,7 @@ export class SessionManager {
             },
           },
     ])
+    this.stopSuggesting(live.id)
     this.update(live, {
       agentId,
       acpSessionId: record.acpSessionId,
@@ -9404,7 +9695,7 @@ export class SessionManager {
       ? servers
           .flatMap((server) => (server.type === 'stdio' ? [] : (server.prompt ?? [])))
           .join('\n\n')
-      : (this.deps.mcp?.guide(record.agentId) ?? '')
+      : (this.deps.mcp?.guide(record.agentId, this.suggestsByTool(record, runtime)) ?? '')
     const memory = (await this.memoryFor(live.id, record, tools))?.text ?? null
     const role = record.role ? roleBlock(record.role.title, record.role.instructions) : null
     return kettuAhead(tools && this.deps.mcp && text ? text : null, memory, role)
@@ -9833,6 +10124,12 @@ export class SessionManager {
     }
     this.emit(live, [{ op: 'entry.add', entry: steered }])
     this.keepOrigin(live, steered)
+    if (item.approval || item.kettu) {
+      live.userTurn = false
+      if (live.record.origin === 'task') {
+        this.deps.task?.current?.turnStarted(live.id, { byUser: false })
+      }
+    }
     this.commitAttachments(live, resolved)
     if (resolved.ids.length > 0) void this.deps.attachments?.release(resolved.ids)
     live.queuedBy.delete(itemId)
@@ -9982,8 +10279,10 @@ export class SessionManager {
       requested: false,
       byAgent,
       ends: [],
+      suggestion: null,
     }
     live.turn = turn
+    this.stopSuggesting(live.id)
     live.sender =
       portId === null ? null : { portId, device: this.deps.portDevice?.(portId) ?? null }
     live.scope = newTurnScope()
@@ -10005,6 +10304,10 @@ export class SessionManager {
     delete live.record.lastTurn
     this.clearContinueTimer(live.id)
     this.continueRetries.delete(live.id)
+    this.tellStepLimit(live.record)
+    if (live.record.origin === 'task') {
+      this.deps.task?.current?.turnStarted(live.id, { byUser: !byAgent && live.userTurn })
+    }
     // The touch below sends the count without the suggestions the user talked past.
     this.deps.cards?.turnStarted(live.id)
     this.update(live, {
@@ -10870,6 +11173,7 @@ export class SessionManager {
         ...(item.title === undefined ? {} : { title: item.title }),
         text: item.text,
         ...(item.failed === undefined ? {} : { failed: item.failed }),
+        ...(item.detail === undefined ? {} : { detail: item.detail }),
       })
       byPlugin.set(item.pluginId, group)
     }
@@ -11018,6 +11322,7 @@ export class SessionManager {
     if (live) this.persist(live)
     else this.saveIndex()
     this.touch(sessionId)
+    this.tellStepLimit(record)
   }
 
   /**
@@ -11133,6 +11438,7 @@ export class SessionManager {
     this.touch(sessionId)
     this.continueRetries.delete(sessionId)
     this.scheduleContinue(sessionId, resetsAt + CONTINUE_AFTER_RESET_MS)
+    this.tellStepLimit(record)
   }
 
   /**
@@ -11149,6 +11455,7 @@ export class SessionManager {
     if (live) this.persist(live)
     else this.saveIndex()
     this.touch(sessionId)
+    this.tellStepLimit(record)
   }
 
   /** Drops the continuation planned for a session, as its Don't continue line asks. */
@@ -11170,6 +11477,7 @@ export class SessionManager {
       if (live) this.persist(live)
       else changed = true
       this.touch(record.id)
+      this.tellStepLimit(record)
     }
     if (changed) this.saveIndex()
   }
@@ -11275,6 +11583,7 @@ export class SessionManager {
     if (stopReason === 'end_turn') this.limitChecks.delete(live.id)
     if (stopReason === 'end_turn' || chosen) this.drainQueue(live, chosen)
     else this.pauseQueue(live)
+    this.suggestNext(live, turn, stopReason)
     this.followAgentTurn(live)
     // An agent that lists its titles sends none in the thread: the turn's end reads the session's.
     this.maybeReadListedTitle(live, this.userMessages(live) === 1)
@@ -11425,8 +11734,17 @@ export class SessionManager {
   /** Tells the task engine a step's turn ended; true for a step's session, which stays quiet. */
   private reportStep(live: Live): boolean {
     if (live.record.origin !== 'task') return false
-    this.deps.task?.current?.turnEnded(live.id, { byUser: live.userTurn })
+    this.deps.task?.current?.turnEnded(live.id, {
+      byUser: live.userTurn,
+      limit: stepLimit(live.record),
+    })
     return true
+  }
+
+  /** Tells the task engine how a step session's last turn stands against a plan limit now. */
+  private tellStepLimit(record: SessionRecord): void {
+    if (record.origin !== 'task') return
+    this.deps.task?.current?.turnLimit(record.id, stepLimit(record))
   }
 
   /** The entries of a turn, after the user entry that opened it. */
@@ -12334,8 +12652,14 @@ export class SessionManager {
     if (status === 'starting' || status === 'auth_required') throw busyError(status)
     if (!editable()) throw new HostError('restricted', t('rewind.notEligible'))
     const entry = live.thread.byId[entryId] as Extract<ThreadEntry, { kind: 'user' }>
-    const content = await this.composerCopy(live, entry.content)
     const at = live.thread.order.indexOf(entryId)
+    const point: RewindPoint = {
+      ref: entry.agentRef ?? null,
+      text: promptLine(entry.content),
+      occurrence: promptOccurrence(live.thread, at),
+    }
+    await this.stageRewind(live, point)
+    const content = await this.composerCopy(live, entry.content)
     const aside = live.thread.order.slice(at).flatMap((id) => {
       const item = live.thread.byId[id]
       const pos = live.positions.get(id)
@@ -12356,11 +12680,7 @@ export class SessionManager {
       turns: turnsFrom(live.thread, at) + (prior?.turns ?? 0),
       draft: prior?.draft ?? draft,
       used: prior ? prior.used : (live.thread.session.usage?.used ?? null),
-      point: {
-        ref: entry.agentRef ?? null,
-        text: promptLine(entry.content),
-        occurrence: promptOccurrence(live.thread, at),
-      },
+      point,
       ...(carry ? { carry } : {}),
       ...(stowed ? { lastTurn: stowed } : {}),
     }
@@ -12408,6 +12728,7 @@ export class SessionManager {
     }
     const used = usedAtEnd(live.thread)
     const usage = live.thread.session.usage
+    this.stopSuggesting(live.id)
     this.update(live, {
       rewound: { turns: live.record.rewound.turns },
       ...(usage && used !== null ? { usage: { ...usage, used } } : {}),
@@ -12514,6 +12835,10 @@ export class SessionManager {
     if (live.rewinding || (live.turn && !live.turn.ended)) {
       throw busyError(live.thread.session.status)
     }
+    await this.unstageRewind(live)
+    if (live.record.rewound !== rewound || live.setAside !== aside) {
+      throw new HostError('restricted', t('rewind.nothing'))
+    }
     const from = aside[0]?.pos ?? live.nextPos
     // Entries added since, as a notice, follow the returned ones as they followed the cut.
     const later = live.thread.order.flatMap((id) => {
@@ -12553,6 +12878,49 @@ export class SessionManager {
         item.type !== 'ref' || item.ref.kind !== 'attachment' || held.has(item.ref.attachment.id),
     )
     return { draft }
+  }
+
+  /**
+   * An agent whose cut takes back the files stages it as the edit goes back, so the files go back
+   * with the turns; when that fails nothing has changed.
+   */
+  private async stageRewind(live: Live, point: RewindPoint): Promise<void> {
+    const connection = await this.fileRewinder(live)
+    if (!connection) return
+    try {
+      await connection.stageRewind!(live.record.acpSessionId, await this.cwdOf(live), point)
+    } catch (error) {
+      throw agentError(error)
+    }
+  }
+
+  /** Put back clears what the edit staged, so the files it took back return with the turns. */
+  private async unstageRewind(live: Live): Promise<void> {
+    const connection = await this.fileRewinder(live)
+    if (!connection) return
+    try {
+      await connection.unstageRewind!(live.record.acpSessionId, await this.cwdOf(live))
+    } catch (error) {
+      throw agentError(error)
+    }
+  }
+
+  /** The connection of an agent whose cut takes back the files, for a session it holds. */
+  private async fileRewinder(live: Live): Promise<AgentConnection | null> {
+    const { record } = live
+    if (record.acpSessionId === '') return null
+    if (!this.deps.agents.status(record.agentId).capabilities.rewindFiles) return null
+    const runtime = await this.deps.agents.ensureReady(record.agentId)
+    const { connection } = runtime
+    if (
+      !runtime.init.capabilities.rewindFiles ||
+      !connection.stageRewind ||
+      !connection.unstageRewind
+    ) {
+      const agent = this.deps.agents.name(record.agentId)
+      throw new HostError('restricted', t('rewind.unsupported', { agent }))
+    }
+    return connection
   }
 
   /** Cuts the agent's own session where an edit went back to, once, before anything else reaches it. */
@@ -12734,6 +13102,7 @@ export class SessionManager {
     live.listedTasks = live.listedTasks && []
     if (live.thread.session.background?.length) this.update(live, { background: [] })
     if (live.thread.session.foreground?.length) this.update(live, { foreground: [] })
+    this.showStillRunning(live)
   }
 
   /** The commands that ran on past their turn in their calls stop with the agent's session. */
@@ -12988,6 +13357,124 @@ export class SessionManager {
       throw agentError(error)
     }
     if (live.listedTasks) live.listedTasks = []
+  }
+
+  // Next-message suggestions.
+
+  /**
+   * The next-message tool's call: kept for when the running turn ends normally; false when the
+   * session gives no suggestion by the tool now.
+   */
+  noteSuggestion(sessionId: string, message: string): boolean {
+    const live = this.live.get(sessionId)
+    if (!live?.turn || !this.deps.settings().promptSuggestions) return false
+    const runtime = this.deps.agents.runtime(live.record.agentId)
+    if (this.suggestionRouteOf(live.record, runtime) !== 'tool') return false
+    live.turn.suggestion = message
+    return true
+  }
+
+  /**
+   * Gives the next-message suggestion once a turn ended normally, for an agent without prompt
+   * suggestions of its own: the one its tool kept, or one asked of a fork of the session.
+   */
+  private suggestNext(live: Live, turn: Turn, stopReason: StopReason): void {
+    // A queued message that went on is the next one already.
+    if (stopReason !== 'end_turn' || live.turn || live.closing) return
+    if (!this.deps.settings().promptSuggestions || planModeOn(live.thread.session.config)) return
+    const route = this.suggestionRouteOf(live.record, this.deps.agents.runtime(live.record.agentId))
+    if (route === 'tool') {
+      if (turn.suggestion !== null) this.offerSuggestion(live, turn.suggestion)
+      return
+    }
+    // A fork is a request of its own, which a plan near its limit is better kept for.
+    if ((route === 'codex' || route === 'fork') && !this.nearPlanLimit(live)) {
+      void this.suggestByFork(live, route)
+    }
+  }
+
+  /**
+   * Huli: a suggestion as Kite's composer and phone take it, one line with an id their dismissal
+   * names, as Claude Code's own come.
+   */
+  private offerSuggestion(live: Live, text: string): void {
+    const line = text
+      .replace(/[\t\n\v\f\r\u0085\u2028\u2029]+/g, ' ')
+      .replace(/[\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, '')
+      .replace(/ {2,}/g, ' ')
+      .trim()
+    if (line === '') return
+    const capped = [...line].slice(0, PROMPT_SUGGESTION_CHARS).join('').trimEnd()
+    this.update(live, { suggestion: { id: randomUUID(), text: capped } })
+  }
+
+  /** Whether a window that holds back the session's model is 90% used or more. */
+  private nearPlanLimit(live: Live): boolean {
+    const { agentId } = live.record
+    if (!this.deps.agents.has(agentId)) return false
+    const now = this.now()
+    const model = live.thread.session.config.find((option) => option.category === 'model')
+    return limitsForModel(this.deps.agents.status(agentId).limits, model).some(
+      (limit) =>
+        !limit.extraUsage &&
+        limitLevel(limit) === 'bad' &&
+        (limit.resetsAt === null || limit.resetsAt > now),
+    )
+  }
+
+  /** Asks a fork of the session, the way its side questions go, what the user sends next. */
+  private async suggestByFork(live: Live, route: 'codex' | 'fork'): Promise<void> {
+    this.stopSuggesting(live.id)
+    const controller = new AbortController()
+    this.suggestRuns.set(live.id, controller)
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(SUGGEST_TIMEOUT_MS)])
+    const ask = { question: SUGGEST_QUESTION, history: [] }
+    const events: SideAnswerEvents = { text: () => {}, step: () => {} }
+    try {
+      const result =
+        route === 'codex'
+          ? await this.sideOwn(live, 'codex', ask, events, signal)
+          : await this.sideFork(live, ask, events, signal)
+      this.recordSuggestUsage(live, result)
+      if (signal.aborted || live.turn || this.live.get(live.id) !== live) return
+      const text = result.synthetic ? null : suggestionText(result.text)
+      if (text && this.deps.settings().promptSuggestions) this.offerSuggestion(live, text)
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        this.deps.diagnostics.log(
+          'info',
+          `No next-message suggestion from a fork of ${live.id}: ${logText(error)}`,
+        )
+      }
+    } finally {
+      if (this.suggestRuns.get(live.id) === controller) this.suggestRuns.delete(live.id)
+    }
+  }
+
+  private recordSuggestUsage(live: Live, result: SideAnswer): void {
+    if (!result.tokens || !this.deps.usage) return
+    this.deps.usage.record(
+      recordRows({
+        sessionId: live.id,
+        acpSessionId: live.record.acpSessionId,
+        agentId: live.record.agentId,
+        project: live.record.projectPath,
+        turnEntryId: `suggest-${randomUUID()}`,
+        at: this.now(),
+        tokens: result.tokens,
+        models: result.model ? [{ model: result.model, tokens: result.tokens }] : [],
+        model: result.model ?? null,
+      }),
+    )
+  }
+
+  /** Stops the fork asked for the session's suggestion; true when one was running. */
+  private stopSuggesting(sessionId: string): boolean {
+    const run = this.suggestRuns.get(sessionId)
+    if (!run) return false
+    this.suggestRuns.delete(sessionId)
+    run.abort()
+    return true
   }
 
   // Side questions.
@@ -13538,16 +14025,16 @@ export class SessionManager {
   }
 
   /**
-   * Lets the plugins that hold `requests.check` look at a request to use a tool before anything
-   * else answers or shows it; one of them may deny it and none can allow it. Null when no plugin
-   * would look, so the request goes on at once. A question, a plan or a request of an MCP server
-   * asks for no authorization, so it is not checked.
+   * 仅执行插件的 `session.permissionRequested` 预检钩子（PLUG-7）：
+   * - 未安装监听插件、非用户会话或非工具授权请求时直接返回 null；
+   * - 若插件拒绝，确保工具条目可见并追加 `plugin_denial` 条目后返回拒绝答复；
+   * - 若插件未拒绝，返回 null 交由调用方继续处理（自动放行或展示审批卡）。
    */
-  private pluginCheck(
+  private checkPermissionPlugin(
     live: Live,
     request: PermissionRequest,
     signal: AbortSignal,
-  ): Promise<PermissionAnswer> | null {
+  ): Promise<PermissionAnswer | null> {
     const plugins = this.deps.plugins
     const deny = request.options.find((option) => option.kind === 'reject_once')
     if (
@@ -13558,15 +14045,21 @@ export class SessionManager {
       request.elicitation ||
       !deny
     ) {
-      return null
+      return Promise.resolve(null)
     }
-    const entry = live.thread.byId[request.toolEntryId]
+    const existing = live.thread.byId[request.toolEntryId]
+    const added = request.output.patches.find(
+      (patch): patch is Extract<typeof patch, { op: 'entry.add' }> =>
+        patch.op === 'entry.add' && patch.entry.id === request.toolEntryId,
+    )?.entry
+    const entry = existing ?? added
     const tool = entry?.kind === 'tool' ? entry : undefined
     const facts = requestFacts(tool)
     return plugins.check(this.summary(live.id), facts).then((denial) => {
       if (signal.aborted) throw signal.reason
       if (live.closing || live.turn?.cancelRequested) return 'cancelled'
-      if (!denial) return this.askPermission(live, request, signal)
+      if (!denial) return null
+      if (!live.thread.byId[request.toolEntryId]) this.applyOutput(live, request.output)
       this.emit(live, [
         {
           op: 'entry.update',
@@ -13595,16 +14088,44 @@ export class SessionManager {
     })
   }
 
+  /**
+   * Lets the plugins that hold `requests.check` look at a request to use a tool before anything
+   * else answers or shows it; one of them may deny it and none can allow it. Null when no plugin
+   * would look, so the request goes on at once. A question, a plan or a request of an MCP server
+   * asks for no authorization, so it is not checked.
+   */
+  private pluginCheck(
+    live: Live,
+    request: PermissionRequest,
+    signal: AbortSignal,
+  ): Promise<PermissionAnswer> | null {
+    const plugins = this.deps.plugins
+    const deny = request.options.find((option) => option.kind === 'reject_once')
+    if (
+      !plugins?.wants('session.permissionRequested') ||
+      live.record.origin !== 'user' ||
+      request.questions ||
+      request.plan !== undefined ||
+      request.elicitation ||
+      !deny
+    ) {
+      return null
+    }
+    return this.checkPermissionPlugin(live, request, signal).then(
+      (denied) => denied ?? this.askPermission(live, request, signal),
+    )
+  }
+
   private askPermission(
     live: Live,
     request: PermissionRequest,
     signal: AbortSignal,
   ): Promise<PermissionAnswer> {
     const assessed = this.riskOf(live, request)
-    const risk: PermissionRisk | null = assessed && {
-      level: assessed.level,
-      reason: riskReason(assessed),
-    }
+    const risk = withAgentRisk(
+      assessed && { level: assessed.level, reason: riskReason(assessed) },
+      request,
+    )
     // A run answers inside its scope while its first turn works; anything else waits for the user.
     if (live.routineScope && live.record.origin === 'routine' && !live.routineTurnEnded) {
       const optionId = this.routineAnswer(live, live.routineScope, request)
@@ -13643,7 +14164,9 @@ export class SessionManager {
     }
     const guarded = this.readOnlyAnswer(live, request, risk)
     if (guarded) return Promise.resolve(guarded)
-    const auto = this.autoAnswer(live, request, assessed)
+    // Huli: what the agent itself holds risky is never allowed by the host alone.
+    const auto =
+      request.risk && request.risk !== 'safe' ? null : this.autoAnswer(live, request, assessed)
     if (auto !== null && risk) {
       this.emit(live, [
         {
@@ -13663,8 +14186,10 @@ export class SessionManager {
     const { elicitation } = request
     const plan = request.plan === undefined ? null : planRevision(live.thread, request.toolEntryId)
     const asked = live.thread.byId[request.toolEntryId]
-    const risky =
+    const heuristicRisky =
       asked?.kind === 'tool' && riskyRequest(asked.toolKind, asked.rawInput, request.shell)
+    const computedRisk = request.risk ?? (heuristicRisky ? 'risky' : 'safe')
+    const risky = computedRisk !== 'safe'
     return new Promise<PermissionAnswer>((resolve, reject) => {
       const onAbort = (): void => {
         this.settlePermission(live, requestId, 'withdrawn')
@@ -13844,6 +14369,11 @@ export class SessionManager {
         this.settleTheme(live.id, entryId, { decision: 'ended' })
         continue
       }
+      // So does a Routine card.
+      if (requestId.startsWith('routine:')) {
+        this.settleRoutine(live.id, entryId, { decision: 'ended' })
+        continue
+      }
       live.origins.delete(requestId)
       this.originRequests.delete(requestId)
       const entry = live.thread.byId[entryId]
@@ -13959,6 +14489,28 @@ export class SessionManager {
   }
 
   /**
+   * Withdraws pending requests that outlast a turn (non-blocking requests, or any request left
+   * open while idle) so a finished or stopped workflow step never stays held waiting and cannot be
+   * woken by a stale card.
+   */
+  withdrawPending(sessionId: string): void {
+    const live = this.live.get(sessionId)
+    if (!live) return
+    const idle = live.turn === null
+    let changed = false
+    for (const [requestId, pending] of [...live.permissions]) {
+      if (!pending.nonBlocking && !idle) continue
+      this.settlePermission(live, requestId, 'withdrawn')
+      pending.answer('cancelled')
+      changed = true
+    }
+    if (changed) {
+      this.persist(live)
+      this.touch(live.id)
+    }
+  }
+
+  /**
    * Answers a request on the user's behalf from a plugin's channel, by the path of their click but
    * only with allow once or deny of a plain permission request: never a question, a plan, a form
    * or anything that lasts.
@@ -14048,6 +14600,9 @@ export class SessionManager {
     this.update(live, { queue: [...queue, item] })
     this.persist(live)
     this.touch(live.id)
+    if (approval && live.record.origin === 'task') {
+      this.deps.task?.current?.turnStarted(live.id, { byUser: false })
+    }
     if (!options?.now) return
     // A turn that cannot take it leaves the message in the queue, which goes when the turn ends.
     this.steerItem(live, item.id).catch((error: unknown) => {
@@ -14056,6 +14611,23 @@ export class SessionManager {
         `Session ${live.id} kept a message queued: ${String(error)}`,
       )
     })
+  }
+
+  /**
+   * Messages the agent took back unsent from its own queue, as on a stop: they wait at the front
+   * of the session's queue, paused, as the queue does after a stop, so none goes out unseen.
+   */
+  private requeue(live: Live, texts: readonly string[]): void {
+    if (this.live.get(live.id) !== live || texts.length === 0) return
+    const at = this.now()
+    const items: QueuedPrompt[] = texts.map((text) => ({
+      id: randomUUID(),
+      content: [{ type: 'text', text }],
+      at,
+    }))
+    this.update(live, { queue: [...items, ...live.thread.session.queue], queuePaused: true })
+    this.persist(live)
+    this.touch(live.id)
   }
 
   // Config options.
@@ -14503,6 +15075,12 @@ export class SessionManager {
     return (this.live.get(sessionId)?.record ?? this.records.get(sessionId))?.commandTools ?? null
   }
 
+  /** The folder of a session that has not ended, which its HTML previews are served from. */
+  openWorkFolder(sessionId: string): string | null {
+    const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
+    return record && record.archivedAt === undefined ? this.workFolder(sessionId) : null
+  }
+
   /** The folder the session works in, its worktree or its project; null for one Kettu does not hold. */
   workFolder(sessionId: string): string | null {
     const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
@@ -14514,9 +15092,16 @@ export class SessionManager {
   }
 
   /** The session's agent now and that agent's own id of it, null for a session Kettu does not hold. */
-  agentSession(sessionId: string): { agentId: AgentId; agentSessionId: string } | null {
+  agentSession(
+    sessionId: string,
+  ): { agentId: AgentId; agentSessionId: string; configDir: string | null } | null {
     const record = this.live.get(sessionId)?.record ?? this.records.get(sessionId)
-    return record ? { agentId: record.agentId, agentSessionId: record.acpSessionId } : null
+    if (!record) return null
+    return {
+      agentId: record.agentId,
+      agentSessionId: record.acpSessionId,
+      configDir: record.configDir ?? null,
+    }
   }
 
   /** The session's title as another thread's label shows it, "Untitled session" when it has none. */
@@ -14837,10 +15422,12 @@ export class SessionManager {
   private async deliverReport(sessionId: string, reported: ReportedTurn): Promise<void> {
     if (!this.has(sessionId) || this.isArchived(this.recordOf(sessionId))) return
     const sent = this.reportsSent.get(sessionId) ?? 0
-    if (sent > REPORT_LIMIT) return
-    this.reportsSent.set(sessionId, sent + 1)
+    if (sent === PAUSED) return
+    // A limit lowered below what already went pauses at the next report.
+    const paused = sent >= this.deps.settings().startedSessions.reports
+    this.reportsSent.set(sessionId, paused ? PAUSED : sent + 1)
     const live = await this.revive(sessionId)
-    if (sent === REPORT_LIMIT) {
+    if (paused) {
       this.emit(live, [
         {
           op: 'entry.add',
@@ -14849,7 +15436,8 @@ export class SessionManager {
             id: this.nextId(live),
             severity: 'info',
             title: t('notice.reportsPaused.title'),
-            description: t('notice.reportsPaused.description', { count: REPORT_LIMIT }),
+            description: t('notice.reportsPaused.description', { count: sent }),
+            cause: 'reports_paused',
             after: agentEntryBefore(live.thread),
           },
         },
@@ -16433,7 +17021,11 @@ export class SessionManager {
     const state = await manager.inspect(record.projectPath, worktree)
     const others = this.worktreeUsers(worktree.path)
       .filter(
-        (user) => user.id !== sessionId && user.origin !== 'subagent' && !this.isArchived(user),
+        (user) =>
+          user.id !== sessionId &&
+          user.origin !== 'subagent' &&
+          !this.live.get(user.id)?.prepared &&
+          !this.isArchived(user),
       )
       .filter((user) => this.topOf(user).id !== this.topOf(record).id)
       .map((user) => user.id)
@@ -16456,10 +17048,16 @@ export class SessionManager {
       throw notFound(t('session.noWorktreeToRemove'))
     }
     const users = this.worktreeUsers(worktree.path)
-    await this.closeAll(
-      users.filter((user) => this.live.has(user.id)),
-      true,
-    )
+    const preparedUsers: Live[] = []
+    const liveUsers: SessionRecord[] = []
+    for (const user of users) {
+      const live = this.live.get(user.id)
+      if (!live) continue
+      if (live.prepared) preparedUsers.push(live)
+      else liveUsers.push(user)
+    }
+    await Promise.all(preparedUsers.map((live) => this.dropPrepared(live)))
+    await this.closeAll(liveUsers, true)
     manager.stop(worktree.path)
     this.dropBranchName(worktree.path)
     const result = await manager.remove(record.projectPath, worktree, { branch, expected })
@@ -18018,6 +18616,29 @@ function agentItemIds(ids: readonly string[]): string[] {
     if (messageId !== null) return [messageId]
     return id.startsWith('t:') ? [id.slice(2)] : []
   })
+}
+
+/** The plan limit that stopped a session's last turn, and when it carries on; null for none. */
+function stepLimit(record: SessionRecord): StepLimit | null {
+  const turn = record.lastTurn
+  return turn?.reason === 'limit' ? { continuesAt: turn.continuesAt ?? null } : null
+}
+
+const AGENT_RISK: Readonly<Record<NonNullable<PermissionRequest['risk']>, RiskLevel>> = {
+  safe: 'low',
+  risky: 'medium',
+  destructive: 'high',
+}
+
+/** Huli: the host's risk of a request, raised to the agent's own judgment where it gives one. */
+function withAgentRisk(
+  risk: PermissionRisk | null,
+  request: PermissionRequest,
+): PermissionRisk | null {
+  if (!request.risk) return risk
+  const level = AGENT_RISK[request.risk]
+  if (risk && RISK_LEVELS.indexOf(risk.level) >= RISK_LEVELS.indexOf(level)) return risk
+  return { level, reason: request.reason ?? risk?.reason ?? '' }
 }
 
 function turnEndText(stopReason: StopReason): string {

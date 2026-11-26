@@ -2879,8 +2879,8 @@ conflict, someone on a branch:
 - `src/main/update-keys.json` keeps Kite's `release` and `sources` keys and takes Kettu's
   `harnesses`.
 - `git grep` for Kettu's domain (`kettu` dot `sh`) must find no more lines than
-  before: 185 after the 2026-11-23 merge and again after the 2026-11-24 and 2026-11-25 ones, its dot also matching
-  the code's `window.kettu` shell calls and names such as the sharing partition's. New code that calls
+  before: 185 after the 2026-11-23 merge and again after the 2026-11-24 and 2026-11-25 ones, 184
+  after the 2026-11-26 one, its dot also matching the code's `window.kettu` shell calls and names such as the sharing partition's. New code that calls
   Kettu's services points at Kite Cloud or stays off; a test that spells out its download service
   as a place of its own takes one of its own (`downloads.example`); Kettu's own Android download
   lines stay out of the READMEs.
@@ -2989,6 +2989,52 @@ And as the 2026-11-25 merge settled it:
   and `@jitl/quickjs-wasmfile-release-sync` (the plugin host); the lockfile keeps SheetJS's
   integrity, which Kettu's lost.
 
+And as the 2026-11-26 merge settled it:
+
+- Next-message suggestions for every agent (#2533): Kettu's routes (`next-message.ts`: Codex's
+  ephemeral fork, a fork agy makes and removes, or the `suggest_next_message` tool) come in, and
+  fill Kite's `PromptSuggestion` (`offerSuggestion` in `sessions.ts`: one cleaned line, an id);
+  Claude Code's are Kite's engine as before (`claude` route). A fork is a request of its own on the
+  user's plan, skipped near a plan limit.
+- Work that runs on after a turn (#2645) is Kettu's line, dots and row status (`stillRunning`);
+  Kite's board, background tasks and the away host's status stay, and the concise thread never
+  hides the line. Its dots are Kite's stepped Web Animations, not CSS animations.
+- Codex releases a thread with `thread_unload_delay_secs: 0` on every thread (#2648), which is
+  Kite's desktop-only MCP unload made one mechanism (`closedOrAfter` in `codex/connection.ts`).
+- Claude Code's flag settings go in a file (#2642, `claude/flag-settings.ts`). The SDK refuses a
+  `sandbox` option beside a settings path, so Kite's sandbox goes in that file
+  (`flags.sandbox`) with the output style and the profile's variables; the folders stay a query
+  option.
+- Archived sessions (#2669) are Kettu's page with Kite's recycle-bin delete and Undo. Conversation
+  export (#2531) is Kite's 导出 submenu; Kettu's single Markdown item is left out (its files stay,
+  for `modelName`), so the web client has no export.
+- A changed-file row's menu (#2681) is Kite's `FileLinkMenu` over Kettu's path model
+  (`change-row-menu.ts`), so a chip and a row show one menu; Open in editor is Kettu's submenu.
+- Side by side diffs (#2527): Kite's line notes read both gutters (`diff-notes/notes-layer.tsx`).
+- Routine tools behind cards (#2649): an agent's delete sends the runs it drops to the recycle bin
+  (`routine:<id>`), the tools keep webhook and GitHub triggers, and Settings › Features' Routines
+  switch gates `create_routine`, `update_routine` and `run_routine`. A new routine waits at a plan
+  limit (`DEFAULT_ON_LIMIT`).
+- The browser's page size (#2554) and Kite's `browser_emulate`: an emulated device first, then the
+  picked size, then the default. A dead window page (#2646) quits a test copy instead of asking.
+- The usage page is Kettu's grid (#2621) with Kite's ranked sessions as a card, its pace tick,
+  reset and balances; Kettu's cards show the prompt cache's saving, so Kite's footer went.
+- Antigravity's Auto policy (#2697) gives a request its own risk, which the host folds into Kite's
+  level (`withAgentRisk`: the higher of the two) and which Kite's auto-approval never allows alone;
+  `PendingPermission` keeps Kite's `risk` and `reason` alone.
+- Reports per message (#2640) are Kettu's `startedSessions.reports` limit in place of Kite's
+  `REPORT_LIMIT`; delivery is still Kite's steering at `next` with merged reports.
+- Remote offers (#2560): Huli Cloud lists no account's clients, so `RemoteOffers` is never
+  eligible and reads nothing (`app.ts`) until it does.
+- About's contact rows (#2501, #2570) are Kite's issue link alone; Kettu's email, X and WeChat rows
+  and their catalog entries are left out. Kettu's contributors wall and app-label workflows run in
+  `KettuAI/Kettu` only.
+- Downloads through the proxy (#2535, #2551): archives, the ACP Registry and the harness manifest
+  keep Kite's `node-runtime/transport`.
+- Codex's fast mode (#2674) works through Kite's tiers (`priority` reads as a fast tier).
+- The thread database took no migration (still 14). No new dependencies; the `@shadcn/react` patch
+  changed, so a worktree needs its own install.
+
 ## Tests
 
 `pnpm test` passes on Linux, as CI runs it, and on Windows. It includes Huli Cloud's tests
@@ -3032,6 +3078,9 @@ one once upstream fixes the same thing:
   replace; Claude Code's SDK installs right after its program from the same Install, its progress
   on the Harness page, rather than on the first session's start.
 - `src/renderer/src/app/crash-screen.tsx`: a render error shows a recoverable screen.
+- `src/agent-host/files-watch.ts` (`isFolder`): on Windows a recursive watch's `change` of a folder
+  the tree knows, which an entry inside it changing sends, refreshes nothing; the entry is judged
+  on its own, so writes in `node_modules`, `.git` or an ignored folder no longer refresh the pane.
 - `features/files/change-badge.tsx` (U for untracked), `features/routines/routines.css` (the
   state column's width).
 - Tests made to pass on Windows: native paths, junctions, hosts and databases closed before their

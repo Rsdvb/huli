@@ -37,6 +37,7 @@ import { clearBrowser } from './clear'
 import { handPushToOthers } from './push-hosts'
 import {
   currentHost,
+  foldedHosted,
   loadHosts,
   namedRelays,
   relayDial,
@@ -256,6 +257,7 @@ async function showPairing(
         key,
         client: base.client,
         device: { name, model: base.browser.browser },
+        account: accountId,
         dialFailure: (error) => (error instanceof RelayMiss ? PAIR_FAILURES[error.problem] : null),
       },
       progress,
@@ -410,7 +412,8 @@ async function showApp(
   }
   const problems = showProblems({
     name: () => shown.name,
-    others: () => kept.hosts.filter((h) => h.relay.id !== shown.relay.id),
+    others: () =>
+      kept.hosts.filter((h) => h.relay.id !== shown.relay.id && !foldedHosted(h, accountId)),
     open: (id) => open(id),
     switchAccount: () => void switchAccount(account),
   })
@@ -509,6 +512,7 @@ async function showApp(
       known: { name: shown.name, deviceName: shown.deviceName },
       paired,
       client: base.client,
+      account: accountId,
       settings: base.settings,
       address: null,
       storage: localStore(),
@@ -528,25 +532,34 @@ async function showApp(
         location.replace('/')
       },
       remember: (names, welcome) => {
-        shown = { ...shown, ...names, ...(welcome?.relay ? { relay: welcome.relay } : {}) }
+        shown = { ...shown, ...names }
+        if (welcome) {
+          if (welcome.relay) shown.relay = welcome.relay
+          shown.account = welcome.account ?? null
+          delete shown.otherAccount
+        }
         keep({ ...kept, hosts: kept.hosts.map((h) => (h.relay.id === shown.relay.id ? shown : h)) })
-        useWebHostStore.setState({ others: othersOf(kept, shown) })
+        useWebHostStore.setState(othersOf(kept, shown, accountId))
       },
-      overrides: (link, api) => {
+      virtualFrames: true,
+      overrides: (link) => {
         linked = link
         relaysOf(account).attach(link, shown.relay)
         problems.follow(link)
-        useWebHostStore.setState({ others: othersOf(kept, shown) })
+        // Kept, folded away, until a welcome under this account brings it back.
+        link.onState((state) => {
+          if (state.kind !== 'stopped' || state.reason !== 'other_account') return
+          shown = { ...shown, otherAccount: true }
+          keep({
+            ...kept,
+            hosts: kept.hosts.map((h) => (h.relay.id === shown.relay.id ? shown : h)),
+          })
+          problems.report('other_account')
+        })
+        useWebHostStore.setState(othersOf(kept, shown, accountId))
         return {
           hosted: true,
           account: accountApi,
-          // The host serves an artifact's frame only on its direct port, which the relay does not
-          // reach, so the page shows its preview.
-          artifacts: {
-            ...api.artifacts,
-            open: async () => ({ failed: 'preview_only' }),
-            close: async () => {},
-          },
         }
       },
       ready: () => {
@@ -563,8 +576,17 @@ async function showApp(
   )
 }
 
-function othersOf(hosts: AccountHosts, shown: HostedHost): { id: string; name: string }[] {
-  return hosts.hosts
-    .filter((h) => h.relay.id !== shown.relay.id)
-    .map((h) => ({ id: h.relay.id, name: h.name }))
+/** The account's other hosts to open, and how many are folded away as another account's. */
+function othersOf(
+  hosts: AccountHosts,
+  shown: HostedHost,
+  accountId: string,
+): { others: { id: string; name: string }[]; otherAccount: number } {
+  const rest = hosts.hosts.filter((h) => h.relay.id !== shown.relay.id)
+  return {
+    others: rest
+      .filter((h) => !foldedHosted(h, accountId))
+      .map((h) => ({ id: h.relay.id, name: h.name })),
+    otherAccount: rest.filter((h) => foldedHosted(h, accountId)).length,
+  }
 }

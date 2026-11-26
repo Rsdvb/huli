@@ -1,7 +1,8 @@
-import type { ReactElement } from 'react'
+import { useContext, useEffect, type ReactElement } from 'react'
 import {
-  CodeIcon,
+  BrowserIcon,
   Copy01Icon,
+  File01Icon,
   FolderOpenIcon,
   Link01Icon,
   SidebarRightIcon,
@@ -15,16 +16,24 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@renderer/components/ui/context-menu'
-import { toast } from '@renderer/components/ui/toast'
-import { errorMessage } from '@renderer/lib/host'
-import { hostOfPath, hostPath } from '@renderer/lib/host-paths'
-import { i18n } from '@renderer/lib/i18n'
-import { fileManagerName, isWeb } from '@renderer/lib/platform'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
+import { SessionIdContext } from '@renderer/features/session/media/grants'
+import { BrowserIcon as DefaultBrowserIcon } from '@renderer/features/session/markdown/web-link'
+import { hostPath } from '@renderer/lib/host-paths'
+import { fileManagerName } from '@renderer/lib/platform'
 import { openFile } from '@renderer/stores/files'
+import { loadSiteIcons, useDefaultBrowser } from '@renderer/stores/site-icons'
 import { FileTypeIcon } from './file-type-icon'
 import type { AgentFileRef, FileRef } from './file-refs'
-import { openInEditor } from './open-in-editor'
-import { copyPaths, hostFilePath } from './operations'
+import { isHtmlFile, openHtmlInBrowser, previewHtml, useHtmlPreview } from './html-preview'
+import { OpenInEditorMenu } from './open-in-editor-menu'
+import {
+  copyFilePathText,
+  copyPaths,
+  hostFilePath,
+  isLocalProject,
+  showFileInManager,
+} from './operations'
 import { nameOf } from './paths'
 
 /** The path as this computer's file manager and editors take it: Windows wants backslashes. */
@@ -32,21 +41,16 @@ function nativePath(path: string): string {
   return /^[a-z]:\//i.test(path) ? path.replaceAll('/', '\\') : path
 }
 
-function outside(open: (path: string) => Promise<void>, path: string) {
-  open(nativePath(path)).catch((failure: unknown) => toast(errorMessage(failure)))
-}
-
-function copyText(text: string) {
-  void navigator.clipboard.writeText(text).then(
-    () => toast(i18n.t('files:tree.copiedPath', { count: 1 })),
-    (failure: unknown) => toast(errorMessage(failure)),
-  )
+/** An HTML file's page, in a tab of the session's browser or in the default one. */
+export interface PagePreview {
+  inKettu: () => void
+  inBrowser: () => void
 }
 
 /**
- * A file's menu, for its links and the lists of changed files: the Files pane, the editor and the
- * file manager, and its paths. The editor and the file manager open files of this computer only,
- * and not a file that is `gone`, as a deleted one.
+ * A file's menu, for its links and the lists of changed files: an HTML file's page, the Files pane,
+ * the editor and the file manager, and its paths. The editor and the file manager open files of
+ * this computer only, and not a file that is `gone`, as a deleted one.
  */
 export function FileLinkMenu({
   trigger,
@@ -56,6 +60,7 @@ export function FileLinkMenu({
   onOpen,
   gone = false,
   selectable = false,
+  page = null,
 }: {
   trigger: ReactElement
   projectPath: string
@@ -68,27 +73,24 @@ export function FileLinkMenu({
   gone?: boolean
   /** The trigger's text selects with the text around it, as a chip in a reply's does. */
   selectable?: boolean
+  page?: PagePreview | null
 }) {
   const { t } = useTranslation('files')
-  const local = !isWeb && hostOfPath(projectPath) === null && !gone
+  const local = isLocalProject(projectPath) && !gone
   return (
     <ContextMenu>
       <ContextMenuTrigger className={selectable ? 'select-auto' : undefined} render={trigger} />
       <ContextMenuContent className="min-w-56">
-        {onOpen && (
+        {page && <PageItems page={page} onOpen={onOpen} />}
+        {!page && onOpen && (
           <ContextMenuItem onClick={onOpen}>
             <HugeiconsIcon icon={SidebarRightIcon} strokeWidth={1.9} aria-hidden />
             {t('link.openInPanel')}
           </ContextMenuItem>
         )}
+        {local && <OpenInEditorMenu path={nativePath(absolute)} />}
         {local && (
-          <ContextMenuItem onClick={() => outside(openInEditor, absolute)}>
-            <HugeiconsIcon icon={CodeIcon} strokeWidth={1.9} aria-hidden />
-            {t('panel.openInEditor')}
-          </ContextMenuItem>
-        )}
-        {local && (
-          <ContextMenuItem onClick={() => outside(window.kettu.shell.showItem, absolute)}>
+          <ContextMenuItem onClick={() => showFileInManager(nativePath(absolute))}>
             <HugeiconsIcon icon={FolderOpenIcon} strokeWidth={1.9} aria-hidden />
             {t('preview.showIn', { name: fileManagerName() })}
           </ContextMenuItem>
@@ -96,7 +98,9 @@ export function FileLinkMenu({
         <ContextMenuSeparator />
         <ContextMenuItem
           onClick={() =>
-            relative === null ? copyText(absolute) : copyPaths(projectPath, [relative], false)
+            relative === null
+              ? copyFilePathText(absolute)
+              : copyPaths(projectPath, [relative], false)
           }
         >
           <HugeiconsIcon icon={Copy01Icon} strokeWidth={1.9} aria-hidden />
@@ -110,6 +114,32 @@ export function FileLinkMenu({
         )}
       </ContextMenuContent>
     </ContextMenu>
+  )
+}
+
+/** The menu's first items for an HTML file: its page in either browser, or its source. */
+function PageItems({ page, onOpen }: { page: PagePreview; onOpen?: () => void }) {
+  const { t } = useTranslation('files')
+  const browser = useDefaultBrowser()
+  useEffect(loadSiteIcons, [])
+  return (
+    <>
+      <ContextMenuItem onClick={page.inKettu}>
+        <HugeiconsIcon icon={BrowserIcon} strokeWidth={1.9} aria-hidden />
+        {t('htmlPreview.inKettu')}
+      </ContextMenuItem>
+      <ContextMenuItem onClick={page.inBrowser}>
+        <DefaultBrowserIcon browser={browser} className="size-3.75" />
+        {t('htmlPreview.inDefault')}
+      </ContextMenuItem>
+      {onOpen && (
+        <ContextMenuItem onClick={onOpen}>
+          <HugeiconsIcon icon={File01Icon} strokeWidth={1.9} aria-hidden />
+          {t('htmlPreview.openFile')}
+        </ContextMenuItem>
+      )}
+      <ContextMenuSeparator />
+    </>
   )
 }
 
@@ -129,31 +159,80 @@ function LinkBody({ path, line }: { path: string; line: number | null }) {
 }
 
 /**
+ * An HTML file's chip with a small Preview button over the text after it while it is hovered or
+ * focused, so the line never moves.
+ */
+function WithPagePreview({ chip, page }: { chip: ReactElement; page: PagePreview | null }) {
+  const { t } = useTranslation('files')
+  if (!page) return chip
+  return (
+    <span className="ks-ref-page">
+      {chip}
+      <span className="ks-ref-page__dock">
+        <Tooltip>
+          <TooltipTrigger
+            delay={500}
+            render={
+              <button
+                type="button"
+                className="ks-page-btn focus-ring"
+                aria-label={t('htmlPreview.inKettu')}
+                onClick={page.inKettu}
+              />
+            }
+          >
+            <HugeiconsIcon icon={BrowserIcon} size={13} strokeWidth={1.9} aria-hidden />
+            {t('htmlPreview.preview')}
+          </TooltipTrigger>
+          <TooltipContent>{t('htmlPreview.inKettu')}</TooltipContent>
+        </Tooltip>
+      </span>
+    </span>
+  )
+}
+
+/**
  * A file reference in a reply, drawn like the thread's links: the file's icon and name over one
  * line, with the path in its tooltip. It opens the file in the Files pane at its line; its menu
- * also shows it in the editor or the file manager and copies its path.
+ * also shows it in the editor or the file manager and copies its path, and an HTML file's page
+ * can be previewed from it too.
  */
 export function FileLink({ file }: { file: FileRef & { projectPath: string } }) {
   const { t } = useTranslation('files')
+  const sessionId = useContext(SessionIdContext)
+  const previewable = useHtmlPreview(sessionId, file.projectPath) && isHtmlFile(file.path)
   const target = file.line ? `${file.path}:${file.line}` : file.path
   const open = () => openFile(file.projectPath, file.path, file.line, { preview: true })
+  const page =
+    previewable && sessionId
+      ? {
+          inKettu: () => void previewHtml(sessionId, file.path),
+          inBrowser: () => void openHtmlInBrowser(sessionId, file.path),
+        }
+      : null
   return (
-    <FileLinkMenu
-      projectPath={file.projectPath}
-      absolute={hostFilePath(file.projectPath, file.path)}
-      relative={file.path}
-      onOpen={open}
-      selectable
-      trigger={
-        <button
-          type="button"
-          data-file-ref=""
-          title={target}
-          aria-label={t('link.open', { target })}
-          onClick={open}
-        >
-          <LinkBody path={file.path} line={file.line} />
-        </button>
+    <WithPagePreview
+      page={page}
+      chip={
+        <FileLinkMenu
+          projectPath={file.projectPath}
+          absolute={hostFilePath(file.projectPath, file.path)}
+          relative={file.path}
+          onOpen={open}
+          selectable
+          page={page}
+          trigger={
+            <button
+              type="button"
+              data-file-ref=""
+              title={target}
+              aria-label={t('link.open', { target })}
+              onClick={open}
+            >
+              <LinkBody path={file.path} line={file.line} />
+            </button>
+          }
+        />
       }
     />
   )

@@ -36,6 +36,7 @@ const AFTER_END = new Set([
   'settings_change',
   'secret_request',
   'theme_change',
+  'routine_change',
   'task_delivery',
   'plugin_denial',
   'session_started',

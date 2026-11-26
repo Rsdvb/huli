@@ -15,6 +15,7 @@ import { hello, HostLink, type Dial, type LinkRoute } from '@shared/remote/link'
 import { startMediaWorker } from './media'
 import mediaWorker from './media-worker.ts?worker&url'
 import type { Paired } from '@shared/remote/pair'
+import { encodeRelayBytes } from '@shared/remote/relay'
 import { WebPush, type WebPushOptions } from './push'
 import type { WebSettings } from './settings'
 
@@ -29,6 +30,8 @@ export interface LaunchOptions {
   /** The connection pairing left open, which the link takes as its first. */
   paired: Paired | null
   client: Hello['client']
+  /** The Kettu account this browser is signed in to, which the hello names; none when absent. */
+  account?: string | null
   /** What the hello names beyond the shared link's own, as the hosted build's regions. */
   features?: string[]
   settings: WebSettings
@@ -49,6 +52,8 @@ export interface LaunchOptions {
   pushSynced?(): void
   /** What the hosted build puts in place of the served page's own, given the link and that API. */
   overrides?: (link: HostLink, api: KettuApi) => Partial<KettuApi>
+  /** Hosted and relay web clients cannot reach a host's direct port and render live artifacts via virtual sandboxed frames instead. */
+  virtualFrames?: boolean
   /** Called once `window.kettu` is set, before the app starts. */
   ready?: () => void
 }
@@ -62,7 +67,7 @@ export async function launchApp(options: LaunchOptions, root: HTMLElement): Prom
       (() => [{ key: 'host', relay: options.address === null, dial: options.dial }]),
     hostKey: options.hostKey,
     key: options.key,
-    hello: withFeatures(hello(options.client), options.features ?? []),
+    hello: withFeatures(hello(options.client, undefined, options.account), options.features ?? []),
     ...(options.paired ? { adopt: options.paired } : {}),
     visible: () => document.visibilityState === 'visible',
   })
@@ -75,7 +80,15 @@ export async function launchApp(options: LaunchOptions, root: HTMLElement): Prom
     ...(options.others ? { others: options.others } : {}),
     ...(options.pushSynced ? { synced: options.pushSynced } : {}),
   })
+  let virtualFrames: Awaited<
+    ReturnType<typeof import('./virtual-frames').createVirtualFrames>
+  > | null = null
+  if (options.virtualFrames) {
+    const { createVirtualFrames } = await import('./virtual-frames')
+    virtualFrames = createVirtualFrames(link)
+  }
   const api = webApi(link, options.settings, {
+    id: encodeRelayBytes(options.hostKey),
     address: options.address,
     known,
     forget: async () => {
@@ -85,7 +98,17 @@ export async function launchApp(options: LaunchOptions, root: HTMLElement): Prom
     storage: options.storage,
     push,
   })
-  Object.assign(window.kettu, api, options.overrides?.(link, api))
+  const mergedApi: KettuApi = virtualFrames
+    ? {
+        ...api,
+        artifacts: {
+          ...api.artifacts,
+          open: virtualFrames.open,
+          close: virtualFrames.close,
+        },
+      }
+    : api
+  Object.assign(window.kettu, mergedApi, options.overrides?.(link, mergedApi))
   options.ready?.()
   startMediaWorker(link, mediaWorker)
   // A page in the back takes patches a batch a second, which the host merges meanwhile.
@@ -129,14 +152,23 @@ export async function launchApp(options: LaunchOptions, root: HTMLElement): Prom
   })
   link.start()
 
-  const [{ bootstrap }, { renderApp }, { setRuntimeRelay }, { attachRuntimePort }] =
-    await Promise.all([
-      import('@renderer/app/bootstrap'),
-      import('@renderer/app/render'),
-      import('@renderer/features/artifacts/frame-link'),
-      import('./runtime-relay'),
-    ])
-  setRuntimeRelay((url, port) => attachRuntimePort(link, url, port))
+  const [
+    { bootstrap },
+    { renderApp },
+    { setRuntimeRelay },
+    { setVirtualFrameHost },
+    { attachRuntimePort },
+  ] = await Promise.all([
+    import('@renderer/app/bootstrap'),
+    import('@renderer/app/render'),
+    import('@renderer/features/artifacts/frame-link'),
+    import('@renderer/features/artifacts/virtual-frame-host'),
+    import('./runtime-relay'),
+  ])
+  setVirtualFrameHost(virtualFrames?.host ?? null)
+  setRuntimeRelay((url, port) =>
+    attachRuntimePort(link, url, port, virtualFrames?.host.allowCapability),
+  )
   await bootstrap()
   renderApp(root)
   push.start()

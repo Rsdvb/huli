@@ -48,6 +48,7 @@ import type {
   FileList,
   FileSearch,
   FileWritten,
+  FolderList,
 } from './files'
 import type { ArtifactContentFile, BackgroundWork } from './host-control'
 import type { HostLoad, HostLoadWatch } from './host-load'
@@ -170,7 +171,7 @@ import type {
   RoutinesProblem,
 } from './routines'
 import type { AgentColor } from './settings'
-import type { SettingsSection } from './settings-catalog'
+import type { CatalogSection } from './settings-catalog'
 import type { TurnPhase, TurnWork } from './turn-phase'
 import type {
   SessionTaskRef,
@@ -235,6 +236,12 @@ export interface AgentAccount {
   email: string | null
   /** The subscription's multiple of the base plan, such as "5x" of Claude Max; absent when unknown. */
   tier?: string
+  /**
+   * The latest a stored subscription sign-in is expected to end, in ms; it can end up to 3 days
+   * sooner, and only signing in again moves it. Absent when unknown, for other kinds of sign-in
+   * and on older hosts.
+   */
+  signInEnds?: number
 }
 
 export interface PlanLimit {
@@ -751,6 +758,7 @@ export interface AgentStatus {
     revertTurns: boolean // takes the latest turn out of a session's history, as Codex's `thread/revert`
     steering: boolean // `_session/steering` into a running turn
     rewind?: boolean // cuts a session's conversation before a turn, for an edit from a message
+    rewindFiles?: boolean // that cut also takes back the files the agent changed since
     reports: boolean // plan limits from its own report (`/usage`, `/status`)
     context: boolean // what fills the context from its own report (`/context`)
     liveContext: boolean // what fills the context from its connection through a running turn
@@ -948,6 +956,7 @@ export type McpToolGroup =
   | 'settings'
   | 'secrets'
   | 'theme'
+  | 'routines'
   | 'plugins'
 
 export interface McpToolSummary {
@@ -1282,6 +1291,20 @@ export interface SessionSummary {
   phase?: TurnPhase['phase'] | null
   // How its last turn ended; null while a turn runs and before any ended; absent from older hosts
   lastTurn?: LastTurn | null
+  // What runs on after its turn ended; null while a turn runs or nothing does; absent from older
+  // hosts
+  stillRunning?: StillRunning | null
+}
+
+/**
+ * What a session's agent still runs between turns, by its own reports: the background tasks the
+ * session board lists and the subagents at work. Agents that list no tasks count subagents alone.
+ */
+export interface StillRunning {
+  commands: number
+  subagents: number
+  /** The agent starts a turn of its own to report once that work ends. */
+  reportsBack: boolean
 }
 
 /**
@@ -1613,6 +1636,9 @@ export interface HostContract {
   'agents.options': { params: void; result: AgentOptions[] }
   // Pins a model to the top of the agent's model menu, or unpins it; a fifth pin is refused.
   'agents.pinModel': { params: { agentId: AgentId; model: string; pinned: boolean }; result: void }
+  // Sets the agent's pins in the order given, at most four, or clears them with none; older hosts
+  // lack it, as their info's `pinnedModels` says.
+  'agents.setPinnedModels': { params: { agentId: AgentId; models: string[] }; result: void }
   // The agents the lightweight tasks' model may be pinned to; older hosts lack it.
   'agents.lightAgents': { params: void; result: { agents: LightAgent[] } }
   // A draft of a problem report's description, written by the agent the report is about, else the
@@ -1826,6 +1852,9 @@ export interface HostContract {
   // The entries of a folder on the host that start as `path`'s last part does, for a path being
   // typed: absolute, or `~` for the home folder. It only reads; a folder it cannot read lists none.
   'paths.complete': { params: { path: string }; result: PathCompletion }
+  // A Windows host's drives that answer now, by their roots (`C:\`), to go up past a drive's root;
+  // other systems list none. Older hosts lack it, as their info's `drives` says.
+  'paths.drives': { params: void; result: string[] }
   'sessions.list': { params: { projectPath?: string }; result: SessionSummary[] }
   'sessions.create': {
     // projectPath null: No project, in a new scratch folder.
@@ -1861,6 +1890,12 @@ export interface HostContract {
   'routines.delete': { params: { routineId: string }; result: void }
   // `busy` while the routine already has an active run.
   'routines.runNow': { params: { routineId: string }; result: RoutineRun }
+  // Any window's or device's answer to a card an agent's Routine tool shows: do it or not; the
+  // first counts.
+  'routines.answerChange': {
+    params: { sessionId: string; entryId: string; decision: 'confirm' | 'decline' }
+    result: void
+  }
   // Drops a queued run, or stops a working one as Stop does.
   'routines.cancelRun': { params: { runId: string }; result: void }
   'routines.runs': {
@@ -1902,6 +1937,11 @@ export interface HostContract {
   // had; none turns the channel off.
   'plugins.setChannelKinds': {
     params: { pluginId: string; channel: string; kinds: PluginNoticeKind[] }
+    result: InstalledKettuPlugin
+  }
+  // Picks the agents the plugin's tools go to on Kettu's MCP service, in place of what it had.
+  'plugins.setToolAgents': {
+    params: { pluginId: string; agents: 'all' | AgentId[] }
     result: InstalledKettuPlugin
   }
   // Copies a development plugin's folder again, in place of the copy installed.
@@ -2601,6 +2641,12 @@ export interface HostContract {
   // The ids of these the host still holds, for the drafts that name them; each is kept from now.
   'attachments.held': { params: { ids: string[] }; result: string[] }
   'files.list': { params: { projectPath: string }; result: FileList }
+  // Keeps the connection told, with `files.changed`, when the project's folder changes on disk,
+  // until `files.unwatch`.
+  'files.watch': { params: { projectPath: string }; result: void }
+  'files.unwatch': { params: { projectPath: string }; result: void }
+  // A folder's direct children, for an ignored folder that `files.list` leaves unread.
+  'files.listFolder': { params: { projectPath: string; path: string }; result: FolderList }
   // `asText` reads a media file as any other file, as an SVG's source.
   'files.read': {
     params: { projectPath: string; path: string; asText?: boolean }
@@ -2634,12 +2680,28 @@ export interface HostContract {
     params: { projectPath: string; paths: string[]; folder: string }
     result: string[]
   }
+  // A file the user dropped or chose, put at `path` in a folder that is there: its bytes, or a file
+  // or folder main granted for a drop, copied. `conflict` when something is at `path` and `replace`
+  // is not set; a replaced folder takes the dropped one's files, replacing those of the same names.
+  'files.upload': {
+    params: {
+      projectPath: string
+      path: string
+      source: { bytes: ArrayBuffer } | { grantId: string }
+      replace?: boolean
+    }
+    result: void
+  }
   // To the system's trash, or for good with `permanently`; what is gone already is skipped.
   // `unavailable` when the host could not put them in a trash.
   'files.delete': {
     params: { projectPath: string; paths: string[]; permanently?: boolean }
     result: void
   }
+  // The address at which the agent host serves an HTML file of the session's folder, read-only on
+  // the loopback address, for Kettu's browser on the same computer; `path` is relative to that
+  // folder. A paired device is refused it.
+  'files.preview': { params: { sessionId: string; path: string }; result: string }
   // `path` as the thread writes it: absolute, `~/`, a `file:` URI, or relative to `projectPath`,
   // the session's folder. `sessionId` lets a file outside it through when that thread names it.
   'media.open': {
@@ -3151,6 +3213,7 @@ export const HOST_METHODS = [
   'agents.listSessions',
   'agents.options',
   'agents.pinModel',
+  'agents.setPinnedModels',
   'agents.lightAgents',
   'agents.draftReport',
   'mcp.status',
@@ -3220,6 +3283,7 @@ export const HOST_METHODS = [
   'projects.cancelClone',
   'projects.create',
   'paths.complete',
+  'paths.drives',
   'sessions.list',
   'sessions.create',
   'sessions.prepare',
@@ -3337,6 +3401,7 @@ export const HOST_METHODS = [
   'routines.update',
   'routines.delete',
   'routines.runNow',
+  'routines.answerChange',
   'routines.cancelRun',
   'routines.runs',
   'routines.markSeen',
@@ -3350,6 +3415,7 @@ export const HOST_METHODS = [
   'plugins.setSetting',
   'plugins.setSecret',
   'plugins.setChannelKinds',
+  'plugins.setToolAgents',
   'plugins.reload',
   'plugins.checkUpdates',
   'plugins.applyUpdate',
@@ -3429,6 +3495,9 @@ export const HOST_METHODS = [
   'attachments.remove',
   'attachments.held',
   'files.list',
+  'files.watch',
+  'files.unwatch',
+  'files.listFolder',
   'files.read',
   'files.search',
   'files.agentFolder',
@@ -3438,7 +3507,9 @@ export const HOST_METHODS = [
   'files.create',
   'files.rename',
   'files.copy',
+  'files.upload',
   'files.delete',
+  'files.preview',
   'media.open',
   'media.authorize',
   'usage.summary',
@@ -3602,13 +3673,15 @@ export type HostEvent =
   | { type: 'git.pr'; projectPath: string; pr: PullRequest | null }
   | { type: 'git.reference'; url: string; found: IssueLookup } // to the ports watching `url`
   | { type: 'git.tools'; tools: GitTools }
+  // To the ports watching the project's files, by the path each named it: list and read them again.
+  | { type: 'files.changed'; projectPath: string }
   | { type: 'star.changed'; state: GitHubStarState }
   | { type: 'usage.changed' } // the figures changed; a page showing them reads again
   | { type: 'market.keysChanged' } // the Marketplace's keys changed; a page showing them reads again
   // The account, what it published or the drafts changed; Marketplace › Published reads again.
   | { type: 'market.publishedChanged' }
   // To the windows showing a session: its agent's open_settings, Settings at a row.
-  | { type: 'settings.open'; section: SettingsSection; item: string | null; row: string }
+  | { type: 'settings.open'; section: CatalogSection; item: string | null; row: string }
   | { type: 'plugins.changed' } // an installed plugin changed; a page showing them reads again
   | { type: 'memory.changed' } // Kettu's memory or its switch changed; a page showing it reads again
   // A server's sign-in changed; `loginId` and `error` close a Connect the window started.

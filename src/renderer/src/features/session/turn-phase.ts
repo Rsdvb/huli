@@ -4,10 +4,11 @@ import {
   awaitsAnswer,
   turnDoing as sharedDoing,
   type TurnDoing as SharedDoing,
+  writingId as sharedWritingId,
   type TurnPhase,
 } from '@shared/turn-phase'
 
-export { awaitsAnswer, turnPhase, writingId, type TurnPhase } from '@shared/turn-phase'
+export { awaitsAnswer, turnPhase, type TurnPhase } from '@shared/turn-phase'
 
 /** The phase as the desktop says it, where a wait on questions alone reads as `question`. */
 export type TurnPhaseName = TurnPhase['phase']
@@ -79,4 +80,32 @@ export function endedOnRejection(state: ThreadState | null | undefined): boolean
     }
   }
   return false
+}
+
+const writingIds = new WeakMap<ThreadState, string | null>()
+const lastUserIds = new WeakMap<ThreadState, string | null>()
+
+/** The shared `writingId`, cached per state object, as every reply reads it on each change. */
+export function writingId(state: ThreadState | null | undefined): string | null {
+  if (!state) return null
+  if (writingIds.has(state)) return writingIds.get(state)!
+  const found = sharedWritingId(state)
+  writingIds.set(state, found)
+  return found
+}
+
+/** The id of the latest non-steered user entry in `state`, cached per state object. */
+export function lastUserEntryId(state: ThreadState | null | undefined): string | null {
+  if (!state) return null
+  if (lastUserIds.has(state)) return lastUserIds.get(state)!
+  let found: string | null = null
+  for (let i = state.order.length - 1; i >= 0; i--) {
+    const entry = state.byId[state.order[i]!]
+    if (entry?.kind === 'user' && !entry.steered) {
+      found = entry.id
+      break
+    }
+  }
+  lastUserIds.set(state, found)
+  return found
 }

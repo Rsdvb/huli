@@ -136,6 +136,32 @@ it("shows the balances an earlier run read as that run's until they are read aga
   expect(read?.balancesStale).toBeUndefined()
 })
 
+it('keeps no plan windows for an agent that goes through a gateway, from a read or an event', async () => {
+  const host = await startTestHost({ agentEnv: { FAKE_AGENT_GATEWAY: '1' } })
+  hosts.push(host)
+  const window = host.connect()
+  const { id } = await window.request('sessions.create', {
+    agentId: 'fake-agent',
+    projectPath: host.project,
+  })
+  await window.open(id)
+  await window.untilStatus(id, 'ready')
+  await window.until(() => fakeStatus(window)?.account?.kind === 'gateway')
+
+  // The plan of a sign-in the gateway does not use still answers a limits read.
+  await window.request('agents.refreshLimits', { agentId: 'fake-agent', force: true })
+  expect(fakeStatus(window)?.limits).toEqual([])
+
+  // A turn's own rate-limit events say nothing of the gateway's limits either.
+  await window.request('sessions.prompt', {
+    sessionId: id,
+    content: [{ type: 'text', text: 'hi' }],
+  })
+  await window.untilStatus(id, 'ready')
+  expect(fakeStatus(window)?.account?.kind).toBe('gateway')
+  expect(fakeStatus(window)?.limits).toEqual([])
+})
+
 it('covers a used-up window with extra usage until an event says it is over', async () => {
   const host = await startTestHost()
   hosts.push(host)

@@ -36,9 +36,17 @@ import type {
 } from './market-publish'
 import type { MemoryAction, MemoryDraft, MemoryLayer, MemoryWriteStatus } from './memory'
 import type { PluginConversion } from './plugin-convert'
-import type { RoutineRef } from './routines'
+import {
+  isPermissionScope,
+  isSchedule,
+  isTimeLimit,
+  type PermissionScope,
+  type RoutineRef,
+  type Schedule,
+  type TimeLimitMinutes,
+} from './routines'
 import type { SecretField, SecretTarget } from './secret-request'
-import type { SettingScalar, SettingsSection } from './settings-catalog'
+import type { CatalogSection, SettingScalar } from './settings-catalog'
 import type { AgentThemeInstalled } from './theme-palette'
 import type { ReviewRun } from './review'
 import type { LimitPause, Stall } from './supervisor'
@@ -585,10 +593,11 @@ export type ThreadEntry =
       severity: 'info' | 'warning' | 'error'
       title: string
       description?: string
-      // The notice ends the turn: the agent exited mid-turn, its model provider is out of credit,
-      // or the turn of a message failed otherwise. Huli: `sign_in`, the agent asks to sign in
+      // Each but reports_paused ends the turn: the agent exited mid-turn, its model provider is out
+      // of credit, or the turn of a message failed otherwise. reports_paused: reports from the
+      // sessions it started stopped waking this one. Huli: `sign_in`, the agent asks to sign in
       // first, which the session's own card offers while the notice stays.
-      cause?: 'agent_stopped' | 'out_of_credit' | 'turn_failed' | 'sign_in'
+      cause?: 'agent_stopped' | 'out_of_credit' | 'turn_failed' | 'reports_paused' | 'sign_in'
       model?: string // out_of_credit: the session's model when the turn failed
       provider?: string // Huli: out_of_credit: the model provider that refused, when it is named
       // turn_failed: the agent's plan refused the turn because a usage window ran out.
@@ -637,6 +646,7 @@ export type ThreadEntry =
   | MemoryWriteEntry // Kettu's own record of an agent's write to Kettu's memory, and its answer
   | MarketPublishEntry // Kettu's own record of a publish to the Kettu Marketplace, and its outcome
   | SettingsChangeEntry // Kettu's own record of an agent's change to Kettu's settings, and its answer
+  | RoutineChangeEntry // Kettu's own record of an agent's change to a Routine, and its answer
   | TaskDeliveryEntry // Kettu's own record of a task this session started ending, and what it delivered
   | SecretRequestEntry // Kite's own record of an agent asking for secrets, never their values
   | ThemeChangeEntry // Kite's own record of an agent's change to the theme colors, and its undo
@@ -658,9 +668,10 @@ export interface PluginAttached {
   plugin: string
   /**
    * `failed` says why a mentioned item could not be added (`text` is then empty): the plugin did
-   * not answer in time, was unavailable, or answered with what was not content.
+   * not answer in time, was unavailable, or answered with what was not content. `detail` is the
+   * plugin's own message for it, untrusted text; entries stored before it have none.
    */
-  items: { title?: string; text: string; failed?: string }[]
+  items: { title?: string; text: string; failed?: string; detail?: string }[]
 }
 
 /**
@@ -920,7 +931,10 @@ export type ProjectHooksDecision = 'use' | 'all' | 'skip'
 /** `timeout` when the session left memory before an answer came. */
 export type ProjectHooksAnswer = ProjectHooksDecision | 'timeout'
 
-/** A hook a folder's own settings declare: the event it runs on and the command or URL it runs. */
+/**
+ * A hook a folder's own settings declare: the event it runs on and the command or URL it runs; or
+ * `env` and the names, never the values, of the variables they set.
+ */
 export interface DeclaredHook {
   event: string
   target: string
@@ -1092,8 +1106,12 @@ export interface SettingChangeItem {
   to: { value: SettingScalar; text: string }
   /** What an always-asking row opens up, said on the card. */
   warning?: string
-  /** Where View in Settings opens: the section, an agent's or harness's page, and the row. */
-  section: SettingsSection
+  /**
+   * Where View in Settings opens: the section, an agent's or harness's page, and the row; for a
+   * plugin's setting, `marketplace` and the plugin's page there. Lines written before have
+   * `plugins` for those.
+   */
+  section: CatalogSection
   item: string | null
   row: string
 }
@@ -1196,6 +1214,59 @@ export interface ThemeChangeEntry {
   /** When an unanswered card counts as declined, in the host's milliseconds; null when not asked. */
   expiresAt: number | null
   outcome: ThemeChangeOutcome | null
+  /** Set when a paired device gave the answer; the host's own windows give none. */
+  device?: FromDevice
+  /** The agent's entry before it, to put it back after a replay. */
+  after: string | null
+}
+
+/** What an agent asks to do to a Routine through Kettu's Routine tools. */
+export type RoutineAction = 'create' | 'update' | 'delete' | 'run'
+
+/** A Routine's settings as its card shows them, with the model and effort by their names. */
+export interface RoutineCardFields {
+  name: string
+  prompt: string
+  schedule: Schedule
+  /** Null for the Routine's own folder. */
+  projectPath: string | null
+  agentId: AgentId
+  /** The model's and effort's names in the agent's menus; null for the agent's own. */
+  model: string | null
+  effort: string | null
+  scope: PermissionScope
+  timeLimitMinutes: TimeLimitMinutes
+  enabled: boolean
+}
+
+/**
+ * What became of a Routine card: done, with the Routine it made or acted on; not done because the
+ * user declined, nobody answered in time or the turn ended first; or refused when it was applied.
+ */
+export type RoutineChangeOutcome =
+  | { kind: 'done'; routineId: string }
+  | { kind: 'declined' | 'expired' | 'ended' }
+  | { kind: 'failed'; message: string }
+
+/**
+ * An agent's creation, change, deletion or run of a Routine: a card while it waits for the user
+ * (`outcome` null), then the line it leaves. Every one asks, in Full access too.
+ */
+export interface RoutineChangeEntry {
+  kind: 'routine_change'
+  id: string
+  action: RoutineAction
+  /** The Routine it acts on; null for a new one. */
+  routineId: string | null
+  /** The Routine as it is to be: made, changed, deleted or run. */
+  routine: RoutineCardFields
+  /** For a change, the Routine as it was, so the card lists only what differs; else null. */
+  before: RoutineCardFields | null
+  /** For a deletion, the run sessions deleted with it; else null. */
+  sessions: number | null
+  /** When an unanswered card counts as declined, in the host's milliseconds. */
+  expiresAt: number
+  outcome: RoutineChangeOutcome | null
   /** Set when a paired device gave the answer; the host's own windows give none. */
   device?: FromDevice
   /** The agent's entry before it, to put it back after a replay. */
@@ -1590,6 +1661,43 @@ export type DigestedToolEntry = Omit<ToolEntry, 'content' | 'rawInput'> & {
 
 export type DigestedThreadEntry = Exclude<ThreadEntry, ToolEntry> | DigestedToolEntry
 
+export type AnyToolContent = ToolContent | ToolContentDigest
+
+export type DiffContentItem =
+  Extract<ToolContent, { type: 'diff' }> | Extract<ToolContentDigest, { of: 'diff' }>
+
+export function isToolContentDigest(item: AnyToolContent): item is ToolContentDigest {
+  return item.type === 'digest'
+}
+
+export function isDiffContentItem(item: AnyToolContent): item is DiffContentItem {
+  return item.type === 'diff' || (item.type === 'digest' && item.of === 'diff')
+}
+
+export function diffPathOf(item: AnyToolContent): string | null {
+  return isDiffContentItem(item) ? item.path : null
+}
+
+/** Views a tool entry's content items, including digests delivered to `TOOL_DIGESTS_FEATURE` clients. */
+export function toolContentItems(
+  entry: Pick<ToolEntry | DigestedToolEntry, 'content'>,
+): readonly AnyToolContent[] {
+  return entry.content as readonly AnyToolContent[]
+}
+
+/** Whether a tool entry still contains digested input or content that needs `sessions.entry`. */
+export function hasToolDigest(entry: ThreadEntry | DigestedThreadEntry | undefined): boolean {
+  if (!entry || entry.kind !== 'tool') return false
+  if (
+    'rawInputDigest' in entry &&
+    entry.rawInputDigest !== undefined &&
+    entry.rawInput === undefined
+  ) {
+    return true
+  }
+  return toolContentItems(entry).some(isToolContentDigest)
+}
+
 /** `SessionSnapshot` as a device that sent `TOOL_DIGESTS_FEATURE` gets it. */
 export type DigestedSnapshot = Omit<SessionSnapshot, 'entries'> & {
   entries: DigestedThreadEntry[]
@@ -1858,7 +1966,17 @@ export function applyPatches(
           if (partial) break
           throw new UnknownEntryError(patch.id)
         }
-        writableById()[patch.id] = { ...entry, ...patch.changes } as ThreadEntry
+        const merged = { ...entry, ...patch.changes } as ThreadEntry & {
+          rawInputDigest?: ToolInputDigest
+        }
+        if (
+          merged.kind === 'tool' &&
+          'rawInput' in patch.changes &&
+          patch.changes.rawInput !== undefined
+        ) {
+          delete merged.rawInputDigest
+        }
+        writableById()[patch.id] = merged
         break
       }
       case 'session.update':
@@ -2197,7 +2315,8 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
         (value.cause === undefined ||
           value.cause === 'agent_stopped' ||
           value.cause === 'out_of_credit' ||
-          value.cause === 'turn_failed') &&
+          value.cause === 'turn_failed' ||
+          value.cause === 'reports_paused') &&
         (value.model === undefined || typeof value.model === 'string') &&
         (value.planLimit === undefined || value.planLimit === true) &&
         (value.mcpServers === undefined || isListOf(value.mcpServers, isString)) &&
@@ -2361,6 +2480,20 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
           value.outcome === 'timeout') &&
         (value.after === null || typeof value.after === 'string')
       )
+    case 'routine_change':
+      return (
+        (value.action === 'create' ||
+          value.action === 'update' ||
+          value.action === 'delete' ||
+          value.action === 'run') &&
+        (value.routineId === null || typeof value.routineId === 'string') &&
+        isRoutineCardFields(value.routine) &&
+        (value.before === null || isRoutineCardFields(value.before)) &&
+        (value.sessions === null || typeof value.sessions === 'number') &&
+        typeof value.expiresAt === 'number' &&
+        (value.outcome === null || isRoutineChangeOutcome(value.outcome)) &&
+        (value.after === null || typeof value.after === 'string')
+      )
     case 'plugin_denial':
       return (
         typeof value.pluginId === 'string' &&
@@ -2381,6 +2514,113 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
         (value.publishAsked === undefined || typeof value.publishAsked === 'number') &&
         (value.after === null || typeof value.after === 'string')
       )
+    case 'settings_change':
+      return (
+        isListOf(value.items, isSettingChangeItem) &&
+        typeof value.asked === 'boolean' &&
+        (value.expiresAt === null || typeof value.expiresAt === 'number') &&
+        (value.outcome === null || isSettingsChangeOutcome(value.outcome)) &&
+        (value.after === null || typeof value.after === 'string')
+      )
+    case 'project_mcp':
+      return (
+        isListOf(
+          value.servers,
+          (item): item is DeclaredMcpServer =>
+            isRecord(item) && typeof item.name === 'string' && typeof item.target === 'string',
+        ) &&
+        (value.decision === null || isProjectAnswer(value.decision)) &&
+        (value.after === null || typeof value.after === 'string')
+      )
+    case 'project_hooks':
+      return (
+        isListOf(
+          value.hooks,
+          (item): item is DeclaredHook =>
+            isRecord(item) && typeof item.event === 'string' && typeof item.target === 'string',
+        ) &&
+        (value.decision === null || isProjectAnswer(value.decision)) &&
+        (value.after === null || typeof value.after === 'string')
+      )
+    default:
+      return false
+  }
+}
+
+const isProjectAnswer = (value: unknown): value is ProjectMcpAnswer | ProjectHooksAnswer =>
+  value === 'use' || value === 'all' || value === 'skip' || value === 'timeout'
+
+const isSettingScalar = (value: unknown): value is SettingScalar =>
+  value === null ||
+  typeof value === 'string' ||
+  typeof value === 'number' ||
+  typeof value === 'boolean'
+
+const isSettingValue = (value: unknown): value is SettingChangeItem['from'] =>
+  isRecord(value) && isSettingScalar(value.value) && typeof value.text === 'string'
+
+function isSettingChangeItem(value: unknown): value is SettingChangeItem {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.place === 'string' &&
+    typeof value.name === 'string' &&
+    isSettingValue(value.from) &&
+    isSettingValue(value.to) &&
+    (value.warning === undefined || typeof value.warning === 'string') &&
+    // Lines written before name `plugins`, which is no section now.
+    typeof value.section === 'string' &&
+    (value.item === null || typeof value.item === 'string') &&
+    typeof value.row === 'string'
+  )
+}
+
+function isSettingsChangeOutcome(value: unknown): value is SettingsChangeOutcome {
+  if (!isRecord(value)) return false
+  switch (value.kind) {
+    case 'changed':
+      return (
+        (value.undone === undefined || value.undone === true) &&
+        (value.stale === undefined || value.stale === true)
+      )
+    case 'declined':
+    case 'expired':
+    case 'ended':
+      return true
+    case 'failed':
+      return typeof value.message === 'string'
+    default:
+      return false
+  }
+}
+
+function isRoutineCardFields(value: unknown): value is RoutineCardFields {
+  return (
+    isRecord(value) &&
+    typeof value.name === 'string' &&
+    typeof value.prompt === 'string' &&
+    isSchedule(value.schedule) &&
+    (value.projectPath === null || typeof value.projectPath === 'string') &&
+    isAgentId(value.agentId) &&
+    (value.model === null || typeof value.model === 'string') &&
+    (value.effort === null || typeof value.effort === 'string') &&
+    isPermissionScope(value.scope) &&
+    isTimeLimit(value.timeLimitMinutes) &&
+    typeof value.enabled === 'boolean'
+  )
+}
+
+function isRoutineChangeOutcome(value: unknown): value is RoutineChangeOutcome {
+  if (!isRecord(value)) return false
+  switch (value.kind) {
+    case 'done':
+      return typeof value.routineId === 'string'
+    case 'declined':
+    case 'expired':
+    case 'ended':
+      return true
+    case 'failed':
+      return typeof value.message === 'string'
     default:
       return false
   }
@@ -2397,7 +2637,8 @@ function isPluginAttached(value: unknown): value is PluginAttached {
         isRecord(item) &&
         typeof item.text === 'string' &&
         (item.title === undefined || typeof item.title === 'string') &&
-        (item.failed === undefined || typeof item.failed === 'string'),
+        (item.failed === undefined || typeof item.failed === 'string') &&
+        (item.detail === undefined || typeof item.detail === 'string'),
     )
   )
 }

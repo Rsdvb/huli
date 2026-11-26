@@ -4,9 +4,10 @@
 import type { Platform } from '../platform'
 import { parseDirectAddress } from './address'
 import { DEVICE_ID, isDeviceName } from './device'
-import type { DirectAddress } from './protocol'
+import { isAccountId, type DirectAddress } from './protocol'
 import { parseHostRelay, relayOrigin, type HostRelay } from './relay'
 import { isRegionName } from './relay-regions'
+import { parseTranscript, type PairTranscript } from './discovery'
 
 /** How long pairing waits for a finished handshake before the host counts as unreachable. */
 export const PAIR_HOST_TIMEOUT_MS = 15_000
@@ -94,13 +95,40 @@ export interface KnownHost {
    * for a host that never said, which is reached directly alone.
    */
   relay?: HostRelay
+  /**
+   * The Kettu account its last welcome named, null for none; absent from a host not welcomed
+   * since accounts were kept.
+   */
+  account?: string | null
+  /**
+   * The account this computer was signed in to when the host turned it away as another
+   * account's: folded while it still is, until the next welcome.
+   */
+  otherAccount?: string
+}
+
+/**
+ * Whether a host is folded away while this computer is signed in to `current`: it belongs to
+ * another account, or turned this one away for it. Signed in to none, it may use every host
+ * directly, as a host lets in a device that names no account.
+ */
+export function foldedHost(
+  host: Pick<KnownHost, 'account' | 'otherAccount'>,
+  current: string | null,
+): boolean {
+  if (current === null) return false
+  if (host.otherAccount === current) return true
+  return host.account !== undefined && host.account !== null && host.account !== current
 }
 
 /** Why main could not change a host: renaming needs it online, and the rest need it listed. */
 export type HostChangeFailure = 'not_connected' | 'unknown_host'
 
-/** Why a host is not tried again: removed for good, or until one side's Kettu is updated. */
-export type HostStop = 'removed' | 'update_client' | 'update_host'
+/**
+ * Why a host is not tried again: removed for good, until one side's Kettu is updated, or while
+ * this computer is signed in to another account than the host's.
+ */
+export type HostStop = 'removed' | 'update_client' | 'update_host' | 'other_account'
 
 export type HostConnection =
   /** Trying the addresses, until the first try since the host was last online settles. */
@@ -143,6 +171,11 @@ export interface HostsStatus {
   plainTextKey: boolean
   /** The system cannot decrypt the device key, so no host is connected. */
   keyFailed: boolean
+  /**
+   * The known hosts of another Kettu account than the one signed in to now, which `hosts` leaves
+   * out; absent from a main before accounts were kept.
+   */
+  otherAccount?: number
 }
 
 /** Why adding a machine over SSH added no host. */
@@ -260,6 +293,10 @@ export type HostPairingFailure =
   | 'cooling_down'
   /** The host of the account is not on the relay, or no longer lets devices find it. */
   | 'host_offline'
+  /** The host is signed in to another Kettu account than this computer. */
+  | 'other_account'
+  /** The pasted pairing link belongs to a different host than the one being updated. */
+  | 'other_host'
   | SshAddFailure
 
 /** Where adding a machine over SSH is, in order; installing or updating only when needed. */
@@ -278,13 +315,23 @@ export type HostPairingState =
   | { state: 'confirm' }
   /**
    * Pairing with a host of the account: both screens show `code`; `matched` once this computer's
-   * user said it is the same, while the host's owner still decides.
+   * user said it is the same, while the host's owner still decides. `transcript`: what the code
+   * is made of, for the code of a batch.
    */
-  | { state: 'compare'; code: string; matched: boolean }
+  | { state: 'compare'; code: string; matched: boolean; transcript?: PairTranscript }
   | ({ state: 'ssh' } & SshStep)
-  | { state: 'added'; host: HostStatus }
+  /**
+   * `reverse`, when this computer asked to let the host use it in turn: whether the host now
+   * may, or why not, `unsupported` for a host without a client of its own, as a daemon.
+   * `updated` is true when the pairing link updated an already-paired host in place.
+   */
+  | { state: 'added'; host: HostStatus; reverse?: ReverseOutcome; updated?: true }
   /** `detail`: output to show beside the reason, as the end of a failed install's. */
   | { state: 'failed'; reason: HostPairingFailure; detail?: string }
+
+export type ReverseOutcome = 'added' | 'failed' | 'unsupported'
+
+const REVERSE_OUTCOMES: readonly string[] = ['added', 'failed', 'unsupported']
 
 /** What main answers to a pasted link or an SSH address: a pairing under an id, or why not. */
 export type HostPairStart =
@@ -293,6 +340,8 @@ export type HostPairStart =
   | { kind: 'invalid' }
   /** This computer's own code. */
   | { kind: 'self' }
+  /** The pasted link belongs to a different host than the one being updated. */
+  | { kind: 'other_host' }
   /** The device key cannot be read. */
   | { kind: 'unavailable' }
 
@@ -380,6 +429,8 @@ export function parseKnownHost(value: unknown): KnownHost | null {
   if (ssh === null) return null
   const relay = v.relay === undefined ? undefined : parseHostRelay(v.relay)
   if (relay === null) return null
+  if (!(v.account === undefined || v.account === null || isAccountId(v.account))) return null
+  if (!(v.otherAccount === undefined || isAccountId(v.otherAccount))) return null
   return {
     id: v.id,
     publicKey: v.publicKey,
@@ -393,10 +444,12 @@ export function parseKnownHost(value: unknown): KnownHost | null {
     removed: v.removed === true,
     ...(ssh ? { ssh } : {}),
     ...(relay ? { relay } : {}),
+    ...(v.account !== undefined ? { account: v.account as string | null } : {}),
+    ...(v.otherAccount !== undefined ? { otherAccount: v.otherAccount as string } : {}),
   }
 }
 
-const STOPS: readonly string[] = ['removed', 'update_client', 'update_host']
+const STOPS: readonly string[] = ['removed', 'update_client', 'update_host', 'other_account']
 
 function parseConnection(value: unknown): HostConnection | null {
   if (typeof value !== 'object' || value === null) return null
@@ -441,6 +494,8 @@ const FAILURES: readonly string[] = [
   'busy',
   'cooling_down',
   'host_offline',
+  'other_account',
+  'other_host',
   'ssh_missing',
   'ssh_unreachable',
   'ssh_auth',
@@ -476,9 +531,12 @@ export function parseHostPairingState(value: unknown): HostPairingState | null {
   if (state === 'connecting' || state === 'confirm') return { state }
   if (state === 'compare') {
     const { code, matched } = fields
-    return typeof code === 'string' && /^\d{6}$/.test(code) && typeof matched === 'boolean'
-      ? { state, code, matched }
-      : null
+    if (typeof code !== 'string' || !/^\d{6}$/.test(code) || typeof matched !== 'boolean') {
+      return null
+    }
+    const transcript = fields.transcript === undefined ? null : parseTranscript(fields.transcript)
+    if (fields.transcript !== undefined && !transcript) return null
+    return transcript ? { state, code, matched, transcript } : { state, code, matched }
   }
   if (state === 'ssh') {
     const step = parseSshStep(fields)
@@ -486,7 +544,16 @@ export function parseHostPairingState(value: unknown): HostPairingState | null {
   }
   if (state === 'added') {
     const parsed = parseHostStatus(host)
-    return parsed ? { state, host: parsed } : null
+    if (!parsed) return null
+    const { reverse, updated } = fields
+    return {
+      state,
+      host: parsed,
+      ...(typeof reverse === 'string' && REVERSE_OUTCOMES.includes(reverse)
+        ? { reverse: reverse as ReverseOutcome }
+        : {}),
+      ...(updated === true ? { updated: true as const } : {}),
+    }
   }
   if (state === 'failed' && FAILURES.includes(reason as string)) {
     const failed = { state, reason: reason as HostPairingFailure } as const

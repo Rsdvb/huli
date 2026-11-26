@@ -55,8 +55,15 @@ import {
   type RoleHint,
   type WorkflowAgent,
 } from './picks'
-import { againPrompt, notePrompt, reminderPrompt, resumePrompt, stepPrompt } from './prompts'
-import { canPinStep, LIVE, needsOf, summaryOf, viewOf, WORKING } from './views'
+import {
+  againPrompt,
+  carryOnPrompt,
+  notePrompt,
+  reminderPrompt,
+  resumePrompt,
+  stepPrompt,
+} from './prompts'
+import { canPinStep, heldWorking, LIVE, needsOf, summaryOf, viewOf, WORKING } from './views'
 
 /** Refused picks in a row before the task waits for the user. */
 export const MAX_PICK_REFUSALS = 3
@@ -83,8 +90,13 @@ export interface TaskSessions {
    * if `due`, asked when its turn comes, still says so.
    */
   send(sessionId: string, text: string, due?: () => boolean): Promise<void>
-  /** Stops the session's turn, if one runs. */
+  /** Stops the session's turn, if one runs, and its carry-on planned for a plan limit's reset. */
   cancel(sessionId: string): Promise<void>
+  /**
+   * Withdraws pending requests that outlast a turn (non-blocking requests, or any request left
+   * open while idle) so a finished or stopped step cannot stay held or be woken by a stale card.
+   */
+  withdrawPending(sessionId: string): void
   /** Huli: into the recycle bin with `group`, the bin item of the task it worked for. */
   delete(sessionId: string, group?: string): Promise<void>
   has(sessionId: string): boolean
@@ -198,12 +210,30 @@ export interface PickResult {
   next: CheckNext
 }
 
+/** A used-up plan limit stopped the session's last turn; it carries on at `continuesAt`, if ever. */
+export interface StepLimit {
+  continuesAt: number | null
+}
+
 /** How a step session's hooks reach the engine; set once it exists. */
 export interface TaskSessionHooks {
   /** The step's session exists, before anything is sent. */
   sessionCreated(sessionId: string, ref: SessionTaskRef): void
-  /** A turn of the session ended; `byUser` when the user's own message started it. */
-  turnEnded(sessionId: string, turn: { byUser: boolean }): void
+  /**
+   * A turn of the session started; `byUser` when the user's own message started it rather than
+   * Kettu or a card answer.
+   */
+  turnStarted(sessionId: string, turn: { byUser: boolean }): void
+  /**
+   * A turn of the session ended; `byUser` when the user's own message started it, `limit` when a
+   * used-up plan limit stopped it.
+   */
+  turnEnded(sessionId: string, turn: { byUser: boolean; limit?: StepLimit | null }): void
+  /**
+   * What the session's last turn ended on changed after it ended: a plan limit turned out to stop
+   * it, its carry-on moved or was dropped, or, with null, another turn started.
+   */
+  turnLimit(sessionId: string, limit: StepLimit | null): void
   /** A request waits for the user in the session, or the last was answered. */
   waiting(sessionId: string, waiting: boolean): void
   sessionGone(sessionId: string): void
@@ -232,6 +262,12 @@ export class TaskEngine implements TaskSessionHooks {
   private readonly binned = new Map<string, TaskRecord>()
   /** Rounds by their session. */
   private readonly bySession = new Map<string, { taskId: string; roundId: string }>()
+  /**
+   * Rounds whose non-user turn ended while an unanswered question/request was open, so the usual
+   * reminder or stuck handling was paused until the user replies or dismisses the question.
+   */
+  private readonly pausedByQuestion = new Set<string>()
+  private readonly deferredChecks = new Set<NodeJS.Immediate>()
   private chain: Promise<unknown> = Promise.resolve()
   private timer: ReturnType<typeof setTimeout> | null = null
   private closed = false
@@ -265,11 +301,21 @@ export class TaskEngine implements TaskSessionHooks {
         if (task.status !== 'running') continue
         let changed = false
         for (const round of task.rounds) {
+          if (round.asking) {
+            // Pending permission/question cards live in memory and do not survive a restart.
+            round.asking = false
+            changed = true
+          }
           if (round.state === 'starting') {
             // Its session may not have been made before the restart; make it again.
             round.state = 'queued'
             changed = true
-          } else if ((round.state === 'working' || round.state === 'picking') && round.sessionId) {
+          } else if (
+            (round.state === 'working' || round.state === 'picking') &&
+            round.sessionId &&
+            !round.limited
+          ) {
+            // A step a plan limit holds goes on when its session carries on, or the user retries.
             round.reminded = false
             const owed =
               round.state === 'picking' && round.picks
@@ -288,6 +334,8 @@ export class TaskEngine implements TaskSessionHooks {
     this.closed = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+    for (const handle of this.deferredChecks) clearImmediate(handle)
+    this.deferredChecks.clear()
   }
 
   private locked<T>(fn: () => Promise<T> | T): Promise<T> {
@@ -704,7 +752,10 @@ export class TaskEngine implements TaskSessionHooks {
       await this.locked(() => {
         if (round.state !== 'starting') {
           // Cancelled, ended or sent back while its session started: it must not work on.
-          if (sessionId) void this.deps.sessions.cancel(sessionId).catch(() => {})
+          if (sessionId) {
+            void this.deps.sessions.cancel(sessionId).catch(() => {})
+            this.deps.sessions.withdrawPending(sessionId)
+          }
           return
         }
         round.state = 'working'
@@ -813,7 +864,32 @@ export class TaskEngine implements TaskSessionHooks {
     return found !== null && (found.round.state === 'working' || found.round.state === 'starting')
   }
 
-  turnEnded(sessionId: string, turn: { byUser: boolean }): void {
+  turnStarted(sessionId: string, turn: { byUser: boolean }): void {
+    if (turn.byUser) return
+    void this.locked(() => {
+      const found = this.roundOfSession(sessionId)
+      if (!found || found.task.status !== 'running') return
+      const { task, round } = found
+      if (this.pausedByQuestion.delete(round.id) && round.reminded) {
+        // The user's reply started a new turn, so it owes its report anew.
+        round.reminded = false
+        this.save(task)
+      }
+    })
+  }
+
+  turnEnded(sessionId: string, turn: { byUser: boolean; limit?: StepLimit | null }): void {
+    const limit = turn.limit
+    if (limit) {
+      // The step did not stop by itself: it waits for the limit, as a step that cannot start does.
+      void this.locked(() => {
+        const found = this.roundOfSession(sessionId)
+        if (!found || found.task.status !== 'running') return
+        this.pausedByQuestion.delete(found.round.id)
+        if (this.hold(found.round, limit)) this.save(found.task)
+      })
+      return
+    }
     // A turn that answered the user's own message owes no report; only the agent's own turns do.
     if (turn.byUser) return
     void this.locked(() => {
@@ -822,33 +898,114 @@ export class TaskEngine implements TaskSessionHooks {
       const { task, round } = found
       if (task.status !== 'running') return
       if (round.state !== 'working' && round.state !== 'picking') return
-      const picking = round.state === 'picking'
-      if (!round.reminded) {
-        round.reminded = true
-        this.save(task)
-        // Queued behind other messages, it may come after the step already reported or picked.
-        const state = round.state
-        const due = () =>
-          task.status === 'running' &&
-          round.state === state &&
-          round.reminded &&
-          this.roundOfSession(sessionId)?.round === round
-        void this.message(sessionId, reminderPrompt(picking), due)
+      if (round.asking) {
+        // The step ended its turn to wait for the user's answer on a non-blocking question.
+        this.pausedByQuestion.add(round.id)
         return
       }
-      this.stick(round, picking ? 'no_pick' : 'no_report', null)
-      this.save(task)
-      this.pump()
+      this.pausedByQuestion.delete(round.id)
+      this.finishUnreportedTurn(task, round, sessionId)
     })
+  }
+
+  private finishUnreportedTurn(task: TaskRecord, round: RoundRecord, sessionId: string): void {
+    const picking = round.state === 'picking'
+    if (!round.reminded) {
+      round.reminded = true
+      this.save(task)
+      // Queued behind other messages, it may come after the step already reported, picked, or
+      // opened another question.
+      const state = round.state
+      const due = () =>
+        task.status === 'running' &&
+        round.state === state &&
+        round.reminded &&
+        !round.asking &&
+        this.roundOfSession(sessionId)?.round === round
+      void this.message(sessionId, reminderPrompt(picking), due)
+      return
+    }
+    this.stick(round, picking ? 'no_pick' : 'no_report', null)
+    this.save(task)
+    this.pump()
+  }
+
+  turnLimit(sessionId: string, limit: StepLimit | null): void {
+    void this.locked(() => {
+      const found = this.roundOfSession(sessionId)
+      if (!found || found.task.status !== 'running') return
+      const { task, round } = found
+      if (limit) {
+        if (this.hold(round, limit)) this.save(task)
+      } else if (round.limited) {
+        round.limited = null
+        this.save(task)
+      }
+    })
+  }
+
+  /**
+   * Holds a round whose session a used-up plan limit stopped, until it carries on; a round stuck
+   * by that same turn ending without its report is held instead. False when it cannot be.
+   */
+  private hold(round: RoundRecord, limit: StepLimit): boolean {
+    if (!round.by) return false
+    const stuckByTurn =
+      round.state === 'stuck' &&
+      (round.stuck?.reason === 'no_report' || round.stuck?.reason === 'no_pick')
+    if (round.state !== 'working' && round.state !== 'picking' && !stuckByTurn) return false
+    if (stuckByTurn) {
+      round.state = round.picks ? 'picking' : 'working'
+      round.stuck = null
+    }
+    // The turn after the limit owes its report anew, so a reminder still comes once.
+    round.reminded = false
+    round.limited = { kind: 'limit', agentId: round.by.agentId, resetsAt: limit.continuesAt }
+    return true
   }
 
   waiting(sessionId: string, waiting: boolean): void {
     void this.locked(() => {
       const found = this.roundOfSession(sessionId)
-      if (!found || found.round.asking === waiting) return
-      found.round.asking = waiting
-      this.save(found.task)
+      if (!found) return
+      const { task, round } = found
+      if (waiting && (task.status !== 'running' || !WORKING.has(round.state))) return
+      if (round.asking === waiting) return
+      round.asking = waiting
+      this.save(task)
+      if (!waiting && this.pausedByQuestion.has(round.id)) {
+        // settlePermission notifies waiting(false) synchronously before the async question handler's
+        // microtask starts the reply turn via target.send(). Defer past the microtask queue so a
+        // normal answer starts its turn without a spurious reminder, while skipping or cancelling
+        // while idle still wakes the step.
+        this.deferQuestionResume(sessionId, task.id, round.id)
+      }
     })
+  }
+
+  private deferQuestionResume(sessionId: string, taskId: string, roundId: string): void {
+    if (this.closed) return
+    const handle = setImmediate(() => {
+      this.deferredChecks.delete(handle)
+      if (this.closed) return
+      void this.locked(() => {
+        const found = this.roundOf(taskId, roundId)
+        if (!found) return
+        const { task, round } = found
+        if (
+          !this.pausedByQuestion.delete(round.id) ||
+          task.status !== 'running' ||
+          (round.state !== 'working' && round.state !== 'picking') ||
+          round.asking ||
+          round.limited ||
+          this.roundOfSession(sessionId)?.round !== round
+        ) {
+          return
+        }
+        this.finishUnreportedTurn(task, round, sessionId)
+      })
+    })
+    this.deferredChecks.add(handle)
   }
 
   sessionGone(sessionId: string): void {
@@ -857,6 +1014,8 @@ export class TaskEngine implements TaskSessionHooks {
       this.bySession.delete(sessionId)
       if (!found) return
       const { task, round } = found
+      this.pausedByQuestion.delete(round.id)
+      round.asking = false
       if (task.status === 'running' && LIVE.has(round.state) && round.state !== 'reviewing') {
         this.stick(round, 'session_gone', null)
       }
@@ -895,6 +1054,14 @@ export class TaskEngine implements TaskSessionHooks {
         return refused()
       }
       line('step_open', true)
+      if (round.asking) {
+        line(
+          'answered',
+          false,
+          'A question or request is still waiting for the user. End your turn and wait for their reply before calling report_step.',
+        )
+        return refused()
+      }
       const outcome =
         input.outcome === null
           ? step.outcomes.length === 1
@@ -1155,6 +1322,7 @@ export class TaskEngine implements TaskSessionHooks {
     if (step.youReview) {
       round.state = 'reviewing'
       round.endedAt = this.now()
+      this.leaveWorking(round)
       this.save(task)
       this.pump()
       return { kind: 'review' }
@@ -1167,6 +1335,7 @@ export class TaskEngine implements TaskSessionHooks {
     const step = stepOf(task.workflow, round.stepId)!
     const outcome = outcomeOf(step, round.outcome ?? '')!
     round.state = 'done'
+    this.leaveWorking(round)
     this.stepEvent(task, round, 'ended')
     round.endedAt ??= this.now()
     round.stuck = null
@@ -1254,10 +1423,16 @@ export class TaskEngine implements TaskSessionHooks {
     }
   }
 
+  private leaveWorking(round: RoundRecord): void {
+    round.asking = false
+    this.pausedByQuestion.delete(round.id)
+    if (round.sessionId) this.deps.sessions.withdrawPending(round.sessionId)
+  }
+
   private stopRound(round: RoundRecord): void {
     round.state = 'stopped'
     round.endedAt ??= this.now()
-    round.asking = false
+    this.leaveWorking(round)
     if (round.sessionId) {
       const sessionId = round.sessionId
       void this.deps.sessions.cancel(sessionId).catch(() => {})
@@ -1267,7 +1442,7 @@ export class TaskEngine implements TaskSessionHooks {
   private stick(round: RoundRecord, reason: StuckReason, detail: string | null): void {
     round.state = 'stuck'
     round.stuck = { reason, detail: detail?.slice(0, 2_000) ?? null }
-    round.asking = false
+    this.leaveWorking(round)
   }
 
   /** Ends the task; a branch that ends it as done merges into the task's own first. */
@@ -1371,6 +1546,7 @@ export class TaskEngine implements TaskSessionHooks {
       const key = arrowKey(round.stepId, null)
       task.arrows[key] = (task.arrows[key] ?? 0) + 1
       round.state = 'done'
+      this.leaveWorking(round)
       this.stepEvent(task, round, 'ended')
       for (const [stepId, held] of Object.entries(task.ahead)) {
         if (held.roundId === round.id) delete task.ahead[stepId]
@@ -1431,8 +1607,18 @@ export class TaskEngine implements TaskSessionHooks {
         this.save(task)
         return this.view(task)
       }
+      const held = task.rounds.findLast(
+        (r) => r.stepId === stepId && WORKING.has(r.state) && r.limited,
+      )
       const round = task.rounds.findLast((r) => r.stepId === stepId && r.state === 'stuck')
-      if (round?.stuck) {
+      if (held) {
+        // It goes on in its session now; a limit still used up holds it again.
+        held.limited = null
+        held.retryNote = text
+        this.pausedByQuestion.delete(held.id)
+        const message = [text, carryOnPrompt(held.state === 'picking')].filter(Boolean).join('\n\n')
+        if (held.sessionId) void this.message(held.sessionId, message)
+      } else if (round?.stuck) {
         const reason = round.stuck.reason
         round.stuck = null
         round.retryNote = text
@@ -1598,6 +1784,21 @@ export class TaskEngine implements TaskSessionHooks {
       if (!canPinStep(task, stepId)) throw new HostError('conflict', t('tasks.cannotPin'))
       if (pick) task.pins[stepId] = { ...pick }
       else delete task.pins[stepId]
+      const held = task.rounds.find((r) => r.stepId === stepId && heldWorking(r))
+      if (held && pick && !samePick(held.by, pick)) {
+        // Someone else takes over the step a plan limit holds: its session stops, carry-on too.
+        this.stopRound(held)
+        held.limited = null
+        task.waiting.push({
+          stepId,
+          since: this.now(),
+          arrivals: [held.lane],
+          sentBack: held.sentBack,
+          retryNote: held.retryNote,
+          blocked: null,
+          picker: null,
+        })
+      }
       const waiting = task.waiting.find((w) => w.stepId === stepId)
       if (waiting) waiting.blocked = null
       this.advance(task)
@@ -1733,4 +1934,8 @@ export class TaskEngine implements TaskSessionHooks {
 
 function firstLine(text: string): string {
   return text.trim().split('\n')[0]?.trim() || 'Task'
+}
+
+function samePick(a: StepPick | null, b: StepPick): boolean {
+  return a?.agentId === b.agentId && a.model === b.model && a.effort === b.effort
 }

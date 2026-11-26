@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { ThreadEntry } from '@shared/thread'
+import { SUGGEST_QUESTION } from './next-message'
 import { FakeAppServer, turn } from './testing/fake-app-server'
 import { startTestHost, type TestHost } from './testing/harness'
 import { inThreadWorker } from './testing/thread-worker'
@@ -23,7 +24,8 @@ async function twoTurns(
 ) {
   const server = new FakeAppServer()
   const writes: ThreadWrite[] = []
-  // Each turn of the session's thread answers at once, and Codex's history keeps it.
+  // Each turn of the session's thread answers at once, and Codex's history keeps it. The
+  // next-message suggestion's turns run in forks of it, whose agent edits nothing.
   server.on('turn/start', (params, self) => {
     const threadId = params.threadId as string
     const turnId = self.nextTurnId()
@@ -38,7 +40,7 @@ async function twoTurns(
       { turnId, item: reply as never },
     ])
     setTimeout(async () => {
-      await work?.(text, host.project)
+      if (!text.includes(SUGGEST_QUESTION)) await work?.(text, host.project)
       self.notify('item/completed', { threadId, turnId, item: { ...reply, phase: 'final_answer' } })
       self.notify('turn/completed', { threadId, turn: turn(turnId, 'completed') })
     }, 0)

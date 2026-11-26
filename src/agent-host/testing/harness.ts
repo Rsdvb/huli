@@ -315,6 +315,8 @@ export interface TestHostOptions {
   threadWorker?: HostOptions['threadWorker']
   /** Runs the plugin host in the test's own process, for the host to load plugins' scripts in. */
   pluginHost?: boolean
+  /** The limits on the sessions agents start, the defaults unless given. */
+  startedSessions?: HostSettings['startedSessions']
 }
 
 export interface TestHost {
@@ -344,6 +346,7 @@ export function testSettings(agentIds: readonly AgentId[]): HostSettings {
     startModes: DEFAULT_SETTINGS.startModes,
     idleSessions: DEFAULT_SETTINGS.idleSessions,
     workflow: DEFAULT_SETTINGS.workflow,
+    startedSessions: DEFAULT_SETTINGS.startedSessions,
     usage: { fromComputer: false },
     sessionTitles: true,
     claudeTestEntrypoint: null,
@@ -390,14 +393,15 @@ export async function startTestHost(options: TestHostOptions = {}): Promise<Test
     platform: process.platform,
     nodeRuntime: { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
     fakeAgentPath: FAKE_AGENT_MAIN,
-    settings:
-      options.settings ??
-      testSettings([
+    settings: options.settings ?? {
+      ...testSettings([
         'fake-agent',
         ...(options.fakeAppServer ? ['codex' as const] : []),
         ...(options.fakeAs ?? []),
         ...(options.fakeThroughRouter?.agentIds ?? []),
       ]),
+      startedSessions: options.startedSessions ?? DEFAULT_SETTINGS.startedSessions,
+    },
     baseEnv: { ...process.env, ...options.agentEnv },
     send: (message) => {
       sent.push(structuredClone(message))

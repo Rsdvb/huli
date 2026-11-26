@@ -45,6 +45,7 @@ import { currentLocale } from '@renderer/lib/i18n'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { setMarketplaceTab } from '@renderer/stores/view'
 import { applyHeldUpdate, declineHeldUpdate, discardPlan, installPlan } from './plugin-actions'
+import { landOnPlugin } from './plugin-landing'
 import {
   ITEM_ICON,
   SCRIPT_ICON,
@@ -377,6 +378,7 @@ export function PluginConsent({
       done.current = true
       onInstalled?.(plugin)
       onClose()
+      landOnPlugin(plugin, scope.hostId)
     } catch (e) {
       setError(errorMessage(e))
     } finally {
@@ -407,6 +409,12 @@ export function PluginConsent({
             </p>
           )}
           <AddsLines contents={contents} />
+          {plan.skipped?.map((skill) => (
+            <p key={skill.name} className="k-plug-quiet" data-selectable="">
+              <Icon icon={Alert02Icon} size={13} />
+              {t('plugin.install.skipsSkill', { name: skill.name, from: skill.from })}
+            </p>
+          ))}
           <ConnectsLines contents={contents} />
           {contents.script && (
             <Group heading={t('plugin.script.heading')} icon={SCRIPT_ICON}>

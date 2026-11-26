@@ -25,6 +25,7 @@ import {
   signInFailure,
   submitFailure,
   type AccountApi,
+  type AccountClient,
   type ClientInfo,
   type Me,
   type ReportUpload,
@@ -305,6 +306,14 @@ export class Account {
   relayToken(): Promise<{ token: string; expiresAt: number }> {
     return this.withAccessToken(
       (token) => this.options.api.relayToken(token),
+      (error) => error instanceof AccountServiceError && error.code === 'invalid_token',
+    )
+  }
+
+  /** The clients signed in to the account; throws `NotSignedIn` when signed out. */
+  clients(): Promise<AccountClient[]> {
+    return this.withAccessToken(
+      (token) => this.options.api.clients(token),
       (error) => error instanceof AccountServiceError && error.code === 'invalid_token',
     )
   }

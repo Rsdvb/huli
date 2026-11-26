@@ -101,6 +101,7 @@ import type {
 import { AgentFiles } from './agent-files'
 import { AgentCopies } from './agent-copies'
 import { agentOptionsFile, AgentOptionsStore, startModeIn } from './agent-options'
+import { clearFlagSettings, flagSettingsFolder } from './claude/flag-settings'
 import { listedModels } from './claude/user-settings'
 import { STOP_TIMINGS } from './agent-process'
 import { AgentTrees } from './agent-trees'
@@ -156,12 +157,15 @@ import { HostError, invalidParams, isHostError, notFound } from './errors'
 import { setLocale, t } from './i18n'
 import { tSettings, tSettingsEnglish } from './settings-words'
 import { FilesService } from './files'
+import { FilesWatches } from './files-watch'
+import { HtmlPreviews } from './html-preview'
 import { MediaService } from './media'
 import { MemoryError, type MemoryErrorCode } from './memory/errors'
 import { MemoryService } from './memory/service'
 import { catalogFile, MarketCatalogService } from './marketplace/catalog'
 import { bundlesFile, MarketBundlesService } from './marketplace/bundles'
 import { MarketCommunityService } from './marketplace/community'
+import { MarketIcons } from './marketplace/icons'
 import { MarketConnectionsService } from './marketplace/connections'
 import { logText } from './localized-error'
 import { parseSignIns } from './marketplace/oauth'
@@ -177,6 +181,7 @@ import { pluginsFile as kettuPluginsFile } from './plugins/store'
 import { PublishDrafts } from './marketplace/publish-drafts'
 import { PluginConverter } from './marketplace/plugin-conversions'
 import { MarketCallError, MarketTools } from './marketplace/publish-tools'
+import { ROUTINE_WAIT_MS, RoutineTools } from './routines/tools'
 import {
   SETTINGS_WAIT_MS,
   SettingsTools,
@@ -200,7 +205,7 @@ import { createGitRunner, type GitRunner } from './file-checkpoints/git'
 import { FileCheckpoints } from './file-checkpoints/store'
 import { GitRetains } from './git/retains'
 import type { SkillsListResponse } from './codex/protocol'
-import { completePath } from './path-completion'
+import { completePath, listDrives } from './path-completion'
 import { pathKey } from './paths'
 import { PluginChannels } from './plugin-runtime/channels'
 import { PluginHostClient } from './plugin-runtime/client'
@@ -220,6 +225,7 @@ import { Projects } from './projects'
 import { claudeOutside, type OutsideReader } from './outside-sessions'
 import type { SecretStore } from './agent-reset/secrets'
 import { claudeCacheTtl, type CacheTtlReader } from './prompt-cache'
+import { proxyFetch } from './proxy-fetch'
 import { claudeModelRequests } from './model-requests/claude'
 import { clineModelRequests } from './model-requests/cline'
 import { antigravityModelRequests } from './model-requests/antigravity'
@@ -634,12 +640,15 @@ export class AgentHost {
   /** Huli: git for the file checkpoints, which reads the user's repositories and writes none. */
   private readonly checkpointGit: GitRunner
   private readonly files: FilesService
+  /** The projects whose folders ports watch for the Files pane. */
+  private readonly fileWatches: FilesWatches
   private readonly agentFiles: AgentFiles
   /** Huli: what agents keep of the sessions deleted here. */
   private readonly copies: AgentCopies
   private readonly sessionFiles: SessionFiles
   /** Grants for the media a thread names and the Files pane opens, which main serves. */
   private readonly media: MediaService
+  private readonly htmlPreviews: HtmlPreviews
   private gitUnsubscribe: (() => void)[] = []
   /** Ports keeping a project's git status live, by path key. */
   private readonly gitRetains = new GitRetains()
@@ -722,6 +731,7 @@ export class AgentHost {
   private nextThemeCall = 1
   /** Huli: the values the user saved for each project, by project path, then name; host only. */
   private projectSecrets: Record<string, Record<string, string>> = {}
+  private readonly routineTools: RoutineTools
   /** What was put off or refused, to publish later. */
   private readonly publishDrafts: PublishDrafts
   /** The Marketplace tools of Kettu's MCP service. */
@@ -768,6 +778,7 @@ export class AgentHost {
         setting: (pluginId, key) => this.plugins.settingValue(pluginId, key),
         secret: (pluginId, key) => this.pluginSecret(pluginId, key),
         storage: this.pluginStorage,
+        setStatus: (pluginId, value) => this.plugins.setStatus(pluginId, value),
       },
       channels: {
         answer: (pluginId, request, decision, from) =>
@@ -780,6 +791,7 @@ export class AgentHost {
   /** The tools of the plugins that are on, which Kettu's MCP service lists. */
   private readonly pluginTools = new PluginTools({
     installed: () => this.plugins.tools(),
+    agentOf: (sessionId) => this.sessions.sessionAgent(sessionId),
     client: this.pluginHost,
     log: (level, message) => writeLog(level, 'plugins', message),
   })
@@ -851,11 +863,17 @@ export class AgentHost {
     this.env.setConfigFolders(configFolders(catalog, options.settings))
     this.execRunner = createExec(() => this.env.agentEnv() as NodeJS.ProcessEnv)
     this.checkpointGit = createGitRunner(() => this.env.agentEnv() as NodeJS.ProcessEnv, platform)
+    const net = proxyFetch(() => this.env.agentEnv(), platform)
     this.media = new MediaService({
       platform,
       homeDir: options.homeDir ?? os.homedir(),
       names: (sessionId, text) => this.sessions.names(sessionId, text),
       grant: (grant) => options.send({ type: 'host:media-grant', grant }),
+    })
+    this.htmlPreviews = new HtmlPreviews({
+      platform,
+      folderOf: (sessionId) => this.sessions.openWorkFolder(sessionId),
+      log: (level, message) => writeLog(level, 'host', message),
     })
     this.files = new FilesService({
       exec: this.execRunner.exec,
@@ -863,6 +881,12 @@ export class AgentHost {
       media: (real, info) => this.media.grantFile(real, info, null, true),
       describeMedia: (real, info) => this.media.describe(real, info, true),
       trash: (paths) => this.trash(paths),
+    })
+    this.fileWatches = new FilesWatches({
+      platform,
+      changed: (portId, projectPath) =>
+        this.hub.send([portId], { type: 'files.changed', projectPath }),
+      log: (level, message) => writeLog(level, 'host', message),
     })
     this.agentFiles = new AgentFiles({
       platform,
@@ -883,6 +907,11 @@ export class AgentHost {
       call: (call) => this.marketCall(call),
       appVersion: options.appVersion,
       folder: path.join(options.userDataPath, 'plugin-conversions'),
+    })
+    const marketIcons = new MarketIcons({
+      dir: path.join(options.userDataPath, 'marketplace-icons'),
+      log,
+      call: (call) => this.marketCall(call),
     })
     this.marketTools = new MarketTools({
       account: () => this.marketAccount,
@@ -916,6 +945,7 @@ export class AgentHost {
       converter: this.pluginConverter,
       appVersion: options.appVersion,
       home: options.homeDir ?? os.homedir(),
+      icon: (icon) => marketIcons.waited(icon),
     })
     this.settingsTools = new SettingsTools({
       platform,
@@ -986,6 +1016,30 @@ export class AgentHost {
         this.hub.send([portId], { type: 'projects.cloneProgress', progress }),
       log,
     })
+    this.routineTools = new RoutineTools({
+      list: () => this.routines.list(),
+      create: (draft) => this.routines.create(draft),
+      update: (routineId, changes) => this.routines.update(routineId, changes),
+      delete: (routineId) => this.routines.delete(routineId),
+      runNow: (routineId) => this.routines.runNow(routineId),
+      agents: () => this.agents.statuses(),
+      agentOptions: (agentId) => this.agentOptions.get(agentId),
+      readOptions: (agentId) => this.agents.readFirstOptions(agentId),
+      sessionAgent: (sessionId) => this.sessions.sessionAgent(sessionId),
+      sessionProject: (sessionId) => {
+        const projectPath = this.sessions.sessionProject(sessionId)
+        return projectPath === null ? null : (this.projects.find(projectPath)?.path ?? null)
+      },
+      project: async (value) => {
+        const found = this.projects.find(value)
+        if (found) return found.path
+        const canonical = await this.projects.resolveDirectory(value).catch(() => null)
+        return canonical === null ? null : (this.projects.find(canonical)?.path ?? null)
+      },
+      ask: (sessionId, ask) => this.sessions.routineAsked(sessionId, ask, ROUTINE_WAIT_MS),
+      settle: (sessionId, entryId, outcome) =>
+        this.sessions.routineSettled(sessionId, entryId, outcome),
+    })
     this.scratch = new ScratchFolders(path.join(options.userDataPath, 'scratch'), platform)
     this.remembered = agentsFile(options.userDataPath, log)
     this.updates = agentUpdatesFile(options.userDataPath, log)
@@ -1014,6 +1068,7 @@ export class AgentHost {
     this.marketCatalog = new MarketCatalogService({
       file: catalogFile(options.userDataPath, log),
       log,
+      fetch: net,
     })
     this.marketConnections = new MarketConnectionsService({
       log,
@@ -1022,12 +1077,14 @@ export class AgentHost {
       keep: (serverId, state) => this.keepSignIn(serverId, state),
       changed: (serverId, connection, loginId, error) =>
         this.connectionChanged(serverId, connection, loginId, error),
+      fetch: net,
     })
     this.mcpProxy = new McpProxy({
       servers: () => this.settings.marketplace.mcp,
       headers: (server) => serverHeaders(server, this.marketKeys),
       token: (serverId) => this.marketConnections.token(serverId),
       refused: (serverId, used) => this.marketConnections.refused(serverId, used),
+      fetch: net,
     })
     const home = options.homeDir ?? os.homedir()
     this.ownPlugins = new OwnPluginsService({
@@ -1048,6 +1105,7 @@ export class AgentHost {
         ...this.workflowLibrary.listingIds(),
       ],
       installWorkflow: (text, origin) => this.workflowLibrary.installListing(text, origin),
+      icon: (icon) => marketIcons.waited(icon),
     })
     this.marketBundles = new MarketBundlesService({
       userDataPath: options.userDataPath,
@@ -1065,6 +1123,7 @@ export class AgentHost {
           isExecutable: (file) => isExecutableFile(file, platform),
         }),
       servers: () => this.settings.marketplace.mcp,
+      fetch: net,
     })
     void this.marketBundles.sweep()
     this.marketSkills = new MarketSkillsService({
@@ -1083,6 +1142,7 @@ export class AgentHost {
       kettu: (id) => this.marketCommunity.download(id, 'skill'),
       ownSkills: () => this.artifactService.guideFlags,
       kettuOn: (agentId) => !this.settings.mcp.kettu.off.includes(agentId),
+      fetch: net,
     })
     this.trees = new AgentTrees({
       file: agentProcessesFile(options.userDataPath, log),
@@ -1236,6 +1296,7 @@ export class AgentHost {
       changed: () => this.broadcast({ type: 'workflows.changed' }),
       binChanged: () => this.recycleBin?.added(),
       pluginOn: (pluginId) => this.plugins.on(pluginId),
+      fetch: net,
     })
     this.pluginThemes = new PluginThemeIndex({
       file: path.join(options.userDataPath, PLUGIN_THEMES_FILE),
@@ -1283,6 +1344,7 @@ export class AgentHost {
         this.hub.broadcast({ type: 'plugins.changed' })
         void this.pluginThemes.sync()
       },
+      fetch: net,
     })
     this.roles = new RolesService({
       userDataPath: options.userDataPath,
@@ -1325,6 +1387,7 @@ export class AgentHost {
       sessionOf: (process, id) => this.sessions.sessionOf(process, id),
       subagentCall: (process, id) => this.sessions.isSubagentCall(process, id),
       plan: { set: (sessionId, items) => this.sessions.planSet(sessionId, items) },
+      suggest: { note: (sessionId, message) => this.sessions.noteSuggestion(sessionId, message) },
       report: { add: (sessionId, draft) => this.sessions.reportDrafted(sessionId, draft) },
       notify: { notify: (sessionId, note) => this.sessions.noteToUser(sessionId, note) },
       memory: {
@@ -1385,6 +1448,7 @@ export class AgentHost {
       theme: this.themeTools,
       features: () => this.settings.features,
       webReader: { read: (caller, input) => this.webReader.read(caller, input) },
+      routines: this.routineTools,
       plugins: this.pluginTools,
       skills: {
         of: (sessionId) => {
@@ -1416,6 +1480,7 @@ export class AgentHost {
         send: (sessionId, text, from, now) =>
           this.sessions.sendFromTool(sessionId, text, from, now),
         started: (callerId) => this.sessions.startedBy(callerId),
+        limits: () => this.settings.startedSessions,
         name: (sessionId) => this.sessions.toolName(sessionId),
         agentName: (sessionId) => this.sessions.agentName(sessionId),
         agentLabel: (agentId) => this.agents.name(agentId),
@@ -1484,6 +1549,7 @@ export class AgentHost {
       adaptersDir,
       sessionRouterPath: options.sessionRouterPath ?? null,
       clineHostPath: options.clineHostPath ?? null,
+      claudeSettingsDir: flagSettingsFolder(options.userDataPath),
       ...(options.detect ? { detect: options.detect } : {}),
       ...(options.protocols ? { protocols: options.protocols } : {}),
       ...(options.drivers ? { drivers: options.drivers } : {}),
@@ -1625,11 +1691,17 @@ export class AgentHost {
       reportsDir: path.join(options.userDataPath, 'agent-reports'),
       attachments: this.attachments,
       mcp: {
-        servers: (sessionId, record, connection) => {
+        servers: (sessionId, record, connection, suggests) => {
           const gateway = this.agents.toolGateway(record.agentId)
           return this.agents.mcpServersByName(record.agentId)
-            ? this.artifactService.folderServers(connection, record.projectPath, sessionId, gateway)
-            : this.artifactService.servers(sessionId, record.projectPath, gateway)
+            ? this.artifactService.folderServers(
+                connection,
+                record.projectPath,
+                sessionId,
+                gateway,
+                suggests,
+              )
+            : this.artifactService.servers(sessionId, record.projectPath, gateway, suggests)
         },
         library: (sessionId, record, connection, transports, taken) =>
           libraryServers(
@@ -1662,10 +1734,11 @@ export class AgentHost {
           this.computer?.forget(sessionId)
           this.browserSites.delete(sessionId)
         },
-        guide: (agentId) =>
+        guide: (agentId, suggests) =>
           this.artifactService.guidePrompt(
             this.marketSkills.loadsSkills(agentId),
             this.agents.toolGateway(agentId),
+            suggests,
           ),
         turnEnded: (sessionId) => {
           this.artifacts.stopUsing(sessionId)
@@ -1675,6 +1748,7 @@ export class AgentHost {
           this.settingsTools.turnEnded(sessionId)
           this.secretTools.turnEnded(sessionId)
           this.themeTools.turnEnded(sessionId)
+          this.routineTools.turnEnded(sessionId)
           if (this.deviceTurns.delete(sessionId)) {
             this.options.send({ type: 'host:device-turn-ended', sessionId })
           }
@@ -1808,7 +1882,10 @@ export class AgentHost {
           this.hub.broadcast({ type: 'session.removed', sessionId })
           this.sendFolders()
         },
-        ended: (sessionIds) => options.send({ type: 'host:sessions-ended', sessionIds }),
+        ended: (sessionIds) => {
+          this.htmlPreviews.end(sessionIds)
+          options.send({ type: 'host:sessions-ended', sessionIds })
+        },
         returned: (sessionId, portIds) => {
           if (portIds) this.hub.send(portIds, { type: 'session.returned', sessionId })
           else this.hub.broadcast({ type: 'session.returned', sessionId })
@@ -2048,7 +2125,11 @@ export class AgentHost {
       sessions: {
         createStep: (params) => this.sessions.createStep(params),
         send: (sessionId, text, due) => this.sessions.sendFromKettu(sessionId, text, due),
-        cancel: (sessionId) => this.sessions.cancel(sessionId),
+        cancel: async (sessionId) => {
+          await this.sessions.cancelContinue(sessionId).catch(() => {})
+          await this.sessions.cancel(sessionId)
+        },
+        withdrawPending: (sessionId) => this.sessions.withdrawPending(sessionId),
         delete: (sessionId, group) => this.sessions.delete(sessionId, group),
         has: (sessionId) => this.sessions.has(sessionId),
       },
@@ -2258,14 +2339,14 @@ export class AgentHost {
       this.broadcast({ type: 'environment.changed', info })
       this.git?.setEnvironment(this.env.agentEnv() as NodeJS.ProcessEnv)
     })
-    // As Reload does: the fallback's PATH may have missed programs the login shell's finds.
+    // As Reload does: the fallback's PATH may have missed programs the login shell's finds. Git's
+    // tools are probed again by setEnvironment above.
     this.env.onRecovered(() => {
-      void (async () => {
-        await this.agents.redetect()
-        if (this.git) await this.gitCall((g) => g.reloadTools())
-      })().catch((error: unknown) =>
-        log('warn', `Could not detect the agents again: ${(error as Error).message}`),
-      )
+      this.agents
+        .redetect()
+        .catch((error: unknown) =>
+          log('warn', `Could not detect the agents again: ${(error as Error).message}`),
+        )
     })
     this.git =
       typeof options.git === 'function'
@@ -2283,6 +2364,10 @@ export class AgentHost {
       path.join(options.userDataPath, 'agents'),
       harnessesFolder(options),
       (message) => writeLog('warn', 'host', message),
+    )
+    // Before any agent starts: what a run before this one left is no process's any more.
+    await clearFlagSettings(flagSettingsFolder(options.userDataPath)).catch((error: unknown) =>
+      writeLog('warn', 'host', `Could not clear Claude Code's settings files: ${String(error)}`),
     )
     // Huli: what needs the user goes to the chat bridges as well as to main's notifications.
     let started: AgentHost | null = null
@@ -2355,6 +2440,7 @@ export class AgentHost {
     // Huli: harness installs an uninstall or update moved aside that a quit left undeleted.
     void host.agents.sweepTrash()
     host.agents.startLimitReads()
+    host.agents.startSignInEndReads()
     void host.agents.removeAntigravityUsageServer()
     void host.agents.detectAll().then(() => {
       host.agents.scheduleUpdateChecks()
@@ -2667,6 +2753,7 @@ export class AgentHost {
     this.artifacts.portClosed(portId)
     this.gitRetains.dropPort(portId)
     this.git?.releaseAll(portId)
+    this.fileWatches.dropPort(portId)
   }
 
   /** `host:settings`: binary overrides, the proxy and background fetch, applied live. */
@@ -4321,6 +4408,7 @@ export class AgentHost {
       this.recycleBin.stop()
       this.execRunner.killAll()
       this.checkpointGit.stop()
+      this.fileWatches.stop()
       for (const unsubscribe of this.gitUnsubscribe) unsubscribe()
       await Promise.all([
         this.agents.stopAll(),
@@ -4333,6 +4421,7 @@ export class AgentHost {
       ])
       await Promise.all([
         this.artifactService.stop(),
+        this.htmlPreviews.stop(),
         this.computer?.shutdown(),
         this.nodeProxy.shutdown(),
         this.projects.flush(),
@@ -4660,6 +4749,8 @@ export class AgentHost {
       'agents.options': () => this.agentOptions.list().map((o) => this.withStartMode(o)),
       'agents.pinModel': ({ agentId, model, pinned }) =>
         this.agentOptions.pin(agentId, model, pinned),
+      'agents.setPinnedModels': ({ agentId, models }) =>
+        this.agentOptions.setPinned(agentId, models),
       'agents.lightAgents': () => ({ agents: this.sessions.lightAgents() }),
       'agents.draftReport': (params) => this.draftReport(params),
       'mcp.status': () => this.mcpStatus(),
@@ -4816,6 +4907,7 @@ export class AgentHost {
         this.projectCreate.create(params, { portId: ctx.portId, device: ctx.device !== null }),
       'paths.complete': ({ path }) =>
         completePath(path, this.options.platform, this.options.homeDir ?? os.homedir()),
+      'paths.drives': () => listDrives(this.options.platform),
       'sessions.list': ({ projectPath }) => sessions.list(projectPath),
       'sessions.create': async (params, { portId, device }) => {
         if (params.manager && !this.featureOn('manager')) throw featureOff('manager')
@@ -5004,6 +5096,8 @@ export class AgentHost {
       'routines.update': ({ routineId, changes }) => routines.update(routineId, changes),
       'routines.delete': ({ routineId }) => routines.delete(routineId),
       'routines.runNow': ({ routineId }) => routines.runNow(routineId),
+      'routines.answerChange': ({ sessionId, entryId, decision }, { device }) =>
+        this.sessions.answerRoutine(sessionId, entryId, decision, fromDevice(device)),
       'routines.cancelRun': ({ runId }) => routines.cancelRun(runId),
       'routines.runs': ({ routineId, before }) => routines.runsOf(routineId, before),
       'routines.markSeen': ({ routineId }) => routines.markSeen(routineId),
@@ -5019,6 +5113,8 @@ export class AgentHost {
       'plugins.setSecret': ({ pluginId, key, value }) => this.setPluginSecret(pluginId, key, value),
       'plugins.setChannelKinds': ({ pluginId, channel, kinds }) =>
         this.plugins.setChannelKinds(pluginId, channel, kinds),
+      'plugins.setToolAgents': ({ pluginId, agents }) =>
+        this.plugins.setToolAgents(pluginId, agents),
       'plugins.reload': ({ pluginId }) => this.plugins.reload(pluginId),
       'plugins.checkUpdates': async ({ pluginId }) => ({
         plugins: await this.plugins.checkUpdates(pluginId),
@@ -5199,9 +5295,11 @@ export class AgentHost {
           portId,
         )
       },
-      'git.watchReferences': ({ urls }, { portId }) => {
-        if (this.hub.has(portId)) this.requireGit().watchReferences(portId, urls)
-      },
+      // Its first sweep probes gh, so it waits for the environment as every other git call does.
+      'git.watchReferences': ({ urls }, { portId }) =>
+        this.gitCall(async (g) => {
+          if (this.hub.has(portId)) g.watchReferences(portId, urls)
+        }),
       'git.avatarUrl': ({ login }) => this.gitCall((g) => g.avatarUrl(login)),
       'git.currentPullRequest': ({ projectPath }) =>
         this.gitProjectCall(projectPath, (g, p) => g.currentPullRequest(p)),
@@ -5235,10 +5333,34 @@ export class AgentHost {
       'attachments.remove': ({ id }) => this.attachments.remove(id),
       'attachments.held': ({ ids }) => this.attachments.held(ids),
       'files.list': ({ projectPath }) =>
-        this.filesCall(projectPath, (root) => this.files.list(root)),
+        this.filesCall(projectPath, async (root) => {
+          const list = await this.files.list(root)
+          this.fileWatches.listed(root, list)
+          return list
+        }),
+      'files.watch': async ({ projectPath }, { portId }) => {
+        const root = await projects.resolveDirectory(projectPath)
+        this.assertOpenFolder(root)
+        if (this.hub.has(portId)) this.fileWatches.add(root, portId, projectPath)
+      },
+      'files.unwatch': async ({ projectPath }, { portId }) => {
+        // The folder may be gone by now, and its watch with it.
+        const root = await projects.resolveDirectory(projectPath).catch(() => projectPath)
+        this.fileWatches.remove(root, portId)
+      },
+      'files.listFolder': ({ projectPath, path }) =>
+        this.filesCall(projectPath, async (root) => {
+          const list = await this.files.listFolder(root, path)
+          this.fileWatches.read(root, path)
+          return list
+        }),
       'files.read': ({ projectPath, path, asText }, { device }) =>
-        // A device's media is read through its remote host, never main's media scheme.
-        this.filesCall(projectPath, (root) => this.files.read(root, path, asText, device !== null)),
+        this.filesCall(projectPath, async (root) => {
+          // A device's media is read through its remote host, never main's media scheme.
+          const content = await this.files.read(root, path, asText, device !== null)
+          this.fileWatches.opened(root, path)
+          return content
+        }),
       'files.search': ({ projectPath, query }) =>
         this.filesCall(projectPath, (root) => this.files.search(root, query)),
       'files.agentFolder': ({ sessionId }) => this.agentFiles.folder(sessionId),
@@ -5258,8 +5380,24 @@ export class AgentHost {
         this.filesCall(projectPath, (root) => this.files.rename(root, from, to)),
       'files.copy': ({ projectPath, paths, folder }) =>
         this.filesCall(projectPath, (root) => this.files.copy(root, paths, folder)),
+      'files.upload': ({ projectPath, path, source, replace }) =>
+        this.filesCall(projectPath, (root) =>
+          this.files.upload(
+            root,
+            path,
+            'grantId' in source
+              ? { path: this.attachments.takeGrant(source.grantId).path }
+              : source,
+            replace === true,
+          ),
+        ),
       'files.delete': ({ projectPath, paths, permanently }) =>
         this.filesCall(projectPath, (root) => this.files.delete(root, paths, permanently === true)),
+      'files.preview': ({ sessionId, path }, { device }) => {
+        // Served on this computer's loopback address, which only its own browser reaches.
+        if (device) throw new HostError('forbidden', 'Only a window may call "files.preview"')
+        return this.htmlPreviews.url(sessionId, path)
+      },
       'media.open': async ({ projectPath, path, sessionId }) => {
         const root = await projects.resolveDirectory(projectPath)
         this.assertOpenFolder(root)
@@ -5300,7 +5438,10 @@ export class AgentHost {
         }))
       },
       'artifacts.read': async ({ id, version }) => {
-        const read = await artifacts.read(id, version === undefined ? {} : { version })
+        const [read, strict] = await Promise.all([
+          artifacts.read(id, version === undefined ? {} : { version }),
+          artifacts.isStrict(id),
+        ])
         return {
           title: read.artifact.title,
           version: read.version.version,
@@ -5311,6 +5452,7 @@ export class AgentHost {
               ? ''
               : await artifacts.entryText(read),
           type: read.type,
+          strict,
           seen: read.artifact.seen,
           files: read.files.map((file) => ({
             path: file.path,

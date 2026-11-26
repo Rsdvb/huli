@@ -68,6 +68,7 @@ import { NodeInstallAction } from '@renderer/features/agents/node-install'
 import { programCopy } from '@renderer/features/agents/harness-problem'
 import { readiness, type AgentReadiness } from '@renderer/features/agents/readiness'
 import { useHostLabel } from '@renderer/features/sidebar/host-label'
+import { agentSignInEnd, signInEndValue } from '@renderer/features/agents/sign-in-end'
 import { errorMessage } from '@renderer/lib/host'
 import { newestLimits } from '@renderer/lib/plan-readings'
 import { i18n } from '@renderer/lib/i18n'
@@ -137,6 +138,7 @@ import { AutoCompactRows } from './auto-compact-rows'
 import { ClaudeSettingsRows } from './claude-settings-rows'
 import { CodebuddySettingsRows } from './codebuddy-settings-rows'
 import { CodexSettingsRows } from './codex-settings-rows'
+import { FavoriteModelsGroup } from './favorite-models'
 import { PlaceRow } from './places'
 import {
   DIALOG_FIELD,
@@ -426,7 +428,9 @@ function AddAgentDialog({
   const providers = chosen?.apiKey?.providers ?? false
   // An added agent of such a harness has no other sign-in, and picks the site its key is from.
   const keyOnly = !useDefault && !!chosen && KEY_ONLY_ADDED_HARNESSES.includes(chosen.harnessId)
-  const loginMode: Login = keyOnly ? 'api-key' : login
+  // A harness Kettu hands no key to, such as Google Antigravity, signs in on the agent's page.
+  const takesKey = !!chosen?.apiKey
+  const loginMode: Login = keyOnly ? 'api-key' : takesKey ? login : 'terminal'
   const valid =
     !!chosen &&
     trimmed.length > 0 &&
@@ -641,7 +645,7 @@ function AddAgentDialog({
                 />
               </SettingsField>
             )}
-            {!useDefault && (
+            {!useDefault && (takesKey || keyOnly) && (
               <SettingsField
                 label={t('agents.add.login')}
                 hint={keyOnly && t('agents.keyOnly.note', { name: chosen?.harnessName ?? '' })}
@@ -1020,6 +1024,26 @@ function AgentEnvKeyRow({
   )
 }
 
+/** When the subscription sign-in ends; nothing for an agent that reports no end. */
+function SignInEndRow({ status }: { status: AgentStatus }) {
+  const { t } = useTranslation('settings')
+  const now = useNow()
+  const end = agentSignInEnd(status, now)
+  if (!end) return null
+  return (
+    <RowFrame text={<RowText name={t('agents.signInEnds.name')} />}>
+      <span
+        className="k-fact"
+        data-wide=""
+        data-tone={end.phase === 'ended' ? 'warning' : undefined}
+        data-selectable=""
+      >
+        {signInEndValue(end, now)}
+      </span>
+    </RowFrame>
+  )
+}
+
 function AgentPageBody({ status }: { status: AgentStatus }) {
   const { hostId, request } = useHostScope()
   const { t } = useTranslation(['settings', 'common'])
@@ -1254,6 +1278,7 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
                     />
                   )),
                 )}
+              <SignInEndRow status={status} />
               {!off &&
                 ((terminalSignIn && hostId === null) ||
                   pageSignIns.length > 0 ||
@@ -1320,6 +1345,8 @@ function AgentPageBody({ status }: { status: AgentStatus }) {
           dshAccount ? null : (
           <UsageGroup status={status} reading={reading} running={running} />
         )}
+
+        <FavoriteModelsGroup key={status.id} status={status} />
 
         <ConfigurationGroup status={status} />
 

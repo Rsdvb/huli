@@ -58,6 +58,7 @@ export function taskRowStatus(
     waiting: live ? waits : 0,
     failed: live && task.error,
     running: live && task.running,
+    background: null,
     starting: live && sessions.some((s) => s?.status === 'starting'),
     unread: task.unread,
   }
@@ -66,6 +67,7 @@ export function taskRowStatus(
     waiting: own.waiting + sessions.reduce((n, s) => n + (s?.permissionCount ?? 0), 0),
     failed: own.failed || sessions.some(failed),
     running: own.running,
+    background: null,
     starting: own.starting,
     unread: own.unread || sessions.some((s) => s?.attention === 'unread'),
   }
@@ -85,6 +87,7 @@ export function stepRowStatus(
     waiting: asking,
     failed: step.state === 'error' || failed(summary),
     running: step.state === 'running' && summary?.status !== 'starting',
+    background: null,
     starting: summary?.status === 'starting',
     unread: summary?.attention === 'unread',
   }
@@ -221,12 +224,29 @@ export function stuckText(reason: StuckReason, step: string): string {
   return t(`stuck.${reason}`, { step })
 }
 
-/** Why a step cannot start, in words. */
-export function blockedText(reason: BlockedReason, hostId: string | null, now: number): string {
+/**
+ * The step's round still at work, which a blocked need of the step then holds: a used-up plan
+ * limit stopped it.
+ */
+export function heldRound(view: TaskView, stepId: string): RoundView | undefined {
+  return view.rounds.findLast(
+    (r) =>
+      r.stepId === stepId &&
+      (r.state === 'starting' || r.state === 'working' || r.state === 'picking'),
+  )
+}
+
+/** Why a step cannot start, or, `held`, cannot go on with the work a plan limit stopped. */
+export function blockedText(
+  reason: BlockedReason,
+  hostId: string | null,
+  now: number,
+  held = false,
+): string {
   switch (reason.kind) {
     case 'limit':
       return reason.resetsAt
-        ? t('blocked.limitAt', {
+        ? t(held ? 'blocked.limitAtHeld' : 'blocked.limitAt', {
             agent: agentName(reason.agentId, hostId),
             time: new Date(reason.resetsAt).toLocaleTimeString(i18n.language, {
               hour: 'numeric',

@@ -9,6 +9,8 @@ import type { DirectAddress } from '@shared/remote/protocol'
 // set, so it reads nothing from it as it loads.
 
 export interface WebHost {
+  /** The host's key as this browser paired with it, the same at every address that reaches it. */
+  id: string
   name: string
   /** As the last welcome said; null before the first one. */
   platform: Platform | null
@@ -47,6 +49,8 @@ interface WebHostStore {
   actions: WebHostActions | null
   /** The hosted client's other hosts of the account; empty in the served page. */
   others: OtherWebHost[]
+  /** How many of the hosted client's hosts belong to another account, folded away. */
+  otherAccount: number
 }
 
 export const useWebHostStore = create<WebHostStore>()(() => ({
@@ -54,4 +58,5 @@ export const useWebHostStore = create<WebHostStore>()(() => ({
   info: null,
   actions: null,
   others: [],
+  otherAccount: 0,
 }))
