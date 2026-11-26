@@ -191,6 +191,26 @@ describe('agent removal on disk', () => {
     ])
   })
 
+  it("takes Kite's own installs away at once, never to the trash, and the rest to it", async () => {
+    const { home, facts } = await claudeHome()
+    const prepared = await prepareRemoval(facts, { secrets: memorySecrets([]), log: () => {} })
+    const kite = path.join(home, '.huli', 'harnesses', 'claude-code')
+    const trashed: string[] = []
+    const discarded: string[] = []
+    const result = await runRemoval(prepared, ids(prepared.preview.program.steps), {
+      secrets: memorySecrets([]),
+      trash: async (paths) => void trashed.push(...paths),
+      discard: async (folder) => void discarded.push(folder),
+      run: async () => ({ error: null, output: '' }),
+      progress: () => {},
+      log: () => {},
+    })
+    expect(result.failed).toEqual([])
+    expect(discarded).toEqual([kite])
+    expect(trashed).not.toContain(kite)
+    expect(trashed.length).toBeGreaterThan(0)
+  })
+
   it('reports each failure with its step and goes on with the rest', async () => {
     const { home, facts } = await claudeHome()
     const prefix = path.join(home, 'npm prefix')

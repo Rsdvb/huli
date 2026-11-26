@@ -26,7 +26,8 @@ export interface ResolveContext {
   files: RemovalFiles
   secrets: SecretStore
   guard(part: RemovalPart): RemovalGuard
-  size?(target: string): Promise<number>
+  /** Null for a folder too big to count in time. */
+  size?(target: string): Promise<number | null>
   log(message: string): void
 }
 
@@ -100,8 +101,13 @@ export async function resolveSteps(
         }
         const names = await goingNames(item, ctx)
         if (names.length === 0) continue
-        bytes = 0
-        for (const name of names) bytes += await size(p.join(item.path, name))
+        let sum: number | null = 0
+        for (const name of names) {
+          const one = await size(p.join(item.path, name))
+          sum = sum === null || one === null ? null : sum + one
+          if (sum === null) break
+        }
+        bytes = sum
         break
       }
     }

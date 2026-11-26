@@ -1358,7 +1358,7 @@
       "trashWindows": "Move to the Recycle Bin instead of deleting",
       "trashMac": "Move to the Trash instead of deleting",
       "trashLinux": "Move to the trash instead of deleting",
-      "trashHint": "What an uninstall command removes, and sign-ins in the system’s credential store, are deleted outright.",
+      "trashHint": "What an uninstall command removes, the packages Kettu installed for it, and sign-ins in the system’s credential store are deleted outright.",
       "sessionsStay": "Its sessions stay in Kettu, where you can still read them; delete them in the session list if you like.",
       "total": "{{size}} in all",
       "confirmProgram": "Uninstall and remove",
@@ -2996,7 +2996,8 @@
       "title": "Uninstall {{name}}?",
       "body": "Kettu deletes its installed package for {{name}} and removes the agents you added here. Any turn still running stops; their sessions stay and can still be read. Your own program, its sign-in and configuration folders are not touched.",
       "program": "Also uninstall the program with this command",
-      "installAgain": "Install it again to use it; its configuration and sessions were kept."
+      "installAgain": "Install it again to use it; its configuration and sessions were kept.",
+      "working": "Uninstalling…"
     }
   },
   "memory": {

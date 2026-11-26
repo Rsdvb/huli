@@ -92,7 +92,10 @@ function RemoveDialog({ status, onClose }: { status: AgentStatus; onClose: () =>
     ...(dataOn && preview ? preview.data.steps : []),
   ]
   const total = chosen.reduce((sum, step) => sum + (step.bytes ?? 0), 0)
-  const moves = chosen.some((step) => step.kind !== 'command' && step.kind !== 'secret')
+  // Huli: Kite's own installs go at once, never to the trash.
+  const moves = chosen.some(
+    (step) => step.kind !== 'command' && step.kind !== 'secret' && step.kite !== true,
+  )
   const busy = (preview?.busy.length ?? 0) > 0 && chosen.length > 0
   const running = phase.kind === 'running'
 
