@@ -326,8 +326,51 @@ export interface FromSession {
    * the turn ended, null for a failure. The thread draws it from these, not from the message text.
    */
   ended?: { agent: string; stopReason: StopReason | null }
+  /**
+   * Huli: set on a report of several sessions' turns, which ended while the receiver was busy and
+   * wait as one: each of them, oldest first. The first is also the one the fields above name.
+   */
+  reports?: ReportedTurn[]
   /** Huli: set on manager mode's report to a manager: each worker it reports on. */
   digest?: DigestItem[]
+}
+
+/** Huli: a turn the receiver asked another session for, as Kettu's report of its end tells it. */
+export interface ReportedTurn {
+  sessionId: string
+  title: string
+  agent: string
+  stopReason: StopReason | null
+}
+
+/** Huli: the most turns one report tells of, as many as reports go between the user's messages. */
+export const REPORTED_TURNS_MAX = 10
+
+const STOP_REASONS: readonly (StopReason | null)[] = [
+  'end_turn',
+  'max_tokens',
+  'max_turn_requests',
+  'refusal',
+  'cancelled',
+  null,
+]
+
+export function isReportedTurn(value: unknown): value is ReportedTurn {
+  if (typeof value !== 'object' || value === null) return false
+  const { sessionId, title, agent, stopReason } = value as Record<string, unknown>
+  return (
+    typeof sessionId === 'string' &&
+    typeof title === 'string' &&
+    typeof agent === 'string' &&
+    STOP_REASONS.includes(stopReason as StopReason | null)
+  )
+}
+
+/** Huli: the turns a report tells of, oldest first; none for a message that is no report. */
+export function reportedTurns(from: FromSession | undefined): ReportedTurn[] {
+  if (!from?.ended) return []
+  if (from.reports && from.reports.length > 0) return from.reports
+  return [{ sessionId: from.sessionId, title: from.title, ...from.ended }]
 }
 
 /** The paired device a message or answer came from, under the name the host lists it by. */

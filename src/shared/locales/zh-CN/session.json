@@ -601,11 +601,28 @@
     "text": "<b>{{plugin}}</b> 拒绝了 <b>{{request}}</b>：{{reason}}"
   },
   "sessionReport": {
-    "agent": "该会话",
-    "finished": "{{agent}} 做完了",
-    "stopped": "{{agent}} 被停止了",
-    "failed": "{{agent}} 出错了",
-    "failedWith": "{{agent}} 出错了 · {{reason}}"
+    "line": {
+      "finished": "「<title>{{title}}</title>」的回合已结束",
+      "stopped": "「<title>{{title}}</title>」的回合已停止",
+      "failed": "「<title>{{title}}</title>」的回合失败了",
+      "limit": "「<title>{{title}}</title>」的回合到了上限",
+      "refusal": "「<title>{{title}}</title>」的回合被模型拒绝"
+    },
+    "state": {
+      "finished": "已结束",
+      "stopped": "已停止",
+      "failed": "失败了",
+      "limit": "到了上限",
+      "refusal": "被模型拒绝"
+    },
+    "many_other": "{{count}} 个会话的回合结束了",
+    "manyTitles_other": "{{count}} 个会话的回合结束了：{{titles}}",
+    "separator": "、",
+    "told": "已告诉 Agent",
+    "tag": "回报",
+    "tellNow": "现在就告诉它",
+    "tellNowSteer": "插入正在进行的回合",
+    "tellNowStop": "停止本轮，接着告诉它"
   },
   "sessionStarted": {
     "label": "已启动 <title>{{title}}</title>",

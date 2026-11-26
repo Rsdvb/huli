@@ -613,11 +613,28 @@
     "text": "<b>{{plugin}}</b> denied <b>{{request}}</b>: {{reason}}"
   },
   "sessionReport": {
-    "agent": "The session",
-    "finished": "{{agent}} finished",
-    "stopped": "{{agent}} was stopped",
-    "failed": "{{agent}} failed",
-    "failedWith": "{{agent}} failed · {{reason}}"
+    "line": {
+      "finished": "<title>{{title}}</title> finished its turn",
+      "stopped": "<title>{{title}}</title> was stopped",
+      "failed": "<title>{{title}}</title> failed",
+      "limit": "<title>{{title}}</title> stopped at a limit",
+      "refusal": "<title>{{title}}</title> was refused by the model"
+    },
+    "state": {
+      "finished": "Finished",
+      "stopped": "Stopped",
+      "failed": "Failed",
+      "limit": "Stopped at a limit",
+      "refusal": "Refused"
+    },
+    "many_other": "{{count}} sessions ended their turns",
+    "manyTitles_other": "{{count}} sessions ended their turns: {{titles}}",
+    "separator": ", ",
+    "told": "Told the agent",
+    "tag": "Report",
+    "tellNow": "Tell it now",
+    "tellNowSteer": "Into the turn that is running",
+    "tellNowStop": "Stop this turn, then tell it"
   },
   "sessionStarted": {
     "label": "Started <title>{{title}}</title>",

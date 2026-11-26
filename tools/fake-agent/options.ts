@@ -56,6 +56,8 @@ export const SCENARIOS = [
   'manager-demo',
   'work',
   'review',
+  // Huli: sessions started through Kite's tools, whose reports reach a long turn.
+  'delegate',
 ] as const
 
 export type ScenarioName = (typeof SCENARIOS)[number]
@@ -71,6 +73,10 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   },
   review: {
     description: 'A reviewer: asks for changes in round 1, approves from FAKE_AGENT_APPROVE_ON',
+  },
+  delegate: {
+    description: 'Starts sessions through Kite, then works on while their reports come in',
+    hint: '--count <1-3> --ask',
   },
   'basic-turn': {
     description: 'A short answer with markdown, then reads, an edit, a new file and a test run',

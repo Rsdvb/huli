@@ -677,9 +677,15 @@ export interface AgentConnection {
   collect(sessionId: string, text: string): Promise<string[]>
   /**
    * Sends a message into the running turn. An agent with no turn running answers
-   * `promptRequired` instead of starting one, and the message stays Kettu's.
+   * `promptRequired` instead of starting one, and the message stays Kettu's. Huli: `notice`
+   * marks news the agent should read without stopping the work in progress, such as a report that
+   * a session it started ended its turn, where the agent tells the two apart.
    */
-  steer(sessionId: string, prompt: readonly PromptBlock[]): Promise<'injected' | 'promptRequired'>
+  steer(
+    sessionId: string,
+    prompt: readonly PromptBlock[],
+    options?: { notice?: true },
+  ): Promise<'injected' | 'promptRequired'>
   cancel(sessionId: string): Promise<void>
   /** Stops one of the session's background tasks. Absent where the agent reports none. */
   stopTask?(sessionId: string, taskId: string): Promise<void>

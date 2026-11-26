@@ -19,7 +19,7 @@ interface CallResult {
 type Call = (name: string, args: Record<string, unknown>) => Promise<CallResult>
 
 /** A client of Kite's MCP server, whose calls show in the thread as the agent's tool calls. */
-async function tools(turn: Turn): Promise<Call | null> {
+export async function kiteTools(turn: Turn): Promise<Call | null> {
   const server = kettu(turn.session.mcpServers as McpServer[])
   if (!server) return null
   const [{ Client }, { StreamableHTTPClientTransport }] = await Promise.all([
@@ -117,7 +117,7 @@ const failed = new Set<string>()
 /** `fake:/manager-demo`: dispatches a writer that asks first, an odd job that fails once and a planner. */
 export const managerDemo: Scenario = async (turn) => {
   const { text, blocks } = promptOf(turn)
-  const call = await tools(turn)
+  const call = await kiteTools(turn)
   if (!call) {
     await say(turn, 'This session has no Kite tools.')
     return 'end_turn'
@@ -185,7 +185,7 @@ export const managerDemo: Scenario = async (turn) => {
 /** `/work [--ask] [--secret] [--fail-once] [--file <path>] [--read]`: a task, reported with report_work. */
 export const work: Scenario = async (turn) => {
   const { text } = promptOf(turn)
-  const call = await tools(turn)
+  const call = await kiteTools(turn)
   if (flag(text, 'fail-once') !== null && !failed.has(turn.session.id)) {
     failed.add(turn.session.id)
     await say(turn, '开始做……')
@@ -261,7 +261,7 @@ export const work: Scenario = async (turn) => {
 /** A review prompt from Kite: changes in round 1, approve after, with report_work. */
 export const review: Scenario = async (turn) => {
   const { text } = promptOf(turn)
-  const call = await tools(turn)
+  const call = await kiteTools(turn)
   const round = Number(
     /第 (\d+)\/\d+ 轮/.exec(text)?.[1] ?? /round (\d+) of/.exec(text)?.[1] ?? '1',
   )

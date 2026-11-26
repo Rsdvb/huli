@@ -1913,7 +1913,11 @@ export class ClaudeConnection implements AgentConnection {
     }
   }
 
-  private send(session: Session, blocks: readonly PromptBlock[], priority?: 'now'): string {
+  private send(
+    session: Session,
+    blocks: readonly PromptBlock[],
+    priority?: 'now' | 'next',
+  ): string {
     const content = promptContent(blocks)
     this.context.hooks.traffic('out', {
       method: priority ? 'steer' : 'prompt',
@@ -2035,10 +2039,14 @@ export class ClaudeConnection implements AgentConnection {
   async steer(
     sessionId: string,
     prompt: readonly PromptBlock[],
+    options?: { notice?: true },
   ): Promise<'injected' | 'promptRequired'> {
     const session = this.sessions.get(sessionId)
     if (!session?.turn || !session.input) return 'promptRequired'
-    this.send(session, prompt, 'now')
+    // Huli: 'now' stops the part of the turn that runs to read the message, as the user's own
+    // steering should; a notice goes at 'next', between the turn's steps, as Claude Code sends
+    // its own news of a background task that ended.
+    this.send(session, prompt, options?.notice ? 'next' : 'now')
     return 'injected'
   }
 

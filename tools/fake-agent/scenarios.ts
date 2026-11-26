@@ -48,6 +48,7 @@ import { computer } from './computer.ts'
 import { documents } from './documents.ts'
 import { write } from './write.ts'
 import { managerDemo, review, work } from './manager.ts'
+import { delegate } from './delegate.ts'
 import { processes } from './processes.ts'
 import type { ScenarioName } from './options.ts'
 import type { Scenario, Turn } from './turn.ts'
@@ -1823,6 +1824,7 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   'manager-demo': managerDemo,
   work,
   review,
+  delegate,
 }
 
 export const compact: Scenario = async (turn) => {

@@ -17,6 +17,7 @@ import {
   isAgentId,
   type AgentId,
   type FromSession,
+  type ReportedTurn,
   type SessionStatus,
   type StopReason,
 } from '@shared/thread'
@@ -1557,6 +1558,22 @@ export function reportText(
     `Kettu: the turn you asked the ${agent} session ${sessionId} for ${how}. ` +
     'Read its reply with get_session.'
   )
+}
+
+/** Huli: what a session is told of several such turns at once, one line each. */
+export function reportsText(turns: readonly ReportedTurn[]): string {
+  return turns.map((turn) => reportText(turn.agent, turn.sessionId, turn.stopReason)).join('\n')
+}
+
+/** Huli: whose a report of these turns is, oldest first, for the thread and the queue to draw. */
+export function reportOrigin(turns: readonly ReportedTurn[]): FromSession {
+  const first = turns[0]!
+  return {
+    sessionId: first.sessionId,
+    title: first.title,
+    ended: { agent: first.agent, stopReason: first.stopReason },
+    ...(turns.length > 1 ? { reports: [...turns] } : {}),
+  }
 }
 
 /** The latest reply cut to 8 KB at a line, so one long answer cannot fill a tool result. */

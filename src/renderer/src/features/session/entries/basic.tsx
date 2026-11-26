@@ -93,7 +93,7 @@ export const UserEntry = memo(function UserEntry({
   const runNotice = only?.type === 'text' ? parseReplyRunNotice(only.text) : null
   // Kettu's report of a turn another session ended is an event, not a message.
   if (entry.from?.ended) {
-    return <ReportLine from={entry.from} ended={entry.from.ended} end={end} className={animation} />
+    return <ReportLine from={entry.from} end={end} className={animation} />
   }
   // Huli: so is manager mode's report on its workers.
   if (entry.from?.digest) {

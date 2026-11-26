@@ -162,6 +162,7 @@ const SCENARIO_TITLES: Partial<Record<ScenarioName | 'compact', string>> = {
   subagent: 'Explore with a subagent',
   plan: 'Follow a plan',
   thinking: 'Think it through',
+  delegate: 'Finish the paper',
 }
 
 export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {

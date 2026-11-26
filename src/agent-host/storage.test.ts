@@ -611,6 +611,43 @@ describe('the host files', () => {
     ).toEqual({ version: 1, sessions: [{ ...session, queue: [{ ...item, from }] }] })
   })
 
+  it('keeps how the turns a queued report tells of ended, so it is never shown as its text', () => {
+    const item = { id: 'q1', content: [{ type: 'text' as const, text: 'Kettu: ...' }], at: 1 }
+    const first = {
+      sessionId: 's-a',
+      title: 'Review',
+      agent: 'Codex',
+      stopReason: 'end_turn' as const,
+    }
+    const second = { sessionId: 's-b', title: 'Docs', agent: 'Claude Code', stopReason: null }
+    const one = {
+      sessionId: 's-a',
+      title: 'Review',
+      ended: { agent: 'Codex', stopReason: 'end_turn' as const },
+    }
+    const queued: SessionRecord = {
+      ...session,
+      queue: [
+        { ...item, from: one },
+        { ...item, id: 'q2', from: { ...one, reports: [first, second] } },
+      ],
+    }
+    expect(parseSessionsFile({ sessions: [queued] })).toEqual({ version: 1, sessions: [queued] })
+    // What does not read is dropped: an unknown end, and turns that do not read.
+    const bad = {
+      ...item,
+      from: {
+        ...one,
+        ended: { agent: 'Codex', stopReason: 'exploded' },
+        reports: [first, { ...second, stopReason: 'exploded' }],
+      },
+    }
+    expect(parseSessionsFile({ sessions: [{ ...session, queue: [bad] }] })).toEqual({
+      version: 1,
+      sessions: [{ ...session, queue: [{ ...item, from: { sessionId: 's-a', title: 'Review' } }] }],
+    })
+  })
+
   it("keeps a queued message's comment summary, dropping one that does not read", () => {
     const item = { id: 'q1', content: [{ type: 'text' as const, text: '> a\n\nb' }], at: 1 }
     const queued: SessionRecord = {

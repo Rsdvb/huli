@@ -1731,6 +1731,24 @@ describe('a turn', () => {
     await expect(turn).resolves.toMatchObject({ stopReason: 'end_turn' })
   })
 
+  it('steers a notice in between the turn’s steps, stopping nothing', async () => {
+    let query!: FakeQuery
+    s.sdk.script = (q) => {
+      query = q
+      if (q.inputs.length === 1) q.running()
+    }
+    const turn = s.connection.prompt(sessionId, [{ type: 'text', text: 'start' }])
+    await settle()
+    const report = [{ type: 'text' as const, text: 'Kettu: the turn you asked for has ended.' }]
+    expect(await s.connection.steer(sessionId, report, { notice: true })).toBe('injected')
+    await settle()
+    // As Claude Code queues its own news of a background task that ended; 'now' would stop the
+    // part of the turn that runs.
+    expect(query.inputs[1]).toMatchObject({ priority: 'next', message: { content: report } })
+    query.finish()
+    await expect(turn).resolves.toMatchObject({ stopReason: 'end_turn' })
+  })
+
   it('interrupts a turn that is stopped, which ends cancelled', async () => {
     s.sdk.script = (query) => query.running()
     s.sdk.onInterrupt = (query) => query.finish({ terminal_reason: 'aborted_streaming' })

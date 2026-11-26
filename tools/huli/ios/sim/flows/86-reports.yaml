@@ -1,0 +1,42 @@
+# Huli: Kite's reports that a session an agent started ended its turn. The fake agent starts two
+# sessions, then waits on an approval, so their reports wait in the queue as one 回报 row; allowed,
+# the turn goes on and takes them, and they show as a notice line, never as the user's message.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/delegate --count 2 --ask'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+# The keyboard goes first, as in 40-cards: with it up, the queue stays folded.
+- swipe:
+    start: 50%, 30%
+    end: 50%, 92%
+    duration: 500
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible: '允许一次'
+    timeout: 120000
+- extendedWaitUntil:
+    visible:
+      text: '.*2 个会话的回合结束了.*'
+    timeout: 60000
+- takeScreenshot: rp01-queued
+- tapOn: '允许一次'
+- extendedWaitUntil:
+    visible:
+      text: '.*已告诉 Agent.*'
+    timeout: 30000
+- takeScreenshot: rp02-notice
