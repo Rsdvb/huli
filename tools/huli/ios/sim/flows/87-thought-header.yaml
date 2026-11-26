@@ -1,5 +1,5 @@
 # A long thought opened and left open: 思考 and its time alone in its header, its text cut to the
-# clamp with 显示全部 under it, and the app still there three and a half minutes later. The fake
+# clamp with 显示全部 under it all along, and the app still there three and a half minutes later. The fake
 # agent's /thinking sends one thought, a single long paragraph, then its answer; when the thought
 # sits in a folded run, the first tap opens the run. The clamp used to measure that paragraph as
 # short as itself, let it go, measure it whole and cut it again on every frame, which held the JS
@@ -47,34 +47,20 @@ appId: io.github.rsdvb.huli
     text: '思考 The user wants to know why.*'
 - assertVisible:
     text: '思考'
-# Left open for three and a half minutes, looked at every 50 s or so.
-- extendedWaitUntil:
-    visible: 'PAUSE_NEVER'
-    timeout: 50000
-    optional: true
-- assertVisible: '显示全部'
-- takeScreenshot: t03-open-1m
-- extendedWaitUntil:
-    visible: 'PAUSE_NEVER'
-    timeout: 50000
-    optional: true
-- assertVisible: '显示全部'
-- extendedWaitUntil:
-    visible: 'PAUSE_NEVER'
-    timeout: 50000
-    optional: true
-- assertVisible: '显示全部'
-- takeScreenshot: t04-open-2m
-- extendedWaitUntil:
-    visible: 'PAUSE_NEVER'
-    timeout: 50000
-    optional: true
-- assertVisible: '显示全部'
-- extendedWaitUntil:
-    visible: 'PAUSE_NEVER'
-    timeout: 20000
-    optional: true
-- assertVisible: '显示全部'
+# Left open for three and a half minutes by the clock, looked at every few seconds. A wait for
+# something that never shows ends early on a screen that holds still, as this one now does, so the
+# clock decides when it is over.
+- evalScript: ${output.openedAt = Date.now()}
+- repeat:
+    times: 400
+    while:
+      true: ${Date.now() - output.openedAt < 210000}
+    commands:
+      - extendedWaitUntil:
+          visible: 'PAUSE_NEVER'
+          timeout: 5000
+          optional: true
+      - assertVisible: '显示全部'
 - assertVisible:
     text: '思考'
 - takeScreenshot: t05-open-3m
