@@ -150,7 +150,9 @@ function ReportedRow({ turn }: { turn: ReportedTurn }) {
     <li className="flex min-h-6 min-w-0 items-center gap-2 text-ui text-muted-foreground">
       <ReportIcon state={state} />
       <span className="min-w-0 truncate">
-        <SessionLink sender={sender}>{sender?.title ?? turn.title}</SessionLink>
+        <SessionLink sender={sender} arrow>
+          {sender?.title ?? turn.title}
+        </SessionLink>
       </span>
       <span className="shrink-0">{t(`sessionReport.state.${state}`)}</span>
     </li>
@@ -182,12 +184,17 @@ function ReportIcon({ state }: { state: ReportState }) {
   )
 }
 
-/** A reported session's title, which opens it while Kettu still holds it. */
+/**
+ * A reported session's title, which opens it while Kettu still holds it; quoted in a sentence, it
+ * goes without the arrow.
+ */
 function SessionLink({
   sender,
+  arrow = false,
   children,
 }: {
   sender: ReturnType<typeof useSender>
+  arrow?: boolean
   children?: ReactNode
 }) {
   if (!sender) return <span className="font-medium">{children}</span>
@@ -198,12 +205,14 @@ function SessionLink({
       onClick={() => openSession(sender.id, sender.projectPath)}
     >
       {children}
-      <HugeiconsIcon
-        icon={ArrowUpRight01Icon}
-        strokeWidth={1.9}
-        aria-hidden
-        className="ml-0.5 inline-block size-3 align-middle text-muted-foreground"
-      />
+      {arrow && (
+        <HugeiconsIcon
+          icon={ArrowUpRight01Icon}
+          strokeWidth={1.9}
+          aria-hidden
+          className="ml-0.5 inline-block size-3 align-middle text-muted-foreground"
+        />
+      )}
     </button>
   )
 }
