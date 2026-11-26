@@ -6,7 +6,7 @@
 // with its add menu, the session's mode and model menus, and the computer's status under it, whose
 // rings open the plan's usage and what fills the context.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -27,6 +27,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Stack, router, useLocalSearchParams } from 'expo-router'
 import type { AgentStatus, SessionSummary } from '@shared/agent-host'
+import { requestQueue, waitsBehind } from '@shared/permission-queue'
 import { limitsForModel } from '@shared/plan-limits'
 import { fallbackAgent, planQuota } from '@shared/plan-quota'
 import {
@@ -77,6 +78,7 @@ import {
 import { ContextSheet } from '../../components/ContextSheet'
 import { Conversation } from '../../components/Conversation'
 import { RecapBar, type RecapShown } from '../../components/RecapLine'
+import { RequestQueue } from '../../components/entries/RequestQueue'
 import {
   PLAN_PILL_ROOM,
   PlanApprovalCard,
@@ -218,6 +220,11 @@ const foldsKept = (entry: ThreadEntry): boolean => {
   let known = folds.get(entry)
   if (known === undefined) folds.set(entry, (known = foldsIntoRun(entry)))
   return known
+}
+
+/** The requests read from the computer whose entries the thread does not hold. */
+function notInThread(thread: ThreadState | null, requests: readonly ThreadEntry[]): ThreadEntry[] {
+  return thread ? requests.filter((entry) => !(entry.id in thread.byId)) : [...requests]
 }
 
 /** The thread's own cards that wait for the user, as rows of their own, oldest first. */
@@ -444,16 +451,30 @@ function Session() {
   const planRunning = ownTurn && running
   const pinned = pinnedPlan(plan, planRunning)
 
-  // What waits: the thread's own cards, and those on pages not read yet, oldest first.
+  // What waits: the thread's own cards, and those on pages not read yet, oldest first. An entry
+  // the thread holds is as the thread has it, so a request settled since the last read loses its
+  // buttons at once rather than once the next read comes back.
   const waits = useThreadSelector(view, threadWaits, sameItems)
+  const unread = useThreadSelector(
+    view,
+    useCallback(
+      (thread: ThreadState | null) => notInThread(thread, view.requests),
+      [view.requests],
+    ),
+    sameItems,
+  )
   const requests = useMemo(() => {
     const seen = new Map<string, ThreadEntry>()
-    for (const entry of view.requests) if (waitsForUser(entry)) seen.set(entry.id, entry)
+    for (const entry of unread) if (waitsForUser(entry)) seen.set(entry.id, entry)
     for (const entry of waits) seen.set(entry.id, entry)
     return [...seen.values()]
-  }, [view.requests, waits])
+  }, [unread, waits])
   const plansWaiting = requests.filter(isPlanAsk)
   const othersWaiting = plansWaiting.length > 0 ? requests.filter((e) => !isPlanAsk(e)) : requests
+  // Huli: the requests the agent waits on, answered in turn: the oldest as its card, the others
+  // collapsed under it.
+  const asked = useMemo(() => requestQueue(othersWaiting), [othersWaiting])
+  const askedKey = asked.map((entry) => entry.id).join(' ')
   const credit = useThreadSelector(view, outOfCreditOf)
   const retryNotice = useThreadSelector(view, retryNoticeOf)
   const cutNotice = useThreadSelector(view, cutNoticeOf)
@@ -1350,9 +1371,16 @@ function Session() {
                 <WorktreeLine sessionId={id} worktree={summary.worktree} />
               ) : null}
               <HandBackCard sessionId={id} session={session} />
-              {othersWaiting.map((entry) => (
-                <WaitingCard key={entry.id} entry={entry} sessionId={id} link={link} />
-              ))}
+              {othersWaiting.map((entry) =>
+                waitsBehind(asked, entry.id) ? null : (
+                  <Fragment key={entry.id}>
+                    <WaitingCard entry={entry} sessionId={id} link={link} />
+                    {asked.length > 1 && asked[0]!.id === entry.id ? (
+                      <RequestQueue key={askedKey} queue={asked} sessionId={id} link={link} />
+                    ) : null}
+                  </Fragment>
+                ),
+              )}
               {credit && (
                 <OutOfCreditStrip
                   sessionId={id}
