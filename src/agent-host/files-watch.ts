@@ -210,6 +210,15 @@ class FolderWatch {
     return segments.length === 0 || this.shows(segments.slice(0, -1))
   }
 
+  /** Whether the entry at `relative` is a folder the last list knew, or one the tree never opens. */
+  private isFolder(relative: string): boolean {
+    const segments = relative.split(/[\\/]/).filter((s) => s !== '' && s !== '.')
+    const name = segments.at(-1)
+    if (name === '.git' || name === 'node_modules') return true
+    const normal = segments.join('/')
+    return this.ignored.has(normal) || this.listedFolders?.has(normal) === true
+  }
+
   /** Whether the tree shows what is directly in the folder of these segments. */
   private shows(folder: string[]): boolean {
     if (folder.includes('.git')) return false
@@ -257,10 +266,14 @@ class FolderWatch {
 
   private add(folder: string, recursive: boolean): void {
     const at = folder === '' ? this.options.root : path.join(this.options.root, folder)
-    const watcher = this.options.watch(at, { recursive, persistent: false }, (_event, name) => {
+    const watcher = this.options.watch(at, { recursive, persistent: false }, (event, name) => {
       const entry = name === null ? null : name.toString()
       if (entry === null || entry === '') return this.trigger()
-      if (this.counts(folder === '' ? entry : `${folder}/${entry}`)) this.trigger()
+      const relative = folder === '' ? entry : `${folder}/${entry}`
+      // Huli: Windows tells of a folder's change when something in it changes, which it tells of
+      // on its own; the folder's own row stays as it was.
+      if (event === 'change' && this.isFolder(relative)) return
+      if (this.counts(relative)) this.trigger()
     })
     watcher.on('error', (error: Error) => {
       watcher.close()
