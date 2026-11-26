@@ -2372,6 +2372,23 @@ wherever they are; an agent still cannot read a session the user never reference
 `@` list does the same, its box showing `@<title>`, and sent messages show the chip or a tile that
 opens the session.
 
+### Reports of started sessions (回报直接插入当前回合)
+
+Upstream queues Kettu's report that a session an agent started ended its turn behind the caller's
+running turn, as an English user message. Kite (`deliverReport` in `src/agent-host/sessions.ts`)
+steers it into that turn where the agent steers, as a notice: `steer(..., { notice: true })`, which
+Claude Code sends at priority `next`, folded in between the turn's steps as its own news of an ended
+background task is, while the user's own steering stays `now`, which stops the part that runs. A
+turn held on a blocking question or approval keeps it queued and takes it once answered
+(`stopWaiting`), or once a turn's prompt reached the agent; a report never skips a question
+(`skipQuestions` is the user's steering alone). A report the turn cannot take stays where it waits,
+and reports waiting together are one item, `from.reports` listing each turn (`queueReport`,
+`archiveStarted` takes one session's turn out of it). The stored queue keeps `from.ended` and
+`from.reports`. The thread shows a report as 「标题」的回合已结束 · 已告诉 Agent (desktop
+`ReportLine` in `entries/session-origin.tsx`, phone `ReportLine` in `entries/NoteEntries.tsx`), the
+queue as a 回报 row with 现在就告诉它 and 移除 only. The fake agent's `/delegate --count <1-3> --ask`
+starts sessions and reads on; simulator flow `86-reports`.
+
 ### Concise thread (简洁视图)
 
 A session's More menu › 工具调用 (kept on this device) and Settings › 通用 › 对话 (the default,
