@@ -27,7 +27,7 @@ import { useReducedMotion } from '../../ui/motion'
 import { SegmentedControl } from '../../ui/SegmentedControl'
 import { useSteps } from '../../ui/steps'
 import type { MenuPage, ViewHandle } from '../../ui/session/Popover'
-import { Clamp } from '../../ui/session/Clamp'
+import { Clamp, clipTo } from '../../ui/session/Clamp'
 import { useSessionRows } from '../../ui/session/context'
 import { copyText, haptic } from '../../ui/session/feedback'
 import { G, Icon } from '../../ui/session/icons'
@@ -156,7 +156,7 @@ function PlanBody(props: { id: string; markdown: string; clamp?: boolean; peek?:
       </Pressable>
       {props.peek ? (
         <>
-          <View style={{ maxHeight: PLAN_PEEK, overflow: 'hidden' }}>
+          <View style={clipTo(PLAN_PEEK)}>
             <View onLayout={(event) => setHeight(event.nativeEvent.layout.height)}>{body}</View>
           </View>
           {height > PLAN_PEEK && (

@@ -2,7 +2,14 @@
 // tool's result shows its first part, with 展开 under it, and 收起 once open.
 
 import { useState, type ReactNode } from 'react'
-import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native'
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+  type ViewStyle,
+} from 'react-native'
 import { useDisclosure } from './disclosure'
 import { useSessionTokens } from './palette'
 
@@ -18,6 +25,17 @@ const CLAMPED_CHARS = 4000
  */
 const heights = new Map<string, number>()
 const HEIGHTS_KEPT = 2000
+
+/**
+ * A box that shows at most `maxHeight` of what it holds, which is still laid out, and measured, at
+ * its whole height. Yoga lays a non-scrolling box's content out within the box's height, and a text
+ * measured within a height comes back cut to it: under `overflow: 'hidden'` a long paragraph
+ * measured as short as the clamp, so the clamp let it go, measured it whole, held it again, and so
+ * on every frame. A scrolling box's content is laid out unbounded; it clips all the same.
+ */
+export function clipTo(maxHeight: number): ViewStyle {
+  return { maxHeight, overflow: 'scroll' }
+}
 
 export function Clamp(props: {
   maxHeight: number
@@ -61,7 +79,7 @@ export function Clamp(props: {
   }
   return (
     <View>
-      <View style={held ? { maxHeight: props.maxHeight, overflow: 'hidden' } : null}>
+      <View style={held ? clipTo(props.maxHeight) : null}>
         <View onLayout={onLayout}>{props.children}</View>
       </View>
       {cut && (
