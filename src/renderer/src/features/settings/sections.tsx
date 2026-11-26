@@ -21,6 +21,7 @@ import { originLabel } from '@shared/browser'
 import { binKey } from '@shared/recycle-bin'
 import { LOCALES, LOCALE_NAMES, type LanguageSetting } from '@shared/locale'
 import { isPortBase, PORT_BASE_MAX, PORT_BASE_MIN } from '@shared/worktree-ports'
+import { DEFAULT_IDLE_TERMINAL_MINUTES, IDLE_TERMINAL_MINUTES } from '@shared/terminal-idle'
 import {
   DEFAULT_WEBHOOK_PORT,
   isWebhookPort,
@@ -769,6 +770,33 @@ export function ShellPicker() {
           {t('terminal.shell.reset')}
         </SetButton>
       )}
+    </>
+  )
+}
+
+/** Huli: when the host closes an agent's terminal that sits idle. */
+export function IdleAgentTerminals({ label }: { label: string }) {
+  const { t } = useTranslation('settings')
+  const minutes = useSettings().terminal.idleAgentMinutes ?? DEFAULT_IDLE_TERMINAL_MINUTES
+  const [apply, error] = useApply()
+  return (
+    <>
+      <ControlError error={error} />
+      <SettingSelect
+        label={label}
+        value={String(minutes)}
+        options={IDLE_TERMINAL_MINUTES.map((each) => ({
+          value: String(each),
+          label:
+            each === 0
+              ? t('terminal.idleAgent.off')
+              : t('terminal.idleAgent.after', { count: each }),
+        }))}
+        onChange={(next) => {
+          const chosen = IDLE_TERMINAL_MINUTES.find((each) => String(each) === next)
+          if (chosen !== undefined) apply({ terminal: { idleAgentMinutes: chosen } })
+        }}
+      />
     </>
   )
 }

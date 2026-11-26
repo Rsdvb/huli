@@ -163,7 +163,10 @@
     "filter": "Filter {{count}} tabs",
     "noMatch": "No tab matches",
     "closeExited_one": "Close {{count}} exited terminal",
-    "closeExited_other": "Close {{count}} exited terminals"
+    "closeExited_other": "Close {{count}} exited terminals",
+    "closeIdle_one": "Close {{count}} idle agent terminal",
+    "closeIdle_other": "Close {{count}} idle agent terminals",
+    "idleFor": "Idle for {{time}}"
   },
   "turnNotice": {
     "open": "Open",

@@ -22,6 +22,7 @@ import {
   ArrowShrink01Icon,
   Cancel01Icon,
   CancelCircleIcon,
+  Clock01Icon,
   GitCompareIcon,
   Layout2ColumnIcon,
   MessageAdd01Icon,
@@ -37,6 +38,7 @@ import {
 import { Trans, useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { SurfaceControl } from '@shared/control'
+import type { TerminalActivity } from '@shared/terminal-host'
 import type { AgentId } from '@shared/thread'
 import { SESSION_DEVICE_LIMIT, type DeviceInfo } from '@shared/device-host'
 import { useEntry } from '@renderer/lib/features'
@@ -87,6 +89,7 @@ import { useSessionView } from '@renderer/features/session/use-thread'
 import { runSessionMenuAccelerator } from '@renderer/features/sidebar/session-menu-model'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { hasBand, isMac, isWeb } from '@renderer/lib/platform'
+import { runningFor } from '@renderer/lib/format'
 import { cn } from '@renderer/lib/utils'
 import { agentName } from '@renderer/stores/agents'
 import { useArtifactsStore } from '@renderer/stores/artifacts'
@@ -113,11 +116,13 @@ import {
   type TabKind,
 } from '@renderer/stores/surface-tabs'
 import {
+  closeIdleTerminals,
   createTerminal,
   forgetTerminal,
   killTerminal,
   renameTerminal,
   showTerminal,
+  terminalActivity,
   terminalsOf,
   toggleSplit,
   useTerminalsStore,
@@ -755,6 +760,16 @@ export function SurfaceTabs({
   const browserTabs = useBrowserStore((s) => (sessionId ? s.bySession[sessionId]?.tabs.length : 0))
   // Tabs whose close waits for the user's answer, the first one asked about.
   const [closing, setClosing] = useState<SurfaceItem[]>([])
+  // Huli: what the session's terminals do, read from their host as the count's list opens.
+  const [activity, setActivity] = useState<Activity | null>(null)
+  const readActivity = useCallback(() => {
+    if (!sessionId || !kinds.terminal) return
+    void terminalActivity(projectPath, sessionId).then((list) =>
+      setActivity(
+        list && { sessionId, at: Date.now(), byId: new Map(list.map((each) => [each.id, each])) },
+      ),
+    )
+  }, [sessionId, kinds.terminal, projectPath])
   const [starting, setStarting] = useState(false)
   const sheetRef = useRef<HTMLElement | null>(null)
   const signature = items
@@ -1076,8 +1091,13 @@ export function SurfaceTabs({
           <CountMenu
             items={items}
             exited={exited.length}
+            activity={activity?.sessionId === sessionId ? activity : null}
+            onOpen={readActivity}
             onSelect={(item) => selectSurface(panel, item)}
             onCloseExited={closeExited}
+            onCloseIdle={() => {
+              if (sessionId) void closeIdleTerminals(projectPath, sessionId)
+            }}
           />
         )}
         {!phone && (
@@ -1520,20 +1540,46 @@ const KIND_ORDER = ['terminal', 'browser', 'devices', 'panes'] as const
  * The count at the row's end while only icons fit: every tab by kind with what it is doing, the
  * shown one checked. A long list takes a filter, and terminals that ended close from its foot.
  */
+/** Huli: what a session's terminals do, as their host said at `at`. */
+interface Activity {
+  sessionId: string
+  at: number
+  byId: Map<string, TerminalActivity>
+}
+
 function CountMenu({
   items,
   exited,
+  activity,
+  onOpen,
   onSelect,
   onCloseExited,
+  onCloseIdle,
 }: {
   items: SurfaceItem[]
   /** How many terminals ended, which Close exited terminals closes. */
   exited: number
+  /** What the terminals do, read as the list opens; null until it is. */
+  activity: Activity | null
+  onOpen: () => void
   onSelect: (item: SurfaceItem) => void
   onCloseExited: () => void
+  onCloseIdle: () => void
 }) {
-  const { t } = useTranslation(['shell', 'browser'])
+  const { t } = useTranslation(['shell', 'browser', 'terminal'])
   const filtering = items.length > FILTER_FROM
+  // A terminal still running, or idle since when, as its host said when the list opened.
+  const stateOf = (item: SurfaceItem): string | null => {
+    const terminal = item.terminal
+    const now = terminal && activity?.byId.get(terminal.id)
+    if (!terminal || !now || terminal.stale || terminal.exitCode !== null) return null
+    // A shell whose foreground program runs says so in its detail already.
+    if (now.running) return terminal.busy ? null : t('terminal:tab.running')
+    return t('shell:surfaces.idleFor', { time: runningFor(activity!.at - now.quietSince) })
+  }
+  const idle = items.filter(
+    (item) => item.terminal && activity?.byId.get(item.terminal.id)?.idle === true,
+  ).length
   // The filter hides every item that does not match it, Close exited terminals too, so that item
   // and the line above it wait for an empty query.
   const [query, setQuery] = useState('')
@@ -1558,7 +1604,11 @@ function CountMenu({
                 {item.name}
                 {item.note && <span className="kp-stab__note"> {item.note}</span>}
               </span>
-              {item.detail && <span className="kp-tablist__note">{item.detail}</span>}
+              {(item.detail || stateOf(item)) && (
+                <span className="kp-tablist__note">
+                  {[item.detail, stateOf(item)].filter(Boolean).join(' \u00b7 ')}
+                </span>
+              )}
             </span>
             {item.code !== null && (
               <span className="kp-stab__code" data-failed={item.code !== 0 || undefined}>
@@ -1582,7 +1632,7 @@ function CountMenu({
     )
   })
   const menu = (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => open && onOpen()}>
       <DropdownMenuTrigger
         render={
           <button
@@ -1622,13 +1672,21 @@ function CountMenu({
             {groups}
           </>
         )}
-        {exited > 0 && !query.trim() && (
+        {(exited > 0 || idle > 0) && !query.trim() && (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onCloseExited}>
-              <PaneIcon icon={CancelCircleIcon} size={16} />
-              {t('shell:surfaces.closeExited', { count: exited })}
-            </DropdownMenuItem>
+            {exited > 0 && (
+              <DropdownMenuItem onClick={onCloseExited}>
+                <PaneIcon icon={CancelCircleIcon} size={16} />
+                {t('shell:surfaces.closeExited', { count: exited })}
+              </DropdownMenuItem>
+            )}
+            {idle > 0 && (
+              <DropdownMenuItem onClick={onCloseIdle}>
+                <PaneIcon icon={Clock01Icon} size={16} />
+                {t('shell:surfaces.closeIdle', { count: idle })}
+              </DropdownMenuItem>
+            )}
           </>
         )}
       </DropdownMenuContent>

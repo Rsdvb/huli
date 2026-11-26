@@ -163,7 +163,10 @@
     "filter": "在 {{count}} 个标签里查找",
     "noMatch": "没有匹配的标签",
     "closeExited_one": "关闭已退出的终端（{{count}} 个）",
-    "closeExited_other": "关闭已退出的终端（{{count}} 个）"
+    "closeExited_other": "关闭已退出的终端（{{count}} 个）",
+    "closeIdle_one": "关闭空闲的 Agent 终端（{{count}} 个）",
+    "closeIdle_other": "关闭空闲的 Agent 终端（{{count}} 个）",
+    "idleFor": "空闲 {{time}}"
   },
   "turnNotice": {
     "open": "打开",
