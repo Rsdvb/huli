@@ -1,8 +1,9 @@
 // Huli: a harness's install and update checks as the harness pages see them: a first install that
 // fails leaves the harness installable, its failure a task to retry, and the user's check reads a
-// program updated outside Kite again. Installs are fakes that write to a temp folder.
+// program updated outside Kite again; an uninstall answers once Kite's install is moved aside.
+// Installs are fakes that write to a temp folder.
 
-import { chmod, mkdir, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentStatus } from '@shared/agent-host'
@@ -12,6 +13,7 @@ import { AgentManager, type AgentManagerDeps } from './agents'
 import { PI } from './agents/pi'
 import type { AgentDefinition } from './catalog'
 import { Diagnostics } from './diagnostics'
+import { deletesSettled, TRASH_PREFIX, type DiscardDeps } from './discard'
 import { parseBundled } from './harness-versions'
 import { CliVersions } from './installed-cli'
 import { parseRegistry } from './registry'
@@ -263,5 +265,141 @@ describe('an update check that fails in part', () => {
     await expect(agents.checkUpdates()).rejects.toThrow(
       /1 of 2 update checks failed\. The ACP Registry could not be reached\./,
     )
+  })
+})
+
+describe('uninstalling a harness', () => {
+  const BUNDLED = parseBundled({
+    registry: {
+      agents: [{ id: 'gemini', version: '1.0.0', distribution: { npx: { package: PACKAGE } } }],
+    },
+  })
+
+  /**
+   * A disk whose deletes wait for `release`, as Windows deleting a package's tens of thousands of
+   * files under a virus scan does, and whose renames are counted and can be held or refused.
+   */
+  function slowDisk() {
+    let release!: () => void
+    const released = new Promise<void>((resolve) => (release = resolve))
+    const renames: string[] = []
+    const disk = {
+      renames,
+      release,
+      /** Set to fail each rename as Windows does while a process holds a file inside. */
+      held: false,
+      /** Set to keep the next rename waiting until it resolves. */
+      gate: null as Promise<void> | null,
+      deps: {
+        rename: async (from: string, to: string) => {
+          renames.push(from)
+          if (disk.gate) await disk.gate
+          if (disk.held) {
+            throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' })
+          }
+          await rename(from, to)
+        },
+        remove: async (dir: string) => {
+          await released
+          await rm(dir, { recursive: true, force: true })
+        },
+        wait: async () => {},
+      } satisfies DiscardDeps,
+    }
+    return disk
+  }
+
+  async function installed(disk: ReturnType<typeof slowDisk>) {
+    const root = await tempFolder('kite-uninstall-')
+    await writeInstall(root, '1.0.0')
+    const made = await manager(root, GEMINI, hostSettings({}), {
+      bundled: BUNDLED,
+      discard: disk.deps,
+    })
+    await made.agents.detectAll()
+    expect(made.status().package).toMatchObject({ installed: true })
+    const names = async () => (await readdir(root)).filter((name) => name !== 'reports').sort()
+    return { root, names, ...made }
+  }
+
+  it('answers once the install is moved aside, and deletes its files after', async () => {
+    const disk = slowDisk()
+    const { agents, names, status } = await installed(disk)
+
+    await expect(agents.uninstall('gemini')).resolves.toEqual({ command: null, error: null })
+    // Its files are still to delete, under a name no install or start reads.
+    const left = await names()
+    expect(left).toHaveLength(1)
+    expect(left[0]!.startsWith(TRASH_PREFIX)).toBe(true)
+    expect(status().package).toMatchObject({ installed: false })
+
+    disk.release()
+    await deletesSettled()
+    expect(await names()).toEqual([])
+  })
+
+  it("gives a second request while the first runs the first one's answer", async () => {
+    const disk = slowDisk()
+    const { agents, names } = await installed(disk)
+
+    const [first, second] = await Promise.all([
+      agents.uninstall('gemini'),
+      agents.uninstall('gemini'),
+    ])
+    expect(second).toEqual(first)
+    expect(disk.renames).toHaveLength(1)
+
+    disk.release()
+    await deletesSettled()
+    expect(await names()).toEqual([])
+  })
+
+  it('refuses an install or update while the uninstall runs', async () => {
+    const disk = slowDisk()
+    const { agents } = await installed(disk)
+    let open!: () => void
+    disk.gate = new Promise<void>((resolve) => (open = resolve))
+
+    const run = agents.uninstall('gemini')
+    await expect.poll(() => disk.renames.length).toBe(1)
+    await expect(agents.install('gemini')).rejects.toMatchObject({ code: 'busy' })
+    await expect(agents.update('gemini')).rejects.toMatchObject({ code: 'busy' })
+    await expect(agents.reinstall('gemini')).rejects.toMatchObject({ code: 'busy' })
+
+    open()
+    await run
+    disk.release()
+    await deletesSettled()
+  })
+
+  it('says what holds a file in use and keeps the install, then uninstalls once it is let go', async () => {
+    const disk = slowDisk()
+    const { root, agents, names } = await installed(disk)
+    disk.held = true
+
+    const error = await agents.uninstall('gemini').catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'busy' })
+    expect((error as Error).message).toContain(path.join(root, 'gemini'))
+    // Tried again once the harness's processes were stopped.
+    expect(disk.renames.length).toBeGreaterThan(1)
+    expect(await names()).toEqual(['gemini'])
+
+    disk.held = false
+    await expect(agents.uninstall('gemini')).resolves.toEqual({ command: null, error: null })
+    disk.release()
+    await deletesSettled()
+    expect(await names()).toEqual([])
+  })
+
+  it('deletes at the next start what a quit left moved aside, and no install', async () => {
+    const disk = slowDisk()
+    disk.release()
+    const { root, agents, names } = await installed(disk)
+    await mkdir(path.join(root, `${TRASH_PREFIX}left`, '1.0.0', 'node_modules'), {
+      recursive: true,
+    })
+
+    await agents.sweepTrash()
+    expect(await names()).toEqual(['gemini'])
   })
 })

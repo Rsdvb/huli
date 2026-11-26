@@ -10,6 +10,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { Platform } from '@shared/platform'
 import { renameWithRetry } from '../adapter-install'
+import { deleteLater, discard as discardFolder, TRASH_PREFIX } from '../discard'
 import { isExecutableFile } from '../find-command'
 import { t } from '../i18n'
 import { withoutElectronVars } from '../shell-env'
@@ -32,7 +33,6 @@ import { HttpStatusError, type Transport } from './transport'
 /** The record each install holds; a folder without it is no install. */
 export const RECORD_FILE = 'kite-node.json'
 const PARTIAL_PREFIX = '.partial-'
-const TRASH_PREFIX = '.trash-'
 /** The newest installs kept: the one agents use, and the one before it while it may still run. */
 export const KEEP_VERSIONS = 2
 
@@ -153,18 +153,11 @@ export async function listNodeInstalls(root: string, platform: Platform): Promis
 }
 
 /**
- * Moves a folder out of the way, then deletes it. On Windows a folder whose node an agent still
- * runs cannot be moved, so it stays whole and false says so.
+ * Moves a folder out of the way at once and deletes it in the background. On Windows a folder
+ * whose program still runs cannot be moved, so it stays whole and false says so.
  */
 async function discard(root: string, dir: string, platform: Platform): Promise<boolean> {
-  const trash = path.join(root, `${TRASH_PREFIX}${randomBytes(6).toString('hex')}`)
-  try {
-    await renameWithRetry(dir, trash, platform)
-  } catch {
-    return false
-  }
-  await rm(trash, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {})
-  return true
+  return discardFolder(dir, { platform, trashRoot: root }).catch(() => false)
 }
 
 /** What an earlier run left: folders moved out to delete, and partials no install still writes. */
@@ -174,7 +167,7 @@ export async function removeLeftovers(root: string, olderThanMs = 60 * 60_000): 
     names.map(async (name) => {
       const full = path.join(root, name)
       if (name.startsWith(TRASH_PREFIX)) {
-        await rm(full, { recursive: true, force: true }).catch(() => {})
+        void deleteLater(full)
       } else if (name.startsWith(PARTIAL_PREFIX)) {
         const info = await stat(full).catch(() => null)
         if (info && Date.now() - info.mtimeMs > olderThanMs) {

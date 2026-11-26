@@ -1310,6 +1310,15 @@ li[data-row-exit='dust'] > * {
 }
 
 /* ---------- the side panel's row of tabs ---------- */
+/* The row and its page buttons. A row wider than its place scrolls sideways (strip-scroll.ts,
+   whose STRIP_EDGE_PX is --stab-edge): an end that hides tabs fades, and while the pointer is over
+   the row a button there pages it. */
+.kp-stabs-box {
+  --stab-edge: 28px;
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
 /* The row pads itself so the light of a tab someone uses is not cut off at its edges. */
 .kp-stabs {
   display: flex;
@@ -1320,10 +1329,87 @@ li[data-row-exit='dust'] > * {
   padding: 6px 4px;
   overflow-x: auto;
   overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-padding-inline: var(--stab-edge);
   scrollbar-width: none;
 }
 .kp-stabs::-webkit-scrollbar {
   display: none;
+}
+.kp-stabs-box[data-more-start] > .kp-stabs {
+  mask-image: linear-gradient(to right, transparent, black var(--stab-edge));
+}
+.kp-stabs-box[data-more-end] > .kp-stabs {
+  mask-image: linear-gradient(to left, transparent, black var(--stab-edge));
+}
+.kp-stabs-box[data-more-start][data-more-end] > .kp-stabs {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black var(--stab-edge),
+    black calc(100% - var(--stab-edge)),
+    transparent
+  );
+}
+.kp-stabs-box[data-scrolling] .kp-stab:not([data-dragging]) {
+  pointer-events: none;
+}
+.kp-stabs__more {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 24px;
+  border-radius: 6px;
+  /* The sheet's own color, so the button covers the faded tabs under it. */
+  background-color: var(--bg-app);
+  color: var(--text-secondary);
+  opacity: 0;
+  visibility: hidden;
+  translate: 0 -50%;
+  outline: none;
+  transition:
+    opacity 140ms ease,
+    visibility 0s linear 140ms,
+    background-color 140ms ease,
+    color 140ms ease;
+}
+.kp-stabs__more[data-side='start'] {
+  left: -4px;
+}
+.kp-stabs__more[data-side='end'] {
+  right: -4px;
+}
+.kp-stabs-box:hover[data-more-start] > .kp-stabs__more[data-side='start'],
+.kp-stabs-box:hover[data-more-end] > .kp-stabs__more[data-side='end'] {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.kp-stabs__more:hover {
+  background-image: linear-gradient(var(--bg-hover), var(--bg-hover));
+  color: var(--text-primary);
+}
+/* The row's tooltip: the tab's whole name, then what it is doing, who uses it or where it is. */
+.kp-stip {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.kp-stip__name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.kp-stip__note,
+.kp-stip__detail {
+  opacity: 0.72;
+}
+.kp-stip__detail {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 .kp-stab {
   --stab-wait: 70ms;
@@ -1561,10 +1647,11 @@ li[data-row-exit='dust'] > * {
 .kp-stabs[data-tight]:not([data-measuring]) .kp-stab:not([data-selected]) .kp-stab__badge {
   display: block;
 }
-/* The selected tab keeps its name, cut short only when even the icons leave it too little room. */
+/* The selected tab keeps its name, cut short only where it would take most of the row, which
+   scrolls (--stab-keep, from the row's measure). */
 .kp-stabs[data-tight]:not([data-measuring]) .kp-stab[data-selected] {
   flex: 0 1 auto;
-  min-width: 72px;
+  min-width: var(--stab-keep, 72px);
 }
 .kp-stabs[data-tight] .kp-stab:not([data-selected]):hover .kp-stab__icon > .kp-stab__glyph {
   opacity: 1;
@@ -2434,6 +2521,38 @@ li[data-row-exit='dust'] > * {
 }
 .kp-tablist__check {
   color: var(--text-primary);
+}
+/* A long list's filter stays at the top while the list scrolls under it. */
+.kp-tablist__find {
+  position: sticky;
+  top: -5px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  margin: -5px -5px 0;
+  padding: 0 13px;
+  background: var(--popover);
+  color: var(--text-disabled);
+}
+.kp-tablist__find input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+.kp-tablist__find input::placeholder {
+  color: var(--text-disabled);
+}
+.kp-tablist__empty {
+  padding: 6px 8px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
 }
 
 /* ---------- panes: Mobile devices ---------- */

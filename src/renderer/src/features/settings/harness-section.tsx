@@ -41,7 +41,6 @@ import {
   AlertDialogTitle,
 } from '@renderer/components/ui/alert-dialog'
 import { Checkbox } from '@renderer/components/ui/checkbox'
-import { toast } from '@renderer/components/ui/toast'
 import { NodeInstallAction } from '@renderer/features/agents/node-install'
 import { needsNode } from '@renderer/features/agents/node-runtime'
 import {
@@ -69,6 +68,7 @@ import {
   harnessStatuses,
   hasProgram,
   usableAgents,
+  without,
   type AgentsStoreHook,
 } from '@renderer/stores/agents'
 import { useHostScope } from '@renderer/stores/host-scope'
@@ -95,6 +95,7 @@ import {
   type SettingsHook,
 } from './harness-install'
 import { harnessVersion, useAction, useHarnessCheck, VENDORS } from './agent-helpers'
+import { uninstallHarness } from './harness-uninstall'
 import {
   CommandLine,
   ControlError,
@@ -224,9 +225,18 @@ function HarnessState({ status }: { status: AgentStatus }) {
   const updated = useAgentsStore((s) => s.updated[status.id])
   const taskError = useAgentsStore((s) => s.taskErrors[status.id])
   const pending = useAgentsStore((s) => s.pending[status.id])
+  const uninstalling = useAgentsStore((s) => !!s.uninstalling[status.harnessId])
   const waiting = useWaitingUpdate(status)
   const task: AgentTask | null = status.task
   const harness = status.harnessId
+  if (uninstalling) {
+    return (
+      <span className="k-end k-muted">
+        <Spin />
+        {t('harnesses.uninstall.working')}
+      </span>
+    )
+  }
   if (task?.state === 'running' || status.state === 'installing' || pending) {
     return (
       <span className="k-end k-muted">
@@ -382,6 +392,7 @@ export function HarnessListItem({ status }: { status: AgentStatus }) {
   const { useAgentsStore } = useHostScope()
   const { t } = useTranslation(['settings', 'agents'])
   const taskError = useAgentsStore((s) => s.taskErrors[status.id])
+  const uninstallError = useAgentsStore((s) => s.uninstallErrors[status.harnessId])
   const agents = useAgentsStore(
     (s) => usableAgents(s.order, s.byId).filter((a) => a.harnessId === status.harnessId).length,
   )
@@ -398,6 +409,8 @@ export function HarnessListItem({ status }: { status: AgentStatus }) {
       <span className="k-danger">{status.task.error}</span>
     ) : taskError ? (
       <span className="k-danger">{taskError.message}</span>
+    ) : uninstallError ? (
+      <span className="k-danger">{uninstallError}</span>
     ) : status.uninstalled ? (
       t('harnesses.removedLine')
     ) : problem?.reason.kind === 'too-old' ? (
@@ -524,6 +537,7 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
   const { request, useAgentsStore } = useHostScope()
   const { t } = useTranslation(['settings', 'common'])
   const environment = useAgentsStore((s) => s.environment)
+  const uninstalling = useAgentsStore((s) => !!s.uninstalling[status.harnessId])
   const [act, busy, error] = useAction()
   const r = readiness(status)
   const problem = harnessProblem(status)
@@ -588,7 +602,10 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
           </Notice>
         )}
         {status.uninstalled && <UninstalledNotice status={status} />}
-        {notice && !ownNotice && <InstallNotice status={status} kind={notice} />}
+        {/* Huli: an uninstalled harness's own notice installs it again. */}
+        {notice && !ownNotice && !status.uninstalled && !uninstalling && (
+          <InstallNotice status={status} kind={notice} />
+        )}
 
         {onMachine && <VersionGroup status={status} />}
         <ProgramGroup status={status} />
@@ -648,7 +665,8 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
             </CollapsibleContent>
           </Collapsible>
         )}
-        {installed && !status.uninstalled && <UninstallGroup status={status} />}
+        {/* Huli: kept while it uninstalls, as what it installed is already forgotten. */}
+        {(uninstalling || (installed && !status.uninstalled)) && <UninstallGroup status={status} />}
       </div>
     </div>
   )
@@ -656,40 +674,20 @@ function HarnessPageBody({ status }: { status: AgentStatus }) {
 
 /**
  * Uninstalls what Kettu installed for the harness, and its agents, while the user's own program
- * and configuration stay; offers to remove the program too when its install route can.
+ * and configuration stay; offers to remove the program too when its install route can. Huli: the
+ * confirmation closes at once, and the row says it is uninstalling, or why it could not.
  */
 function UninstallGroup({ status }: { status: AgentStatus }) {
-  const { api, request, useAgentsStore, useSettingsStore } = useHostScope()
+  const scope = useHostScope()
+  const { useAgentsStore } = scope
   const { t } = useTranslation(['settings', 'common'])
   const [open, setOpen] = useState(false)
   const [removeProgram, setRemoveProgram] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const uninstall = async (): Promise<void> => {
-    if (busy) return
-    setBusy(true)
-    setError(null)
-    try {
-      const result = await request('agents.uninstall', {
-        agentId: status.harnessId,
-        removeProgram,
-      })
-      const agents = useAgentsStore.getState()
-      const ids = agents.order.filter(
-        (id) =>
-          agents.byId[id]?.harnessId === status.harnessId && agents.byId[id]?.registered !== false,
-      )
-      for (const id of ids) await api.settings.removeAgent(id, false)
-      await useSettingsStore.getState().update({
-        agents: { [status.harnessId]: { uninstalled: true, enabled: false } },
-      })
-      setOpen(false)
-      openHarnessSettings(null)
-      if (result.error) toast(result.error, undefined, { tone: 'warning' })
-    } catch (e) {
-      setError(errorMessage(e))
-      setBusy(false)
-    }
+  const busy = useAgentsStore((s) => !!s.uninstalling[status.harnessId])
+  const error = useAgentsStore((s) => s.uninstallErrors[status.harnessId] ?? null)
+  const uninstall = (): void => {
+    setOpen(false)
+    void uninstallHarness(scope, status, removeProgram)
   }
   return (
     <section className="k-group">
@@ -703,15 +701,23 @@ function UninstallGroup({ status }: { status: AgentStatus }) {
           }
         >
           <DangerButton
+            busy={busy}
             onClick={() => {
-              setError(null)
+              useAgentsStore.setState((s) => ({
+                uninstallErrors: without(s.uninstallErrors, status.harnessId),
+              }))
               setRemoveProgram(false)
               setOpen(true)
             }}
           >
-            {t('harnesses.uninstall.button')}
+            {busy ? t('harnesses.uninstall.working') : t('harnesses.uninstall.button')}
           </DangerButton>
         </RowFrame>
+        {error && (
+          <p className="ui-sg-hint k-error" data-wrap="" data-selectable="">
+            {error}
+          </p>
+        )}
       </RowGroup>
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogContent className="sm:max-w-120">
@@ -740,14 +746,9 @@ function UninstallGroup({ status }: { status: AgentStatus }) {
               </span>
             </label>
           )}
-          {error && <p className="text-xs text-danger">{error}</p>}
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common:actions.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={busy}
-              onClick={() => void uninstall()}
-            >
+            <AlertDialogAction variant="destructive" disabled={busy} onClick={uninstall}>
               {t('harnesses.uninstall.button')}
             </AlertDialogAction>
           </AlertDialogFooter>

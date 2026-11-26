@@ -25,18 +25,27 @@ export interface ResolvedItem {
 const MAX_JSON_BYTES = 64 * 1024 * 1024
 // A folder with more entries than this is counted only this far.
 const MAX_COUNTED = 50_000
+// Huli: one that takes longer than this to count has no size shown. A harness's 95,000
+// node_modules files took 25 s under a virus scan, while the dialog showed only its loading lines.
+const COUNT_MS = 2_000
 
 function isMissing(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code
   return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
-/** The bytes under `target`, without following links. */
-export async function sizeOf(target: string): Promise<number> {
+/** The bytes under `target`, without following links; null when counting them takes too long. */
+export async function sizeOf(target: string, countMs = COUNT_MS): Promise<number | null> {
   let total = 0
   let counted = 0
+  const until = Date.now() + countMs
+  let late = false
   const visit = async (at: string): Promise<void> => {
-    if (counted++ > MAX_COUNTED) return
+    if (late || counted++ > MAX_COUNTED) return
+    if (Date.now() > until) {
+      late = true
+      return
+    }
     const info = await lstat(at).catch(() => null)
     if (!info) return
     if (!info.isDirectory()) {
@@ -47,7 +56,7 @@ export async function sizeOf(target: string): Promise<number> {
     for (const name of names) await visit(path.join(at, name))
   }
   await visit(target)
-  return total
+  return late ? null : total
 }
 
 async function pathItem(

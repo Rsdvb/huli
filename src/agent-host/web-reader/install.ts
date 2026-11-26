@@ -11,6 +11,7 @@ import path from 'node:path'
 import type { Platform } from '@shared/platform'
 import { MOLI_VERSION } from '@shared/web-reader'
 import { renameWithRetry } from '../adapter-install'
+import { deleteLater, discard as discardFolder, TRASH_PREFIX } from '../discard'
 import { isExecutableFile } from '../find-command'
 import { t } from '../i18n'
 import { extractArchive } from '../node-runtime/install'
@@ -21,7 +22,6 @@ import { archiveFolder, archiveName, moliProgram, releaseUrl, type MoliAsset } f
 /** The record each install holds; a folder without it is no install. */
 export const RECORD_FILE = 'kite-moli.json'
 const PARTIAL_PREFIX = '.partial-'
-const TRASH_PREFIX = '.trash-'
 const VERSION_DIR = /^\d+\.\d+\.\d+$/
 const DOWNLOAD_TIMEOUT_MS = 20 * 60_000
 /** A download that receives nothing for this long has stalled. */
@@ -107,18 +107,11 @@ async function folderBytes(dir: string): Promise<number> {
 }
 
 /**
- * Moves a folder out of the way, then deletes it. On Windows a folder whose program still runs
- * cannot be moved, so it stays whole and false says so.
+ * Moves a folder out of the way at once and deletes it in the background. On Windows a folder
+ * whose program still runs cannot be moved, so it stays whole and false says so.
  */
 async function discard(root: string, dir: string, platform: Platform): Promise<boolean> {
-  const trash = path.join(root, `${TRASH_PREFIX}${randomBytes(6).toString('hex')}`)
-  try {
-    await renameWithRetry(dir, trash, platform)
-  } catch {
-    return false
-  }
-  await rm(trash, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {})
-  return true
+  return discardFolder(dir, { platform, trashRoot: root }).catch(() => false)
 }
 
 /** What an earlier run left: folders moved out to delete, partials, and other versions. */
@@ -127,7 +120,9 @@ export async function removeLeftovers(root: string, platform: Platform): Promise
   await Promise.all(
     names.map(async (name) => {
       const full = path.join(root, name)
-      if (name.startsWith(TRASH_PREFIX) || name.startsWith(PARTIAL_PREFIX)) {
+      if (name.startsWith(TRASH_PREFIX)) {
+        void deleteLater(full)
+      } else if (name.startsWith(PARTIAL_PREFIX)) {
         await rm(full, { recursive: true, force: true }).catch(() => {})
       } else if (VERSION_DIR.test(name) && name !== MOLI_VERSION) {
         await discard(root, full, platform)

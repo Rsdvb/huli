@@ -2437,6 +2437,8 @@ export class AgentHost {
     options.send({ type: 'host:service-port', port: host.artifactService.listeningPort })
     options.send({ type: 'host:ready' })
     void host.trees.stopLeftovers()
+    // Huli: harness installs an uninstall or update moved aside that a quit left undeleted.
+    void host.agents.sweepTrash()
     host.agents.startLimitReads()
     host.agents.startSignInEndReads()
     void host.agents.removeAntigravityUsageServer()

@@ -9,12 +9,15 @@ import {
   type RefObject,
 } from 'react'
 import { AlertDialog as AlertDialogPrimitive } from '@base-ui/react/alert-dialog'
+import { Menu as MenuPrimitive } from '@base-ui/react/menu'
+import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'
 import { DragDropProvider, type DragEndEvent } from '@dnd-kit/react'
 import { DragFeedback, lightPlugins } from '@renderer/components/drag-feedback'
 import { isSortable, useSortable } from '@dnd-kit/react/sortable'
 import {
   ArrowDown01Icon,
   ArrowExpand01Icon,
+  ArrowLeft01Icon,
   ArrowRight01Icon,
   ArrowShrink01Icon,
   Cancel01Icon,
@@ -25,6 +28,7 @@ import {
   PencilEdit02Icon,
   PinIcon,
   PlusSignIcon,
+  Search01Icon,
   ShapesIcon,
   SidebarRightIcon,
   Tick02Icon,
@@ -56,6 +60,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuList,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -148,6 +153,7 @@ import {
   type SurfaceRowId,
 } from './surface-rows'
 import { PaneBody, PaneEmpty, PaneIcon, PaneSpinner, PanelButton } from './panel-button'
+import { revealTab, useStripScroll } from './strip-scroll'
 import { CornerControlsSpace } from './top-bar'
 
 // The row of tabs at the top of a session's side panel: every terminal, page, device and pane the
@@ -155,6 +161,12 @@ import { CornerControlsSpace } from './top-bar'
 
 /** Below this width the tabs not selected keep only their icon. */
 const MIN_TAB_PX = 72
+/** While only icons fit, the selected tab's name takes at most this share of the row. */
+const KEEP_SHARE = 0.5
+/** Above this many tabs, the list of them all takes a filter. */
+const FILTER_FROM = 10
+/** How long after the wheel turns the row a tab under the pointer opens no tooltip. */
+const WHEEL_QUIET_MS = 600
 /** Only a start that takes a while shows its Starting tab, so a quick one shows its tab at once. */
 const SLOW_START_MS = 400
 
@@ -172,8 +184,8 @@ interface SurfaceItem {
   preview: boolean
   /** What a file, diff or artifact tab shows. */
   doc: DocTab | null
-  /** The tooltip: the name, then what the tab is doing or who uses it. */
-  title: string
+  /** What the tooltip says under the name: what the tab is doing, who uses it, or where it is. */
+  detail: string
   selected: boolean
   /** Who uses it in the turn that runs, drawn on the whole tab. */
   control: Exclude<SurfaceControl['kind'], 'idle'> | null
@@ -302,7 +314,7 @@ function useDocItems(panel: string, projectPath: string, hostId: string | null):
           ...item,
           name,
           note: '',
-          title: name,
+          detail: '',
           icon: <PaneIcon icon={kind ? KIND_ICON[kind] : ShapesIcon} size={14} />,
           dot: null,
         }
@@ -316,7 +328,7 @@ function useDocItems(panel: string, projectPath: string, hostId: string | null):
           ...item,
           name,
           note: '',
-          title: surface ? `${name} \u00b7 ${surfaceTitle(surface, i18n.language)}` : name,
+          detail: surface ? surfaceTitle(surface, i18n.language) : '',
           icon: (
             <PluginTile
               name={surface?.name ?? tab.pluginId}
@@ -335,7 +347,7 @@ function useDocItems(panel: string, projectPath: string, hostId: string | null):
           ...item,
           name,
           note,
-          title: [
+          detail: [
             tab.oldPath ? `${tab.oldPath} \u2192 ${path}` : path,
             tab.ref ? tab.ref.slice(0, 7) : t('shell:surfaces.uncommitted'),
           ].join(' \u00b7 '),
@@ -350,7 +362,7 @@ function useDocItems(panel: string, projectPath: string, hostId: string | null):
         ...item,
         name,
         note,
-        title: owner ? `${path}\n${t('files:tabs.agentFile', { agent: owner })}` : path,
+        detail: owner ? `${path}\n${t('files:tabs.agentFile', { agent: owner })}` : path,
         icon: tab.agent ? (
           <AgentMark agent={tab.agent.agentId} hostId={hostId} size={14} dot={null} />
         ) : (
@@ -395,8 +407,7 @@ function useSingleItems(panel: string, hostId: string | null): SurfaceItem[] {
         id: '',
         name,
         ...NOT_A_DOC,
-        title: [
-          name,
+        detail: [
           control ? tb(CONTROL_NOTE[control], { agent }) : dot?.label,
           needs > 0 ? t('board:summary.needs', { count: needs }) : null,
         ]
@@ -484,10 +495,15 @@ function useSurfaceItems(panel: string, projectPath: string, kinds: SurfaceKinds
         id: terminal.id,
         name,
         ...NOT_A_DOC,
-        title: [
-          terminal.name ? automatic : name,
+        detail: [
+          terminal.name ? automatic : null,
           control ? note(control, owner ?? agent(sessionAgent)) : (owner ?? shared),
           dot?.label,
+          terminal.stale
+            ? t('terminal:view.stopped')
+            : exited
+              ? t('terminal:view.exited', { code: terminal.exitCode })
+              : null,
         ]
           .filter(Boolean)
           .join(' · '),
@@ -520,8 +536,7 @@ function useSurfaceItems(panel: string, projectPath: string, kinds: SurfaceKinds
         id: tab.id,
         name,
         ...NOT_A_DOC,
-        title: [
-          name,
+        detail: [
           control
             ? note(control, agent(sessionAgent))
             : tab.released
@@ -567,9 +582,7 @@ function useSurfaceItems(panel: string, projectPath: string, kinds: SurfaceKinds
           id: device.id,
           name: device.name,
           ...NOT_A_DOC,
-          title: [device.name, control ? note(control, agent(sessionAgent)) : dot?.label]
-            .filter(Boolean)
-            .join(' · '),
+          detail: control ? note(control, agent(sessionAgent)) : (dot?.label ?? ''),
           selected,
           control,
           icon: <PaneIcon icon={markOf(device)} size={14} />,
@@ -656,8 +669,10 @@ function useRowFit(signature: string): {
   const [tight, setTight] = useState(false)
   useLayoutEffect(() => {
     const row = stripRef.current
-    const head = row?.parentElement
-    if (!row || !head) return
+    // The row lies in a box with its page buttons, in the head's main part.
+    const box = row?.parentElement
+    const head = box?.parentElement
+    if (!row || !box || !head) return
     const measure = (): void => {
       // Every tab at its full width once, the selected one included, which always keeps it.
       row.dataset.measuring = ''
@@ -667,17 +682,20 @@ function useRowFit(signature: string): {
       const selected = tabs.findIndex((tab) => tab.dataset.selected !== undefined)
       // The count shows only while icons alone fit, so it must not keep the row that way.
       const others = [...head.children].filter(
-        (child) => child !== row && !child.classList.contains('kp-tabcount'),
+        (child) => child !== box && !child.classList.contains('kp-tabcount'),
       )
       const othersWidth = others.reduce((sum, child) => sum + (child as HTMLElement).offsetWidth, 0)
       const headGap = parseFloat(getComputedStyle(head).columnGap) || 0
       const rowGap = parseFloat(getComputedStyle(row).columnGap) || 0
+      const space = head.clientWidth - othersWidth - headGap * others.length
+      // While only icons fit, the row scrolls, so the selected tab keeps its whole name unless
+      // that takes most of the row.
+      if (selected >= 0) {
+        const keep = Math.min(widths[selected]!, Math.max(MIN_TAB_PX, space * KEEP_SHARE))
+        row.style.setProperty('--stab-keep', `${Math.floor(keep)}px`)
+      }
       const room =
-        head.clientWidth -
-        othersWidth -
-        headGap * others.length -
-        rowGap * Math.max(0, tabs.length - 1) -
-        (selected >= 0 ? widths[selected]! : 0)
+        space - rowGap * Math.max(0, tabs.length - 1) - (selected >= 0 ? widths[selected]! : 0)
       // Long names give way first: the others share what is left, each up to its own width.
       const rest = widths.filter((_, index) => index !== selected).sort((a, b) => a - b)
       let left = room
@@ -707,6 +725,12 @@ function useRowFit(signature: string): {
 function endsRun(item: SurfaceItem): boolean {
   const terminal = item.terminal
   return !!terminal && !terminal.stale && terminal.busy && terminal.exitCode === null
+}
+
+/** A terminal whose shell exited, or that its host no longer has. */
+function hasEnded(item: SurfaceItem): boolean {
+  const terminal = item.terminal
+  return !!terminal && (terminal.stale || terminal.exitCode !== null)
 }
 
 /**
@@ -740,6 +764,26 @@ export function SurfaceTabs({
     )
     .join('\n')
   const { stripRef, tight } = useRowFit(`${signature}|${starting}`)
+  // One tooltip for the row, which each tab's button opens with its own key. The wheel closes it,
+  // and the tabs it moves under the pointer open none until it rests.
+  const tip = useMemo(() => TooltipPrimitive.createHandle<string>(), [])
+  const wheeledAt = useRef(0)
+  const hideTip = useCallback(() => {
+    wheeledAt.current = performance.now()
+    if (tip.isOpen) tip.close()
+  }, [tip])
+  // The selected tabs as last scrolled into view, the first of them kept in view as the row's
+  // width changes.
+  const revealed = useRef<string[] | null>(null)
+  const keepSelected = useCallback(() => {
+    const strip = stripRef.current
+    const key = revealed.current?.[0]
+    if (strip && key) revealTab(strip, key, false)
+  }, [stripRef])
+  const { page } = useStripScroll(stripRef, `${signature}|${starting}|${tight}`, {
+    onResize: keepSelected,
+    onWheel: hideTip,
+  })
   const shown = useViewStore((s) => s.sidePane[panel])
   const pages = items.filter((item) => item.kind === 'browser').length
   const devices = items.filter((item) => item.kind === 'devices').length
@@ -748,6 +792,23 @@ export function SurfaceTabs({
   // phone the panel always covers the area and the corner always holds the sidebar's toggle.
   const phone = usePhoneWindow()
   const cornered = (useViewStore((s) => s.sidebarCollapsed) || phone) && maximized && !hasBand
+
+  // A tab newly selected, from the list, a shortcut or an agent's new terminal, scrolls into view:
+  // after the row's measure, and again once the row settles on icons or names. The first one shows
+  // at once; later ones glide there.
+  const selectedKeys = items
+    .filter((item) => item.selected)
+    .map((item) => item.key)
+    .join('\n')
+  useLayoutEffect(() => {
+    const strip = stripRef.current
+    const keys = selectedKeys ? selectedKeys.split('\n') : []
+    const before = revealed.current
+    revealed.current = keys
+    // In a split, the tab that just joined the selection is the one to show.
+    const key = keys.find((other) => !before?.includes(other)) ?? keys[0]
+    if (strip && key) revealTab(strip, key, before !== null)
+  }, [selectedKeys, tight, stripRef])
 
   // Files are read and kept by project; the row says which project its panel's tabs are of.
   useEffect(() => notePanel(panel, projectPath), [panel, projectPath])
@@ -820,14 +881,18 @@ export function SurfaceTabs({
     [close, panel, projectPath],
   )
 
-  // Close others and Close to the right: `keep` takes the panel when the selected tab goes.
+  // Close others and Close to the right: `keep` takes the panel when the selected tab goes, or the
+  // side panel's list when no tab stays.
   const closeMany = useCallback(
-    (targets: SurfaceItem[], keep: SurfaceItem) => {
+    (targets: SurfaceItem[], keep: SurfaceItem | null) => {
       // Files with unsaved edits stay; each is closed on its own, which asks about it.
       const going = targets.filter((item) =>
         item.kind === 'artifact' ? mayLeave(item.id) : !(item.kind === 'file' && item.dot),
       )
-      if (going.some((item) => item.selected)) selectSurface(panel, keep)
+      if (going.some((item) => item.selected)) {
+        if (keep) selectSurface(panel, keep)
+        else toggleSidePane(panel, 'surfaces', true)
+      }
       let pagesLeft = browserTabs ?? 0
       for (const item of going.filter((other) => !endsRun(other))) {
         drop(item, pagesLeft)
@@ -837,6 +902,17 @@ export function SurfaceTabs({
     },
     [panel, browserTabs, drop],
   )
+
+  // Terminals whose shell exited or whose host lost them, which the count's list closes at once.
+  const exited = useMemo(() => items.filter(hasEnded), [items])
+  const closeExited = useCallback(() => {
+    const index = items.findIndex((item) => item.selected)
+    const keep =
+      [...items.slice(index + 1), ...items.slice(0, Math.max(0, index)).reverse()].find(
+        (item) => !hasEnded(item),
+      ) ?? null
+    closeMany(exited, keep)
+  }, [items, exited, closeMany])
 
   // Mod+W closes the selected tab; in a split the focused side's terminal goes.
   useEffect(
@@ -892,55 +968,102 @@ export function SurfaceTabs({
     <div className={cn('kp-head app-region-drag', cornered && 'kp-head--cornered')}>
       {cornered && <CornerControlsSpace className="mr-1" />}
       <div className="kp-head__main">
-        <DragDropProvider sensors={tabSensors} plugins={lightPlugins} onDragEnd={dragEnded}>
-          <DragFeedback />
-          <div
-            ref={(element) => {
-              stripRef.current = element
-              sheetRef.current = element?.closest<HTMLElement>('.kp-pane') ?? null
-            }}
-            role="tablist"
-            aria-label={t('shell:surfaces.tabs')}
-            className="kp-stabs"
-            data-tight={tight || undefined}
-          >
-            {items.map((item, index) => (
-              <SurfaceTab
-                key={item.key}
-                panel={panel}
-                projectPath={projectPath}
-                item={item}
-                index={index}
-                onSelect={() => selectSurface(panel, item)}
-                onClose={() => requestClose(item)}
-                onCloseOthers={
-                  items.length > 1
-                    ? () =>
-                        closeMany(
-                          items.filter((other) => other.key !== item.key),
-                          item,
-                        )
-                    : null
-                }
-                onCloseRight={
-                  index < items.length - 1 ? () => closeMany(items.slice(index + 1), item) : null
-                }
-              />
-            ))}
-            {starting && (
-              <span className="kp-stab">
-                <span className="kp-stab__btn">
-                  <span className="kp-stab__icon">
-                    <span className="kp-stab__glyph">
-                      <PaneSpinner />
+        <div className="kp-stabs-box">
+          <DragDropProvider sensors={tabSensors} plugins={lightPlugins} onDragEnd={dragEnded}>
+            <DragFeedback />
+            <div
+              ref={(element) => {
+                stripRef.current = element
+                sheetRef.current = element?.closest<HTMLElement>('.kp-pane') ?? null
+              }}
+              role="tablist"
+              aria-label={t('shell:surfaces.tabs')}
+              className="kp-stabs"
+              data-tight={tight || undefined}
+            >
+              {items.map((item, index) => (
+                <SurfaceTab
+                  key={item.key}
+                  panel={panel}
+                  projectPath={projectPath}
+                  item={item}
+                  index={index}
+                  tip={tip}
+                  onSelect={() => selectSurface(panel, item)}
+                  onClose={() => requestClose(item)}
+                  onCloseOthers={
+                    items.length > 1
+                      ? () =>
+                          closeMany(
+                            items.filter((other) => other.key !== item.key),
+                            item,
+                          )
+                      : null
+                  }
+                  onCloseRight={
+                    index < items.length - 1 ? () => closeMany(items.slice(index + 1), item) : null
+                  }
+                />
+              ))}
+              {starting && (
+                <span className="kp-stab">
+                  <span className="kp-stab__btn">
+                    <span className="kp-stab__icon">
+                      <span className="kp-stab__glyph">
+                        <PaneSpinner />
+                      </span>
                     </span>
+                    <span className="kp-stab__name">{t('terminal:panel.starting')}</span>
                   </span>
-                  <span className="kp-stab__name">{t('terminal:panel.starting')}</span>
                 </span>
-              </span>
-            )}
-          </div>
-        </DragDropProvider>
+              )}
+            </div>
+          </DragDropProvider>
+          {/* For the pointer only: the keyboard reaches every tab, which scrolls into view. */}
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label={t('shell:surfaces.scrollStart')}
+            className="kp-stabs__more"
+            data-side="start"
+            onClick={() => page(-1)}
+          >
+            <PaneIcon icon={ArrowLeft01Icon} size={14} />
+          </button>
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label={t('shell:surfaces.scrollEnd')}
+            className="kp-stabs__more"
+            data-side="end"
+            onClick={() => page(1)}
+          >
+            <PaneIcon icon={ArrowRight01Icon} size={14} />
+          </button>
+          <Tooltip
+            handle={tip}
+            onOpenChange={(open, details) => {
+              if (open && performance.now() - wheeledAt.current < WHEEL_QUIET_MS) details.cancel()
+            }}
+          >
+            {({ payload }) => {
+              const item = items.find((other) => other.key === payload)
+              return (
+                <TooltipContent side="bottom">
+                  {item && (
+                    <span className="kp-stip">
+                      <span className="kp-stip__name">
+                        {item.name}
+                        {item.note && <span className="kp-stip__note"> {item.note}</span>}
+                      </span>
+                      {item.detail && <span className="kp-stip__detail">{item.detail}</span>}
+                    </span>
+                  )}
+                </TooltipContent>
+              )
+            }}
+          </Tooltip>
+        </div>
         <AddMenu
           panel={panel}
           projectPath={projectPath}
@@ -949,7 +1072,14 @@ export function SurfaceTabs({
         />
       </div>
       <div className="kp-head__tools app-region-no-drag">
-        {tight && <CountMenu items={items} onSelect={(item) => selectSurface(panel, item)} />}
+        {tight && (
+          <CountMenu
+            items={items}
+            exited={exited.length}
+            onSelect={(item) => selectSurface(panel, item)}
+            onCloseExited={closeExited}
+          />
+        )}
         {!phone && (
           <PanelButton
             label={maximized ? t('common:pane.restore') : t('common:pane.maximize')}
@@ -998,6 +1128,7 @@ function SurfaceTab({
   projectPath,
   item,
   index,
+  tip,
   onSelect,
   onClose,
   onCloseOthers,
@@ -1007,6 +1138,8 @@ function SurfaceTab({
   projectPath: string
   item: SurfaceItem
   index: number
+  /** The row's tooltip, which the tab's button opens with the tab's key. */
+  tip: TooltipPrimitive.Handle<string>
   onSelect: () => void
   onClose: () => void
   /** Null where the row has no other tab, or none after this one. */
@@ -1029,11 +1162,6 @@ function SurfaceTab({
   )
   const terminal = item.terminal
   const split = useTerminalsStore((s) => (terminal ? !!s.split[panel] : false))
-
-  // A full row scrolls; a tab selected out of sight, such as one an agent opens, comes into view.
-  useEffect(() => {
-    if (item.selected) button.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [item.selected])
 
   useEffect(() => {
     if (editing || !refocus.current) return
@@ -1066,6 +1194,7 @@ function SurfaceTab({
       <ContextMenuTrigger
         ref={ref}
         className="kp-stab"
+        data-key={item.key}
         data-kind={item.kind}
         data-selected={item.selected || undefined}
         data-control={item.control ?? undefined}
@@ -1075,12 +1204,14 @@ function SurfaceTab({
         data-preview={item.preview || undefined}
       >
         {/* Stays mounted while renaming, hidden under the input, so the tab keeps its width. */}
-        <button
+        <TooltipTrigger
           ref={setButton}
+          handle={tip}
+          payload={item.key}
+          disabled={editing}
           type="button"
           role="tab"
           aria-selected={item.selected}
-          title={item.title}
           onClick={onSelect}
           onDoubleClick={() => (terminal ? setEditing(true) : keepDoc(panel, item.key))}
           onAuxClick={(event) => event.button === 1 && onClose()}
@@ -1111,7 +1242,7 @@ function SurfaceTab({
               data-tone={item.dot.tone}
             />
           )}
-        </button>
+        </TooltipTrigger>
         {editing ? (
           <TabNameInput
             initial={item.name}
@@ -1385,16 +1516,72 @@ function DeviceItems({
 
 const KIND_ORDER = ['terminal', 'browser', 'devices', 'panes'] as const
 
-/** The count at the row's end while only icons fit: every tab by kind, the shown one checked. */
+/**
+ * The count at the row's end while only icons fit: every tab by kind with what it is doing, the
+ * shown one checked. A long list takes a filter, and terminals that ended close from its foot.
+ */
 function CountMenu({
   items,
+  exited,
   onSelect,
+  onCloseExited,
 }: {
   items: SurfaceItem[]
+  /** How many terminals ended, which Close exited terminals closes. */
+  exited: number
   onSelect: (item: SurfaceItem) => void
+  onCloseExited: () => void
 }) {
   const { t } = useTranslation(['shell', 'browser'])
-  return (
+  const filtering = items.length > FILTER_FROM
+  // The filter hides every item that does not match it, Close exited terminals too, so that item
+  // and the line above it wait for an empty query.
+  const [query, setQuery] = useState('')
+  const groups = KIND_ORDER.map((kind) => {
+    const own = items.filter((item) =>
+      kind === 'panes' ? !isSurfaceKind(item.kind) : item.kind === kind,
+    )
+    if (own.length === 0) return null
+    return (
+      <DropdownMenuGroup key={kind}>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>{t(`shell:surfaces.kinds.${kind}`)}</DropdownMenuLabel>
+        {own.map((item) => (
+          <DropdownMenuItem
+            key={item.key}
+            label={[item.name, item.note, item.detail].filter(Boolean).join(' ')}
+            onClick={() => onSelect(item)}
+          >
+            <span className="kp-tablist__mark">{item.icon}</span>
+            <span className="kp-tablist__text">
+              <span className="kp-tablist__name">
+                {item.name}
+                {item.note && <span className="kp-stab__note"> {item.note}</span>}
+              </span>
+              {item.detail && <span className="kp-tablist__note">{item.detail}</span>}
+            </span>
+            {item.code !== null && (
+              <span className="kp-stab__code" data-failed={item.code !== 0 || undefined}>
+                {item.code}
+              </span>
+            )}
+            {item.dot && (
+              <span
+                role="img"
+                aria-label={item.dot.label}
+                className="kp-stab__dot"
+                data-tone={item.dot.tone}
+              />
+            )}
+            {item.selected && (
+              <PaneIcon icon={Tick02Icon} size={14} className="kp-tablist__check" />
+            )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuGroup>
+    )
+  })
+  const menu = (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
@@ -1410,34 +1597,47 @@ function CountMenu({
         <PaneIcon icon={ArrowDown01Icon} size={12} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="kp-tablist">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>{t('browser:tabs.count', { count: items.length })}</DropdownMenuLabel>
-        </DropdownMenuGroup>
-        {KIND_ORDER.map((kind) => {
-          const own = items.filter((item) =>
-            kind === 'panes' ? !isSurfaceKind(item.kind) : item.kind === kind,
-          )
-          if (own.length === 0) return null
-          return (
-            <DropdownMenuGroup key={kind}>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel>{t(`shell:surfaces.kinds.${kind}`)}</DropdownMenuLabel>
-              {own.map((item) => (
-                <DropdownMenuItem key={item.key} onClick={() => onSelect(item)}>
-                  <span className="kp-tablist__mark">{item.icon}</span>
-                  <span className="kp-tablist__text">
-                    <span className="kp-tablist__name">{item.name}</span>
-                  </span>
-                  {item.selected && (
-                    <PaneIcon icon={Tick02Icon} size={14} className="kp-tablist__check" />
-                  )}
-                </DropdownMenuItem>
-              ))}
+        {filtering ? (
+          <>
+            <label className="kp-tablist__find">
+              <PaneIcon icon={Search01Icon} size={14} />
+              <MenuPrimitive.Input
+                placeholder={t('shell:surfaces.filter', { count: items.length })}
+                aria-label={t('shell:surfaces.filter', { count: items.length })}
+                spellCheck={false}
+              />
+            </label>
+            <DropdownMenuList>{groups}</DropdownMenuList>
+            <MenuPrimitive.Empty className="kp-tablist__empty">
+              {t('shell:surfaces.noMatch')}
+            </MenuPrimitive.Empty>
+          </>
+        ) : (
+          <>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>
+                {t('browser:tabs.count', { count: items.length })}
+              </DropdownMenuLabel>
             </DropdownMenuGroup>
-          )
-        })}
+            {groups}
+          </>
+        )}
+        {exited > 0 && !query.trim() && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onCloseExited}>
+              <PaneIcon icon={CancelCircleIcon} size={16} />
+              {t('shell:surfaces.closeExited', { count: exited })}
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+  return filtering ? (
+    <MenuPrimitive.FilterProvider onValueChange={setQuery}>{menu}</MenuPrimitive.FilterProvider>
+  ) : (
+    menu
   )
 }
 

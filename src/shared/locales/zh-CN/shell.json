@@ -157,7 +157,13 @@
     "shared": "{{agent}} 能用",
     "news": "有新动静",
     "closeOthers": "关闭其他",
-    "closeRight": "关闭右边的"
+    "closeRight": "关闭右边的",
+    "scrollStart": "向左滚动标签",
+    "scrollEnd": "向右滚动标签",
+    "filter": "在 {{count}} 个标签里查找",
+    "noMatch": "没有匹配的标签",
+    "closeExited_one": "关闭已退出的终端（{{count}} 个）",
+    "closeExited_other": "关闭已退出的终端（{{count}} 个）"
   },
   "turnNotice": {
     "open": "打开",

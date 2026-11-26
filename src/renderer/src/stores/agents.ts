@@ -46,6 +46,10 @@ export interface AgentsStore extends HostAgents {
    * before the host reports a task, and a second click does not ask again.
    */
   pending: Partial<Record<AgentId, AgentTask['kind']>>
+  /** Huli: harnesses this window is uninstalling, from the click until their agents are gone. */
+  uninstalling: Partial<Record<AgentId, true>>
+  /** Huli: why the last uninstall of a harness this window asked for failed, until the next. */
+  uninstallErrors: Partial<Record<AgentId, string>>
   setAll(statuses: AgentStatus[]): void
   setOne(status: AgentStatus): void
   /** An added agent the user removed; its sessions stay. */
@@ -87,6 +91,8 @@ export function createAgentsStore(request: HostRequest): AgentsStoreHook {
     updated: {},
     taskErrors: {},
     pending: {},
+    uninstalling: {},
+    uninstallErrors: {},
     setAll(statuses) {
       set({ ...listOf(statuses), loaded: true })
     },
@@ -273,7 +279,7 @@ export function forgetHostAgents(hostId: string): void {
   })
 }
 
-function without<T>(
+export function without<T>(
   record: Partial<Record<AgentId, T>>,
   agentId: AgentId,
 ): Partial<Record<AgentId, T>> {

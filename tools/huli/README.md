@@ -899,6 +899,43 @@ an uninstall marks the harness `uninstalled`, as Settings › Harness's own unin
 - Tests: `src/agent-host/agent-removal/*.test.ts` (fake disks of each platform, temp folders, a
   fake npm through cmd.exe), and the requests in `validate.test.ts`.
 
+### Uninstalling without waiting (卸载不再卡住)
+
+Settings › Harness › Uninstall… once deleted Kite's install of the harness before it answered: on
+Windows with a virus scan, DeepSeek Harness's 95,000 node_modules files (1.4 GB) took about 40 s,
+the confirmation sat on its greyed button, and a second click raced the first into EPERM. Now:
+
+- The host (`AgentManager.uninstall`) stops the harness's processes, renames `<harnesses>/<id>` to
+  `<harnesses>/.trash-<random>` in one step and answers; the files go in the background
+  (`src/agent-host/discard.ts`): one folder after another, a subtree at a time rather than one
+  `rm` that queues every delete at once, and EPERM, EBUSY or ENOTEMPTY are tried again after 1, 5,
+  15, 30 and 60 s. A quit leaves the rest, which goes once the next host start has answered
+  `host:ready` (`agents.sweepTrash`). Measured in a test copy: the request took 37.5 s before and
+  about 55 ms after (the dialog to the uninstalled page about 150 ms); the delete behind it ran
+  50-70 s.
+- A second uninstall while one runs gets the first one's answer; an install, update, reinstall or
+  start of the harness meanwhile is refused (`agent.uninstall.running`), and an uninstall while an
+  install runs is refused as before. If a file stays held after the rename's ~3 s of retries (a
+  program run from the folder outside Kite), the harness's processes are stopped again, those whose
+  stop gave up too, it is tried for ~7 s more, and the user is told what holds it
+  (`agent.uninstall.inUse`); the folder stays whole.
+- The confirmation closes at once. The harness's page row and its line in the list say 正在卸载…
+  (a renderer state in the host's agents store, `features/settings/harness-uninstall.ts`), then
+  show it uninstalled, or the reason in the row; the button cannot be pressed twice. The page stays
+  open and an uninstalled harness shows its own notice alone, without a second Install notice.
+- The same route: older versions an update replaces (`removeStaleInstalls`, `removeStaleArchives`;
+  one still in use stays whole for a later start rather than going half), a reinstall's install
+  (`removeInstall`), Kite's own folder in Remove from this computer (never to the system's trash:
+  it holds only what Install downloads again), and the Moli and Node.js removals. Install folders
+  are listed without `.trash-` names. The removal and reset plans count a folder for at most 2 s
+  (`sizeOf`) and show no size past that: counting the same harness had kept the Remove dialog on its
+  loading lines for 25 s. The sandbox image goes through its engine and the recycle bin's purge
+  already deletes checkpoints in the background, so neither changed; the phone's harness page
+  already closed its confirmation and showed 正在卸载….
+- Tests: `discard.test.ts` (the rename, its retries, the background delete's EPERM retries, links
+  removed as links, the start's sweep), `harness-install.test.ts` (uninstalling a harness: answers
+  before the delete, joined requests, refused installs, a file in use) and `agent-removal/run.test.ts`.
+
 ### Deleting the agent's own copy
 
 A session deleted in Kite is deleted from the agent's own history too, so neither its own CLI and
