@@ -2426,6 +2426,20 @@ and reports waiting together are one item, `from.reports` listing each turn (`qu
 queue as a 回报 row with 现在就告诉它 and 移除 only. The fake agent's `/delegate --count <1-3> --ask`
 starts sessions and reads on; simulator flow `86-reports`.
 
+### Long replies between sessions (长回复分段读取)
+
+Upstream's `get_session` cuts another session's latest reply to 8 KB and says only in the result's
+text, which agents that take the structured value never see, that `read_session_history` reads
+more; that tool cuts each turn to 24 KB in turn. An agent then asked the other one to send its
+review again in parts, spending that session's turns and the user's quota. Kite gives a long reply
+in parts: `get_session` takes `offset` and returns up to 16 KB (`LAST_REPLY_BYTES`), cut after a
+line when one ends in the part's second half, with `next_offset`, `reply_chars` and `read_more`
+(the call that reads the next part) in the structured value and the text alike, and
+`read_session_history` takes `turn` and `offset` to read one long turn the same way (`textPart` in
+`src/agent-host/session-tools.ts`). The hints hold Kite's own words, the session id and a number,
+never the reply's text. The sessions topic and the MCP server instructions tell agents to read on
+rather than ask for a resend. Tests in `session-tools.test.ts`.
+
 ### Concise thread (简洁视图)
 
 A session's More menu › 工具调用 (kept on this device) and Settings › 通用 › 对话 (the default,
