@@ -36,9 +36,9 @@
     "workflowFile": "来自文件的工作流…",
     "workflowFileLine": "这台电脑上的一个 .yaml 文件",
     "pluginGithub": "来自 GitHub 的插件…",
-    "pluginGithubLine": "一个仓库，或仓库中的一个文件夹",
+    "pluginGithubLine": "纸鸢、Claude Code 或 Codex 插件，或插件市场",
     "pluginFolder": "来自文件夹的插件…",
-    "pluginFolderLine": "含有 plugin.json 的文件夹，用来开发插件"
+    "pluginFolderLine": "开发中的纸鸢插件，或 Claude Code、Codex 插件"
   },
   "sections": {
     "featured": "精选",
@@ -338,8 +338,8 @@
     "skillsTitle": "没有可显示的技能",
     "skills": "技能目录是空的。可以用“添加”从 GitHub 或文件夹加入技能。",
     "pluginsTitle": "没有可显示的插件",
-    "plugins": "纸鸢没有接入官方的在线插件目录，所以这里不列推荐插件。可以用右上角的「添加」从 GitHub 链接或本地文件夹安装插件，装好的在「已安装」里管理。",
-    "pluginsWeb": "纸鸢没有接入官方的在线插件目录，所以这里不列推荐插件。可以用右上角的「添加」从 GitHub 链接安装插件，装好的在「已安装」里管理。"
+    "plugins": "没能读到 GitHub 上的插件列表。检查网络或代理后点「刷新」；也可以用右上角的「添加」从 GitHub 链接或本地文件夹安装插件。",
+    "pluginsWeb": "没能读到 GitHub 上的插件列表。检查网络或代理后点「刷新」；也可以用右上角的「添加」从 GitHub 链接安装插件。"
   },
   "plugin": {
     "installs_one": "{{value}} 次安装",
@@ -446,7 +446,8 @@
       "noScript": "它添加上面的内容，不运行任何代码。",
       "hooksTitle": "钩子",
       "hooks": "它的钩子是为其他工具写的，Kettu 不会运行。",
-      "warnings": "已略过：{{list}}"
+      "warnings": "已略过：{{list}}",
+      "runsServers": "它自己不运行脚本。智能体用到它的 MCP 服务器时，会在这台电脑上运行上面列出的程序。"
     },
     "update": {
       "title": "把 {{name}} 更新到 {{version}}",
@@ -463,12 +464,18 @@
     },
     "add": {
       "githubTitle": "添加来自 GitHub 的插件",
-      "githubDescription": "Kettu 会先读取插件，在安装任何东西之前告诉你它添加什么、能做什么。",
+      "githubDescription": "可以是纸鸢插件、Claude Code 或 Codex 插件，也可以是插件市场。纸鸢会先读取它，在安装任何东西之前告诉你它添加什么、能做什么；Claude Code 和 Codex 插件会转换成纸鸢插件。",
       "url": "地址",
       "urlHint": "github.com 上的仓库，或仓库中的一个文件夹。",
       "urlInvalid": "请输入 github.com 上的地址。",
       "urlPlaceholder": "https://github.com/owner/repo",
-      "githubSubmit": "继续"
+      "githubSubmit": "继续",
+      "marketTitle": "{{name}} 是一个插件市场",
+      "marketLine_other": "它列出了 {{count}} 个纸鸢能从 GitHub 安装的插件。选一个，安装之前会先告诉你它添加什么。",
+      "marketEmpty": "它没有列出纸鸢能从 GitHub 安装的插件。",
+      "marketSearch": "搜索这个插件市场",
+      "marketMore_other": "还有 {{count}} 个，搜索可以缩小范围。",
+      "back": "返回"
     },
     "toast": {
       "inspectFailed": "无法读取插件：{{error}}",
@@ -481,7 +488,8 @@
       "upToDate": "{{name}} 已是最新版本",
       "rollBackFailed": "无法回退 {{name}}：{{error}}",
       "rolledBack": "{{name}} 已回退到 {{version}}",
-      "installedSetup": "已安装 {{name}}。填好 {{what}} 就能用了。"
+      "installedSetup": "已安装 {{name}}。填好 {{what}} 就能用了。",
+      "linkFailed": "无法读取这个链接：{{error}}"
     },
     "tags": {
       "skill_other": "{{count}} 个技能",
@@ -585,6 +593,24 @@
       "save": "保存",
       "cancel": "取消",
       "placeholder": "粘贴密钥"
+    },
+    "converted": {
+      "from": "这是 {{harness}} 插件，已转换成纸鸢插件。上面列出的是转换后它会添加的东西。",
+      "harness": {
+        "claude-code": "Claude Code",
+        "codex": "Codex"
+      },
+      "leftOut_other": "有 {{count}} 项没带过来",
+      "changed": "转换时改动的",
+      "kind": {
+        "hook": "钩子",
+        "command": "命令",
+        "agent": "智能体",
+        "server": "MCP 服务器",
+        "skill": "技能",
+        "file": "文件"
+      },
+      "fromNothing": "这是 {{harness}} 插件。转换成纸鸢插件时，下面这些都没能带过来。"
     }
   },
   "skill": {
@@ -1306,5 +1332,15 @@
       "skill-link": "技能文件夹里有链接，纸鸢不复制链接（{{detail}}）",
       "skill-too-large": "技能文件夹太大，无法复制"
     }
+  },
+  "directory": {
+    "readAt": "插件列表来自 GitHub，{{ago}}读取。Claude Code 和 Codex 插件会在安装时转换成纸鸢插件。",
+    "reading": "正在从 GitHub 读取插件列表…",
+    "refresh": "刷新",
+    "failed": "无法读取{{source}}：{{error}}",
+    "failedStale": "无法重新读取{{source}}，下面的可能不是最新的：{{error}}",
+    "failedAll": "无法读取插件列表：{{error}}",
+    "harnessPlugin": "{{harness}} 插件",
+    "convertsHint": "安装时转换成纸鸢插件"
   }
 }

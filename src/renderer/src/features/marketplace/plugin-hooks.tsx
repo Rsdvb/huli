@@ -4,6 +4,7 @@
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { InstalledKettuPlugin, PluginPlan, PluginSource } from '@shared/plugins'
+import type { CatalogPluginRef } from '@shared/plugin-catalog'
 import { pluginItem } from '@shared/plugins'
 import { toast } from '@renderer/components/ui/toast'
 import { errorMessage } from '@renderer/lib/host'
@@ -38,7 +39,11 @@ export function usePluginInstall(): PluginInstall {
   const reading = useRef(new Set<string>())
   const start = async (
     source: PluginSource,
-    options: { meta?: PluginMeta; onInstalled?: (plugin: InstalledKettuPlugin) => void } = {},
+    options: {
+      meta?: PluginMeta
+      onInstalled?: (plugin: InstalledKettuPlugin) => void
+      catalog?: CatalogPluginRef
+    } = {},
   ): Promise<boolean> => {
     const key = sourceKey(source)
     if (reading.current.has(key)) return false
@@ -46,7 +51,7 @@ export function usePluginInstall(): PluginInstall {
     const market = scope.useMarketplaceStore
     markBusy(market, pluginBusy(key), true)
     try {
-      const plan = await inspectPlugin(scope, source)
+      const plan = await inspectPlugin(scope, source, options.catalog)
       setWaiting({ plan, meta: options.meta ?? {}, onInstalled: options.onInstalled })
       return true
     } catch (error) {

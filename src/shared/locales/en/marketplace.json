@@ -36,9 +36,9 @@
     "workflowFile": "A workflow from a file…",
     "workflowFileLine": "A .yaml file on this computer",
     "pluginGithub": "A plugin from GitHub…",
-    "pluginGithubLine": "A repository, or a folder in one",
+    "pluginGithubLine": "Kite, Claude Code or Codex plugins, or a marketplace",
     "pluginFolder": "A plugin from a folder…",
-    "pluginFolderLine": "A folder with a plugin.json, for developing one"
+    "pluginFolderLine": "A Kite plugin to develop, or a Claude Code or Codex plugin"
   },
   "sections": {
     "featured": "Featured",
@@ -339,8 +339,8 @@
     "skillsTitle": "No skills to show",
     "skills": "The skills catalog is empty. Add a skill from GitHub or a folder with Add.",
     "pluginsTitle": "No plugins to show",
-    "plugins": "Kite doesn't read Kettu's online plugin directory, so nothing is listed here. Use Add to install a plugin from a GitHub link or a folder; manage installed ones under Installed.",
-    "pluginsWeb": "Kite doesn't read Kettu's online plugin directory, so nothing is listed here. Use Add to install a plugin from a GitHub link; manage installed ones under Installed."
+    "plugins": "The plugin lists from GitHub couldn’t be read. Check the network or proxy and press Refresh, or use Add to install a plugin from a GitHub link or a folder.",
+    "pluginsWeb": "The plugin lists from GitHub couldn’t be read. Check the network or proxy and press Refresh, or use Add to install a plugin from a GitHub link."
   },
   "plugin": {
     "installs_one": "{{value}} install",
@@ -459,7 +459,8 @@
       "noScript": "It adds the items above and runs no code.",
       "hooksTitle": "Hooks",
       "hooks": "Its hooks are written for other tools. Kettu doesn’t run them.",
-      "warnings": "Left out: {{list}}"
+      "warnings": "Left out: {{list}}",
+      "runsServers": "It runs no script of its own. Its MCP servers run the programs above on this computer when an agent uses them."
     },
     "update": {
       "title": "Update {{name}} to {{version}}",
@@ -477,12 +478,20 @@
     },
     "add": {
       "githubTitle": "Add a plugin from GitHub",
-      "githubDescription": "Kettu reads the plugin and shows what it adds and may do before anything is installed.",
+      "githubDescription": "A Kite plugin, a Claude Code or Codex plugin, or a plugin marketplace. Kite reads it first and shows what it adds and can do before anything is installed; Claude Code and Codex plugins are converted into Kite plugins.",
       "url": "Address",
       "urlHint": "A repository, or a folder in one, on github.com.",
       "urlInvalid": "Enter an address on github.com.",
       "urlPlaceholder": "https://github.com/owner/repo",
-      "githubSubmit": "Continue"
+      "githubSubmit": "Continue",
+      "marketTitle": "{{name}} is a plugin marketplace",
+      "marketLine_one": "It lists {{count}} plugin Kite can install from GitHub. Pick it to see what it adds before anything is installed.",
+      "marketLine_other": "It lists {{count}} plugins Kite can install from GitHub. Pick one to see what it adds before anything is installed.",
+      "marketEmpty": "It lists no plugin Kite can install from GitHub.",
+      "marketSearch": "Search this marketplace",
+      "marketMore_one": "{{count}} more. Search to narrow the list.",
+      "marketMore_other": "{{count}} more. Search to narrow the list.",
+      "back": "Back"
     },
     "toast": {
       "inspectFailed": "Couldn’t read the plugin: {{error}}",
@@ -495,7 +504,8 @@
       "upToDate": "{{name}} is up to date",
       "rollBackFailed": "Couldn’t roll {{name}} back: {{error}}",
       "rolledBack": "{{name}} rolled back to {{version}}",
-      "installedSetup": "{{name}} installed. Set the {{what}} to start using it."
+      "installedSetup": "{{name}} installed. Set the {{what}} to start using it.",
+      "linkFailed": "Couldn’t read this link: {{error}}"
     },
     "tags": {
       "skill_one": "{{count}} skill",
@@ -608,6 +618,25 @@
       "save": "Save",
       "cancel": "Cancel",
       "placeholder": "Paste the secret"
+    },
+    "converted": {
+      "from": "This is a {{harness}} plugin, converted into a Kite plugin. The list above is what the converted plugin adds.",
+      "harness": {
+        "claude-code": "Claude Code",
+        "codex": "Codex"
+      },
+      "leftOut_one": "{{count}} part left out",
+      "leftOut_other": "{{count}} parts left out",
+      "changed": "Changed on the way",
+      "kind": {
+        "hook": "Hook",
+        "command": "Command",
+        "agent": "Agent",
+        "server": "MCP server",
+        "skill": "Skill",
+        "file": "File"
+      },
+      "fromNothing": "This is a {{harness}} plugin. Converting it into a Kite plugin left out everything below."
     }
   },
   "skill": {
@@ -1336,5 +1365,15 @@
       "skill-link": "The skill folder holds a link, which Kite does not copy ({{detail}})",
       "skill-too-large": "The skill folder is too large to copy"
     }
+  },
+  "directory": {
+    "readAt": "Plugins listed from GitHub, read {{ago}}. Claude Code and Codex plugins are converted into Kite plugins when installed.",
+    "reading": "Reading the plugin lists from GitHub…",
+    "refresh": "Refresh",
+    "failed": "Couldn’t read {{source}}: {{error}}",
+    "failedStale": "Couldn’t read {{source}} again, so the list below may be out of date: {{error}}",
+    "failedAll": "Couldn’t read the plugin lists: {{error}}",
+    "harnessPlugin": "{{harness}} plugin",
+    "convertsHint": "Converted into a Kite plugin when installed"
   }
 }
