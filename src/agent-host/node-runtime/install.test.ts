@@ -88,7 +88,9 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
-  await rm(root, { recursive: true, force: true })
+  // The trash a prune moved aside is still being deleted in the background, which Windows can
+  // hold for a moment.
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
 })
 
 /** What the system's tar would leave: the archive's one folder, with its node. */
