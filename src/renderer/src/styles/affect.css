@@ -7556,6 +7556,7 @@ li[data-row-exit='dust'] > * {
   .kettu-queue__card:is(:hover, :focus-visible)
   > :is(
     .kettu-queue__n,
+    .kettu-queue__tag,
     .kettu-queue__text,
     .kettu-queue__from,
     .kettu-queue__paused,
@@ -7603,6 +7604,17 @@ li[data-row-exit='dust'] > * {
   flex: none;
   font-size: 12px;
   color: var(--composer-faint);
+}
+/* Huli: a report Kettu queued, which is no message of the user's. */
+.kettu-queue__tag {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 0.5px var(--composer-line-strong);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--composer-muted);
 }
 .kettu-queue__paused {
   display: inline-flex;

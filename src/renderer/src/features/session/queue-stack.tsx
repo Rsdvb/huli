@@ -7,8 +7,14 @@ import {
   type ReactNode,
 } from 'react'
 import { ArrowUp01Icon, Cancel01Icon, PencilEdit02Icon } from '@hugeicons/core-free-icons'
-import { useTranslation } from 'react-i18next'
-import type { Attachment, QueuedPrompt, SessionView } from '@shared/thread'
+import { Trans, useTranslation } from 'react-i18next'
+import {
+  reportedTurns,
+  type Attachment,
+  type QueuedPrompt,
+  type ReportedTurn,
+  type SessionView,
+} from '@shared/thread'
 import { emitAppEvent } from '@renderer/app/events'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { errorMessage, host } from '@renderer/lib/host'
@@ -16,7 +22,7 @@ import { agentsOn, useAgentsStore } from '@renderer/stores/agents'
 import { hostOfSession } from '@renderer/stores/sessions'
 import { restoreAttachments } from './composer/attachments'
 import { Glyph } from '@renderer/features/shell/glyph'
-import { reportSentence } from './entries/helpers'
+import { reportState } from './entries/helpers'
 
 function promptText(item: QueuedPrompt): string {
   return item.content
@@ -280,11 +286,15 @@ export function QueueStack({
         const p = place(i)
         // A report is drawn from its fields, as in the thread, not from the sentence the agent gets,
         // and a message of comments from its summary, not from the quotes it sends.
-        const text = item.from?.ended
-          ? reportSentence(item.from.ended)
-          : item.comments
-            ? t('queue.comments', { count: item.comments.count, text: item.comments.text })
-            : promptText(item)
+        const turns = reportedTurns(item.from)
+        const report = turns.length > 0
+        const text = report ? (
+          <ReportText turns={turns} />
+        ) : item.comments ? (
+          t('queue.comments', { count: item.comments.count, text: item.comments.text })
+        ) : (
+          promptText(item)
+        )
         const attachments = queuedAttachments(item).length
         return (
           <div
@@ -314,6 +324,7 @@ export function QueueStack({
             <span className="kettu-queue__n" aria-hidden>
               {i + 1}
             </span>
+            {report && <span className="kettu-queue__tag">{t('sessionReport.tag')}</span>}
             <span className="kettu-queue__text">
               {text || (attachments === 0 && t('queue.attachment'))}
               {attachments > 0 && (
@@ -328,7 +339,7 @@ export function QueueStack({
                 {t('queue.from', { device: item.device.name })}
               </span>
             )}
-            {item.from && (
+            {item.from && !report && (
               <span className="kettu-queue__from">
                 {t('queue.fromSession', { title: item.from.title })}
               </span>
@@ -352,16 +363,23 @@ export function QueueStack({
               <span className="kettu-queue__actions">
                 {running && (
                   <QueueAction
-                    label={t('queue.sendNow')}
-                    tip={t(steering ? 'queue.steer' : 'queue.stopAndSend')}
+                    label={t(report ? 'sessionReport.tellNow' : 'queue.sendNow')}
+                    tip={
+                      report
+                        ? t(steering ? 'sessionReport.tellNowSteer' : 'sessionReport.tellNowStop')
+                        : t(steering ? 'queue.steer' : 'queue.stopAndSend')
+                    }
                     onClick={() => sendNow(item)}
                   >
                     <ReturnGlyph />
                   </QueueAction>
                 )}
-                <QueueAction label={t('queue.edit')} onClick={() => edit(item)}>
-                  <Glyph icon={PencilEdit02Icon} size={14} />
-                </QueueAction>
+                {/* Huli: a report is Kettu's, not words of the user's to edit. */}
+                {!report && (
+                  <QueueAction label={t('queue.edit')} onClick={() => edit(item)}>
+                    <Glyph icon={PencilEdit02Icon} size={14} />
+                  </QueueAction>
+                )}
                 <QueueAction label={t('queue.remove')} onClick={() => remove(item)}>
                   <Glyph icon={Cancel01Icon} size={14} />
                 </QueueAction>
@@ -371,6 +389,24 @@ export function QueueStack({
         )
       })}
     </div>
+  )
+}
+
+/** Huli: a waiting report's words: whose turn ended and how, or how many and whose. */
+function ReportText({ turns }: { turns: readonly ReportedTurn[] }) {
+  const { t } = useTranslation('session')
+  const first = turns[0]!
+  if (turns.length > 1) {
+    const titles = turns.map((turn) => turn.title).join(t('sessionReport.separator'))
+    return t('sessionReport.manyTitles', { count: turns.length, titles })
+  }
+  return (
+    <Trans
+      t={t}
+      i18nKey={`sessionReport.line.${reportState(first.stopReason)}`}
+      values={{ title: first.title }}
+      components={{ title: <span /> }}
+    />
   )
 }
 

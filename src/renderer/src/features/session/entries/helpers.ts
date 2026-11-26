@@ -3,7 +3,6 @@ import {
   entryMessageId,
   type FormValues,
   type FromDevice,
-  type FromSession,
   type PermissionKind,
   type QuestionAnswer,
   type SessionStatus,
@@ -495,21 +494,21 @@ export function stopReasonText(stopReason: StopReason, durationMs: number): stri
   }
 }
 
-/** The words of a report of a turn the session asked another one for, from how it ended. */
-export function reportSentence(ended: NonNullable<FromSession['ended']>): string {
-  const agent = ended.agent || i18n.t('session:sessionReport.agent')
-  switch (ended.stopReason) {
+/** Huli: how a turn the session asked another one for ended, as a report's words key it. */
+export type ReportState = 'finished' | 'stopped' | 'failed' | 'limit' | 'refusal'
+
+export function reportState(stopReason: StopReason | null): ReportState {
+  switch (stopReason) {
     case 'end_turn':
-      return i18n.t('session:sessionReport.finished', { agent })
+      return 'finished'
     case 'cancelled':
-      return i18n.t('session:sessionReport.stopped', { agent })
+      return 'stopped'
+    case 'refusal':
+      return 'refusal'
     case null:
-      return i18n.t('session:sessionReport.failed', { agent })
+      return 'failed'
     default:
-      return i18n.t('session:sessionReport.failedWith', {
-        agent,
-        reason: stopReasonText(ended.stopReason, 0),
-      })
+      return 'limit'
   }
 }
 

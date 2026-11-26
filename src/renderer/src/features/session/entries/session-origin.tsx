@@ -7,15 +7,15 @@ import {
   StopCircleIcon,
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import type { FromSession, StopReason } from '@shared/thread'
+import { reportedTurns, type FromSession, type ReportedTurn, type StopReason } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { BrandIcon } from '@renderer/components/brand'
 import { cn } from '@renderer/lib/utils'
 import { hostOfSession, sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
 import { openSession } from '@renderer/stores/view'
-import { reportSentence } from './helpers'
+import { reportState, type ReportState } from './helpers'
 import { TurnEndTag } from './turn-end-tag'
 
 /** The session a message or report came from, while Kettu still holds it. */
@@ -89,59 +89,121 @@ export function KettuCard({ children }: { children: ReactNode }) {
 
 /**
  * Kettu's report that a turn the session asked for ended: an event line like the thread's other
- * ones, since it is not something anyone said. It is drawn from the report's fields, never from
- * the sentence the agent was sent.
+ * ones, since it is not something anyone said, which says the agent was told. It is drawn from
+ * the report's fields, never from the sentence the agent was sent. Huli: a report of several
+ * turns names each session under it.
  */
 export function ReportLine({
   from,
-  ended,
   end,
   className,
 }: {
   from: FromSession
-  ended: NonNullable<FromSession['ended']>
   /** How the turn the report started ended, when it got no reply. */
   end?: { stopReason: StopReason; durationMs: number }
   className?: string
 }) {
-  useTranslation('session')
-  const sender = useSender(from.sessionId)
-  const title = sender?.title ?? from.title
-  const done = ended.stopReason === 'end_turn'
-  const stopped = ended.stopReason === 'cancelled'
+  const { t } = useTranslation('session')
+  const turns = reportedTurns(from)
+  const first = turns[0]
+  const sender = useSender(first?.sessionId ?? '')
+  if (!first) return null
+  const many = turns.length > 1
+  const state = many ? worstState(turns) : reportState(first.stopReason)
   return (
     <div className={cn('flex flex-col', className)} data-selectable="">
       <div className="flex min-h-6 min-w-0 items-center gap-2 text-ui text-muted-foreground">
-        <HugeiconsIcon
-          icon={done ? CheckmarkCircle02Icon : stopped ? StopCircleIcon : AlertCircleIcon}
-          strokeWidth={1.9}
-          aria-hidden
-          className={cn(
-            'size-3.5 shrink-0',
-            done && 'text-success',
-            !done && !stopped && 'text-danger',
-          )}
-        />
-        <span className="shrink-0">{reportSentence(ended)}</span>
-        {sender ? (
-          <button
-            type="button"
-            className="flex min-w-0 items-center gap-1 rounded-sm font-medium text-foreground outline-none hover:underline focus-visible:underline"
-            onClick={() => openSession(sender.id, sender.projectPath)}
-          >
-            <span className="truncate">{title}</span>
-            <HugeiconsIcon
-              icon={ArrowUpRight01Icon}
-              strokeWidth={1.9}
-              aria-hidden
-              className="size-3 shrink-0 text-muted-foreground"
+        <ReportIcon state={state} />
+        <span className="min-w-0 truncate">
+          {many ? (
+            t('sessionReport.many', { count: turns.length })
+          ) : (
+            <Trans
+              t={t}
+              i18nKey={`sessionReport.line.${state}`}
+              values={{ title: sender?.title ?? first.title }}
+              components={{ title: <SessionLink sender={sender} /> }}
             />
-          </button>
-        ) : (
-          <span className="min-w-0 truncate font-medium">{title}</span>
-        )}
+          )}
+          <span aria-hidden> · </span>
+          {t('sessionReport.told')}
+        </span>
       </div>
+      {many && (
+        <ul className="flex flex-col pl-5.5">
+          {turns.map((turn) => (
+            <ReportedRow key={turn.sessionId} turn={turn} />
+          ))}
+        </ul>
+      )}
       {end && <TurnEndTag stopReason={end.stopReason} durationMs={end.durationMs} />}
     </div>
+  )
+}
+
+/** One session of a report of several: how its turn ended, and its title, which opens it. */
+function ReportedRow({ turn }: { turn: ReportedTurn }) {
+  const { t } = useTranslation('session')
+  const sender = useSender(turn.sessionId)
+  const state = reportState(turn.stopReason)
+  return (
+    <li className="flex min-h-6 min-w-0 items-center gap-2 text-ui text-muted-foreground">
+      <ReportIcon state={state} />
+      <span className="min-w-0 truncate">
+        <SessionLink sender={sender}>{sender?.title ?? turn.title}</SessionLink>
+      </span>
+      <span className="shrink-0">{t(`sessionReport.state.${state}`)}</span>
+    </li>
+  )
+}
+
+/** The state a report of several turns leads with: a failure first, then a stop. */
+function worstState(turns: readonly ReportedTurn[]): ReportState {
+  const states = turns.map((turn) => reportState(turn.stopReason))
+  if (states.every((state) => state === 'finished')) return 'finished'
+  if (states.every((state) => state === 'finished' || state === 'stopped')) return 'stopped'
+  return 'failed'
+}
+
+function ReportIcon({ state }: { state: ReportState }) {
+  const done = state === 'finished'
+  const stopped = state === 'stopped'
+  return (
+    <HugeiconsIcon
+      icon={done ? CheckmarkCircle02Icon : stopped ? StopCircleIcon : AlertCircleIcon}
+      strokeWidth={1.9}
+      aria-hidden
+      className={cn(
+        'size-3.5 shrink-0',
+        done && 'text-success',
+        !done && !stopped && 'text-danger',
+      )}
+    />
+  )
+}
+
+/** A reported session's title, which opens it while Kettu still holds it. */
+function SessionLink({
+  sender,
+  children,
+}: {
+  sender: ReturnType<typeof useSender>
+  children?: ReactNode
+}) {
+  if (!sender) return <span className="font-medium">{children}</span>
+  return (
+    <button
+      type="button"
+      className="rounded-sm font-medium text-foreground outline-none hover:underline focus-visible:underline"
+      onClick={() => openSession(sender.id, sender.projectPath)}
+    >
+      {children}
+      <HugeiconsIcon
+        icon={ArrowUpRight01Icon}
+        strokeWidth={1.9}
+        aria-hidden
+        className="ml-0.5 inline-block size-3 align-middle text-muted-foreground"
+      />
+    </button>
   )
 }
