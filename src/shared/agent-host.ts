@@ -2465,6 +2465,13 @@ export interface HostContract {
     }
     result: void
   }
+  // Huli: 全部同意 / 全部拒绝 for the requests the user was shown (`permission-queue.ts`): each one
+  // still waiting that is a plain request gets its allow once or deny, an allow never a high one.
+  // The rest are skipped, to be answered on their own cards.
+  'permissions.respondAll': {
+    params: { sessionId: string; requestIds: string[]; decision: 'allow' | 'deny' }
+    result: { answered: string[]; skipped: string[] }
+  }
   // Reading the status also keeps the project live on the connection, until `git.unwatch`. A
   // client that watches a project from several screens gives each a `watcher` of its own, which
   // `git.unwatch` names, so one screen leaving leaves the others watching.
@@ -3384,6 +3391,7 @@ export const HOST_METHODS = [
   'tasks.saveWorkflow',
   'tasks.publishWorkflow',
   'permissions.respond',
+  'permissions.respondAll',
   'git.status',
   'git.unwatch',
   'git.fetch',

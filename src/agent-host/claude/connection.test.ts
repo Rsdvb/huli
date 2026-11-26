@@ -2723,6 +2723,47 @@ describe('permissions', () => {
     expect(await answer).toMatchObject({ behavior: 'deny' })
   })
 
+  // Claude Code runs the concurrency-safe calls of one message together, each asking on its own:
+  // each request waits for its own answer, which reaches only its own call.
+  it('asks for calls that run at once apart, each answered on its own in turn', async () => {
+    const read = (file: string, toolUseID: string, signal = new AbortController().signal) =>
+      s.sdk.last.options.canUseTool!('Read', { file_path: file }, { signal, toolUseID })
+    const cancel = new AbortController()
+    const first = read('/home/ada/a.txt', 'toolu_a')
+    const second = read('/home/ada/b.txt', 'toolu_b')
+    const third = read('/home/ada/c.txt', 'toolu_c', cancel.signal)
+    await settle()
+    expect(target.asked.map(({ request }) => request.toolEntryId)).toEqual([
+      't:toolu_a',
+      't:toolu_b',
+      't:toolu_c',
+    ])
+    let settled = ''
+    void first.then(() => (settled += 'a'))
+    void second.then(() => (settled += 'b'))
+    void third.then(() => (settled += 'c'))
+
+    target.asked[0]!.answer({ optionId: 'allow-once' })
+    expect(await first).toEqual({
+      behavior: 'allow',
+      updatedInput: { file_path: '/home/ada/a.txt' },
+      toolUseID: 'toolu_a',
+    })
+    await settle()
+    expect(settled).toBe('a')
+    expect(target.entry('t:toolu_a')).toMatchObject({ status: 'in_progress' })
+    expect(target.entry('t:toolu_b')).toMatchObject({ status: 'pending' })
+
+    target.asked[1]!.answer({ optionId: 'reject' })
+    expect(await second).toMatchObject({ behavior: 'deny', toolUseID: 'toolu_b' })
+    // The last one's call was cancelled before an answer: it is denied, and an answer after it
+    // reaches nothing.
+    cancel.abort(new Error('sibling failed'))
+    expect(await third).toMatchObject({ behavior: 'deny', toolUseID: 'toolu_c' })
+    expect(target.asked[2]!.signal.aborted).toBe(true)
+    expect(settled).toBe('abc')
+  })
+
   it("offers no always allow that Claude Code holds back, nor for a plan's approval", async () => {
     const suppressed = s.sdk.last.options.canUseTool!(
       'Bash',

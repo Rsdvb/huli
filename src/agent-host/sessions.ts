@@ -14,6 +14,7 @@ import {
 import type { AgentResetBusy } from '@shared/agent-reset'
 import type { DeviceAccessAnswer, DeviceAccessDecision } from '@shared/device-agent'
 import type { PublishVisibility } from '@shared/market-publish'
+import { bulkOption, requestQueue } from '@shared/permission-queue'
 import type { PermissionRelay } from '@shared/plugin-channels'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, realpath, stat } from 'node:fs/promises'
@@ -13657,7 +13658,8 @@ export class SessionManager {
       this.touch(live.id)
       return Promise.resolve({ optionId: auto })
     }
-    const requestId = `${this.requestPrefix}${++this.requestCounter}`
+    const number = ++this.requestCounter
+    const requestId = `${this.requestPrefix}${number}`
     const { elicitation } = request
     const plan = request.plan === undefined ? null : planRevision(live.thread, request.toolEntryId)
     const asked = live.thread.byId[request.toolEntryId]
@@ -13703,6 +13705,9 @@ export class SessionManager {
               ...(request.reason ? { reason: request.reason } : {}),
               ...(risk ? { risk } : {}),
               risky,
+              // Huli: its place in the queue the clients answer in turn; a request no turn waits
+              // on stands apart.
+              ...(request.nonBlocking ? {} : { queue: number }),
             },
             permissionResult: null,
             ...(plan ? { planVersion: plan.version } : {}),
@@ -13974,6 +13979,39 @@ export class SessionManager {
       }
     }
     this.respond(sessionId, requestId, { optionId }, undefined, relay)
+  }
+
+  /**
+   * Huli: 全部同意 / 全部拒绝: answers the requests the user was shown, among those the session's
+   * agent waits on, oldest first. Each still waiting that is a plain request gets its allow once
+   * or its deny; an allow never reaches a high request, and no answer reaches a question, a plan
+   * or a form, which are answered on their own cards. What it leaves comes back as skipped.
+   */
+  respondAll(
+    sessionId: string,
+    requestIds: readonly string[],
+    decision: 'allow' | 'deny',
+    device?: FromDevice,
+  ): { answered: string[]; skipped: string[] } {
+    this.recordOf(sessionId)
+    const live = this.live.get(sessionId)
+    if (!live) throw notFound(t('session.waiting.permission.gone'))
+    const asked = new Set(requestIds)
+    const queued = requestQueue(
+      [...live.permissions.values()].map(({ toolEntryId }) => live.thread.byId[toolEntryId]),
+    ).filter((entry) => asked.has(entry.permission.requestId))
+    const answered: string[] = []
+    for (const entry of queued) {
+      const optionId = bulkOption(entry, decision)
+      if (optionId === null) continue
+      const { requestId } = entry.permission
+      // An answer of the agent's own may have settled it on the way.
+      if (!live.permissions.has(requestId)) continue
+      this.respond(sessionId, requestId, { optionId }, device)
+      answered.push(requestId)
+    }
+    const done = new Set(answered)
+    return { answered, skipped: requestIds.filter((id) => !done.has(id)) }
   }
 
   /**
