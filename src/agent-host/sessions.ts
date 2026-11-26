@@ -120,6 +120,8 @@ import {
   coalescePatches,
   entryMessageId,
   harnessOf,
+  REPORTED_TURNS_MAX,
+  reportedTurns,
   retryableTurn,
   threadEntries,
   threadFromSnapshot,
@@ -143,6 +145,7 @@ import {
   type ProblemReportOutcome,
   type PlanItem,
   type QuestionAnswer,
+  type ReportedTurn,
   type SessionSnapshot,
   type QueuedComments,
   type SessionStatus,
@@ -361,7 +364,8 @@ import type {
 import { missedCache, type IdleRelease } from './idle-release'
 import {
   REPORT_LIMIT,
-  reportText,
+  reportOrigin,
+  reportsText,
   toolAgentStatus,
   type ToolChoices,
   type ToolDelivery,
@@ -1046,6 +1050,8 @@ interface Live {
    * its turn comes, by item id.
    */
   kettuQueued: Map<string, () => boolean>
+  /** Huli: the queued reports on their way into the running turn, which no other report joins. */
+  reportsSteering: Set<string>
   /** The last turn began with the user's own message, which owes no step report. */
   userTurn: boolean
   /** The message that gave the session its first title, for a written title, and its tries. */
@@ -4828,6 +4834,7 @@ export class SessionManager {
       heldFirst: null,
       queuedBy: new Map(),
       kettuQueued: new Map(),
+      reportsSteering: new Set(),
       userTurn: false,
       titlePrompt: null,
       titleWriting: false,
@@ -9774,8 +9781,12 @@ export class SessionManager {
     await this.steerItem(await this.revive(sessionId), itemId)
   }
 
-  /** Steers a queued prompt; false when the turn was ending and the prompt stays first. */
-  private async steerItem(live: Live, itemId: string): Promise<boolean> {
+  /**
+   * Steers a queued prompt; false when the turn was ending and the prompt stays first, or with
+   * `auto`, Kettu's own steering of a report, where it waited. Huli: a report goes in as a notice
+   * and leaves the questions that wait for the user as they are: it answers none of them.
+   */
+  private async steerItem(live: Live, itemId: string, auto = false): Promise<boolean> {
     const item = live.thread.session.queue.find((i) => i.id === itemId)
     if (!item) throw notFound(t('session.noQueued'))
     if (!this.deps.agents.status(live.record.agentId).capabilities.steering) {
@@ -9787,17 +9798,24 @@ export class SessionManager {
     if (!live.turn || live.turn.ended || !live.connection) {
       throw new HostError('busy', t('session.noTurn'))
     }
+    const report = !!item.from?.ended
     const resolved = await this.resolveAttachments(live, item.content)
     let outcome
     try {
-      outcome = await live.connection.steer(live.record.acpSessionId, resolved.wire)
+      outcome = await live.connection.steer(
+        live.record.acpSessionId,
+        resolved.wire,
+        report ? { notice: true } : undefined,
+      )
     } catch (error) {
       throw agentError(error)
     }
     const { queue } = live.thread.session
     if (outcome === 'promptRequired') {
-      this.update(live, { queue: [item, ...queue.filter((i) => i.id !== itemId)] })
-      this.persist(live)
+      if (!auto) {
+        this.update(live, { queue: [item, ...queue.filter((i) => i.id !== itemId)] })
+        this.persist(live)
+      }
       if (canSend(live.thread.session.status)) this.drainQueue(live)
       return false
     }
@@ -9820,7 +9838,7 @@ export class SessionManager {
     this.update(live, { queue: queue.filter((i) => i.id !== itemId) })
     this.persist(live)
     this.touch(live.id)
-    this.skipQuestions(live)
+    if (!report) this.skipQuestions(live)
     return true
   }
 
@@ -9904,6 +9922,8 @@ export class SessionManager {
     // Kettu's own messages that are no longer due, such as a reminder for a step that reported
     // meanwhile, are dropped as their turn comes.
     const start = queue.findIndex((item) => live.kettuQueued.get(item.id)?.() !== false)
+    // Huli: a report on its way into the turn that just ended goes on once the agent answers.
+    if (start !== -1 && live.reportsSteering.has(queue[start]!.id)) return
     const dropped = start === -1 ? queue : queue.slice(0, start)
     for (const item of dropped) live.kettuQueued.delete(item.id)
     const [next, ...rest] = queue.slice(dropped.length)
@@ -10773,6 +10793,7 @@ export class SessionManager {
       const sending = connection.prompt(live.record.acpSessionId, wire, sent).finally(() => {
         if (live.unansweredCancel === turn) live.unansweredCancel = null
       })
+      this.steerWaitingReports(live)
       this.refreshContext(live)
       // Sent: a retry after a failed sign-in sends what the thread shows, and the records stay
       // until the turn ends, in case its message is given back.
@@ -13856,6 +13877,7 @@ export class SessionManager {
     if (waitingCount(live) - nonBlocking > 0) return
     if (live.thread.session.status !== 'awaiting_permission') return
     this.update(live, { status: live.turn || live.childRunning ? 'running' : 'ready' })
+    if (live.turn) this.steerWaitingReports(live)
   }
 
   respond(
@@ -14537,8 +14559,15 @@ export class SessionManager {
     const starter = starterId ? this.live.get(starterId) : undefined
     if (!starter) return
     const { queue } = starter.thread.session
-    const rest = queue.filter((item) => !item.from?.ended || item.from.sessionId !== sessionId)
-    if (rest.length === queue.length) return
+    // Huli: a report that tells of other sessions' turns too goes on with theirs.
+    const rest = queue.flatMap((item): QueuedPrompt[] => {
+      const turns = reportedTurns(item.from)
+      if (!turns.some((turn) => turn.sessionId === sessionId)) return [item]
+      const left = turns.filter((turn) => turn.sessionId !== sessionId)
+      if (left.length === 0) return []
+      return [{ ...item, content: reportContent(left), from: reportOrigin(left) }]
+    })
+    if (rest.length === queue.length && rest.every((item, i) => item === queue[i])) return
     this.update(starter, { queue: rest, ...(rest.length === 0 ? { queuePaused: false } : {}) })
     this.persist(starter)
     this.touch(starter.id)
@@ -14743,15 +14772,14 @@ export class SessionManager {
     const entry = live.thread.byId[turn.entryId]
     if (entry?.kind !== 'user' || entry.from?.sessionId !== starterId) return
     if (entry.from.report === false) return
-    const agent = this.agentName(live.id)
-    const text = reportText(agent, live.id, stopReason)
-    const from: FromSession = {
+    const reported: ReportedTurn = {
       sessionId: live.id,
       title: this.toolName(live.id),
-      ended: { agent, stopReason },
+      agent: this.agentName(live.id),
+      stopReason,
     }
     queueMicrotask(() => {
-      void this.deliverReport(starterId, text, from).catch((error: unknown) => {
+      void this.deliverReport(starterId, reported).catch((error: unknown) => {
         this.deps.diagnostics.log(
           'warn',
           `Could not report to session ${starterId}: ${(error as Error).message}`,
@@ -14761,11 +14789,14 @@ export class SessionManager {
   }
 
   /**
-   * Sends a report as a turn when the session is idle, else at the end of its queue, which stays
-   * paused if it is. An archived session gets none. Past the limit since the user's last message
-   * there, the thread says so once and later reports go nowhere.
+   * Sends a report as a turn when the session is idle. While a turn runs, into that turn where the
+   * agent steers, so it hears now rather than once its long turn ends; else, or when the turn was
+   * ending, it waits at the end of the queue, which stays paused if it is, joined with the reports
+   * that already wait there. A turn held on the user's answer gets it once answered, so no report
+   * skips the user's question. An archived session gets none. Past the limit since the user's last
+   * message there, the thread says so once and later reports go nowhere.
    */
-  private async deliverReport(sessionId: string, text: string, from: FromSession): Promise<void> {
+  private async deliverReport(sessionId: string, reported: ReportedTurn): Promise<void> {
     if (!this.has(sessionId) || this.isArchived(this.recordOf(sessionId))) return
     const sent = this.reportsSent.get(sessionId) ?? 0
     if (sent > REPORT_LIMIT) return
@@ -14788,15 +14819,90 @@ export class SessionManager {
       this.touch(live.id)
       return
     }
-    const content: UserContent[] = [{ type: 'text', text }]
     const { status, queue } = live.thread.session
     if (canSend(status) && queue.length === 0 && !this.waitsForWorktree(live)) {
-      this.sendPrompt(live, content, from)
+      this.sendPrompt(live, reportContent([reported]), reportOrigin([reported]))
       return
     }
-    this.update(live, { queue: [...queue, { id: randomUUID(), content, at: this.now(), from }] })
+    const itemId = this.queueReport(live, reported)
+    if (this.takesReportNow(live)) await this.steerReport(live, itemId)
+  }
+
+  /**
+   * Puts a report in the queue: into the report that waits there already, which then tells of
+   * every turn, the newest of each session, else as a new item at the end. Its id.
+   */
+  private queueReport(live: Live, reported: ReportedTurn): string {
+    const { queue } = live.thread.session
+    const waiting = queue.find(
+      (item) => item.from?.ended && !item.approval && !live.reportsSteering.has(item.id),
+    )
+    const turns = [
+      ...reportedTurns(waiting?.from).filter((turn) => turn.sessionId !== reported.sessionId),
+      reported,
+    ].slice(-REPORTED_TURNS_MAX)
+    const item: QueuedPrompt = {
+      id: waiting?.id ?? randomUUID(),
+      content: reportContent(turns),
+      at: waiting?.at ?? this.now(),
+      from: reportOrigin(turns),
+    }
+    this.update(live, {
+      queue: waiting ? queue.map((other) => (other === waiting ? item : other)) : [...queue, item],
+    })
     this.persist(live)
     this.touch(live.id)
+    return item.id
+  }
+
+  /**
+   * Whether a report goes into the session's turn now: one runs at the agent and waits on nothing
+   * of the user's, which steering would skip or the agent would hold, and its agent steers.
+   */
+  private takesReportNow(live: Live): boolean {
+    const turn = live.turn
+    return (
+      live.thread.session.status === 'running' &&
+      !!turn &&
+      turn.prompted &&
+      !turn.ended &&
+      !turn.cancelRequested &&
+      !!live.connection &&
+      !live.closing &&
+      this.deps.agents.status(live.record.agentId).capabilities.steering
+    )
+  }
+
+  /** Steers a queued report into the turn; one the turn could not take stays where it waits. */
+  private async steerReport(live: Live, itemId: string): Promise<void> {
+    live.reportsSteering.add(itemId)
+    try {
+      await this.steerItem(live, itemId, true)
+    } catch (error) {
+      this.deps.diagnostics.log(
+        'warn',
+        `Session ${live.id} kept a report queued: ${(error as Error).message}`,
+      )
+    } finally {
+      live.reportsSteering.delete(itemId)
+    }
+    if (canSend(live.thread.session.status)) this.drainQueue(live)
+  }
+
+  /**
+   * Once the turn's prompt went to the agent, or nothing of the user's holds the turn any more,
+   * the reports that waited for that go into it, after the prompt or the answer.
+   */
+  private steerWaitingReports(live: Live): void {
+    if (!live.thread.session.queue.some((item) => item.from?.ended)) return
+    setTimeout(() => {
+      if (this.live.get(live.id) !== live || !this.takesReportNow(live)) return
+      for (const item of live.thread.session.queue) {
+        if (item.from?.ended && !live.reportsSteering.has(item.id)) {
+          void this.steerReport(live, item.id)
+        }
+      }
+    }, 0)
   }
 
   /** A message from the user does not bring an archived session back; restoring it does. */
@@ -17590,6 +17696,11 @@ function compacted(thread: Pick<ThreadState, 'byId'>, patch: Patch): boolean {
 /** Whether a session in this status takes a prompt: an attached one that is free, or one to attach. */
 function canSend(status: SessionStatus): boolean {
   return status === 'ready' || status === 'closed'
+}
+
+/** Huli: the message a report of these turns goes to the agent as. */
+function reportContent(turns: readonly ReportedTurn[]): UserContent[] {
+  return [{ type: 'text', text: reportsText(turns) }]
 }
 
 /** The entries of the tool calls whose commands the session lists as running on past their turn. */

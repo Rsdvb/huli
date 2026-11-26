@@ -43,8 +43,11 @@ import type { PortBlock } from '@shared/worktree-ports'
 import {
   isAgentId,
   isQueuedComments,
+  isReportedTurn,
   isUserContent,
+  REPORTED_TURNS_MAX,
   type AgentId,
+  type FromSession,
   type PromptCache,
   type QueuedPrompt,
   type UserContent,
@@ -956,10 +959,40 @@ function withFrom(item: QueuedPrompt): QueuedPrompt {
           sessionId: from.sessionId,
           title: from.title,
           ...(from.report === false ? { report: false as const } : {}),
+          ...endedOf(from.ended),
+          ...reportsOf(from.reports),
           ...digestOf(from.digest),
         },
       }
     : rest
+}
+
+/**
+ * Huli: a queued report keeps how the turn it tells of ended, which its row is drawn from rather
+ * than from the words the agent gets.
+ */
+function endedOf(value: unknown): Pick<FromSession, 'ended'> {
+  if (!isRecord(value)) return {}
+  const ended = { sessionId: '', title: '', agent: value.agent, stopReason: value.stopReason }
+  return isReportedTurn(ended)
+    ? { ended: { agent: ended.agent, stopReason: ended.stopReason } }
+    : {}
+}
+
+/** Huli: and a report of several turns each of them. */
+function reportsOf(value: unknown): Pick<FromSession, 'reports'> {
+  if (!Array.isArray(value)) return {}
+  const turns = value.filter(isReportedTurn).slice(-REPORTED_TURNS_MAX)
+  return turns.length > 1
+    ? {
+        reports: turns.map(({ sessionId, title, agent, stopReason }) => ({
+          sessionId,
+          title,
+          agent,
+          stopReason,
+        })),
+      }
+    : {}
 }
 
 /** Huli: a manager's queued digest keeps the workers it reports on. */
