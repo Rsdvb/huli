@@ -37,7 +37,7 @@ export const MAX_CLOSED_TERMINALS = 50
 export const MAX_CLOSED_TITLE = 200
 export const MAX_CLOSED_OUTPUT = 2_000
 /** How many of a closed terminal's last lines the thread keeps. */
-export const CLOSED_OUTPUT_LINES = 12
+export const CLOSED_OUTPUT_LINES = 8
 
 /**
  * The closed terminals in a message from another process, or null when it is not a list of them

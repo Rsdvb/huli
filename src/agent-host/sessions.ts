@@ -559,7 +559,7 @@ export interface SessionTimings {
 const MAX_RETRY_MS = 5 * 60_000
 
 /** Huli: how many closed idle terminals a notice shows with their output; the rest by name. */
-const IDLE_NOTE_TERMINALS = 5
+const IDLE_NOTE_TERMINALS = 3
 /** Huli: how long after a notice of idle terminals closed the next close joins it. */
 const IDLE_NOTE_MERGE_MS = 15 * 60_000
 
