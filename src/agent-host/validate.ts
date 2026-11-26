@@ -185,6 +185,7 @@ import {
   type PluginViewParams,
 } from '@shared/plugin-views'
 import { PLUGIN_REF_ID, PLUGIN_REF_LIMITS } from '@shared/plugin-refs'
+import { catalogRef, pluginDirectoryValidators } from './marketplace/plugin-directory-validate'
 import {
   parseFormValues,
   parseParams as parseViewParams,
@@ -3021,7 +3022,14 @@ export function createValidators(platform: Platform): Validators {
       return { routineId: routineId(o) }
     },
     'plugins.list': none,
-    'plugins.inspect': (params) => ({ source: pluginSource(fields(params).source, platform) }),
+    'plugins.inspect': (params) => {
+      const o = fields(params)
+      const source = pluginSource(o.source, platform)
+      if (o.catalog === undefined) return { source }
+      // Huli: a plugin of the directory installs from the folder the directory names.
+      if (source.kind !== 'github') throw invalidParams('catalog goes with a github source')
+      return { source, catalog: catalogRef(o.catalog) }
+    },
     'plugins.install': pluginToken,
     'plugins.discard': pluginToken,
     'plugins.uninstall': installedPlugin,
@@ -4000,6 +4008,7 @@ export function createValidators(platform: Platform): Validators {
     },
     ...folderValidators,
     ...networkValidators,
+    ...pluginDirectoryValidators,
     ...nodeRuntimeValidators,
     ...moveValidators(platform),
     ...sessionMcpValidators,

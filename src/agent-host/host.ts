@@ -173,6 +173,7 @@ import { McpProxy } from './marketplace/proxy'
 import type { CodexRequest } from './codex/rpc'
 import { OwnPluginsService } from './marketplace/own-plugins'
 import { MarketSkillsService, skillFor, skillsCatalogFile } from './marketplace/skills'
+import type { PluginDirectory } from './marketplace/plugin-directory'
 import { CommandsService } from './commands/service'
 import { RolesService } from './roles/service'
 import { PluginsService } from './plugins/service'
@@ -699,6 +700,9 @@ export class AgentHost {
   private readonly ownPlugins: OwnPluginsService
   /** The skills catalog, the skills Kettu keeps, and what each agent gets of them. */
   private readonly marketSkills: MarketSkillsService
+  /** Huli: the Plugins tab's directory of plugins on GitHub, loaded when the tab first asks. */
+  private readonly pluginDirectory: () => Promise<PluginDirectory>
+  private pluginDirectoryLoaded: PluginDirectory | null = null
   private agentSyncService: Promise<AgentSync> | null = null
   /** Huli: moving sessions to other computers, loaded at the first move. */
   private movesService: Promise<SessionMoves> | null = null
@@ -1144,6 +1148,17 @@ export class AgentHost {
       kettuOn: (agentId) => !this.settings.mcp.kettu.off.includes(agentId),
       fetch: net,
     })
+    let directory: Promise<PluginDirectory> | null = null
+    this.pluginDirectory = () =>
+      (directory ??= import('./marketplace/plugin-directory').then(
+        ({ PluginDirectory, pluginDirectoryFile }) =>
+          (this.pluginDirectoryLoaded = new PluginDirectory({
+            file: pluginDirectoryFile(options.userDataPath, log),
+            log,
+            appVersion: options.appVersion,
+            fetch: net,
+          })),
+      ))
     this.trees = new AgentTrees({
       file: agentProcessesFile(options.userDataPath, log),
       control: options.processControl ?? processControl(platform),
@@ -4438,6 +4453,7 @@ export class AgentHost {
         this.attachments.flush(),
         this.marketCatalog.flush(),
         this.marketSkills.flush(),
+        this.pluginDirectoryLoaded?.flush(),
         this.marketBundles.flush(),
         this.plugins.flush(),
         this.publishDrafts.flush(),
@@ -4774,6 +4790,9 @@ export class AgentHost {
       'market.skillRepository': ({ id, refresh }) =>
         this.marketSkills.repository(id, refresh === true),
       'market.addSkill': ({ source }) => this.marketSkills.add(source),
+      'market.pluginCatalog': async ({ refresh, cached }) =>
+        (await this.pluginDirectory()).catalog(refresh === true, cached === true),
+      'market.pluginLink': async ({ url }) => (await this.pluginDirectory()).link(url),
       'settings.answerChange': ({ sessionId, entryId, decision }, { device }) =>
         this.sessions.answerSettings(sessionId, entryId, decision, fromDevice(device)),
       'settings.undoChange': ({ sessionId, entryId }) => this.undoSettings(sessionId, entryId),
@@ -5103,7 +5122,12 @@ export class AgentHost {
       'routines.markSeen': ({ routineId }) => routines.markSeen(routineId),
       'routines.webhookSecret': ({ routineId }) => this.newWebhookSecret(routineId),
       'plugins.list': async () => ({ plugins: await this.plugins.list() }),
-      'plugins.inspect': ({ source }) => this.plugins.inspect(source),
+      'plugins.inspect': async ({ source, catalog }) => {
+        if (!catalog) return this.plugins.inspect(source)
+        // Huli: the directory's entry says which folder, at which commit, and how to convert it.
+        const { url, hint } = await (await this.pluginDirectory()).hint(catalog)
+        return this.plugins.inspect({ kind: 'github', url }, hint)
+      },
       'plugins.install': ({ token }) => this.plugins.install(token),
       'plugins.discard': ({ token }) => this.plugins.discard(token),
       'plugins.uninstall': ({ pluginId }) => this.plugins.uninstall(pluginId),
