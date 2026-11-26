@@ -12,6 +12,8 @@ import path from 'node:path'
 import type { AgentId } from '@shared/agents'
 import type { CommunityListing } from '@shared/market-community'
 import type { MarketListing } from '@shared/market-publish'
+import type { PluginFormat } from '@shared/plugin-catalog'
+import type { PluginConversion } from '@shared/plugin-convert'
 import { serverName, type MarketServer, type MarketSkill } from '@shared/marketplace'
 import {
   checkSetting,
@@ -42,6 +44,7 @@ import { HostError, notFound } from '../errors'
 import { t } from '../i18n'
 import { logText } from '../localized-error'
 import { modeOf, type DownloadedFile } from '../marketplace/community'
+import { bareClaudePlugin, notPlugin, withEntryManifest } from '../marketplace/plugin-catalog'
 import {
   branchHead,
   downloadTarball,
@@ -53,6 +56,7 @@ import {
 } from '../marketplace/tarball'
 import type { JsonFile, LogFn } from '../storage'
 import type { InstalledScript } from '../plugin-runtime/installed'
+import { convertHarnessPlugin, harnessOf } from './convert'
 import { refusal } from './manifest'
 import { serverSpec } from './mcp'
 import {
@@ -158,7 +162,21 @@ interface Fetched {
   pkg: PluginPackage
   revision: string | null
   origin: string | null
+  /** Huli: what converting a Claude Code or Codex plugin into this package left out. */
+  conversion?: PluginConversion | null
 }
+
+/**
+ * Huli: what the Plugins tab's directory says of a plugin it installs: its name, what it is
+ * written for, and a Claude Code marketplace entry's own manifest fields.
+ */
+export interface InspectHint {
+  name: string
+  format: PluginFormat
+  manifest: Record<string, unknown> | null
+}
+
+const PINNED = /^[0-9a-f]{40}$/
 
 interface Plan extends Fetched {
   source: PluginSource
@@ -202,7 +220,7 @@ function sourceKey(source: PluginSource): string {
     : `github:${source.url}`
 }
 
-function pluginId(source: PluginSource): string {
+export function pluginId(source: PluginSource): string {
   return `p${createHash('sha256').update(sourceKey(source)).digest('hex').slice(0, 12)}`
 }
 
@@ -514,8 +532,8 @@ export class PluginsService {
    * Reads a source's package and says what it holds and would run. Fetching it is all that
    * happens: nothing is written into the host's data and nothing of it runs.
    */
-  async inspect(source: PluginSource): Promise<PluginPlan> {
-    const fetched = await this.fetch(source)
+  async inspect(source: PluginSource, hint?: InspectHint): Promise<PluginPlan> {
+    const fetched = await this.fetch(source, hint)
     const file = await this.load()
     const id = pluginId(source)
     const token = randomUUID()
@@ -533,6 +551,7 @@ export class PluginsService {
       // Older clients keep Install off for any reason given here.
       blocked: null,
       skipped: taken(id, fetched.pkg.contents.skills, skills),
+      ...(fetched.conversion ? { conversion: fetched.conversion } : {}),
     }
   }
 
@@ -732,6 +751,8 @@ export class PluginsService {
     if (source.kind !== 'github') return false
     const github = githubSource(source.url)
     if (!github) return false
+    // Huli: a folder at a commit, as the Plugins tab installs one, never moves.
+    if (github.ref !== null && PINNED.test(github.ref)) return false
     const head = await branchHead(
       { owner: github.owner, repo: github.repo, branch: github.ref ?? 'HEAD' },
       null,
@@ -792,6 +813,8 @@ export class PluginsService {
       : null
     const stale = record.previous?.dir
     record.previous = keep && old ? old : null
+    // Huli: installed again from the directory at another commit, it stays at that one.
+    record.source = source
     record.revision = fetched.revision
     record.origin = fetched.origin
     record.held = null
@@ -928,14 +951,15 @@ export class PluginsService {
   }
 
   /** A source's package, read and checked. */
-  private async fetch(source: PluginSource): Promise<Fetched> {
+  private async fetch(source: PluginSource, hint?: InspectHint): Promise<Fetched> {
     if (source.kind === 'local') {
       const info = await stat(source.path).catch(() => null)
       if (!info?.isDirectory()) {
         throw notFound(t('marketSkills.notFolder', { folder: source.path }))
       }
       const files = await readPackageFolder(source.path)
-      return { pkg: readPackage(files, this.deps.appVersion), revision: null, origin: null }
+      const read = this.packageOf(files, path.basename(source.path), hint, source.path)
+      return { ...read, revision: null, origin: null }
     }
     if (source.kind === 'kettu') {
       const { listing, files } = await this.deps.kettu(source.id)
@@ -952,13 +976,20 @@ export class PluginsService {
       const gz = await downloadTarball(tarballUrl(github), TAR_LIMITS, this.deps.fetch)
       const tarball = await readTarball(gz, TAR_LIMITS)
       const prefix = github.path === '' ? '' : `${github.path}/`
-      if (!tarball.files.some((file) => file.path === `${prefix}${MANIFEST_FILE}`)) {
-        throw notFound(t('plugins.noPlugin', { url: source.url }))
-      }
+      // Huli: what the folder is decides first, so a repository that is no plugin is not
+      // refused only for its size.
+      this.formatOf(
+        tarball.files
+          .filter((file) => file.path.startsWith(prefix))
+          .map((file) => ({ path: file.path.slice(prefix.length) })),
+        hint,
+        source.url,
+      )
       // A link in the package's folder refuses it, so nothing is followed out of it.
       const files = folderFiles(tarball, github.path, PACKAGE_LIMITS)
+      const folder = github.path.split('/').pop() || github.repo
       return {
-        pkg: readPackage(files, this.deps.appVersion),
+        ...this.packageOf(files, folder, hint, source.url),
         revision: tarball.commit ?? createHash('sha256').update(gz).digest('hex').slice(0, 40),
         origin: null,
       }
@@ -966,6 +997,55 @@ export class PluginsService {
       if (error instanceof HostError) throw error
       throw new HostError('unavailable', (error as Error).message)
     }
+  }
+
+  /**
+   * Huli: what a folder's files are a plugin for: Kettu's own format, a harness's whose manifest
+   * or the directory says so, or a Claude Code plugin without a manifest. Throws what the folder
+   * is instead, such as a skill or a marketplace, when it is no plugin.
+   */
+  private formatOf(
+    files: readonly { path: string }[],
+    hint: InspectHint | undefined,
+    where: string,
+  ): { kettu: boolean; from: 'claude-code' | 'codex' | null } {
+    const kettu = files.some((file) => file.path === MANIFEST_FILE)
+    const from =
+      harnessOf(files) ??
+      (hint && hint.format !== 'kettu' ? hint.format : null) ??
+      (bareClaudePlugin(files) ? 'claude-code' : null)
+    if (kettu || from) return { kettu, from }
+    const instead = notPlugin(files)
+    if (instead === 'skill') throw new HostError('invalid_params', t('plugins.isSkill'))
+    if (instead === 'marketplace') throw new HostError('invalid_params', t('plugins.isMarketplace'))
+    throw notFound(t('plugins.noPluginAt', { url: where.slice(0, 300) }))
+  }
+
+  /**
+   * Huli: a folder's package, a Claude Code or Codex plugin converted into a Kettu plugin in
+   * memory; nothing of it runs. A Kettu manifest is read first, and one that does not read gives
+   * way to the harness's.
+   */
+  private packageOf(
+    files: PackageFile[],
+    folder: string,
+    hint: InspectHint | undefined,
+    where: string,
+  ): { pkg: PluginPackage; conversion: PluginConversion | null } {
+    const { kettu, from } = this.formatOf(files, hint, where)
+    if (kettu) {
+      try {
+        return { pkg: readPackage(files, this.deps.appVersion), conversion: null }
+      } catch (error) {
+        if (!from) throw error
+      }
+    }
+    const source =
+      from === 'claude-code'
+        ? withEntryManifest(files, hint?.manifest ?? null, hint?.name ?? folder)
+        : files
+    const made = convertHarnessPlugin(source, from!, folder, this.deps.appVersion)
+    return { pkg: readPackage(made.files, this.deps.appVersion), conversion: made.conversion }
   }
 
   /** Writes a package's files as `dir`, renamed into place only once every file is written. */

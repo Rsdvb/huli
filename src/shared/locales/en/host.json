@@ -1905,7 +1905,10 @@
         "nameTaken": "Another one is named {{name}}.",
         "nameTakenFile": "A Kettu plugin’s own files have this name."
       }
-    }
+    },
+    "isSkill": "This is a skill, not a plugin: it has a SKILL.md and no plugin.json. Add it with Add › Skill from GitHub, or Skill from a folder.",
+    "isMarketplace": "This is a plugin marketplace, which lists several plugins. Paste its github.com link in Add › Plugin from GitHub to pick one, or pick the folder of one plugin in it.",
+    "noPluginAt": "{{url}} holds no plugin: there’s no plugin.json, no Claude Code .claude-plugin/plugin.json and no Codex .codex-plugin/plugin.json."
   },
   "commands": {
     "missingArguments": "/{{command}} wasn’t sent. It needs a value for {{names}}, typed after it.",
@@ -2703,5 +2706,12 @@
       "item": "{{n}}. [{{severity}}] {{place}} — {{title}}",
       "after": "Change only what they need, then say briefly what you changed."
     }
+  },
+  "pluginCatalog": {
+    "tooLarge": "{{file}} is larger than Kite reads.",
+    "notJson": "{{file}} isn’t JSON Kite can read.",
+    "noList": "{{file}} lists no plugins.",
+    "noFile": "The repository has no {{file}}.",
+    "noSuchPlugin": "The plugin list no longer has {{name}}. Refresh the list and try again."
   }
 }

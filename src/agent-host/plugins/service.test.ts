@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { gzipSync } from 'node:zlib'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CommunityListing } from '@shared/market-community'
 import type { MarketListing } from '@shared/market-publish'
@@ -16,6 +17,7 @@ import { claudePluginFiles } from './claude-plugin-fixture'
 import { convertFolder } from './convert'
 import { addedAccess, PluginsService } from './service'
 import { emptyPluginsFile, parsePluginsFile, type PluginsFile } from './store'
+import { COMMIT, tarball } from '../testing/tarball'
 
 const SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json'
 const MCP_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json'
@@ -80,7 +82,7 @@ afterEach(async () => {
 })
 
 /** A host's libraries around the service: the settings' lists, the skills on disk, the workflows. */
-async function host(data: PluginsFile = emptyPluginsFile()) {
+async function host(data: PluginsFile = emptyPluginsFile(), fetcher?: typeof fetch) {
   const settings = { skills: [] as MarketSkill[], servers: [] as MarketServer[] }
   let saved = structuredClone(data)
   // What the Kettu Marketplace lists under the one listing, as the service would download it.
@@ -173,6 +175,7 @@ async function host(data: PluginsFile = emptyPluginsFile()) {
     removed: (id) => told.removed.push(id),
     settingChanged: (id, key) => told.settings.push(`${id}:${key}`),
     changed: () => {},
+    ...(fetcher ? { fetch: fetcher } : {}),
   })
   await plugins.load()
   const skillFile = (id: string, name: string): string =>
@@ -998,5 +1001,124 @@ describe("a plugin's tools, settings and storage", () => {
     expect(h.plugins.declaresSecret(plugin.id, 'token')).toBe(true)
     expect(h.plugins.declaresSecret(plugin.id, 'name')).toBe(false)
     expect(() => h.plugins.settingValue(plugin.id, 'token')).toThrow()
+  })
+})
+
+describe('Huli: a Claude Code or Codex plugin, converted when it is installed', () => {
+  const PIN = COMMIT
+  /** GitHub's tarball of a repository whose `plugins/rt` folder holds `files`. */
+  function github(
+    files: Files,
+    extra: { name: string; type?: string; data?: string; link?: string }[] = [],
+  ) {
+    const asked: string[] = []
+    const fetcher = (async (input: string | URL | Request) => {
+      const url = String(input)
+      asked.push(url)
+      if (!url.startsWith('https://codeload.github.com/'))
+        return new Response(null, { status: 404 })
+      const entries = Object.entries(files).map(([name, data]) => ({
+        name: `b-${PIN}/plugins/rt/${name}`,
+        data,
+      }))
+      return new Response(gzipSync(tarball([...entries, ...extra])))
+    }) as typeof fetch
+    return { fetcher, asked }
+  }
+  const url = `https://github.com/a/b/tree/${PIN}/plugins/rt`
+
+  it('converts a Claude Code folder in memory, shows what came over, and writes nothing', async () => {
+    const h = await host()
+    const folder = path.join(root, 'claude')
+    await writeTree(folder, claudePluginFiles())
+    const plan = await h.plugins.inspect({ kind: 'local', path: folder })
+    expect(plan.conversion?.from).toBe('claude-code')
+    expect(plan.conversion?.leftOut.some((item) => item.kind === 'hook')).toBe(true)
+    expect(plan.contents.skills.map((skill) => skill.name)).toEqual(['changelog'])
+    expect(plan.contents.servers.map((server) => [server.name, server.runs])).toEqual([
+      ['local', './bin/server --data ${PLUGIN_ROOT}/data'],
+      ['tracker', 'https://tracker.example.com/mcp'],
+    ])
+    expect(plan.contents.hooks).toBe(false)
+    expect(existsSync(path.join(root, 'marketplace', 'kettu-plugins'))).toBe(false)
+    expect(await readdir(folder)).not.toContain('plugin.json')
+    const plugin = await h.plugins.install(plan.token)
+    expect(plugin.kept.skills).toHaveLength(1)
+    expect(h.settings.servers.map((server) => server.title).sort()).toEqual(['local', 'tracker'])
+  })
+
+  it('reads a plugin folder of a GitHub repository at a commit, converted', async () => {
+    const { fetcher, asked } = github(claudePluginFiles())
+    const h = await host(emptyPluginsFile(), fetcher)
+    const plan = await h.plugins.inspect({ kind: 'github', url })
+    expect(asked).toEqual([`https://codeload.github.com/a/b/tar.gz/${PIN}`])
+    expect(plan.conversion?.from).toBe('claude-code')
+    const plugin = await h.plugins.install(plan.token)
+    expect(plugin.revision).toBe(PIN)
+    // A folder at a commit never moves, so no check asks GitHub again.
+    await h.plugins.checkUpdates()
+    expect(asked).toHaveLength(1)
+  })
+
+  it('refuses a folder that leaves the repository or holds a link', async () => {
+    const climbing = github(claudePluginFiles(), [
+      { name: `b-${PIN}/plugins/rt/../../../evil.sh`, data: 'x' },
+    ])
+    await expect(
+      (await host(emptyPluginsFile(), climbing.fetcher)).plugins.inspect({ kind: 'github', url }),
+    ).rejects.toThrow(/unsafe path/)
+    const linked = github(claudePluginFiles(), [
+      { name: `b-${PIN}/plugins/rt/skills/changelog/secret`, type: '2', link: '/etc/passwd' },
+    ])
+    await expect(
+      (await host(emptyPluginsFile(), linked.fetcher)).plugins.inspect({ kind: 'github', url }),
+    ).rejects.toThrow(/link/)
+  })
+
+  it('takes the manifest a marketplace entry gives a folder without one', async () => {
+    const { fetcher } = github({
+      'local-ai/SKILL.md': '---\nname: local-ai\ndescription: Runs models.\n---\nRun.\n',
+    })
+    const h = await host(emptyPluginsFile(), fetcher)
+    const plan = await h.plugins.inspect(
+      { kind: 'github', url },
+      {
+        name: 'amd-skills',
+        format: 'claude-code',
+        manifest: { strict: false, skills: ['./local-ai'] },
+      },
+    )
+    expect(plan.contents.name).toBe('amd-skills')
+    expect(plan.contents.skills.map((skill) => skill.name)).toEqual(['local-ai'])
+  })
+
+  it('says what a folder that is no plugin is instead', async () => {
+    const h = await host()
+    const skill = path.join(root, 'skill')
+    await writeTree(skill, { 'SKILL.md': '---\nname: s\ndescription: d\n---\n' })
+    await expect(h.plugins.inspect({ kind: 'local', path: skill })).rejects.toMatchObject({
+      code: 'invalid_params',
+      message: expect.stringMatching(/skill/i),
+    })
+    const market = path.join(root, 'market')
+    await writeTree(market, { '.claude-plugin/marketplace.json': '{"plugins":[]}' })
+    await expect(h.plugins.inspect({ kind: 'local', path: market })).rejects.toMatchObject({
+      code: 'invalid_params',
+      message: expect.stringMatching(/marketplace/i),
+    })
+    const empty = path.join(root, 'empty')
+    await writeTree(empty, { 'README.md': '# Nothing' })
+    await expect(h.plugins.inspect({ kind: 'local', path: empty })).rejects.toMatchObject({
+      code: 'not_found',
+    })
+  })
+
+  it('reads a Kettu plugin as before, though it ships a Claude Code manifest too', async () => {
+    const h = await host()
+    const folder = path.join(root, 'both')
+    await writeTree(folder, { ...packageFiles(), '.claude-plugin/plugin.json': '{"name":"x"}' })
+    const plan = await h.plugins.inspect({ kind: 'local', path: folder })
+    expect(plan.conversion).toBeUndefined()
+    expect(plan.contents.name).toBe('review-kit')
   })
 })

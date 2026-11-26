@@ -7,6 +7,7 @@ import type { McpSpec } from './marketplace'
 import type { PluginLinkDecl, PluginMentionDecl } from './plugin-refs'
 import type { PluginChannelDecl, PluginNoticeKind } from './plugin-channels'
 import type { PluginActionDecl, PluginViewDecl } from './plugin-views'
+import type { PluginConversion } from './plugin-convert'
 
 export const PLUGIN_NAMESPACE = 'sh.kettu'
 /** The only version of the `sh.kettu` entry this app reads. */
@@ -423,6 +424,8 @@ export interface PluginPlan {
   blocked: string | null
   /** Its skills left out, since another skill has the name; absent from older hosts. */
   skipped?: PluginSkippedSkill[]
+  /** Huli: a Claude Code or Codex plugin converted to this package, with what did not come over. */
+  conversion?: PluginConversion
 }
 
 /** A skill of a plugin left out, since a skill Kettu keeps from elsewhere has its name. */
