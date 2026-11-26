@@ -46,8 +46,10 @@ export function useOverlayRoot<Details>(
   }, [id, shown])
   return useCallback(
     (next: boolean, details: Details) => {
-      setSelf(next)
       onOpenChange?.(next, details)
+      // A change the handler canceled leaves the root as it was.
+      if ((details as { isCanceled?: boolean } | undefined)?.isCanceled) return
+      setSelf(next)
     },
     [onOpenChange],
   )

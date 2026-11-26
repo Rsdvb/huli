@@ -156,6 +156,12 @@
     "shared": "{{agent}} may use it",
     "news": "New activity",
     "closeOthers": "Close others",
-    "closeRight": "Close to the right"
+    "closeRight": "Close to the right",
+    "scrollStart": "Scroll tabs left",
+    "scrollEnd": "Scroll tabs right",
+    "filter": "Filter {{count}} tabs",
+    "noMatch": "No tab matches",
+    "closeExited_one": "Close {{count}} exited terminal",
+    "closeExited_other": "Close {{count}} exited terminals"
   }
 }
