@@ -90,6 +90,8 @@ export function RequestQueue(props: {
         <Pressable
           style={styles.toggle}
           accessibilityRole="button"
+          // The chevron's own label ("go down") would come first; the line says it all.
+          accessibilityLabel={`后面还有 ${later.length} 个请求`}
           accessibilityState={{ expanded: open }}
           onPress={() => {
             if (confirming) setConfirming(null)
