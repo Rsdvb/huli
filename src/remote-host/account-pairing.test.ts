@@ -380,7 +380,9 @@ describe("a phone pairing with a computer of its Huli Cloud account (Huli's own 
     p.pairing.match(true)
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect(t.server.options.devices.list()).toEqual([])
-    await expect.poll(() => t.events.length).toBe(1)
+    // The phone's yes is told to the owner too, as the request's second event.
+    await expect.poll(() => t.events.length).toBe(2)
+    expect(t.events[1]!.requestId).toBe(t.events[0]!.requestId)
     t.discovery.answer(t.events[0]!.requestId, false, '')
     expect(await p.pairing.result).toBeNull()
     expect(p.last()).toEqual({ state: 'failed', reason: 'rejected' })

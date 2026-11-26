@@ -1873,6 +1873,9 @@ describe("agy's metrics and context estimates", () => {
   })
 })
 
+// The requests name POSIX paths, which the policy reads by the platform it runs on.
+const ON_WINDOWS = process.platform === 'win32'
+
 describe('agy 托管 Auto 模式、本会话总是允许与插件预检', () => {
   const OPTIONS = [
     { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
@@ -1956,7 +1959,7 @@ describe('agy 托管 Auto 模式、本会话总是允许与插件预检', () => 
     connection.close()
   })
 
-  it('托管 Auto 放行日常操作、拦截删核心文件与改 .env 并透传 destructive 风险与原因，支持本会话总是允许', async () => {
+  it.skipIf(ON_WINDOWS)('托管 Auto 放行日常操作、拦截删核心文件与改 .env 并透传 destructive 风险与原因，支持本会话总是允许', async () => {
     const requestsSeen: PermissionRequest[] = []
     const answersSent: unknown[] = []
     const { connection } = connect('1.5.17', async (client, sessionId) => {
@@ -2053,7 +2056,7 @@ describe('agy 托管 Auto 模式、本会话总是允许与插件预检', () => 
     connection.close()
   })
 
-  it('遵循 PLUG-7：即便在 Auto 模式下命中自动放行，插件预检钩子仍可拒绝工具调用', async () => {
+  it.skipIf(ON_WINDOWS)('遵循 PLUG-7：即便在 Auto 模式下命中自动放行，插件预检钩子仍可拒绝工具调用', async () => {
     const answersSent: unknown[] = []
     const { connection } = connect('1.5.17', async (client, sessionId) => {
       const tc = {

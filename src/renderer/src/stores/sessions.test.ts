@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSummary } from '@shared/agent-host'
 import {
   hasNoProjectSessions,
@@ -12,6 +12,9 @@ import {
   sidebarTabStop,
   useSessionsStore,
 } from './sessions'
+
+// Huli: the store reads Settings > Features, whose store needs a window; every feature is on here.
+vi.mock('@renderer/lib/features', () => ({ entryShown: () => true }))
 
 function makeSummary(id: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {

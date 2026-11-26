@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { HtmlPreviews } from './html-preview'
+import { FILE_LINKS, linkFolder } from './testing/links'
 import { tempFolder } from './testing/temp'
 
 const platform = process.platform === 'win32' ? 'win32' : 'darwin'
@@ -143,10 +144,13 @@ describe('HtmlPreviews', () => {
     )
     expect((await send(port, `/${token}//etc/hosts`)).status).toBe(404)
     expect((await send(port, `/${token}/%00index.html`)).status).toBe(404)
-    await symlink(path.join(outside, 'secret.txt'), path.join(root, 'linked.txt'))
-    await symlink(outside, path.join(root, 'linked-folder'))
-    expect((await send(port, `/${token}/linked.txt`)).status).toBe(404)
+    await linkFolder(outside, path.join(root, 'linked-folder'))
     expect((await send(port, `/${token}/linked-folder/secret.txt`)).status).toBe(404)
+    // Windows lets only an administrator or Developer Mode link to a file.
+    if (FILE_LINKS) {
+      await symlink(path.join(outside, 'secret.txt'), path.join(root, 'linked.txt'))
+      expect((await send(port, `/${token}/linked.txt`)).status).toBe(404)
+    }
   })
 
   it('serves no dot file and nothing in a dot folder, whatever the path', async () => {
@@ -157,8 +161,10 @@ describe('HtmlPreviews', () => {
     expect((await send(port, `/${token}/site/.hidden/page.html`)).status).toBe(404)
     expect((await send(port, `/${token}/site/%2Ehidden/page.html`)).status).toBe(404)
     // A link with an ordinary name still leads to the dot file.
-    await symlink(path.join(root, '.env'), path.join(root, 'env.txt'))
-    expect((await send(port, `/${token}/env.txt`)).status).toBe(404)
+    if (FILE_LINKS) {
+      await symlink(path.join(root, '.env'), path.join(root, 'env.txt'))
+      expect((await send(port, `/${token}/env.txt`)).status).toBe(404)
+    }
     await expect(previews.url('s1', 'site/.hidden/page.html')).rejects.toMatchObject({
       code: 'invalid_params',
     })

@@ -98,7 +98,8 @@ async function check(current: string, files: Map<string, Buffer>) {
   return { version: info.version, source: (run as SourceRun | null)?.current.id ?? null, asked }
 }
 
-describe('checking the sources in auto mode', () => {
+// Huli: Kite's one channel is both sources' address, so there is no other source to move on to.
+describe.skipIf(KETTU === GITHUB)('checking the sources in auto mode', () => {
   it('moves on to GitHub when the download service answers 404, as it does while lagging', async () => {
     const result = await check('0.1.20', served({ [GITHUB]: '0.1.23' }))
     expect(result).toMatchObject({ version: '0.1.23', source: GITHUB_SOURCE.id })

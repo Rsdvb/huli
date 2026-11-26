@@ -212,6 +212,8 @@ async function newSession({ agents, root, program }: Awaited<ReturnType<typeof m
     projects: {
       list: () => [],
       find: () => null,
+      sandbox: () => null,
+      presentFolders: () => [],
       resolveDirectory: async (folder: string) => folder,
       add: async () => {},
     } as unknown as Projects,

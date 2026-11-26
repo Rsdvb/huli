@@ -380,7 +380,7 @@ describe('the Marketplace tools', () => {
 })
 
 describe('the feature switches of Settings > Features', () => {
-  /** A service whose session is a manager or a worker, with the secrets and theme tools. */
+  /** A service whose session is a manager or a worker, with the secrets, theme and Routine tools. */
   async function switched(features: { current: Record<string, boolean> }, role: string) {
     const deps = {
       log: () => {},
@@ -390,6 +390,7 @@ describe('the feature switches of Settings > Features', () => {
       secrets: { call: () => Promise.reject(new Error('not in this test')) },
       theme: { call: () => Promise.reject(new Error('not in this test')) },
       webReader: { read: () => Promise.reject(new Error('not in this test')) },
+      routines: { call: () => Promise.reject(new Error('not in this test')) },
       features: () => features.current,
     } as unknown as ArtifactServiceDeps
     const service = new ArtifactService(deps)

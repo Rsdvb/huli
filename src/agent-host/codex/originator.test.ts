@@ -347,14 +347,13 @@ describe('withCodexOriginator', () => {
       ].join('\n'),
     )
 
+    // The folders are this computer's, so they are read by its own rules.
+    const platform = process.platform === 'win32' ? 'win32' : 'darwin'
     const officialEnv = await withCodexOriginator(
       { HOME: root, CODEX_HOME: officialHome },
-      { platform: 'darwin' },
+      { platform },
     )
-    const proxyEnv = await withCodexOriginator(
-      { HOME: root, CODEX_HOME: proxyHome },
-      { platform: 'darwin' },
-    )
+    const proxyEnv = await withCodexOriginator({ HOME: root, CODEX_HOME: proxyHome }, { platform })
     expect(officialEnv[CODEX_ORIGINATOR_ENV]).toBeUndefined()
     expect(proxyEnv[CODEX_ORIGINATOR_ENV]).toBe(CODEX_CLI_ORIGINATOR)
   })

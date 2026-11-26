@@ -20,6 +20,7 @@ import { TextRing } from './ring'
 import { EnvironmentService } from './shell-env'
 import type { AgentUpdatesFile, HarnessManifestFile } from './storage'
 import { inProcessLauncher, loadFakeAgent } from './testing/harness'
+import { FILE_LINKS } from './testing/links'
 import { manifestDocument, manifestSigner } from './testing/manifest'
 import { tempFolder } from './testing/temp'
 
@@ -740,7 +741,8 @@ async function externalCliManager(setup: ExternalCliSetup) {
   }
 }
 
-describe('refreshing externally upgraded CLIs', () => {
+// Each test links the CLI's program to its package, which Windows allows only with the right.
+describe.skipIf(!FILE_LINKS)('refreshing externally upgraded CLIs', () => {
   it('re-detects Codex during checkUpdates() and clears the update banner even when stat is unchanged', async () => {
     const m = await externalCliManager({
       def: CODEX,
