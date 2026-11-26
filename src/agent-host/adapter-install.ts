@@ -7,6 +7,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/p
 import path from 'node:path'
 import type { Platform } from '@shared/platform'
 import { spawnArguments } from './agent-process'
+import { deleteLater, discard, moveAside, TRASH_PREFIX, type DiscardDeps } from './discard'
 import { needsShell, type Env } from './find-command'
 import { staleInstalls } from './harness-versions'
 import { t } from './i18n'
@@ -123,7 +124,9 @@ export function compareInstalls(a: InstalledAdapter, b: InstalledAdapter): numbe
 async function installDirs(root: string, agentId: string): Promise<string[]> {
   try {
     const names = await readdir(path.join(root, agentId))
-    return names.filter((name) => !name.startsWith(PARTIAL_PREFIX))
+    return names.filter(
+      (name) => !name.startsWith(PARTIAL_PREFIX) && !name.startsWith(TRASH_PREFIX),
+    )
   } catch {
     return []
   }
@@ -145,12 +148,15 @@ export async function listInstalled(
 /**
  * Deletes the installs `staleInstalls` names once `keep` runs, so the one before it stays to fall
  * back to, and directories that hold no complete install; returns the directory names removed.
+ * Huli: each is moved aside into `root` at once and deleted in the background; one a process still
+ * runs from on Windows stays whole for a later start, rather than going half.
  */
 export async function removeStaleInstalls(
   root: string,
   agentId: string,
   packageName: string,
   keep: InstalledAdapter,
+  options: { platform?: Platform; deps?: DiscardDeps } = {},
 ): Promise<string[]> {
   const found = await Promise.all(
     (await installDirs(root, agentId)).map(async (name) => {
@@ -160,12 +166,11 @@ export async function removeStaleInstalls(
   )
   const installs = found.flatMap(({ install }) => (install ? [install] : []))
   const stale = new Set(staleInstalls(installs, keep).map((install) => install.dir))
-  const removed = found
-    .filter(({ dir, install }) => (install ? stale.has(dir) : dir !== keep.dir))
-    .map(({ name }) => name)
-  await Promise.all(
-    removed.map((name) => rm(path.join(root, agentId, name), { recursive: true, force: true })),
-  )
+  const going = found.filter(({ dir, install }) => (install ? stale.has(dir) : dir !== keep.dir))
+  const removed: string[] = []
+  for (const { name, dir } of going) {
+    if (await discard(dir, { ...options, trashRoot: root })) removed.push(name)
+  }
   return removed
 }
 
@@ -180,9 +185,17 @@ export async function readInstallFiles(
   return { installed, lock }
 }
 
-/** Deletes one install, for a reinstall. */
-export async function removeInstall(dir: string): Promise<void> {
-  await removeTree(dir)
+/**
+ * Deletes one install, for a reinstall: moved aside into `root` at once, deleted in the background.
+ * Throws, keeping it whole, while a file in it stays in use.
+ */
+export async function removeInstall(
+  root: string,
+  dir: string,
+  options: { platform?: Platform; deps?: DiscardDeps } = {},
+): Promise<void> {
+  const trash = await moveAside(dir, { ...options, trashRoot: root })
+  if (trash) void deleteLater(trash, options.deps)
 }
 
 /**

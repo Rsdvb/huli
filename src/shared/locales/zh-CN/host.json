@@ -487,7 +487,9 @@
     "noProviders": "这个智能体没有厂商账号",
     "disabled": "{{agent}} 已停用。到设置 › 智能体里启用后才能使用。",
     "uninstall": {
-      "busy": "{{agent}} 正在安装或更新，等它完成后才能卸载。"
+      "busy": "{{agent}} 正在安装或更新，等它完成后才能卸载。",
+      "running": "正在卸载 {{agent}}，等它完成后再试。",
+      "inUse": "没能卸载 {{agent}}：还有程序开着 {{path}} 里的文件，比如在 Kettu 以外启动的 {{agent}}。关掉它后再试。"
     },
     "removing": "正在从这台电脑移除 {{agent}}，完成后再试",
     "removeBusy_other": "这个 Agent 有 {{count}} 个会话正在运行，先停下或等它们做完再移除",

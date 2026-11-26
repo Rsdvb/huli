@@ -213,6 +213,13 @@ import {
 } from './connection'
 import type { Diagnostics } from './diagnostics'
 import {
+  deleteLater,
+  heldOpen,
+  moveAside,
+  sweepTrash as sweepTrashFolder,
+  type DiscardDeps,
+} from './discard'
+import {
   agentSandboxSupport,
   type AgentSandboxSupport,
   type ContainerLaunch,
@@ -534,10 +541,18 @@ export interface AgentManagerDeps extends DriverOverrides {
   envKeyNames?(agentId: AgentId): string[]
   /** Huli: Kite's data folder, which no container mounts. */
   dataDir?: string
+  /** Huli: what moves installs aside and deletes them; tests pass their own disk and clock. */
+  discard?: DiscardDeps
 }
 
 /** An install that was stopped on purpose, which leaves the agent as it was rather than failed. */
 class InstallCancelled extends Error {}
+
+/** What an uninstall ran to remove the user's own program, and why that failed, if it did. */
+export interface UninstallResult {
+  command: string | null
+  error: string | null
+}
 
 interface UpdateCheck {
   checked: number
@@ -612,6 +627,8 @@ class Harness {
   taskRun: Promise<void> | null = null
   taskAbort: AbortController | null = null
   taskOutput = new TextRing(8 * 1024)
+  /** Huli: the uninstall that runs, which a second request for it joins. */
+  uninstalling: Promise<UninstallResult> | null = null
 
   constructor(readonly def: AgentDefinition) {}
 }
@@ -1453,9 +1470,12 @@ export class AgentManager {
       throw new HostError('busy', t(key, { agent: slot.name }))
     }
     const { h } = slot
+    // Huli: nothing starts from the installs an uninstall is moving aside.
+    this.assertNotUninstalling(h)
     await this.detectAll()
     if (slot.stopping) await slot.stopping
     if (h.installing) await h.installing.catch(() => {})
+    this.assertNotUninstalling(h)
     this.registeredSlot(agentId)
     this.assertEnabled(agentId)
     if (slot.runtime) return slot.runtime
@@ -2051,7 +2071,10 @@ export class AgentManager {
     if (this.agentsOf(h).some((agent) => this.givenUpRuns(agent))) return
     h.cleanedDir = current.dir
     const harnessId = h.def.id
-    removeStaleInstalls(this.deps.adaptersDir, harnessId, launch.package, current).then(
+    removeStaleInstalls(this.deps.adaptersDir, harnessId, launch.package, current, {
+      platform: this.deps.platform,
+      deps: this.discardDeps(),
+    }).then(
       (removed) => {
         if (removed.length > 0) {
           this.deps.diagnostics.event(slot.id, 'removed', removed.join(', '))
@@ -2086,7 +2109,10 @@ export class AgentManager {
         (install) => install.dir === dir,
       )
       if (!keep) return
-      const removed = await removeStaleArchives(this.deps.adaptersDir, h.def.id, keep)
+      const removed = await removeStaleArchives(this.deps.adaptersDir, h.def.id, keep, {
+        platform: this.deps.platform,
+        deps: this.discardDeps(),
+      })
       if (removed.length > 0) this.deps.diagnostics.event(slot.id, 'removed', removed.join(', '))
     })().catch((error: unknown) =>
       this.deps.diagnostics.log(
@@ -2117,11 +2143,18 @@ export class AgentManager {
     h.task = { kind: 'install', state: 'failed', command, method: null, error: message }
   }
 
-  /** Refuses a second install or update while one runs. */
+  /** Refuses a second install or update while one runs, and any while the harness uninstalls. */
   private assertNoInstall(h: Harness): void {
+    this.assertNotUninstalling(h)
     const installing = this.agentsOf(h).some((slot) => slot.state === 'installing')
     if (h.task?.state === 'running' || h.installing || installing) {
       throw new HostError('busy', t('agent.busyTask', { agent: h.def.name }))
+    }
+  }
+
+  private assertNotUninstalling(h: Harness): void {
+    if (h.uninstalling) {
+      throw new HostError('busy', t('agent.uninstall.running', { agent: h.def.name }))
     }
   }
 
@@ -2134,20 +2167,33 @@ export class AgentManager {
    * Removes what Kettu installed for the harness, and asks the harness's own installer to remove
    * the user's program when asked. Agents and their sessions are handled by the settings change
    * that follows; external configuration and user-installed programs are never deleted here.
+   * Huli: a second request while one runs gets the first one's answer.
    */
-  async uninstall(
-    agentId: AgentId,
-    removeProgram = false,
-  ): Promise<{ command: string | null; error: string | null }> {
+  async uninstall(agentId: AgentId, removeProgram = false): Promise<UninstallResult> {
     const { h } = this.slot(agentId)
+    if (!h.uninstalling) {
+      const run = this.runUninstall(h, removeProgram)
+      h.uninstalling = run
+      const done = (): void => {
+        if (h.uninstalling === run) h.uninstalling = null
+      }
+      run.then(done, done)
+    }
+    return h.uninstalling
+  }
+
+  private async runUninstall(h: Harness, removeProgram: boolean): Promise<UninstallResult> {
     await this.detectAll()
-    if (h.task?.state === 'running') {
+    const installing = this.agentsOf(h).some((slot) => slot.state === 'installing')
+    if (h.task?.state === 'running' || h.installing || h.packageInstall || installing) {
       throw invalidParams(t('agent.uninstall.busy', { agent: h.def.name }))
     }
+    const removing = this.agentsOf(h).find((slot) => slot.removing)
+    if (removing) throw new HostError('busy', t('agent.removing', { agent: removing.name }))
     const program = removeProgram ? this.programUninstall(h) : null
     await this.stopAutoUpdate(h)
     for (const slot of this.agentsOf(h)) await this.stopProcess(slot)
-    await rm(path.join(this.deps.adaptersDir, h.def.id), { recursive: true, force: true })
+    await this.moveInstallsAside(h)
     this.forgetInstall(h)
     this.deps.diagnostics.event(h.def.id, 'uninstall', 'removed what Kettu installed')
     if (!program) return { command: null, error: null }
@@ -2173,6 +2219,65 @@ export class AgentManager {
       command: program.command,
       error: programFailure(program.command, run, this.timings.installMs),
     }
+  }
+
+  /**
+   * Huli: moves Kite's installs of the harness aside in one rename, to delete in the background:
+   * deleting a package's tens of thousands of files under a virus scan took most of a minute. On
+   * Windows a file a process still holds keeps the folder in place, so the harness's processes are
+   * stopped again, those whose stop gave up too, and it is tried once more before the user is told.
+   */
+  private async moveInstallsAside(
+    h: Harness,
+    dir = path.join(this.deps.adaptersDir, h.def.id),
+  ): Promise<void> {
+    const options = {
+      platform: this.deps.platform,
+      trashRoot: this.deps.adaptersDir,
+      ...(this.deps.discard ? { deps: this.deps.discard } : {}),
+    }
+    let trash: string | null
+    try {
+      trash = await moveAside(dir, options)
+    } catch (error) {
+      if (!heldOpen(error)) throw error
+      this.deps.diagnostics.log('warn', `${h.def.name}: ${dir} is in use; stopping its processes`)
+      await this.stopGivenUp(h)
+      for (const slot of this.agentsOf(h)) await this.stopProcess(slot)
+      try {
+        trash = await moveAside(dir, { ...options, waits: [500, 1_000, 2_000, 4_000] })
+      } catch (again) {
+        if (!heldOpen(again)) throw again
+        throw new HostError('busy', t('agent.uninstall.inUse', { agent: h.def.name, path: dir }))
+      }
+    }
+    if (trash) void deleteLater(trash, this.discardDeps())
+  }
+
+  /** How the background deletes log, and what tests put in place of the disk. */
+  private discardDeps(): DiscardDeps {
+    return {
+      log: (level, message) => this.deps.diagnostics.log(level, message),
+      ...this.deps.discard,
+    }
+  }
+
+  /** Stops once more the harness's processes whose stop gave up, and what they started. */
+  private async stopGivenUp(h: Harness): Promise<void> {
+    const runs = [...this.givenUp].filter(
+      ([launched, owner]) => owner.h === h && !launched.hasExited,
+    )
+    await Promise.all(
+      runs.map(async ([launched, owner]) => {
+        await launched.stop(this.tools()).catch(() => {})
+        await this.reapTree(owner, launched).catch(() => {})
+      }),
+    )
+  }
+
+  /** Huli: deletes in the background the harness installs a quit left moved aside. */
+  sweepTrash(): Promise<void> {
+    return sweepTrashFolder(this.deps.adaptersDir, this.discardDeps())
   }
 
   /** Forgets what the harness's install that is gone reported, and the updates found for it. */
@@ -2250,6 +2355,7 @@ export class AgentManager {
     if (launch.kind !== 'package') {
       throw invalidParams(t('detect.notInstalledByKettu', { agent: h.def.name }))
     }
+    this.assertNotUninstalling(h)
     if (h.installing || agents.some((slot) => slot.starting)) {
       throw new HostError('busy', t('agent.busyInstalling', { agent: h.def.name }))
     }
@@ -2272,7 +2378,12 @@ export class AgentManager {
       // The install a start runs goes, and the same version comes back.
       const detected = h.detection?.state === 'available' ? h.detection.adapter : null
       const removed = detected?.current ?? null
-      if (removed) await removeInstall(removed.dir)
+      if (removed) {
+        await removeInstall(this.deps.adaptersDir, removed.dir, {
+          platform: this.deps.platform,
+          deps: this.discardDeps(),
+        })
+      }
       h.cleanedDir = null
       for (const slot of agents) {
         slot.failures = []
@@ -3120,7 +3231,8 @@ export class AgentManager {
       return
     }
     const installing = this.agentsOf(h).some((slot) => slot.state === 'installing')
-    if (h.task?.state === 'running' || h.installing || h.packageInstall || installing) return
+    const busy = h.task?.state === 'running' || h.installing || h.packageInstall || installing
+    if (busy || h.uninstalling) return
     // Installed but not run, such as one the user's CLI cannot run: installing it again would not.
     if (await this.hasInstall(h, target.version)) return
     const abort = new AbortController()
@@ -3273,6 +3385,7 @@ export class AgentManager {
   async update(agentId: AgentId): Promise<void> {
     const { h } = this.slot(agentId)
     const { launch } = h.def
+    this.assertNotUninstalling(h)
     await this.detectAll()
     if (this.targeted(h)) return this.updateToTarget(h)
     if (launch.kind !== 'package') {
@@ -3515,6 +3628,7 @@ export class AgentManager {
    */
   async updateCli(agentId: AgentId): Promise<void> {
     const { h } = this.slot(agentId)
+    this.assertNotUninstalling(h)
     await this.detectAll()
     const plan = await this.cliUpdatePlan(h)
     if (!plan?.run) {
@@ -3630,6 +3744,7 @@ export class AgentManager {
    */
   async install(agentId: AgentId, method?: AgentInstallMethod['id']): Promise<void> {
     const { h } = this.slot(agentId)
+    this.assertNotUninstalling(h)
     await this.detectAll()
     // The user's program an SDK runs is installed first; one found too old is updated instead.
     const cliMissing = h.detection?.state === 'not-installed' && !h.detection.cli
@@ -3755,6 +3870,7 @@ export class AgentManager {
   private async installNow(h: Harness): Promise<void> {
     const home = this.home(h)
     const agentId = home.id
+    this.assertNotUninstalling(h)
     if (h.installing) {
       await h.installing
       return
@@ -6268,6 +6384,7 @@ export class AgentManager {
       const result = await runRemoval(prepared, steps, {
         secrets: this.secretStore(),
         trash: options.trash,
+        discard: (folder) => this.moveInstallsAside(h, folder),
         run: async (program, args) => {
           const run = await (this.deps.runProgram ?? runProgram)({
             program,
