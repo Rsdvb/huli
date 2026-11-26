@@ -1,10 +1,17 @@
 // The host's own notes in a conversation, as the desktop words them: another agent taking the
 // session over, the user taking a surface over and handing it back, a message from another session,
-// and a session or sub-agent this one started, with whether it waits for the user.
+// a session or sub-agent this one started, with whether it waits for the user, and the report that
+// a turn this one asked such a session for ended.
 
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
-import type { ThreadEntry } from '@shared/thread'
+import {
+  reportedTurns,
+  type FromSession,
+  type ReportedTurn,
+  type StopReason,
+  type ThreadEntry,
+} from '@shared/thread'
 import { useAgent, useConnected, useLink, useSession } from '../../host'
 import { sessionTitle } from '../../sessions'
 import { AgentAvatar } from '../../ui/AgentAvatar'
@@ -16,6 +23,7 @@ import { G, Icon } from '../../ui/session/icons'
 import { useSessionTokens } from '../../ui/session/palette'
 import { useDisclosure } from '../../ui/session/disclosure'
 import { subagentRunning, useSubagentDigest } from '../../ui/session/subagents'
+import { turnText } from '../../ui/session/reports'
 import { durationText } from '../../ui/session/work'
 import { useAgentName } from './AccessEntries'
 import { E, QuietLine } from './kit'
@@ -346,6 +354,54 @@ export function ChildEntry(props: { entry: Of<'subagent'> | Of<'session_started'
   )
 }
 
+const reportTone = (stopReason: StopReason | null) =>
+  stopReason === 'end_turn' ? 'done' : stopReason === 'cancelled' ? 'other' : 'failed'
+
+const reportIcon = (stopReason: StopReason | null) =>
+  stopReason === 'end_turn' ? G.done : stopReason === 'cancelled' ? G.stopOutline : G.failed
+
+/**
+ * Kettu's report that a turn this session asked another one for ended: a quiet line that says the
+ * agent was told, never the English sentence it was told in; a tap opens that session. One of
+ * several turns names each session under it.
+ */
+export function ReportLine(props: { from: FromSession }) {
+  const { c } = useSessionTokens()
+  const turns = reportedTurns(props.from)
+  if (turns.length === 1) return <ReportedTurnLine turn={turns[0]!} told />
+  const failed = turns.some((turn) => reportTone(turn.stopReason) === 'failed')
+  return (
+    <View>
+      <QuietLine
+        icon={failed ? G.failed : G.done}
+        tone={failed ? 'failed' : 'done'}
+        text={`${turns.length} 个会话的回合结束了`}
+        detail="已告诉 Agent"
+      />
+      <View style={[styles.reports, { borderColor: c.border }]}>
+        {turns.map((turn) => (
+          <ReportedTurnLine key={turn.sessionId} turn={turn} />
+        ))}
+      </View>
+    </View>
+  )
+}
+
+function ReportedTurnLine(props: { turn: ReportedTurn; told?: boolean }) {
+  const { turn } = props
+  const session = useSession(turn.sessionId)
+  const title = session ? sessionTitle(session) : turn.title
+  return (
+    <QuietLine
+      icon={reportIcon(turn.stopReason)}
+      tone={reportTone(turn.stopReason)}
+      text={turnText(title, turn.stopReason)}
+      {...(props.told ? { detail: '已告诉 Agent' } : {})}
+      {...(session ? { onPress: () => router.push(`/session/${session.id}`) } : {})}
+    />
+  )
+}
+
 const STOP_REASON = {
   end_turn: null,
   cancelled: '已取消',
@@ -410,6 +466,7 @@ const styles = StyleSheet.create({
   },
   startedText: { flex: 1, fontSize: 13, lineHeight: 18 },
   dot: { width: 7, height: 7, borderRadius: 4 },
+  reports: { marginLeft: 6, paddingLeft: 12, borderLeftWidth: StyleSheet.hairlineWidth },
   pill: {
     fontSize: 11,
     fontWeight: '600',

@@ -6,12 +6,13 @@ import { useState, type RefObject } from 'react'
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import Reanimated, { Easing, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
 import { useKeyboardState } from 'react-native-keyboard-controller'
-import type {
-  ConfigOption,
-  OutsideKind,
-  QueuedPrompt,
-  SessionView,
-  UserContent,
+import {
+  reportedTurns,
+  type ConfigOption,
+  type OutsideKind,
+  type QueuedPrompt,
+  type SessionView,
+  type UserContent,
 } from '@shared/thread'
 import type { HarnessId } from '@shared/agents'
 import type { LimitPause, LimitPauseAction, Stall, StallAction } from '@shared/supervisor'
@@ -35,8 +36,12 @@ import {
   type ModeLook,
 } from './ConfigMenus'
 import { optionName, shortModelName } from '../ui/session/optionText'
+import { reportText } from '../ui/session/reports'
 
 function promptText(item: QueuedPrompt): string {
+  // A report reads as the thread draws it, never as the sentence the agent gets.
+  const turns = reportedTurns(item.from)
+  if (turns.length > 0) return reportText(turns)
   return item.content
     .map((c) => (c.type === 'text' ? c.text : c.ref.kind === 'link' ? c.ref.uri : ''))
     .join(' ')
@@ -586,6 +591,7 @@ export function QueueStack(props: {
         )}
       </View>
       {(open ? session.queue : []).map((item, index) => {
+        const report = reportedTurns(item.from).length > 0
         const text = promptText(item)
         const attachments = attachmentCount(item)
         const disabled = !connected || busyItem !== null
@@ -621,7 +627,7 @@ export function QueueStack(props: {
         )
         const from = item.device
           ? `来自 ${item.device.name}`
-          : item.from
+          : item.from && !report
             ? `来自「${item.from.title}」`
             : null
         return (
@@ -640,6 +646,9 @@ export function QueueStack(props: {
                 <Text style={[styles.numberText, { color: c.textSecondary }]}>{index + 1}</Text>
               </View>
               <Text style={[styles.queuedText, { color: c.text }]} numberOfLines={2}>
+                {report ? (
+                  <Text style={{ color: c.textSecondary, fontWeight: '600' }}>回报 · </Text>
+                ) : null}
                 {text || (attachments > 0 ? '' : '附件')}
                 {attachments > 0 && (
                   <Text style={{ color: c.textSecondary }}>
@@ -660,11 +669,18 @@ export function QueueStack(props: {
               ) : (
                 <>
                   {action('移除', () => remove(item), { danger: true })}
-                  {action('在输入框中编辑', () => edit(item))}
+                  {/* A report is Kettu's, not words of the user's to edit. */}
+                  {!report && action('在输入框中编辑', () => edit(item))}
                   {running &&
-                    action('立即发送', () => sendNow(item), {
+                    action(report ? '现在就告诉它' : '立即发送', () => sendNow(item), {
                       strong: true,
-                      hint: steering ? '立即插入当前对话' : '停止本轮，接着发送这条消息',
+                      hint: report
+                        ? steering
+                          ? '插入正在进行的回合'
+                          : '停止本轮，接着告诉它'
+                        : steering
+                          ? '立即插入当前对话'
+                          : '停止本轮，接着发送这条消息',
                     })}
                 </>
               )}

@@ -45,6 +45,7 @@ import {
   ChildEntry,
   ControlNoteEntry,
   RecallEntry,
+  ReportLine,
   SessionMessageEntry,
   TakeoverEntry,
   TurnEndEntry,
@@ -267,6 +268,8 @@ export const EntryView = memo(function EntryView(props: {
   switch (entry.kind) {
     case 'user':
       if (entry.approval) return null
+      // Kettu's report of a turn another session ended is an event, not a message.
+      if (entry.from?.ended) return <ReportLine from={entry.from} />
       return (
         <UserMessage
           id={entry.id}
