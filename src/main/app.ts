@@ -482,6 +482,8 @@ async function start(): Promise<void> {
     settings: () => terminalSettings(settings.get()),
     onReady: () => broadcast('terminals:ready', null),
     onHandedBack: (sessionId, ms) => hostRef.current?.terminalHandedBack(sessionId, ms),
+    onIdleClosed: (sessionId, terminals) =>
+      hostRef.current?.terminalsIdleClosed(sessionId, terminals),
   })
   const deviceHost = new DeviceHost({
     allowDevices: () => true,

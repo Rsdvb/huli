@@ -190,6 +190,15 @@
       "title": "会话在消息发出前已关闭",
       "description": "消息会留在队列中，点击「继续」后才会发出。"
     },
+    "idleTerminals": {
+      "title_one": "已关闭 {{count}} 个空闲的 Agent 终端",
+      "title_other": "已关闭 {{count}} 个空闲的 Agent 终端",
+      "line": "{{title}} · 空闲了 {{minutes}} 分钟",
+      "more_one": "另有 {{count}} 个：{{names}}",
+      "more_other": "另有 {{count}} 个：{{names}}",
+      "separator": "、",
+      "setting": "里面已经没有程序在跑。可以在 设置 › 终端 › 自动关闭空闲的 Agent 终端 里调整。"
+    },
     "outOfCredit": {
       "title": "{{model}} 余额不足",
       "titleNoModel": "{{agent}} 的模型服务商余额不足",

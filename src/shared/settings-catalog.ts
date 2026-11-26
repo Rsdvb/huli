@@ -29,6 +29,7 @@ import {
 import { AUTO_APPROVE_LEVELS } from './risk'
 import { SANDBOX_NETWORKS, SANDBOX_TIERS } from './sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from './supervisor'
+import { DEFAULT_IDLE_TERMINAL_MINUTES, IDLE_TERMINAL_MINUTES } from './terminal-idle'
 import { SETTLE_DAYS } from './session-tidy'
 import { BIN_KEEP_DAYS } from './recycle-bin'
 import { TOOL_CALL_VIEWS } from './zen-view'
@@ -2050,6 +2051,28 @@ const ENTRIES = {
     part: 'host',
     kind: 'path',
     get: (file) => file.terminal.shellPath ?? null,
+  },
+  'terminal.idle-agent': {
+    section: 'terminal',
+    row: 'idle-agent',
+    group: 'terminal.groups.agents',
+    name: 'terminal.idleAgent.name',
+    description: 'terminal.idleAgent.description',
+    keywords: 'terminal.idleAgent.keywords',
+    part: 'host',
+    access: 'change',
+    ...pick(
+      'terminal',
+      'idleAgentMinutes',
+      (file) => file.terminal.idleAgentMinutes ?? DEFAULT_IDLE_TERMINAL_MINUTES,
+      IDLE_TERMINAL_MINUTES.map((minutes) => ({
+        value: minutes,
+        label:
+          minutes === 0
+            ? { key: 'terminal.idleAgent.off' }
+            : { key: 'terminal.idleAgent.after', params: { count: String(minutes) } },
+      })),
+    ),
   },
   'terminal.font-family': {
     section: 'terminal',

@@ -14,6 +14,7 @@ import type { ControlChannel, PortChannel } from '@shared/port-channel'
 import type { FromPort } from '@shared/port-rpc'
 import type { PortDevice } from '@shared/remote/device'
 import type { HostSettings } from '@shared/settings'
+import { parseClosedTerminals } from '@shared/terminal-idle'
 import { recordedSecretStore } from './agent-reset/secrets'
 import { createGitService } from './git'
 import { AgentHost } from './host'
@@ -289,6 +290,13 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
           withHost((h) => h.terminalHandedBack(message.sessionId, message.durationMs))
         }
         break
+      case 'host:terminals-idle-closed': {
+        const terminals = parseClosedTerminals(message.terminals)
+        if (typeof message.sessionId === 'string' && message.sessionId && terminals) {
+          withHost((h) => h.terminalsIdleClosed(message.sessionId, terminals))
+        }
+        break
+      }
       case 'host:browser-handed-back':
         if (
           typeof message.sessionId === 'string' &&

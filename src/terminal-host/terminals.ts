@@ -14,12 +14,28 @@ import {
   type TerminalCallErrorCode,
   type TerminalWaitReason,
 } from '@shared/terminal-agent'
-import type { TerminalCommand, TerminalInfo, TerminalParams } from '@shared/terminal-host'
+import type {
+  TerminalActivity,
+  TerminalCommand,
+  TerminalInfo,
+  TerminalParams,
+} from '@shared/terminal-host'
 import { TERMINAL_FLOW, terminalName } from '@shared/terminal-host'
+import {
+  AGENT_TERMINAL_CAP,
+  CLOSED_OUTPUT_LINES,
+  DEFAULT_IDLE_TERMINAL_MINUTES,
+  keepEnd,
+  MANUAL_IDLE_MS,
+  MAX_CLOSED_OUTPUT,
+  MAX_CLOSED_TITLE,
+  type ClosedTerminal,
+} from '@shared/terminal-idle'
 import { commandTitle, typedTitle } from './command-title'
 import { DeviceFlow, FlowControl } from './flow'
 import { OutputScanner } from './output-scanner'
 import { looksLikePasswordPrompt, readsPassword, type TtyModes } from './password'
+import { runningUnder, type ProcessRow } from './processes'
 import { plainTail } from '@shared/terminal-text'
 import type { ProjectRegistry } from './projects'
 import { ReplayBuffer } from './replay'
@@ -98,8 +114,13 @@ export interface TerminalManagerOptions {
   loadPty: () => Promise<PtySpawn>
   findOnPath?: FindOnPath
   warn?: (message: string) => void
-  /** Lists the processes attached to a Windows console, the shell's included. */
-  consoleProcesses?: (pty: PtyProcess) => Promise<number[] | null>
+  /**
+   * Huli: every process of the system, which tells the shells with a program running under them
+   * from those idle at their prompt; without it every shell may be running something.
+   */
+  listProcesses?: () => Promise<ProcessRow[]>
+  /** Huli: agent terminals of a session sat idle and were closed; its thread notes them. */
+  idleClosed?: (sessionId: string, terminals: ClosedTerminal[]) => void
   /** Whether a port serves a paired device, which never pauses the pty; none do when absent. */
   isDevicePort?: (port: string) => boolean
   /** The user handed back a terminal an agent's turn uses, after holding it for `durationMs`. */
@@ -124,6 +145,15 @@ const WAIT_POLL_MS = 200
 const IDLE_AFTER_MS = 1500
 // The output kept to read the line the cursor waits on.
 const TAIL_CHARS = 1024
+// Huli: how long a process listing answers for what runs in terminals busy with output, as the
+// quit and update dialogs ask again every few seconds; a CIM query takes about a second.
+const LISTING_REUSE_MS = 5_000
+// Huli: how long the quit confirmation waits for a listing before it counts every shell it could
+// not tell about as running; main waits 2 s for the answer.
+const BUSY_LISTING_MS = 1_500
+// Huli: at most one check for idle terminals a minute once a host holds more agent terminals
+// than AGENT_TERMINAL_CAP.
+const CAP_CHECK_GAP_MS = 60_000
 // An agent's command and text are typed as they are; a control character could act as a key.
 // eslint-disable-next-line no-control-regex
 const AGENT_CONTROL = /[\x00-\x08\x0a-\x1f\x7f]/
@@ -156,6 +186,53 @@ interface Terminal {
   lastOutputAt: number
   quietTimer: NodeJS.Timeout | null
   quietSeq: number // bumped by each output, so a password check that output overtook is dropped
+  /** Huli: the command it was opened to run, which names an agent's tab on Windows. */
+  commandTitle: string | null
+  /** Huli: the user typed into it or took it over, so it is never closed as idle. */
+  userTyped: boolean
+  /** Huli: when it last printed or was typed into, which may start or end a program in it. */
+  touchedAt: number
+  /** Huli: what ran under its shell at a listing taken since it was last touched. */
+  checked: ChildCheck | null
+}
+
+/** Huli: whether a program ran under a shell at a process listing taken at `at`. */
+interface ChildCheck {
+  running: boolean
+  /** When the earliest of them started, when one ran. */
+  since: number | null
+  at: number
+}
+
+/** Huli: a listing of the system's processes, taken at `at`. */
+interface Listing {
+  rows: ProcessRow[]
+  at: number
+}
+
+/* eslint-disable no-control-regex */
+const TYPED_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g
+const TYPED_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
+const TYPED_STRING = /\x1b[PX^_][^\x1b]*\x1b\\/g
+const TYPED_ESCAPE = /\x1b./g
+/* eslint-enable no-control-regex */
+
+/**
+ * Huli: whether keys from a window or device are the user's typing, rather than the terminal's
+ * own answers to the program's questions (cursor position, colours, focus) or a mouse report.
+ */
+export function isTyping(data: string): boolean {
+  const rest = data
+    .replace(TYPED_CSI, '')
+    .replace(TYPED_OSC, '')
+    .replace(TYPED_STRING, '')
+    .replace(TYPED_ESCAPE, '')
+  return rest.length > 0
+}
+
+/** Huli: a terminal an agent opened with its tools, not one the user ran from a reply. */
+function isAgents(terminal: Terminal): boolean {
+  return terminal.info.owner !== null && !terminal.info.owner.fromReply
 }
 
 /**
@@ -185,6 +262,13 @@ function programTitle(title: string): string {
 export class TerminalManager {
   private readonly terminals = new Map<string, Terminal>()
   private shellPath: string | null = null
+  // Huli: how long an agent's terminal sits idle before it is closed; null never.
+  private idleMs: number | null = DEFAULT_IDLE_TERMINAL_MINUTES * 60_000
+  // Huli: the one check for idle terminals each session waits for, by session id.
+  private readonly idleTimers = new Map<string, NodeJS.Timeout>()
+  private capCheckedAt = -Infinity
+  private listed: Listing | null = null
+  private listing: { at: number; promise: Promise<Listing | null> } | null = null
   private authCommands = new Set<string>()
   private spawnPty: Promise<PtySpawn> | null = null
   private readonly findOnPath: FindOnPath
@@ -223,6 +307,15 @@ export class TerminalManager {
 
   setAuthCommands(commands: string[]): void {
     this.authCommands = new Set(commands)
+  }
+
+  /** Huli: Settings › Terminal › Close idle agent terminals; 0 never. */
+  setIdleMinutes(minutes: number): void {
+    const idleMs = minutes > 0 ? minutes * 60_000 : null
+    if (idleMs === this.idleMs) return
+    this.idleMs = idleMs
+    // A check already waiting keeps its time; one that comes too early waits again.
+    if (idleMs === null) this.clearIdleTimers()
   }
 
   create(port: string, params: TerminalParams<'terminals.create'>): Promise<TerminalInfo> {
@@ -298,6 +391,10 @@ export class TerminalManager {
       lastOutputAt: this.now(),
       quietTimer: null,
       quietSeq: 0,
+      commandTitle: naming.title || null,
+      userTyped: false,
+      touchedAt: this.now(),
+      checked: null,
     }
     await this.spawn(terminal)
     this.terminals.set(terminal.info.id, terminal)
@@ -333,6 +430,11 @@ export class TerminalManager {
         this.kill(terminal.info.id)
       }
     }
+    for (const sessionId of ended) {
+      const timer = this.idleTimers.get(sessionId)
+      if (timer) clearTimeout(timer)
+      this.idleTimers.delete(sessionId)
+    }
   }
 
   /** The output so far, and from now on the terminal's data events, for `port`. */
@@ -353,13 +455,19 @@ export class TerminalManager {
     if (this.controls.holdsInput(id) && data !== CTRL_C && terminal.info.waiting !== 'password') {
       return
     }
+    if (isTyping(data)) {
+      terminal.userTyped = true
+      this.touch(terminal)
+    }
     terminal.pty?.write(data)
   }
 
   /** The user's Take over; false when no agent's turn uses the terminal. */
   takeOver(id: string): boolean {
-    this.get(id)
-    return this.controls.takeOver(id)
+    const terminal = this.get(id)
+    const taken = this.controls.takeOver(id)
+    if (taken) terminal.userTyped = true
+    return taken
   }
 
   /** The user's Hand back: the agent's waiting calls go on. */
@@ -368,7 +476,10 @@ export class TerminalManager {
     return this.controls.handBack(id)
   }
 
-  /** The turn of `sessionId` ended, or every turn when null: its terminals are nobody's now. */
+  /**
+   * The turn of `sessionId` ended, or every turn when null: its terminals are nobody's now. Huli:
+   * once its agent terminals could have sat idle as long as the setting says, they are checked.
+   */
   turnEnded(sessionId: string | null): void {
     for (const id of this.controls.keys()) {
       const terminal = this.terminals.get(id)
@@ -376,6 +487,16 @@ export class TerminalManager {
         this.controls.turnEnded(id)
       }
     }
+    const idleMs = this.idleMs
+    if (idleMs === null) return
+    const sessions = new Set<string>()
+    for (const terminal of this.terminals.values()) {
+      const session = sessionOf(terminal)
+      if (session && isAgents(terminal) && (sessionId === null || session === sessionId)) {
+        sessions.add(session)
+      }
+    }
+    for (const session of sessions) this.scheduleIdleCheck(session, this.now() + idleMs)
   }
 
   /**
@@ -413,6 +534,7 @@ export class TerminalManager {
           const data = call.enter ? `${call.text}\r` : call.text
           return await this.agentAct(call, (terminal) => {
             if (!terminal.pty) throw new TerminalError('internal', t('terminal.shellExited'))
+            this.touch(terminal)
             terminal.pty.write(data)
             return { kind: 'terminal', terminal: agentView(terminal) }
           })
@@ -423,6 +545,7 @@ export class TerminalManager {
               this.kill(terminal.info.id)
               return { kind: 'closed' }
             }
+            this.touch(terminal)
             terminal.pty?.write(CTRL_C)
             return { kind: 'terminal', terminal: agentView(terminal) }
           })
@@ -541,6 +664,7 @@ export class TerminalManager {
     // A new terminal is the turn's from the start, so the user's first keys are held back too.
     const end = await this.controls.begin(info.id, { deadline: this.now() + CONTROL_WAIT_MS })
     end()
+    this.checkCap()
     return { result: { kind: 'terminal', terminal: agentView(this.get(info.id)) } }
   }
 
@@ -736,6 +860,9 @@ export class TerminalManager {
     // The new shell is the user's: no agent started it, and the user allowed none to use it yet.
     this.controls.forget(id)
     terminal.agentCommand = false
+    terminal.commandTitle = null
+    terminal.userTyped = false
+    terminal.checked = null
     terminal.shellProcess = null
     terminal.program = null
     terminal.flow = new FlowControl()
@@ -754,23 +881,249 @@ export class TerminalManager {
     }
   }
 
-  /** Terminals with a command running, for the quit confirmation. */
+  /**
+   * Terminals with a command running, for the quit confirmation. Huli: a shell counts as running
+   * one while a process runs under it; one the listing could not tell about in time counts too.
+   */
   async busy(): Promise<BusyTerminal[]> {
     const live = [...this.terminals.values()].filter((terminal) => terminal.pty)
-    const busy = await Promise.all(
-      live.map(async (terminal) => {
-        if (this.options.platform !== 'win32') return terminal.info.busy
-        const attached = await this.options.consoleProcesses?.(terminal.pty!)
-        // Without a process list there is no telling; asking is safer than losing work.
-        return attached ? attached.length > 1 : true
-      }),
-    )
+    const checks = await this.childChecks(live, this.now() - LISTING_REUSE_MS, BUSY_LISTING_MS)
     return live
-      .filter((_, index) => busy[index])
-      .map(({ info }) => ({ id: info.id, projectPath: info.projectPath, title: info.title }))
+      .filter(
+        (terminal) => this.foregroundBusy(terminal) || checks.get(terminal)?.running !== false,
+      )
+      .map((terminal) => {
+        const { info } = terminal
+        return {
+          id: info.id,
+          projectPath: info.projectPath,
+          title: info.title,
+          sessionId: sessionOf(terminal),
+          name: info.name,
+          folder: terminal.cwd,
+          opener: openerOf(info),
+          since: checks.get(terminal)?.since ?? null,
+        }
+      })
+  }
+
+  /**
+   * Huli: what each terminal of the session does now, as its tab list opens, after the session's
+   * agent terminals that sat idle as long as the setting says are closed.
+   */
+  async activity(sessionId: string): Promise<TerminalActivity[]> {
+    if (this.idleMs !== null) await this.autoCloseIdle(sessionId)
+    const own = [...this.terminals.values()].filter((terminal) => sessionOf(terminal) === sessionId)
+    const checks = await this.childChecks(own, latestTouch(own))
+    const now = this.now()
+    return own
+      .filter((terminal) => this.terminals.get(terminal.info.id) === terminal)
+      .map((terminal) => {
+        const running =
+          terminal.pty !== null &&
+          (this.foregroundBusy(terminal) || checks.get(terminal)?.running !== false)
+        return {
+          id: terminal.info.id,
+          running,
+          quietSince: terminal.lastOutputAt,
+          idle: !running && this.idleState(terminal, MANUAL_IDLE_MS, now) === 'idle',
+        }
+      })
+  }
+
+  /** Huli: the tab list's Close idle agent terminals; answers how many it closed. */
+  async closeIdle(sessionId: string): Promise<{ closed: number }> {
+    const { closed } = await this.closeIdleNow(sessionId, MANUAL_IDLE_MS, false)
+    return { closed }
+  }
+
+  /**
+   * Huli: whether an agent's terminal may be closed as idle, short of what runs under its shell:
+   * `never` while it is the user's or a turn uses it, `later` while it printed within `quietMs`.
+   */
+  private idleState(terminal: Terminal, quietMs: number, now: number): 'idle' | 'later' | 'never' {
+    const { info } = terminal
+    if (!isAgents(terminal) || terminal.userTyped) return 'never'
+    if (this.controls.state(info.id).kind !== 'idle') return 'never'
+    if (terminal.command !== null || info.waiting === 'password' || this.foregroundBusy(terminal)) {
+      return 'never'
+    }
+    return now - terminal.lastOutputAt < quietMs ? 'later' : 'idle'
+  }
+
+  /**
+   * Huli: closes the agent terminals of `sessionId`, or of every session when null, that are idle
+   * and printed nothing for `quietMs`, and notes them in their sessions' threads when `note` is
+   * set. A shell is closed only once a listing shows nothing running under it; when none can be
+   * taken, none is. Answers how many closed, and when each session's next could be idle.
+   */
+  private async closeIdleNow(
+    sessionId: string | null,
+    quietMs: number,
+    note: boolean,
+  ): Promise<{ closed: number; nextAt: Map<string, number> }> {
+    const inScope = (terminal: Terminal) => sessionId === null || sessionOf(terminal) === sessionId
+    const ready = [...this.terminals.values()].filter(
+      (terminal) => inScope(terminal) && this.idleState(terminal, quietMs, this.now()) === 'idle',
+    )
+    const checks = await this.childChecks(ready, latestTouch(ready))
+    const now = this.now()
+    const closedBy = new Map<string, ClosedTerminal[]>()
+    let closed = 0
+    for (const terminal of ready) {
+      // Anything may have changed while the listing ran.
+      if (this.terminals.get(terminal.info.id) !== terminal) continue
+      if (this.idleState(terminal, quietMs, now) !== 'idle') continue
+      if (terminal.pty && checks.get(terminal)?.running !== false) continue
+      const record = this.closedRecord(terminal, now)
+      const session = sessionOf(terminal)
+      this.kill(terminal.info.id)
+      closed++
+      if (!session) continue
+      const list = closedBy.get(session)
+      if (list) list.push(record)
+      else closedBy.set(session, [record])
+    }
+    if (note) for (const [session, list] of closedBy) this.options.idleClosed?.(session, list)
+    const nextAt = new Map<string, number>()
+    for (const terminal of this.terminals.values()) {
+      const session = sessionOf(terminal)
+      if (!session || !inScope(terminal) || this.idleState(terminal, quietMs, now) !== 'later') {
+        continue
+      }
+      const at = terminal.lastOutputAt + quietMs
+      nextAt.set(session, Math.min(nextAt.get(session) ?? Infinity, at))
+    }
+    return { closed, nextAt }
+  }
+
+  /** Huli: what the thread keeps of a terminal closed as idle. */
+  private closedRecord(terminal: Terminal, now: number): ClosedTerminal {
+    this.flush(terminal)
+    const { info } = terminal
+    const title = (info.name ?? (info.title || info.shell)).slice(0, MAX_CLOSED_TITLE)
+    const output = keepEnd(
+      plainTail(terminal.replay.snapshot(), CLOSED_OUTPUT_LINES),
+      MAX_CLOSED_OUTPUT,
+    )
+    return { title, idleMs: Math.max(0, Math.round(now - terminal.lastOutputAt)), output }
+  }
+
+  /** Huli: closes idle agent terminals as the setting says, and waits for those not idle yet. */
+  private async autoCloseIdle(sessionId: string | null): Promise<void> {
+    const idleMs = this.idleMs
+    if (idleMs === null) return
+    try {
+      const { nextAt } = await this.closeIdleNow(sessionId, idleMs, true)
+      for (const [session, at] of nextAt) {
+        if (!this.idleTimers.has(session)) this.scheduleIdleCheck(session, at)
+      }
+    } catch (error) {
+      this.options.warn?.(`Could not close idle terminals: ${(error as Error).message}`)
+    }
+  }
+
+  /** Huli: one check of the session's agent terminals at `at`, in place of any it waited for. */
+  private scheduleIdleCheck(sessionId: string, at: number): void {
+    const before = this.idleTimers.get(sessionId)
+    if (before) clearTimeout(before)
+    const timer = setTimeout(
+      () => {
+        this.idleTimers.delete(sessionId)
+        void this.autoCloseIdle(sessionId)
+      },
+      Math.max(0, at - this.now()),
+    )
+    timer.unref?.()
+    this.idleTimers.set(sessionId, timer)
+  }
+
+  private clearIdleTimers(): void {
+    for (const timer of this.idleTimers.values()) clearTimeout(timer)
+    this.idleTimers.clear()
+  }
+
+  /** Huli: past AGENT_TERMINAL_CAP agent terminals, a new one checks them all for idle ones. */
+  private checkCap(): void {
+    if (this.idleMs === null) return
+    let count = 0
+    for (const terminal of this.terminals.values()) if (isAgents(terminal)) count++
+    if (count <= AGENT_TERMINAL_CAP || this.now() - this.capCheckedAt < CAP_CHECK_GAP_MS) return
+    this.capCheckedAt = this.now()
+    void this.autoCloseIdle(null)
+  }
+
+  /** Huli: a program other than the shell is in the foreground, which Windows never tells. */
+  private foregroundBusy(terminal: Terminal): boolean {
+    return this.options.platform !== 'win32' && terminal.info.busy
+  }
+
+  /** Huli: the terminal printed or was typed into, which may have started or ended a program. */
+  private touch(terminal: Terminal): void {
+    terminal.touchedAt = this.now()
+    terminal.checked = null
+  }
+
+  /**
+   * Huli: what runs under each live shell, from its last check when it was not touched since, or
+   * from a listing taken from `after` on; a shell it cannot tell about, as no listing could be
+   * taken or none came within `waitMs`, is missing from the answer.
+   */
+  private async childChecks(
+    terminals: readonly Terminal[],
+    after: number,
+    waitMs?: number,
+  ): Promise<Map<Terminal, ChildCheck>> {
+    const checks = new Map<Terminal, ChildCheck>()
+    const unknown: Terminal[] = []
+    for (const terminal of terminals) {
+      if (!terminal.pty) continue
+      if (terminal.checked && terminal.checked.at >= terminal.touchedAt) {
+        checks.set(terminal, terminal.checked)
+      } else unknown.push(terminal)
+    }
+    if (unknown.length === 0) return checks
+    const listing = await within(this.processRows(after), waitMs)
+    if (!listing) return checks
+    for (const terminal of unknown) {
+      const { pty } = terminal
+      if (!pty) continue
+      const child = runningUnder(listing.rows, pty.pid)
+      const check = { running: child !== null, since: child?.startedAt ?? null, at: listing.at }
+      checks.set(terminal, check)
+      if (terminal.pty === pty && listing.at >= terminal.touchedAt) terminal.checked = check
+    }
+    return checks
+  }
+
+  /** Huli: a listing of the system's processes taken from `after` on, shared by every caller. */
+  private processRows(after: number): Promise<Listing | null> {
+    const list = this.options.listProcesses
+    if (!list) return Promise.resolve(null)
+    if (this.listed && this.listed.at >= after) return Promise.resolve(this.listed)
+    if (this.listing && this.listing.at >= after) return this.listing.promise
+    const at = this.now()
+    const promise = list().then(
+      (rows): Listing => {
+        const listing = { rows, at }
+        if (!this.listed || this.listed.at < at) this.listed = listing
+        return listing
+      },
+      (error: unknown) => {
+        this.options.warn?.(`Could not list processes: ${(error as Error).message}`)
+        return null
+      },
+    )
+    const entry = { at, promise }
+    this.listing = entry
+    void promise.finally(() => {
+      if (this.listing === entry) this.listing = null
+    })
+    return promise
   }
 
   dispose(): void {
+    this.clearIdleTimers()
     for (const terminal of this.terminals.values()) this.stopPty(terminal)
     this.terminals.clear()
   }
@@ -871,6 +1224,7 @@ export class TerminalManager {
   private outputArrived(terminal: Terminal, data: string): void {
     terminal.tail = (terminal.tail + data).slice(-TAIL_CHARS)
     terminal.lastOutputAt = this.now()
+    this.touch(terminal)
     terminal.quietSeq++
     if (terminal.info.waiting !== null) {
       terminal.info.waiting = null
@@ -915,7 +1269,13 @@ export class TerminalManager {
     let busy = info.busy
     if (this.options.platform === 'win32') {
       const shellTitle = terminal.scanner.title
-      title = shellTitle ? programTitle(shellTitle) : terminal.shell.name
+      const program = shellTitle ? programTitle(shellTitle) : null
+      // Between commands PowerShell titles the console with its own path; a tab opened to run a
+      // command keeps naming it then.
+      title =
+        program && program.toLowerCase() !== terminal.shell.name.toLowerCase()
+          ? program
+          : (terminal.commandTitle ?? terminal.shell.name)
     } else {
       const foreground = foregroundName(pty)
       if (foreground === null) return
@@ -960,6 +1320,7 @@ export class TerminalManager {
       typed?.(false)
       return
     }
+    this.touch(terminal)
     if (terminal.agentCommand && command.text.includes('\n')) {
       const ok = terminal.scanner.bracketedPaste
       if (ok) {
@@ -1005,7 +1366,7 @@ export class TerminalManager {
     terminal.info.exitCode = signal ? 128 + signal : exitCode
     terminal.info.busy = false
     terminal.info.waiting = null
-    terminal.info.title = terminal.shell.name
+    terminal.info.title = terminal.commandTitle ?? terminal.shell.name
     this.options.sink.info(this.view(terminal))
   }
 
@@ -1057,4 +1418,29 @@ function agentView(terminal: Terminal): AgentTerminal {
 
 function failure(code: TerminalCallErrorCode, message: string): TerminalCallAnswer {
   return { error: { code, message } }
+}
+
+function openerOf(info: TerminalInfo): NonNullable<BusyTerminal['opener']> {
+  return info.owner === null ? 'user' : info.owner.fromReply ? 'reply' : 'agent'
+}
+
+/** Huli: what `promise` settles to, or null once `ms` passes first; without `ms` it waits. */
+async function within<T>(promise: Promise<T>, ms: number | undefined): Promise<T | null> {
+  if (ms === undefined) return promise
+  let timer: NodeJS.Timeout | undefined
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms)
+  })
+  try {
+    return await Promise.race([promise, late])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Huli: when the latest of the terminals was touched; a listing taken since tells about all. */
+function latestTouch(terminals: readonly Terminal[]): number {
+  let latest = -Infinity
+  for (const terminal of terminals) latest = Math.max(latest, terminal.touchedAt)
+  return latest
 }

@@ -9,12 +9,15 @@ import { writeLog } from '@shared/log/process-log'
 import type { ControlChannel, PortChannel } from '@shared/port-channel'
 import type { FromPort } from '@shared/port-rpc'
 import type { PortDevice } from '@shared/remote/device'
+import type { TerminalSettings } from '@shared/settings'
+import { DEFAULT_IDLE_TERMINAL_MINUTES, isIdleTerminalMinutes } from '@shared/terminal-idle'
 import type { TerminalEvent } from '@shared/terminal-host'
 import { readCommandLine } from './command-title'
 import { readTtyModes } from './password'
+import { listProcesses } from './processes'
 import { ProjectRegistry } from './projects'
 import { PortServer } from './server'
-import { type PtyProcess, type PtySpawn, TerminalManager } from './terminals'
+import { type PtySpawn, TerminalManager } from './terminals'
 
 export interface StartedTerminalHost {
   /**
@@ -42,14 +45,13 @@ async function loadPty(): Promise<PtySpawn> {
   return (file, args, options) => pty.spawn(file, args, options)
 }
 
-// node-pty lists a ConPTY's attached processes for its own kill(); it is not public API, so a
-// missing method means "unknown" rather than "idle".
-type WindowsPty = { _agent?: { _getConsoleProcessList?: () => Promise<number[]> } }
+// A CIM query took 22 to 34 s on a loaded Windows runner; a check for idle terminals waits it out.
+const LIST_PROCESSES_MS = 60_000
 
-function consoleProcesses(pty: PtyProcess): Promise<number[] | null> {
-  const agent = (pty as unknown as WindowsPty)._agent
-  if (typeof agent?._getConsoleProcessList !== 'function') return Promise.resolve(null)
-  return agent._getConsoleProcessList().catch(() => null)
+/** The setting's minutes, the default from a parent that sends none or one it does not know. */
+function idleMinutes(settings: TerminalSettings): number {
+  const minutes = settings.idleAgentMinutes
+  return isIdleTerminalMinutes(minutes) ? minutes : DEFAULT_IDLE_TERMINAL_MINUTES
 }
 
 export function startTerminalHost(
@@ -72,7 +74,9 @@ export function startTerminalHost(
       env: process.env,
       projects,
       loadPty: options.loadPty ?? loadPty,
-      consoleProcesses,
+      listProcesses: () => listProcesses(message.platform, LIST_PROCESSES_MS),
+      idleClosed: (sessionId, terminals) =>
+        send({ type: 'terminal-host:idle-closed', sessionId, terminals }),
       warn,
       isDevicePort: (port) => server?.isDevice(port) ?? false,
       handedBack: (sessionId, durationMs) =>
@@ -90,6 +94,7 @@ export function startTerminalHost(
       },
     })
     terminals.setShellPath(message.settings.shellPath)
+    terminals.setIdleMinutes(idleMinutes(message.settings))
     terminals.setAuthCommands(message.authCommands)
     manager = terminals
     server = new PortServer(
@@ -106,6 +111,8 @@ export function startTerminalHost(
         'terminals.rename': (_, params) => terminals.rename(params.id, params.name),
         'terminals.takeOver': (_, params) => terminals.takeOver(params.id),
         'terminals.handBack': (_, params) => terminals.handBack(params.id),
+        'terminals.activity': (_, params) => terminals.activity(params.sessionId),
+        'terminals.closeIdle': (_, params) => terminals.closeIdle(params.sessionId),
       },
       (port) => terminals.detach(port),
       warn,
@@ -131,6 +138,7 @@ export function startTerminalHost(
         break
       case 'terminal-host:settings':
         manager?.setShellPath(message.settings.shellPath)
+        manager?.setIdleMinutes(idleMinutes(message.settings))
         allowDevices = message.settings.allowDevices === true
         server?.setAllowDevices(allowDevices)
         break

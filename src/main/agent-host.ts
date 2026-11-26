@@ -1,5 +1,6 @@
 import type { DeviceCall, DeviceCallAnswer } from '@shared/device-agent'
 import type { TerminalCall, TerminalCallAnswer } from '@shared/terminal-agent'
+import type { ClosedTerminal } from '@shared/terminal-idle'
 import { isAbsolute, join } from 'node:path'
 import { app, MessageChannelMain, shell, type MessagePortMain, type WebContents } from 'electron'
 import {
@@ -760,6 +761,11 @@ export class AgentHost {
       sessionId,
       durationMs: Math.max(0, Math.round(durationMs)),
     })
+  }
+
+  /** Huli: `host:terminals-idle-closed`: agent terminals of the session sat idle and closed. */
+  terminalsIdleClosed(sessionId: string, terminals: ClosedTerminal[]): void {
+    this.host.post({ type: 'host:terminals-idle-closed', sessionId, terminals })
   }
 
   /** `host:browser-handed-back`: the user handed the page back; the thread says for how long. */

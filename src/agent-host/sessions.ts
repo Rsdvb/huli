@@ -202,6 +202,7 @@ import {
   appealConfirms,
   PROMPT_SUGGESTION_CHARS,
 } from '@shared/thread'
+import type { ClosedTerminal } from '@shared/terminal-idle'
 import type { SessionProcesses } from '@shared/task-processes'
 import { readTaskProcesses } from './task-processes'
 import {
@@ -556,6 +557,9 @@ export interface SessionTimings {
 
 /** The longest a thread's write waits after writes that failed. */
 const MAX_RETRY_MS = 5 * 60_000
+
+/** Huli: how many closed idle terminals a notice shows with their output; the rest by name. */
+const IDLE_NOTE_TERMINALS = 5
 
 export const SESSION_TIMINGS: SessionTimings = {
   flushMs: 16,
@@ -3831,6 +3835,55 @@ export class SessionManager {
   /** The user handed a surface back after taking it over: the thread says for how long. */
   controlHandedBack(sessionId: string, surface: ControlSurface, durationMs: number): void {
     this.controlNote(sessionId, surface, { event: 'handed_back', durationMs })
+  }
+
+  /**
+   * Huli: the terminal host closed agent terminals of the session that sat idle: a notice says
+   * which, with what each last printed, in place of the output the closed tabs took with them.
+   */
+  async terminalsIdleClosed(
+    sessionId: string,
+    terminals: readonly ClosedTerminal[],
+  ): Promise<void> {
+    if (!this.has(sessionId)) return
+    let live: Live
+    try {
+      live = await this.revive(sessionId)
+    } catch (error) {
+      this.deps.diagnostics.log(
+        'warn',
+        `Could not note the idle terminals closed in ${sessionId}: ${(error as Error).message}`,
+      )
+      return
+    }
+    const shown = terminals.slice(0, IDLE_NOTE_TERMINALS)
+    const rest = terminals.slice(IDLE_NOTE_TERMINALS)
+    const parts = shown.map((terminal) => {
+      const line = t('notice.idleTerminals.line', {
+        title: terminal.title,
+        minutes: Math.max(1, Math.round(terminal.idleMs / 60_000)),
+      })
+      return terminal.output ? `${line}\n${terminal.output}` : line
+    })
+    if (rest.length > 0) {
+      const names = rest.map((terminal) => terminal.title).join(t('notice.idleTerminals.separator'))
+      parts.push(t('notice.idleTerminals.more', { count: rest.length, names }))
+    }
+    parts.push(t('notice.idleTerminals.setting'))
+    this.emit(live, [
+      {
+        op: 'entry.add',
+        entry: {
+          kind: 'notice',
+          id: this.nextId(live),
+          severity: 'info',
+          title: t('notice.idleTerminals.title', { count: terminals.length }),
+          description: parts.join('\n\n'),
+          after: agentEntryBefore(live.thread),
+        },
+      },
+    ])
+    this.touch(live.id)
   }
 
   /** The user's own click or key in the app the agent used took it over: the thread says so. */

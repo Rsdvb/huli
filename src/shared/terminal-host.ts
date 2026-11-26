@@ -74,6 +74,24 @@ export interface TerminalContract {
   /** Take over and Hand back of a terminal an agent's turn uses; false when no turn has it. */
   'terminals.takeOver': { params: { id: string }; result: boolean }
   'terminals.handBack': { params: { id: string }; result: boolean }
+  /**
+   * Huli: what each terminal of a session does now, read as its tab list opens; the host first
+   * closes the session's agent terminals that sat idle as long as Settings › Terminal says.
+   */
+  'terminals.activity': { params: { sessionId: string }; result: TerminalActivity[] }
+  /** Huli: closes the session's agent terminals that are idle now; answers how many. */
+  'terminals.closeIdle': { params: { sessionId: string }; result: { closed: number } }
+}
+
+/** Huli: what a terminal does now, which its tab list shows. */
+export interface TerminalActivity {
+  id: string
+  /** A process runs under its shell: a command, a server, a watcher. */
+  running: boolean
+  /** When it last printed, in ms since the epoch. */
+  quietSince: number
+  /** Close idle agent terminals would close it now. */
+  idle: boolean
 }
 
 /**
@@ -123,6 +141,8 @@ export const TERMINAL_METHODS = [
   'terminals.rename',
   'terminals.takeOver',
   'terminals.handBack',
+  'terminals.activity',
+  'terminals.closeIdle',
 ] as const satisfies readonly TerminalMethod[]
 
 export type TerminalEvent =

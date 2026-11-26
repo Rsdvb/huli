@@ -76,6 +76,7 @@ import { isPortBase, PORT_BASE_MAX, PORT_BASE_MIN } from '@shared/worktree-ports
 import { AUTO_APPROVE_LEVELS } from '@shared/risk'
 import { SANDBOX_NETWORKS, SANDBOX_TIERS } from '@shared/sandbox'
 import { RESUME_TEXT_CHARS, STALL_MINUTES } from '@shared/supervisor'
+import { IDLE_TERMINAL_MINUTES, type IdleTerminalMinutes } from '@shared/terminal-idle'
 import { SETTLE_DAYS } from '@shared/session-tidy'
 import { BIN_KEEP_DAYS } from '@shared/recycle-bin'
 import { isWebhookPort, WEBHOOK_PORT_MAX, WEBHOOK_PORT_MIN } from '@shared/routines'
@@ -1368,6 +1369,9 @@ export function validateSettingsPatch(raw: unknown): SettingsPatch {
           const problem =
             fieldValue === null ? null : checkFontFamily(fieldValue, 'terminal.fontFamily')
           if (problem) problems.push(problem)
+        } else if (key === 'idleAgentMinutes') {
+          const problem = oneOf(...IDLE_TERMINAL_MINUTES)(fieldValue, 'terminal.idleAgentMinutes')
+          if (problem) problems.push(problem)
         } else if (key === 'shellPath') {
           if (fieldValue !== null) {
             problems.push(
@@ -1534,6 +1538,9 @@ export function mergeSettings(
       next.terminal.fontFamily = patch.terminal.fontFamily
     }
     if (patch.terminal.shellPath === null) delete next.terminal.shellPath
+    if (patch.terminal.idleAgentMinutes !== undefined) {
+      next.terminal.idleAgentMinutes = patch.terminal.idleAgentMinutes
+    }
   }
   if (patch.remote) {
     const { enabled, name, direct, terminal, relay, discoverable } = patch.remote
@@ -1902,7 +1909,7 @@ export function parseSettingsFile(raw: unknown): LoadedSettings {
   if (raw.terminal !== undefined) {
     if (!isRecord(raw.terminal)) problems.push('"terminal" must be an object')
     else {
-      const { fontSize, fontFamily, shellPath } = raw.terminal
+      const { fontSize, fontFamily, shellPath, idleAgentMinutes } = raw.terminal
       if (fontSize !== undefined) {
         const problem = oneOf(...FONT_SIZES)(fontSize, 'terminal.fontSize')
         if (problem) problems.push(problem)
@@ -1917,6 +1924,14 @@ export function parseSettingsFile(raw: unknown): LoadedSettings {
         const problem = checkStoredPath(shellPath, 'terminal.shellPath')
         if (problem) problems.push(problem)
         else settings.terminal.shellPath = shellPath as string
+      }
+      if (idleAgentMinutes !== undefined) {
+        const problem = oneOf(...IDLE_TERMINAL_MINUTES)(
+          idleAgentMinutes,
+          'terminal.idleAgentMinutes',
+        )
+        if (problem) problems.push(problem)
+        else settings.terminal.idleAgentMinutes = idleAgentMinutes as IdleTerminalMinutes
       }
     }
   }
@@ -2202,6 +2217,7 @@ export function terminalSettings(settings: SettingsFile): TerminalSettings {
     shellPath: settings.terminal.shellPath ?? null,
     fontSize: settings.terminal.fontSize,
     allowDevices: settings.remote.terminal,
+    idleAgentMinutes: settings.terminal.idleAgentMinutes,
   }
 }
 

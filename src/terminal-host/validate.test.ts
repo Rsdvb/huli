@@ -43,6 +43,8 @@ describe('terminal request validators', () => {
       rows: 1,
     })
     expect(validators['terminals.ack']({ id: 't', chars: 5000 })).toEqual({ id: 't', chars: 5000 })
+    expect(validators['terminals.activity']({ sessionId: 's1' })).toEqual({ sessionId: 's1' })
+    expect(validators['terminals.closeIdle']({ sessionId: 's1' })).toEqual({ sessionId: 's1' })
   })
 
   it.each([
@@ -87,6 +89,14 @@ describe('terminal request validators', () => {
     ['terminals.rename', { id: 't', name: 7 }],
     ['terminals.rename', { id: 't', name: 'x'.repeat(257) }],
     ['terminals.rename', { id: 't', name: 'x', by: 'agent' }],
+    ['terminals.activity', undefined],
+    ['terminals.activity', {}],
+    ['terminals.activity', { sessionId: '' }],
+    ['terminals.activity', { sessionId: 7 }],
+    ['terminals.activity', { sessionId: 's'.repeat(200) }],
+    ['terminals.closeIdle', { sessionId: 's1', quietMs: 0 }],
+    ['terminals.closeIdle', { sessionId: 's1', ids: ['t'] }],
+    ['terminals.closeIdle', ['s1']],
   ] as const)('rejects %s %j', (method, params) => {
     expect(() => validators[method](params as never)).toThrow(ValidationError)
   })

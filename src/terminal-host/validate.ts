@@ -134,4 +134,10 @@ export const validators: Validators = {
   },
   'terminals.takeOver': (raw) => ({ id: string(object(raw, ['id']), 'id', MAX_ID) }),
   'terminals.handBack': (raw) => ({ id: string(object(raw, ['id']), 'id', MAX_ID) }),
+  'terminals.activity': (raw) => ({
+    sessionId: string(object(raw, ['sessionId']), 'sessionId', MAX_ID),
+  }),
+  'terminals.closeIdle': (raw) => ({
+    sessionId: string(object(raw, ['sessionId']), 'sessionId', MAX_ID),
+  }),
 }

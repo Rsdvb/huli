@@ -414,8 +414,17 @@
       "name": "字号",
       "description": "单位：像素。"
     },
+    "idleAgent": {
+      "name": "自动关闭空闲的 Agent 终端",
+      "description": "Agent 打开的终端里没有程序在跑、并且这么久没有输出，就把它关掉。你自己打开或输入过的、正在进行的这一轮在用的、还有命令、服务或监听在跑的，都不会关。会话里会留下它最后的输出。",
+      "keywords": "空闲 智能体 Agent 终端 自动关闭 清理 后台 powershell 堆积",
+      "off": "关闭",
+      "after_one": "{{count}} 分钟后",
+      "after_other": "{{count}} 分钟后"
+    },
     "groups": {
       "shell": "Shell",
+      "agents": "Agent 的终端",
       "display": "显示"
     }
   },

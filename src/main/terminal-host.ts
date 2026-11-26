@@ -7,6 +7,11 @@ import {
   type TerminalCall,
   type TerminalCallAnswer,
 } from '@shared/terminal-agent'
+import {
+  parseBusyTerminals,
+  parseClosedTerminals,
+  type ClosedTerminal,
+} from '@shared/terminal-idle'
 import terminalHostPath from '../terminal-host/entry?modulePath'
 import { locale as currentLocale, t } from './i18n'
 import { createLogger } from './log'
@@ -19,12 +24,8 @@ export interface TerminalHostDeps {
   onReady?(): void
   /** The user handed back a terminal an agent's turn uses, after holding it for `durationMs`. */
   onHandedBack?(sessionId: string, durationMs: number): void
-}
-
-function isBusyTerminal(value: unknown): value is BusyTerminal {
-  if (typeof value !== 'object' || value === null) return false
-  const { id, projectPath, title } = value as Record<string, unknown>
-  return typeof id === 'string' && typeof projectPath === 'string' && typeof title === 'string'
+  /** Huli: agent terminals of the session sat idle and were closed. */
+  onIdleClosed?(sessionId: string, terminals: ClosedTerminal[]): void
 }
 
 /** Main's side of the terminal host, which starts on the first window's or device's port. */
@@ -207,6 +208,13 @@ export class TerminalHost {
       }
       return
     }
+    if (message.type === 'terminal-host:idle-closed') {
+      const terminals = parseClosedTerminals(message.terminals)
+      if (typeof message.sessionId === 'string' && message.sessionId && terminals) {
+        deps.onIdleClosed?.(message.sessionId, terminals)
+      }
+      return
+    }
     if (message.type !== 'terminal-host:busy') {
       log.warn(`Ignored unknown message "${message.type}"`)
       return
@@ -214,6 +222,6 @@ export class TerminalHost {
     const resolve = this.busyRequests.get(message.requestId)
     if (!resolve) return
     this.busyRequests.delete(message.requestId)
-    resolve(Array.isArray(message.terminals) ? message.terminals.filter(isBusyTerminal) : [])
+    resolve(parseBusyTerminals(message.terminals))
   }
 }
