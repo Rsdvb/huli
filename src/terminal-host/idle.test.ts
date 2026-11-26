@@ -287,8 +287,8 @@ describe('busy terminals on Windows', () => {
     expect(idle.id).not.toBe(server.id)
     state.children = null
     await vi.advanceTimersByTimeAsync(6000)
-    idle.pty.emit('x')
-    server.pty.emit('x')
+    idle.pty.emit('\r\n% ')
+    server.pty.emit('\r\n% ')
     await vi.advanceTimersByTimeAsync(50)
     expect((await manager.busy()).map((terminal) => terminal.id)).toEqual([idle.id, server.id])
   })
@@ -306,6 +306,59 @@ describe('busy terminals on Windows', () => {
     pty.emit('\x1b]0;npm run dev\x07')
     await vi.advanceTimersByTimeAsync(200)
     expect((await manager.list()).find((info) => info.id === id)?.title).toBe('npm run dev')
+  })
+})
+
+describe('idle agent terminals on Windows', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it("never closes one whose command runs inside PowerShell, off the shell's prompt", async () => {
+    const { manager, ptys, ids, root } = idleHost('win32')
+    const answer = await manager.agentCall({
+      kind: 'run',
+      sessionId: 's1',
+      agentId: 'claude-code',
+      folder: root,
+      command: 'Start-Sleep 3600',
+    })
+    expect('result' in answer).toBe(true)
+    const pty = ptys[0]!
+    pty.emit('PS C:\\work\\app> ')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(pty.written).toEqual(['Start-Sleep 3600\r'])
+    pty.emit('Start-Sleep 3600\r\n')
+    manager.turnEnded('s1')
+    await vi.advanceTimersByTimeAsync(30 * MINUTE)
+    expect(await ids()).toHaveLength(1)
+    expect((await manager.busy()).map((terminal) => terminal.title)).toEqual(['Start-Sleep 3600'])
+    pty.emit('PS C:\\work\\app> ')
+    await vi.advanceTimersByTimeAsync(2 * MINUTE)
+    expect(await manager.closeIdle('s1')).toEqual({ closed: 1 })
+  })
+})
+
+describe('the prompt of an agent terminal on Windows', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('is read from the echo of the command, typed before PowerShell showed its prompt', async () => {
+    const { manager, ptys, ids, root } = idleHost('win32')
+    await manager.agentCall({
+      kind: 'run',
+      sessionId: 's1',
+      agentId: 'claude-code',
+      folder: root,
+      command: 'echo hi',
+    })
+    const pty = ptys[0]!
+    pty.emit('Windows PowerShell\r\nCopyright (C) Microsoft Corporation.')
+    await vi.advanceTimersByTimeAsync(500)
+    expect(pty.written).toEqual(['echo hi\r'])
+    pty.emit('\r\nPS C:\\work\\app> \x1b[93mecho\x1b[0m hi\r\nhi\r\nPS C:\\work\\app> ')
+    manager.turnEnded('s1')
+    await vi.advanceTimersByTimeAsync(11 * MINUTE)
+    expect(await ids()).toEqual([])
   })
 })
 

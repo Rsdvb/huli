@@ -154,6 +154,11 @@ const BUSY_LISTING_MS = 1_500
 // Huli: at most one check for idle terminals a minute once a host holds more agent terminals
 // than AGENT_TERMINAL_CAP.
 const CAP_CHECK_GAP_MS = 60_000
+// Huli: how long after an agent's command is typed its echo is looked for, in how many of the
+// last lines, by how many of its first characters.
+const ECHO_WINDOW_MS = 3_000
+const ECHO_LINES = 4
+const ECHO_PROBE_CHARS = 40
 // An agent's command and text are typed as they are; a control character could act as a key.
 // eslint-disable-next-line no-control-regex
 const AGENT_CONTROL = /[\x00-\x08\x0a-\x1f\x7f]/
@@ -194,6 +199,14 @@ interface Terminal {
   touchedAt: number
   /** Huli: what ran under its shell at a listing taken since it was last touched. */
   checked: ChildCheck | null
+  /**
+   * Huli: the last character of the prompt the shell echoed an agent's command after, which the
+   * line the cursor waits on ends with again once the shell is back at its prompt; null when
+   * unknown.
+   */
+  promptMark: string | null
+  /** Huli: the start of an agent's command just typed, looked for in its echo until `until`. */
+  echo: { probe: string; until: number } | null
 }
 
 /** Huli: whether a program ran under a shell at a process listing taken at `at`. */
@@ -395,6 +408,8 @@ export class TerminalManager {
       userTyped: false,
       touchedAt: this.now(),
       checked: null,
+      promptMark: null,
+      echo: null,
     }
     await this.spawn(terminal)
     this.terminals.set(terminal.info.id, terminal)
@@ -863,6 +878,8 @@ export class TerminalManager {
     terminal.commandTitle = null
     terminal.userTyped = false
     terminal.checked = null
+    terminal.promptMark = null
+    terminal.echo = null
     terminal.shellProcess = null
     terminal.program = null
     terminal.flow = new FlowControl()
@@ -889,9 +906,7 @@ export class TerminalManager {
     const live = [...this.terminals.values()].filter((terminal) => terminal.pty)
     const checks = await this.childChecks(live, this.now() - LISTING_REUSE_MS, BUSY_LISTING_MS)
     return live
-      .filter(
-        (terminal) => this.foregroundBusy(terminal) || checks.get(terminal)?.running !== false,
-      )
+      .filter((terminal) => this.runsInShell(terminal) || checks.get(terminal)?.running !== false)
       .map((terminal) => {
         const { info } = terminal
         return {
@@ -921,7 +936,7 @@ export class TerminalManager {
       .map((terminal) => {
         const running =
           terminal.pty !== null &&
-          (this.foregroundBusy(terminal) || checks.get(terminal)?.running !== false)
+          (this.runsInShell(terminal) || checks.get(terminal)?.running !== false)
         return {
           id: terminal.info.id,
           running,
@@ -945,7 +960,7 @@ export class TerminalManager {
     const { info } = terminal
     if (!isAgents(terminal) || terminal.userTyped) return 'never'
     if (this.controls.state(info.id).kind !== 'idle') return 'never'
-    if (terminal.command !== null || info.waiting === 'password' || this.foregroundBusy(terminal)) {
+    if (terminal.command !== null || info.waiting === 'password' || this.runsInShell(terminal)) {
       return 'never'
     }
     return now - terminal.lastOutputAt < quietMs ? 'later' : 'idle'
@@ -1053,9 +1068,31 @@ export class TerminalManager {
     void this.autoCloseIdle(null)
   }
 
-  /** Huli: a program other than the shell is in the foreground, which Windows never tells. */
-  private foregroundBusy(terminal: Terminal): boolean {
-    return this.options.platform !== 'win32' && terminal.info.busy
+  /**
+   * Huli: the shell runs something it shows without a child of its own: a program in the
+   * foreground on macOS and Linux, and on Windows, which tells no foreground, a command such as
+   * PowerShell's Start-Sleep that keeps the cursor off the prompt the agent's command followed.
+   */
+  private runsInShell(terminal: Terminal): boolean {
+    if (this.options.platform !== 'win32') return terminal.info.busy
+    const mark = terminal.promptMark
+    return mark !== null && !cursorLine(terminal.tail).endsWith(mark)
+  }
+
+  /**
+   * Huli: the prompt mark from the latest line that shows the agent's command after a prompt; the
+   * shell may draw that line again once its prompt is up, which then wins.
+   */
+  private readEcho(terminal: Terminal, echo: { probe: string; until: number }): void {
+    if (this.now() > echo.until) {
+      terminal.echo = null
+      return
+    }
+    const text = plainTail(terminal.tail, ECHO_LINES)
+    const at = text.lastIndexOf(echo.probe)
+    if (at < 0) return
+    const before = text.slice(text.lastIndexOf('\n', at) + 1, at).trimEnd()
+    if (before) terminal.promptMark = before.slice(-1)
   }
 
   /** Huli: the terminal printed or was typed into, which may have started or ended a program. */
@@ -1225,6 +1262,7 @@ export class TerminalManager {
     terminal.tail = (terminal.tail + data).slice(-TAIL_CHARS)
     terminal.lastOutputAt = this.now()
     this.touch(terminal)
+    if (terminal.echo) this.readEcho(terminal, terminal.echo)
     terminal.quietSeq++
     if (terminal.info.waiting !== null) {
       terminal.info.waiting = null
@@ -1241,7 +1279,7 @@ export class TerminalManager {
     const { pty } = terminal
     const seq = terminal.quietSeq
     // A prompt leaves the cursor after its words; a program that printed whole lines asks nothing.
-    const line = plainTail(terminal.tail.slice(terminal.tail.lastIndexOf('\n') + 1), 1)
+    const line = cursorLine(terminal.tail)
     if (!pty || terminal.info.exitCode !== null || !line) return
     let waits: boolean
     if (this.options.platform === 'win32') {
@@ -1321,6 +1359,13 @@ export class TerminalManager {
       return
     }
     this.touch(terminal)
+    if (terminal.agentCommand) {
+      // A shell still starting may take the command before it prints its prompt, so the prompt is
+      // read from the line its echo shows on.
+      const probe = command.text.split(/\r?\n/, 1)[0]!.trim().slice(0, ECHO_PROBE_CHARS)
+      terminal.promptMark = null
+      terminal.echo = probe ? { probe, until: this.now() + ECHO_WINDOW_MS } : null
+    }
     if (terminal.agentCommand && command.text.includes('\n')) {
       const ok = terminal.scanner.bracketedPaste
       if (ok) {
@@ -1443,4 +1488,9 @@ function latestTouch(terminals: readonly Terminal[]): number {
   let latest = -Infinity
   for (const terminal of terminals) latest = Math.max(latest, terminal.touchedAt)
   return latest
+}
+
+/** The line the cursor waits on at the end of `tail`, as plain text. */
+function cursorLine(tail: string): string {
+  return plainTail(tail.slice(tail.lastIndexOf('\n') + 1), 1)
 }
