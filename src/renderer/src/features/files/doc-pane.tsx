@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { PaneBody } from '@renderer/features/shell/panel-button'
-import { openDiff, showOpenFile, useFilesStore } from '@renderer/stores/files'
+import { openDiff, showOpenFile, useFilesStore, watchFiles } from '@renderer/stores/files'
 import { docRoot, panelSession, shownDoc, useViewStore, type DocTab } from '@renderer/stores/view'
 import { useFileChanges } from './changes'
 import { DiffPreview } from './diff-preview'
@@ -14,6 +14,8 @@ export default function DocPane({ projectPath, panel }: { projectPath: string; p
   const tab = useViewStore((s) => shownDoc(s, panel))
   // Huli: a tab of a further folder of the project reads from that folder.
   const root = docRoot(tab, projectPath)
+  // The shown file or change is read again after each change on disk, as the tree is.
+  useEffect(() => watchFiles(root), [root])
   if (tab?.kind === 'file') {
     return <FileDoc key={tab.id} projectPath={root} panel={panel} tab={tab} />
   }

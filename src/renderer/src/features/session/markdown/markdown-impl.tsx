@@ -19,11 +19,8 @@ import {
   type RefObject,
 } from 'react'
 import { cjk } from '@streamdown/cjk'
-import {
-  createCodePlugin,
-  type CodeHighlighterPlugin,
-  type HighlightResult,
-} from '@streamdown/code'
+import type { CodeHighlighterPlugin, HighlightResult } from '@streamdown/code'
+import { createCodePlugin } from './code-plugin'
 import { Tick02Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import {
@@ -38,12 +35,19 @@ import { githubIssueUrl } from '@shared/git'
 import type { TextStep } from '@shared/thread'
 import { Kbd } from '@renderer/components/ui/kbd'
 import { AgentFileLink, FileLink } from '@renderer/features/files/file-link'
-import { ProjectPathContext, useAgentFileRef, useFileRef } from '@renderer/features/files/file-refs'
+import {
+  PreviewFileContext,
+  ProjectPathContext,
+  useAgentFileRef,
+  useFileRef,
+} from '@renderer/features/files/file-refs'
+import { PreviewImage } from '@renderer/features/files/preview-image'
 import { useProjectRepository } from '@renderer/features/git/gh-reference-data'
 import { ConfirmedLink } from '@renderer/features/session/link-confirm'
 import { EntryIdContext, SessionIdContext } from '@renderer/features/session/media/grants'
 import { LocalMedia, MediaRows } from '@renderer/features/session/media/local-media'
 import { MediaGrid } from '@renderer/features/session/media/media-grid'
+import { useNearView } from '@renderer/features/session/media/near-view'
 import {
   NamedMedia,
   NamedMediaContext,
@@ -120,15 +124,22 @@ function createPlugins({ light, dark }: CodeThemes) {
 type Plugins = ReturnType<typeof createPlugins>
 
 // One set per pair of code themes, shared by every chunk: Streamdown's context depends on it, and
-// a new object would re-render every code block.
+// a new object would re-render every code block. Keep only the latest couple of theme pairs.
+const MAX_THEME_PLUGIN_SETS = 2
 const pluginsByThemes = new Map<string, Plugins>()
 
 function pluginsFor(themes: CodeThemes): Plugins {
   const key = `${themes.light} ${themes.dark}`
   let plugins = pluginsByThemes.get(key)
-  if (!plugins) {
-    plugins = createPlugins(themes)
+  if (plugins) {
+    pluginsByThemes.delete(key)
     pluginsByThemes.set(key, plugins)
+    return plugins
+  }
+  plugins = createPlugins(themes)
+  pluginsByThemes.set(key, plugins)
+  if (pluginsByThemes.size > MAX_THEME_PLUGIN_SETS) {
+    pluginsByThemes.delete(pluginsByThemes.keys().next().value!)
   }
   return plugins
 }
@@ -175,14 +186,21 @@ export function Link(props: ComponentProps<'a'> & ExtraProps) {
 }
 
 /**
- * An image: a local file from the media scheme, a remote one as a link to it, since the CSP
- * loads nothing remote, or a `data:` or `blob:` picture as it comes. Anything else, such as
- * `//host/x.png`, would resolve against the page, so it stays text.
+ * An image: a local file from the media scheme, in the Files pane's preview a project file found
+ * from the previewed file's folder, a remote one as a link to it, since the CSP loads nothing
+ * remote, or a `data:` or `blob:` picture as it comes. Anything else, such as `//host/x.png`,
+ * would resolve against the page, so it stays text.
  */
 function MarkdownImage(props: ComponentProps<'img'> & ExtraProps) {
+  const preview = useContext(PreviewFileContext)
   const src = typeof props.src === 'string' ? props.src : ''
   const local = localImageTarget(src)
-  if (local !== null) return <LocalMedia key={local} path={local} alt={props.alt ?? ''} image />
+  if (local !== null && preview) {
+    return <PreviewImage key={local} file={preview} written={local} alt={props.alt ?? ''} />
+  }
+  if (local !== null) {
+    return <LocalMedia key={local} path={local} origin="image" alt={props.alt ?? ''} />
+  }
   const remote = /^https?:/i.test(src) ? URL.parse(src) : null
   if (remote) {
     return <ConfirmedLink url={src}>{remote.host}</ConfirmedLink>
@@ -232,12 +250,13 @@ function MediaUnder({ node }: ExtraProps) {
     setClaim(next)
     return named.claim(next)
   }, [named, key])
+  const shown = enabled && claim && named ? named.shown(claim) : []
+  const near = useNearView(ref, shown.length > 0)
   if (!enabled || paths.length === 0) return null
-  const shown = claim && named ? named.shown(claim) : []
   return (
-    // Empty until it shows a file, which hides it (globals.css).
+    // Empty, a box of no height, until the host finds a file it names (globals.css).
     <div ref={ref} data-media-block="" className="flex flex-col items-start gap-3">
-      <MediaRows paths={shown} />
+      <MediaRows paths={shown} near={near} />
     </div>
   )
 }

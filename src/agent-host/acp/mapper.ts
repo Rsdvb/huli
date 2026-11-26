@@ -595,12 +595,18 @@ export function mapConfig(
   return mapped
 }
 
+/** Each name once, the first sent: agy sends a skill once for each folder it found it in. */
 function mapCommands(commands: readonly acp.AvailableCommand[]): SlashCommand[] {
-  return commands.map((command) => ({
-    name: command.name,
-    description: command.description,
-    ...(command.input?.hint ? { inputHint: command.input.hint } : {}),
-  }))
+  const listed = new Map<string, SlashCommand>()
+  for (const command of commands) {
+    if (listed.has(command.name)) continue
+    listed.set(command.name, {
+      name: command.name,
+      description: command.description,
+      ...(command.input?.hint ? { inputHint: command.input.hint } : {}),
+    })
+  }
+  return [...listed.values()]
 }
 
 function parseTime(value: string | null | undefined, fallback: number): number {
@@ -764,6 +770,61 @@ export function mapModelUsage(meta: unknown): ModelTokens[] {
     })
   }
   return models
+}
+
+/**
+ * The tokens of one model call that an agent attaches to an `agent_message_chunk` under
+ * `_meta.usage`, in ACP's usage fields. Qwen Code sends one such chunk per call, its own and its
+ * subagents', with an empty text and no id, and reports no usage on its prompt response.
+ */
+export function chunkTokens(update: acp.SessionUpdate): TokenTotals | null {
+  if (update.sessionUpdate !== 'agent_message_chunk') return null
+  const usage = (update._meta as { usage?: unknown } | null | undefined)?.usage
+  if (typeof usage !== 'object' || usage === null) return null
+  const fields = usage as Record<string, unknown>
+  const totalTokens = count(fields.totalTokens)
+  const inputTokens = count(fields.inputTokens)
+  const outputTokens = count(fields.outputTokens)
+  if (totalTokens === null || inputTokens === null || outputTokens === null) return null
+  return mapTokenTotals({
+    totalTokens,
+    inputTokens,
+    outputTokens,
+    thoughtTokens: count(fields.thoughtTokens),
+    cachedReadTokens: count(fields.cachedReadTokens),
+    cachedWriteTokens: count(fields.cachedWriteTokens),
+  })
+}
+
+/** goose's own session notification, sent beside `session/update` to a client that asks for it. */
+export const GOOSE_SESSION_UPDATE = '_goose/unstable/session/update'
+
+/**
+ * One model call of a goose turn, from the `message_usage` update of goose's own session
+ * notification, in ACP's usage fields; goose's prompt response reports only the latest call. Its
+ * input holds the call's cache reads and writes, and its total is input plus output.
+ */
+export function gooseCallUsage(
+  params: unknown,
+): { messageId: string | null; usage: acp.Usage } | null {
+  const update = (params as { update?: unknown } | null | undefined)?.update
+  if (typeof update !== 'object' || update === null) return null
+  const { sessionUpdate, messageId, usage } = update as Record<string, unknown>
+  if (sessionUpdate !== 'message_usage' || typeof usage !== 'object' || usage === null) return null
+  const fields = usage as Record<string, unknown>
+  const inputTokens = count(fields.inputTokens)
+  const outputTokens = count(fields.outputTokens)
+  if (inputTokens === null || outputTokens === null) return null
+  return {
+    messageId: typeof messageId === 'string' ? messageId : null,
+    usage: {
+      totalTokens: count(fields.totalTokens) ?? inputTokens + outputTokens,
+      inputTokens,
+      outputTokens,
+      cachedReadTokens: count(fields.cacheReadTokens),
+      cachedWriteTokens: count(fields.cacheWriteTokens),
+    },
+  }
 }
 
 type CompactionStatus = Extract<ThreadEntry, { kind: 'compaction' }>['status']

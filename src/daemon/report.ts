@@ -1,5 +1,6 @@
 // What `kettu status`, `kettu devices` and `kettu terminal` print.
 
+import type { DiscoveryRequestEvent } from '@shared/remote/discovery'
 import type { RelayStatus } from '@shared/remote/relay-host'
 import type { RelayReport } from '@shared/remote/status'
 import type { DaemonStatus, DeviceSummary, HostStatus } from './control'
@@ -128,7 +129,11 @@ export function devicesReport(devices: DeviceSummary[], now: number): string {
       device.name,
       device.kind,
       device.platform,
-      device.connected ? 'connected now' : since(device.lastConnectedAt, now),
+      device.otherAccount
+        ? 'another account'
+        : device.connected
+          ? 'connected now'
+          : since(device.lastConnectedAt, now),
     ]),
   ]
   const widths = table[0]!.map((_, column) => Math.max(...table.map((row) => row[column]!.length)))
@@ -141,6 +146,40 @@ export function devicesReport(devices: DeviceSummary[], now: number): string {
       )
       .join('\n') + '\n'
   )
+}
+
+/**
+ * What `kettu requests` shows of the device of the account that asks to be added; `added` once the
+ * owner said add and only the device's confirmation is left.
+ */
+export function requestReport(
+  pending: { event: DiscoveryRequestEvent; added: boolean } | null,
+  now: number,
+): string {
+  const request = pending?.event.request
+  if (!pending || request?.state !== 'confirm') {
+    return 'No device of your Kettu account asks to be added.\n'
+  }
+  const { device, code, expiresAt, deviceConfirmed } = request
+  const about = [device.model, device.platform].filter((part) => part !== '').join(', ')
+  const seconds = Math.max(0, Math.ceil((expiresAt - now) / 1000))
+  const left = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+  return [
+    `${device.name}${about ? ` (${about})` : ''} asks to be added to this computer.`,
+    `Code: ${code.slice(0, 3)} ${code.slice(3)}`,
+    pending.added
+      ? `Added, waiting for ${device.name} to confirm the code.`
+      : deviceConfirmed
+        ? 'Its user confirmed the code.'
+        : 'Its user has not confirmed the code yet.',
+    pending.added
+      ? ''
+      : `Answer within ${left}: kettu requests add [<name>], or kettu requests reject.`,
+    device.known ? 'This device was added before.' : '',
+  ]
+    .filter((line) => line !== '')
+    .join('\n')
+    .concat('\n')
 }
 
 function since(at: number | null, now: number): string {

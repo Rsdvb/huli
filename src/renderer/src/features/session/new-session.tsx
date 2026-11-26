@@ -845,6 +845,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
             ) : (
               <ModelMenu
                 agentId={agentId}
+                hostId={hostId}
                 harness={status?.harnessName ?? name ?? ''}
                 config={config ?? []}
                 onSelect={pick}

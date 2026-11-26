@@ -231,6 +231,38 @@ describe('change_settings', () => {
     expect(asked[0]!.items[0]!.warning).toContain('type passwords and codes')
   })
 
+  it('still asks in Full access to raise a limit on the sessions agents start', async () => {
+    const { tools, asked, applied, recorded } = harness({ fullAccess: true })
+    void change(tools, [{ id: 'agents.started-daily', value: 30 }])
+    await vi.waitFor(() => expect(asked).toHaveLength(1))
+    expect(applied).toEqual([])
+    expect(recorded).toEqual([])
+    expect(asked[0]!.items[0]!.warning).toContain('start more sessions')
+  })
+
+  it('lowers a limit on the sessions agents start as the mode allows', async () => {
+    const full = harness({ fullAccess: true })
+    const result = await change(full.tools, [{ id: 'agents.started-working', value: 2 }])
+    expect(result.isError).toBeUndefined()
+    expect(full.asked).toEqual([])
+    expect(full.file().startedSessions).toMatchObject({ working: 2, daily: 10, reports: 10 })
+
+    const auto = harness()
+    void change(auto.tools, [{ id: 'agents.started-reports', value: 5 }])
+    await vi.waitFor(() => expect(auto.asked).toHaveLength(1))
+    expect(auto.asked[0]!.items[0]!.warning).toBeUndefined()
+  })
+
+  it('asks in Full access when one change raises a limit and another lowers one', async () => {
+    const { tools, asked } = harness({ fullAccess: true })
+    void change(tools, [
+      { id: 'agents.started-working', value: 1 },
+      { id: 'agents.started-daily', value: 11 },
+    ])
+    await vi.waitFor(() => expect(asked).toHaveLength(1))
+    expect(asked[0]!.items.map((item) => item.warning !== undefined)).toEqual([false, true])
+  })
+
   it('never changes secrets, paths or actions', async () => {
     const { tools, applied, asked } = harness({ fullAccess: true })
     for (const id of [
@@ -324,7 +356,7 @@ describe("a plugin's settings", () => {
     const { tools } = harness({ plugins, pluginFacts })
     const found = text(await tools.call(CALLER, FIND_SETTINGS, { query: 'verbose' }))
     expect(found).toContain(`plugins.switch:${PLUGIN}:verbose`)
-    expect(found).toContain('Plugins › Acme › Verbose logging')
+    expect(found).toContain('Marketplace › Acme › Verbose logging')
     expect(found).toContain('Logs more.')
     expect(found).toContain('value: Off')
     const mode = text(await tools.call(CALLER, FIND_SETTINGS, { query: 'acme mode' }))
@@ -355,11 +387,11 @@ describe("a plugin's settings", () => {
     await vi.waitFor(() => expect(asked).toHaveLength(1))
     expect(asked[0]!.items[0]).toMatchObject({
       id: `plugins.switch:${PLUGIN}:verbose`,
-      place: 'Plugins › Acme',
+      place: 'Marketplace › Acme',
       name: 'Verbose logging',
       from: { value: false, text: 'Off' },
       to: { value: true, text: 'On' },
-      section: 'plugins',
+      section: 'marketplace',
       item: PLUGIN,
       row: 'setting-verbose',
     })
@@ -397,9 +429,10 @@ describe("a plugin's settings", () => {
     await expect(tools.undo(recorded[0]!)).rejects.toBeInstanceOf(StaleUndo)
   })
 
-  it('open at the plugin’s page and the row on it', async () => {
+  it('open at the plugin’s page in the Marketplace and the row on it, not in Settings', async () => {
     const { tools } = harness({ plugins, pluginFacts })
     const result = await tools.call(CALLER, OPEN_SETTINGS, { id: `plugins.secret:${PLUGIN}:token` })
-    expect(text(result)).toContain('Plugins › Acme › Access token')
+    expect(text(result)).toContain('it is in Marketplace › Acme › Access token.')
+    expect(text(result)).not.toContain('Settings ›')
   })
 })

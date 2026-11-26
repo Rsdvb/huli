@@ -3,9 +3,9 @@
 
 import type { HostMethod } from '../agent-host'
 
-// A file main's media scheme serves. A device adds a project by typing its folder, which the agent
-// host checks is one.
-const MAIN_ONLY: ReadonlySet<string> = new Set<HostMethod>(['media.open'])
+// A file main's media scheme serves, and a page Kettu's browser loads from this computer's loopback
+// address. A device adds a project by typing its folder, which the agent host checks is one.
+const MAIN_ONLY: ReadonlySet<string> = new Set<HostMethod>(['media.open', 'files.preview'])
 
 // Huli: the agents' network is this computer's to set up. Its subscriptions' addresses carry
 // tokens, so a device never gets these, which carry their hosts and mihomo's messages or change
@@ -78,7 +78,8 @@ export function namesUploadFile(method: string, params: unknown): boolean {
 
 /**
  * Whether a device is refused this request: a host method that needs main or is the windows'
- * alone, or an attachment from a file main granted to a window. A method the host does not know is not this list's to refuse.
+ * alone, or an attachment or upload from a file main granted to a window. A method the host does
+ * not know is not this list's to refuse.
  */
 export function forbiddenToDevices(method: string, params: unknown): boolean {
   if (MAIN_ONLY.has(method) || WINDOW_ONLY.has(method)) return true
@@ -87,7 +88,7 @@ export function forbiddenToDevices(method: string, params: unknown): boolean {
   if ((method === 'sessions.create' || method === 'sessions.prepare') && namesSandbox(params)) {
     return true
   }
-  return method === 'attachments.add' && hasGrant(params)
+  return (method === 'attachments.add' || method === 'files.upload') && hasGrant(params)
 }
 
 /** Huli: a manager session whose agent answers its workers' requests, which a device never starts. */

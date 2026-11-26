@@ -22,8 +22,12 @@ import { isDirectStatus } from '@shared/remote/address'
 import {
   parseDiscoveredHosts,
   parseDiscoveryEvent,
+  parseReverseGrant,
   type DiscoveredHosts,
   type DiscoveryRequestEvent,
+  type PairGroup,
+  type ReverseGrant,
+  type ReverseHost,
 } from '@shared/remote/discovery'
 import {
   parsePortDevice,
@@ -42,7 +46,12 @@ import {
   type SshManageResult,
 } from '@shared/remote/hosts'
 import { isPairingState, type PairingState } from '@shared/remote/pairing'
-import type { HostAdminEvent } from '@shared/remote/host-admin'
+import {
+  parseJoined,
+  type HostAdminEvent,
+  type JoinedDevice,
+  type JoinedVia,
+} from '@shared/remote/host-admin'
 import type { DirectAddress } from '@shared/remote/protocol'
 import type { OwnRelayCheck, OwnRelayInput } from '@shared/remote/own-relay'
 import { parseRelayStatuses } from '@shared/remote/relay-host'
@@ -94,8 +103,15 @@ export interface RemoteHostDeps {
   useOwnRelay(input: OwnRelayInput): Promise<OwnRelayCheck>
   /** Whether devices of the account find this computer on the relay, as the setting is now. */
   discoverable(): boolean
+  /**
+   * The id of the Kettu account this computer is signed in to with Kettu's services on, null for
+   * none: devices of another account are turned away, and hellos to other hosts name it.
+   */
+  account?(): string | null
   /** A device of the account asks to be added, or that request ended. */
   discoveryChanged?(event: DiscoveryRequestEvent): void
+  /** A device that was not paired was added, by any path. */
+  deviceJoined?(device: JoinedDevice, via: JoinedVia): void
   /** A pairing is about to start: resolves once the relay's token was handed on, or none can be. */
   relayTokenReady?(): Promise<void>
   /** The key this computer connects to other hosts with, made on first use; rejects like it. */
@@ -143,6 +159,10 @@ export type HostPairingListener = (pairId: number, pairing: HostPairingState) =>
 
 export type RemoteHostState = 'off' | 'starting' | 'on' | 'failed'
 
+/** A host the remote host stopped connecting to, as another account's. */
+const folded = (host: HostStatus): boolean =>
+  host.connection.state === 'stopped' && host.connection.reason === 'other_account'
+
 function isStatus(value: unknown): value is RemoteHostStatus {
   if (typeof value !== 'object' || value === null) return false
   const { publicKey, plainTextKey, devices, online, refused, direct, relays } = value as Record<
@@ -186,6 +206,8 @@ export class RemoteHost {
   private relayOn: string | null = null
   /** Whether devices of the account find this computer, as the running process was last told. */
   private discoverableOn: boolean | null = null
+  /** The account, as the running process was last told. */
+  private accountOn: string | null = null
   /** Listings of the account's hosts under way, which keep the process running. */
   private discovering = 0
   /** The discovery request the owner is asked about now. */
@@ -253,14 +275,27 @@ export class RemoteHost {
   }
 
   /** The discovery request the owner is asked about now, if any. */
-  get pendingDiscovery(): DiscoveryRequestEvent | null {
+  pendingDiscovery(): DiscoveryRequestEvent | null {
     return this.discoveryRequest
   }
 
-  /** The known hosts, or null while the remote host has not reported them yet. */
+  /**
+   * The known hosts, or null while the remote host has not reported them yet; those of another
+   * account than the one signed in to now are folded away and left out.
+   */
   get hosts(): HostStatus[] | null {
-    if (this.hostList) return this.hostList
+    if (this.hostList) return this.hostList.filter((host) => !folded(host))
     return this.host || this.known ? null : []
+  }
+
+  /** Every known host, folded ones included, as the remote host last reported them. */
+  get knownHosts(): HostStatus[] {
+    return this.hostList ?? []
+  }
+
+  /** How many known hosts belong to another account than the one signed in to now. */
+  get otherAccountHosts(): number {
+    return this.hostList?.filter(folded).length ?? 0
   }
 
   /** The device key is kept in a file only the user can read, without the system's encryption. */
@@ -340,6 +375,18 @@ export class RemoteHost {
     }
   }
 
+  /** Tells the process when the account this computer is signed in to changed; each start reads it. */
+  accountChanged(): void {
+    const account = this.deps.account?.() ?? null
+    if (account === this.accountOn) return
+    if (this.host?.post({ type: 'remote-host:account', account })) this.accountOn = account
+  }
+
+  /** The account this computer is signed in to, as the running process knows it. */
+  get account(): string | null {
+    return this.deps.account?.() ?? null
+  }
+
   /** Tells the process when Let devices of the account find it changed; each start reads it. */
   discoverableChanged(): void {
     const enabled = this.deps.discoverable()
@@ -349,10 +396,41 @@ export class RemoteHost {
     }
   }
 
-  /** The owner's answer to the discovery request it was asked about. */
-  answerDiscovery(requestId: number, add: boolean, name: string): void {
-    if (this.discoveryRequest?.requestId !== requestId) return
-    this.toServer({ type: 'remote-host:discovery-answer', requestId, add, name })
+  /**
+   * An answer to the discovery request the owner was asked about, from this computer's window or,
+   * under `by`, a paired device: true when it was the first and counted.
+   */
+  async answerDiscovery(
+    discoveryId: number,
+    add: boolean,
+    name: string,
+    by: string | null = null,
+  ): Promise<boolean> {
+    if (this.discoveryRequest?.requestId !== discoveryId || !this.serving) return false
+    const answer = await this.request((requestId) => ({
+      type: 'remote-host:discovery-answer',
+      requestId,
+      discoveryId,
+      add,
+      name,
+      by,
+    }))
+    return answer?.type === 'remote-host:discovery-answer' && answer.counted === true
+  }
+
+  /**
+   * Keeps a computer that this one just added as a host here too, as the device that added it
+   * asked; this computer's device as that computer then adds it, or null when it could not be.
+   */
+  async addReverseHost(host: ReverseHost): Promise<ReverseGrant | null> {
+    if (!(await this.loadDevice()) || !this.host) return null
+    const answer = await this.request((requestId) => ({
+      type: 'remote-host:add-reverse-host',
+      requestId,
+      host,
+    }))
+    if (answer?.type !== 'remote-host:reverse-host') return null
+    return answer.grant === null ? null : parseReverseGrant(answer.grant)
   }
 
   /**
@@ -377,11 +455,15 @@ export class RemoteHost {
     }
   }
 
-  /** Pairs with a host `discover` listed, by its relay id, the way `pairHost` pairs with a link. */
+  /**
+   * Pairs with a host `discover` listed, by its relay id, the way `pairHost` pairs with a link:
+   * in the batch `group` names, if any.
+   */
   async pairDiscovered(
     relayId: string,
     model: string,
     listener: HostPairingListener,
+    group?: PairGroup,
   ): Promise<number | null> {
     if (!(await this.loadDevice())) return null
     const pairId = this.nextPair++
@@ -389,16 +471,28 @@ export class RemoteHost {
     await this.deps.relayTokenReady?.()
     await this.reconcile()
     if (!this.hostPairings.has(pairId)) return pairId
-    if (!this.host?.post({ type: 'remote-host:pair-discovered', pairId, relayId, model })) {
+    const message: MainToRemoteHost = {
+      type: 'remote-host:pair-discovered',
+      pairId,
+      relayId,
+      model,
+      ...(group ? { group } : {}),
+    }
+    if (!this.host?.post(message)) {
       this.finishPairing(pairId, { state: 'failed', reason: 'unreachable' })
     }
     return pairId
   }
 
   /** Whether the code on both screens is the same; false ends the pairing. */
-  matchHostPairing(pairId: number, match: boolean): void {
+  matchHostPairing(pairId: number, match: boolean, reverse = false): void {
     if (!this.hostPairings.has(pairId)) return
-    this.host?.post({ type: 'remote-host:pair-match', pairId, match })
+    this.host?.post({
+      type: 'remote-host:pair-match',
+      pairId,
+      match,
+      ...(reverse ? { reverse: true } : {}),
+    })
   }
 
   /**
@@ -448,8 +542,13 @@ export class RemoteHost {
   }
 
   /** Tells the owner's devices something of the host: every one, or only `deviceId`. */
-  adminEvent(event: HostAdminEvent, deviceId: string | null): void {
-    this.toServer({ type: 'remote-host:admin-event', event, deviceId })
+  adminEvent(event: HostAdminEvent, deviceId: string | null, except?: string): void {
+    this.toServer({
+      type: 'remote-host:admin-event',
+      event,
+      deviceId,
+      ...(except === undefined ? {} : { except }),
+    })
   }
 
   /** What the agent host says needs the user, which devices may be notified of. */
@@ -519,6 +618,7 @@ export class RemoteHost {
     link: string,
     model: string,
     listener: HostPairingListener,
+    hostId?: string,
   ): Promise<number | null> {
     if (!(await this.loadDevice())) return null
     const pairId = this.nextPair++
@@ -526,7 +626,15 @@ export class RemoteHost {
     await this.deps.relayTokenReady?.()
     await this.reconcile()
     if (!this.hostPairings.has(pairId)) return pairId
-    if (!this.host?.post({ type: 'remote-host:pair-host', pairId, link, model })) {
+    if (
+      !this.host?.post({
+        type: 'remote-host:pair-host',
+        pairId,
+        link,
+        model,
+        ...(hostId ? { hostId } : {}),
+      })
+    ) {
       this.finishPairing(pairId, { state: 'failed', reason: 'unreachable' })
     }
     return pairId
@@ -846,6 +954,8 @@ export class RemoteHost {
       progress: this.progress,
       ...(this.present === null ? {} : { present: this.present }),
       discoverable: this.initDiscoverable(),
+      account: this.initAccount(),
+      reverseHosts: true,
       ...(this.device
         ? { device: { privateKey: this.device.privateKey, platform: this.platform } }
         : {}),
@@ -867,6 +977,11 @@ export class RemoteHost {
     const off = this.deps.featuresOff?.() ?? []
     this.featuresOff = JSON.stringify(off)
     return off
+  }
+
+  private initAccount(): string | null {
+    this.accountOn = this.deps.account?.() ?? null
+    return this.accountOn
   }
 
   private initDiscoverable(): boolean {
@@ -1118,7 +1233,15 @@ export class RemoteHost {
         this.deps.discoveryChanged?.(event)
         break
       }
+      case 'remote-host:device-joined': {
+        if (this.host !== host || !this.serving) break
+        const joined = parseJoined(message)
+        if (joined) this.deps.deviceJoined?.(joined.device, joined.via)
+        break
+      }
       case 'remote-host:activity':
+      case 'remote-host:discovery-answer':
+      case 'remote-host:reverse-host':
       case 'remote-host:reset':
       case 'remote-host:stop-serving':
       case 'remote-host:forwarding':

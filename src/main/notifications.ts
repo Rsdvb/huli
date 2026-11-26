@@ -1,13 +1,19 @@
 import { BrowserWindow, Notification } from 'electron'
 import type { HostToMain } from '@shared/host-control'
 import type { DiscoveryRequestEvent } from '@shared/remote/discovery'
-import { ATTENTION_SETTING, attentionTarget, attentionText } from '@shared/attention'
+import {
+  ATTENTION_SETTING,
+  attentionNotice,
+  attentionTarget,
+  attentionText,
+} from '@shared/attention'
 import type { HostAttention } from '@shared/remote/host-admin'
 import type { SettingsFile } from '@shared/settings'
-import { sendCommand } from './events'
+import { sendCommand, sendEvent } from './events'
 import { t } from './i18n'
 import { createLogger } from './log'
 import { testInBackground } from './test-window'
+import { appFocused, currentWindow } from './window'
 
 const log = createLogger('notifications')
 
@@ -26,7 +32,9 @@ const shown = new Map<string, Notification>()
 /**
  * An OS notification for what needs the user, on this computer or on another host, shown only
  * when no window is focused. A request that can be allowed once offers that and Open; clicking
- * it, or Open, opens its session, as does Allow once when the answer cannot be sent.
+ * it, or Open, opens its session, as does Allow once when the answer cannot be sent. While one of
+ * the app's windows is focused, a session's turn goes to that window instead, which shows it
+ * unless the session is on screen.
  */
 export function notifyAttention(
   message: Attention | HostAttention,
@@ -40,7 +48,15 @@ export function notifyAttention(
     return
   }
   if (!settings.notifications[ATTENTION_SETTING[message.kind]]) return
-  if (BrowserWindow.getFocusedWindow()) return
+  const title = host
+    ? t('notifications.onHost', { host: host.name, title: message.title })
+    : message.title
+  if (BrowserWindow.getFocusedWindow()) {
+    const notice = appFocused() ? attentionNotice(message, title) : null
+    const window = notice && currentWindow()
+    if (notice && window) sendEvent(window.webContents, 'app:attention', notice)
+    return
+  }
   // Huli: an agent's test copy, never focused, would notify the owner of every turn.
   if (!Notification.isSupported() || testInBackground()) return
 
@@ -48,9 +64,6 @@ export function notifyAttention(
   // Agent ids repeat across hosts, so a pause on one never replaces another's.
   const key = host ? `${host.id}:${target.key}` : target.key
   const answer = message.kind === 'permission' ? validAnswer(message.allowOnce) : null
-  const title = host
-    ? t('notifications.onHost', { host: host.name, title: message.title })
-    : message.title
   shown.get(key)?.close()
   const notification = new Notification({
     ...attentionText({ ...message, title }),
@@ -102,6 +115,8 @@ function validAnswer(value: unknown): { requestId: string; optionId: string } | 
 }
 
 let discovery: { requestId: number; notification: Notification } | null = null
+/** The request last notified, which its later events do not notify again. */
+let notifiedRequest: number | null = null
 
 /**
  * A device of the account asks to be added: an OS notification while no window is focused, whose
@@ -119,7 +134,11 @@ export function notifyDiscovery(
     }
     return
   }
+  // The same request again, now that its device confirmed the code, is no new notice, even when
+  // the first one was dismissed or failed.
+  if (notifiedRequest === event.requestId) return
   if (BrowserWindow.getFocusedWindow() || !Notification.isSupported() || testInBackground()) return
+  notifiedRequest = event.requestId
   discovery?.notification.close()
   const notification = new Notification({
     title: t('notifications.discoveryTitle'),
@@ -139,6 +158,45 @@ export function notifyDiscovery(
     log.warn(`Notification failed: ${error}`)
   })
   discovery = { requestId: event.requestId, notification }
+  notification.show()
+}
+
+/**
+ * A device joined this computer: an OS notification, focused or not, with Remove; Remove and its
+ * click both do `ask`, the device's page with its remove confirmation, as removing asks first.
+ */
+export function notifyJoined(
+  device: { id: string; name: string },
+  hostName: string,
+  settings: SettingsFile,
+  ask: () => void,
+): void {
+  if (!Notification.isSupported() || testInBackground()) return
+  const key = `joined:${device.id}`
+  shown.get(key)?.close()
+  const notification = new Notification({
+    title: t('notifications.joinedTitle', { name: device.name, host: hostName }),
+    body: t('notifications.joinedBody'),
+    silent: !settings.notifications.sound,
+    actions: [{ type: 'button' as const, text: t('notifications.remove') }],
+  })
+  const forget = (): void => {
+    if (shown.get(key) === notification) shown.delete(key)
+  }
+  notification.on('click', () => {
+    forget()
+    ask()
+  })
+  notification.on('action', () => {
+    forget()
+    ask()
+  })
+  notification.on('close', forget)
+  notification.on('failed', (_, error) => {
+    forget()
+    log.warn(`Notification failed: ${error}`)
+  })
+  shown.set(key, notification)
   notification.show()
 }
 

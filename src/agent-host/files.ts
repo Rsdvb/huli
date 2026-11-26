@@ -2,8 +2,9 @@
 // is in a repository, and through a bounded walk of the folder when it is not.
 
 import { createHash, randomBytes } from 'node:crypto'
-import type { Stats } from 'node:fs'
+import { constants, type Stats } from 'node:fs'
 import {
+  copyFile,
   cp,
   lstat,
   mkdir,
@@ -33,6 +34,7 @@ import {
   type FileSearch,
   type FileStamp,
   type FileWritten,
+  type FolderList,
 } from '@shared/files'
 import type { MediaFile, MediaGrant } from '@shared/media'
 import type { Platform } from '@shared/platform'
@@ -154,6 +156,19 @@ export async function readBytes(handle: FileHandle, length: number, position = 0
   return buffer.subarray(0, filled)
 }
 
+/** Writes `bytes` to a new file at `at`, which fails when anything is there, a link included. */
+async function writeNew(at: string, bytes: Uint8Array): Promise<void> {
+  const handle = await open(at, 'wx', 0o666)
+  try {
+    await handle.writeFile(bytes)
+  } catch (error) {
+    await handle.close().catch(() => {})
+    await unlink(at).catch(() => {})
+    throw error
+  }
+  await handle.close()
+}
+
 /** A line as a match shows it: without its line end and cut to `chars` characters. */
 function cutLine(line: string, chars: number): string {
   const text = line.endsWith('\r') ? line.slice(0, -1) : line
@@ -221,6 +236,15 @@ const isGone = (error: unknown): boolean => {
   return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
+const isTaken = (error: unknown): boolean =>
+  (error as NodeJS.ErrnoException | undefined)?.code === 'EEXIST'
+
+/** What `upload` puts in the project: bytes a window or device sent, or a path main granted. */
+export type UploadSource = { bytes: ArrayBuffer } | { path: string }
+
+/** Makes a new entry at a path where nothing may be, and leaves nothing there when it fails. */
+type MakeAt = (at: string) => Promise<void>
+
 export class FilesService {
   private readonly limits: FilesLimits
   private readonly paths: path.PlatformPath
@@ -232,16 +256,26 @@ export class FilesService {
 
   /** The files under `root`, relative and sorted. `root` is a canonical project path. */
   async list(root: string): Promise<FileList> {
-    const [listed, deleted, untracked] = await Promise.all([
+    const [listed, deleted, untracked, excluded] = await Promise.all([
       this.git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard']),
       this.git(root, ['ls-files', '-z', '--deleted']),
       // Untracked folders, each once as `name/` however much it holds, where empty ones may be.
       this.git(root, ['ls-files', '-z', '--others', '--directory', '--exclude-standard']),
+      // An ignored folder once as `name/`, which git does not go into.
+      this.git(root, [
+        'ls-files',
+        '-z',
+        '--others',
+        '--ignored',
+        '--directory',
+        '--exclude-standard',
+      ]),
     ])
     const files = gitOutput('git ls-files', listed)
     const gone = gitOutput('git ls-files --deleted', deleted)
     const folders = gitOutput('git ls-files --directory', untracked)
-    if (files === null || gone === null || folders === null) {
+    const ignored = gitOutput('git ls-files --ignored', excluded)
+    if (files === null || gone === null || folders === null || ignored === null) {
       return this.walk(root, this.limits.list)
     }
     const missing = new Set(gone.split('\0'))
@@ -252,8 +286,51 @@ export class FilesService {
     // A folder whose tracked files are all gone from disk is no untracked folder to git.
     const emptied = this.foldersWithout(gone.split('\0'), paths)
     const empty = await this.emptyFolders(root, [...folders.split('\0'), ...emptied])
-    if (paths.length <= this.limits.list) return { paths, folders: empty, truncated: false }
-    return { paths: paths.slice(0, this.limits.list), folders: empty, truncated: true }
+    const truncated = paths.length > this.limits.list
+    const kept = truncated ? paths.slice(0, this.limits.list) : paths
+    // Git names the project's own folder when it ignores all of it, so nothing else is listed.
+    if (ignored.split('\0').includes('./')) {
+      const top = await this.realRoot(root)
+      const own = await this.children(top, top, '')
+      return {
+        paths: kept,
+        folders: empty,
+        ignored: own.files,
+        ignoredFolders: own.folders,
+        truncated: truncated || own.truncated,
+      }
+    }
+    const left = this.ignoredEntries(ignored, this.limits.list - kept.length)
+    return {
+      paths: kept,
+      folders: empty,
+      ignored: left.files,
+      ignoredFolders: left.folders,
+      truncated: truncated || left.truncated,
+    }
+  }
+
+  /**
+   * The ignored files and folders in `git ls-files --ignored --directory` output, at most `limit`
+   * of them. Git also names, as `name/`, an untracked folder it went into because only ignored
+   * entries are in it; that folder is no ignored one, and what it holds follows it in the output.
+   */
+  private ignoredEntries(
+    output: string,
+    limit: number,
+  ): { files: string[]; folders: string[]; truncated: boolean } {
+    const entries = sortedUnique(output.split('\0').filter((entry) => entry !== ''))
+    const files: string[] = []
+    const folders: string[] = []
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i]!
+      const folder = entry.endsWith('/')
+      if (folder && entries[i + 1]?.startsWith(entry)) continue
+      if (files.length + folders.length >= limit) return { files, folders, truncated: true }
+      if (folder) folders.push(entry.slice(0, -1))
+      else files.push(entry)
+    }
+    return { files, folders, truncated: false }
   }
 
   /**
@@ -330,6 +407,61 @@ export class FilesService {
       for (const line of result.stdout.split('\n')) ignored.add(line.replace(/\/$/, ''))
     }
     return sortedUnique(found.filter((folder) => !ignored.has(folder)))
+  }
+
+  /**
+   * The files and folders directly in a folder of the project, sorted, leaving out `.git`. A link
+   * to a file is a file; a link to a folder is a folder only while it stays in the project.
+   */
+  async listFolder(root: string, relativePath: string): Promise<FolderList> {
+    const relative = this.editable(relativePath)
+    return this.children(await this.realRoot(root), await this.folder(root, relative), relative)
+  }
+
+  /**
+   * What `listFolder` gives for the folder at the real path `real`, '' being the project's own;
+   * `top` is the project's real path.
+   */
+  private async children(top: string, real: string, relative: string): Promise<FolderList> {
+    let entries
+    try {
+      entries = await readdir(real, { withFileTypes: true })
+    } catch (error) {
+      throw this.fsError(error, relative)
+    }
+    entries.sort((a, b) => byCodeUnit(a.name, b.name))
+    const files: string[] = []
+    const folders: string[] = []
+    for (const entry of entries) {
+      if (entry.name === '.git') continue
+      const kind = entry.isSymbolicLink()
+        ? await this.linkKind(top, this.paths.join(real, entry.name))
+        : entry.isDirectory()
+          ? 'folder'
+          : entry.isFile()
+            ? 'file'
+            : null
+      if (kind === null) continue
+      if (files.length + folders.length >= this.limits.list) {
+        return { files, folders, truncated: true }
+      }
+      const path = relative === '' ? entry.name : `${relative}/${entry.name}`
+      if (kind === 'folder') folders.push(path)
+      else files.push(path)
+    }
+    return { files, folders, truncated: false }
+  }
+
+  /** What a link leads to: a file, a folder in the project at `top`, or nothing to list. */
+  private async linkKind(top: string, link: string): Promise<'file' | 'folder' | null> {
+    try {
+      const info = await stat(link)
+      if (info.isFile()) return 'file'
+      if (!info.isDirectory()) return null
+      return this.within(top, await realpath(link)) ? 'folder' : null
+    } catch {
+      return null
+    }
   }
 
   /**
@@ -577,6 +709,111 @@ export class FilesService {
       copies.push(into === '' ? name : `${into}/${name}`)
     }
     return copies
+  }
+
+  /**
+   * Puts what the user dropped or chose at `relativePath`, in a folder that is there: bytes as a
+   * file, a granted file or folder copied, a folder's links as links and without its `.git`.
+   * Something there already is `conflict` unless `replace`: then a file replaces a file or a link
+   * itself, never what a link points to, and a folder goes into the folder there, its files
+   * replacing those of the same names.
+   */
+  async upload(
+    root: string,
+    relativePath: string,
+    source: UploadSource,
+    replace: boolean,
+  ): Promise<void> {
+    const relative = this.editable(relativePath)
+    const parent = await this.folder(root, folderOf(relative))
+    const name = nameOf(relative)
+    if ('bytes' in source) {
+      const bytes = new Uint8Array(source.bytes)
+      return this.putFile(parent, name, relative, replace, (at) => writeNew(at, bytes))
+    }
+    const from = source.path
+    const info = await stat(from).catch((error: unknown) => {
+      throw this.fsError(error, name)
+    })
+    if (info.isDirectory()) {
+      if (this.within(await realpath(from), this.paths.join(parent, name))) {
+        throw invalidParams(t('files.copyIntoItself', { path: name }))
+      }
+      return this.putFolder(from, parent, name, relative, replace)
+    }
+    if (!info.isFile()) throw invalidParams(t('files.notFileOrFolder', { path: name }))
+    return this.putFile(parent, name, relative, replace, (at) =>
+      copyFile(from, at, constants.COPYFILE_EXCL),
+    )
+  }
+
+  /**
+   * Makes the file `name` in `parent`, a real folder of the project, with `make`. A replacement is
+   * made beside it under a name of its own and renamed over what is there, so a link there is
+   * replaced itself.
+   */
+  private async putFile(
+    parent: string,
+    name: string,
+    relative: string,
+    replace: boolean,
+    make: MakeAt,
+  ): Promise<void> {
+    const target = this.paths.join(parent, name)
+    try {
+      return await make(target)
+    } catch (error) {
+      if (!isTaken(error)) throw error
+      if (!replace) throw this.taken(error, relative)
+    }
+    const there = await lstat(target).catch(() => null)
+    if (there?.isDirectory()) throw invalidParams(t('files.folderInTheWay', { path: relative }))
+    const temp = this.paths.join(parent, `.kettu-${randomBytes(6).toString('hex')}.tmp`)
+    await make(temp)
+    try {
+      await rename(temp, target)
+    } catch (error) {
+      await rm(temp, { force: true }).catch(() => {})
+      throw error
+    }
+  }
+
+  /**
+   * Copies the folder `from` to `name` in `parent`, a real folder of the project: a new folder, or
+   * with `replace` the folder there, never a link to one.
+   */
+  private async putFolder(
+    from: string,
+    parent: string,
+    name: string,
+    relative: string,
+    replace: boolean,
+  ): Promise<void> {
+    const target = this.paths.join(parent, name)
+    try {
+      await mkdir(target)
+    } catch (error) {
+      if (!isTaken(error)) throw error
+      if (!replace) throw this.taken(error, relative)
+      if (!(await lstat(target)).isDirectory()) {
+        throw invalidParams(t('files.fileInTheWay', { path: relative }))
+      }
+    }
+    for (const entry of await readdir(from, { withFileTypes: true })) {
+      if (entry.name === '.git') continue
+      const source = this.paths.join(from, entry.name)
+      const path = `${relative}/${entry.name}`
+      if (entry.isDirectory()) {
+        await this.putFolder(source, target, entry.name, path, true)
+      } else if (entry.isSymbolicLink()) {
+        const to = await readlink(source)
+        await this.putFile(target, entry.name, path, true, (at) => symlink(to, at))
+      } else if (entry.isFile()) {
+        await this.putFile(target, entry.name, path, true, (at) =>
+          copyFile(source, at, constants.COPYFILE_EXCL),
+        )
+      }
+    }
   }
 
   /** Moves each entry to the system's trash, or removes it for good; one already gone is skipped. */

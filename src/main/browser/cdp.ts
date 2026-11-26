@@ -7,10 +7,12 @@ import {
   BROWSER_CONSOLE_LEVELS,
   BROWSER_WAIT_STATES,
   MAX_SNAPSHOT_DEPTH,
+  pageSizeOf,
   siteOf,
   type BrowserWaitState,
   type BrowserCallResult,
   type BrowserToolName,
+  type PageSize,
   type UploadAnswer,
 } from '@shared/browser'
 import {
@@ -126,6 +128,8 @@ export interface BrowserCdpDeps {
   reload(sessionId: string): Promise<LoadOutcome>
   /** `browser_tabs`: lists, opens, selects or closes the session's tabs. */
   tabs(sessionId: string, args: Record<string, unknown>): Promise<BrowserCallResult>
+  /** `browser_resize`: the size a tab's page keeps from then on, as it took it. */
+  resize(tabId: string, size: PageSize): Promise<PageSize>
   /** Who uses each session's page; a call waits there while the user holds it. */
   controls: SurfaceControls
   /** The scale a tab's page draws at in its view, once the page has its latest size. */
@@ -925,6 +929,8 @@ export class BrowserCdp {
         return this.trace(sessionId, args)
       case 'browser_storage_state':
         return this.storageState(sessionId, args)
+      case 'browser_resize':
+        return this.resize(sessionId, args)
       case 'browser_ask_user':
         throw new ToolFailure('invalid', 'browser_ask_user does not run as a page action.')
     }
@@ -1494,6 +1500,36 @@ export class BrowserCdp {
         ...newErrors(page),
       ].join(' '),
       value: { url: shown, title, status, snapshot: outline },
+    }
+  }
+
+  private async resize(
+    sessionId: string,
+    args: Record<string, unknown>,
+  ): Promise<BrowserCallResult> {
+    const asked = pageSizeOf(args)
+    if ('error' in asked) throw new ToolFailure('invalid', asked.error)
+    const page = this.pageOf(sessionId)
+    const tab = this.tabOf(sessionId)!
+    this.deps.acted?.(sessionId, null, false)
+    const size = await this.deps.resize(tab, asked)
+    const as =
+      size.name === 'phone' || size.name === 'tablet' ? ` as a ${size.name}, with touch` : ''
+    const result = await this.afterAction(
+      sessionId,
+      page,
+      `Your page lays out at ${size.width} × ${size.height}${as}, from now on. A page that chose ` +
+        'its layout by user agent when it loaded needs browser_reload.',
+    )
+    return {
+      text: result.text,
+      value: {
+        size: size.name,
+        width: size.width,
+        height: size.height,
+        mobile: size.mobile,
+        ...result.value,
+      },
     }
   }
 

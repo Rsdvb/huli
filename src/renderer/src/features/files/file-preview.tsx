@@ -3,12 +3,16 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from 'react'
 import {
+  BrowserIcon,
   CodeIcon,
   FileNotFoundIcon,
   FloppyDiskIcon,
@@ -21,8 +25,10 @@ import {
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import type { ChangeStatus } from '@shared/git'
+import { compareVersions } from '@shared/market-publish'
 import {
   DOCX_TYPE,
+  MEDIA_DOCUMENT_NAME,
   OFFICE_PREVIEW_LIMIT,
   XLS_TYPE,
   XLSX_TYPE,
@@ -43,11 +49,13 @@ import {
   PaneIcon,
   PanelButton,
 } from '@renderer/features/shell/panel-button'
-import { panelSession } from '@renderer/stores/view'
+import { useHostsStore } from '@renderer/stores/hosts'
+import { openSettings, openSettingsItem, panelSession } from '@renderer/stores/view'
+import { useWebHostStore } from '@renderer/stores/web-host'
 import { bytes, clock } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
-import { fileManagerName, formatShortcut, isMod, isWeb, isWindows } from '@renderer/lib/platform'
+import { fileManagerName, formatShortcut, isMod, isWeb } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { Markdown } from '@renderer/features/session/markdown'
 import { playerFailure } from '@renderer/features/session/media/failure'
@@ -79,9 +87,13 @@ import {
   type OpenFile,
 } from '@renderer/stores/files'
 import { ChangeBadge } from './change-badge'
+import { PreviewFileContext } from './file-refs'
 import { PathCopy, PreviewEditToggle } from './file-header'
-import { mentionPaths } from './mention-lines'
-import { copyPaths } from './operations'
+import { isHtmlFile, previewHtml, useHtmlPreview } from './html-preview'
+import { fileQuote, selectedPassage, type FilePassage } from './file-quote'
+import { mentionPaths, quoteInComposer } from './mention-lines'
+import { resolveFilePath } from './file-location'
+import { copyPaths, isLocalProject } from './operations'
 import { openInEditor } from './open-in-editor'
 import { nameOf } from './paths'
 import type { DocumentFailure } from './document-failure'
@@ -131,16 +143,32 @@ export function FilePreview({
     )
   }, [])
   const markdown = isMarkdown(file.path) && file.content?.kind === 'text'
-  const local = isLocal(projectPath)
+  const local = isLocalProject(projectPath)
   const sessionId = panelSession(panel)
+  const page = useHtmlPreview(sessionId, projectPath) && !file.agent && isHtmlFile(file.path)
+  const root = useRef<HTMLDivElement>(null)
+  const selected = useSelectedLines(root, projectPath, file, source)
+  // With a passage selected, only that passage goes, not the whole file.
   const mention = (): void => {
     if (!sessionId) return
-    const missed = mentionPaths(sessionId, projectPath, [{ path: file.path, folder: false }])
+    const passage = passageIn(root.current, projectPath, file, source)
+    const missed = passage
+      ? quoteInComposer(sessionId, fileQuote(file.path, passage))
+      : mentionPaths(sessionId, projectPath, [{ path: file.path, folder: false }])
     if (missed === 'no-composer') toast(t('tree.noComposer'))
     else if (missed === 'full') toast(t('composer:attachments.limit'))
   }
+  const referenceLabel =
+    selected === null
+      ? t('preview.reference')
+      : selected === 'text'
+        ? t('preview.quoteSelection')
+        : selected[0] === selected[1]
+          ? t('preview.quoteLine', { line: selected[0] })
+          : t('preview.quoteLines', { start: selected[0], end: selected[1] })
   return (
     <div
+      ref={root}
       data-file-preview=""
       className="flex min-h-0 flex-1 flex-col"
       // Anywhere in the pane, so it still saves after a click on one of the bars' buttons.
@@ -186,13 +214,21 @@ export function FilePreview({
                 onChange={(next) => showSvgSource(next === 'edit')}
               />
             )}
+            {page && sessionId && (
+              <PanelButton
+                label={t('htmlPreview.inKettu')}
+                onClick={() => void previewHtml(sessionId, file.path)}
+              >
+                <PaneIcon icon={BrowserIcon} />
+              </PanelButton>
+            )}
             {onShowDiff && (
               <PanelButton label={t('preview.showChanges')} onClick={onShowDiff}>
                 <PaneIcon icon={GitCompareIcon} />
               </PanelButton>
             )}
             {sessionId && !file.agent && (
-              <PanelButton label={t('preview.reference')} onClick={mention}>
+              <PanelButton label={referenceLabel} onClick={mention}>
                 <PaneIcon icon={MessageAdd01Icon} />
               </PanelButton>
             )}
@@ -259,6 +295,71 @@ export function FilePreview({
 }
 
 const isMarkdown = (path: string) => /\.(md|markdown|mdx)$/i.test(path)
+
+/**
+ * The passage selected in the file as it shows: in the editor, by its main selection, or in the
+ * rendered Markdown inside `root`. Null without one, or for a selection of the whole file.
+ */
+function passageIn(
+  root: HTMLElement | null,
+  projectPath: string,
+  file: OpenFile,
+  source: boolean,
+): FilePassage | null {
+  if (file.content?.kind !== 'text') return null
+  if (!rendered(file, source)) {
+    const state = getBuffer(projectPath, file.path)?.state
+    if (!state) return null
+    const { from, to } = state.selection.main
+    return selectedPassage(state.doc, from, to)
+  }
+  const selection = window.getSelection()
+  const body = root?.querySelector('.kp-doc__body')
+  if (!body || !selection || selection.isCollapsed || selection.rangeCount === 0) return null
+  if (!body.contains(selection.getRangeAt(0).commonAncestorContainer)) return null
+  const text = selection.toString().trim()
+  return text ? { lines: null, text } : null
+}
+
+/**
+ * The lines the file's selection covers, or `text` for a selection in rendered Markdown, kept
+ * current as it changes, so the reference button says what it quotes.
+ */
+function useSelectedLines(
+  root: RefObject<HTMLElement | null>,
+  projectPath: string,
+  file: OpenFile,
+  source: boolean,
+): [number, number] | 'text' | null {
+  const [key, setKey] = useState<string | null>(null)
+  const read = useEffectEvent(() => {
+    const passage = passageIn(root.current, projectPath, file, source)
+    setKey(passage ? (passage.lines?.join('-') ?? 'text') : null)
+  })
+  useEffect(() => {
+    const box = root.current
+    let frame = 0
+    // A frame later, once the editor has taken the change. An editor shown again restores its
+    // selection unfocused, with no selection event, so pointing or focusing in the pane reads it.
+    const changed = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(read)
+    }
+    changed()
+    document.addEventListener('selectionchange', changed)
+    box?.addEventListener('pointerover', changed)
+    box?.addEventListener('focusin', changed)
+    return () => {
+      cancelAnimationFrame(frame)
+      document.removeEventListener('selectionchange', changed)
+      box?.removeEventListener('pointerover', changed)
+      box?.removeEventListener('focusin', changed)
+    }
+  }, [root, projectPath, file, source])
+  if (key === null || key === 'text') return key
+  const [start = 0, end = start] = key.split('-').map(Number)
+  return [start, end]
+}
 
 /** Markdown shows rendered unless the source was chosen or a reference asks for a line. */
 const rendered = (file: OpenFile, source: boolean) =>
@@ -363,22 +464,13 @@ function NextStep({
   )
 }
 
-/** Editors and the file manager reach files on this computer only. */
-const isLocal = (projectPath: string): boolean => !isWeb && hostOfPath(projectPath) === null
-
-/** The file's own path on this computer, from its path in the project; an agent's is absolute. */
-function pathOnDisk(projectPath: string, path: string): string {
-  if (/^(?:\/|[a-z]:[\\/])/i.test(path)) return path
-  const sep = isWindows ? '\\' : '/'
-  return `${projectPath.replace(/[\\/]+$/, '')}${sep}${path.split('/').join(sep)}`
-}
-
 /** Shows the file in the system's file manager. */
 const showInFolder = (path: string): Promise<void> => window.kettu.shell.showItem(path)
 
 /** Shows the file in the editor or the file manager; a failure says why in a toast. */
 function openOutside(open: (path: string) => Promise<void>, projectPath: string, path: string) {
-  open(pathOnDisk(projectPath, path)).catch((failure: unknown) => toast(errorMessage(failure)))
+  const target = resolveFilePath(projectPath, path).absolutePath ?? path
+  open(target).catch((failure: unknown) => toast(errorMessage(failure)))
 }
 
 /** The bar goes once answered, and its button with it, so the text takes the focus back. */
@@ -408,7 +500,7 @@ function Body({
   const { t } = useTranslation('files')
   const source = useFilesStore((s) => s.markdownSource)
   const { content, error } = file
-  const local = isLocal(projectPath)
+  const local = isLocalProject(projectPath)
   if (error && !content) {
     return (
       <Notice title={t('preview.openFailed')} description={error}>
@@ -418,22 +510,7 @@ function Body({
   }
   if (!content) return <Lines />
   if (content.kind === 'binary') {
-    return (
-      <Notice
-        title={t('preview.binaryTitle')}
-        description={t('preview.binaryDescription', { size: bytes(content.size) })}
-      >
-        {local && (
-          <button
-            type="button"
-            className="kp-btn"
-            onClick={() => openOutside(showInFolder, projectPath, file.path)}
-          >
-            {t('preview.showIn', { name: fileManagerName() })}
-          </button>
-        )}
-      </Notice>
-    )
+    return <BinaryFile projectPath={projectPath} file={file} size={content.size} />
   }
   if (content.kind === 'too-large') {
     return (
@@ -486,6 +563,9 @@ function Body({
         key={`${projectPath}\0${panel}\0${file.path}`}
         viewKey={`${projectPath}\0${panel}\0${file.path}`}
         text={editedText(projectPath, file) ?? content.text}
+        // The agent's own folder is read without media, so its images stay text.
+        projectPath={file.agent ? null : projectPath}
+        path={file.path}
       />
     )
   }
@@ -496,10 +576,93 @@ function Body({
   )
 }
 
+/** Hosts before this read PDF, Word and Excel files as binary, since they preview none. */
+const DOCUMENT_PREVIEWS_SINCE = '0.1.18'
+
+/** The host of a project on another computer, or the web client's, as far as its welcome said. */
+function useProjectHost(projectPath: string): { name: string; version: string | null } | null {
+  const hostId = hostOfPath(projectPath)
+  const other = useHostsStore((s) =>
+    hostId === null ? null : (s.status?.hosts?.find((h) => h.id === hostId) ?? null),
+  )
+  const web = useWebHostStore((s) => s.host)
+  if (hostId !== null) return other
+  return isWeb ? web : null
+}
+
+/**
+ * A file the host would not show. A document from a host too old to preview it says to update
+ * Kettu there, and opens its page in Settings; an agent's own files are never previewed anyway.
+ */
+function BinaryFile({
+  projectPath,
+  file,
+  size,
+}: {
+  projectPath: string
+  file: OpenFile
+  size: number
+}) {
+  const { t } = useTranslation('files')
+  const host = useProjectHost(projectPath)
+  const old =
+    host?.version != null &&
+    !file.agent &&
+    MEDIA_DOCUMENT_NAME.test(file.path) &&
+    compareVersions(host.version, DOCUMENT_PREVIEWS_SINCE) < 0
+  if (host && old) {
+    const hostId = hostOfPath(projectPath)
+    return (
+      <Notice
+        title={t('preview.oldHostTitle', { name: host.name })}
+        description={t('preview.oldHostDescription', { version: host.version })}
+      >
+        <button
+          type="button"
+          className="kp-btn"
+          onClick={() =>
+            hostId === null ? openSettings('hosts') : openSettingsItem('hosts', hostId)
+          }
+        >
+          {t('preview.oldHostOpen', { name: host.name })}
+        </button>
+      </Notice>
+    )
+  }
+  return (
+    <Notice
+      title={t('preview.binaryTitle')}
+      description={t('preview.binaryDescription', { size: bytes(size) })}
+    >
+      {isLocalProject(projectPath) && (
+        <button
+          type="button"
+          className="kp-btn"
+          onClick={() => openOutside(showInFolder, projectPath, file.path)}
+        >
+          {t('preview.showIn', { name: fileManagerName() })}
+        </button>
+      )}
+    </Notice>
+  )
+}
+
 const markdownScroll = new Map<string, number>()
 
-function RenderedMarkdown({ viewKey, text }: { viewKey: string; text: string }) {
+function RenderedMarkdown({
+  viewKey,
+  text,
+  projectPath,
+  path,
+}: {
+  viewKey: string
+  text: string
+  /** The project the file is in, whose images it shows; null for a file outside one. */
+  projectPath: string | null
+  path: string
+}) {
   const box = useRef<HTMLDivElement>(null)
+  const preview = useMemo(() => (projectPath ? { projectPath, path } : null), [projectPath, path])
   useLayoutEffect(() => {
     if (box.current) box.current.scrollTop = markdownScroll.get(viewKey) ?? 0
   }, [viewKey])
@@ -510,7 +673,9 @@ function RenderedMarkdown({ viewKey, text }: { viewKey: string; text: string }) 
       data-selectable=""
       onScroll={(event) => markdownScroll.set(viewKey, event.currentTarget.scrollTop)}
     >
-      <Markdown markdown={text} className="mx-auto max-w-[50em]" />
+      <PreviewFileContext value={preview}>
+        <Markdown markdown={text} className="mx-auto max-w-[50em]" />
+      </PreviewFileContext>
     </div>
   )
 }

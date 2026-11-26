@@ -304,7 +304,7 @@ function blobSource(blob: Blob): UploadSource {
 }
 
 /** The browser's own file picker, for the web client; opened while the click that asked lasts. */
-function chooseFiles(): Promise<File[]> {
+export function chooseFiles(): Promise<File[]> {
   return new Promise((resolve) => {
     const input = document.createElement('input')
     input.type = 'file'

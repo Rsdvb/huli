@@ -3,7 +3,12 @@
 // what a browser can do itself. What needs the desktop app's own window is never offered: the
 // page hides it, and a call that comes anyway is refused.
 
-import { pushedAttention } from '@shared/attention'
+import {
+  ATTENTION_SETTING,
+  attentionNotice,
+  pushedAttention,
+  type AttentionNotice,
+} from '@shared/attention'
 import type { DeviceEvent } from '@shared/device-host'
 import type { HostEvent } from '@shared/agent-host'
 import type { HostToMain } from '@shared/host-control'
@@ -16,13 +21,15 @@ import { matchLocale } from '@shared/locale'
 import type { PortConnectionState } from '@shared/port-rpc'
 import type { Platform } from '@shared/platform'
 import { parseHostRenamed, type DirectAddress } from '@shared/remote/protocol'
-import type {
-  HostAdminEvent,
-  HostAdminMethod,
-  HostAdminParams,
-  HostAdminResult,
-  HostInfo,
+import {
+  parseJoined,
+  type HostAdminEvent,
+  type HostAdminMethod,
+  type HostAdminParams,
+  type HostAdminResult,
+  type HostInfo,
 } from '@shared/remote/host-admin'
+import { parseDiscoveryEvent } from '@shared/remote/discovery'
 import type { TerminalEvent } from '@shared/terminal-host'
 import { copyPath } from '@renderer/lib/copy-path'
 import { useWebHostStore, type WebHost } from '@renderer/stores/web-host'
@@ -95,6 +102,8 @@ function portState(link: HostLink): PortConnectionState {
 
 /** What the web client knows of the host it connects to beyond the link. */
 export interface WebHostContext {
+  /** The host's key as this browser paired with it, encoded. */
+  id: string
   /** The page's own address, which this browser reaches the host at; null through the relay. */
   address: DirectAddress | null
   /** The names this browser kept from the last welcome, shown until the next one. */
@@ -191,6 +200,7 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
 
   useWebHostStore.setState({
     host: {
+      id: context.id,
       name: context.known.name,
       platform: null,
       version: null,
@@ -229,6 +239,7 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
 
   // What a notification's click opens, as main sends a window its menu's commands.
   const commands = new Set<(command: AppCommand) => void>()
+  const notices = new Set<(notice: AttentionNotice) => void>()
   const inFront = (): boolean => document.visibilityState === 'visible' && document.hasFocus()
   followTabFront(inFront)
   const open = (command: AppCommand): void => {
@@ -248,6 +259,11 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
         context.push?.active === true &&
         pushedAttention({ type: 'host:attention', ...attention } as AttentionMessage) !== null,
     })
+    // In front, a session's turn shows in the page in place of the browser's notification.
+    const notice = inFront() ? attentionNotice(attention) : null
+    if (notice && settings.current().notifications[ATTENTION_SETTING[notice.kind]]) {
+      for (const listener of notices) listener(notice)
+    }
   })
   context.push?.onOpen(open)
 
@@ -281,6 +297,10 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
       onCommand: (listener) => {
         commands.add(listener)
         return () => commands.delete(listener)
+      },
+      onAttention: (listener) => {
+        notices.add(listener)
+        return () => notices.delete(listener)
       },
       reportInteractive: () => {},
       onShortcut: never,
@@ -371,10 +391,23 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
       closePairing: (codeId) => done(admin('remote.closePairing', { codeId })),
       answerPairing: (codeId, add, name) =>
         done(admin('remote.answerPairing', { codeId, add, name })),
-      // Devices of the account ask the host's own windows; the web client is never asked.
-      pendingDiscovery: () => Promise.resolve(null),
-      answerDiscovery: () => unsupported('answer devices of the account'),
-      onDiscovery: never,
+      pendingDiscovery: () => admin('remote.pendingDiscovery'),
+      answerDiscovery: (requestId, add, name) =>
+        admin('remote.answerDiscovery', { requestId, add, name }),
+      onDiscovery: (listener) =>
+        adminEvent('remote.discovery', (event) => {
+          const parsed = parseDiscoveryEvent(event.event)
+          if (parsed) listener(parsed)
+        }),
+      onDeviceJoined: (listener) =>
+        adminEvent('remote.deviceJoined', (event) => {
+          const joined = parseJoined(event)
+          if (joined) listener(joined)
+        }),
+      // Asked in the desktop app's own window, about itself.
+      offer: () => Promise.resolve(null),
+      answerOffer: () => unsupported('turn remote access on for the account'),
+      onOffer: never,
       renameDevice: (id, name) => admin('remote.renameDevice', { id, name }),
       removeDevice: (id) => admin('remote.removeDevice', { id }),
       activity: (id) => admin('remote.activity', { id }),
@@ -466,6 +499,11 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
         askPath('shell', settings.current().terminal.shellPath ?? null, async (path) =>
           settings.takeHost(await admin('settings.setShellPath', { path })),
         ),
+      exportConversation: async (title, markdown) => {
+        const name = `${safeName(title, 'conversation')}.md`
+        downloadFile(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), name)
+        return true
+      },
     },
     // A browser opens no debugging ports of its own; the host's are on the host.
     debug: {
@@ -578,6 +616,7 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
       reload: () => unsupported('show the browser'),
       stop: () => unsupported('show the browser'),
       openExternal: () => unsupported('show the browser'),
+      setPageSize: () => unsupported('show the browser'),
       freeze: async () => null,
       capture: async () => null,
       pick: async () => false,

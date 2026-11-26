@@ -27,6 +27,8 @@ export interface ToastOptions {
   icon?: IconSvgElement
   /** In ms; the default suits a message that is read once. */
   duration?: number
+  /** A line under the title, such as what went wrong for each of several items. */
+  description?: string
 }
 
 // The toasts on screen, so the layer can tell the browser pane it is covered.
@@ -71,7 +73,7 @@ export function toast(
   action?: { label: string; onClick: () => void },
   options: ToastOptions = {},
 ): ToastId {
-  const { tone, icon, duration } = options
+  const { tone, icon, duration, description } = options
   const show =
     tone === 'success' ? affectToast.success : tone === 'info' ? affectToast.info : affectToast
   const mark =
@@ -87,6 +89,7 @@ export function toast(
     ) : undefined
   return track((settings) => show(title, settings), {
     icon: mark,
+    ...(description !== undefined && { description }),
     ...(action && { action: actionOf(action), duration: 6000 }),
     ...(duration !== undefined && { duration }),
   })
@@ -194,6 +197,39 @@ export function alertToast(
     description,
     duration: ALERT_MS,
   })
+}
+
+/**
+ * Says what happened out of view, such as a turn that ended in another session, with an action
+ * that goes there. Given the `id` of one still on screen, it changes that one in place and starts
+ * its time again; `onClose` runs once it goes.
+ */
+export function eventToast(
+  content: { title: string; description?: string; warning?: boolean },
+  action: { label: string; onClick: () => void },
+  options: { id?: ToastId; onClose?: () => void } = {},
+): ToastId {
+  const id = affectToast(content.title, {
+    ...(options.id !== undefined && { id: options.id }),
+    description: content.description,
+    icon: content.warning ? (
+      <HugeiconsIcon
+        icon={Alert02Icon}
+        strokeWidth={1.9}
+        aria-hidden
+        className="size-3.75 text-warning"
+      />
+    ) : undefined,
+    action: actionOf(action),
+    duration: 6000,
+    onDismiss: (closed) => {
+      onDismiss(closed)
+      options.onClose?.()
+    },
+  })
+  open.add(id)
+  changed()
+  return id
 }
 
 /**

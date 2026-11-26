@@ -59,6 +59,7 @@ function hostSettings(agents: HostSettings['agents']): HostSettings {
     usage: { fromComputer: false },
     sessionTitles: true,
     workflow: DEFAULT_SETTINGS.workflow,
+    startedSessions: DEFAULT_SETTINGS.startedSessions,
     lightModel: { mode: 'small' },
     defaultAgent: null,
     computerUse: DEFAULT_SETTINGS.computerUse,

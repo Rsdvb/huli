@@ -124,6 +124,8 @@ export interface NotificationChoices {
    * leave it out of what they answer and ignore it when it is set.
    */
   limits: boolean
+  /** A device of the account asks to be added, or a device joined the host. */
+  device: boolean
   /** Only while the user is not at the host, when the host can tell: the desktop app can. */
   onlyAway: boolean
   /** Titles and text; without them a notification says only which host needs the user. */
@@ -143,6 +145,7 @@ export const DEFAULT_CHOICES: NotificationChoices = {
   errors: true,
   routines: false,
   limits: true,
+  device: true,
   onlyAway: true,
   details: true,
   muted: [],
@@ -236,6 +239,7 @@ const SWITCHES = [
   'errors',
   'routines',
   'limits',
+  'device',
   'onlyAway',
   'details',
   'liveProgress',
@@ -347,6 +351,10 @@ export type PushEvent =
    * from before it was added shows its title and body, or its generic text.
    */
   | { kind: 'plan-limit'; agentId: string; window: string }
+  /** A device of the account asks to be added; it opens the request's card. */
+  | { kind: 'device-request'; requestId: number }
+  /** A device joined the host, which the device may remove. */
+  | { kind: 'device-joined'; deviceId: string }
   /** Removes the notification of the same tag, which no longer applies. */
   | { kind: 'withdraw'; sessionId?: string }
   /** A Live Activity's state: how many requests wait, and the session of the latest. */

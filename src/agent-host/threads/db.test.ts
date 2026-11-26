@@ -436,6 +436,10 @@ describe('the thread database', () => {
       artifact('w3', 'art_b', 'Sketch', 'delete'),
       reply('a1', 'Merged https://github.com/KettuAI/cloud/pull/7 and https://example.com/x.'),
       reply('a2', 'Also see https://github.com/KettuAI/Kettu/pull/30'),
+      reply(
+        'a3',
+        'And github.com/KettuAI/Kettu/issues/31, not gist.github.com/KettuAI/Kettu/issues/1',
+      ),
       { kind: 'turn_end', id: 'end1', stopReason: 'end_turn', durationMs: 9000 },
       user('u2'),
     ]
@@ -445,11 +449,12 @@ describe('the thread database', () => {
       outputs: {
         artifacts: [{ id: 'art_a', title: 'Plan v2' }],
         references: [
+          'https://github.com/KettuAI/Kettu/issues/31',
           'https://github.com/KettuAI/Kettu/pull/30',
           'https://github.com/KettuAI/cloud/pull/7',
           'https://github.com/KettuAI/Kettu/issues/12',
         ],
-        reply: 'Also see https://github.com/KettuAI/Kettu/pull/30',
+        reply: 'And github.com/KettuAI/Kettu/issues/31, not gist.github.com/KettuAI/Kettu/issues/1',
         turnMs: 9000,
         plan: [
           { content: 'Read', priority: 'medium', status: 'completed' },
@@ -970,6 +975,69 @@ describe('the thread database', () => {
     expect(again.page('s1', null)).toBeNull()
     expect(again.load('s1')).toBeNull()
     expect(logs.some((l) => l.level === 'error' && l.message.includes('s1'))).toBe(true)
+    again.close()
+  })
+
+  it("reads back Kettu's settings changes and a folder's held servers and hooks", () => {
+    const file = tempFile()
+    const db = open(file)
+    const row = {
+      id: 'appearance.color-mode',
+      place: 'Appearance › Theme',
+      name: 'Color mode',
+      from: { value: 'system', text: 'System' },
+      to: { value: 'dark', text: 'Dark' },
+      section: 'appearance',
+      item: null,
+      row: 'color-mode',
+    } as const
+    const own: ThreadEntry[] = [
+      {
+        kind: 'settings_change',
+        id: 'k1',
+        items: [row],
+        asked: true,
+        expiresAt: 1_700_000_000_000,
+        outcome: null,
+        after: 't0.0',
+      },
+      {
+        kind: 'settings_change',
+        id: 'k2',
+        items: [{ ...row, warning: 'Opens it up.' }],
+        asked: false,
+        expiresAt: null,
+        outcome: { kind: 'changed' },
+        after: 't0.0',
+      },
+      {
+        kind: 'project_mcp',
+        id: 'k3',
+        servers: [{ name: 'db', target: 'npx db-mcp' }],
+        decision: 'use',
+        after: null,
+      },
+      {
+        kind: 'project_hooks',
+        id: 'k4',
+        hooks: [{ event: 'PreToolUse', target: './check.sh' }],
+        decision: null,
+        after: null,
+      },
+    ]
+    const entries = [
+      ...turns(1, 1),
+      ...own.map((entry, i) => ({ pos: 4 + i, entry })),
+    ] satisfies PositionedEntry[]
+    db.write('s1', { head, entries })
+    db.close()
+
+    const again = open(file)
+    expect(again.page('s1', null)!.entries.slice(4)).toEqual(own)
+    expect(again.load('s1')!.entries.map(({ entry }) => entry)).toEqual(
+      entries.map(({ entry }) => entry),
+    )
+    expect(logs.filter((l) => l.level === 'error')).toEqual([])
     again.close()
   })
 

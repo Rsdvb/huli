@@ -214,6 +214,7 @@ export const AgentEntry = memo(function AgentEntry({ sessionId, entryId }: Entry
         sources={NO_SOURCES}
         answer=""
         streaming={streaming}
+        glideHeight={false}
         mark={wrote && <TurnDots phase="writing" still={!streaming} />}
         labels={{ writing: t('thread.phase.writing', { count: 1 }) }}
       >

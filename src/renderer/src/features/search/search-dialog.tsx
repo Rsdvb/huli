@@ -33,6 +33,7 @@ import {
 } from '@renderer/components/affect/command-menu'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { VIEW_ICONS } from '@renderer/features/plugin-views/icons'
+import { openPluginPage } from '@renderer/features/marketplace/plugin-landing'
 import { PluginTile } from '@renderer/features/plugin-views/plugin-tile'
 import { runPluginAction } from '@renderer/features/plugin-views/run-action'
 import { Button } from '@renderer/components/ui/button'
@@ -153,7 +154,12 @@ function openEntry(entry: SearchEntry): void {
       newSession(entry.path)
       break
     case 'section':
-      openSettings(entry.section)
+      if ('pluginSetting' in entry) {
+        openPluginPage(entry.pluginSetting.pluginId, {
+          row: entry.pluginSetting.row,
+          hostId: entry.pluginSetting.hostId,
+        })
+      } else openSettings(entry.section)
       break
     case 'action':
       runAction(entry.action)
@@ -186,8 +192,13 @@ const EXPAND = 'expand:'
 function SearchPalette() {
   const { t } = useTranslation(['sidebar', 'common'])
   const found = useSearchEntries()
-  const [query, setQuery] = useState('')
-  const [scope, setScope] = useState<SearchScope>('all')
+  const [init] = useState(() => useViewStore.getState().searchInit)
+  const [query, setQuery] = useState(() => init?.query ?? '')
+  const [scope, setScope] = useState<SearchScope>(() =>
+    init?.scope && (SCOPES as readonly string[]).includes(init.scope)
+      ? (init.scope as SearchScope)
+      : 'all',
+  )
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const conversations = useConversationHits(query)
   const others = useOtherHosts()
@@ -341,6 +352,7 @@ function SearchPalette() {
       placeholder={t('search.placeholder')}
       scopes={scopes}
       scope={scope}
+      initialQuery={init?.query ?? ''}
       onScopeChange={(id) => setScope(id as SearchScope)}
       onQueryChange={setQuery}
       empty={empty}
@@ -431,6 +443,10 @@ function commandOf(entry: SearchEntry): Command {
     case 'routine':
       return { ...base, icon: <Icon icon={Clock01Icon} size={16} /> }
     case 'section':
+      if ('pluginSetting' in entry) {
+        const { plugin } = entry.pluginSetting
+        return { ...base, logo: <PluginTile name={plugin.name} icon={plugin.icon} size={16} /> }
+      }
       return { ...base, icon: <Icon icon={Settings02Icon} size={16} /> }
     case 'action':
       return {

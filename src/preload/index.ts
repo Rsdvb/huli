@@ -83,6 +83,7 @@ const onUpdateChanged = subscribe('update:changed')
 const onDebugChanged = subscribe('debug:changed')
 const onRecordingChanged = subscribe('report:recording-changed')
 const onShortcut = subscribe('app:shortcut')
+const onAttention = subscribe('app:attention')
 const onArtifactBlocked = subscribe('artifact:blocked')
 const onArtifactStopped = subscribe('artifact:stopped')
 const onArtifactFrameFailed = subscribe('artifact:frame-failed')
@@ -94,6 +95,7 @@ const onRemoteChanged = subscribe('remote:changed')
 const onIslandChanged = subscribe('island:changed')
 const onRemotePairing = subscribe('remote:pairing')
 const onRemoteDiscovery = subscribe('remote:discovery')
+const onRemoteOffer = subscribe('remote:offer')
 const onHostsChanged = subscribe('hosts:changed')
 const onHostPairing = subscribe('hosts:pairing')
 const onBrowserState = subscribe('browser:state')
@@ -144,6 +146,7 @@ const api: KettuApi = {
         commandListeners.delete(listener)
       }
     },
+    onAttention,
     reportInteractive: () => send('perf:interactive'),
     setUnsaved: (files) => send('app:set-unsaved', files),
     closeWindow: () => send('app:close-window'),
@@ -176,6 +179,11 @@ const api: KettuApi = {
     answerDiscovery: (requestId, add, name) =>
       invoke('remote:discovery-answer', requestId, add, name),
     onDiscovery: onRemoteDiscovery,
+    // Main tells this computer's user of a device that joined with a system notification.
+    onDeviceJoined: () => () => {},
+    offer: () => invoke('remote:offer'),
+    answerOffer: (clientId, turnOn) => invoke('remote:answer-offer', clientId, turnOn),
+    onOffer: onRemoteOffer,
     renameDevice: (id, name) => invoke('remote:rename-device', id, name),
     removeDevice: (id) => invoke('remote:remove-device', id),
     activity: (id) => invoke('remote:activity', id),
@@ -188,14 +196,15 @@ const api: KettuApi = {
   },
   hosts: {
     status: () => invoke('hosts:status'),
-    pair: (link) => invoke('hosts:pair', link),
+    pair: (link, hostId) => invoke('hosts:pair', link, hostId ?? null),
     sshConfig: () => invoke('hosts:ssh-config'),
     addSsh: (address) => invoke('hosts:add-ssh', address),
     chooseKeyFile: () => invoke('hosts:choose-key-file'),
     closePairing: (pairId) => invoke('hosts:pair-close', pairId),
     discover: () => invoke('hosts:discover'),
-    pairDiscovered: (relayId) => invoke('hosts:pair-discovered', relayId),
-    matchPairing: (pairId, match) => invoke('hosts:pair-match', pairId, match),
+    pairDiscovered: (relayId, options) => invoke('hosts:pair-discovered', relayId, options ?? {}),
+    matchPairing: (pairId, match, reverse) =>
+      invoke('hosts:pair-match', pairId, match, reverse === true),
     rename: (id, name) => invoke('hosts:rename', id, name),
     setAddresses: (id, addresses) => invoke('hosts:set-addresses', id, addresses),
     remove: (id) => invoke('hosts:remove', id),
@@ -286,6 +295,7 @@ const api: KettuApi = {
     chooseProjectFolder: () => invoke('dialog:choose-project-folder'),
     chooseNewProjectParent: (defaultPath) =>
       invoke('dialog:choose-new-project-parent', defaultPath),
+    exportConversation: (title, markdown) => invoke('dialog:export-conversation', title, markdown),
   },
   debug: {
     get: () => invoke('debug:get'),
@@ -353,6 +363,7 @@ const api: KettuApi = {
     reload: (id) => invoke('browser:reload', id),
     stop: (id) => invoke('browser:stop', id),
     openExternal: (id) => invoke('browser:open-external', id),
+    setPageSize: (id, size) => invoke('browser:page-size', id, size),
     freeze: (id) => invoke('browser:freeze', id),
     thaw: (id) => invoke('browser:thaw', id),
     capture: (id) => invoke('browser:capture', id),

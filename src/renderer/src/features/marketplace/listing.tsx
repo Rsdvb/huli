@@ -28,7 +28,12 @@ import { SettingSwitch } from '@renderer/features/settings/controls'
 import { mediumAgo } from '@renderer/lib/format'
 import { currentLocale, i18n } from '@renderer/lib/i18n'
 import { useHostScope } from '@renderer/stores/host-scope'
-import { openMarketplace, type MarketplaceTab } from '@renderer/stores/view'
+import {
+  openMarketplace,
+  openSession,
+  type MarketplaceTab,
+  type SessionView,
+} from '@renderer/stores/view'
 import { installServer, setServerOn } from './actions'
 import { CommunityListingPage, CommunityPreviewPage } from './community'
 import { ConnectButton, ConnectionControls } from './connect'
@@ -53,8 +58,9 @@ import {
 } from './model'
 import { ExternalLink, ListingFrame, ListingSkeleton, Missing } from './parts'
 import { BuiltinServerPage } from './builtin'
-import { FromPlugin, PluginPage } from './plugin-ui'
-import { usePluginItemOff } from './plugin-hooks'
+import { FromPlugin } from './plugin-ui'
+import { PluginHome } from './plugin-home'
+import { usePluginItemOff, usePluginOfListing } from './plugin-hooks'
 import { isPluginItem } from './plugin-model'
 import { PublishedListingPage } from './published-listing'
 import { KETTU_ITEM, previewIdOf, publishedIdOf } from './published-keys'
@@ -71,21 +77,58 @@ function publisherOf(listing: Listing): string | null {
   return listing.source === 'manual' ? i18n.t('marketplace:listing.addedByYou') : null
 }
 
-/** The listing's Back: to the directory on the tab it was opened from. */
-function leave(tab: MarketplaceTab): void {
-  backTo({ kind: 'marketplace', ...(tab !== 'all' ? { tab } : {}) }, () => openMarketplace({ tab }))
+/** The listing's Back: to the directory on the tab and host it was opened from. */
+function leave(tab: MarketplaceTab, hostId?: string | null): void {
+  backTo(
+    {
+      kind: 'marketplace',
+      ...(tab !== 'all' ? { tab } : {}),
+      ...(hostId !== undefined ? { hostId } : {}),
+    },
+    () => openMarketplace({ tab, hostId }),
+  )
 }
 
-/** A listing by its view's `item`: a plugin's, an MCP server's, a skill's or a workflow's. */
-export function ListingPage({ item, tab }: { item: string; tab: MarketplaceTab }) {
+/** A plugin page's Back to the session whose side panel opened it. */
+function returnTo(session: SessionView): void {
+  backTo(session, () => openSession(session.sessionId, session.projectPath))
+}
+
+/**
+ * A listing by its view's `item`: a plugin's, an MCP server's, a skill's or a workflow's. A plugin
+ * page opened `from` a session's side panel goes back to that session.
+ */
+export function ListingPage({
+  item,
+  tab,
+  hostId,
+  from,
+}: {
+  item: string
+  tab: MarketplaceTab
+  hostId?: string | null
+  from?: SessionView
+}) {
+  const { t } = useTranslation('marketplace')
   const ref = parseItem(item)
-  const back = () => leave(tab)
+  const back = () => leave(tab, hostId)
   if (item === KETTU_ITEM) return <BuiltinServerPage tab={tab} back={back} />
   const publishedId = publishedIdOf(item)
   if (publishedId) return <PublishedListingPage id={publishedId} back={back} />
   const previewId = previewIdOf(item)
   if (previewId) return <CommunityPreviewPage id={previewId} tab={tab} />
-  if (ref?.kind === 'plugin') return <PluginPage id={ref.id} tab={tab} back={back} />
+  if (ref?.kind === 'plugin') {
+    return from ? (
+      <PluginHome
+        id={ref.id}
+        tab={tab}
+        back={() => returnTo(from)}
+        backLabel={t('listing.backToSession')}
+      />
+    ) : (
+      <PluginHome id={ref.id} tab={tab} back={back} />
+    )
+  }
   if (ref?.kind === 'skill') return <SkillListing id={ref.id} tab={tab} back={back} />
   if (ref?.kind === 'workflow') return <WorkflowListing id={ref.id} tab={tab} back={back} />
   if (ref?.kind === 'community') return <CommunityPage id={ref.id} tab={tab} back={back} />
@@ -97,10 +140,15 @@ export function ListingPage({ item, tab }: { item: string; tab: MarketplaceTab }
   )
 }
 
-/** A listing of the Kettu Marketplace; once its workflow is in the library, that workflow's page. */
+/**
+ * A listing of the Kettu Marketplace; once its workflow is in the library, that workflow's page,
+ * and once its plugin is installed, the plugin's page in its place.
+ */
 function CommunityPage({ id, tab, back }: { id: string; tab: MarketplaceTab; back: () => void }) {
   const workflow = useListingWorkflow(id)
+  const plugin = usePluginOfListing(id)
   if (workflow) return <WorkflowListing id={workflow.id} tab={tab} back={back} />
+  if (plugin) return <PluginHome id={plugin.id} tab={tab} back={back} />
   return <CommunityListingPage id={id} tab={tab} back={back} />
 }
 

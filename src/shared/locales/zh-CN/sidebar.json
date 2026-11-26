@@ -92,7 +92,8 @@
     "indexing": "正在为对话建立索引（{{percent}}%），已建好的部分可以搜。",
     "hostsSlow": "还在等：{{hosts}}",
     "announce_other": "找到 {{count}} 个会话",
-    "pluginAction": "操作"
+    "pluginAction": "操作",
+    "pluginSetting": "{{plugin}} · 市场"
   },
   "project": {
     "missing": "未找到",
@@ -128,6 +129,7 @@
       "noSessionsForGood": "它在 Kettu 里没有会话。",
       "running_other": "正在运行的 {{count}} 个会先停下。",
       "folderStays": "文件夹和里面的文件会留在这台电脑上。",
+      "folderStaysOn": "文件夹和里面的文件会留在 {{host}} 上。",
       "separator": "",
       "confirm": "移除"
     },
@@ -261,6 +263,28 @@
     "suggestingTitle": "正在写标题…",
     "mini": "在小窗中打开"
   },
+  "export": {
+    "menu": "导出对话…",
+    "exporting": "正在导出“{{title}}”…",
+    "exported": "已导出“{{title}}”",
+    "failed": "无法导出“{{title}}”：{{error}}",
+    "agent": "智能体：{{name}}",
+    "model": "模型：{{name}}",
+    "project": "项目：{{path}}",
+    "started": "开始时间：{{date}}",
+    "exportedAt": "导出时间：{{date}}",
+    "you": "你",
+    "fromKettu": "来自 Kettu",
+    "from": "来自 {{title}}",
+    "fromParent": "来自父会话",
+    "attachments": "附件",
+    "image": "图片 {{number}}",
+    "audio": "音频",
+    "video": "视频",
+    "subagent": "子智能体",
+    "startedSession": "已启动 {{title}}",
+    "startedSessionMissing": "已启动一个会话"
+  },
   "work": {
     "turn": "当前这一轮",
     "waiting_other": "{{count}} 个请求在等你回答",
@@ -347,6 +371,7 @@
     "error": "错误",
     "running": "运行中",
     "starting": "正在启动",
+    "background": "后台还在跑：{{work}}",
     "unread": "未读",
     "stalled": "可能卡住了：很久没有输出",
     "paused": "额度用完已暂停，恢复后自动继续",
@@ -372,6 +397,14 @@
     "signInDetail": "打开「设置 › 智能体」进行登录",
     "noticesName": "通知：{{list}}",
     "listSeparator": "，"
+  },
+  "signInEnds": {
+    "inDays_other": "{{name}} 登录 {{count}} 天后到期",
+    "anyDay": "{{name}} 登录随时可能到期",
+    "ended": "{{name}} 登录可能已过期",
+    "detail": "登录最晚 {{latest}}到期，最早可能 {{earliest}}。重新登录即可续期。",
+    "endedDetail": "登录最晚应在 {{latest}}到期，现在可能已经失效。重新登录后才能继续使用。",
+    "signIn": "重新登录"
   },
   "countdown": {
     "minutes": "{{count}} 分钟",
@@ -469,7 +502,13 @@
     "took": "用时 {{time}}",
     "moreReferences_other": "还有 {{count}} 个 issue 和 PR",
     "moreArtifacts_other": "还有 {{count}} 个产物",
-    "artifactFacts": "v{{version}} · {{time}}"
+    "artifactFacts": "v{{version}} · {{time}}",
+    "background": "后台在跑"
+  },
+  "stillRunning": {
+    "subagents_other": "{{count}} 个子智能体",
+    "commands_other": "{{count}} 条命令",
+    "both": "{{subagents}}、{{commands}}"
   },
   "subagents": {
     "title": "这个会话的子智能体",
@@ -524,6 +563,18 @@
     "waitHint": "复制完文件、跑完命令后，智能体才开始工作。",
     "save": "保存",
     "forbidden": "只有这台电脑的主人能在这里改这些设置，除非主人允许已配对的设备使用终端。"
+  },
+  "remoteOffer": {
+    "text": "你的 {{name}} 也登录了这个账号，要让它用这台电脑吗？",
+    "detail": "打开远程访问后，这个账号的设备就能请求使用这台电脑",
+    "turnOn": "打开",
+    "notNow": "以后再说",
+    "kind": {
+      "ios": "iPhone",
+      "web": "浏览器",
+      "desktop": "另一台电脑",
+      "daemon": "另一台电脑"
+    }
   },
   "projectFolders": {
     "title": "{{project}} 的文件夹",

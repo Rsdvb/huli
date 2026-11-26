@@ -135,6 +135,10 @@
         "noChange": "找不到这次设置更改",
         "noUndo": "这次更改不能撤销"
       },
+      "routine": {
+        "gone": "这张定时任务卡片已不再等待回答",
+        "answered": "这张定时任务卡片已经回答过了"
+      },
       "step": {
         "gone": "这一步已不再等待回答",
         "answered": "这一步已经回答过了"
@@ -295,6 +299,10 @@
     "marketPublish": "想把 {{name}} 发布到 Kettu 市场",
     "marketUnlist": "想把 {{name}} 从 Kettu 市场下架",
     "settingsChange_other": "想修改 {{count}} 项设置",
+    "routineCreate": "想新建定时任务「{{name}}」",
+    "routineUpdate": "想修改定时任务「{{name}}」",
+    "routineDelete": "想删除定时任务「{{name}}」",
+    "routineRun": "想立即运行定时任务「{{name}}」",
     "secretRequest": "需要你提供 {{title}}",
     "themeChange": "想更换纸鸢的主题颜色"
   },
@@ -687,8 +695,12 @@
     "notFolder": "{{path}} 不是文件夹",
     "notFile": "{{path}} 不是文件",
     "outsideProject": "{{path}} 在项目之外",
+    "folderInTheWay": "{{path}} 是文件夹，不能用文件替换它",
+    "fileInTheWay": "{{path}} 不是文件夹，不能把文件夹放进去",
     "tooManyCopies": "{{name}} 的副本太多了",
-    "notExist": "{{path}} 不存在"
+    "notExist": "{{path}} 不存在",
+    "previewRefused": "{{path}} 在文件夹外或是隐藏文件，不能预览",
+    "previewNotHtml": "{{path}} 不是 HTML 文件"
   },
   "worktree": {
     "branchDeleteFailed": "无法删除分支 {{branch}}：{{reason}}",
@@ -776,7 +788,7 @@
       },
       "auto": {
         "name": "自动",
-        "description": "改动和安全的命令不问，不可撤回的操作先问"
+        "description": "常规改动、安全命令与可逆工具自动放行，删除核心文件等敏感操作先问"
       },
       "plan": {
         "name": "计划",
@@ -785,6 +797,46 @@
       "fullAccess": {
         "name": "完全访问",
         "description": "什么都不问。两轮之间、它在跑的命令结束后生效，会重启 agy"
+      }
+    },
+    "auto": {
+      "allowSessionMcp": "本会话允许使用 `{{tool}}`",
+      "allowSessionDir": "本会话允许修改 `{{dir}}` 目录",
+      "allowSessionCommand": "本会话允许运行 `{{command}}`",
+      "reason": {
+        "userRule": "命中你在 Antigravity 设置中配置的询问规则",
+        "deleteCore": "尝试删除核心文件或目录：{{target}}",
+        "deleteRecursive": "尝试递归删除文件或目录",
+        "deleteFiles": "尝试删除文件或目录",
+        "moveCore": "尝试移走核心文件或目录：{{target}}",
+        "sensitiveWrite": "尝试修改受保护的敏感文件：{{target}}",
+        "sensitiveRead": "尝试读取敏感凭据或密钥文件：{{target}}",
+        "outsideWrite": "尝试修改工作区外的文件：{{target}}",
+        "sensitiveUrl": "尝试访问非公开或受限地址",
+        "sensitiveEnv": "尝试覆盖敏感环境变量：{{name}}",
+        "privilegedCommand": "尝试执行提权或系统级命令：{{command}}",
+        "systemMutation": "尝试修改系统权限或终止进程：{{command}}",
+        "opaqueCommand": "包含无法静态判定的脚本或外部执行：{{command}}",
+        "complexCommand": "包含复杂控制流或无法静态判定的命令语法",
+        "remoteScript": "尝试从网络下载并直接执行脚本",
+        "destructiveCommand": "尝试执行破坏性命令：{{command}}",
+        "destructiveScript": "内联脚本包含删除或破坏性操作：{{command}}",
+        "sensitiveScript": "内联脚本包含写入或敏感路径访问：{{command}}",
+        "gitConfigFlag": "Git 命令带有可改变执行行为的配置参数",
+        "gitDestructive": "不可逆的 Git 破坏性操作：{{command}}",
+        "gitForcePush": "尝试强制推送覆盖远端提交历史",
+        "gitPush": "尝试向远端仓库推送提交",
+        "gitDiscard": "尝试丢弃本地未提交的改动",
+        "gitRewrite": "涉及改写分支或历史的操作：{{command}}",
+        "remoteIrreversible": "不可逆的远端或发布操作：{{command}}",
+        "remoteWrite": "涉及外部写操作：{{command}}",
+        "mcpDestructive": "破坏性或不可逆的 MCP 工具：{{tool}}",
+        "mcpSensitive": "涉及外部发送或权限变更的 MCP 工具：{{tool}}",
+        "mcpUnknown": "外部 MCP 工具：{{tool}}",
+        "deleteArtifact": "尝试删除 Artifact",
+        "terminalInput": "尝试向交互式终端发送输入",
+        "computerControl": "尝试操控本机桌面应用",
+        "writeArtifactData": "尝试写入 Artifact 持久化数据"
       }
     },
     "fullAccess": {
@@ -966,6 +1018,7 @@
       "notSaved": "Codex 还没存下这个会话。先发一条消息，再点仍然启动。",
       "stillLoaded": "Codex 还在忙这个会话，没能重新打开它。等它空闲了再试。"
     },
+    "heldElsewhere": "这个会话还开在另一个 Codex 程序里，比如 Codex 应用、终端或编辑器。在那边关掉它，过一分钟再试。",
     "option": {
       "mode": "模式",
       "modeDescription": "这个会话的授权和沙箱预设",
@@ -1114,6 +1167,10 @@
       "plan": {
         "description": "打开计划模式。"
       },
+      "fast": {
+        "description": "切换当前会话的快速模式。",
+        "hint": "[on|off|status]"
+      },
       "mcp": {
         "description": "查看 MCP 服务器的状态，或重新连接它们。",
         "hint": "[reconnect]"
@@ -1259,6 +1316,15 @@
         "stop": "停止",
         "interrupt": "打断"
       }
+    },
+    "fast": {
+      "on": "已开启快速模式。",
+      "off": "已关闭快速模式。",
+      "statusOn": "快速模式当前已开启。",
+      "statusOff": "快速模式当前已关闭。",
+      "unsupported": "当前模型（{{model}}）未声明支持快速模式。",
+      "unsupportedNoModel": "当前模型未声明支持快速模式。",
+      "usage": "命令“/fast”不带参数，或接受 `on`、`off`、`status`。"
     },
     "noValue": "Codex 的 {{option}} 没有 {{value}} 这个值",
     "cannotSignOut": "这里无法让 Codex 退出登录",
@@ -1498,7 +1564,12 @@
     "permission": {
       "allowAlways": "本会话始终允许"
     },
-    "signInFirst": "请先登录 Cline，再开始会话"
+    "signInFirst": "请先登录 Cline，再开始会话",
+    "compact": {
+      "command": "压缩会话的上下文",
+      "nothing": "还没有可以压缩的内容。",
+      "off": "Cline 自己的设置里关掉了上下文压缩。"
+    }
   },
   "question": {
     "other": "其他回答…"
@@ -1747,6 +1818,7 @@
       "kettuField": "sh.kettu 这一项里有这个 Kettu 不认识的字段 {{field}}，已忽略。",
       "event": "sh.kettu 这一项里有这个 Kettu 不认识的事件 {{event}}，已忽略。",
       "eventPermission": "没有带上事件 {{event}}：它需要权限 {{permission}}，而插件没有申请。",
+      "settingField": "设置 {{setting}} 有一个这个 Kettu 不认识的字段：{{field}}。已忽略。",
       "viewField": "视图 {{view}} 有一个这个 Kettu 不认识的字段：{{field}}。已忽略。",
       "viewIcon": "视图 {{view}} 用了一个这个 Kettu 没有的图标。已略去。",
       "toolsPermission": "没有带上工具：它们需要权限 tools，而插件没有申请。",

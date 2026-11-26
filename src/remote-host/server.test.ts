@@ -12,6 +12,7 @@ import { startDeviceChannel, type DeviceChannel } from '@shared/remote/device-ch
 import {
   DISCOVER_PROLOGUE,
   deviceDiscovery,
+  newPairGroup,
   pairCommit,
   type DiscoveryRequestEvent,
 } from '@shared/remote/discovery'
@@ -58,12 +59,15 @@ async function setup(
     push?: boolean
     uploadFreeSpace?: RemoteServerOptions['uploadFreeSpace']
     listPorts?: RemoteServerOptions['listPorts']
+    /** The Kettu account the host is signed in to; none when absent. */
+    account?: string
   } = {},
 ) {
   // A test that sets up twice stops the first host too: one still running holds its folder's
   // files open, which Windows then cannot remove.
   const previous = agent
   if (previous) cleanups.push(() => previous.stop())
+  const signedIn = { account: options.account ?? null }
   agent = await startTestHost()
   const logs: string[] = []
   const log = (level: string, message: string) => logs.push(`${level}: ${message}`)
@@ -97,6 +101,8 @@ async function setup(
   let changes = 0
   const host = agent.host
   const relayKey = await importRelayKey(await newRelaySeed())
+  const relayId = await relayHostId(relayKey.publicKey)
+  const joined: { id: string; via: string }[] = []
   const notifications = options.push
     ? new DeviceNotifications({
         devices,
@@ -140,6 +146,9 @@ async function setup(
     },
     changed: () => changes++,
     log,
+    account: () => signedIn.account,
+    relayId: () => relayId,
+    joined: (device, via) => joined.push({ id: device.id, via }),
     ...(options.admin ? { admin: options.admin } : {}),
     ...(options.listPorts ? { listPorts: options.listPorts } : {}),
     ...(options.helloTimeoutMs ? { helloTimeoutMs: options.helloTimeoutMs } : {}),
@@ -199,6 +208,7 @@ async function setup(
     agent,
     server,
     hostKey,
+    signedIn,
     devices,
     activity,
     pairing,
@@ -211,6 +221,8 @@ async function setup(
     forwarded,
     agentPorts,
     relayKey,
+    relayId,
+    joined,
     connect,
     openCode,
     pairWith,
@@ -272,12 +284,25 @@ describe('a paired device', () => {
     await expect(
       device.port.request('attachments.add', { source: { grantId: 'grant' }, thumb: null }),
     ).rejects.toMatchObject({ code: 'forbidden' })
+    // The page would be served on the host's own loopback address, for its own browser.
+    await expect(
+      device.port.request('files.preview', { sessionId: 'none', path: 'index.html' }),
+    ).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(
+      device.port.request('files.upload', {
+        projectPath: t.agent.project,
+        path: 'a.png',
+        source: { grantId: 'grant' },
+      }),
+    ).rejects.toMatchObject({ code: 'forbidden' })
     expect(await device.port.request('projects.list', undefined)).toEqual([])
     const methods = t.forwarded.map((message) => (message as { method: string }).method)
     expect(methods).toEqual(['projects.list'])
     expect(t.logs).toEqual([
       `warn: Device ${t.phone.id} asked for media.open, which devices may not call`,
       `warn: Device ${t.phone.id} asked for attachments.add, which devices may not call`,
+      `warn: Device ${t.phone.id} asked for files.preview, which devices may not call`,
+      `warn: Device ${t.phone.id} asked for files.upload, which devices may not call`,
     ])
   })
 
@@ -1230,6 +1255,69 @@ describe('pairing with a device of the account', () => {
       })
   })
 
+  it('takes a batch only when it names this host, and tells the owner what its code is made of', async () => {
+    const t = await setup()
+    const other = 'a'.repeat(26)
+    const outside = await t.discover(await generateKeyPair())
+    const refused = heard(outside)
+    await outside.send({
+      type: 'pair-commit',
+      commit: await pairCommit(new Uint8Array(32).fill(1)),
+      group: newPairGroup([other, 'b'.repeat(26)]),
+    })
+    await outside.closed
+    expect(refused).toEqual([{ type: 'closing', reason: 'invalid' }])
+
+    const group = newPairGroup([other, t.relayId])
+    const exchange = await deviceDiscovery(await t.discover(await generateKeyPair()), group)
+    if (!('code' in exchange)) throw new Error('The host refused the exchange')
+    await exchange.channel.send(LAPTOP_HELLO)
+    await expect.poll(() => t.discoveryEvents.length).toBe(1)
+    expect(t.discoveryEvents[0]!.request).toMatchObject({
+      state: 'confirm',
+      code: exchange.code,
+      deviceConfirmed: false,
+      transcript: exchange.transcript,
+      group,
+    })
+    await exchange.channel.send({ type: 'pair-confirm' })
+    await expect
+      .poll(() => t.discoveryEvents.at(-1)?.request)
+      .toMatchObject({ state: 'confirm', deviceConfirmed: true })
+  })
+
+  it('says a device joined by any path once, not when it is added again', async () => {
+    const t = await setup()
+    const exchange = await deviceDiscovery(await t.discover(await generateKeyPair()))
+    if (!('code' in exchange)) throw new Error('The host refused the exchange')
+    await exchange.channel.send(LAPTOP_HELLO)
+    await exchange.channel.send({ type: 'pair-confirm' })
+    await expect.poll(() => t.discoveryEvents.length).toBeGreaterThan(0)
+    t.discovery.answer(1, true, 'Laptop', 'Phone')
+    await expect.poll(() => t.joined.map((entry) => entry.via)).toEqual(['account'])
+    expect(t.discoveryEvents.at(-1)?.request).toEqual({
+      state: 'closed',
+      reason: 'added',
+      answeredOn: 'Phone',
+    })
+
+    const key = await generateKeyPair()
+    const device = {
+      publicKey: base64(key.publicKey),
+      name: 'Studio',
+      kind: 'desktop',
+      platform: 'macOS 26',
+      model: '',
+    }
+    await t.server.addDevice(device, 'reverse')
+    await t.server.addDevice(device, 'ssh')
+    expect(t.joined.map((entry) => entry.via)).toEqual(['account', 'reverse'])
+    expect(t.activity.list(await deviceId(key.publicKey)).map((event) => event.kind)).toEqual([
+      'paired',
+      'paired',
+    ])
+  })
+
   it('closes the device the owner rejects, with the reason', async () => {
     const t = await setup()
     const exchange = await deviceDiscovery(await t.discover(await generateKeyPair()))
@@ -1237,7 +1325,9 @@ describe('pairing with a device of the account', () => {
     const messages = heard(exchange.channel)
     await exchange.channel.send(LAPTOP_HELLO)
     await exchange.channel.send({ type: 'pair-confirm' })
-    await expect.poll(() => t.discoveryEvents.length).toBe(1)
+    await expect
+      .poll(() => t.discoveryEvents.at(-1)?.request)
+      .toMatchObject({ state: 'confirm', deviceConfirmed: true })
     t.discovery.answer(1, false, '')
     await exchange.channel.closed
     expect(messages).toEqual([{ type: 'closing', reason: 'rejected' }])
@@ -1661,5 +1751,112 @@ describe("a desktop app's browser", () => {
         answer: { result: { text: 'no', value: {} } },
       }),
     ).rejects.toMatchObject({ code: 'forbidden' })
+  })
+})
+
+describe('a device of another account', () => {
+  const OTHER = { account: 'account-b' }
+
+  it("is welcomed with the host's account, and turned away once it names another", async () => {
+    const t = await setup({ account: 'account-a' })
+    const same = await t.connect(undefined, { account: 'account-a' })
+    expect(await same.first).toMatchObject({ type: 'welcome', account: 'account-a' })
+    expect(t.devices.get(t.phone.id)!.account).toBe('account-a')
+    same.close()
+
+    const other = await t.connect(undefined, OTHER)
+    expect(await other.first).toEqual({ type: 'closing', reason: 'other_account' })
+    expect(await other.closing).toEqual({ type: 'closing', reason: 'other_account' })
+    // The device list marks it, and the host was never left with a session for it.
+    expect(t.devices.get(t.phone.id)!.account).toBe('account-b')
+    await expect.poll(() => t.server.online()).toEqual([])
+  })
+
+  it('connects when its hello names no account, or the host is signed in to none', async () => {
+    const signedOut = await setup()
+    const any = await signedOut.connect(undefined, OTHER)
+    expect(await any.first).toMatchObject({ type: 'welcome' })
+    expect(await any.first).not.toHaveProperty('account')
+
+    const t = await setup({ account: 'account-a' })
+    const none = await t.connect()
+    expect(await none.first).toMatchObject({ type: 'welcome', account: 'account-a' })
+    expect(t.devices.get(t.phone.id)!.account).toBeNull()
+  })
+
+  it('cannot resume its session under another account', async () => {
+    const t = await setup({ account: 'account-a' })
+    const protocol = { min: 1, max: PROTOCOL_VERSION }
+    const device = await t.connect(undefined, { protocol, account: 'account-a' })
+    const { resume: token } = (await device.first) as { resume: string }
+    device.close()
+    const again = await t.connect(undefined, {
+      protocol,
+      account: 'account-b',
+      resume: { token, received: device.received() },
+    })
+    expect(await again.first).toEqual({ type: 'closing', reason: 'other_account' })
+  })
+
+  it('is closed when the host signs in to another account, and works when it signs back', async () => {
+    const t = await setup({ account: 'account-a' })
+    const device = await t.connect(undefined, { account: 'account-a' })
+    await device.first
+    t.signedIn.account = 'account-b'
+    t.server.accountChanged()
+    expect(await device.closing).toEqual({ type: 'closing', reason: 'other_account' })
+
+    t.signedIn.account = 'account-a'
+    const back = await t.connect(undefined, { account: 'account-a' })
+    expect(await back.first).toMatchObject({ type: 'welcome', account: 'account-a' })
+  })
+
+  it('pairing with the code is turned away without voiding the code or asking the owner', async () => {
+    const t = await setup({ account: 'account-a' })
+    const secret = t.openCode()
+    const stranger = await t.connect(
+      await generateKeyPair(),
+      {
+        client: { kind: 'ios', version: '1.0.0', platform: 'iOS 26.1' },
+        device: { name: 'Their phone', model: 'iPhone 17' },
+        ...OTHER,
+      },
+      secret,
+    )
+    expect(await stranger.closing).toEqual({ type: 'closing', reason: 'other_account' })
+    // The code was handed back, and its asker never asked.
+    expect(new Set(t.states())).toEqual(new Set(['waiting']))
+    expect(t.server.refused).toBe(0)
+    // No attempt was spent: the code still adds the owner's device.
+    const padKey = await generateKeyPair()
+    const pad = await t.connect(
+      padKey,
+      {
+        client: { kind: 'ios', version: '1.0.0', platform: 'iPadOS 26.1' },
+        device: { name: 'iPad Air', model: 'iPad Air' },
+        account: 'account-a',
+      },
+      secret,
+    )
+    await t.until(1, 'confirm')
+    t.pairing.answer(1, { add: true, name: 'iPad Air' })
+    expect(await pad.first).toMatchObject({ type: 'welcome', account: 'account-a' })
+    expect(t.devices.get(await deviceId(padKey.publicKey))!.account).toBe('account-a')
+  })
+
+  it('asking as a device of the account is turned away before the owner hears of it', async () => {
+    const t = await setup({ account: 'account-a' })
+    const exchange = await deviceDiscovery(await t.discover(await generateKeyPair()))
+    if (!('code' in exchange)) throw new Error('The host refused the exchange')
+    const messages = heard(exchange.channel)
+    await exchange.channel.send({ ...LAPTOP_HELLO, ...OTHER })
+    await exchange.channel.closed
+    expect(messages).toEqual([{ type: 'closing', reason: 'other_account' }])
+    expect(t.discoveryEvents).toEqual([])
+    // It counted as no strike: the next device of the account is asked about.
+    const next = await deviceDiscovery(await t.discover(await generateKeyPair()))
+    if (!('code' in next)) throw new Error('The host refused the exchange')
+    await next.channel.send({ ...LAPTOP_HELLO, account: 'account-a' })
+    await expect.poll(() => t.discoveryEvents.length).toBe(1)
   })
 })

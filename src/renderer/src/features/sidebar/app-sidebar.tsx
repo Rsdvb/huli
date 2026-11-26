@@ -3,7 +3,7 @@ import { Add01Icon, ArrowRight01Icon, MoreHorizontalIcon } from '@hugeicons/core
 import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import type { Project, SessionSummary } from '@shared/agent-host'
+import type { Project } from '@shared/agent-host'
 import type { AgentId } from '@shared/thread'
 import { useEntry } from '@renderer/lib/features'
 import { newSession } from '@renderer/app/actions'
@@ -32,9 +32,9 @@ import { NoticeCard } from '@renderer/features/updates/update-notice'
 import { useUpdates } from '@renderer/features/updates/use-updates'
 import { errorMessage, hostAt } from '@renderer/lib/host'
 import { hostOfPath, hostPath } from '@renderer/lib/host-paths'
-import { isWeb } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { isAway, shownHosts, useOtherHost, useOtherHosts } from '@renderer/stores/hosts'
+import { useInsecureState } from '@renderer/stores/insecure-notice'
 import {
   noProjectKey,
   noProjectPinned,
@@ -44,19 +44,21 @@ import {
 import {
   byGroupOrder,
   byPin,
+  hasNoProjectSessions,
   hostGroup,
   hostOfSession,
-  inPinnedTree,
+  hostsWithNoProjectSessions,
   keepSameNodes,
   noProjectGroup,
+  pinnedSummaries,
   pinnedTree,
+  projectSummaries,
   sessionTree,
   sidebarRows,
   sidebarTabStop,
   type SessionNode,
   type SidebarRow,
   type SidebarTabStop,
-  listedOrigin,
   useSessionsStore,
 } from '@renderer/stores/sessions'
 import { listedTasks, pinnedTasks, useTasksStore } from '@renderer/stores/tasks'
@@ -81,7 +83,10 @@ import { HostEmpty, HostHeading, NeedsYouGroup } from './host-groups'
 import { useHostLabel } from './host-label'
 import { ImportSessionsDialog } from './import-sessions'
 import { InsecureCard } from './insecure-card'
+import { RemoteOfferCard } from './remote-offer-card'
+import { useRemoteOffer } from './use-remote-offer'
 import { signInLabel, useNotices } from './notices'
+import { SignInEndCard } from './sign-in-end-card'
 import { NoProjectMenuItems, ProjectMenuItems } from './project-menu'
 import { RemoveProjectDialog } from './remove-project'
 import { GroupRenameHints } from './rename-hints'
@@ -245,19 +250,7 @@ export function SidebarList() {
 
 /** Whether `hostId` has a session started with No project that the list shows. */
 function useHasNoProjectSessions(hostId: string | null): boolean {
-  return useSessionsStore((s) => noProjectHosts(Object.values(s.byId), [hostId]).length > 0)
-}
-
-/** Those of `hosts` with a session started with No project that the list shows. */
-function noProjectHosts(
-  summaries: readonly SessionSummary[],
-  hosts: readonly (string | null)[],
-): (string | null)[] {
-  return hosts.filter((hostId) =>
-    summaries.some(
-      (x) => x.scratch && listedOrigin(x) && !x.archivedAt && hostOfSession(x) === hostId,
-    ),
-  )
+  return useSessionsStore((s) => hasNoProjectSessions(s.byId, hostId))
 }
 
 /** `hosts` with the one at `from` moved to `to`, kept as this window's order. */
@@ -443,14 +436,10 @@ function ProjectGroup({
   const noProject = useProjectsStore((s) =>
     project ? undefined : s.noProjects[noProjectKey(hostId)],
   )
-  const summaries = useSessionsStore(
-    useShallow((s) =>
-      Object.values(s.byId).filter((x) =>
-        project ? x.projectPath === project.path : x.scratch && hostOfSession(x) === hostId,
-      ),
-    ),
-  )
   const projectPath = project?.path ?? null
+  const summaries = useSessionsStore(
+    useShallow((s) => projectSummaries(s.byId, projectPath, hostId)),
+  )
   // Huli: a session in one of the user's folders shows there instead; the header takes it back.
   const listed = useUnfoldered(summaries, hostId)
   const [ungroupTarget, ungroupOver] = useUngroupDrop(key, hostId)
@@ -500,9 +489,9 @@ function ProjectGroup({
   const limited = limitRows(rows, allShown, (row) => rowInSight(row, shownId))
   // Importing reads the agents' own lists, which only this computer's do.
   const local = hostId === null
-  // A host that cannot pin a group leaves its pin out.
+  // A host that cannot pin a group leaves its pin out; a project can always be removed.
   const canPin = project ? project.pinnedAt !== undefined : noProject !== undefined
-  const hasMenu = local || canPin || canOrder(order)
+  const hasMenu = local || !!project || canPin || canOrder(order)
 
   const toggle = () => toggleGroup(key)
   const groupStop = stop?.kind === 'group' && stop.key === key
@@ -585,7 +574,7 @@ function ProjectGroup({
   const menuItems = !hasMenu ? null : project ? (
     <ProjectMenuItems
       project={project}
-      pinDisabled={away}
+      away={away}
       onPin={pin}
       onImport={() => onImport(project)}
       onRemove={() => setRemoving(true)}
@@ -768,9 +757,7 @@ function PinnedGroup({
 }) {
   const { t } = useTranslation('sidebar')
   const open = useViewStore((s) => !s.collapsedProjects[PINNED_GROUP])
-  const summaries = useSessionsStore(
-    useShallow((s) => Object.values(s.byId).filter((x) => inPinnedTree(s.byId, x))),
-  )
+  const summaries = useSessionsStore(useShallow((s) => pinnedSummaries(s.byId)))
   const tree = useKeptNodes(
     useMemo(
       () =>
@@ -792,7 +779,7 @@ function PinnedGroup({
   const noProjects = useProjectsStore((s) => s.noProjects)
   // A No project group shows only while it has sessions, pinned or not.
   const scratchHosts = useSessionsStore(
-    useShallow((s) => noProjectHosts(Object.values(s.byId), hosts ?? [null])),
+    useShallow((s) => hostsWithNoProjectSessions(s.byId, hosts ?? [null])),
   )
   const folders = useMemo(
     () =>
@@ -881,18 +868,23 @@ function moveRowFocus(event: KeyboardEvent<HTMLDivElement>): void {
 }
 
 /**
- * The cards over the account row: the web client's insecure page, agents that need sign-in and
- * one update card for Kettu and the harnesses, never stacked.
+ * The cards over the account row: the web client's insecure page, agents that need sign-in, a
+ * sign-in that ends soon, the offer to turn remote access on and one update card for Kettu and the
+ * harnesses, never stacked.
  */
 export function SidebarNotices() {
-  const { signIn, signInIds } = useNotices()
+  const { signIn, signInIds, signInEnd } = useNotices()
   const { card, items, batch } = useUpdates()
+  const insecure = useInsecureState() === 'shown'
+  const offer = useRemoteOffer()
   return (
     <>
-      {isWeb && !window.isSecureContext && <InsecureCard />}
+      {insecure && <InsecureCard />}
       {signIn.length > 0 && <SignInCard names={signIn} ids={signInIds} />}
+      {signInEnd && <SignInEndCard card={signInEnd} />}
+      {offer && <RemoteOfferCard offer={offer} />}
       {card && <UpdateCardView card={card} items={items} batch={batch} />}
-      <StarCard blocked={(isWeb && !window.isSecureContext) || signIn.length > 0 || !!card} />
+      <StarCard blocked={insecure || signIn.length > 0 || !!signInEnd || !!offer || !!card} />
     </>
   )
 }

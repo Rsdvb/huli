@@ -79,6 +79,7 @@ import {
   antigravitySignInMethod,
 } from './vendor-usage/antigravity'
 import { readAntigravityUsage } from './antigravity-usage'
+import { savedGoogleSignIn } from './antigravity-sign-in'
 import { signsInWithKeyOnly } from '@shared/agents'
 import { takesAutoCompact } from '@shared/auto-compact'
 import type { AgentProcess, NodeRuntime } from '@shared/host-control'
@@ -174,6 +175,7 @@ import { readOutputStyles } from './claude/output-styles'
 import { readCodexSettings, writeCodexSetting } from './codex/settings'
 import { readCodebuddySite, shellOverrides, writeCodebuddySite } from './codebuddy/user-settings'
 import { readAutoCompact, writeAutoCompact, type CompactPlace } from './auto-compact/settings'
+import { withCodexOriginator } from './codex/originator'
 import type { CodexRequest } from './codex/rpc'
 import { takesSkills } from './marketplace/skill-tools'
 import {
@@ -189,6 +191,7 @@ import {
   type InstallPlan,
 } from './binary-install'
 import {
+  carriesAgents,
   detectAgent,
   displayCommand,
   EXTENSIONS_FOLDER,
@@ -201,7 +204,7 @@ import {
   userProgramFound,
   type LaunchSpec,
 } from './catalog'
-import { OAUTH_ACCOUNT_LABEL } from './claude/reports'
+import { mapAuthStatus, OAUTH_ACCOUNT_LABEL } from './claude/reports'
 import {
   AgentRequestError,
   LimitsReadFailed,
@@ -223,7 +226,7 @@ import type { ContainerRuntime } from './sandbox/runtimes'
 import type { AgentDriver, AgentTransport } from './driver'
 import { driverOf, preferredProtocol, protocolFor, type DriverOverrides } from './drivers'
 import { HostError, invalidParams } from './errors'
-import { findCommand, getEnv, isExecutableFile, type Env } from './find-command'
+import { findCommand, getEnv, isExecutableFile, needsShell, type Env } from './find-command'
 import {
   fetchManifest,
   inNpmRange,
@@ -299,7 +302,7 @@ import {
   mergeReadLimits,
   planWindow,
 } from './session-updates'
-import type { EnvironmentService } from './shell-env'
+import { withHome, type EnvironmentService } from './shell-env'
 import type {
   AgentsFile,
   AgentUpdatesFile,
@@ -355,6 +358,8 @@ export interface AgentTimings {
   limitsBackgroundMs: number
   /** How long one read of the plan limits may take before later refreshes stop waiting for it. */
   limitsReadMs: number
+  /** How often Claude Code is asked when its sign-in ends while nothing else asks. */
+  signInEndMs: number
   /** How long the hidden `session/new` that reads an agent's options may take. */
   optionsMs: number
   /** Huli: how often a sign-in that waits on a browser or a terminal is checked again. */
@@ -414,6 +419,7 @@ export const AGENT_TIMINGS: AgentTimings = {
   limitsMs: 60_000,
   limitsBackgroundMs: 5 * 60_000,
   limitsReadMs: 90_000,
+  signInEndMs: 24 * 60 * 60_000,
   optionsMs: 30_000,
   signInPollMs: 4_000,
   signInWatchMs: 3 * 60_000,
@@ -474,6 +480,8 @@ export interface AgentManagerDeps extends DriverOverrides {
   sessionRouterPath?: string | null
   /** The bundle of the process that runs Cline's SDK; null without one. */
   clineHostPath?: string | null
+  /** Where Claude Code's flag settings are written for its processes. */
+  claudeSettingsDir?: string
   detect?(def: AgentDefinition, ctx: DetectContext): Promise<Detection>
   install?(options: InstallOptions): Promise<InstalledAdapter>
   /** Downloads and extracts a binary agent's release archive. */
@@ -659,6 +667,8 @@ class Slot {
   remembered = ''
   limitsRun: Promise<void> | null = null
   limitsReadAt = 0
+  signInEndRun: Promise<void> | null = null
+  signInEndReadAt = 0
   /** Why the last limits read failed; null once one succeeds. */
   limitsError: string | null = null
   /** Codex's reset credits as last read; null while it holds none or none were read. */
@@ -684,6 +694,10 @@ class Slot {
   /** Huli: a waiting sign-in is checked again every `signInPollMs` until then. */
   signInWatchUntil = 0
   signInWatchTimer: ReturnType<typeof setTimeout> | null = null
+  /** The process whose refused sign-in was checked against the Google sign-in agy holds. */
+  signInChecked: AgentRun | null = null
+  /** That check of a refused sign-in, while it runs. */
+  savedSignInCheck: Promise<void> | null = null
   /** The key of its `keySignIn` changed, so its next start signs in with it. */
   keySignInPending = false
   /** The method a `sharesSignIn` agent is signed in with, as it and its files show; null unknown. */
@@ -869,21 +883,40 @@ function programOf(def: AgentDefinition): AgentStatus['program'] {
   }
 }
 
+/** Whether two subscription accounts are one sign-in, as far as their addresses tell. */
+function sameSignIn(before: AgentAccount | null, after: AgentAccount): boolean {
+  return (
+    before?.kind === 'account' &&
+    after.kind === 'account' &&
+    (before.email === null || after.email === null || before.email === after.email)
+  )
+}
+
+/**
+ * The agent's models go through a gateway, which has no plan: a sign-in it keeps, such as Codex's
+ * ChatGPT one under a provider of the user's own, still answers for a plan that holds nothing back.
+ */
+function throughGateway(slot: Slot): boolean {
+  return slot.account?.kind === 'gateway'
+}
+
 /** A state detection gives a harness that cannot run, for the reason it found. */
 function unavailable(state: AgentState): boolean {
   return state === 'not-installed' || state === 'node-missing' || state === 'node-outdated'
 }
 
 /**
- * The version that runs: the handshake's, else the program's, else the installed package's, since
- * a package harness has no program to ask and Grok names none in its handshake.
+ * The version that runs: the handshake's, else the program's, else the user's own CLI's or the
+ * installed package's, since Grok names none in its handshake.
  */
 function runningVersion(slot: Slot): string | null {
   const detection = slot.h.detection
-  const adapter = detection?.state === 'available' ? detection.adapter : null
+  const available = detection?.state === 'available' ? detection : null
+  const adapter = available?.adapter ?? null
   return (
     slot.init?.version ??
     slot.h.binaryVersion ??
+    available?.cli?.version ??
     (adapter?.current ?? adapter?.fallback)?.version ??
     null
   )
@@ -1001,6 +1034,7 @@ export class AgentManager {
   private readManifest: HarnessManifest | null = null
   private manifestReadAt: number | null = null
   private limitsTimer: ReturnType<typeof setInterval> | null = null
+  private signInEndTimer: ReturnType<typeof setInterval> | null = null
   private stopped = false
   /** DeepSeek Harness's sign-in and balance, read from its home without starting it. */
   private readonly dshAccounts: DshAccounts
@@ -1107,7 +1141,7 @@ export class AgentManager {
       if (this.slots.has(agent.id)) continue
       const h = this.harnesses.get(harnessOf(agent.id))
       // An agent of a harness this build does not have stays in the settings, unlisted.
-      if (!h?.def.configVariable) continue
+      if (!h || !carriesAgents(h.def)) continue
       const slot = new Slot(agent.id, h, agent)
       if (h.detection) {
         slot.state = h.detection.state
@@ -1318,10 +1352,23 @@ export class AgentManager {
       .map((h) => h.def.id)
   }
 
+  /**
+   * Detects `harnesses` again and waits for each binary program's `--version` answer, so callers
+   * that report versions or compare them against updates see what is on disk now.
+   */
+  private async refreshHarnesses(
+    harnesses: readonly Harness[],
+    clearCache: boolean,
+  ): Promise<void> {
+    if (clearCache) this.cliVersions.clear()
+    await Promise.all(harnesses.map((h) => this.detect(h)))
+    await Promise.all(harnesses.map((h) => h.binaryVersionAsked))
+  }
+
   async check(agentId?: AgentId): Promise<AgentStatus[]> {
     await this.detectAll()
     const harnesses = agentId ? [this.slot(agentId).h] : [...this.harnesses.values()]
-    await Promise.all(harnesses.map((h) => this.detect(h)))
+    await this.refreshHarnesses(harnesses, true)
     return this.statuses()
   }
 
@@ -1332,9 +1379,8 @@ export class AgentManager {
 
   /** Detects every harness again in the environment as it is now. */
   async redetect(): Promise<AgentStatus[]> {
-    this.cliVersions.clear()
     this.npmConfigs.clear()
-    await Promise.all([...this.harnesses.values()].map((h) => this.detect(h)))
+    await this.refreshHarnesses([...this.harnesses.values()], true)
     return this.statuses()
   }
 
@@ -1626,6 +1672,13 @@ export class AgentManager {
     this.emit(slot)
   }
 
+  /** The environment the agent's process starts in. */
+  private startEnv(slot: Slot): Env {
+    const base = this.deps.env.agentEnv(slot.id)
+    const launchEnv = this.deps.launchEnv?.(slot.id, base) ?? base
+    return slot.added && slot.def.addedEnv ? { ...launchEnv, ...slot.def.addedEnv } : launchEnv
+  }
+
   private async launch(slot: Slot, spec: LaunchSpec): Promise<AgentRuntime> {
     const { diagnostics } = this.deps
     const agentId = slot.id
@@ -1635,6 +1688,14 @@ export class AgentManager {
       await slot.h.binaryVersionAsked
     }
     await this.driver(slot).load?.()
+    const baseEnv = this.startEnv(slot)
+    const env =
+      protocolFor(slot.def, this.deps, slot.protocol) === 'codex-app-server'
+        ? await withCodexOriginator(baseEnv, {
+            platform: this.deps.platform,
+            specEnv: spec.env,
+          })
+        : baseEnv
     this.registeredSlot(agentId)
     this.assertEnabled(agentId)
     if (this.stopped) throw new Error(t('agent.hostStopping', { agent: slot.name }))
@@ -1643,9 +1704,6 @@ export class AgentManager {
     slot.progress.clear()
     slot.intentionalStop = false
     slot.launchSpec = spec
-    const base = this.deps.env.agentEnv(agentId)
-    const launchEnv = this.deps.launchEnv?.(agentId, base) ?? base
-    const env = slot.added && slot.def.addedEnv ? { ...launchEnv, ...slot.def.addedEnv } : launchEnv
     slot.launchConfig = this.configIn(slot, env)
     this.emit(slot)
     diagnostics.event(agentId, 'start', formatCommand(spec.display, this.deps.platform))
@@ -1788,9 +1846,18 @@ export class AgentManager {
     env: Env,
   ): { launched: AgentRun; connection: AgentConnection } {
     const driver = this.driver(slot)
-    const context = { def: slot.def, hooks: this.connectionHooks(slot), spec, env }
+    const home = this.ownHome(slot)
+    const context = {
+      def: slot.def,
+      hooks: this.connectionHooks(slot),
+      spec,
+      env,
+      ...(home ? { home } : {}),
+    }
     if (driver.kind === 'process') {
-      const launched = this.deps.launcher.launch(slot.def, spec, env, {
+      const folder = this.folderArgs(slot)
+      const run = folder.length > 0 ? { ...spec, args: [...spec.args, ...folder] } : spec
+      const launched = this.deps.launcher.launch(slot.def, run, env, {
         stderr: (text) => this.onStderr(slot, text),
         event: (event, detail) => this.deps.diagnostics.event(slot.id, event, detail),
       })
@@ -1818,6 +1885,7 @@ export class AgentManager {
         kettuDir: path.join(this.deps.adaptersDir, EXTENSIONS_FOLDER, slot.def.id),
         nodeRuntime: this.deps.nodeRuntime,
         clineHostPath: this.deps.clineHostPath ?? null,
+        ...(this.deps.claudeSettingsDir ? { claudeSettingsDir: this.deps.claudeSettingsDir } : {}),
       })
     } catch (error) {
       slot.launched = null
@@ -2778,6 +2846,26 @@ export class AgentManager {
   }
 
   /**
+   * Asks when each Claude Code agent's sign-in ends soon after the host starts, then once a day
+   * whether or not it is in use; each ask is a short `claude auth status`.
+   */
+  startSignInEndReads(): void {
+    if (this.signInEndTimer || this.stopped) return
+    const readDue = (): void => {
+      if (this.stopped) return
+      for (const slot of this.slots.values()) {
+        if (Date.now() - slot.signInEndReadAt >= this.timings.signInEndMs) {
+          void this.readSignInEnd(slot)
+        }
+      }
+    }
+    const first = setTimeout(readDue, SIGN_IN_FIRST_READ_MS)
+    first.unref?.()
+    this.signInEndTimer = setInterval(readDue, Math.min(this.timings.signInEndMs, HOUR_MS))
+    this.signInEndTimer.unref?.()
+  }
+
+  /**
    * Keeps the plan limits current while agents are in use, since rate-limit events rarely carry
    * the used share: only agents already running with a live session, so none starts or stays up
    * for it.
@@ -2866,16 +2954,18 @@ export class AgentManager {
       await before
       await this.detectAll()
       if (this.stopped) return { checked: 0, failures: [] }
-      // The user's check reads every program again, so one updated outside Kettu shows its new
-      // version: a CLI's launcher can keep its size and time across versions, as npm's do, which
-      // is all the version cache looks at.
+      const now = Date.now()
+      // Re-detect local CLIs before fetching remote versions so upgrades done outside Kettu are
+      // reflected instead of comparing against the startup cache.
       if (all) {
-        this.cliVersions.clear()
-        await Promise.all([...this.harnesses.values()].map((h) => this.detect(h)))
+        await this.refreshHarnesses([...this.harnesses.values()], true)
+      } else {
+        const due = this.checkable().filter((h) => this.checkDue(h) <= now)
+        if (due.length > 0) await this.refreshHarnesses(due, true)
       }
+      if (this.stopped) return { checked: 0, failures: [] }
       const abort = new AbortController()
       this.updateAbort = abort
-      const now = Date.now()
       const harnesses = this.checkable().filter((h) => all || this.checkDue(h) <= now)
       const [listing, ...results] = await Promise.all([
         all ? this.readListing(abort.signal) : null,
@@ -3555,8 +3645,7 @@ export class AgentManager {
         const name = path.basename(run.program).replace(/\.(?:cmd|exe)$/i, '')
         const failure = programFailure(name, result, timeoutMs)
         if (failure) throw new Error(failure)
-        this.cliVersions.clear()
-        await this.detect(h)
+        await this.refreshHarnesses([h], true)
         h.cliSkipped = null
         const update = this.updateOf(h)
         if (update && h.def.cli && !this.stopped && !this.targeted(h)) {
@@ -4318,6 +4407,8 @@ export class AgentManager {
     if (this.limitsTimer) clearInterval(this.limitsTimer)
     this.limitsTimer = null
     this.terminalGrants.dispose()
+    if (this.signInEndTimer) clearInterval(this.signInEndTimer)
+    this.signInEndTimer = null
     for (const slot of this.slots.values()) {
       if (slot.resetsRetry) clearTimeout(slot.resetsRetry)
       slot.resetsRetry = null
@@ -4370,6 +4461,11 @@ export class AgentManager {
         }
       },
       account: (account) => this.setAccount(slot, account),
+      signInEnds: (at) => {
+        // A process that has not yet noticed a new sign-in still reports the old one's end.
+        const known = slot.account?.signInEnds
+        if (known === undefined || at > known) this.setSignInEnds(slot, at)
+      },
       modelProviders: (providers) => {
         if (JSON.stringify(providers) === JSON.stringify(slot.modelProviders)) return
         slot.modelProviders = providers
@@ -4419,8 +4515,13 @@ export class AgentManager {
     const same =
       before?.kind === named.kind && before.label === named.label && before.email === named.email
     slot.account = same && before.tier ? { ...named, tier: before.tier } : named
+    // A report without the end, such as a session's start, keeps the one read for the sign-in.
+    const ends = before?.signInEnds
+    if (named.signInEnds === undefined && ends !== undefined && sameSignIn(before, named)) {
+      slot.account = { ...slot.account, signInEnds: ends }
+    }
     // A gateway has no plan: windows kept from a sign-in before it would show as its limits.
-    if (named.kind === 'gateway') {
+    if (throughGateway(slot)) {
       slot.limits.clear()
       setBalances(slot, [], 0)
     }
@@ -4462,7 +4563,77 @@ export class AgentManager {
       return
     slot.account = { kind: account.kind, label, email }
     if (tier) slot.account.tier = tier
+    if (account.signInEnds !== undefined) slot.account.signInEnds = account.signInEnds
     this.emit(slot)
+  }
+
+  /** Sets or clears when the agent's subscription sign-in ends; only a subscription has one. */
+  private setSignInEnds(slot: Slot, at: number | null): void {
+    const account = slot.account
+    if (account?.kind !== 'account' || (account.signInEnds ?? null) === at) return
+    const next: AgentAccount = { ...account }
+    if (at === null) delete next.signInEnds
+    else next.signInEnds = at
+    slot.account = next
+    this.emit(slot)
+  }
+
+  /**
+   * Asks Claude Code's own `auth status` when its stored sign-in ends, at most once a minute
+   * unless forced. Besides the end it only names an account none was reported for: whether the
+   * agent is signed in stays with its sessions and account reads. Never rejects.
+   */
+  private readSignInEnd(slot: Slot, force = false): Promise<void> {
+    if (slot.def.id !== 'claude-code' || !this.has(slot.id) || this.isDisabled(slot.id)) {
+      return Promise.resolve()
+    }
+    if (slot.signInEndRun) return slot.signInEndRun
+    if (!force && Date.now() - slot.signInEndReadAt < this.timings.limitsMs)
+      return Promise.resolve()
+    slot.signInEndRun = this.signInEndRead(slot)
+      .catch((error: unknown) => {
+        const message = (error as Error).message
+        this.deps.diagnostics.log('warn', `${slot.name}: its sign-in end was not read: ${message}`)
+      })
+      .finally(() => {
+        slot.signInEndRun = null
+      })
+    return slot.signInEndRun
+  }
+
+  private async signInEndRead(slot: Slot): Promise<void> {
+    const found = await this.harnessProgram(slot.id)
+    if (!found) return
+    const run = await (this.deps.runProgram ?? runProgram)({
+      program: found.program,
+      args: ['auth', 'status', '--json'],
+      cwd: os.homedir(),
+      env: this.startEnv(slot),
+      platform: this.deps.platform,
+      timeoutMs: SIGN_IN_STATUS_MS,
+    })
+    slot.signInEndReadAt = Date.now()
+    if (run.error || run.timedOut || run.aborted) {
+      throw new Error(run.error ?? `claude auth status ${run.timedOut ? 'timed out' : 'stopped'}`)
+    }
+    // Signed out, it exits with 1 and still writes its status.
+    const status = mapAuthStatus(run.stdout)
+    if (!status) return
+    const account = slot.account
+    if (status.kind !== 'account') {
+      this.setSignInEnds(slot, null)
+    } else if (
+      (account === null && slot.signIn !== 'required') ||
+      (account?.kind === 'account' &&
+        account.email !== null &&
+        status.email !== null &&
+        account.email !== status.email)
+    ) {
+      // No account was reported yet, or the stored sign-in is another one than was reported.
+      this.setAccount(slot, status)
+    } else {
+      this.setSignInEnds(slot, status.signInEnds ?? null)
+    }
   }
 
   /** The plan limits the agent reported last, one per window. */
@@ -4472,7 +4643,7 @@ export class AgentManager {
 
   setLimit(agentId: AgentId, limit: PlanLimit): void {
     const slot = this.slots.get(agentId)
-    if (!slot) return
+    if (!slot || throughGateway(slot)) return
     const before = slot.limits.get(limit.window)
     // Claude Code often reports a window without its utilization; the use `/usage` read for the
     // same period still holds. `/usage` gives the reset to the minute, the events to the second.
@@ -4725,7 +4896,9 @@ export class AgentManager {
     const now = Date.now()
     slot.limitsReadAt = now
     slot.limitsError = null
-    const merged = mergeReadLimits([...slot.limits.values()], limits, now)
+    const merged = throughGateway(slot)
+      ? []
+      : mergeReadLimits([...slot.limits.values()], limits, now)
     slot.limits.clear()
     for (const limit of merged) slot.limits.set(limit.window, limit)
     const extras = connection.planExtras?.()
@@ -4942,7 +5115,10 @@ export class AgentManager {
     }
     const command = this.display(slot)
     const base = this.deps.env.agentEnv(slot.id)
-    const env = { ...(this.deps.launchEnv?.(slot.id, base) ?? base), ...command.env }
+    const env = this.commandEnv(slot, {
+      ...(this.deps.launchEnv?.(slot.id, base) ?? base),
+      ...command.env,
+    })
     await mkdir(this.deps.reportsDir, { recursive: true })
     const now = Date.now()
     let usage: VendorUsage
@@ -4991,7 +5167,8 @@ export class AgentManager {
    */
   private async readSignInMethod(slot: Slot): Promise<string | null> {
     if (slot.def.id !== 'antigravity') return null
-    const text = await readFile(antigravityAuthStateFile(os.homedir()), 'utf8').catch(() => '')
+    const home = this.ownHome(slot) ?? os.homedir()
+    const text = await readFile(antigravityAuthStateFile(home), 'utf8').catch(() => '')
     slot.signInFile = antigravitySignInMethod(text)
     return this.decideSignIn(slot)
   }
@@ -5109,7 +5286,8 @@ export class AgentManager {
 
   private applyVendorUsage(slot: Slot, usage: VendorUsage, now: number): void {
     setBalances(slot, usage.balances, now)
-    if (usage.tier) {
+    const gateway = throughGateway(slot)
+    if (usage.tier && !gateway) {
       slot.account = slot.account
         ? { ...slot.account, label: usage.tier }
         : { kind: 'account', label: usage.tier, email: null }
@@ -5117,7 +5295,7 @@ export class AgentManager {
     slot.limitsReadAt = now
     slot.limitsError = null
     slot.limits = new Map(
-      mergeReadLimits([...slot.limits.values()], usage.limits, now).map((item) => [
+      (gateway ? [] : mergeReadLimits([...slot.limits.values()], usage.limits, now)).map((item) => [
         item.window,
         item,
       ]),
@@ -5433,16 +5611,21 @@ export class AgentManager {
         await this.readModelProviders(slot)
       return
     }
+    // Beside the account's read, which can start the agent, since it needs neither.
+    const ends = this.readSignInEnd(slot, force)
     await this.detectAll()
-    if (!force && slot.signIn === 'required') return
-    if (!slot.runtime && (slot.h.detection?.state !== 'available' || !slot.h.detection.spec)) return
     try {
+      if (!force && slot.signIn === 'required') return
+      if (!slot.runtime && (slot.h.detection?.state !== 'available' || !slot.h.detection.spec))
+        return
       if (this.hasLimits(agentId)) await this.refreshLimits(agentId, { force })
       else await this.ensureReady(agentId)
     } catch (error) {
       // Still signed out: the notice stays, and opening the page is not an error.
       if (force && error instanceof HostError && error.code === 'auth_required') return
       throw error
+    } finally {
+      await ends
     }
   }
 
@@ -5825,9 +6008,100 @@ export class AgentManager {
 
   authRequired(agentId: AgentId): void {
     const slot = this.slots.get(agentId)
-    if (!slot || slot.signIn === 'required') return
+    if (!slot || slot.savedSignInCheck) return
+    if (this.checksSavedSignIn(slot)) {
+      slot.savedSignInCheck = this.checkSavedSignIn(slot).finally(() => {
+        slot.savedSignInCheck = null
+      })
+      return
+    }
+    if (slot.signIn === 'required') return
     slot.signIn = 'required'
     this.emit(slot)
+  }
+
+  /**
+   * Whether a refused sign-in is first checked against the Google sign-in agy holds: once per
+   * process of the default Antigravity agent, whose sign-in is the user's terminal `agy`'s.
+   */
+  private checksSavedSignIn(slot: Slot): boolean {
+    return (
+      slot.def.id === 'antigravity' &&
+      !!slot.def.configFlag &&
+      !this.ownHome(slot) &&
+      !!slot.runtime &&
+      slot.launched !== null &&
+      slot.signInChecked !== slot.launched
+    )
+  }
+
+  /**
+   * agy refused a session though it may still hold a Google sign-in: its ACP mode keeps to the
+   * method its last ACP client chose, such as an API key that is gone since. When a scratch agy
+   * shows that sign-in, the running one is signed in with it, which opens no browser; otherwise
+   * the agent must sign in.
+   */
+  private async checkSavedSignIn(slot: Slot): Promise<void> {
+    const { runtime, launched } = slot
+    slot.signInChecked = launched
+    const log = (level: 'info' | 'warn', message: string): void =>
+      this.deps.diagnostics.log(level, `${slot.name}: ${message}`)
+    try {
+      const method = await savedGoogleSignIn({
+        parent: this.deps.reportsDir,
+        launch: (folder) => this.launchSignInCheck(slot, folder),
+      })
+      // A process started since is checked on its own refusal.
+      if (!runtime || slot.runtime !== runtime) return
+      if (method) {
+        const abort = new AbortController()
+        const timer = setTimeout(() => abort.abort(), SIGN_IN_CHECK_MS)
+        try {
+          // A page to open means a new sign-in, which is the user's to start.
+          await runtime.connection.authenticate(method, {
+            openLink: () => abort.abort(),
+            signal: abort.signal,
+          })
+        } finally {
+          clearTimeout(timer)
+        }
+        log('info', `signed in again with the Google sign-in agy holds (${method})`)
+        slot.signIn = 'signed-in'
+        slot.accountRefused = false
+        this.emit(slot)
+        this.hooks.signedIn(slot.id)
+        void this.readSignInMethod(slot)
+        // The plan and limits shown were read under the method agy refused.
+        this.refreshLimits(slot.id, { force: true }).catch((error: unknown) => {
+          log('warn', `the plan limits read failed: ${agentError(error).message}`)
+        })
+        return
+      }
+      log('info', 'refused a session and holds no Google sign-in')
+    } catch (error) {
+      log('warn', `could not sign in again with its Google sign-in: ${agentError(error).message}`)
+    }
+    if (slot.signIn === 'required') return
+    slot.signIn = 'required'
+    this.emit(slot)
+  }
+
+  /** The user's `agy acp` as the agent runs it, with its folder in `folder` instead. */
+  private launchSignInCheck(slot: Slot, folder: string): LaunchedAgent {
+    const words = this.display(slot)
+    const flag = slot.def.configFlag!
+    const paths = this.deps.platform === 'win32' ? path.win32 : path.posix
+    const args = [...words.args, flag.flag, paths.join(folder, flag.under)]
+    const base = this.deps.env.agentEnv(slot.id)
+    const env = this.deps.launchEnv?.(slot.id, base) ?? base
+    const spec: LaunchSpec = {
+      command: words.command,
+      args,
+      env: words.env,
+      shell: needsShell(words.command, this.deps.platform),
+      display: { ...words, args },
+    }
+    return this.deps.launcher.launch(slot.def, spec, env, { stderr: () => {}, event: () => {} })
   }
 
   /** A session request succeeded, so the agent is signed in. */
@@ -6322,13 +6596,41 @@ export class AgentManager {
   }
 
   /**
-   * The agent's own folder, which Kettu sets in its harness's variable: an added agent's, or one a
-   * default agent was given before agents could be added; null at the harness's default.
+   * The agent's own folder, which Kettu sets in its harness's variable or flag: an added agent's,
+   * or one a default agent was given before agents could be added; null at the harness's default.
    */
   private chosenFolder(slot: Slot): string | null {
-    if (!slot.def.configVariable) return null
+    if (!carriesAgents(slot.def)) return null
     if (slot.added) return slot.added.configDir
+    if (!slot.def.configVariable) return null
     return this.deps.settings().agents[slot.def.id]?.configDir ?? null
+  }
+
+  /**
+   * The home folder of an agent whose harness moves its folder with a flag, for its commands that
+   * take none: its own folder; null for the user's home folder.
+   */
+  private ownHome(slot: Slot): string | null {
+    return slot.def.configFlag ? this.chosenFolder(slot) : null
+  }
+
+  /** The launch's words with the flag that gives the process the agent's own folder, if any. */
+  private folderArgs(slot: Slot): string[] {
+    const home = this.ownHome(slot)
+    const flag = slot.def.configFlag
+    if (!home || !flag) return []
+    const paths = this.deps.platform === 'win32' ? path.win32 : path.posix
+    return [flag.flag, paths.join(home, flag.under)]
+  }
+
+  /**
+   * The environment of an agent's command that runs nothing of the user's, such as agy's print
+   * mode: an agent whose harness moves its folder with a flag gets its own folder as home.
+   */
+  private commandEnv(slot: Slot, env: Env): Env {
+    const home = this.ownHome(slot)
+    if (!home) return env
+    return withHome({ ...env, ...slot.def.addedEnv }, home, this.deps.platform)
   }
 
   /** Whether Kettu's MCP server is on for this agent, from the settings. */
@@ -6690,7 +6992,7 @@ export class AgentManager {
 
   /** The configuration folder `env` gives the agent; null for an agent whose folder is fixed. */
   private configIn(slot: Slot, env: Env): RunningConfig | null {
-    if (!slot.def.configVariable) return null
+    if (!carriesAgents(slot.def)) return null
     const { platform } = this.deps
     const chosen = this.chosenFolder(slot)
     const locations = configLocations(
@@ -6735,6 +7037,7 @@ export class AgentManager {
     display: CommandWords,
     method: AuthMethodInfo,
     folderEnv: Record<string, string>,
+    folderArgs: readonly string[],
   ): string {
     const env = { ...display.env, ...method.env, ...folderEnv }
     if (slot.def.id === 'kimi' && method.id === 'login') {
@@ -6747,7 +7050,7 @@ export class AgentManager {
       return formatCommand({ command: method.command, args: method.args, env }, this.deps.platform)
     }
     return formatCommand(
-      { command: display.command, args: [...display.args, ...method.args], env },
+      { command: display.command, args: [...display.args, ...method.args, ...folderArgs], env },
       this.deps.platform,
     )
   }
@@ -6770,6 +7073,8 @@ export class AgentManager {
     const signInFolder = (active ?? config)?.chosen
     const folderEnv: Record<string, string> =
       signInFolder && slot.def.configVariable ? { [slot.def.configVariable]: signInFolder } : {}
+    const folderArgs = this.folderArgs(slot)
+    if (folderArgs.length > 0) Object.assign(folderEnv, slot.def.addedEnv)
     // An added agent that signs in only with its key offers none of the agent's own methods.
     const declared = signsInWithKeyOnly(agentId) ? [] : (init?.authMethods ?? [])
     // Mistral Vibe offers its browser sign-in twice, under one name, once the client takes its page.
@@ -6795,7 +7100,7 @@ export class AgentManager {
           }
         : {}),
       ...(method.type === 'terminal'
-        ? { command: this.signInCommand(slot, display, method, folderEnv) }
+        ? { command: this.signInCommand(slot, display, method, folderEnv, folderArgs) }
         : {}),
     }))
     const { keySignIn, terminalSignIn } = slot.def
@@ -6817,9 +7122,11 @@ export class AgentManager {
       // agy 1.5.9 declares its terminal sign-in itself to a client that runs one; it goes first.
       const own = authMethods.find((item) => item.type === 'terminal')
       const kept = authMethods.filter((item) => !replaced.includes(item) && item !== own)
+      // The program's own sign-in takes no folder flag, so an agent with a folder of its own would
+      // sign the default agent in; such an agent signs in only through the one its launch declares.
       const terminal: AgentAuthMethod | null =
         own ??
-        (replaced.length > 0
+        (replaced.length > 0 && folderArgs.length === 0
           ? {
               id: `${slot.def.id}-terminal-login`,
               name: replaced.map((item) => item.name).join(' / '),
@@ -6935,9 +7242,17 @@ export class AgentManager {
       ...profilesOf(this.deps.profiles?.(agentId)),
       sandbox: this.sandboxSupport(agentId),
       state: slot.state,
+      // A running process reports the version it started on; once stopped, the binary's current
+      // version on disk takes over so external upgrades show without waiting for another start.
       // Kettu's own install names its release when the program reports no version of its own, and
       // a package that is the program itself, as DeepSeek Harness's is, the version installed.
-      version: init?.version ?? h.binaryVersion ?? installed?.version ?? programPackage ?? null,
+      version:
+        (this.running(slot) ? init?.version : null) ??
+        h.binaryVersion ??
+        init?.version ??
+        installed?.version ??
+        programPackage ??
+        null,
       // None runs while the user's own program runs in its place.
       package:
         launch.kind === 'package' && !replaces
@@ -6977,7 +7292,8 @@ export class AgentManager {
           }
         : {}),
       ...(limitsReason ? { limitsReason } : {}),
-      ...(slot.def.sharesSignIn ? { sharesSignIn: true } : {}),
+      // An agent in a folder of its own keeps its sign-in and sessions apart from the vendor's apps.
+      ...(slot.def.sharesSignIn && !this.ownHome(slot) ? { sharesSignIn: true } : {}),
       deletesCopy: (capabilities?.deleteSession ?? false) || removesCopies(slot.def.id),
       ...(capabilities ? {} : { capabilitiesUnknown: true as const }),
       ...(slot.def.movedAccounts
@@ -7068,6 +7384,7 @@ export class AgentManager {
         revertTurns: capabilities?.revertTurns ?? false,
         steering: capabilities?.steering ?? false,
         ...(capabilities?.rewind ? { rewind: true } : {}),
+        ...(capabilities?.rewindFiles ? { rewindFiles: true } : {}),
         reports: this.hasLimits(slot.id) && !consoleSignIn,
         context: this.hasContext(slot.id),
         liveContext: this.driver(slot).reads?.context === true,
@@ -7331,9 +7648,15 @@ export class AgentManager {
    * looks up tools such as brew on PATH, which `status` does not wait for.
    */
   private async refreshCliCommand(h: Harness): Promise<void> {
+    const version = this.cliUpdateVersion(h)
+    if (!version) {
+      this.cliCommandKeys.delete(h)
+      this.cliCommands.delete(h)
+      return
+    }
     const mine = this.userProgram(h)
-    const key = [this.cliUpdateVersion(h), h.cliMethod, h.cliGlobal?.dir, mine?.path].join('\0')
-    if (!this.cliUpdateVersion(h) || this.cliCommandKeys.get(h) === key) return
+    const key = [version, h.cliMethod, h.cliGlobal?.dir, mine?.path].join('\0')
+    if (this.cliCommandKeys.get(h) === key) return
     this.cliCommandKeys.set(h, key)
     const plan = await this.cliUpdatePlan(h).catch(() => null)
     if (this.cliCommandKeys.get(h) !== key) return
@@ -7381,10 +7704,17 @@ export class AgentManager {
 // A stop waits this long at most for a hidden session's removal, well under the 6 s main gives
 // the host to stop on quit; removing takes milliseconds unless the agent hangs.
 const REMOVAL_WAIT_MS = 1_000
+/** How long signing agy in again with the Google sign-in it holds may take. */
+const SIGN_IN_CHECK_MS = 30_000
 /** The reset credits are not asked for twice within this, however a read was started. */
 const RESETS_GAP_MS = 5_000
 /** How soon a read that fell short of the credits' expiries is tried again. */
 const RESETS_RETRY_MS = 20_000
+/** How long `claude auth status` may take; it answers from the stored sign-in, without a request. */
+const SIGN_IN_STATUS_MS = 10_000
+/** How soon after the host starts its first ask of when Claude Code's sign-in ends runs. */
+const SIGN_IN_FIRST_READ_MS = 30_000
+const HOUR_MS = 60 * 60_000
 
 /** Waits for `promise`, which never rejects, for at most `ms`. */
 function settledWithin(promise: Promise<void>, ms: number): Promise<void> {

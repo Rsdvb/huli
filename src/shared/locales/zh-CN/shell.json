@@ -44,6 +44,7 @@
     "findInSession": "在会话中查找",
     "send": "发送",
     "sendNow": "运行中立即发送",
+    "queue": "运行中加入队列",
     "newLine": "换行",
     "focusComposer": "聚焦输入框",
     "addFiles": "添加文件或照片",
@@ -157,5 +158,10 @@
     "news": "有新动静",
     "closeOthers": "关闭其他",
     "closeRight": "关闭右边的"
+  },
+  "turnNotice": {
+    "open": "打开",
+    "finished_other": "{{count}} 个会话已结束",
+    "waiting_other": "{{count}} 个会话需要你看一下"
   }
 }

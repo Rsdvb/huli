@@ -42,6 +42,7 @@ function harness(handlers: Record<string, Handler> = {}) {
     back: async () => ({ url: '', title: null }),
     reload: async () => ({ url: '', title: null }),
     tabs: async () => ({ text: '', value: {} }),
+    resize: async (_, size) => size,
     controls: new SurfaceControls({ changed: () => {} }),
     log: () => {},
     uploadFiles: async () => [],

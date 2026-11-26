@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
+  type RefObject,
 } from 'react'
 import {
   DragDropProvider,
@@ -21,11 +22,13 @@ import { DragFeedback, lightPlugins } from '@renderer/components/drag-feedback'
 import {
   ArrowRight01Icon,
   AtIcon,
+  BrowserIcon,
   ComputerTerminal01Icon,
   Copy01Icon,
   Delete02Icon,
   FileAddIcon,
   FilePasteIcon,
+  FileUploadIcon,
   FolderAddIcon,
   FolderOpenIcon,
   Link01Icon,
@@ -43,16 +46,25 @@ import {
   ContextMenuTrigger,
 } from '@renderer/components/ui/context-menu'
 import { toast } from '@renderer/components/ui/toast'
-import { PaneIcon } from '@renderer/features/shell/panel-button'
-import { errorMessage } from '@renderer/lib/host'
-import { fileManagerName, formatShortcut, isMac, isMod } from '@renderer/lib/platform'
-import { openFile, unsavedUnder, useFilesStore, type ProjectFiles } from '@renderer/stores/files'
+import { chooseFiles } from '@renderer/features/session/composer/attachments'
+import { PaneIcon, PaneSpinner } from '@renderer/features/shell/panel-button'
+import { i18n } from '@renderer/lib/i18n'
+import { fileManagerName, formatShortcut, isMac, isMod, isWeb } from '@renderer/lib/platform'
+import {
+  openFile,
+  readIgnoredFolder,
+  unsavedUnder,
+  useFilesStore,
+  type FolderRead,
+  type ProjectFiles,
+} from '@renderer/stores/files'
 import { useTerminalAllowed } from '@renderer/stores/hosts'
 import { panelSession } from '@renderer/stores/view'
 import { ChangeBadge } from './change-badge'
 import { columnOf, NO_PATHS, saveColumn } from './column'
 import { DeletePrompt, type Deleting } from './delete-prompt'
 import { FileTypeIcon } from './file-type-icon'
+import { isHtmlFile, previewHtml, useHtmlPreview } from './html-preview'
 import { mentionPaths } from './mention-lines'
 import {
   copyEntries,
@@ -66,19 +78,25 @@ import {
   pasteInto,
   putOnClipboard,
   renameEntry,
+  showFileInManager,
 } from './operations'
 import {
   folderOf,
   foldersAbove,
+  ignoredOnly,
   indexFolders,
+  insideAny,
   isWithin,
   joinPath,
   movedPath,
   nameOf,
   outermost,
   treeRows,
+  withReads,
+  type Folder,
   type TreeRow,
 } from './paths'
+import { uploadInto, useUploadDrop, type Incoming } from './upload'
 import { VirtualRows, type RowKey } from './virtual-rows'
 
 // A single click in a list opens the preview tab, which the next single click replaces.
@@ -105,16 +123,77 @@ const sensors = [
   }),
 ]
 
-// A list's folders and files, worked out once while the list lives.
-const folderIndexes = new WeakMap<ProjectFiles, ReturnType<typeof indexFolders>>()
+interface TreeIndex {
+  folders: Map<string, Folder>
+  /** The rows the tree dims: what git ignores, and the folders that hold nothing else. */
+  ignored: ReadonlySet<string>
+  /** Folders git ignores as a whole, whose insides are read once they are opened. */
+  unread: ReadonlySet<string>
+}
 
-function folderIndex(files: ProjectFiles): ReturnType<typeof indexFolders> {
-  let index = folderIndexes.get(files)
-  if (!index) {
-    index = indexFolders(files.paths, files.folders)
-    folderIndexes.set(files, index)
+// A list's folders and files, worked out once while the list lives, with what git ignores or not.
+const treeIndexes = new WeakMap<ProjectFiles, { shown?: TreeIndex; hidden?: TreeIndex }>()
+const NO_READS: Record<string, FolderRead> = {}
+
+/** Whether a folder is in an ignored one, so that the list leaves what is in it unread. */
+const isUnread = (index: TreeIndex, folder: string): boolean =>
+  index.unread.has(folder) || insideAny(folder, index.unread)
+
+// The index with what was read of ignored folders, worked out again only when a read changes.
+const openedIndexes = new WeakMap<
+  TreeIndex,
+  { reads: Record<string, FolderRead>; folders: Map<string, Folder> }
+>()
+
+function withOpened(index: TreeIndex, reads: Record<string, FolderRead>): Map<string, Folder> {
+  if (index.unread.size === 0) return index.folders
+  const cached = openedIndexes.get(index)
+  if (cached?.reads === reads) return cached.folders
+  const opened = Object.entries(reads).flatMap(([folder, read]) =>
+    read.status === 'read' ? [[folder, read] as const] : [],
+  )
+  const folders =
+    opened.length === 0
+      ? index.folders
+      : withReads(index.folders, opened, (folder) => isUnread(index, folder))
+  openedIndexes.set(index, { reads, folders })
+  return folders
+}
+
+function treeIndex(files: ProjectFiles, hideIgnored: boolean): TreeIndex {
+  let cached = treeIndexes.get(files)
+  if (!cached) {
+    cached = {}
+    treeIndexes.set(files, cached)
   }
+  const key = hideIgnored ? 'hidden' : 'shown'
+  const known = cached[key]
+  if (known) return known
+  const ignoring = !hideIgnored && files.ignored.length + files.ignoredFolders.length > 0
+  const folders = ignoring
+    ? indexFolders([...files.paths, ...files.ignored], [...files.folders, ...files.ignoredFolders])
+    : indexFolders(files.paths, files.folders)
+  const index: TreeIndex = ignoring
+    ? {
+        folders,
+        ignored: new Set([...files.ignored, ...ignoredOnly(folders, files.paths, files.folders)]),
+        unread: new Set(files.ignoredFolders),
+      }
+    : { folders, ignored: NO_PATHS, unread: NO_PATHS }
+  cached[key] = index
   return index
+}
+
+/** Reads an ignored folder the tree opened, telling when it could not be read whole. */
+async function readFolder(projectPath: string, folder: string): Promise<void> {
+  const read = await readIgnoredFolder(projectPath, folder)
+  const name = nameOf(folder)
+  if (read.status === 'failed') {
+    toast(i18n.t('files:tree.readFailed', { name, message: read.error }))
+  } else if (read.status === 'read' && read.truncated) {
+    const count = read.files.length + read.folders.length
+    toast(i18n.t('files:tree.readTruncated', { name, count }))
+  }
 }
 
 /** Where a new row goes among `rows`: a folder first under its parent, a file after the folders. */
@@ -168,6 +247,7 @@ export function FileTree({
   edit,
   onEdit,
   collapsed,
+  uploadRef,
 }: {
   projectPath: string
   /** The side panel the pane shows in, whose session a mention goes to. */
@@ -182,10 +262,17 @@ export function FileTree({
   onEdit: (edit: TreeEdit | null) => void
   /** Counts Collapse all, which closes every folder. */
   collapsed: number
+  /** Set while the tree shows to what uploads into its chosen row's folder. */
+  uploadRef?: RefObject<((incoming: Incoming[]) => void) | null>
 }) {
   const { t } = useTranslation(['files', 'common', 'composer'])
-  const index = folderIndex(files)
+  const hideIgnored = useFilesStore((s) => s.hideIgnored)
+  const reads = useFilesStore((s) => s.folderReads[projectPath] ?? NO_READS)
+  const base = treeIndex(files, hideIgnored)
+  const unread = (folder: string) => isUnread(base, folder)
+  const index = withOpened(base, reads)
   const isFolder = (path: string) => index.has(path)
+  const dimmed = (path: string) => base.ignored.has(path) || insideAny(path, base.unread)
   const [expanded, setExpanded] = useState(() => columnOf(columnKey).expanded)
   const [selected, setSelected] = useState(() => columnOf(columnKey).selected)
   const [anchor, setAnchor] = useState(() => columnOf(columnKey).anchor)
@@ -218,12 +305,26 @@ export function FileTree({
     () => saveColumn(columnKey, { expanded, revealed, selected, anchor }),
     [columnKey, expanded, revealed, selected, anchor],
   )
+  // An ignored folder is read when it shows open, its folders above it open too.
+  const toRead = [...expanded].filter(
+    (folder) =>
+      reads[folder] === undefined &&
+      index.has(folder) &&
+      unread(folder) &&
+      foldersAbove(folder).every((above) => expanded.has(above)),
+  )
+  const toReadKey = toRead.join('\0')
+  useEffect(() => {
+    if (toReadKey === '') return
+    for (const folder of toReadKey.split('\0')) void readFolder(projectPath, folder)
+  }, [projectPath, toReadKey])
   const clipboard = useFilesStore((s) =>
     s.clipboard?.projectPath === projectPath ? s.clipboard : null,
   )
   const cut = useMemo(() => new Set(clipboard?.cut ? clipboard.paths : []), [clipboard])
   const terminal = useTerminalAllowed(projectPath)
   const sessionId = panelSession(panel)
+  const previews = useHtmlPreview(sessionId, projectPath)
 
   const adding = edit?.kind === 'new' ? edit : null
   const rows = withDraft(treeRows(index, expanded), adding)
@@ -243,6 +344,8 @@ export function FileTree({
 
   const toggle = (folder: string, open = !expanded.has(folder)) => {
     if (open === expanded.has(folder)) return
+    // A folder that could not be read is read again each time it opens.
+    if (open && reads[folder]?.status === 'failed') void readFolder(projectPath, folder)
     const next = new Set(expanded)
     if (open) next.add(folder)
     else next.delete(folder)
@@ -367,10 +470,49 @@ export function FileTree({
     showPaths(arrived, clipboard.cut ? movesOf(clipboard.paths, folder, arrived) : [])
   }
 
-  const reveal = (path: string) =>
-    void window.kettu.shell
-      .showItem(hostFilePath(projectPath, path))
-      .catch((failure: unknown) => toast(errorMessage(failure)))
+  /** Uploads into `folder`, then opens the folders above what arrived and chooses it. */
+  const upload = (folder: string, incoming: Incoming[]) =>
+    void uploadInto(projectPath, panel, folder, incoming).then((arrived) => {
+      if (arrived.length === 0) return
+      setExpanded((open) => new Set([...open, ...arrived.flatMap((path) => foldersAbove(path))]))
+      choose(arrived)
+      // A long upload leaves the focus where the user went meanwhile.
+      const active = document.activeElement
+      if (!active || active === document.body || box.current?.contains(active)) {
+        setFocusPath(arrived[0]!)
+      }
+    })
+
+  /** The folder of the chosen row, the one clicked last when several are; the project's when none. */
+  const chosenFolder = (): string => {
+    const path =
+      anchor !== null && selected.has(anchor)
+        ? anchor
+        : selected.size === 1
+          ? [...selected][0]!
+          : null
+    return folderFor(path, path !== null && isFolder(path))
+  }
+  useEffect(() => {
+    if (!uploadRef) return
+    uploadRef.current = (incoming) => upload(chosenFolder(), incoming)
+    return () => {
+      uploadRef.current = null
+    }
+  })
+
+  // Files dragged in from the file manager go into the folder under the pointer.
+  const folderAt = (target: EventTarget | null): string => {
+    const path =
+      target instanceof Element
+        ? target.closest<HTMLElement>('[data-path]')?.dataset.path
+        : undefined
+    if (path === undefined || path === DRAFT) return ''
+    return isFolder(path) ? path : folderOf(path)
+  }
+  const fileDrop = useUploadDrop(folderAt, upload)
+
+  const reveal = (path: string) => showFileInManager(hostFilePath(projectPath, path))
 
   const mention = (paths: string[]) => {
     if (!sessionId) return
@@ -418,7 +560,11 @@ export function FileTree({
     const own = edit?.kind === 'rename' ? edit.path : null
     // Only a change of case names the row itself, which the host renames.
     if (own !== null && target.path.toLowerCase() === own.toLowerCase()) return null
-    if (files.known.has(target.path) || index.has(target.path)) {
+    const taken =
+      files.known.has(target.path) ||
+      index.has(target.path) ||
+      !!index.get(folderOf(target.path))?.files.includes(target.path)
+    if (taken) {
       return t('tree.nameTaken', { name: nameOf(target.path) })
     }
     return null
@@ -547,8 +693,14 @@ export function FileTree({
     }
   }
 
+  // Where rows dragged in the tree, or files dragged in from outside, would go.
+  const dropping = dropFolder ?? fileDrop.over
   const menuTargets = targetsOf(menuPath)
   const menuFolder = folderFor(menuPath, menuPath !== null && isFolder(menuPath))
+  // An HTML file of the session's folder, whose page the menu offers to preview.
+  const menuFile = menuTargets.length === 1 ? menuTargets[0]! : null
+  const menuPage =
+    previews && menuFile !== null && !isFolder(menuFile) && isHtmlFile(menuFile) ? menuFile : null
   const shortcut = (keys: string) => (
     <ContextMenuShortcut>{formatShortcut(keys)}</ContextMenuShortcut>
   )
@@ -575,10 +727,11 @@ export function FileTree({
         <ContextMenuTrigger
           ref={box}
           className="kp-tree select-none"
-          data-drop={dropFolder === '' || undefined}
+          data-drop={dropping === '' || undefined}
           onContextMenu={onContextMenu}
           onKeyDownCapture={onKeyDownCapture}
           onKeyDown={onKeyDown}
+          {...fileDrop.handlers}
         >
           {rows.length === 0 ? (
             <p className="kp-tree__note">{t('browser.empty')}</p>
@@ -620,12 +773,12 @@ export function FileTree({
                     row={row}
                     tabIndex={tabIndex}
                     open={expanded.has(row.path)}
+                    ignored={dimmed(row.path)}
+                    loading={row.folder && reads[row.path]?.status === 'loading'}
                     current={row.path === openPath}
                     chosen={selected.has(row.path)}
                     cut={[...cut].some((path) => isWithin(row.path, path))}
-                    drop={
-                      dropFolder !== null && dropFolder !== '' && isWithin(row.path, dropFolder)
-                    }
+                    drop={dropping !== null && dropping !== '' && isWithin(row.path, dropping)}
                     change={row.folder ? undefined : changes.get(row.path)}
                     onClick={(event) => onRowClick(row, event)}
                     onDoubleClick={
@@ -640,6 +793,15 @@ export function FileTree({
         </ContextMenuTrigger>
         {/* The menu leaves the focus alone for what takes it once it closes. */}
         <ContextMenuContent className="min-w-56" finalFocus={() => !keepsFocus.current}>
+          {menuPage !== null && sessionId && (
+            <>
+              <ContextMenuItem onClick={() => void previewHtml(sessionId, menuPage)}>
+                <PaneIcon icon={BrowserIcon} size={16} />
+                {t('htmlPreview.preview')}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+            </>
+          )}
           <ContextMenuItem
             onClick={() => queue(() => onEdit({ kind: 'new', folder: menuFolder, type: 'file' }))}
           >
@@ -652,6 +814,22 @@ export function FileTree({
             <PaneIcon icon={FolderAddIcon} size={16} />
             {t('tree.newFolder')}
           </ContextMenuItem>
+          {/* The browser's picker opens while the click lasts, so it is not queued. */}
+          {isWeb && (
+            <ContextMenuItem
+              onClick={() =>
+                void chooseFiles().then((chosen) =>
+                  upload(
+                    menuFolder,
+                    chosen.map((file) => ({ file, folder: false })),
+                  ),
+                )
+              }
+            >
+              <PaneIcon icon={FileUploadIcon} size={16} />
+              {t('upload.choose')}
+            </ContextMenuItem>
+          )}
           <ContextMenuSeparator />
           {local && (
             <ContextMenuItem onClick={() => reveal(menuTargets[0] ?? '')}>
@@ -743,6 +921,8 @@ function TreeItem({
   row,
   tabIndex,
   open,
+  ignored,
+  loading,
   current,
   chosen,
   cut,
@@ -755,6 +935,10 @@ function TreeItem({
   row: Line
   tabIndex: number | undefined
   open: boolean
+  /** Git ignores it, so it shows dimmed. */
+  ignored: boolean
+  /** An ignored folder being read for the first time. */
+  loading: boolean
   current: boolean
   chosen: boolean
   cut: boolean
@@ -790,6 +974,8 @@ function TreeItem({
       data-chosen={chosen || undefined}
       data-cut={cut || undefined}
       data-drop={drop || undefined}
+      data-ignored={ignored || undefined}
+      aria-busy={loading || undefined}
       style={{ paddingLeft: 8 + row.depth * 14 }}
       className={row.folder ? 'kp-node kp-node--dir' : 'kp-node'}
     >
@@ -798,6 +984,7 @@ function TreeItem({
       <span className="kp-node__name">
         <span>{nameOf(row.path)}</span>
       </span>
+      {loading && <PaneSpinner />}
       {change && <ChangeBadge status={change} />}
     </button>
   )

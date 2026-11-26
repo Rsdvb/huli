@@ -52,6 +52,7 @@ import { openSession, useViewStore } from '@renderer/stores/view'
 import { RenameHints } from './rename-hints'
 import { useRenameHints } from './rename-scope'
 import { isReturning, rowVariants } from './row-exit'
+import { badgeInUse } from './row-badges'
 import { rowStatus } from './row-status'
 import { cacheGone, useGoneLabel, useSessionCache } from './session-cache'
 import { SessionCard } from './session-card'
@@ -186,6 +187,8 @@ export const SessionRow = memo(function SessionRow({
   const [cardOpen, setCardOpen] = useState(false)
   const issueBadge = useEntry('sidebar.issueBadge')
   const boardMark = useEntry('sidebar.boardMark')
+  const [cardMounted, setCardMounted] = useState(false)
+  if (cardOpen && !cardMounted) setCardMounted(true)
   const row = useRef<HTMLDivElement>(null)
   const rename = useRenaming(() => row.current?.querySelector<HTMLElement>('[data-sidebar-row]'))
   const drag = useSessionDragSource(summary.id, rename.renaming)
@@ -336,12 +339,12 @@ export const SessionRow = memo(function SessionRow({
           </span>
         )}
         {summary.worktree && (
-          <WorktreeRowMark worktree={summary.worktree} onEnter={() => setCardOpen(false)} />
+          <WorktreeRowMark worktree={summary.worktree} onOpen={() => setCardOpen(false)} />
         )}
         {summary.issue && issueBadge && (
           <IssueBadge issue={summary.issue} onEnter={() => setCardOpen(false)} />
         )}
-        <PrBadge summary={summary} onEnter={() => setCardOpen(false)} />
+        <PrBadge summary={summary} onOpen={() => setCardOpen(false)} />
         {summary.board && boardMark && onBoard(summary) && (
           <BoardRowMark status={summary.board.status} onEnter={() => setCardOpen(false)} />
         )}
@@ -369,7 +372,7 @@ export const SessionRow = memo(function SessionRow({
           <SubagentBadge
             parent={summary}
             subagents={node.subagents}
-            onEnter={() => setCardOpen(false)}
+            onOpen={() => setCardOpen(false)}
           />
         )}
         <RowEnd>
@@ -395,17 +398,20 @@ export const SessionRow = memo(function SessionRow({
     </button>
   )
 
-  const menuItems = picked ? (
-    <MultiSessionMenuItems ids={picked} onDelete={() => setDeleting(true)} />
-  ) : (
-    <SessionMenuItems
-      summary={summary}
-      onRename={rename.menu.onRename}
-      onNewSubSession={rename.menu.onLeave}
-      onDelete={() => setDeleting(true)}
-      subagents={away ? undefined : node.subagents}
-    />
-  )
+  const menuItems =
+    menuOpen || moreOpen ? (
+      picked ? (
+        <MultiSessionMenuItems ids={picked} onDelete={() => setDeleting(true)} />
+      ) : (
+        <SessionMenuItems
+          summary={summary}
+          onRename={rename.menu.onRename}
+          onNewSubSession={rename.menu.onLeave}
+          onDelete={() => setDeleting(true)}
+          subagents={away ? undefined : node.subagents}
+        />
+      )
+    ) : null
 
   const pinned = !!summary.pinnedAt
   return (
@@ -449,14 +455,14 @@ export const SessionRow = memo(function SessionRow({
               {/* A trigger's render must take its props, so the card's Root wraps the menu trigger. */}
               <HoverCard
                 open={cardOpen}
-                // The badge lists the sub-agents on its own hover, which the row's card leaves to it.
+                // A badge's own card stands in for the row's, so only one shows at a time.
                 // Huli: and a drag of a session opens none, as its row stays under the pointer.
                 onOpenChange={(open, details) => {
                   if (open && useSessionDragStore.getState().dragging) {
                     details.cancel()
                     return
                   }
-                  setCardOpen(open && !row.current?.querySelector('[data-subagent-badge]:hover'))
+                  setCardOpen(open && !badgeInUse(row.current))
                 }}
               >
                 <HoverCardTrigger
@@ -471,12 +477,14 @@ export const SessionRow = memo(function SessionRow({
                   alignOffset={-4}
                   className="w-[340px] p-0"
                 >
-                  <SessionCard
-                    summary={summary}
-                    cache={cache}
-                    status={status}
-                    onOpen={() => setCardOpen(false)}
-                  />
+                  {cardMounted && (
+                    <SessionCard
+                      summary={summary}
+                      cache={cache}
+                      status={status}
+                      onOpen={() => setCardOpen(false)}
+                    />
+                  )}
                 </HoverCardContent>
               </HoverCard>
               <ContextMenuContent

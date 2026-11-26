@@ -860,6 +860,13 @@ describe('createValidators', () => {
     rejects(() => set({ path: 'repo', autoApprove: 'low' }))
   })
 
+  it('takes nothing to list the drives, which the host finds alone', () => {
+    expect(windows['paths.drives'](undefined)).toBeUndefined()
+    expect(windows['paths.drives']({})).toBeUndefined()
+    rejects(() => windows['paths.drives']({ path: 'C:\\' }))
+    rejects(() => windows['paths.drives']({ letters: ['C', 'D'] }))
+  })
+
   it('requires an absolute project path and an explicit boolean for pinning', () => {
     const pin = posix['projects.pin']
     expect(pin({ path: '/repo', pinned: false })).toEqual({ path: '/repo', pinned: false })
@@ -1008,6 +1015,26 @@ describe('createValidators', () => {
     rejects(() => pin({ agentId: 'unknown-agent', model: 'opus', pinned: false }))
   })
 
+  it('takes an agent’s pins only as a list of up to four model values, each once', () => {
+    const set = posix['agents.setPinnedModels']
+    expect(set({ agentId: 'opencode', models: ['deepseek/deepseek-v4-pro', 'opus'] })).toEqual({
+      agentId: 'opencode',
+      models: ['deepseek/deepseek-v4-pro', 'opus'],
+    })
+    expect(set({ agentId: 'claude-code', models: [] })).toEqual({
+      agentId: 'claude-code',
+      models: [],
+    })
+    rejects(() => set({ agentId: 'opencode', models: ['a', 'b', 'c', 'd', 'e'] }))
+    rejects(() => set({ agentId: 'opencode', models: ['opus', 'opus'] }))
+    rejects(() => set({ agentId: 'opencode', models: ['opus', ''] }))
+    rejects(() => set({ agentId: 'opencode', models: ['x'.repeat(4097)] }))
+    rejects(() => set({ agentId: 'opencode', models: [7] }))
+    rejects(() => set({ agentId: 'opencode', models: 'opus' }))
+    rejects(() => set({ agentId: 'opencode' }))
+    rejects(() => set({ agentId: 'unknown-agent', models: ['opus'] }))
+  })
+
   it('takes a reset credit to spend only with a credit id and a UUID v4 request id', () => {
     const spend = posix['agents.spendReset']
     const requestId = '0b0e7a52-6d0c-4a6e-9a3b-0d6f6f0c2a11'
@@ -1077,6 +1104,18 @@ describe('createValidators', () => {
     expect(posix['files.list']({ projectPath: '/p', extra: 1 })).toEqual({ projectPath: '/p' })
     rejects(() => posix['files.list']({ projectPath: 'p' }))
 
+    const listFolder = posix['files.listFolder']
+    expect(listFolder({ projectPath: '/p', path: 'dist', extra: 1 })).toEqual({
+      projectPath: '/p',
+      path: 'dist',
+    })
+    rejects(() => listFolder({ projectPath: '/p' }))
+    rejects(() => listFolder({ projectPath: '/p', path: '' }))
+    rejects(() => listFolder({ projectPath: '/p', path: '/etc' }))
+    rejects(() => listFolder({ projectPath: '/p', path: 'a\0b' }))
+    rejects(() => listFolder({ projectPath: 'p', path: 'dist' }))
+    rejects(() => windows['files.listFolder']({ projectPath: 'C:\\p', path: 'C:\\Windows' }))
+
     const read = posix['files.read']
     expect(read({ projectPath: '/p', path: 'src/a.ts', extra: 1 })).toEqual({
       projectPath: '/p',
@@ -1099,6 +1138,22 @@ describe('createValidators', () => {
     rejects(() => windows['files.read']({ projectPath: 'C:\\p', path: '\\\\server\\share\\a' }))
     rejects(() => windows['files.read']({ projectPath: 'C:\\p', path: '\\Windows\\a.ini' }))
     expect(windows['files.read']({ projectPath: 'C:\\p', path: 'src/a.ts' })).toMatchObject({})
+
+    // The host decides which files of the session's folder it serves.
+    const preview = posix['files.preview']
+    expect(preview({ sessionId: 's', path: 'site/index.html', extra: 1 })).toEqual({
+      sessionId: 's',
+      path: 'site/index.html',
+    })
+    rejects(() => preview({ path: 'index.html' }))
+    rejects(() => preview({ sessionId: '', path: 'index.html' }))
+    rejects(() => preview({ sessionId: 's' }))
+    rejects(() => preview({ sessionId: 's', path: '' }))
+    rejects(() => preview({ sessionId: 's', path: '/etc/index.html' }))
+    rejects(() => preview({ sessionId: 's', path: 'a\0b.html' }))
+    rejects(() => preview({ sessionId: 's', path: 'x'.repeat(32_768) }))
+    rejects(() => windows['files.preview']({ sessionId: 's', path: 'C:\\a\\index.html' }))
+    rejects(() => windows['files.preview']({ sessionId: 's', path: '\\\\server\\a.html' }))
 
     // A thread may name any path; the host decides what it grants.
     const media = posix['media.open']
@@ -1273,6 +1328,36 @@ describe('createValidators', () => {
     rejects(() => copy({ projectPath: '/p', paths: ['/a'], folder: '' }))
     rejects(() => copy({ projectPath: '/p', paths: ['a'], folder: '/tmp' }))
     rejects(() => copy({ projectPath: '/p', paths: 'a', folder: '' }))
+
+    const upload = posix['files.upload']
+    const data = new ArrayBuffer(3)
+    expect(upload({ projectPath: '/p', path: 'a/b.png', source: { bytes: data } })).toEqual({
+      projectPath: '/p',
+      path: 'a/b.png',
+      source: { bytes: data },
+    })
+    expect(
+      upload({
+        projectPath: '/p',
+        path: 'a',
+        source: { grantId: 'g', path: '/etc' },
+        replace: true,
+      }),
+    ).toEqual({ projectPath: '/p', path: 'a', source: { grantId: 'g' }, replace: true })
+    expect(upload({ projectPath: '/p', path: 'e', source: { bytes: new ArrayBuffer(0) } })).toEqual(
+      { projectPath: '/p', path: 'e', source: { bytes: new ArrayBuffer(0) } },
+    )
+    rejects(() => upload({ projectPath: '/p', path: '/etc/x', source: { bytes: data } }))
+    rejects(() => upload({ projectPath: '/p', path: 'a', source: { path: '/etc/passwd' } }))
+    rejects(() => upload({ projectPath: '/p', path: 'a', source: { bytes: 'abc' } }))
+    rejects(() => upload({ projectPath: '/p', path: 'a', source: { bytes: data }, replace: 1 }))
+    rejects(() =>
+      upload({
+        projectPath: '/p',
+        path: 'a',
+        source: { bytes: new ArrayBuffer(20 * 1024 * 1024 + 1) },
+      }),
+    )
 
     const remove = posix['files.delete']
     expect(remove({ projectPath: '/p', paths: ['a'] })).toEqual({ projectPath: '/p', paths: ['a'] })

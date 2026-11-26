@@ -14,11 +14,16 @@ import {
   BROWSER_TAB_ACTIONS,
   BROWSER_WAIT_STATES,
   BROWSER_TOOL_NAMES,
+  MAX_PAGE_SIDE,
   MAX_SESSION_TABS,
   MAX_SNAPSHOT_DEPTH,
   MAX_UPLOAD_BYTES,
   MAX_UPLOAD_FILES,
+  MIN_PAGE_SIDE,
   ORIGIN_WAIT_MS,
+  PAGE_SIZE_NAMES,
+  PAGE_SIZES,
+  pageSizeOf,
 } from '@shared/browser'
 import {
   BROWSER_ARGS,
@@ -155,6 +160,10 @@ function output(properties: Record<string, Schema>): Tool['outputSchema'] {
 
 const READ_ONLY = { readOnlyHint: true } as const
 
+function sizeText(name: keyof typeof PAGE_SIZES): string {
+  return `${PAGE_SIZES[name].width} × ${PAGE_SIZES[name].height}`
+}
+
 /**
  * The tools that only read a page, which run without the agent's own permission prompt: they read
  * the agent's own tabs, and on a tab the user opened Kettu asks them in its own card instead.
@@ -182,6 +191,7 @@ export const BROWSER_AUTO_MODE_TOOLS: readonly BrowserToolName[] = [
   'browser_evaluate',
   'browser_ask_user',
   'browser_tabs',
+  'browser_resize',
 ]
 
 const TAB = object(
@@ -635,6 +645,40 @@ export const BROWSER_TOOLS: Tool[] = [
     annotations: { openWorldHint: false },
   },
   {
+    name: 'browser_resize',
+    title: 'Resize page',
+    description:
+      `Sets the size your page lays out at: desktop ${sizeText('desktop')}, the one it starts ` +
+      `with, tablet ${sizeText('tablet')} or phone ${sizeText('phone')}, or a width and height ` +
+      'of your own. Tablet and phone lay it out as a touch device with a mobile user agent. The ' +
+      'size stays with the tab, whatever room the user’s panel has. To emulate a device, its ' +
+      'pixel ratio or the rest, use browser_emulate, whose device or viewport takes the place of ' +
+      'this size while it is set. Returns the page with a snapshot.',
+    inputSchema: object({
+      size: { type: 'string', enum: [...PAGE_SIZE_NAMES] },
+      width: {
+        type: 'integer',
+        minimum: MIN_PAGE_SIDE,
+        maximum: MAX_PAGE_SIDE,
+        description: 'In CSS pixels, with height, in place of size.',
+      },
+      height: {
+        type: 'integer',
+        minimum: MIN_PAGE_SIDE,
+        maximum: MAX_PAGE_SIDE,
+        description: 'In CSS pixels, with width, in place of size.',
+      },
+    }),
+    outputSchema: output({
+      size: { type: 'string', enum: [...PAGE_SIZE_NAMES, 'custom'] },
+      width: { type: 'integer' },
+      height: { type: 'integer' },
+      mobile: { type: 'boolean', description: 'It lays out as a touch device.' },
+      ...PAGE,
+    }),
+    annotations: { openWorldHint: false },
+  },
+  {
     name: 'browser_upload_file',
     title: 'Upload file',
     description:
@@ -725,7 +769,8 @@ export const BROWSER_TOOLS: Tool[] = [
       'a dark or light color scheme, reduced motion, a locale, a time zone, a location, or a slow ' +
       'or offline network. What you leave out stays as it is; off turns items back off. The ' +
       'user sees a chip while anything is emulated and may reset it. Reload the page for a ' +
-      'locale or a device to apply to what it already loaded.',
+      'locale or a device to apply to what it already loaded. For a page size alone, use ' +
+      'browser_resize; a device or viewport here takes its place until you turn it off.',
     inputSchema: object({
       device: {
         type: 'string',
@@ -982,6 +1027,7 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
     browser_ask_user: ['step', 'reason'],
     browser_tabs: ['action', 'index'],
     browser_upload_file: ['paths', 'ref', 'element'],
+    browser_resize: ['size', 'width', 'height'],
   }
   if (isArgsTool(name)) {
     // Huli: the second batch's tools are checked by the parsers main runs again.
@@ -1220,6 +1266,17 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
       const element = ref(false)
       if (element !== undefined) args.ref = element
       if (o.element !== undefined) args.element = text('element', false, 200)
+      break
+    }
+    case 'browser_resize': {
+      const size = pageSizeOf(o)
+      if ('error' in size) throw invalid(size.error)
+      if (size.name === 'custom') {
+        args.width = size.width
+        args.height = size.height
+      } else {
+        args.size = size.name
+      }
       break
     }
     case 'browser_evaluate': {

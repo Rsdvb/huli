@@ -32,6 +32,7 @@ import {
 import { Channel, type ChannelMessage } from '@shared/remote/channel'
 import {
   normalizeDeviceName,
+  otherAccount,
   type NewDevice,
   type PairedDevice,
   type PortDevice,
@@ -43,13 +44,17 @@ import {
   parsePairCommit,
   parsePairConfirm,
   parsePairReveal,
+  REVERSE_HOST_FEATURE,
   revealMatches,
   type PairNonce,
+  type PairGroup,
+  type PairTranscript,
 } from '@shared/remote/discovery'
 import {
   isHostAdminMethod,
   type HostAdminEvent,
   type HostAdminMethod,
+  type JoinedVia,
 } from '@shared/remote/host-admin'
 import {
   HOST_KEEPALIVE,
@@ -202,6 +207,17 @@ export interface RemoteServerOptions {
   featuresOff?: readonly string[]
   /** The host's id on the Kettu relay and its relays while it uses the relay, for welcomes. */
   relay?(): HostRelay | null
+  /**
+   * The Kettu account the host is signed in to now, null for none: a device whose hello names
+   * another is turned away on every path. Absent, as in tests, the host is signed in to none.
+   */
+  account?(): string | null
+  /** The host's id on the relay, which a batch of computers connected to at once must name. */
+  relayId?(): string | null
+  /** Whether welcomes offer `remote.addReverseHost`, which the host's parent then runs. */
+  reverseHosts?(): boolean
+  /** A device that was not paired was added, by any path. */
+  joined?(device: PairedDevice, via: JoinedVia): void
   /** The relay regions, which devices that read them hear of; none without the relay. */
   regions?: ServerRegions
   /** The devices' notifications, which a host without its signing key has none of. */
@@ -284,6 +300,30 @@ export class RemoteServer {
     this.previews.closeAll()
   }
 
+  /** The host's Kettu account now, null while it is signed in to none. */
+  get account(): string | null {
+    return this.options.account?.() ?? null
+  }
+
+  /**
+   * The host signed in to another account, or out: devices last seen with another account than
+   * the new one are turned away, their sessions closed, and the next welcomes carry it.
+   */
+  accountChanged(): void {
+    const account = this.account
+    if (account === null) return
+    const away = (id: string | undefined): boolean => {
+      const device = id === undefined ? null : this.options.devices.get(id)
+      return device !== null && otherAccount(device, account)
+    }
+    for (const connection of this.connections) {
+      if (away(connection.device?.id)) void connection.close('other_account')
+    }
+    for (const session of this.sessions) {
+      if (away(session.device.id)) void session.close('other_account')
+    }
+  }
+
   /** The welcome's relay, while the host uses it. */
   relay(): { relay?: HostRelay } {
     const relay = this.options.relay?.() ?? null
@@ -363,12 +403,19 @@ export class RemoteServer {
     return [...ids]
   }
 
-  /** `via`: added from a request of a device of the account rather than a code. */
-  async addDevice(device: NewDevice, via?: 'account'): Promise<PairedDevice | null> {
+  /** `via`: how it was added, a code unless the parent or the account vouched for it. */
+  async addDevice(device: NewDevice, via: JoinedVia = 'code'): Promise<PairedDevice | null> {
+    const key = Buffer.from(device.publicKey, 'base64')
+    // Set up again over SSH, as an update does, it is no news to the other devices.
+    const before = key.length === 32 ? this.options.devices.withKey(key) : null
     const added = await this.options.devices.add(device)
     if (added) {
-      this.options.activity.record(added.id, via ? { kind: 'paired', via } : { kind: 'paired' })
+      this.options.activity.record(
+        added.id,
+        via === 'code' ? { kind: 'paired' } : { kind: 'paired', via },
+      )
       this.options.changed()
+      if (!before) this.options.joined?.(added, via)
     }
     return added
   }
@@ -415,9 +462,10 @@ export class RemoteServer {
     return renamed
   }
 
-  /** Tells the owner's devices something of the host: every one, or only `deviceId`. */
-  adminEvent(event: HostAdminEvent, deviceId: string | null): void {
+  /** Tells the owner's devices something of the host: every one but `except`, or only `deviceId`. */
+  adminEvent(event: HostAdminEvent, deviceId: string | null, except?: string): void {
     for (const session of this.sessions) {
+      if (except !== undefined && session.device.id === except) continue
       if (deviceId === null || session.device.id === deviceId) session.adminEvent(event)
     }
   }
@@ -619,6 +667,8 @@ interface Discovery {
   commit: string | null
   hostNonce: Uint8Array | null
   code: string | null
+  transcript: PairTranscript | null
+  group: PairGroup | null
 }
 
 /** One connection of a device: its handshake and hello, then the session it opened or resumed. */
@@ -767,6 +817,8 @@ class DeviceConnection {
         commit: null,
         hostNonce: null,
         code: null,
+        transcript: null,
+        group: null,
       }
     }
     return responder
@@ -781,6 +833,12 @@ class DeviceConnection {
       case 'commit': {
         const commit = parsePairCommit(value)
         if (!commit) return void this.close('invalid')
+        // A batch is the device's to name, but only one this host is in.
+        const own = this.server.options.relayId?.() ?? null
+        if (commit.group && (own === null || !commit.group.hosts.includes(own))) {
+          return void this.close('invalid')
+        }
+        discovery.group = commit.group ?? null
         discovery.commit = commit.commit
         discovery.hostNonce = discoveryNonce()
         this.state = 'reveal'
@@ -799,6 +857,11 @@ class DeviceConnection {
         const code = await pairCode(discovery.hash!, discovery.hostNonce!, nonce)
         if (this.state !== 'reveal') return
         discovery.code = code
+        discovery.transcript = {
+          hash: encodeRelayBytes(discovery.hash!),
+          hostNonce: encodeRelayBytes(discovery.hostNonce!),
+          deviceNonce: encodeRelayBytes(nonce),
+        }
         this.state = 'hello'
         return
       }
@@ -896,6 +959,17 @@ class DeviceConnection {
     const joining = this.pairing !== null || this.discovery !== null
     // The device may have been removed, or paired again, since its handshake.
     const known = this.device ?? this.removed
+    const account = hello.account ?? null
+    const hostAccount = this.server.account
+    if (account !== null && hostAccount !== null && account !== hostAccount) {
+      // Neither a failed try at the code nor a request the owner hears of: the code stays open.
+      if (this.device) this.server.options.devices.noteAccount(this.device.id, account)
+      this.server.options.log(
+        'info',
+        `Turned away ${this.device ? `device ${this.device.id}` : 'a device'} of another account`,
+      )
+      return void this.close('other_account')
+    }
     const device = this.discovery
       ? await this.confirmDiscovery(hello)
       : this.pairing
@@ -909,6 +983,7 @@ class DeviceConnection {
       return this.close('removed')
     }
     this.device = device
+    if (!joining) this.server.options.devices.noteAccount(device.id, account)
     if (hello.resume && version >= RESUME_VERSION && !joining) {
       if (hello.standby === 'join') {
         const kept = this.server.findSession(hello.resume.token, device.id)
@@ -987,6 +1062,7 @@ class DeviceConnection {
       model,
       kind,
       platform,
+      account: hello.account ?? null,
     })
     if (!added || this.state !== 'confirming') return null
     options.pairing.added(code, added)
@@ -999,10 +1075,10 @@ class DeviceConnection {
    * add and the device said the codes match; the device as added, or null when it was not.
    */
   private async confirmDiscovery(hello: Hello): Promise<PairedDevice | null> {
-    const { publicKey, slot, code } = this.discovery!
+    const { publicKey, slot, code, transcript, group } = this.discovery!
     const { options } = this.server
     const requests = options.discovery
-    if (!hello.device || !requests || code === null) {
+    if (!hello.device || !requests || code === null || transcript === null) {
       void this.close('invalid')
       return null
     }
@@ -1013,6 +1089,8 @@ class DeviceConnection {
       slot,
       { name, model, kind, platform, known: options.devices.withKey(publicKey) !== null },
       code,
+      transcript,
+      group,
     )
     if (this.state !== 'confirming') return null
     if (!outcome.add) {
@@ -1028,6 +1106,7 @@ class DeviceConnection {
         model,
         kind,
         platform,
+        account: hello.account ?? null,
       },
       'account',
     )
@@ -1499,6 +1578,7 @@ class DeviceSession {
           : []),
         ...(this.regionsOffered ? [REGIONS_CHANNEL_FEATURE] : []),
         ...(this.standbys ? [STANDBY_FEATURE] : []),
+        ...(this.server.options.reverseHosts?.() ? [REVERSE_HOST_FEATURE] : []),
       ],
       role: this.role,
       device: { id: this.device.id, name: this.device.name },
@@ -1509,6 +1589,7 @@ class DeviceSession {
       ...this.server.relay(),
       ...(this.token ? { resume: this.token } : {}),
       ...(resumed ? { resumed } : {}),
+      ...(this.server.account !== null ? { account: this.server.account } : {}),
     }
     connection.channel!.send({ kind: 'json', value: welcome }).catch(() => {})
   }

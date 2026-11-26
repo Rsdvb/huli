@@ -82,6 +82,7 @@ import {
   commandList,
   parseCommand,
   parseShell,
+  parseFastArg,
   skillsMessage,
   statusMessage,
   usageMessage,
@@ -94,10 +95,12 @@ import {
   ConfigValueError,
   DEFAULT_MODE,
   effortFor,
+  FAST_ID,
   MODE_ID,
   modeFromPolicy,
   modeOf,
   type Settings,
+  speedTiers,
   STANDARD_TIER,
   tierFor,
 } from './config'
@@ -336,6 +339,14 @@ function codexWarning(method: string, p: Record<string, unknown>): CodexNotice |
 const OPTED_OUT = ['turn/moderationMetadata']
 
 const NOT_FOUND = /no rollout found|thread not loaded|thread not found|unknown thread/i
+// Another process on the same Codex home holds the thread's writer lock: the Codex app, a CLI or
+// an editor that has it loaded, which app-server keeps for a minute after its last client leaves.
+const HELD_ELSEWHERE = /already has an active writer/i
+// A thread Kettu let go of a moment ago and app-server still unloads, until `thread/closed`.
+const CLOSING = /is closing; retry/i
+const CLOSING_WAIT_MS = 10_000
+// `thread/closed` can come before the refusal, so it is not waited for alone.
+const CLOSING_RETRY_MS = 200
 
 function totals(usage: TokenUsageBreakdown): TokenTotals {
   return {
@@ -426,6 +437,9 @@ function sessionConfig(
     features,
     // Codex warns in the thread that an under-development feature is on.
     suppress_unstable_features_warning: true,
+    // app-server otherwise keeps a thread loaded, and its writer lock held, for 60 s after Kettu
+    // lets go of it, so the user's own Codex cannot open it for that minute.
+    thread_unload_delay_secs: 0,
   }
   const entries = (options.mcpServers ?? []).flatMap((server) => {
     const entry = codexServer(server)
@@ -657,6 +671,8 @@ export class CodexConnection implements AgentConnection {
   /** Subagent threads, to the thread each runs under. */
   private readonly parents = new Map<string, string>()
   private extras: { balances: ProviderBalance[] } | null = null
+  /** Who waits for `thread/closed`, by thread: a resume refused while it unloads, Kite's reload. */
+  private readonly closedWaiters = new Map<string, Set<() => void>>()
   /** The models as last listed, which each turn's service tier is read from. */
   private knownModels: Model[] = []
   private modelsReadAt: number | null = null
@@ -678,8 +694,6 @@ export class CodexConnection implements AgentConnection {
   private readonly pluginDeclarations = new Map<string, Promise<Record<string, unknown>>>()
   /** Huli: the threads that started servers of the Codex desktop app turned off. */
   private readonly desktop = new Map<string, DesktopThread>()
-  /** Huli: who waits for a thread to unload, by its id. */
-  private readonly unloads = new Map<string, () => void>()
   /** Huli: warnings about Codex itself, by key, with the thread each concerns, null for all. */
   private readonly notices = new Map<string, { threadId: string | null; notice: CodexNotice }>()
   /** Huli: the warnings each session has shown. */
@@ -780,7 +794,8 @@ export class CodexConnection implements AgentConnection {
     if (error instanceof RpcError) {
       // A thread with no rollout, which a thread never prompted is, counts as one Codex lacks.
       const code = NOT_FOUND.test(error.message) ? RESOURCE_NOT_FOUND : error.code
-      return new AgentRequestError('agent_error', error.message, code, error.data)
+      const message = HELD_ELSEWHERE.test(error.message) ? t('codex.heldElsewhere') : error.message
+      return new AgentRequestError('agent_error', message, code, error.data)
     }
     return new AgentRequestError('agent_error', (error as Error)?.message ?? String(error))
   }
@@ -1113,7 +1128,7 @@ export class CodexConnection implements AgentConnection {
       this.desktopServers(cwd),
       this.setSkillRoots(options.skillRoots),
     ])
-    const response = await this.call<ThreadResponse>('thread/resume', {
+    const response = await this.resumeThread({
       threadId,
       cwd,
       ...(mode
@@ -1137,6 +1152,39 @@ export class CodexConnection implements AgentConnection {
     record.prompted = true
     this.keepDesktop(threadId, cwd, options, desktop, allowed)
     return record
+  }
+
+  /** `thread/resume`, again once a thread app-server still unloads has closed, for up to 10 s. */
+  private async resumeThread(
+    params: { threadId: string } & Record<string, unknown>,
+  ): Promise<ThreadResponse> {
+    const until = Date.now() + CLOSING_WAIT_MS
+    for (;;) {
+      try {
+        return await this.call<ThreadResponse>('thread/resume', params)
+      } catch (error) {
+        const closing = error instanceof AgentRequestError && CLOSING.test(error.message)
+        if (!closing || this.isClosed || Date.now() >= until) throw error
+        await this.closedOrAfter(params.threadId, CLOSING_RETRY_MS)
+      }
+    }
+  }
+
+  /** Waits for the thread's `thread/closed`, or `ms`; true when it closed. */
+  private closedOrAfter(threadId: string, ms: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const waiters = this.closedWaiters.get(threadId) ?? new Set<() => void>()
+      const end = (closed: boolean): void => {
+        clearTimeout(timer)
+        waiters.delete(done)
+        if (waiters.size === 0) this.closedWaiters.delete(threadId)
+        resolve(closed)
+      }
+      const done = (): void => end(true)
+      const timer = setTimeout(() => end(false), ms)
+      waiters.add(done)
+      this.closedWaiters.set(threadId, waiters)
+    })
   }
 
   async resumeSession(
@@ -1773,9 +1821,6 @@ export class CodexConnection implements AgentConnection {
       return
     }
     switch (method) {
-      case 'thread/closed':
-        this.unloads.get(threadId)?.()
-        break
       case 'turn/started':
         this.turnStarted(threadId, p.turn as Turn)
         break
@@ -1786,6 +1831,9 @@ export class CodexConnection implements AgentConnection {
         this.threads
           .get(threadId)
           ?.watch?.((p.status as ThreadStatus).type === 'active' ? 'active' : 'inactive')
+        break
+      case 'thread/closed':
+        for (const done of [...(this.closedWaiters.get(threadId) ?? [])]) done()
         break
       case 'item/started':
       case 'item/completed': {
@@ -2098,6 +2146,8 @@ export class CodexConnection implements AgentConnection {
           },
         }
       : null
+    const model = this.knownModels.find((item) => item.id === settings.model)
+    const tier = this.tierOf(settings)
     return {
       threadId: record.id,
       approvalPolicy: mode.approvalPolicy,
@@ -2110,7 +2160,11 @@ export class CodexConnection implements AgentConnection {
       summary: 'auto',
       ...(settings.model ? { model: settings.model } : {}),
       ...(settings.effort ? { effort: settings.effort } : {}),
-      serviceTier: this.tierOf(settings) ?? STANDARD_TIER,
+      // A model that lists no faster tier gets none, so Codex keeps config.toml's; a tier chosen
+      // goes out even before the model list is read.
+      ...(tier !== null || speedTiers(model).length > 0
+        ? { serviceTier: tier ?? STANDARD_TIER }
+        : {}),
       ...(collaborationMode ? { collaborationMode } : {}),
     }
   }
@@ -2527,16 +2581,7 @@ export class CodexConnection implements AgentConnection {
 
   /** Huli: whether Codex unloads the thread before `UNLOAD_TIMEOUT_MS` passes. */
   private unloaded(threadId: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      const end = (gone: boolean): void => {
-        clearTimeout(timer)
-        if (this.unloads.get(threadId) === unload) this.unloads.delete(threadId)
-        resolve(gone)
-      }
-      const unload = (): void => end(true)
-      const timer = setTimeout(() => end(false), UNLOAD_TIMEOUT_MS)
-      this.unloads.set(threadId, unload)
-    })
+    return this.closedOrAfter(threadId, UNLOAD_TIMEOUT_MS)
   }
 
   /** The layer each key of the configuration comes from, as the thread's folder sees it. */
@@ -2745,6 +2790,8 @@ export class CodexConnection implements AgentConnection {
     switch (name) {
       case 'plan':
         return rest ? this.answer(record, usage) : this.togglePlan(record)
+      case 'fast':
+        return this.answer(record, () => this.fastAnswer(record, rest))
       case 'compact':
         return this.commandTurn(record, async () => {
           await this.call('thread/compact/start', { threadId: record.id })
@@ -2910,10 +2957,34 @@ export class CodexConnection implements AgentConnection {
     return stopped('end_turn')
   }
 
+  /** `/fast [on|off|status]`: toggles or inspects fast mode for models that advertise it. */
+  private async fastAnswer(record: ThreadRecord, rest: string): Promise<string> {
+    const arg = parseFastArg(rest)
+    if (arg === 'invalid') return t('codex.fast.usage')
+    const models = await this.listModels()
+    const model = models.find((item) => item.id === record.settings.model)
+    if (speedTiers(model).length === 0) {
+      return record.settings.model
+        ? t('codex.fast.unsupported', { model: record.settings.model })
+        : t('codex.fast.unsupportedNoModel')
+    }
+    // Huli: on is any faster tier, so on turns on the model's first one, as the Fast switch does.
+    const fast = tierFor(model, record.settings.tier) !== null
+    if (arg === 'status') return t(fast ? 'codex.fast.statusOn' : 'codex.fast.statusOff')
+    const next = arg === 'toggle' ? !fast : arg === 'on'
+    record.settings = applyOption(record.settings, models, FAST_ID, next)
+    this.publishConfig(record, models)
+    return t(next ? 'codex.fast.on' : 'codex.fast.off')
+  }
+
   /** Sets the collaboration mode of the session's next turns, and shows it in its options. */
   private async setCollaboration(record: ThreadRecord, value: 'default' | 'plan'): Promise<void> {
     const models = await this.listModels()
     record.settings = applyOption(record.settings, models, COLLABORATION_ID, value)
+    this.publishConfig(record, models)
+  }
+
+  private publishConfig(record: ThreadRecord, models: readonly Model[]): void {
     const target = this.targets.get(record.id)
     if (!target) return
     const config = buildConfig(record.settings, models)

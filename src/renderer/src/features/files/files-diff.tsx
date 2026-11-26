@@ -2,8 +2,9 @@ import { memo, useMemo, type ReactNode } from 'react'
 import type { DiffLineAnnotation, FileDiffMetadata, SelectedLineRange } from '@pierre/diffs'
 import { FileDiff, WorkerPoolContext } from '@pierre/diffs/react'
 import { useCodeThemes } from '@renderer/features/session/markdown/code-themes'
-import { diffsPool as pool } from '@renderer/features/session/markdown/diff-pool'
+import { getDiffsPool } from '@renderer/features/session/markdown/diff-pool'
 import { useDark } from '@renderer/hooks/use-dark'
+import { useDiffStyle } from '@renderer/stores/diff-style'
 import { hunkHeader } from './hunk-header'
 
 // @pierre/diffs mixes a changed row's tint into the background once more, which leaves a
@@ -11,13 +12,13 @@ import { hunkHeader } from './hunk-header'
 const TINTS_AS_GIVEN =
   '[data-line],[data-no-newline],[data-gutter-buffer],[data-column-number]{--mix-light:0%;--mix-dark:0%}'
 
-// The folded lines between hunks as a flat strip across the diff rather than the library's
-// rounded, inset bar, whose height, gaps and corners no variable sets.
+// The folded lines between hunks as a flat strip across the diff, both columns of it side by side,
+// rather than the library's rounded, inset bar, whose height, gaps and corners no variable sets.
 const FLAT_SEPARATOR = [
-  '[data-separator=line-info]{height:26px;margin-block:0}',
-  '[data-separator=line-info] [data-separator-wrapper]{padding-inline:12px;column-gap:8px;grid-template-columns:auto 1fr;background-color:var(--diffs-bg-separator)}',
+  '[data-separator=line-info]{height:26px;margin-block:0;background-color:var(--diffs-bg-separator)}',
+  '[data-separator=line-info] [data-separator-wrapper]{padding-inline:12px;column-gap:8px;grid-template-columns:auto 1fr;background-color:var(--diffs-bg-separator);border-radius:0}',
   '[data-separator=line-info] :is([data-expand-button],[data-separator-content]){border-radius:0}',
-  '[data-separator=line-info] [data-expand-button]{min-width:0;border:0}',
+  '[data-separator=line-info] [data-expand-button]{min-width:16px;border:0}',
   '[data-separator=line-info] [data-separator-content]{padding:0}',
 ].join('')
 
@@ -31,11 +32,11 @@ const NOTE_MARK =
   '[data-column-number][data-note]{color:var(--diff-note);box-shadow:inset -2px 0 var(--diff-note)}'
 
 /**
- * The Files pane's diff of a parsed change: unified, a bar along each changed line, the first
- * hunk's header above, unchanged runs folded, lines selectable by their numbers to mention them.
- * `onRendered` hears of each render the library makes. Huli: `annotations` put a row of their own
- * under lines, each drawn by `renderAnnotation` from its id; both keep their identity while the
- * rows stay, since each new one draws the diff again.
+ * The Files pane's diff of a parsed change: unified or side by side as last chosen, a bar along each
+ * changed line, the first hunk's header above, unchanged runs folded, lines selectable by their
+ * numbers to mention them. `onRendered` hears of each render the library makes. Huli:
+ * `annotations` put a row of their own under lines, each drawn by `renderAnnotation` from its id;
+ * both keep their identity while the rows stay, since each new one draws the diff again.
  */
 function FilesDiffImpl({
   fileDiff,
@@ -54,11 +55,12 @@ function FilesDiffImpl({
 }) {
   const dark = useDark()
   const theme = useCodeThemes()
+  const diffStyle = useDiffStyle((s) => s.style)
   const options = useMemo(
     () => ({
       theme,
       themeType: dark ? ('dark' as const) : ('light' as const),
-      diffStyle: 'unified' as const,
+      diffStyle,
       overflow: 'scroll' as const,
       diffIndicators: 'bars' as const,
       hunkSeparators: 'line-info' as const,
@@ -70,8 +72,9 @@ function FilesDiffImpl({
       onPostRender: onRendered,
       unsafeCSS: TINTS_AS_GIVEN + FLAT_SEPARATOR + CODE_SPACING + NOTE_MARK,
     }),
-    [dark, theme, onSelect, onRendered],
+    [dark, theme, diffStyle, onSelect, onRendered],
   )
+  const pool = useMemo(() => getDiffsPool(), [])
   const first = fileDiff.hunks[0]
   return (
     <WorkerPoolContext.Provider value={pool}>

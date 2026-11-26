@@ -8,7 +8,7 @@ import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { Platform } from '@shared/platform'
-import type { ConfigOption, QuestionAnswer, StopReason } from '@shared/thread'
+import type { ConfigOption, QuestionAnswer, SlashCommand, StopReason } from '@shared/thread'
 import {
   AgentRequestError,
   optionAnswer,
@@ -42,6 +42,7 @@ import {
   type ClineListed,
   type ClineMcpServer,
   type ClineProvider,
+  type CompactResult,
   type EventNotification,
   type HelloResult,
   type ListResult,
@@ -80,13 +81,28 @@ function pageOf<T>(
   const end = start + LIST_PAGE
   return { items: all.slice(start, end), nextCursor: end < all.length ? String(end) : null }
 }
+/** Cline's own command for compacting by hand, which its SDK runs apart from a turn. */
+const COMPACT = 'compact'
+const COMPACT_PROMPT = /^\/compact(?:\s|$)/
 
 /** Kettu's words for a refusal the SDK's process names by reason, which cannot translate. */
 function refusalText(data: unknown): string | null {
   const reason = (data as { reason?: unknown } | null | undefined)?.reason
   if (reason === 'signIn') return t('cline.signInFirst')
   if (reason === 'betweenTurns') return t('agentRun.betweenTurns')
+  if (reason === 'compactionOff') return t('cline.compact.off')
   return null
+}
+
+/** The commands a session offers: Cline's SDK lists none, so only the one Kettu runs. */
+function commandList(): SlashCommand[] {
+  return [{ name: COMPACT, description: t('cline.compact.command') }]
+}
+
+/** Whether a prompt is `/compact`; anything after the name is not taken. */
+function isCompact({ text, images, files }: Omit<PromptParams, 'sessionId'>): boolean {
+  if (images.length > 0 || files.length > 0) return false
+  return COMPACT_PROMPT.test(text.trim())
 }
 
 /** The SDK's process cannot serve the agent: its start fails, and the agent runs over ACP. */
@@ -255,6 +271,11 @@ export class ClineConnection implements AgentConnection {
 
   get hiddenSessions(): boolean {
     return false
+  }
+
+  /** Cline's host session runs the tools a server lists in `autoAllow` without asking. */
+  get allowsKettuTools(): boolean {
+    return true
   }
 
   /** A session costs Cline nothing until its first prompt, so one opened only to be read leaves no trace. */
@@ -491,6 +512,10 @@ export class ClineConnection implements AgentConnection {
     session.choices = choices
     session.mapper.window(currentModel(choices)?.contextWindow ?? null)
     this.sessions.set(sessionId, session)
+    this.deliver(sessionId, () => ({
+      patches: [{ op: 'session.update', changes: { commands: commandList() } }],
+      effects: [],
+    }))
     return session
   }
 
@@ -612,6 +637,7 @@ export class ClineConnection implements AgentConnection {
     session.mapper.turn()
     try {
       const params: PromptParams = { sessionId, ...promptParts(prompt) }
+      if (isCompact(params)) return await this.compact(session)
       const result = await this.call<TurnResult>(METHOD.prompt, params)
       const tokens = result.usage ? tokenTotals(result.usage) : null
       return {
@@ -626,6 +652,15 @@ export class ClineConnection implements AgentConnection {
       const output = target && session.mapper.ended(target.context())
       if (output) target.apply(output)
     }
+  }
+
+  /** Cline's `/compact`: the process compacts, and the notices it sends draw the divider. */
+  private async compact(session: Session): Promise<PromptResult> {
+    const result = await this.call<CompactResult>(METHOD.compact, { sessionId: session.id })
+    if (result.empty) {
+      this.deliver(session.id, (ctx) => session.mapper.inform(ctx, t('cline.compact.nothing')))
+    }
+    return { stopReason: stopReason(result.finishReason), tokens: null, models: [] }
   }
 
   async collect(sessionId: string, text: string): Promise<string[]> {
@@ -709,6 +744,17 @@ export class ClineConnection implements AgentConnection {
       return
     }
     const output = session.mapper.event(event, target.context())
+    if (output) target.apply(output)
+  }
+
+  /** Applies to the session's thread, or keeps it until a target is registered. */
+  private deliver(sessionId: string, map: Deferred): void {
+    const target = this.targets.get(sessionId)
+    if (!target) {
+      this.hold(sessionId, map)
+      return
+    }
+    const output = map(target.context())
     if (output) target.apply(output)
   }
 

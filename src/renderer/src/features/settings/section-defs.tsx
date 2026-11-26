@@ -21,7 +21,7 @@ import {
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import type { AgentStatus, SessionSummary } from '@shared/agent-host'
+import type { AgentStatus } from '@shared/agent-host'
 import type { ArtifactConsentRow } from '@shared/artifact-capabilities'
 import { originLabel } from '@shared/browser'
 import { USER_FONT_ROLES } from '@shared/settings'
@@ -47,7 +47,6 @@ import { useAccountStore } from '@renderer/stores/account'
 import { useDebugStore } from '@renderer/stores/debug'
 import { artifactListShown, useArtifactsStore } from '@renderer/stores/artifacts'
 import { useProjectsStore } from '@renderer/stores/projects'
-import { archivedSessions, sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { loadHosts, useHostsStore } from '@renderer/stores/hosts'
 import { useWebHostStore } from '@renderer/stores/web-host'
@@ -61,7 +60,7 @@ import {
 } from '@renderer/stores/view'
 import { useAgentHistoryRow } from '@renderer/features/agent-history/settings-row'
 import { pageRow } from '@renderer/features/sidebar/sidebar-pages'
-import { AboutHero, AutomaticUpdates, NoUpdates, UpdateRow } from './about-section'
+import { AboutHero, AutomaticUpdates, NewIssue, NoUpdates, UpdateRow } from './about-section'
 import { useIdleSessionRows } from './idle-sessions'
 import { useAutoApproveRows } from './auto-approve'
 import { useSandboxRows } from './sandbox'
@@ -69,7 +68,9 @@ import { ResumeAfterLimit, ResumeText, StallMinutesChoice } from './supervisor-r
 import { AutoSettle, SettleDaysChoice, SettleMerged } from './tidy-rows'
 import { ToolCallsChoice } from './zen-rows'
 import { IslandSidesSelect, IslandSwitch } from './island-row'
+import { usePluginChannelRows } from './plugin-channels'
 import { useIslandDescription } from './island-state'
+import { useStartedSessionRows } from './started-sessions'
 import { useWorkflowRows } from './workflow-settings'
 import {
   AgentListItem,
@@ -79,12 +80,12 @@ import {
   NoAgents,
 } from './agents-section'
 import {
-  EnvironmentFooter,
+  HarnessesFooter,
   HarnessGroupActions,
   HarnessListItem,
   HarnessPage,
 } from './harness-section'
-import { ArchivedRow } from './archived-section'
+import { ArchivedSection } from './archived-section'
 import { BinKeepDays, RecycleBinPage } from './recycle-bin-section'
 import { useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { CloudSwitchRow, OtherConnections } from './cloud-section'
@@ -92,15 +93,27 @@ import { useCloudOffHere } from './use-cloud-off-here'
 import { DebugModeRow } from './debug-mode'
 import { FontFamily, UserFont } from './font-family'
 import { ConsentRow, ConsentsState } from './artifacts-section'
-import { EmptyCard, GroupNote } from './rows'
+import { GroupNote } from './rows'
 import { BROUGHT_SHOWN, useBroughtSites } from './brought-sites'
 import { BringSignInsRow, BroughtMoreRow, BroughtSiteRow } from './sign-ins-rows'
 import { WebReaderRow } from './web-reader-rows'
 import { HostPage } from './host-page'
 import { hostLine, platformName, webHostLine } from './host-text'
-import { AccountHostRow, AccountHostsActions, AccountHostsState } from './host-account'
+import {
+  AccountComputerRow,
+  AccountHostRow,
+  AccountHostsActions,
+  AccountHostsState,
+} from './host-account'
 import { useDiscoveredHosts } from './use-discovered'
-import { AddHostButton, HostRow, HostsLoading, HostsNote, SelfRow } from './hosts-section'
+import {
+  AddHostButton,
+  HostRow,
+  HostsLoading,
+  HostsNote,
+  OtherAccountHosts,
+  SelfRow,
+} from './hosts-section'
 import { DevicePage } from './remote-device'
 import { DirectPortField, FoundAddresses, OwnAddresses } from './remote-direct'
 import { DirectSwitch, DiscoverableSwitch } from './remote-relay'
@@ -173,6 +186,7 @@ import {
   RememberedSitesList,
   RemoveAll,
   ReportProblem,
+  RunningSend,
   SendKey,
   ShellPicker,
   SidebarHover,
@@ -244,6 +258,12 @@ export function useGeneralSection(): SectionDef {
         setting: 'general.send-key',
         group: input,
         render: () => <SendKey />,
+      },
+      {
+        id: 'running-send',
+        setting: 'general.running-send',
+        group: input,
+        render: () => <RunningSend />,
       },
       {
         id: 'default-agent',
@@ -505,6 +525,7 @@ export function useNotificationsSection(): SectionDef {
   const routinesOn = useEntry('settings.routineNotifications')
   const agentNotesOn = useFeature('agentNotify')
   const islandDescription = useIslandDescription()
+  const channelRows = usePluginChannelRows()
   const rows: RowDef[] = [
     {
       id: 'preview',
@@ -624,6 +645,7 @@ export function useNotificationsSection(): SectionDef {
       render: () => <NotificationSwitch field="badge" label={name} />,
     })
   }
+  rows.push(...channelRows)
   return {
     id: 'notifications',
     title: t('sections.notifications'),
@@ -805,6 +827,7 @@ export function useAgentsSection(): SectionDef {
   const approvalRows = useAutoApproveRows()
   const sandboxRows = useSandboxRows()
   const sandboxOn = useEntry('settings.sandbox')
+  const startedRows = useStartedSessionRows()
   const workflowRows = useWorkflowRows()
   // The footer goes under the list, so the workflow groups after it keep their own notes.
   const list: GroupDef =
@@ -878,6 +901,7 @@ export function useAgentsSection(): SectionDef {
           <GeneralSwitch field="lowerAgentPriority" label={t('agents.priority.name')} />
         ),
       },
+      ...startedRows,
       ...workflowRows,
     ],
     itemPage: (agentId) => <AgentPage agentId={agentId as AgentId} />,
@@ -928,7 +952,7 @@ export function useHarnessesSection(): SectionDef {
         render: () => null,
       },
     ],
-    footer: <EnvironmentFooter />,
+    footer: <HarnessesFooter />,
     itemPage: (harnessId) => <HarnessPage harnessId={harnessId as HarnessId} />,
     mark:
       updates.length > 0
@@ -1297,6 +1321,7 @@ export function useAboutSection(): SectionDef {
   // A host whose Kettu Settings cannot update, as the daemon's, says so in the row.
   const updatable = useHostHas('updates')
   const updates = group('updates', t('about.groups.updates'))
+  const contact = group('contact', t('about.groups.contact'))
   return {
     id: 'about',
     title: t('sections.about'),
@@ -1322,6 +1347,8 @@ export function useAboutSection(): SectionDef {
             },
             // Huli: one channel of its own, so no choice of download source.
           ] satisfies RowDef[])),
+      // Huli: issues go to Kite's own repository; Kettu's email, X and WeChat group are its own.
+      { id: 'issues', setting: 'about.issues', group: contact, render: () => <NewIssue /> },
       {
         id: 'github',
         setting: 'about.github',
@@ -1332,42 +1359,22 @@ export function useAboutSection(): SectionDef {
   }
 }
 
-/** More archived rows than a tall window shows, drawn in full as the page opens. */
-const ARCHIVED_EAGER = 30
-
 export function useArchivedSection(): SectionDef {
-  const { t } = useTranslation(['settings', 'sidebar'])
-  const { hostId } = useHostScope()
-  const archived = useSessionsStore(useShallow((s) => archivedSessions(s.byId, hostId)))
-  const projects = useProjectsStore((s) => s.projects)
-  const where = (summary: SessionSummary) =>
-    summary.scratch
-      ? t('sidebar:project.noProject')
-      : (projects.find((p) => p.path === summary.projectPath)?.name ??
-        basename(summary.projectPath))
-  const list = group('archived', t('archived.group'), { count: archived.length })
+  const { t } = useTranslation('settings')
   return {
     id: 'archived',
     title: t('sections.archived'),
     description: t('pages.archived'),
     icon: Archive01Icon,
-    rows: archived.map((summary, i): RowDef => ({
-      id: summary.id,
-      setting: 'archived.sessions',
-      item: {
-        name: sessionTitle(summary),
-        description: where(summary),
-        keywords: agentName(summary.agentId, hostId),
+    rows: [
+      {
+        id: 'archived',
+        setting: 'archived.sessions',
+        searchOnly: true,
+        render: () => null,
       },
-      group: list,
-      layout: 'custom',
-      render: () => (
-        <ArchivedRow summary={summary} where={where(summary)} eager={i < ARCHIVED_EAGER} />
-      ),
-    })),
-    footer: archived.length === 0 && (
-      <EmptyCard title={t('archived.emptyTitle')} hint={t('archived.emptyHint')} />
-    ),
+    ],
+    footer: <ArchivedSection />,
   }
 }
 
@@ -1520,6 +1527,16 @@ function useDesktopHostsSection(): SectionDef {
       open: () => openSettingsItem('hosts', host.id),
     })),
   ]
+  const folded = status?.otherAccount ?? 0
+  if (folded > 0) {
+    rows.push({
+      id: 'hosts-other-account',
+      setting: 'hosts.hosts',
+      group: list,
+      layout: 'custom',
+      render: () => <OtherAccountHosts count={folded} />,
+    })
+  }
   if (status && hosts === null) {
     rows.push({
       id: 'hosts-loading',
@@ -1534,6 +1551,7 @@ function useDesktopHostsSection(): SectionDef {
     note: <GroupNote>{t('hosts.account.note')}</GroupNote>,
   })
   const found = discovered?.state === 'ok' ? discovered.hosts : []
+  const computers = discovered?.state === 'ok' ? (discovered.computers ?? []) : []
   // The account's computers are found through the relay, which a self-hosted computer never uses.
   if (!cloudOff) {
     rows.push(
@@ -1542,7 +1560,7 @@ function useDesktopHostsSection(): SectionDef {
         setting: 'hosts.account-hosts',
         group: account,
         layout: 'custom',
-        searchOnly: found.length > 0,
+        searchOnly: found.length + computers.length > 0,
         render: () => <AccountHostsState discovered={discovered} />,
       },
       ...found.map((host): RowDef => ({
@@ -1552,6 +1570,23 @@ function useDesktopHostsSection(): SectionDef {
         group: account,
         layout: 'custom',
         render: () => <AccountHostRow host={host} />,
+      })),
+      ...computers.map((computer): RowDef => ({
+        id: `account-${computer.state}-${computer.name}`,
+        setting: 'hosts.account-hosts',
+        item: {
+          name: computer.name,
+          description: t(
+            computer.state === 'added'
+              ? 'hosts.account.computer.added'
+              : computer.state === 'remote_off'
+                ? 'hosts.account.computer.remoteOff'
+                : 'hosts.state.offline',
+          ),
+        },
+        group: account,
+        layout: 'custom',
+        render: () => <AccountComputerRow computer={computer} />,
       })),
     )
   }

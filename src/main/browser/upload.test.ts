@@ -145,6 +145,7 @@ function cdpWith(answer: (page: ReturnType<typeof fakePage>) => Promise<UploadAn
     back: () => Promise.reject(new Error('unused')),
     reload: () => Promise.reject(new Error('unused')),
     tabs: () => Promise.reject(new Error('unused')),
+    resize: () => Promise.reject(new Error('unused')),
     controls: new SurfaceControls({ changed: () => {} }),
     log: () => {},
     uploadFiles: (paths) => uploadFiles(paths),

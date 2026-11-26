@@ -40,29 +40,29 @@ const ROOM_BELOW = 300
 export function SubagentBadge({
   parent,
   subagents,
-  onEnter,
+  onOpen,
 }: {
   parent: SessionSummary
   subagents: SessionSummary[]
-  /** The pointer came onto the badge, whose list takes the place of the row's own card. */
-  onEnter: () => void
+  /** The badge's list opened, taking the place of the row's own card. */
+  onOpen: () => void
 }) {
   const showFinished = useViewStore((s) => s.showFinishedSubagents)
   const listed = listedSubagents(subagents, showFinished)
   if (listed.length === 0) return null
-  return <BadgeCard parent={parent} listed={listed} showFinished={showFinished} onEnter={onEnter} />
+  return <BadgeCard parent={parent} listed={listed} showFinished={showFinished} onOpen={onOpen} />
 }
 
 function BadgeCard({
   parent,
   listed,
   showFinished,
-  onEnter,
+  onOpen,
 }: {
   parent: SessionSummary
   listed: SessionSummary[]
   showFinished: boolean
-  onEnter: () => void
+  onOpen: () => void
 }) {
   const { t } = useTranslation('sidebar')
   const [open, setOpen] = useState(false)
@@ -119,8 +119,10 @@ function BadgeCard({
           details.cancel()
           return
         }
-        if (next) setSide(roomySide(trigger.current))
-        else menuOpen.current = false
+        if (next) {
+          setSide(roomySide(trigger.current))
+          onOpen()
+        } else menuOpen.current = false
         setOpen(next)
       }}
     >
@@ -129,7 +131,6 @@ function BadgeCard({
         delay={300}
         closeDelay={CLOSE_DELAY}
         aria-label={label}
-        onPointerEnter={onEnter}
         render={
           // As an image, its label goes into the name of the row's button around it.
           <span

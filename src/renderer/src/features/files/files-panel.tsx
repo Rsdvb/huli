@@ -1,13 +1,23 @@
-import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react'
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react'
 import {
   ArrowRight01Icon,
   CodeIcon,
   FileAddIcon,
+  FileUploadIcon,
   Folder01Icon,
   FolderAddIcon,
   MinusSignSquareIcon,
   MoreHorizontalIcon,
   Search01Icon,
+  ViewIcon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { ProjectFolder } from '@shared/agent-host'
@@ -16,8 +26,10 @@ import type { ChangeStatus } from '@shared/git'
 import { SegmentedControl } from '@renderer/components/affect/segmented-control'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@renderer/components/ui/dropdown-menu'
@@ -33,6 +45,7 @@ import { Skeleton } from '@renderer/components/ui/skeleton'
 import { toast } from '@renderer/components/ui/toast'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { LineCounts } from '@renderer/features/git/rows'
+import { chooseFiles } from '@renderer/features/session/composer/attachments'
 import { MENTION_LIMIT } from '@renderer/features/session/composer/mentions'
 import {
   PaneBody,
@@ -43,9 +56,15 @@ import {
   PanelButton,
 } from '@renderer/features/shell/panel-button'
 import { errorMessage, host } from '@renderer/lib/host'
-import { hostOfPath } from '@renderer/lib/host-paths'
 import { formatShortcut, isMod, isWeb } from '@renderer/lib/platform'
-import { diffId, openDiff, openFile, useFilesStore, watchFiles } from '@renderer/stores/files'
+import {
+  diffId,
+  openDiff,
+  openFile,
+  setHideIgnored,
+  useFilesStore,
+  watchFiles,
+} from '@renderer/stores/files'
 import { openGitPane } from '@renderer/features/git/pane/open-pane'
 import { openGitDialog, useGitStore } from '@renderer/stores/git'
 import { useFurtherFolders } from '@renderer/stores/projects'
@@ -57,10 +76,12 @@ import { columnOf, saveColumn } from './column'
 import { FileLinkMenu } from './file-link'
 import { FileTree, type TreeEdit } from './file-tree'
 import { openInEditor } from './open-in-editor'
-import { hostFilePath } from './operations'
+import { hostFilePath, isLocalProject } from './operations'
 import { FileTypeIcon } from './file-type-icon'
 import { folderOf, nameOf, rankPaths, type PathMatch } from './paths'
 import { basename } from '@renderer/lib/format'
+import { uploadInto, useUploadDrop, type Incoming } from './upload'
+import { ReplacePrompt } from './upload-prompt'
 import { VirtualRows } from './virtual-rows'
 
 const SEARCH_DELAY_MS = 250
@@ -112,7 +133,7 @@ function FilesPane({ projectPath, panel, roots }: FilesPanelProps & { roots: Fil
   const openPath = useViewStore((s) => fileOfKey(s.sideDoc[panel]))
   const isRepo = useGitStore((s) => !!s.status[projectPath]?.repo)
   // Editors open folders on this computer only.
-  const local = !isWeb && hostOfPath(projectPath) === null
+  const local = isLocalProject(projectPath)
   const [query, setQuery] = useState(() => columnOf(columnKey).query)
   const [searching, setSearching] = useState(() => columnOf(columnKey).searching)
   const changes = useFileChanges(projectPath)
@@ -128,12 +149,15 @@ function FilesPane({ projectPath, panel, roots }: FilesPanelProps & { roots: Fil
   // A name typed in the tree for a new file or folder or a rename, and Collapse all's count.
   const [edit, setEdit] = useState<TreeEdit | null>(null)
   const [collapsed, setCollapsed] = useState(0)
+  const hideIgnored = useFilesStore((s) => s.hideIgnored)
   // A folder with no files yet, as a new scratch session's, has nothing to list or open, so the
   // pane says so once, in its middle, instead of in each half, until a file is being made.
   const bare =
     useFilesStore((s) => {
       const files = s.byProject[projectPath]
-      return !!files && !files.error && files.paths.length === 0 && files.folders.length === 0
+      if (!files || files.error) return false
+      const { paths, folders, ignored, ignoredFolders } = files
+      return paths.length + folders.length + ignored.length + ignoredFolders.length === 0
     }) && edit === null
   const listed = useFilesStore((s) => !!s.byProject[projectPath] && !s.byProject[projectPath].error)
   // New file and New folder go into the project's folder, in the tree, shown for them.
@@ -142,6 +166,21 @@ function FilesPane({ projectPath, panel, roots }: FilesPanelProps & { roots: Fil
     setMode('all')
     setEdit({ kind: 'new', folder: '', type })
   }
+  // Chosen files go into the tree's chosen folder, or the project's when the tree is not shown.
+  const uploadRef = useRef<((incoming: Incoming[]) => void) | null>(null)
+  const uploadChosen = (files: File[]) => {
+    const incoming = files.map((file) => ({ file, folder: false }))
+    if (incoming.length === 0) return
+    if (uploadRef.current) return uploadRef.current(incoming)
+    stopSearching()
+    setMode('all')
+    void uploadInto(projectPath, panel, '', incoming)
+  }
+  // An empty folder shows no tree, so a drop anywhere on it goes into the project's folder.
+  const emptyDrop = useUploadDrop(
+    () => '',
+    (folder, incoming) => void uploadInto(projectPath, panel, folder, incoming),
+  )
 
   // The list follows the files while the pane shows; window focus refreshes it through the git
   // status it brings.
@@ -171,6 +210,7 @@ function FilesPane({ projectPath, panel, roots }: FilesPanelProps & { roots: Fil
         edit={edit}
         onEdit={setEdit}
         collapsed={collapsed}
+        uploadRef={uploadRef}
       />
     )
   const treeList = roots ? (
@@ -214,7 +254,7 @@ function FilesPane({ projectPath, panel, roots }: FilesPanelProps & { roots: Fil
                 )}
               </>
             )}
-            {(!bare || local) && (
+            {(!bare || local || (isWeb && listed)) && (
               <DropdownMenu>
                 <Tooltip>
                   <TooltipTrigger
@@ -235,6 +275,15 @@ function FilesPane({ projectPath, panel, roots }: FilesPanelProps & { roots: Fil
                   <TooltipContent>{t('panel.more')}</TooltipContent>
                 </Tooltip>
                 <DropdownMenuContent align="end" className="w-56">
+                  {/* The browser's picker opens while the click lasts. */}
+                  {isWeb && listed && (
+                    <DropdownMenuItem
+                      onClick={() => void chooseFiles().then((files) => uploadChosen(files))}
+                    >
+                      <PaneIcon icon={FileUploadIcon} size={16} />
+                      {t('upload.choose')}
+                    </DropdownMenuItem>
+                  )}
                   {!bare && (
                     <DropdownMenuItem
                       onClick={() => (searching ? stopSearching() : setSearching(true))}
@@ -255,6 +304,18 @@ function FilesPane({ projectPath, panel, roots }: FilesPanelProps & { roots: Fil
                       <PaneIcon icon={CodeIcon} size={16} />
                       {t('panel.openInEditor')}
                     </DropdownMenuItem>
+                  )}
+                  {isRepo && mode === 'all' && !bare && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuCheckboxItem
+                        checked={!hideIgnored}
+                        onCheckedChange={(shown) => setHideIgnored(!shown)}
+                      >
+                        <PaneIcon icon={ViewIcon} size={16} />
+                        {t('panel.showIgnored')}
+                      </DropdownMenuCheckboxItem>
+                    </>
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -301,11 +362,17 @@ function FilesPane({ projectPath, panel, roots }: FilesPanelProps & { roots: Fil
       </PaneContext>
       <div className="kp-body">
         {bare ? (
-          <PaneEmpty
-            icon={<PaneIcon icon={Folder01Icon} size={20} />}
-            title={t('panel.emptyTitle')}
-            text={t('panel.emptyDescription')}
-          />
+          <div
+            className="kp-tree flex-1"
+            data-drop={emptyDrop.over !== null || undefined}
+            {...emptyDrop.handlers}
+          >
+            <PaneEmpty
+              icon={<PaneIcon icon={Folder01Icon} size={20} />}
+              title={t('panel.emptyTitle')}
+              text={t('panel.emptyDescription')}
+            />
+          </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">{treeList}</div>
         )}
@@ -313,6 +380,7 @@ function FilesPane({ projectPath, panel, roots }: FilesPanelProps & { roots: Fil
           <ChangesFoot projectPath={projectPath} panel={panel} changes={changes} />
         )}
       </div>
+      <ReplacePrompt panel={panel} />
     </PaneBody>
   )
 }
@@ -513,6 +581,7 @@ function Browser({
   edit,
   onEdit,
   collapsed,
+  uploadRef,
 }: {
   projectPath: string
   panel: string
@@ -524,6 +593,7 @@ function Browser({
   edit: TreeEdit | null
   onEdit: (edit: TreeEdit | null) => void
   collapsed: number
+  uploadRef: RefObject<((incoming: Incoming[]) => void) | null>
 }) {
   const files = useFilesStore((s) => s.byProject[projectPath])
   if (!files) return <LoadingRows />
@@ -556,6 +626,7 @@ function Browser({
       edit={edit}
       onEdit={onEdit}
       collapsed={collapsed}
+      uploadRef={uploadRef}
     />
   )
 }

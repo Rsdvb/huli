@@ -12,6 +12,7 @@ import { DEFAULT_SUPERVISOR, type SupervisorSettings } from './supervisor'
 import { DEFAULT_TIDY, type TidySettings } from './session-tidy'
 import { DEFAULT_RECYCLE_BIN, type RecycleBinSettings } from './recycle-bin'
 import type { ToolCallView } from './zen-view'
+import { DEFAULT_STARTED_LIMITS, type StartedSessionLimits } from './started-sessions'
 import { BUILTIN_THEME_ID } from './themes'
 import type { AgentId, HarnessId } from './thread'
 import { DEFAULT_PORT_BASE } from './worktree-ports'
@@ -38,6 +39,10 @@ export interface OnboardingState {
 export const NEW_SESSION_LISTS = ['sessions', 'artifacts', 'off'] as const
 export type NewSessionList = (typeof NEW_SESSION_LISTS)[number]
 
+/** What sending while a turn runs does by default: queue it, or steer into the turn. */
+export const RUNNING_SENDS = ['queue', 'steer'] as const
+export type RunningSend = (typeof RUNNING_SENDS)[number]
+
 /**
  * The model the requests Kettu makes itself ask: session titles, branch names, outline titles,
  * commit messages and problem report drafts. `small`: a small model of the task's agent, else the
@@ -59,6 +64,7 @@ export interface SettingsFile {
     language: LanguageSetting
     defaultAgent: AgentId | null // null: pick one on the New session screen each time
     sendKey: 'enter' | 'mod-enter' // the other key inserts a newline
+    runningSend: RunningSend // what sending while a turn runs does; the other shortcut flips it
     restoreLastSession: boolean
     newSessionList: NewSessionList // what New session lists under the input
     confirmQuitWhileRunning: boolean
@@ -161,6 +167,8 @@ export interface SettingsFile {
   webhooks: { port: number }
   // How many workflow step sessions work at once across every task.
   workflow: { maxWorkingSteps: WorkingStepLimit }
+  // How far a session's agent may go starting sessions through Kettu's session tools.
+  startedSessions: StartedSessionLimits
   // source: where updates come from; GitHub only never reaches Kettu's download service.
   updates: { automatic: 'download' | 'restart' | 'notify' | 'off'; source: 'auto' | 'github' }
   privacy: { hideAccount: boolean } // kept so older files still parse; loading turns it off
@@ -440,6 +448,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     language: 'system',
     defaultAgent: null,
     sendKey: 'enter',
+    runningSend: 'queue',
     restoreLastSession: true,
     newSessionList: 'sessions',
     confirmQuitWhileRunning: true,
@@ -503,6 +512,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   recycleBin: { ...DEFAULT_RECYCLE_BIN },
   webhooks: { port: DEFAULT_WEBHOOK_PORT },
   workflow: { maxWorkingSteps: DEFAULT_WORKING_STEPS },
+  startedSessions: { ...DEFAULT_STARTED_LIMITS },
   updates: { automatic: 'download', source: 'auto' },
   privacy: { hideAccount: false },
   browserProfiles: { mode: 'shared' },
@@ -618,6 +628,7 @@ export interface SettingsPatch {
   recycleBin?: Partial<SettingsFile['recycleBin']>
   webhooks?: Partial<SettingsFile['webhooks']>
   workflow?: Partial<SettingsFile['workflow']>
+  startedSessions?: Partial<SettingsFile['startedSessions']>
   updates?: Partial<SettingsFile['updates']>
   privacy?: Partial<SettingsFile['privacy']>
   browserProfiles?: Partial<SettingsFile['browserProfiles']>
@@ -675,6 +686,7 @@ export interface HostSettings {
   // Huli: routines' webhook port; absent from a parent older than it, which leaves the default.
   webhooks?: SettingsFile['webhooks']
   workflow: SettingsFile['workflow']
+  startedSessions: SettingsFile['startedSessions']
   usage: { fromComputer: boolean }
   sessionTitles: boolean // write a title for a session its agent leaves untitled
   claudeTestEntrypoint: string | null

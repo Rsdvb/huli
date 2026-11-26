@@ -14,7 +14,7 @@
     "artifacts": "产物",
     "sharing": "分享",
     "remote": "远程访问",
-    "plugins": "插件",
+    "marketplace": "市场",
     "browser": "浏览器",
     "harnesses": "Harness",
     "memory": "记忆",
@@ -72,6 +72,13 @@
       "description": "另一个按键用于换行。",
       "keywords": "回车 换行 输入框 enter newline composer"
     },
+    "runningSend": {
+      "name": "运行中发送消息",
+      "description": "一轮进行中发送时的默认行为。另一组快捷键执行相反操作；不支持插入的智能体仍会加入队列。",
+      "keywords": "排队 队列 立即发送 插入 插队 运行中 输入框 快捷键 queue steer send now",
+      "queue": "加入队列",
+      "steer": "立即发送"
+    },
     "restore": {
       "name": "启动时恢复上次的会话",
       "description": "分屏会连同其中的窗格一起恢复。"
@@ -106,7 +113,7 @@
     },
     "promptSuggestions": {
       "name": "建议下一条消息",
-      "description": "一轮结束后，空着的输入框显示你接下来可能要说的话，按 Tab 填入。目前只有 Claude Code，借用它的提示词缓存。",
+      "description": "一轮结束后，空着的输入框显示你接下来可能要说的话，按 Tab 填入。由 Agent 自己看着对话来猜，大多借用它的提示词缓存。",
       "keywords": "建议 预测 下一条 消息 补全 输入框 suggestion predict next prompt tab autocomplete"
     },
     "agentPasswords": {
@@ -505,6 +512,12 @@
         "missing": "这个版本没有带灵动岛。系统通知照旧。"
       }
     },
+    "alsoSent": {
+      "description": "插件加的渠道。每个渠道收哪几种，在市场里插件的页上选。",
+      "keywords": "插件 渠道 webhook 群聊 机器人",
+      "none": "还没选要发的通知",
+      "open": "打开 {{plugin}}，它发到 {{channel}}"
+    },
     "islandSides": {
       "name": "灵动岛两侧显示状态",
       "description": "不会盖住菜单栏上的图标和菜单。刘海两侧没有空位时只待在刘海里，鼠标停在刘海上就会展开。",
@@ -513,11 +526,12 @@
       "notch": "只在刘海里",
       "off": "关闭灵动岛"
     },
-    "footer": "只在没有 Kettu 窗口位于前台时显示。",
+    "footer": "只在没有 Kettu 窗口位于前台时显示。窗口在前台时，你没在看的会话结束一轮或需要你时，在窗口里提示。",
     "groups": {
       "preview": "预览",
       "when": "提醒我",
-      "how": "提醒方式"
+      "how": "提醒方式",
+      "alsoSent": "也发到"
     },
     "test": "发送测试通知",
     "testUnsupported": "这个系统不显示通知",
@@ -525,7 +539,7 @@
     "previewTitle": "Claude Code 需要授权",
     "previewBody": "kettu · 运行 {{command}}",
     "previewTime": "现在",
-    "footerWeb": "只在这个页面不在前台时显示。"
+    "footerWeb": "只在这个页面不在前台时显示。页面在前台时，你没在看的会话结束一轮或需要你时，在页面里提示。"
   },
   "account": {
     "name": "Kettu 账号",
@@ -1017,6 +1031,14 @@
     "setBy": "由 {{env}} 指定",
     "showIn": "在{{name}}中显示",
     "noConfig": "没有可显示的配置文件。",
+    "favorites": {
+      "name": "常用模型",
+      "description": "选中的模型按这个顺序排在模型菜单的首页，其余都在更多模型里。",
+      "keywords": "常用模型 模型菜单 首页 更多模型 顺序 排序 置顶 自定义 自动",
+      "reset": "恢复自动",
+      "full": "最多选 {{count}} 个常用模型。关掉一个才能再选。",
+      "move": "移动{{name}}"
+    },
     "startMode": {
       "name": "新会话的模式",
       "description": "新会话一开始使用的权限模式，不论项目自己的设置怎么写。智能体开的会话不会用“完全访问”。",
@@ -1227,6 +1249,13 @@
     "signInRowHint": "由 Harness 自己在终端里登录，Kettu 不经手凭据。",
     "signInUnknownHint": "{{name}} 要到会话开始时才告诉 Kettu 是否已登录；还没登录的话，可以在这里登录。",
     "signInAgain": "在终端中重新登录",
+    "signInEnds": {
+      "name": "登录到期",
+      "days": "{{latest}}前（最早可能 {{earliest}}）· 还有 {{from}}–{{to}} 天",
+      "atMost_other": "{{latest}}前（最早可能 {{earliest}}）· 最多还有 {{count}} 天",
+      "today": "{{latest}}前（最早可能 {{earliest}}）· 最晚今天到期",
+      "ended": "可能已过期"
+    },
     "terminal": {
       "start": "在终端中启动",
       "startHint": "在终端里运行这个 Agent 自己的 CLI，用你正在工作的文件夹，或者另选一个",
@@ -1562,6 +1591,24 @@
         "body": "在这个版本上接回的会话连续两次从 prompt cache 读到的不到上下文的一半。所以现在空闲会话在缓存过期前不释放，不按下面的设置；Claude Code 更新到别的版本后恢复。内存紧张时仍然释放。"
       }
     },
+    "started": {
+      "group": "智能体开的会话",
+      "note": "调高上限会多用你的套餐。",
+      "keywords": "智能体 开的会话 子会话 上限 同时 每天 回报 start_session",
+      "invalid": "填 {{min}} 到 {{max}} 之间的整数。",
+      "working": {
+        "name": "同时工作的个数",
+        "description": "一个会话的智能体开的会话里，最多几个同时在工作。"
+      },
+      "daily": {
+        "name": "每天开的个数",
+        "description": "一个会话的智能体在一个自然日里最多开几个会话。"
+      },
+      "reports": {
+        "name": "每条消息后的回报次数",
+        "description": "你在一个会话里发消息后，它开的会话的回报最多唤醒它几次。"
+      }
+    },
     "priority": {
       "group": "性能",
       "name": "让 Agent 让着你",
@@ -1859,8 +1906,15 @@
       "name": "GitHub",
       "keywords": "源代码 仓库 许可证 反馈 问题 source code repository license issue bug"
     },
+    "issues": {
+      "name": "问题和建议",
+      "description": "在 GitHub 上提 issue，用什么语言都可以。",
+      "keywords": "反馈 联系 问题 建议 功能 feedback contact bug feature request issue",
+      "open": "新建 issue"
+    },
     "groups": {
-      "updates": "更新"
+      "updates": "更新",
+      "contact": "联系我们"
     }
   },
   "pages": {
@@ -1875,14 +1929,13 @@
     "git": "顶栏的分支与更改、PR 和它的检查结果，都靠下面两个工具。",
     "advanced": "网络代理、诊断信息，以及 Kettu 保存在这台电脑上的数据。",
     "advanced_web": "网络代理、诊断信息，以及 Kettu 保存在 {{host}} 上的数据。",
-    "about": "Kettu 的版本和更新。",
+    "about": "Kettu 的版本、更新和联系方式。",
     "archived": "从侧边栏移走但仍保留。恢复后回到原来的位置。",
     "recycle-bin": "删除的东西先放在这里，可以恢复，也可以彻底删除。",
     "artifacts": "页面要读取项目文件或向你的智能体提问时会先问你。只保存自己数据的页面不会问。",
     "sharing": "把产物发布为链接，发布到 Kettu 或你自己的 Cloudflare 账号；发布到 Kettu 的可以选择谁能打开。",
     "remote": "在 iPhone、iPad 或另一台电脑上的 Kettu 里使用这台电脑的会话。",
     "remote_web": "在 iPhone、iPad 或另一台电脑上的 Kettu 里使用 {{host}} 的会话。",
-    "plugins": "你装的插件的设置，以及每个插件的脚本能做什么。装和卸载插件在市场里。",
     "browser": "登录状态、智能体给出的链接在哪里打开，以及它们可以使用的网站。",
     "browserWeb": "智能体回复中的链接会在新标签页中打开。",
     "harnesses": "智能体跑在上面的程序：Claude Code、Codex 等。Kettu 先用你电脑上装好的，没有时再替你装一份。",
@@ -1970,11 +2023,67 @@
     "description": "{{project}} · {{when}}归档",
     "parent": "“{{title}}”的子会话",
     "group": "已归档",
+    "searchPlaceholder": "搜索已归档会话",
+    "project": "项目",
+    "agent": "智能体",
+    "filterProject": "按项目筛选",
+    "filterAgent": "按智能体筛选",
+    "findProject": "查找项目",
+    "allProjects": "全部项目",
+    "allAgents": "全部智能体",
+    "noProjectMatch": "没有匹配的项目",
+    "groupBy": "已归档会话分组方式",
+    "byDate": "按时间",
+    "byProject": "按项目",
+    "count_other": "{{count}} 个会话",
+    "projectCount_other": "{{count}} 个项目",
+    "countInProjects": "{{projects}}中共 {{sessions}}",
+    "filteredCount": "{{shown}} / {{total}}",
+    "clearFilters": "清除筛选",
+    "date": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "earlierThisWeek": "本周早些时候",
+      "earlierThisMonth": "本月早些时候"
+    },
+    "subSessions_other": "{{count}} 个子会话",
+    "openRow": "打开“{{title}}”",
+    "selectRow": "选择“{{title}}”",
+    "toggleRow": "切换选择“{{title}}”",
+    "selectGroup": "选择“{{group}}”中的全部会话",
+    "selectionBar": "已选中的已归档会话",
+    "selectedCount": "已选 {{count}} 个",
+    "selectAllInGroup": "全选“{{group}}”的 {{count}} 个",
+    "selectAll": "全选 {{count}} 个",
+    "clearSelection": "取消选择",
     "restore": "恢复",
     "restored": "已恢复到 {{project}}",
     "restoredUnder": "已恢复到“{{title}}”下",
+    "restoredCount": "已恢复 {{count}} 个会话",
+    "restoredSome": "已恢复 {{done}} / {{total}} 个会话：{{error}}",
     "delete": "删除…",
     "deleted": "会话已删除",
+    "deletedCount": "已删除 {{count}} 个会话",
+    "deletedSome": "已删除 {{done}} / {{total}} 个会话：{{error}}",
+    "deleteOneTitle": "删除“{{title}}”？",
+    "deleteOneBody": "这段对话会从这台电脑上移除，无法撤销。",
+    "deleteOneBodyWithSubs_other": "这段对话会从这台电脑上移除，随它一起归档的 {{count}} 个子会话也会一并删除，无法撤销。",
+    "deleteOneConfirm": "删除会话",
+    "deleteManyTitle": "删除这 {{count}} 个会话？",
+    "deleteManyBody": "这些对话会从这台电脑上移除，随它们一起归档的子会话也会一并删除，无法撤销。",
+    "deleteOneBodyBin": "它会移到回收站，可以从那里恢复。",
+    "deleteOneBodyWithSubsBin_other": "它会和随它一起归档的 {{count}} 个子会话一起移到回收站，可以从那里恢复。",
+    "deleteManyBodyBin": "这些会话会和随它们一起归档的子会话一起移到回收站，可以从那里恢复。",
+    "deleteManyConfirm": "删除 {{count}} 个会话",
+    "searchConversationsPrompt": "想找对话里说过的话？",
+    "searchConversations": "搜索对话",
+    "noMatchTitle": "没有匹配的已归档会话",
+    "noMatchQuery": "没有与“{{query}}”匹配的已归档会话。",
+    "noMatchQueryProject": "{{project}} 中没有与“{{query}}”匹配的已归档会话。",
+    "noMatchQueryAgent": "使用 {{agent}} 的会话中没有与“{{query}}”匹配的。",
+    "noMatchQueryProjectAgent": "{{project}} 中使用 {{agent}} 的会话里没有与“{{query}}”匹配的。",
+    "noMatchProjectAgent": "{{project}} 中没有使用 {{agent}} 的已归档会话。",
+    "noMatchGeneric": "试试清除或调整筛选条件。",
     "emptyTitle": "没有已归档的会话",
     "emptyHint": "可以在侧边栏中从会话的菜单里归档。",
     "keywords": "归档 恢复 archive"
@@ -2093,7 +2202,8 @@
       "relay": "Kettu 中继",
       "relayAt": "Kettu 中继 · {{region}}",
       "ownRelay": "自己的中继",
-      "ownRelayAt": "自己的中继 · {{host}}"
+      "ownRelayAt": "自己的中继 · {{host}}",
+      "noRelay": "无中继 · 仅直连"
     },
     "failed": {
       "not_connected": "{{name}} 没有连上，等它在线后再试。",
@@ -2107,6 +2217,7 @@
       "removed": "已被移除",
       "update_client": "要更新这台电脑的 Kettu",
       "update_host": "要更新它上面的 Kettu",
+      "other_account": "另一个账号",
       "relay": {
         "unreachable": "离线 · 连不上 Kettu 中继",
         "wrong_account": "离线 · 要用那台电脑主人的账号登录",
@@ -2115,6 +2226,10 @@
     },
     "note": "要从手机或其他电脑访问这台电脑，请在<link>远程访问</link>中添加设备。",
     "plainTextKey": "这台电脑连别的电脑用的密钥存在只有当前用户能读的文件里，因为系统没有钥匙串。",
+    "otherAccount": {
+      "title_other": "另一个账号的 {{count}} 台电脑",
+      "body_other": "它们属于另一个 Kettu 账号，不是这里登录的这个。用那个账号登录后就会回来。"
+    },
     "keyFailed": "系统没能解开这台电脑连别的电脑用的密钥，所以连不了别的电脑。",
     "add": {
       "button": "添加电脑…",
@@ -2132,13 +2247,17 @@
       "rejected": "那台电脑没有添加这台电脑。",
       "unreachable": "15 秒内没连上那台电脑。确认两台电脑在同一网络或同一个 VPN 里、那台电脑开着远程访问；用的是你给它加的地址时，确认端口转发还在。",
       "wrong_account": "Kettu 中继只把登录着同一个账号的电脑接到那台电脑上。在这里登录那台电脑所用的账号后再试。",
+      "other_account": "这台电脑属于另一个 Kettu 账号，用那个账号登录后才能用。",
       "signed_out": "这个配对码要经 Kettu 中继连那台电脑，需要 Kettu 账号。先在设置 › 账号里登录，再试一次。",
       "self": "这是本机自己的配对码。要让别的设备连这台电脑，在那台设备上扫码或粘贴。",
+      "other_host": "这个配对链接属于另一台电脑，不是 {{name}}。请在 {{name}} 上打开添加设备，粘贴那里的链接。",
       "update_client": "这台电脑的 Kettu 太旧，连不了那台电脑。更新 Kettu 后再试。",
       "update_host": "那台电脑上的 Kettu 太旧，这台电脑连不了。在那台电脑上更新 Kettu 后再试。",
       "retry": "重试",
       "newLink": "粘贴新链接",
       "added": "已添加 {{name}}",
+      "updated": "已更新 {{name}}",
+      "updatedBody": "{{name}} 之前已经配对过，已更新它的中继和地址并重新连接。",
       "nameLabel": "这台电脑在 {{name}} 上的名字",
       "nameHint": "{{name}} 的设备列表里显示这个名字，以后在 设置 › 电脑 › {{name}} 里改。",
       "done": "完成",
@@ -2221,9 +2340,18 @@
       "gone": "这台电脑已经不在列表里了。",
       "connection": "连接",
       "route": "怎么连",
+      "notConnected": "未连接",
+      "relay": "中继",
       "addresses": "地址",
+      "noAddresses": "无",
       "edit": "编辑…",
-      "addressesNote": "{{name}} 连上时会告诉这台电脑最新的地址；它换了端口又一直没连上时，在这里改。",
+      "addressesNote": "{{name}} 连上时会自动更新中继和地址。如果它在离线时切换了中继或换了端口，粘贴它的新配对链接更新连接，或在这里编辑地址。",
+      "updateRelay": {
+        "button": "更新…",
+        "title": "更新 {{name}} 的中继",
+        "hint": "在 {{name}} 的 Kettu 里打开 设置 › 远程访问 › 添加设备，或在上面运行 <code>kettu pair</code>，把显示的链接粘贴到这里。这会更新 {{name}} 的中继和地址，不用先移除。",
+        "submit": "更新"
+      },
       "sshTarget": "SSH 地址",
       "sshNote": "Kettu 用你自己的 SSH 配置和 agent 连 {{name}}，和在终端里运行 ssh {{target}} 一样。",
       "self": "这台电脑在 {{name}} 上",
@@ -2259,6 +2387,10 @@
       "update_host": {
         "title": "要更新 {{name}} 上的 Kettu",
         "body": "{{name}} 上的 Kettu 太旧，读不懂这台电脑说的。在它上面更新 Kettu 后会自动连上。"
+      },
+      "other_account": {
+        "title": "{{name}} 属于另一个账号",
+        "body": "这台电脑属于另一个 Kettu 账号，用那个账号登录后才能用。"
       },
       "kettu": {
         "name": "Kettu",
@@ -2345,6 +2477,12 @@
       "note": "连接时两台电脑会显示同一个验证码。确认一致后，在那台电脑上添加这台电脑。",
       "connect": "连接",
       "connectTo": "连接 {{name}}",
+      "computer": {
+        "added": "已添加",
+        "remoteOff": "没打开远程访问",
+        "remoteOffHint": "没打开远程访问，或没让同一个账号的设备找到它。在那台电脑的设置 › 远程访问里打开。",
+        "lastSeen": "上次在线 {{ago}}"
+      },
       "refresh": "刷新",
       "or": "或用配对链接、SSH 连接",
       "back": "返回",
@@ -2368,13 +2506,41 @@
         "intro": "稍后这里和 {{name}} 上会显示一个验证码。",
         "check": "确认 {{name}} 上显示的是同一个验证码。",
         "differs": "不一致就取消：可能是别的电脑在应答。",
-        "matched": "验证码一致。在 {{name}} 上点添加即可完成。",
+        "matched": "验证码一致。在 {{name}} 上或你的另一台能用它的设备上添加这台电脑。",
         "match": "验证码一致"
       },
       "failed": {
         "void": "{{name}} 添加之前请求就结束了：已过期，或在那边被关掉了。再试一次。",
         "rejected": "{{name}} 没有添加这台电脑。",
         "unreachable": "经 Kettu 中继连不上 {{name}}。确认它开着机并已登录，再试一次。"
+      },
+      "connectAll": "全部连接",
+      "connectAllLabel": "连接全部 {{count}} 台电脑",
+      "reverse": "也让 {{name}} 用这台电脑",
+      "reverseAdded": "{{name}} 也能用这台电脑了。",
+      "reverseFailed": "没能让 {{name}} 用这台电脑。还想这样的话，在设置 › 远程访问里添加它。",
+      "reverseUnsupported": "{{name}} 上的 Kettu 没有窗口，用不了别的电脑。",
+      "pairAll": {
+        "title": "连接 {{count}} 台电脑",
+        "intro": "稍后这里和每台电脑上会显示一个验证码。",
+        "check": "确认每台电脑，或你的另一台能用它们的设备上，显示的是这个验证码。",
+        "each": "或逐台核对",
+        "matched": "验证码一致。在每台电脑上，或你的另一台能用它们的设备上添加这台电脑。",
+        "added_other": "已连接 {{count}} 台电脑",
+        "partial": "已连接 {{count}} 台中的 {{added}} 台电脑",
+        "none": "没有添加任何电脑",
+        "state": {
+          "connecting": "正在连接…",
+          "matched": "等待添加…",
+          "added": "已添加",
+          "failed": "没有添加"
+        },
+        "failed": {
+          "void": "已过期，或在那边被关闭",
+          "rejected": "在那边被拒绝了",
+          "unreachable": "连不上它",
+          "other": "无法通过中继连上它"
+        }
       }
     },
     "load": {
@@ -2454,6 +2620,7 @@
       "add": "添加设备…",
       "addOff": "打开远程访问后才能添加设备。",
       "online": "在线",
+      "otherAccount": "另一个账号",
       "seenToday": "今天 {{time}} 连接过",
       "seenYesterday": "昨天 {{time}} 连接过",
       "seenDaysAgo_other": "{{count}} 天前连接过",
@@ -2591,6 +2758,8 @@
       "joinedAccount": "{{date}}，通过 Kettu 账号添加",
       "joinedLink": "{{date}}，粘贴链接添加",
       "lastConnected": "上次连接",
+      "otherAccount": "它上次连接时登录的 Kettu 账号和这台电脑的不同，所以连不上。这台电脑登录回那个账号后它照旧能用，也可以移除它。",
+      "otherAccount_web": "它上次连接时登录的 Kettu 账号和 {{host}} 的不同，所以连不上。{{host}} 登录回那个账号后它照旧能用，也可以移除它。",
       "onlineSince": "现在在线，{{time}} 连上",
       "never": "还没连接过",
       "version": "Kettu 版本",
@@ -2624,7 +2793,11 @@
         "sessionDeleted": "删除会话“{{title}}”",
         "sessionDeletedUnknown": "删除了一个会话",
         "terminalOpened": "打开终端",
-        "terminalClosed": "关闭终端"
+        "terminalClosed": "关闭终端",
+        "pairedSsh": "经 SSH 加入这台电脑",
+        "pairedSsh_web": "经 SSH 加入 {{host}}",
+        "pairedReverse": "这台电脑加入它时添加",
+        "pairedReverse_web": "{{host}} 加入它时添加"
       },
       "remove": {
         "name": "移除这台设备",
@@ -2635,7 +2808,9 @@
         "body": "它马上断开，之后连不上这台电脑；它缓存的会话列表，等它下次连上时清掉。要再用，得重新扫码添加。",
         "body_web": "它马上断开，之后连不上 {{host}}；它缓存的会话列表，等它下次连上时清掉。要再用，得重新扫码添加。",
         "confirm": "移除"
-      }
+      },
+      "joinedSsh": "{{date}}，经 SSH 添加",
+      "joinedReverse": "{{date}}，这台电脑加入它时添加"
     },
     "time": {
       "today": "今天 {{time}}",
@@ -2714,12 +2889,25 @@
         }
       },
       "note": {
-        "switch": "Kettu 先检查中继和密钥，过了才切换。现在在线的设备马上跟过去；其余的下次在同一网络连到这台电脑时跟过去，或者重新添加。",
+        "switch": "Kettu 先检查中继和密钥，过了才切换。现在在线的设备马上跟过去；不在线的设备下次在同一网络连到这台电脑时跟过去，或在设备上粘贴新的配对链接更新。",
         "own": "一次只用一个中继。你的 Kettu 账号照旧把这台电脑的通知发到 iPhone。",
         "pinned": "电脑和 iPhone 上的 Kettu 应用连得上它。浏览器没法按指纹认证书，要用有域名的中继。",
         "local": "本地模式下 Kettu 不向自己的服务发送任何东西。中继是你自己的，所以照用。",
-        "switch_web": "Kettu 先检查中继和密钥，过了才切换。现在在线的设备马上跟过去；其余的下次在同一网络连到 {{host}} 时跟过去，或者重新添加。",
+        "switch_web": "Kettu 先检查中继和密钥，过了才切换。现在在线的设备马上跟过去；不在线的设备下次在同一网络连到 {{host}} 时跟过去，或在设备上粘贴新的配对链接更新。",
         "own_web": "一次只用一个中继。你的 Kettu 账号照旧把 {{host}} 的通知发到 iPhone。"
+      },
+      "confirm": {
+        "offTitle": "切换到不用中继？",
+        "offBody_other": "已配对的 {{count}} 台设备之后只能在同一网络、经 VPN 或 SSH 直接连到这台电脑。不在线的设备不会自动跟随后面的中继切换。",
+        "offBody_web_other": "已配对的 {{count}} 台设备之后只能在同一网络、经 VPN 或 SSH 直接连到 {{host}}。不在线的设备不会自动跟随后面的中继切换。",
+        "offConfirm": "切换到不用中继",
+        "kettuTitle": "切换到 Kettu 中继？",
+        "kettuBody_other": "有 {{count}} 台设备当前不在线，不会自动跟着切换到 Kettu 中继。它们之后需要在同一网络直连这台电脑，或在设备上粘贴新的配对链接来更新中继。",
+        "kettuBody_web_other": "有 {{count}} 台设备当前不在线，不会自动跟着切换到 Kettu 中继。它们之后需要在同一网络直连 {{host}}，或在设备上粘贴新的配对链接来更新中继。",
+        "kettuConfirm": "切换到 Kettu 中继",
+        "offlineTitle_other": "{{count}} 台离线设备不会自动跟随",
+        "offlineBody_other": "只有现在在线的设备会马上收到新中继。不在线的设备之后需要在同一网络直连这台电脑，或在设备上粘贴新的配对链接来更新中继。",
+        "offlineBody_web_other": "只有现在在线的设备会马上收到新中继。不在线的设备之后需要在同一网络直连 {{host}}，或在设备上粘贴新的配对链接来更新中继。"
       },
       "own": {
         "address": "地址",
@@ -2785,7 +2973,20 @@
         "cancelled": "{{name}} 取消了连接请求",
         "expired": "{{name}} 的连接请求已过期",
         "stopped": "远程访问已停止，{{name}} 的连接请求随之结束"
-      }
+      },
+      "bodyOn": "{{name}} 想连接 {{host}}。它登录着你的 Kettu 账号，只有是你自己在设置它时才添加。",
+      "answeredOn": {
+        "added": "{{name}} 已在 {{place}} 上添加",
+        "rejected": "{{name}} 已在 {{place}} 上被拒绝"
+      },
+      "gone": "{{name}} 的请求已在别处答复，或已结束",
+      "groupTitle": "要把这台设备加到 {{count}} 台电脑吗？",
+      "groupBody": "{{name}} 想连接 {{hosts}}。它登录着你的 Kettu 账号，只有是你自己在设置它时才添加。",
+      "groupCheck": "确认 {{name}} 上为这几台电脑显示的是同一个验证码。"
+    },
+    "joined": {
+      "toast": "{{name}} 已加入 {{host}}",
+      "remove": "移除"
     }
   },
   "usage": {
@@ -3306,6 +3507,7 @@
       "relay": "会改变设备从别的网络经哪个中继连到这台电脑。",
       "proxy": "智能体、npx 和更新都会经过这个代理。",
       "source": "会改变 Kettu 下载更新的来源。",
+      "startedLimits": "智能体将能开更多会话，也会多用你的套餐。",
       "computerForeground": "智能体的操作将能把应用窗口短暂切到前台。"
     }
   },
@@ -3707,60 +3909,5 @@
       "name": "不能修改的按键",
       "description": "后退、前进、切换窗格、关闭和缩放的按键保持不变。"
     }
-  },
-  "plugins": {
-    "back": "插件",
-    "loading": "正在读取插件…",
-    "readFailed": "读不了插件：{{error}}",
-    "retry": "重试",
-    "empty": {
-      "title": "还没有装插件",
-      "hint": "在市场里装的插件会出现在这里，连同它们的设置。"
-    },
-    "notInstalled": "这个插件没有装。",
-    "row": {
-      "open": "打开 {{name}}",
-      "settings_other": "{{count}} 项设置",
-      "noSettings": "没有设置"
-    },
-    "state": {
-      "off": "已关闭",
-      "noScript": "没有脚本",
-      "idle": "脚本待命",
-      "active": "脚本运行中",
-      "disabled": "脚本崩溃太多次，已停用"
-    },
-    "settings": {
-      "heading": "设置",
-      "none": "这个插件没有设置。"
-    },
-    "secret": {
-      "set": "已设置",
-      "notSet": "未设置",
-      "setAction": "设置…",
-      "change": "更改…",
-      "clear": "清除",
-      "save": "保存",
-      "cancel": "取消",
-      "placeholder": "粘贴密钥",
-      "note": "存在这台电脑上。只有这个插件的脚本读得到，智能体读不到。"
-    },
-    "channels": {
-      "hint": "打开的几类通知会发到这里。不选的话什么都不会发。"
-    },
-    "script": {
-      "heading": "它的脚本能做什么",
-      "none": "这个插件不运行脚本。",
-      "nothing": "它的脚本除了自己的设置和存储，什么都不要。",
-      "high": "高风险"
-    },
-    "manage": {
-      "heading": "管理",
-      "enabled": "启用",
-      "uninstallName": "卸载",
-      "uninstallHint": "连同它的设置、密钥和存储的数据一起删除。",
-      "uninstall": "卸载…"
-    },
-    "changeFailed": "改不了 {{name}}：{{error}}"
   }
 }

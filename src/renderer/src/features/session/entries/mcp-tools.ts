@@ -82,6 +82,7 @@ const TARGETS = {
   browser_pdf: [],
   browser_trace: [],
   browser_storage_state: ['name', 'action'],
+  browser_resize: ['size'],
   device_list: [],
   device_open: [],
   device_close: [],
@@ -154,6 +155,11 @@ const TARGETS = {
   request_secrets: ['title'],
   read_theme: [],
   set_theme_colors: ['name'],
+  list_routines: [],
+  create_routine: ['name'],
+  update_routine: ['name', 'routine'],
+  delete_routine: ['routine'],
+  run_routine: ['routine'],
 } satisfies Record<KettuTool, readonly Target[]>
 
 const known = (tool: string): tool is KettuTool => Object.hasOwn(TARGETS, tool)

@@ -135,6 +135,10 @@
         "noChange": "This settings change is no longer on record",
         "noUndo": "This change cannot be undone"
       },
+      "routine": {
+        "gone": "This Routine card is no longer waiting for an answer",
+        "answered": "This Routine card was already answered"
+      },
       "step": {
         "gone": "This step is no longer waiting for an answer",
         "answered": "This step was already answered"
@@ -298,6 +302,10 @@
     "marketUnlist": "Wants to unlist {{name}} from the Kettu Marketplace",
     "settingsChange_one": "Wants to change {{count}} setting",
     "settingsChange_other": "Wants to change {{count}} settings",
+    "routineCreate": "Wants to create the Routine {{name}}",
+    "routineUpdate": "Wants to change the Routine {{name}}",
+    "routineDelete": "Wants to delete the Routine {{name}}",
+    "routineRun": "Wants to run the Routine {{name}} now",
     "secretRequest": "Needs {{title}} from you",
     "themeChange": "Wants to change Kettu’s theme colors"
   },
@@ -695,8 +703,12 @@
     "notFolder": "{{path}} is not a folder",
     "notFile": "{{path}} is not a file",
     "outsideProject": "{{path}} is outside the project",
+    "folderInTheWay": "A folder is at {{path}}, so a file cannot replace it",
+    "fileInTheWay": "{{path}} is not a folder, so a folder cannot go into it",
     "tooManyCopies": "Too many copies of {{name}}",
-    "notExist": "{{path}} does not exist"
+    "notExist": "{{path}} does not exist",
+    "previewRefused": "{{path}} is outside the folder or hidden, so it cannot be previewed",
+    "previewNotHtml": "{{path}} is not an HTML file"
   },
   "worktree": {
     "branchDeleteFailed": "Could not delete {{branch}}: {{reason}}",
@@ -784,7 +796,7 @@
       },
       "auto": {
         "name": "Auto",
-        "description": "Approve edits and safe commands; ask before irreversible actions"
+        "description": "Allows routine edits, safe commands, and reversible tools; asks before deleting core files or other sensitive actions"
       },
       "plan": {
         "name": "Plan",
@@ -793,6 +805,46 @@
       "fullAccess": {
         "name": "Full access",
         "description": "Never asks. Applies between turns, once its commands end, restarting agy"
+      }
+    },
+    "auto": {
+      "allowSessionMcp": "Allow `{{tool}}` for this session",
+      "allowSessionDir": "Allow edits in `{{dir}}` for this session",
+      "allowSessionCommand": "Allow `{{command}}` for this session",
+      "reason": {
+        "userRule": "Matches an ask rule in your Antigravity settings",
+        "deleteCore": "Deletes a core file or directory: {{target}}",
+        "deleteRecursive": "Recursively deletes files or directories",
+        "deleteFiles": "Deletes files or directories",
+        "moveCore": "Moves a core file or directory: {{target}}",
+        "sensitiveWrite": "Modifies a protected sensitive file: {{target}}",
+        "sensitiveRead": "Reads a sensitive credential or key file: {{target}}",
+        "outsideWrite": "Modifies a file outside the workspace: {{target}}",
+        "sensitiveUrl": "Accesses a restricted or non-public URL",
+        "sensitiveEnv": "Overrides a sensitive environment variable: {{name}}",
+        "privilegedCommand": "Runs a privileged or system-level command: {{command}}",
+        "systemMutation": "Changes system permissions or terminates processes: {{command}}",
+        "opaqueCommand": "Runs an opaque script or external command: {{command}}",
+        "complexCommand": "Uses complex shell syntax that cannot be verified statically",
+        "remoteScript": "Downloads and executes a remote script",
+        "destructiveCommand": "Runs a destructive command: {{command}}",
+        "destructiveScript": "Inline script contains destructive or deletion actions: {{command}}",
+        "sensitiveScript": "Inline script writes files or accesses sensitive paths: {{command}}",
+        "gitConfigFlag": "Git command sets config flags that can execute commands",
+        "gitDestructive": "Irreversible Git operation: {{command}}",
+        "gitForcePush": "Force-pushes and rewrites remote Git history",
+        "gitPush": "Pushes commits to a remote repository",
+        "gitDiscard": "Discards uncommitted local changes",
+        "gitRewrite": "Rewrites branches or history: {{command}}",
+        "remoteIrreversible": "Irreversible remote or publish action: {{command}}",
+        "remoteWrite": "External write action: {{command}}",
+        "mcpDestructive": "Destructive or irreversible MCP tool: {{tool}}",
+        "mcpSensitive": "Sensitive external or permission-changing MCP tool: {{tool}}",
+        "mcpUnknown": "External MCP tool: {{tool}}",
+        "deleteArtifact": "Deletes an artifact",
+        "terminalInput": "Sends input to an interactive terminal",
+        "computerControl": "Controls desktop apps on this computer",
+        "writeArtifactData": "Writes persistent artifact data"
       }
     },
     "fullAccess": {
@@ -979,6 +1031,7 @@
       "notSaved": "Codex hasn't saved this session yet. Send a message first, then choose Start anyway.",
       "stillLoaded": "Codex is still busy with this session and couldn't reopen it. Try again once it's idle."
     },
+    "heldElsewhere": "This session is still open in another Codex program, such as the Codex app, a terminal or an editor. Close it there and try again in a minute.",
     "option": {
       "mode": "Mode",
       "modeDescription": "Approval and sandboxing preset for the session",
@@ -1130,6 +1183,10 @@
       "plan": {
         "description": "Turn plan mode on."
       },
+      "fast": {
+        "description": "Toggle fast mode for the current session.",
+        "hint": "[on|off|status]"
+      },
       "mcp": {
         "description": "Show the status of the MCP servers, or reconnect them.",
         "hint": "[reconnect]"
@@ -1278,6 +1335,15 @@
         "stop": "stop",
         "interrupt": "interrupt"
       }
+    },
+    "fast": {
+      "on": "Fast mode is now on.",
+      "off": "Fast mode is now off.",
+      "statusOn": "Fast mode is on.",
+      "statusOff": "Fast mode is off.",
+      "unsupported": "The current model ({{model}}) does not report fast mode support.",
+      "unsupportedNoModel": "The current model does not report fast mode support.",
+      "usage": "Command \"/fast\" accepts no arguments, or `on`, `off`, or `status`."
     },
     "noValue": "Codex has no value {{value}} for {{option}}",
     "cannotSignOut": "Codex cannot sign out here",
@@ -1517,7 +1583,12 @@
     "permission": {
       "allowAlways": "Always allow in this session"
     },
-    "signInFirst": "Sign in to Cline before starting a session"
+    "signInFirst": "Sign in to Cline before starting a session",
+    "compact": {
+      "command": "Compact the session’s context",
+      "nothing": "There’s nothing to compact yet.",
+      "off": "Context compaction is turned off in Cline’s own settings."
+    }
   },
   "question": {
     "other": "Something else…"
@@ -1766,6 +1837,7 @@
       "kettuField": "The sh.kettu entry has a field this Kettu doesn’t know, {{field}}. It’s ignored.",
       "event": "The sh.kettu entry names an event this Kettu doesn’t know, {{event}}. It’s ignored.",
       "eventPermission": "The event {{event}} is left out: it needs the permission {{permission}}, which the plugin doesn’t ask for.",
+      "settingField": "The setting {{setting}} has a field this Kettu doesn’t know, {{field}}. It’s ignored.",
       "viewField": "The view {{view}} has a field this Kettu doesn’t know, {{field}}. It’s ignored.",
       "viewIcon": "The view {{view}} names an icon this Kettu doesn’t have. It’s left out.",
       "toolsPermission": "The tools are left out: they need the permission tools, which the plugin doesn’t ask for.",

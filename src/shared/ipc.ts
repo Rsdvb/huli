@@ -18,6 +18,7 @@ import type {
   BrowserBounds,
   BrowserOriginDecision,
   BrowserState,
+  PageSizeName,
   SavedStateSummary,
 } from './browser'
 import type { PickColor, PickEvent } from './page-notes'
@@ -26,6 +27,7 @@ import type { ControlAgent, ControlOutcome } from './control'
 import type { DebugStatus } from './debug'
 import type { ComputerPermissionKind, ComputerUseStatus } from './computer-use'
 import type { EditorApp, EditorList } from './editors'
+import type { AttentionNotice } from './attention'
 import type { BusySession, BusyTerminal } from './host-control'
 import type { HostSessionChange } from './host-sessions'
 import type { Locale } from './locale'
@@ -34,8 +36,13 @@ import type { CarriedMedia } from './media'
 import type { Platform } from './platform'
 import type { ProfileDraft } from './provider-profiles'
 import type { DeviceActivity } from './remote/activity'
-import type { HostAdminMethod } from './remote/host-admin'
-import type { DiscoveredHosts, DiscoveryRequestEvent } from './remote/discovery'
+import type { HostAdminMethod, JoinedDevice, JoinedVia } from './remote/host-admin'
+import type {
+  DiscoveredHosts,
+  DiscoveryRequestEvent,
+  PairGroup,
+  RemoteOffer,
+} from './remote/discovery'
 import type {
   HostPairingState,
   HostPairStart,
@@ -76,6 +83,11 @@ import type { IslandState } from './island'
 import type { AgentId, HarnessId } from './thread'
 import type { TrayTarget } from './tray'
 import type { UpdateStatus } from './updates'
+
+/** How a host of the account is connected to: alone, or in a batch under one code. */
+export interface DiscoveredPairOptions {
+  group?: PairGroup
+}
 
 export interface AppInfo {
   name: string
@@ -182,6 +194,8 @@ export type AppCommand =
   | { kind: 'open-project' }
   | { kind: 'new-session' }
   | { kind: 'open-settings'; section?: string }
+  /** A device that joined this computer: its page in Settings, asking to remove it. */
+  | { kind: 'remove-device'; deviceId: string }
   /** Kettu was started again to debug, while this run is a normal one. */
   | { kind: 'confirm-debug-restart' }
   | { kind: 'toggle-sidebar' }
@@ -323,6 +337,8 @@ export interface IpcInvokeContract {
   // Huli: the folder a new project is cloned or made in, opening at `defaultPath`; null when
   // cancelled. The host resolves and checks it.
   'dialog:choose-new-project-parent': { args: [defaultPath: string | null]; result: string | null }
+  // `title`: the session's, which names the file; the path written, false when cancelled.
+  'dialog:export-conversation': { args: [title: string, markdown: string]; result: string | false }
   // `defaultPath`: the folder the dialog opens in, the session's; an empty list when cancelled.
   'dialog:add-attachments': {
     args: [kind: 'files' | 'folder', defaultPath: string | null]
@@ -486,8 +502,12 @@ export interface IpcInvokeContract {
   'remote:discovery-pending': { args: []; result: DiscoveryRequestEvent | null }
   'remote:discovery-answer': {
     args: [requestId: number, add: boolean, name: string]
-    result: void
+    result: 'gone' | null
   }
+  // Whether to let another client of the account use this computer: null when nothing is asked.
+  'remote:offer': { args: []; result: RemoteOffer | null }
+  // Turn on turns remote access on; either answer is kept for every client asked about with it.
+  'remote:answer-offer': { args: [clientId: string, turnOn: boolean]; result: void }
   // Null once done, else a code the page words in the user's language.
   'remote:rename-device': { args: [id: string, name: string]; result: 'not_renamed' | null }
   'remote:remove-device': { args: [id: string]; result: 'not_removed' | null }
@@ -500,7 +520,8 @@ export interface IpcInvokeContract {
   'remote:use-own-relay': { args: [input: OwnRelayInput]; result: OwnRelayCheck }
   'hosts:status': { args: []; result: HostsStatus }
   // Pairs with the host of a pasted link, its progress as `hosts:pairing` under the id.
-  'hosts:pair': { args: [link: string]; result: HostPairStart }
+  // When `hostId` is given, only a link for that host is accepted, updating its relay and addresses.
+  'hosts:pair': { args: [link: string, hostId: string | null]; result: HostPairStart }
   // The machines of the user's SSH config Add host may add, read again on each call.
   'hosts:ssh-config': { args: []; result: SshConfigHosts }
   // Adds the machine at an SSH address, its progress as `hosts:pairing` under the id; several
@@ -513,9 +534,14 @@ export interface IpcInvokeContract {
   // out.
   'hosts:discover': { args: []; result: DiscoveredHosts }
   // Pairs with a host `hosts:discover` listed, its progress as `hosts:pairing` under the id.
-  'hosts:pair-discovered': { args: [relayId: string]; result: HostPairStart }
-  // This computer's user saw the same code on both screens, or not, which ends the pairing.
-  'hosts:pair-match': { args: [pairId: number, match: boolean]; result: void }
+  // `group`: the batch it is connected to with one code.
+  'hosts:pair-discovered': {
+    args: [relayId: string, options: DiscoveredPairOptions]
+    result: HostPairStart
+  }
+  // This computer's user saw the same code on both screens, or not, which ends the pairing;
+  // `reverse`: once added, let that host use this computer too.
+  'hosts:pair-match': { args: [pairId: number, match: boolean, reverse: boolean]; result: void }
   // This computer's name on a connected host. Each change answers null once done, else a code
   // the page words in the user's language.
   'hosts:rename': { args: [id: string, name: string]; result: 'not_connected' | null }
@@ -563,6 +589,8 @@ export interface IpcInvokeContract {
   'browser:reload': { args: [sessionId: string]; result: void }
   'browser:stop': { args: [sessionId: string]; result: void }
   'browser:open-external': { args: [sessionId: string]; result: void }
+  // The size the selected tab's page keeps, picked in the pane; held back while the agent has it.
+  'browser:page-size': { args: [sessionId: string, size: PageSizeName]; result: void }
   // The page as it looks now, for the pane to show while an overlay would cover the view.
   'browser:freeze': { args: [sessionId: string]; result: string | null }
   'browser:capture': { args: [sessionId: string]; result: Uint8Array | null }
@@ -678,6 +706,8 @@ export interface IpcEventContract {
   'app:confirm-quit': QuitRequest
   'debug:changed': DebugStatus
   'app:command': AppCommand
+  /** To the focused window: a session's turn ended, failed or waits, in place of a notification. */
+  'app:attention': AttentionNotice
   'report:recording-changed': ReportRecording | null
   'app:shortcut': ForwardedKey
   'artifact:blocked': ArtifactBlockedEvent
@@ -693,6 +723,8 @@ export interface IpcEventContract {
   'remote:pairing': RemotePairingEvent
   /** Sent to every window: a device of the account asks to be added, or that request ended. */
   'remote:discovery': DiscoveryRequestEvent
+  /** Sent to every window: the offer to let another client of the account in, or null. */
+  'remote:offer': RemoteOffer | null
   'hosts:changed': HostsStatus
   /** Sent only to the page that pasted the link. */
   'hosts:pairing': HostPairingEvent
@@ -815,6 +847,8 @@ export interface KettuApi {
     setUnsaved(files: UnsavedFile[]): void
     closeWindow(): void
     onCommand(listener: (command: AppCommand) => void): () => void
+    /** A session's turn ended, failed or waits for the user while this window is in front. */
+    onAttention(listener: (notice: AttentionNotice) => void): () => void
     reportInteractive(): void
     /** App shortcuts typed in an artifact's frame, which the page itself never sees. */
     onShortcut(listener: (key: ForwardedKey) => void): () => void
@@ -968,9 +1002,21 @@ export interface KettuApi {
     answerPairing(codeId: number, add: boolean, name: string): Promise<void>
     /** The discovery request waiting for the owner's answer, if any. */
     pendingDiscovery(): Promise<DiscoveryRequestEvent | null>
-    /** Adds the device of a discovery request, under `name`, or turns it down. */
-    answerDiscovery(requestId: number, add: boolean, name: string): Promise<void>
+    /**
+     * Adds the device of a discovery request, under `name`, or turns it down; `gone` when it was
+     * answered elsewhere first, or ended.
+     */
+    answerDiscovery(requestId: number, add: boolean, name: string): Promise<'gone' | null>
     onDiscovery(listener: (event: DiscoveryRequestEvent) => void): () => void
+    /**
+     * A device joined the host: a browser hears it from its host, while the desktop app's own
+     * window hears nothing, since main posts a system notification.
+     */
+    onDeviceJoined(listener: (joined: { device: JoinedDevice; via: JoinedVia }) => void): () => void
+    /** Whether to ask about letting another client of the account use this computer. */
+    offer(): Promise<RemoteOffer | null>
+    answerOffer(clientId: string, turnOn: boolean): Promise<void>
+    onOffer(listener: (offer: RemoteOffer | null) => void): () => void
     /** Null once renamed, else why not. */
     renameDevice(id: string, name: string): Promise<'not_renamed' | null>
     /** Removes the device and ends its sessions at once; null once removed, else why not. */
@@ -994,8 +1040,11 @@ export interface KettuApi {
   /** Other hosts this computer connects to as a device. */
   hosts: {
     status(): Promise<HostsStatus>
-    /** Pairs with the host of a pasted link, unless it is no link or this computer's own. */
-    pair(link: string): Promise<HostPairStart>
+    /**
+     * Pairs with the host of a pasted link, unless it is no link or this computer's own. When
+     * `hostId` is given, rejects links belonging to any other host.
+     */
+    pair(link: string, hostId?: string): Promise<HostPairStart>
     /** The machines of the user's SSH config, resolved by the system's ssh. */
     sshConfig(): Promise<SshConfigHosts>
     /** Adds the machine at an SSH address over the system's ssh, unless it is no SSH address. */
@@ -1007,9 +1056,9 @@ export interface KettuApi {
     /** The account's hosts this computer may pair with. */
     discover(): Promise<DiscoveredHosts>
     /** Pairs with a host `discover` listed. */
-    pairDiscovered(relayId: string): Promise<HostPairStart>
+    pairDiscovered(relayId: string, options?: DiscoveredPairOptions): Promise<HostPairStart>
     /** Whether the code on both screens is the same; false ends the pairing. */
-    matchPairing(pairId: number, match: boolean): Promise<void>
+    matchPairing(pairId: number, match: boolean, reverse?: boolean): Promise<void>
     /** Renames this computer on a connected host; null once renamed, else why not. */
     rename(id: string, name: string): Promise<'not_connected' | null>
     setAddresses(id: string, addresses: DirectAddress[]): Promise<'unknown_host' | null>
@@ -1101,6 +1150,11 @@ export interface KettuApi {
     chooseProjectFolder(): Promise<string | null>
     /** Huli: the folder a new project goes in; null when cancelled. */
     chooseNewProjectParent(defaultPath: string | null): Promise<string | null>
+    /**
+     * Asks where to save a session's conversation as Markdown, named after its title. The path
+     * written, true where a browser saved it, or false when the user cancelled.
+     */
+    exportConversation(title: string, markdown: string): Promise<string | boolean>
   }
   /** Debug mode: this run's ports, and restarting into it or out of it. */
   debug: {
@@ -1220,6 +1274,8 @@ export interface KettuApi {
     stop(sessionId: string): Promise<void>
     /** Opens the page's current address in the system browser. */
     openExternal(sessionId: string): Promise<void>
+    /** The size the selected tab's page keeps; desktop lets one no agent used fill the pane. */
+    setPageSize(sessionId: string, size: PageSizeName): Promise<void>
     /** A still of the page for the pane to show, after which main hides the view. */
     freeze(sessionId: string): Promise<string | null>
     thaw(sessionId: string): Promise<void>

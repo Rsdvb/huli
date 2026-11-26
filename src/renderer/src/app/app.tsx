@@ -51,6 +51,7 @@ import { prefersReducedMotion, useSettingsStore } from '@renderer/stores/setting
 import { showSearch, useViewStore } from '@renderer/stores/view'
 import { usePathRequest } from '@renderer/web/host-path-request'
 import { useKeyboardShortcuts } from './shortcuts'
+import { useAttentionNotices } from './attention-notices'
 import { useActionLog, useAppCommands } from './commands'
 import { useSnoozeAsk } from '@renderer/features/sidebar/tidy'
 import { useMcpPanelStore } from '@renderer/features/session/mcp/mcp-panel'
@@ -116,6 +117,7 @@ export function App() {
   if (pathAsked && !pathPicker) setPathPicker(true)
   useKeyboardShortcuts()
   useAppCommands()
+  useAttentionNotices()
   useActionLog()
   useReportNotices()
 
@@ -182,8 +184,8 @@ export function App() {
         <ReportDialog />
         {/* Kettu's browser, which sign-ins are brought into, runs in the desktop app alone. */}
         {!isWeb && <SignInsDialog />}
-        {/* Devices of the account ask the host's own windows; a browser is never asked. */}
-        {!isWeb && cloud && <DiscoveryRequestDialog />}
+        {/* Devices of the account ask every window of the hosts it uses, a browser's too. */}
+        {(isWeb || cloud) && <DiscoveryRequestDialog />}
         {pathPicker && (
           <Suspense fallback={null}>
             <HostPathDialog />

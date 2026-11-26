@@ -59,9 +59,14 @@ const NONE: Spots = { pins: [], editor: null }
 const REST_MS = 120
 const MARK = 'data-note'
 
-/** The gutter's number cells, one per drawn row, in the diff's shadow root. */
-function gutterOf(box: HTMLElement): Element | null {
-  return box.querySelector('.files-diff')?.shadowRoot?.querySelector('[data-gutter]') ?? null
+/**
+ * The gutters' number cells, one per drawn row, in the diff's shadow root: one gutter unified, the
+ * old and the new side's side by side, whose cells carry the unified row's index first too.
+ */
+function gutterCells(box: HTMLElement): Element[] {
+  const root = box.querySelector('.files-diff')?.shadowRoot
+  if (!root) return []
+  return [...root.querySelectorAll('[data-gutter]')].flatMap((gutter) => [...gutter.children])
 }
 
 /**
@@ -76,8 +81,8 @@ function placeNotes(
   editing: NoteEditing | null,
   marked: Set<Element>,
 ): { spots: Spots; marked: Set<Element> } {
-  const gutter = gutterOf(box)
-  if (!gutter) return { spots: NONE, marked }
+  const cells = gutterCells(box)
+  if (cells.length === 0) return { spots: NONE, marked }
   const spans = notes.flatMap((note) => {
     const span = noteSpan(fileDiff, note)
     return span ? [{ note, span }] : []
@@ -92,7 +97,7 @@ function placeNotes(
   for (const { note, span } of spans) ends.set(span[1], [...(ends.get(span[1]) ?? []), note])
   const next = new Set<Element>()
   const anchors = new Map<number, Element>()
-  for (const cell of gutter.children) {
+  for (const cell of cells) {
     const at = cell.getAttribute('data-line-index')
     if (at === null) continue
     const row = Number.parseInt(at, 10)

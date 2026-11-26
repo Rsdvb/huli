@@ -1,7 +1,16 @@
-import { answeredUnasked, type ThreadEntry, type ThreadState } from '@shared/thread'
+import {
+  answeredUnasked,
+  diffPathOf,
+  toolContentItems,
+  type ThreadEntry,
+  type ThreadState,
+} from '@shared/thread'
 import { isArtifactWrite } from './entries/artifact-writes'
 import { workflowCardOf } from './entries/workflow-tools'
 import { FOLDED_LINES, FOLD_OVER } from './markdown/code-meta'
+
+const stateSignatures = new WeakMap<ThreadState, string>()
+const entryChars = new WeakMap<ThreadEntry, string>()
 
 // One character per entry, so the thread re-renders only when its shape changes, not on every
 // streamed token: u user, s user message steered into a running turn, a agent, h thought, g
@@ -14,8 +23,23 @@ import { FOLDED_LINES, FOLD_OVER } from './markdown/code-meta'
 // write to global memory are: of their own, never folded into a run.
 export function signatureOf(state: ThreadState | null | undefined): string {
   if (!state) return ''
+  const cached = stateSignatures.get(state)
+  if (cached !== undefined) return cached
   let signature = ''
-  for (const id of state.order) signature += charOf(state.byId[id])
+  for (const id of state.order) {
+    const entry = state.byId[id]
+    if (!entry) {
+      signature += 'o'
+      continue
+    }
+    let ch = entryChars.get(entry)
+    if (ch === undefined) {
+      ch = charOf(entry)
+      entryChars.set(entry, ch)
+    }
+    signature += ch
+  }
+  stateSignatures.set(state, signature)
   return signature
 }
 
@@ -118,18 +142,28 @@ export type Item =
       endId: string | null
       latest: boolean
       toolIds: string[]
+      /** It closes the thread, and what runs on after its turn shows under its end. */
+      still?: boolean
     }
   // The running turn's status, where the reply will start: right after a message you sent.
   | { key: string; type: 'status'; afterSent: boolean }
   // Huli: the 简洁视图's line for a turn's hidden steps, which opens the turn (zen-items.ts).
   | { key: string; type: 'hidden'; turn: string; count: number }
+  // What runs on after the last turn ended, when no reply closes the thread to show it.
+  | { key: string; type: 'still' }
 
 /**
  * The thread's items. Work folds as it happens, so a running turn already reads as it will once it
  * ends: the same rows with the same keys, and a turn ending only adds its reply footer. With
- * `live`, a turn is running and gets its reply footer only when it ends.
+ * `live`, a turn is running and gets its reply footer only when it ends; with `still` and none
+ * running, what runs on after the last turn closes the thread.
  */
-export function buildItems(order: string[], signature: string, live = false): Item[] {
+export function buildItems(
+  order: string[],
+  signature: string,
+  live = false,
+  still = false,
+): Item[] {
   const items: Item[] = []
   const { replacing, after } = replyFooters(order, signature, live)
   for (let i = 0; i < order.length; i++) {
@@ -170,7 +204,10 @@ export function buildItems(order: string[], signature: string, live = false): It
     const closing = after.get(i)
     if (closing) items.push(closing)
   }
-  if (live) items.push({ key: 'status', type: 'status', afterSent: sentItem(items.at(-1)) })
+  const last = items.at(-1)
+  if (live) items.push({ key: 'status', type: 'status', afterSent: sentItem(last) })
+  else if (still && last?.type === 'reply') items[items.length - 1] = { ...last, still: true }
+  else if (still && last) items.push({ key: 'still', type: 'still' })
   return items
 }
 
@@ -285,7 +322,10 @@ function changedFiles(toolIds: string[], byId: Record<string, ThreadEntry>): num
   for (const id of toolIds) {
     const entry = byId[id]
     if (entry?.kind !== 'tool') continue
-    for (const content of entry.content) if (content.type === 'diff') paths.add(content.path)
+    for (const content of toolContentItems(entry)) {
+      const path = diffPathOf(content)
+      if (path !== null) paths.add(path)
+    }
   }
   return paths.size
 }
@@ -301,11 +341,20 @@ const agentHeights = new WeakMap<ThreadEntry, number>()
  */
 export function estimateOf(item: Item, byId: Record<string, ThreadEntry> | undefined): number {
   if (item.type === 'run') return 28
-  if (item.type === 'group' || item.type === 'status' || item.type === 'hidden') return 24
+  if (
+    item.type === 'group' ||
+    item.type === 'status' ||
+    item.type === 'hidden' ||
+    item.type === 'still'
+  ) {
+    return 24
+  }
   if (item.type === 'reply') {
     const files = byId ? changedFiles(item.toolIds, byId) : 0
     const end = item.endId ? byId?.[item.endId] : undefined
-    const ending = end?.kind === 'turn_end' && end.stopReason !== 'end_turn' ? ENDING_PX : 0
+    const ending =
+      (end?.kind === 'turn_end' && end.stopReason !== 'end_turn' ? ENDING_PX : 0) +
+      (item.still ? ENDING_PX : 0)
     if (files === 0) return FOOTER_PX + ending
     const rows = Math.min(files, SHOWN_CHANGES) + (files > SHOWN_CHANGES ? 1 : 0)
     return FOOTER_PX + ending + CHANGES_HEAD_PX + rows * CHANGE_ROW_PX

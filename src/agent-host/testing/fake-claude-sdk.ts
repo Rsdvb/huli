@@ -2,6 +2,7 @@
 // messages a test scripts for the prompts it gets and records every call made to it.
 
 import { EventEmitter } from 'node:events'
+import { readFileSync } from 'node:fs'
 import { PassThrough } from 'node:stream'
 import type {
   AccountInfo,
@@ -54,16 +55,28 @@ export class FakeQuery implements Query {
   private readonly queue: SdkMessage[] = []
   private waiting: ((result: IteratorResult<SdkMessage>) => void) | null = null
   readonly process: unknown
+  /** The flag settings Claude Code reads from the `settings` file as it starts. */
+  readonly flagSettings: Record<string, unknown> | undefined
 
   constructor(
     readonly sdk: FakeClaudeSdk,
     readonly options: QueryOptions,
     prompt: AsyncIterable<UserInput>,
   ) {
-    // The SDK starts its Claude Code process as the query starts.
+    const { settings } = options
+    this.flagSettings =
+      settings === undefined
+        ? undefined
+        : (JSON.parse(readFileSync(settings, 'utf8')) as Record<string, unknown>)
+    // The SDK starts its Claude Code process as the query starts, with the settings option on its
+    // command line.
     this.process = options.spawnClaudeCodeProcess({
       command: options.pathToClaudeCodeExecutable,
-      args: ['--output-format', 'stream-json'],
+      args: [
+        '--output-format',
+        'stream-json',
+        ...(settings === undefined ? [] : ['--settings', settings]),
+      ],
       cwd: options.cwd,
       env: options.env,
       signal: new AbortController().signal,
@@ -211,11 +224,15 @@ export class FakeQuery implements Query {
 
   async setMcpServers(servers: Record<string, McpServerConfig>): Promise<McpSetServersResult> {
     this.record('setMcpServers', servers)
+    await this.sdk.connecting
     return { added: Object.keys(servers), removed: [], errors: {} }
   }
 
   async mcpServerStatus(): Promise<McpServerStatus[]> {
     this.record('mcpServerStatus')
+    // A list of answers goes one per call, the last one repeated; else the one answer.
+    const statuses = this.sdk.mcpStatuses
+    if (statuses.length > 0) return (statuses.length > 1 ? statuses.shift() : statuses[0]) ?? []
     return this.sdk.mcpStatus
   }
 
@@ -320,6 +337,10 @@ export class FakeClaudeSdk implements ClaudeSdk {
   reloadError: Error | null = null
   /** What a query's `askSideQuestion` answers; undefined for an SDK without it. */
   sideAnswer: { response: string; synthetic: boolean } | null | undefined = undefined
+  /** What `setMcpServers` waits on before it answers, as while the servers connect. */
+  connecting: Promise<void> | null = null
+  /** The answers of `mcpServerStatus` in turn, the last one repeated, before `mcpStatus`. */
+  mcpStatuses: McpServerStatus[][] = []
   context: ContextUsageAnswer = {
     categories: [
       { name: 'System prompt', tokens: 3000 },

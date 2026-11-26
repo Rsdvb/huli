@@ -19,17 +19,14 @@ import { PermissionRequest } from '@renderer/components/affect/permission-reques
 import { Button } from '@renderer/components/ui/button'
 import { toast } from '@renderer/components/ui/toast'
 import { emitAppEvent } from '@renderer/app/events'
+import { openCatalogRow } from '@renderer/features/marketplace/plugin-landing'
 import { errorMessage, host } from '@renderer/lib/host'
-import { hostOfPath } from '@renderer/lib/host-paths'
-import { isMac, isWeb } from '@renderer/lib/platform'
+import { isMac } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
-import { hostScope, LOCAL_SCOPE, useSettingsHostStore } from '@renderer/stores/host-scope'
-import { useOtherHost } from '@renderer/stores/hosts'
-import { useSessionsStore } from '@renderer/stores/sessions'
-import { openSettingsRow } from '@renderer/stores/view'
-import { useWebHostStore } from '@renderer/stores/web-host'
+import { hostScope, LOCAL_SCOPE } from '@renderer/stores/host-scope'
 import { useEntry, useEntryAnimation } from '../use-thread'
 import { revealWaiting } from './helpers'
+import { useSessionHost } from './session-host'
 import { useAnswering } from './use-answering'
 
 /**
@@ -55,22 +52,11 @@ export const SettingsChangeEntry = memo(function SettingsChangeEntry({
   )
 })
 
-/** The session's host: null for this computer, with its name when it is another one. */
-function useSessionHost(sessionId: string): { hostId: string | null; name: string | null } {
-  const hostId = useSessionsStore((s) => hostOfPath(s.byId[sessionId]?.projectPath ?? ''))
-  const other = useOtherHost(hostId)
-  const served = useWebHostStore((s) => s.host?.name ?? null)
-  if (hostId !== null) return { hostId, name: other?.name ?? null }
-  // A browser reaches its host from elsewhere, so the host goes by its name there.
-  return { hostId: null, name: isWeb ? served : null }
-}
-
 /** Settings at the row, on the host the change was for. */
 function viewInSettings(hostId: string | null, item: SettingChangeItem): void {
   const parsed = parseToolId(item.id)
   const desktop = parsed ? CATALOG[parsed.id].part === 'desktop' : false
-  useSettingsHostStore.setState({ hostId: desktop ? null : hostId })
-  openSettingsRow(item.section, item.item, item.row)
+  openCatalogRow(item.section, item.item, item.row, desktop ? null : hostId)
 }
 
 function SettingsRows({ items }: { items: SettingChangeItem[] }) {

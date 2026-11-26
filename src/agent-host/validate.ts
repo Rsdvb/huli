@@ -1,7 +1,12 @@
 // Hand-written guards for every request on the agent host port. A validator returns a fresh
 // params object with only the known fields, or throws `invalid_params` before anything runs.
 
-import type { AgentInstallMethod, HostMethod, HostParams } from '@shared/agent-host'
+import {
+  MAX_PINNED_MODELS,
+  type AgentInstallMethod,
+  type HostMethod,
+  type HostParams,
+} from '@shared/agent-host'
 import { MAX_REMOVAL_STEPS } from '@shared/agent-removal'
 import {
   SYNC_ID,
@@ -647,6 +652,20 @@ function gitPath(o: Fields, key: string): string {
 
 // The pull requests and issues one window shows, at most as many as a request should carry.
 const WATCHED_REFERENCES = 100
+
+// An agent's pinned models, each a value its model option takes, in their order.
+function modelValues(o: Fields, key: string): string[] {
+  const value = o[key]
+  if (!Array.isArray(value) || value.length > MAX_PINNED_MODELS) {
+    throw invalidParams(`${key} must be an array of at most ${MAX_PINNED_MODELS} models`)
+  }
+  const models = value.map((model: unknown, index) => {
+    const at = `${key}[${index}]`
+    return string({ [at]: model }, at, TEXT_CHARS)
+  })
+  if (new Set(models).size !== models.length) throw invalidParams(`${key} names a model twice`)
+  return models
+}
 
 // The files of one commit or discard, at most as many as a request should carry.
 const GIT_PATHS = 1_000
@@ -1411,10 +1430,11 @@ function thumbnail(o: Fields): string | null {
 }
 
 /** Bytes a renderer hands over, not empty and not too large. */
-function bytes(o: Fields, key: string, max: number): ArrayBuffer {
+/** Bytes up to `max`; empty only when `empty`, as an uploaded file may be. */
+function bytes(o: Fields, key: string, max: number, empty = false): ArrayBuffer {
   const value = o[key]
   if (!(value instanceof ArrayBuffer)) throw invalidParams(`${key} must be an ArrayBuffer`)
-  if (value.byteLength === 0) throw invalidParams(`${key} must not be empty`)
+  if (value.byteLength === 0 && !empty) throw invalidParams(`${key} must not be empty`)
   if (value.byteLength > max) throw invalidParams(`${key} is larger than ${max} bytes`)
   return value
 }
@@ -1658,6 +1678,16 @@ function pluginChannelKinds(params: unknown): HostParams<'plugins.setChannelKind
     }
   }
   return { ...installedPlugin(params), channel, kinds: kinds as PluginNoticeKind[] }
+}
+
+/** The agents a plugin's tools go to: "all", or a list of agent ids. */
+function pluginToolAgents(params: unknown): HostParams<'plugins.setToolAgents'> {
+  const { agents } = fields(params)
+  if (agents === 'all') return { ...installedPlugin(params), agents }
+  if (!Array.isArray(agents) || agents.length > 64 || !agents.every(isAgentId)) {
+    throw invalidParams('agents must be "all" or a list of agents')
+  }
+  return { ...installedPlugin(params), agents: [...new Set(agents)] }
 }
 
 function pluginToken(params: unknown): { token: string } {
@@ -1988,6 +2018,10 @@ export function createValidators(platform: Platform): Validators {
         model: string(o, 'model', TEXT_CHARS),
         pinned: flag(o, 'pinned'),
       }
+    },
+    'agents.setPinnedModels': (params) => {
+      const o = fields(params)
+      return { agentId: agentId(o), models: modelValues(o, 'models') }
     },
     'agents.lightAgents': none,
     'agents.draftReport': (params) => {
@@ -2403,6 +2437,7 @@ export function createValidators(platform: Platform): Validators {
       }
       return { path: value }
     },
+    'paths.drives': none,
     'sessions.list': (params) => {
       const o = params === undefined || params === null ? {} : fields(params)
       return o.projectPath === undefined
@@ -2938,6 +2973,17 @@ export function createValidators(platform: Platform): Validators {
     },
     'routines.delete': (params) => ({ routineId: routineId(fields(params)) }),
     'routines.runNow': (params) => ({ routineId: routineId(fields(params)) }),
+    'routines.answerChange': (params) => {
+      const o = fields(params)
+      if (o.decision !== 'confirm' && o.decision !== 'decline') {
+        throw invalidParams('decision must be confirm or decline')
+      }
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ID_CHARS),
+        decision: o.decision,
+      }
+    },
     'routines.cancelRun': (params) => ({ runId: string(fields(params), 'runId', ID_CHARS) }),
     'routines.runs': (params) => {
       const o = fields(params)
@@ -2987,6 +3033,7 @@ export function createValidators(platform: Platform): Validators {
       return { ...installedPlugin(params), key: pluginSettingKey(o), value }
     },
     'plugins.setChannelKinds': pluginChannelKinds,
+    'plugins.setToolAgents': pluginToolAgents,
     'plugins.reload': installedPlugin,
     'plugins.checkUpdates': (params) =>
       params === undefined || params === null || fields(params).pluginId === undefined
@@ -3384,6 +3431,15 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'files.list': project,
+    'files.watch': project,
+    'files.unwatch': project,
+    'files.listFolder': (params) => {
+      const o = fields(params)
+      return {
+        projectPath: absolutePath(o, 'projectPath', platform),
+        path: relativePath(o, 'path', platform),
+      }
+    },
     'files.read': (params) => {
       const o = fields(params)
       const asText = optionalFlag(o, 'asText')
@@ -3444,6 +3500,20 @@ export function createValidators(platform: Platform): Validators {
         folder: relativeFolder(o, 'folder', platform),
       }
     },
+    'files.upload': (params) => {
+      const o = fields(params)
+      const source = fields(o.source)
+      const replace = optionalFlag(o, 'replace')
+      return {
+        projectPath: absolutePath(o, 'projectPath', platform),
+        path: relativePath(o, 'path', platform),
+        source:
+          source.grantId !== undefined
+            ? { grantId: string(source, 'grantId', ID_CHARS) }
+            : { bytes: bytes(source, 'bytes', ATTACHMENT_BYTES, true) },
+        ...(replace === undefined ? {} : { replace }),
+      }
+    },
     'files.delete': (params) => {
       const o = fields(params)
       const permanently = optionalFlag(o, 'permanently')
@@ -3452,6 +3522,10 @@ export function createValidators(platform: Platform): Validators {
         paths: relativePaths(o, 'paths', platform),
         ...(permanently === undefined ? {} : { permanently }),
       }
+    },
+    'files.preview': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), path: relativePath(o, 'path', platform) }
     },
     'artifacts.list': (params) => {
       const o = params === undefined || params === null ? {} : fields(params)

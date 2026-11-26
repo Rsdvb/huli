@@ -17,6 +17,8 @@
       "denied": "说说改用什么做法",
       "runningQueue": "排队一条消息 · Esc 停止",
       "runningTouch": "排队一条消息",
+      "runningSteer": "立即发送一条消息 · Esc 停止",
+      "runningSteerTouch": "立即发送一条消息",
       "pickAgent": "选一个智能体接着做…"
     },
     "stop": "停止",
@@ -26,6 +28,7 @@
     "stopTooltip": "停止 <shortcut>{{shortcut}}</shortcut>",
     "queueTooltip": "排队 <shortcut>{{shortcut}}</shortcut>",
     "queueHoldTooltip": "排队 <shortcut>{{shortcut}}</shortcut> · 按住可立即发送",
+    "steerHoldTooltip": "立即发送 <shortcut>{{shortcut}}</shortcut> · 按住可加入队列",
     "queueIt": "加入队列",
     "queueItHint": "本轮结束后发送",
     "sendNow": "立即发送",
@@ -47,6 +50,7 @@
     "followsAgentOn": "跟随 {{agent}} · 开",
     "followsAgentOff": "跟随 {{agent}} · 关",
     "modelsFrom": "来自 {{source}}",
+    "customizeModels": "自定义…",
     "optionValue": "{{name}}：{{value}}",
     "permissionMode": "权限模式",
     "modePendingTurn": "本轮结束后将切换为{{mode}}。",
@@ -260,7 +264,14 @@
       "estimateLastsMinutes_other": "约有效 {{count}} 分钟",
       "estimateLastsHours_other": "约有效 {{count}} 小时",
       "leftLine": "剩余 <time>{{time}}</time> · 已缓存 {{tokens}} tokens",
-      "leftLineAbout": "约剩 <time>{{time}}</time> · 已缓存 {{tokens}} tokens"
+      "leftLineAbout": "约剩 <time>{{time}}</time> · 已缓存 {{tokens}} tokens",
+      "hitShort": "<word>缓存 </word>{{percent}}%",
+      "hitButton": "提示词缓存：命中率 {{percent}}%",
+      "hitLine": "命中 <hit>{{percent}}%</hit> · {{cached}} / {{total}} tokens",
+      "uncachedInput": "未缓存输入",
+      "dynamicNote": "该模型的缓存生命周期由服务端动态管理，没有固定倒计时。",
+      "lastRequest": "上次请求 {{time}}",
+      "dynamicLifetime": "动态时长"
     },
     "speed": {
       "title": "输出速度",

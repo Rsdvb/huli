@@ -386,6 +386,8 @@ export interface TaskSummary {
   /** The step furthest along the workflow that started, 1-based, for step/total; null before any. */
   at: number | null
   needsYou: boolean
+  /** The kinds of what waits for the user on it; absent from an older host. */
+  needKinds?: TaskNeed['kind'][]
   error: boolean
   running: boolean
   /** The task's own branch and worktree; null outside Git. */
@@ -563,7 +565,15 @@ export interface SessionTaskRef {
 // The checks Kettu shows on a report's or a pick's card.
 
 export type ReportCheck =
-  'step_open' | 'outcome' | 'note' | 'document' | 'deliverables' | 'committed' | 'merged' | 'picks'
+  | 'step_open'
+  | 'answered'
+  | 'outcome'
+  | 'note'
+  | 'document'
+  | 'deliverables'
+  | 'committed'
+  | 'merged'
+  | 'picks'
 
 export type PickCheck =
   'step' | 'agent' | 'allowed' | 'model' | 'effort' | 'tools' | 'limit' | 'review'

@@ -32,6 +32,8 @@ import { agentsOn, useAgentsStore } from '@renderer/stores/agents'
 import { hostOfSession } from '@renderer/stores/sessions'
 import { useThreadsStore } from '@renderer/stores/threads'
 import { useReplyHover } from '../reply-hover'
+import { StillRunningLine } from '../still-running-line'
+import { lastUserEntryId } from '../turn-phase'
 import { useEntry, useEntryAnimation } from '../use-thread'
 import { ChangesCard } from './changes-card'
 import { useEditable, useEditFrom } from './edit-from-here'
@@ -100,16 +102,7 @@ export function UserActions({
   const row = useRef<HTMLSpanElement>(null)
   const cancelled = useRef<HTMLButtonElement>(null)
   // Only the last turn's message stands for a cancelled turn still waiting to be written again.
-  const lastTurn = useThreadsStore((s) => {
-    const order = s.replicas[sessionId]?.state?.order
-    const byId = s.replicas[sessionId]?.state?.byId
-    if (!order || !byId) return false
-    for (let i = order.length - 1; i >= 0; i--) {
-      const entry = byId[order[i]!]
-      if (entry?.kind === 'user' && !entry.steered) return entry.id === entryId
-    }
-    return false
-  })
+  const lastTurn = useThreadsStore((s) => lastUserEntryId(s.replicas[sessionId]?.state) === entryId)
   const meta = (
     <span ref={row} className="ks-user__meta" data-open={edit.open || rewind.open ? '' : undefined}>
       {steered && (
@@ -202,6 +195,7 @@ export const ReplyFooter = memo(
     toolIds,
     endId,
     latest,
+    still,
   }: {
     replyKey: string
     sessionId: string
@@ -210,6 +204,8 @@ export const ReplyFooter = memo(
     toolIds: string[]
     endId: string | null
     latest: boolean
+    /** What runs on after its turn shows under its end. */
+    still: boolean
   }) {
     const { t } = useTranslation('session')
     const lastId = agentIds.at(-1)!
@@ -338,6 +334,7 @@ export const ReplyFooter = memo(
             />
           )
         )}
+        {still && <StillRunningLine sessionId={sessionId} />}
         <div
           className={cn('ks-reply-foot', animation)}
           data-shown={hovered || forking || reverting ? '' : undefined}
@@ -404,6 +401,7 @@ export const ReplyFooter = memo(
     a.projectPath === b.projectPath &&
     a.endId === b.endId &&
     a.latest === b.latest &&
+    a.still === b.still &&
     sameIds(a.agentIds, b.agentIds) &&
     sameIds(a.toolIds, b.toolIds),
 )

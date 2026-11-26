@@ -94,7 +94,7 @@ import {
   type InstallKind,
   type SettingsHook,
 } from './harness-install'
-import { harnessVersion, useAction, VENDORS } from './agent-helpers'
+import { harnessVersion, useAction, useHarnessCheck, VENDORS } from './agent-helpers'
 import {
   CommandLine,
   ControlError,
@@ -486,6 +486,7 @@ export function HarnessGroupActions() {
 export function HarnessPage({ harnessId }: { harnessId: HarnessId }) {
   const { useAgentsStore } = useHostScope()
   const status = useAgentsStore((s) => s.byId[harnessId])
+  useHarnessCheck(harnessId)
   if (!status) return <HarnessPageHeader status={null} />
   return <HarnessPageBody status={status} />
 }
@@ -1627,6 +1628,12 @@ function reloadLabel(environment: EnvironmentInfo | null) {
   return environment?.source === 'inherited'
     ? 'agents.environment.redetect'
     : 'agents.environment.reload'
+}
+
+/** Footer for Settings > Harnesses: refreshes local detection on open alongside environment info. */
+export function HarnessesFooter() {
+  useHarnessCheck()
+  return <EnvironmentFooter />
 }
 
 export function EnvironmentFooter() {

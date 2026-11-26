@@ -522,41 +522,42 @@
   ) {
   color: revert-layer;
 }
-/* 有子代理徽标时，空状态槽收起，让徽标贴近行尾。
-   The badge is the slot's sibling: a :has() on the row would restyle the page on every added
-   element. */
-.kettu-subagent-badge ~ .kettu-row-end:not(:has(> :not(:empty))) {
-  display: none;
-}
-/* 会话和任务行默认用满宽度。子代理徽标所在的行在工具出现时为它们留出空间，
-   其余行继续用遮罩和工具一起淡出行尾内容。触屏沿用 App Shell 的布局。 */
+/* A session's or task's row keeps no room for its tools, More and Pin: on hover or focus they sit
+   over its end, which fades out under them through a mask, since the sidebar's fill is translucent.
+   A row with a badge (sub-agents, worktree, pull requests) keeps their room instead, as a project's
+   row does, so no badge goes under them. Nothing moves. Touch keeps App Shell's layout.
+   Huli: a badge is found as the status slot's sibling: a :has() on the row would restyle the page
+   on every added element. */
 @property --kettu-row-cover {
   syntax: '<number>';
   inherits: false;
   initial-value: 0;
 }
+@media (hover: none) {
+  /* An empty status slot leaves a sub-agent badge at the row's end. */
+  .kettu-subagent-badge ~ .kettu-row-end:not(:has(> :not(:empty))) {
+    display: none;
+  }
+}
 @media (hover: hover) {
-  .ui-as.ui-as
-    .ui-as-chat-row:not(:has(.kettu-subagent-badge)):is(:hover, :has(:focus-visible), [data-menu])
-    .ui-as-chat-row__link,
+  .ui-as.ui-as .ui-as-chat-row:is(:hover, :has(:focus-visible), [data-menu]) .ui-as-chat-row__link,
   .ui-as.ui-as
     .ui-as-chat-folder-row:is(:hover, :has(:focus-visible), [data-menu])
     > .ui-as-chat-folder {
     padding-right: 6px;
   }
-  .ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > .ui-as-chat-row__tool) .kettu-row-end {
+  .ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > .ui-as-chat-row__tool) .kettu-row-end,
+  :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge]) ~ .kettu-row-end {
     min-width: 42px;
   }
   .ui-as-chat-row:is(:hover, :has(:focus-visible), [data-menu])
-    .kettu-subagent-badge
+    :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge])
     ~ .kettu-row-end {
-    position: absolute;
     opacity: 0;
-    pointer-events: none;
     transition: none;
   }
   .ui-as-chat-row:has(> .ui-as-chat-row__tools > .ui-as-chat-row__tool):not(
-      :has(.kettu-subagent-badge)
+      :has(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge])
     ) {
     .kettu-row-body {
       transition: --kettu-row-cover var(--duration-fast) ease;
@@ -847,6 +848,10 @@ li[data-row-exit='dust'] > * {
 .kettu-plan-ring__button--amount {
   width: auto;
   padding: 0 6px;
+}
+/* Wider than the sidebar's 260 px menu, so each card fits a window's name beside "100%". */
+.ui-as-user-menu .ui-as-user-pop.kettu-plan-ring__pop {
+  min-width: 280px;
 }
 .kettu-plan-pop {
   padding: 4px;
@@ -1740,7 +1745,7 @@ li[data-row-exit='dust'] > * {
   color: var(--on-fill);
 }
 .kp-btn--danger:hover {
-  background: color-mix(in srgb, var(--danger) 90%, var(--text-primary));
+  background: color-mix(in srgb, var(--danger) 90%, var(--fill-ink));
 }
 .kp-link {
   display: inline-flex;
@@ -2750,6 +2755,10 @@ li[data-row-exit='dust'] > * {
 }
 .kp-node[aria-current][data-chosen] {
   background: var(--bg-selected);
+}
+/* Ignored by git. */
+.kp-node[data-ignored] .kp-node__name {
+  color: var(--text-disabled);
 }
 /* Cut and waiting to be pasted. */
 .kp-node[data-cut] > :not(.kp-node__chev) {
@@ -3952,6 +3961,11 @@ li[data-row-exit='dust'] > * {
 :is(.kettu-settings, .kettu-sd) .k-sort-row[data-dragging] .k-sort-handle {
   cursor: grabbing;
 }
+/* A row that cannot be dragged keeps the handle's room, so the marks after it line up. */
+:is(.kettu-settings, .kettu-sd) .k-sort-gap {
+  flex: none;
+  width: 24px;
+}
 :is(.kettu-settings, .kettu-sd) .k-sort-restore {
   justify-content: flex-start;
   min-height: 48px;
@@ -4183,6 +4197,11 @@ li[data-row-exit='dust'] > * {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+/* A line that says what to do, such as on another computer, wraps rather than cut it off */
+:is(.kettu-settings, .kettu-sd) .k-lines > small[data-wrap] {
+  white-space: normal;
+  text-wrap: pretty;
 }
 :is(.kettu-settings, .kettu-sd) .k-end {
   display: flex;
@@ -5250,6 +5269,12 @@ li[data-row-exit='dust'] > * {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+:is(.kettu-settings, .kettu-sd) .k-fact[data-wide] {
+  max-width: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-fact[data-tone='warning'] {
+  color: var(--warning);
+}
 :is(.kettu-settings, .kettu-sd) .k-wrap {
   flex-wrap: wrap;
 }
@@ -5321,6 +5346,9 @@ li[data-row-exit='dust'] > * {
 .kettu-settings .k-relay-form {
   gap: 14px;
   padding-block: 12px 14px;
+}
+.kettu-settings .k-relay-form .k-notice {
+  margin: 0;
 }
 .kettu-settings .k-relay-docs {
   display: inline-flex;
@@ -5979,6 +6007,11 @@ li[data-row-exit='dust'] > * {
 .kettu-sd .kettu-sd__code[data-pending] {
   color: var(--muted);
 }
+.kettu-sd .kettu-sd__each-code {
+  font-family: var(--code-face);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
 .kettu-sd .kettu-sd__label {
   margin: 0;
   font-size: 13px;
@@ -6585,6 +6618,23 @@ li[data-row-exit='dust'] > * {
   font-size: 12px;
   line-height: 1.5;
   color: var(--composer-muted);
+}
+.kettu-cache__rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 16px;
+  margin: 6px 0 0;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--composer-line);
+  font-size: 12px;
+}
+.kettu-cache__rows dt {
+  color: var(--composer-muted);
+}
+.kettu-cache__rows dd {
+  margin: 0;
+  text-align: right;
+  color: var(--composer-ink);
 }
 .kettu-cache__foot {
   display: flex;
@@ -7218,6 +7268,23 @@ li[data-row-exit='dust'] > * {
 }
 .kettu-model-picker .ui-mdpc__fly-group:first-child {
   padding-top: 2px;
+}
+/* More models' foot: where the models come from, and Customize… at its end. */
+.kettu-model-picker__note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.kettu-model-picker__customize {
+  flex: none;
+  margin-left: auto;
+  border-radius: var(--radius-sm);
+  color: var(--ui-mdpc-text);
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+.kettu-model-picker__customize:hover {
+  color: var(--ui-mdpc-ink);
 }
 /* The agent menu's Default tag after a model's name. */
 .kettu-model-tag {
@@ -7954,6 +8021,25 @@ li[data-row-exit='dust'] > * {
   color: var(--composer-ink);
 }
 
+/* The built-in theme's menus, palettes and segmented controls draw the text of their items in the
+   primary text, the sidebar rows' color, like the shell's own menus. An installed theme's rules
+   below come later and win. */
+.ui-cmc.ui-cmc {
+  --ui-cmc-ink: var(--shell-text);
+}
+.ui-pmc.ui-pmc {
+  --ui-pmc-ink: var(--shell-text);
+}
+.ui-mdpc.ui-mdpc {
+  --ui-mdpc-ink: var(--shell-text);
+}
+.ui-fmc.ui-fmc {
+  --ui-fmc-ink: var(--shell-text);
+}
+.ui-segc.ui-segc {
+  --ui-segc-text: var(--shell-text);
+}
+
 /* themes: under an installed theme (data-installed-theme on <html>, see tokens.css), affectUI's
    components take the theme's tokens instead of the values they ship with, which the built-in
    theme keeps as the hi-fi draws them. Their white sheens stay. */
@@ -8082,28 +8168,6 @@ li[data-row-exit='dust'] > * {
   --ui-cmc-ok: var(--success);
   --ui-cmc-shadow: 0 0 0 0.5px var(--border-subtle), var(--elevation-card);
 }
-[data-installed-theme] .ui-cbc {
-  --ui-cbc-card: var(--shell-card);
-  --ui-cbc-ink: var(--text-primary);
-  --ui-cbc-strong: var(--text-primary);
-  --ui-cbc-text: var(--text-secondary);
-  --ui-cbc-muted: var(--text-tertiary);
-  --ui-cbc-faint: var(--text-disabled);
-  --ui-cbc-line: var(--border-subtle);
-  --ui-cbc-wash: var(--bg-hover);
-  --ui-cbc-fill: var(--bg-selected);
-  --ui-cbc-up: var(--success);
-  --ui-cbc-up-bg: color-mix(in srgb, var(--success) 10%, transparent);
-  --ui-cbc-down: var(--danger);
-  --ui-cbc-down-bg: color-mix(in srgb, var(--danger) 8%, transparent);
-  --ui-cbc-c1: color-mix(in srgb, var(--context-1) 76.5%, transparent);
-  --ui-cbc-c2: color-mix(in srgb, var(--context-1) 50%, transparent);
-  --ui-cbc-c3: color-mix(in srgb, var(--context-1) 32%, transparent);
-  --ui-cbc-c4: color-mix(in srgb, var(--context-1) 18%, transparent);
-  --ui-cbc-c5: var(--border-strong);
-  --ui-cbc-shadow: 0 0 0 0.5px var(--border-subtle), var(--elevation-card);
-  --ui-cbc-focus: var(--focus-ring-color);
-}
 [data-installed-theme] .ui-cwc {
   --ui-cwc-card: var(--shell-card);
   --ui-cwc-strong: var(--text-primary);
@@ -8222,24 +8286,6 @@ li[data-row-exit='dust'] > * {
   --ui-fmc-check: var(--control-on);
   --ui-fmc-focus: var(--focus-ring-color);
   --ui-fmc-shadow: 0 0 0 0.5px var(--border-subtle), var(--elevation-card);
-}
-[data-installed-theme] .ui-kpic {
-  --ui-kpic-card: var(--shell-card);
-  --ui-kpic-pop: var(--bg-surface);
-  --ui-kpic-ink: var(--text-primary);
-  --ui-kpic-strong: var(--text-primary);
-  --ui-kpic-text: var(--text-secondary);
-  --ui-kpic-muted: var(--text-tertiary);
-  --ui-kpic-line: var(--border-subtle);
-  --ui-kpic-grid: var(--border-subtle);
-  --ui-kpic-guide: var(--border-default);
-  --ui-kpic-up: var(--success);
-  --ui-kpic-up-bg: color-mix(in srgb, var(--success) 10%, transparent);
-  --ui-kpic-down: var(--danger);
-  --ui-kpic-down-bg: color-mix(in srgb, var(--danger) 8%, transparent);
-  --ui-kpic-focus: var(--focus-ring-color);
-  --ui-kpic-shadow: 0 0 0 0.5px var(--border-subtle), var(--elevation-card);
-  --ui-kpic-shadow-pop: 0 0 0 0.5px var(--border-default), var(--elevation-popover);
 }
 [data-installed-theme] .ui-mac {
   --ui-mac-card: var(--shell-card);
@@ -8464,11 +8510,11 @@ li[data-row-exit='dust'] > * {
   --ui-agc-flag-ink: var(--agent-flag-ink);
 }
 
-/* The answer and the breakdown stop their motion under the system's reduced motion only; the app's
-   own Reduce motion setting stops it too. */
-:root[data-reduce-motion='always'] :is(.ui-ansc, .ui-cbc) *,
-:root[data-reduce-motion='always'] :is(.ui-ansc, .ui-cbc) *::before,
-:root[data-reduce-motion='always'] :is(.ui-ansc, .ui-cbc) *::after {
+/* The answer stops its motion under the system's reduced motion only; the app's own Reduce motion
+   setting stops it too. */
+:root[data-reduce-motion='always'] .ui-ansc *,
+:root[data-reduce-motion='always'] .ui-ansc *::before,
+:root[data-reduce-motion='always'] .ui-ansc *::after {
   animation: none !important;
   transition: none !important;
 }
@@ -9426,4 +9472,619 @@ li[data-row-exit='dust'] > * {
   justify-content: flex-end;
   width: 44px;
   margin-left: 6px;
+}
+
+/* Settings > Archived sessions: wider column aligned with other pages' left edge, toolbar,
+   compact 38 px rows, filter popovers, sticky multi-select bar, and bulk delete list. */
+.kettu-settings .kettu-settings__body[data-section='archived'] {
+  max-width: 800px;
+  margin-left: max(0px, calc((100% - 640px) / 2));
+  margin-right: 0;
+}
+.kettu-settings .kettu-settings__body[data-section='archived'] .k-groups:empty {
+  display: none;
+}
+
+:is(.kettu-settings, .kettu-sd) .k-ar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 56px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-tb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 20px 0 8px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-search {
+  display: flex;
+  flex: 1 1 200px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--border-default);
+  color: var(--placeholder);
+  transition: box-shadow 140ms ease;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-search:focus-within {
+  box-shadow:
+    inset 0 0 0 1px var(--control-on),
+    0 0 0 3px var(--control-on-tint);
+  color: var(--ink);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-search.is-has {
+  color: var(--ink);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-search > input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  outline: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-search > input::placeholder {
+  color: var(--placeholder);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-search__clear {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-search__clear:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+
+:is(.kettu-settings, .kettu-sd) .k-ar-fb {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  max-width: 210px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--border-default);
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-fb:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-fb:focus {
+  outline: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-fb:focus-visible {
+  box-shadow:
+    inset 0 0 0 1px var(--control-on),
+    0 0 0 3px var(--control-on-tint);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-fb.is-set {
+  background: var(--control-on-tint);
+  box-shadow: none;
+  color: var(--control-on);
+  font-weight: 500;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-fb__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-fb__val {
+  font-weight: 500;
+}
+
+.k-ar-pop {
+  width: 268px;
+  padding: 6px;
+  gap: 0;
+}
+.k-ar-pop__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin: -6px -6px 6px;
+  padding: 0 14px;
+  box-shadow: 0 1px 0 var(--border-subtle);
+  color: var(--text-tertiary);
+}
+.k-ar-pop__search > input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+}
+.k-ar-pop__search > input::placeholder {
+  color: var(--text-placeholder);
+}
+.k-ar-pop__list {
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.k-ar-pop__div {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-subtle);
+}
+.k-ar-pop__empty {
+  padding: 14px 10px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+.k-ar-mi {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.k-ar-mi:hover,
+.k-ar-mi:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+.k-ar-mi.is-on {
+  font-weight: 500;
+}
+.k-ar-mi__ck {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  color: var(--control-on);
+}
+.k-ar-mi__ico {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  color: var(--text-tertiary);
+}
+.k-ar-mi__t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.k-ar-mi__k {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+:is(.kettu-settings, .kettu-sd) .k-ar-count {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  margin: 0 0 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--control-on);
+  cursor: pointer;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:is(.kettu-settings, .kettu-sd) .k-ar-groups {
+  display: flex;
+  flex-direction: column;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-group {
+  margin-top: 16px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-group:first-child {
+  margin-top: 10px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-gh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  margin: 0 0 6px;
+  padding: 0 2px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-gh.is-selecting {
+  gap: 10px;
+  padding-left: 15px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-gh__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 2px 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-gh__toggle:hover {
+  background: var(--bg-hover);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-gh__fold {
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-gh__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-gh__count {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+:is(.kettu-settings, .kettu-sd) .k-ar-rows {
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 10px;
+  border-radius: 8px;
+  transition: background 100ms ease;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-row:hover,
+:is(.kettu-settings, .kettu-sd) .k-ar-row:focus-within {
+  background: var(--bg-hover);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-row.is-sel {
+  background: var(--control-on-tint);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-hit:focus-visible {
+  outline: 2px solid var(--control-on);
+  outline-offset: -2px;
+}
+
+:is(.kettu-settings, .kettu-sd) .k-ar-lead {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-lead__mark {
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-lead__cbx {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  pointer-events: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-row:hover .k-ar-lead__mark,
+:is(.kettu-settings, .kettu-sd) .k-ar-row:has(.k-ar-lead__cbx :focus-visible) .k-ar-lead__mark,
+:is(.kettu-settings, .kettu-sd) .k-ar-row.is-selecting .k-ar-lead__mark,
+:is(.kettu-settings, .kettu-sd) .k-ar-row.is-sel .k-ar-lead__mark {
+  opacity: 0;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-row:hover .k-ar-lead__cbx,
+:is(.kettu-settings, .kettu-sd) .k-ar-row:has(.k-ar-lead__cbx :focus-visible) .k-ar-lead__cbx,
+:is(.kettu-settings, .kettu-sd) .k-ar-row.is-selecting .k-ar-lead__cbx,
+:is(.kettu-settings, .kettu-sd) .k-ar-row.is-sel .k-ar-lead__cbx {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+:is(.kettu-settings, .kettu-sd) .k-ar-title {
+  position: relative;
+  z-index: 1;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-sub {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 210px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-sub__t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-kids {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--bg-hover);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  pointer-events: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-sp {
+  flex: 1;
+  min-width: 10px;
+  pointer-events: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-br {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  max-width: 170px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-br__t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-pj {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  max-width: 140px;
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-when {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  min-width: 46px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+  pointer-events: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-acts {
+  position: relative;
+  z-index: 1;
+  display: none;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-row:not(.is-selecting):is(:hover, :focus-within) .k-ar-acts {
+  display: inline-flex;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-row:not(.is-selecting):is(:hover, :focus-within) .k-ar-when {
+  display: none;
+}
+
+:is(.kettu-settings, .kettu-sd) .k-ar mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--mark);
+  color: inherit;
+}
+
+:is(.kettu-settings, .kettu-sd) .k-ar-conv-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+:is(.kettu-settings, .kettu-sd) .k-ar-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 64px 16px;
+  text-align: center;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-empty__ico {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--bg-hover);
+  color: var(--muted);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-empty__title {
+  margin: 12px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-empty__sub {
+  margin: 4px 0 16px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-empty__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+:is(.kettu-settings, .kettu-sd) .k-ar-selbar {
+  position: sticky;
+  bottom: 20px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 6px 8px 6px 14px;
+  border-radius: 13px;
+  background: var(--bg-raised);
+  box-shadow:
+    inset 0 0 0 1px var(--border-default),
+    var(--elevation-popover);
+  white-space: nowrap;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-selbar__n {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-selbar__all {
+  margin: 0 4px 0 2px;
+  font-size: 12.5px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-selbar__sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border-default);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-selbar__del {
+  color: var(--danger);
+}
+
+.k-ar-dlg-list {
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+.k-ar-dlg-list[data-scrollable] {
+  max-height: 248px;
+  overflow-y: auto;
+}
+.k-ar-dlg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+}
+.k-ar-dlg-row__t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.k-ar-dlg-row__subs {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+@container ui-as-main (max-width: 600px) {
+  :is(.kettu-settings, .kettu-sd) .k-ar-br,
+  :is(.kettu-settings, .kettu-sd) .k-ar-sub {
+    display: none;
+  }
+  :is(.kettu-settings, .kettu-sd) .k-ar-selbar {
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 100%;
+  }
+}
+
+:root[data-reduce-motion='always'] :is(.k-ar-search, .k-ar-fb, .k-ar-row) {
+  transition: none;
 }

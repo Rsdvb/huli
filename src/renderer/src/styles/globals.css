@@ -1248,8 +1248,7 @@
   line-height: 1.65;
   /* Italics are the face's own; Chinese, which has none, stays upright. */
   font-synthesis-style: none;
-  /* affectUI's answer: the prose a step softer than the ink, which bold text keeps. */
-  color: color-mix(in srgb, var(--text-primary) 84%, var(--bg-app));
+  color: var(--prose-text);
   overflow-wrap: anywhere;
   user-select: text;
 
@@ -1294,8 +1293,11 @@
     margin: 0 0 0.75em;
     font-family: var(--font-sans);
   }
+  /* Empty until the host finds a file it names: a box of no height, which margins collapse
+     through, so it can still tell when it nears the view. */
   & [data-media-block]:empty {
-    display: none;
+    display: block;
+    margin: 0;
   }
 
   /* More space above than below, so a heading sits on its content: three steps only, 20, 16.5
@@ -1410,7 +1412,7 @@
   & [data-streamdown='list-item'] > p {
     margin: 0;
   }
-  & [data-streamdown='list-item'] > [data-media-block] {
+  & [data-streamdown='list-item'] > [data-media-block]:not(:empty) {
     margin-block: 0.4em;
   }
   /* A task's box takes the bullet's place; a done task's text turns gray and struck through. */
@@ -1550,10 +1552,13 @@
     border-top: 1px solid var(--border-subtle);
   }
 
-  /* A table sits in a thin frame that scrolls sideways when it is wider than the reply, its
-     hidden edge fading (markdown-table.tsx); numbers line up on the right. */
+  /* A table sits in a thin frame as wide as its columns need, which scrolls sideways when it is
+     wider than the reply, its hidden edge fading (markdown-table.tsx); numbers line up on the
+     right. */
   & [data-table-frame] {
     position: relative;
+    width: fit-content;
+    max-width: 100%;
     overflow: hidden;
     border-radius: var(--radius-code);
     font-family: var(--font-sans);
@@ -1577,8 +1582,11 @@
       transparent
     );
   }
+  /* Never stretched to the reply's width: the browser would hand the spare room out by content,
+     so a short first column would take most of it. It fills the frame only where the footer is
+     wider. */
   & [data-streamdown='table'] {
-    width: 100%;
+    min-width: 100%;
     margin: 0;
     border: 0;
     border-collapse: collapse;
@@ -1607,10 +1615,12 @@
     color: var(--text-primary);
     font-size: calc(var(--prose-size) - 1.5px);
   }
-  /* A column of sentences wraps instead of stretching the table (markdown-table.tsx). */
+  /* A column of words wraps instead of stretching the table (markdown-table.tsx); its floor stays
+     under the width that makes it one, so it is never wider than its words. */
   & [data-streamdown='table-cell'][data-prose] {
-    min-width: 16em;
+    min-width: 10em;
     white-space: normal;
+    text-wrap: pretty;
   }
   & :is([data-streamdown='table-header-cell'], [data-streamdown='table-cell'])[data-numeric] {
     text-align: right;

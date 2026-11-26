@@ -13,6 +13,7 @@ import type {
 import { harnessOf, START_MODE_CHARS } from '@shared/agents'
 import { longer } from '@shared/artifacts'
 import { BOARD_STATUSES, isBoardStatus, type BoardStatus } from '@shared/session-board'
+import type { StartedSessionLimits } from '@shared/started-sessions'
 import {
   isAgentId,
   type AgentId,
@@ -41,10 +42,6 @@ export const TITLE_CHARS = 120
 export const TEXT_CHARS = 100_000
 export const LIST_LIMIT = 200
 export const LIST_DEFAULT = 50
-export const WORKING_LIMIT = 3
-export const DAILY_LIMIT = 10
-/** Reports stop waking a session once this many went to it since the user last wrote there. */
-export const REPORT_LIMIT = 10
 const QUERY_CHARS = 200
 const ID_CHARS = 200
 const OPTION_CHARS = 200
@@ -141,6 +138,8 @@ export interface SessionToolsDeps {
   send(sessionId: string, text: string, from: FromSession, now: boolean): Promise<ToolDelivery>
   /** The sessions the caller started, for the limits. */
   started(callerId: string): ToolSession[]
+  /** The limits the host's settings set now. */
+  limits(): StartedSessionLimits
   /** The caller's title for a label in another thread, "Untitled session" when it has none. */
   name(sessionId: string): string
   /** The display name of the session's agent, as the notice an archive leaves shows it. */
@@ -256,21 +255,22 @@ function nextLocalMidnight(now: number): number {
   return date.getTime()
 }
 
-/** Which limit the caller is past, if any: 3 of its sessions working, or 10 started a local day. */
+/** Which limit the caller is past, if any: too many of its sessions working, or started today. */
 export function startLimit(
   callerId: string,
   sessions: readonly StartCandidate[],
   now: number,
+  limits: Pick<StartedSessionLimits, 'working' | 'daily'>,
 ): StartLimitInfo | null {
   const started = sessions.filter((session) => session.startedBy === callerId)
   const working = started.filter((session) => WORKING.has(session.status)).length
-  if (working >= WORKING_LIMIT) return { kind: 'working', limit: WORKING_LIMIT }
+  if (working >= limits.working) return { kind: 'working', limit: limits.working }
   const dayStart = localMidnight(now)
   const dayEnd = nextLocalMidnight(now)
   const today = started.filter(
     (session) => session.createdAt >= dayStart && session.createdAt < dayEnd,
   ).length
-  if (today >= DAILY_LIMIT) return { kind: 'day', limit: DAILY_LIMIT, resetsAt: dayEnd }
+  if (today >= limits.daily) return { kind: 'day', limit: limits.daily, resetsAt: dayEnd }
   return null
 }
 
@@ -1294,7 +1294,12 @@ export class SessionTools {
         'You are the manager: dispatch work with start_worker to a worker from the roster.',
       )
     }
-    const limit = startLimit(caller.sessionId, this.deps.started(caller.sessionId), this.now())
+    const limit = startLimit(
+      caller.sessionId,
+      this.deps.started(caller.sessionId),
+      this.now(),
+      this.deps.limits(),
+    )
     if (limit) throw limitError(limit)
     // What the role suggests applies where the caller named nothing, and only when it can be used.
     const set: string[] = []

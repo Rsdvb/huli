@@ -1,12 +1,14 @@
 // Open project on another host: a browser of that host's folders, which lists only folders and
-// marks Git repositories. The chosen folder becomes a project on that host; nothing is copied here.
+// marks Git repositories, and a Windows host's drives above their roots. The chosen folder becomes
+// a project on that host; nothing is copied here.
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 import {
   AlertCircleIcon,
   ArrowRight01Icon,
   ArrowUp02Icon,
   GitBranchIcon,
+  HardDriveIcon,
   InformationCircleIcon,
   ReloadIcon,
 } from '@hugeicons/core-free-icons'
@@ -43,14 +45,28 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 import { HostIcon } from '@renderer/features/settings/remote-parts'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { errorMessage, hostAt } from '@renderer/lib/host'
+import { useHostHas } from '@renderer/lib/host-features'
 import { onHost } from '@renderer/lib/host-paths'
+import { formatShortcut, isMac, isMod } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
+import { HostScopeContext, hostScope } from '@renderer/stores/host-scope'
 import { useOtherHost } from '@renderer/stores/hosts'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { homeStart, separator } from '@renderer/web/host-path'
-import { crumbs, foldersOf, listing, parentOf, type HostFolder } from './host-folders'
+import {
+  crumbs,
+  DRIVES,
+  drivesOf,
+  foldersOf,
+  listing,
+  parentOf,
+  type HostFolder,
+} from './host-folders'
 
-type Read = { folder: string; completion: PathCompletion } | { folder: string; error: string }
+type Read =
+  | { folder: string; completion: PathCompletion }
+  | { folder: string; drives: string[] }
+  | { folder: string; error: string }
 
 // The widths of the placeholder rows while a folder is read.
 const SKELETON_WIDTHS = ['w-2/5', 'w-3/5', 'w-1/3', 'w-2/3', 'w-1/2', 'w-2/5', 'w-7/12']
@@ -67,20 +83,40 @@ export function HostFolderDialog({
   /** The project added on the host, by the path the window names it with. */
   onOpened: (projectPath: string) => void
 }) {
+  // The dialog opens on the folder list, so the arrows work at once.
+  const list = useRef<HTMLDivElement>(null)
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="@container gap-0 overflow-hidden p-0 sm:max-w-[560px]">
-        {hostId && <Browser key={hostId} hostId={hostId} onOpened={onOpened} />}
+      {/* A zero minimum on the one column, so a long path never widens the dialog past its edge. */}
+      <DialogContent
+        initialFocus={list}
+        className="@container grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-[560px]"
+      >
+        {hostId && (
+          <HostScopeContext.Provider value={hostScope(hostId)}>
+            <Browser key={hostId} hostId={hostId} list={list} onOpened={onOpened} />
+          </HostScopeContext.Provider>
+        )}
       </DialogContent>
     </Dialog>
   )
 }
 
-function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string) => void }) {
+function Browser({
+  hostId,
+  list,
+  onOpened,
+}: {
+  hostId: string
+  list: RefObject<HTMLDivElement | null>
+  onOpened: (path: string) => void
+}) {
   const { t } = useTranslation(['session', 'common'])
   const host = useOtherHost(hostId)
   const platform = host?.platform ?? 'linux'
   const name = host?.name ?? ''
+  // An older host lists no drives, so a drive's root stays the top, as before.
+  const drives = useHostHas('drives') === true && platform === 'win32'
   const listId = useId()
   // The home folder, as `~` until the host's answer says where it is.
   const [folder, setFolder] = useState(() => homeStart(platform))
@@ -89,13 +125,18 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
   const [selected, setSelected] = useState<string | null>(null)
   const [opening, setOpening] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
-  const list = useRef<HTMLDivElement>(null)
   const trail = useRef<HTMLElement>(null)
 
   useEffect(() => {
     let live = true
-    hostAt(hostId, 'paths.complete', { path: listing(folder, platform) }).then(
-      (completion) => live && setRead({ folder, completion }),
+    const reading: Promise<Read> =
+      folder === DRIVES
+        ? hostAt(hostId, 'paths.drives', undefined).then((roots) => ({ folder, drives: roots }))
+        : hostAt(hostId, 'paths.complete', { path: listing(folder, platform) }).then(
+            (completion) => ({ folder, completion }),
+          )
+    reading.then(
+      (next) => live && setRead(next),
       (error: unknown) => live && setRead({ folder, error: errorMessage(error) }),
     )
     return () => {
@@ -105,15 +146,23 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
 
   const current = read && read.folder === folder ? read : null
   const completion = current && 'completion' in current ? current.completion : null
-  const folders = completion ? foldersOf(completion, platform) : []
+  // The drives are a place to go into, not a folder to open.
+  const atDrives = folder === DRIVES
+  const folders = completion
+    ? foldersOf(completion, platform)
+    : current && 'drives' in current
+      ? drivesOf(current.drives)
+      : []
   const shownFolder = completion?.folder ?? folder
   const path = selected ?? (completion ? completion.folder : null)
   // A folder that cannot be read still has a parent to go back to.
   const parent = completion
-    ? parentOf(completion.folder, platform)
+    ? parentOf(completion.folder, platform, drives)
     : current
-      ? parentOf(folder, platform)
+      ? parentOf(folder, platform, drives)
       : null
+  const trailCrumbs = crumbs(shownFolder, platform, drives)
+  const thisPc = t('newSession.hostFolders.thisPc')
 
   // A deep path keeps its end, the folder shown, in view.
   useEffect(() => {
@@ -133,8 +182,10 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
     setAttempt((n) => n + 1)
   }
 
+  const canOpen = !!path && !opening && !!completion
+
   const openProject = async () => {
-    if (!path || opening) return
+    if (!path || !canOpen) return
     setOpening(true)
     setFailed(null)
     try {
@@ -159,7 +210,7 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
             : Math.max(0, at - 1)
       setSelected(folders[next]!.path)
       document.getElementById(`${listId}-${next}`)?.scrollIntoView({ block: 'nearest' })
-    } else if (event.key === 'Enter' && selected) {
+    } else if (event.key === 'Enter' && selected && !event.metaKey && !event.ctrlKey) {
       event.preventDefault()
       go(selected)
     } else if (event.key === 'Backspace' && parent) {
@@ -168,10 +219,17 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
     }
   }
 
+  // Mod+Enter anywhere in the dialog opens what Open would: the selected folder, else the one shown.
+  const onDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' || !isMod(event) || event.altKey || event.shiftKey) return
+    event.preventDefault()
+    void openProject()
+  }
+
   const activeIndex = folders.findIndex((f) => f.path === selected)
   const note = t('newSession.hostFolders.note', { host: name })
   return (
-    <>
+    <div className="contents" onKeyDown={onDialogKeyDown}>
       <div
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-48 bg-[radial-gradient(180px_100px_at_40px_36px,color-mix(in_srgb,var(--control-on)_13%,transparent),transparent)]"
@@ -204,35 +262,45 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
             aria-label={t('newSession.hostFolders.location')}
             className="no-scrollbar flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto scroll-fade-x font-mono text-xs whitespace-nowrap text-tertiary"
           >
-            {crumbs(shownFolder, platform).map((crumb, i, all) =>
-              i === all.length - 1 ? (
+            {trailCrumbs.map((crumb, i, all) => {
+              // This PC is a place, not a path; a root already ends with its separator.
+              const place = crumb.path === DRIVES
+              const label = place ? thisPc : crumb.name
+              return i === all.length - 1 ? (
                 <span
                   key={crumb.path}
                   aria-current="location"
-                  className="shrink-0 px-1.5 font-medium text-primary"
+                  className={cn('shrink-0 px-1.5 font-medium text-primary', place && 'font-sans')}
                 >
-                  {crumb.name}
+                  {label}
                 </span>
               ) : (
                 <span key={crumb.path} className="flex shrink-0 items-center gap-0.5">
                   <button
                     type="button"
                     onClick={() => go(crumb.path)}
-                    className="rounded-md px-1.5 py-0.5 outline-none hover:bg-hover hover:text-primary focus-ring"
+                    className={cn(
+                      'rounded-md px-1.5 py-0.5 outline-none hover:bg-hover hover:text-primary focus-ring',
+                      place && 'font-sans',
+                    )}
                   >
-                    {crumb.name}
+                    {label}
                   </button>
-                  {i > 0 && <span aria-hidden>{platform === 'win32' ? '\\' : '/'}</span>}
+                  {!place && !crumb.name.endsWith(separator(platform)) && (
+                    <span aria-hidden>{separator(platform)}</span>
+                  )}
                 </span>
-              ),
-            )}
+              )
+            })}
           </nav>
         </div>
       </div>
       <div className="flex h-7 items-center justify-between gap-3 px-6 text-hint text-tertiary">
         <span className="inline-flex items-center gap-1.5">
-          {t('newSession.hostFolders.folders')}
-          {completion && <span className="tabular-nums">{folders.length}</span>}
+          {atDrives ? t('newSession.hostFolders.drives') : t('newSession.hostFolders.folders')}
+          {current && !('error' in current) && (
+            <span className="tabular-nums">{folders.length}</span>
+          )}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -265,9 +333,13 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
         ref={list}
         role="listbox"
         tabIndex={0}
-        aria-label={t('newSession.hostFolders.list', {
-          folder: crumbs(shownFolder, platform).at(-1)?.name ?? shownFolder,
-        })}
+        aria-label={
+          atDrives
+            ? t('newSession.hostFolders.drives')
+            : t('newSession.hostFolders.list', {
+                folder: trailCrumbs.at(-1)?.name ?? shownFolder,
+              })
+        }
         aria-activedescendant={activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
         aria-busy={!current || opening}
         onKeyDown={onKeyDown}
@@ -290,7 +362,9 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
                 <Glyph icon={AlertCircleIcon} />
               </EmptyMedia>
               <EmptyTitle className="text-control">{current.error}</EmptyTitle>
-              <EmptyDescription>{t('newSession.hostFolders.errorHint')}</EmptyDescription>
+              {!atDrives && (
+                <EmptyDescription>{t('newSession.hostFolders.errorHint')}</EmptyDescription>
+              )}
             </EmptyHeader>
             <EmptyContent>
               <Button variant="outline" size="dialog" onClick={retry}>
@@ -298,6 +372,14 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
                 {t('newSession.hostFolders.retry')}
               </Button>
             </EmptyContent>
+          </Empty>
+        ) : folders.length === 0 && atDrives ? (
+          <Empty className="h-full border-0 p-6">
+            <EmptyHeader>
+              <EmptyTitle className="text-control">
+                {t('newSession.hostFolders.noDrives')}
+              </EmptyTitle>
+            </EmptyHeader>
           </Empty>
         ) : folders.length === 0 ? (
           <Empty className="h-full border-0 p-6">
@@ -317,6 +399,7 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
                 key={entry.path}
                 id={`${listId}-${i}`}
                 entry={entry}
+                drive={atDrives}
                 selected={entry.path === selected}
                 onSelect={() => setSelected(entry.path)}
                 onEnter={() => go(entry.path)}
@@ -332,7 +415,12 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
             <span className="truncate">{failed}</span>
           </p>
         ) : (
-          <Target path={path ?? shownFolder} platform={platform} dim={!path} />
+          <Target
+            path={atDrives ? thisPc : (path ?? shownFolder)}
+            platform={platform}
+            dim={atDrives || !path}
+            place={atDrives}
+          />
         )}
         <div className="flex shrink-0 gap-1.5">
           <DialogClose render={<Button variant="outline" size="dialog" />}>
@@ -340,20 +428,37 @@ function Browser({ hostId, onOpened }: { hostId: string; onOpened: (path: string
           </DialogClose>
           <Button
             size="dialog"
-            disabled={!path || opening || !completion}
+            disabled={!canOpen}
+            aria-keyshortcuts={isMac ? 'Meta+Enter' : 'Control+Enter'}
             onClick={() => void openProject()}
           >
             {opening && <Spinner data-icon="inline-start" />}
             {t('newSession.hostFolders.open')}
+            <Kbd className="h-4.5 min-w-4.5 rounded-sm bg-[color-mix(in_srgb,var(--primary-foreground)_14%,transparent)] px-1 text-key text-[color-mix(in_srgb,var(--primary-foreground)_70%,transparent)] shadow-none">
+              {formatShortcut('Mod+Enter')}
+            </Kbd>
           </Button>
         </div>
       </DialogFooter>
-    </>
+    </div>
   )
 }
 
-/** What Open will open: the folder's own name in ink, the path above it quiet and cut at its start. */
-function Target({ path, platform, dim }: { path: string; platform: Platform; dim: boolean }) {
+/**
+ * What Open will open: the folder's own name in ink, the path above it quiet and cut at its start;
+ * a `place`, This PC, is no path and takes the interface face.
+ */
+function Target({
+  path,
+  platform,
+  dim,
+  place = false,
+}: {
+  path: string
+  platform: Platform
+  dim: boolean
+  place?: boolean
+}) {
   const { t } = useTranslation('session')
   const sep = separator(platform)
   const cut = path.lastIndexOf(sep, path.length - 2) + 1
@@ -364,11 +469,16 @@ function Target({ path, platform, dim }: { path: string; platform: Platform; dim
       className={cn('flex min-w-0 items-center gap-2 text-hint text-tertiary', dim && 'opacity-50')}
     >
       <span className="hidden shrink-0 @md:inline">{t('newSession.hostFolders.opens')}</span>
-      <code className="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-lg bg-(--tray) pr-2.5 pl-1.5 font-mono text-xs shadow-sunk [--tray:var(--bg-subtle)] dark:[--tray:var(--bg-app)]">
+      <code
+        className={cn(
+          'inline-flex h-7 min-w-0 items-center gap-1.5 rounded-lg bg-(--tray) pr-2.5 pl-1.5 font-mono text-xs shadow-sunk [--tray:var(--bg-subtle)] dark:[--tray:var(--bg-app)]',
+          place && 'font-sans',
+        )}
+      >
         <span className="size-4.5 shrink-0 [&_svg]:size-full!">
           <FolderClosedMark />
         </span>
-        <span className="min-w-0 truncate text-left direction-rtl">
+        <span className="min-w-0 truncate text-left [direction:rtl]">
           <bdo dir="ltr">
             {head}
             <b className="font-medium text-primary">{tail}</b>
@@ -382,12 +492,15 @@ function Target({ path, platform, dim }: { path: string; platform: Platform; dim
 function FolderRow({
   id,
   entry,
+  drive,
   selected,
   onSelect,
   onEnter,
 }: {
   id: string
   entry: HostFolder
+  /** A drive of a Windows host, at This PC. */
+  drive: boolean
   selected: boolean
   onSelect: () => void
   onEnter: () => void
@@ -404,8 +517,13 @@ function FolderRow({
       onDoubleClick={onEnter}
       className="group/row relative flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-ui select-none not-data-highlighted:hover:bg-hover"
     >
-      <span className="relative size-6.5 shrink-0 [&_svg]:size-full!">
-        <FolderClosedMark />
+      <span
+        className={cn(
+          'relative size-6.5 shrink-0',
+          drive ? 'grid place-items-center text-secondary' : '[&_svg]:size-full!',
+        )}
+      >
+        {drive ? <Glyph icon={HardDriveIcon} size={20} /> : <FolderClosedMark />}
         {entry.repo && (
           <span
             role="img"

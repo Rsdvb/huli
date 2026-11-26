@@ -22,6 +22,7 @@ import {
 import { Button } from '@renderer/components/ui/button'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { cn } from '@renderer/lib/utils'
+import { useSessionsStore } from '@renderer/stores/sessions'
 import { loadOlder, loadThrough, useThreadsStore } from '@renderer/stores/threads'
 import { returnedTo } from '@renderer/stores/view'
 import { Entry } from './entries/entry'
@@ -40,6 +41,7 @@ import { itemAtTop, leaveThread, readingPosition, type ReadingPosition } from '.
 import { RecapLine } from './recap/recap-line'
 import { useSidewaysWheel } from './sideways-wheel'
 import { playEntrance } from './thread-entrance'
+import { StillRunningLine } from './still-running-line'
 import { TurnStatus } from './turn-status'
 import { HiddenSteps } from './hidden-steps'
 import { zenItems, zenSignatureOf } from './zen-items'
@@ -58,14 +60,20 @@ import {
 // It opens on its latest page with its newest items rendered. Whenever less than a viewport of
 // rendered items lies above the view, a batch of older ones renders in a transition, which
 // MessageScroller keeps in place as they are prepended; once every loaded item is rendered, the
-// page before them loads. Rendered items stay while the thread is read, and off-screen ones skip
-// layout and paint; once it rests at its end, all but the newest go again (TrimAtEnd).
+// page before them loads. Rendered items stay while the thread is read: when a long thread grows
+// past WINDOW_THRESHOLD rendered items, items far outside the viewport unmount their subtrees while
+// keeping their measured height, so DOM and heap usage stay bounded without shifting scroll
+// position. Huli: once it rests at its end, all but the newest go again (TrimAtEnd).
 const FIRST_ITEMS = 24
 const MORE_ITEMS = 16
 /** Rendered items past which a thread resting at its end lets the older ones go. */
 const KEEP_ITEMS = 3 * FIRST_ITEMS
 /** How long a thread rests at its end before it does. */
 const TRIM_AFTER_MS = 3000
+const WINDOW_THRESHOLD = 48
+const OVERSCAN_SCREENS = 2
+const PIN_TAIL = 10
+const WINDOW_HYSTERESIS = 4
 
 /** The entry an item starts with; a reply's footer and the turn's status start with none. */
 function firstEntryOf(item: Item | undefined): string | null {
@@ -335,6 +343,7 @@ const NO_TURNS: ReadonlySet<string> = new Set()
  */
 function spacing(item: Item, previous: Item): string {
   if (item.type === 'status') return ''
+  if (item.type === 'still') return 'pt-1.5'
   if (item.type === 'entry' && item.turnStart) return 'pt-[22px]'
   if (item.type === 'reply') return 'pt-1.5'
   if (isSent(previous) || (item.type === 'entry' && item.char === 's')) return 'pt-[22px]'
@@ -364,7 +373,11 @@ export const Thread = memo(function Thread({
     () => withoutHidden(allOrder ?? [], allSignature),
     [allOrder, allSignature],
   )
-  const built = useMemo(() => buildItems(order, signature, working), [order, signature, working])
+  const still = useSessionsStore((s) => !!s.byId[sessionId]?.stillRunning)
+  const built = useMemo(
+    () => buildItems(order, signature, working, still),
+    [order, signature, working, still],
+  )
   // Huli: the 简洁视图, a view of the built items; Find shows every step while it is open.
   const [findOpen, setFindOpen] = useState(false)
   const chosenView = useToolCallView(sessionId)
@@ -440,10 +453,12 @@ export const Thread = memo(function Thread({
     const next = windowEnd(items, gapStart, gapEnd, byId)
     startTransition(() => setGap(next < gapEnd ? { start: items[next]!.key, end: gap.end } : null))
   }, [sessionId, gap, gapOpen, gapStart, gapEnd, items])
+  const [pinnedKey, setPinnedKey] = useState<string | null>(null)
   const jumps = useMemo<ThreadJumps>(
     () => ({
       reveal: (key) =>
         new Promise((resolve) => {
+          setPinnedKey(key)
           revealing.current = { key, resolve }
           setRevealTick((tick) => tick + 1)
         }),
@@ -482,14 +497,130 @@ export const Thread = memo(function Thread({
   const content = useRef<HTMLDivElement | null>(null)
   const selected = useSelectedText(viewport)
   useSidewaysWheel(viewport)
-  const nearStart = useCallback(() => {
+  // Measured outer height per item key, used to keep exact scroll height when off-screen items
+  // unmount their React subtrees in long threads.
+  const measuredHeights = useRef(new Map<string, number>())
+  const [windowState, setWindowState] = useState<{
+    start: number
+    end: number
+    heights: ReadonlyMap<string, number>
+  } | null>(null)
+  const windowStateRef = useRef(windowState)
+  useLayoutEffect(() => {
+    windowStateRef.current = windowState
+  }, [windowState])
+  const windowFrame = useRef(0)
+  const lastWindowScrollTop = useRef(-Infinity)
+  const lastWindowCount = useRef(0)
+
+  const syncWindowNow = useCallback(() => {
+    windowFrame.current = 0
+    const renderedCount = items.length - shownFrom
+    if (renderedCount <= WINDOW_THRESHOLD) {
+      if (windowStateRef.current !== null) setWindowState(null)
+      lastWindowCount.current = renderedCount
+      return
+    }
+    if (selected || returnPending || held || gapOpen || revealing.current !== null) return
+    const view = viewport.current
+    const column = content.current
+    if (!view || !column || view.clientHeight <= 0) return
+
+    const scrollTop = view.scrollTop
+    const clientHeight = view.clientHeight
+    // Skip re-scanning the thread while following small streaming appends near the same scroll offset.
+    if (
+      windowStateRef.current !== null &&
+      Math.abs(scrollTop - lastWindowScrollTop.current) < clientHeight * 0.4 &&
+      Math.abs(renderedCount - lastWindowCount.current) < 8
+    ) {
+      return
+    }
+
+    const overscan = clientHeight * OVERSCAN_SCREENS
+    const topBound = scrollTop - overscan
+    const bottomBound = scrollTop + clientHeight + overscan
+
+    const keyToIndex = new Map<string, number>()
+    for (let i = shownFrom; i < items.length; i++) keyToIndex.set(items[i]!.key, i)
+
+    let winStart = -1
+    let winEnd = -1
+    let cursorY: number | null = null
+    for (let child = column.firstElementChild; child; child = child.nextElementSibling) {
+      if (!(child instanceof HTMLElement)) continue
+      const key = child.dataset.messageId
+      if (!key) continue
+      const idx = keyToIndex.get(key)
+      if (idx === undefined) continue
+      let top: number
+      let height: number
+      // Virtualized placeholders already have their exact cached height; avoid reading offsetHeight
+      // on them so Blink never forces layout across off-screen content-visibility subtrees.
+      if (child.childElementCount === 0) {
+        const cached = measuredHeights.current.get(key)
+        if (cached !== undefined && cursorY !== null) {
+          top = cursorY
+          height = cached
+        } else {
+          top = child.offsetTop
+          height = cached ?? child.offsetHeight
+        }
+      } else {
+        top = cursorY ?? child.offsetTop
+        height = child.offsetHeight
+        if (height > 0) measuredHeights.current.set(key, height)
+      }
+      const bottom = top + height
+      cursorY = bottom
+      if (bottom >= topBound && top <= bottomBound) {
+        if (winStart === -1) winStart = idx
+        winEnd = idx
+      }
+    }
+    lastWindowScrollTop.current = scrollTop
+    lastWindowCount.current = renderedCount
+    if (winStart === -1 || winEnd === -1) return
+    const prev = windowStateRef.current
+    if (
+      prev !== null &&
+      Math.abs(prev.start - winStart) < WINDOW_HYSTERESIS &&
+      Math.abs(prev.end - winEnd) < WINDOW_HYSTERESIS
+    ) {
+      return
+    }
+    const heights = new Map(measuredHeights.current)
+    startTransition(() => setWindowState({ start: winStart, end: winEnd, heights }))
+  }, [items, shownFrom, selected, returnPending, held, gapOpen])
+
+  const checkNearStart = useCallback(() => {
     const el = viewport.current
     if (!el || held || returnTo || el.scrollTop >= el.clientHeight) return
     if (shownFrom > 0) startTransition(() => showFrom(shownFrom - MORE_ITEMS))
     else if (hasOlder) loadOlder(sessionId)
   }, [sessionId, held, returnTo, hasOlder, shownFrom, showFrom])
-  // Also after each prepend, and for a page too short to scroll.
-  useEffect(nearStart, [nearStart, items.length])
+
+  const scheduleScrollSync = useCallback(() => {
+    if (windowFrame.current !== 0) return
+    windowFrame.current = requestAnimationFrame(() => {
+      syncWindowNow()
+      checkNearStart()
+    })
+  }, [syncWindowNow, checkNearStart])
+
+  useEffect(() => {
+    scheduleScrollSync()
+  }, [scheduleScrollSync, items.length, shownFrom])
+
+  useEffect(
+    () => () => {
+      if (windowFrame.current !== 0) {
+        cancelAnimationFrame(windowFrame.current)
+        windowFrame.current = 0
+      }
+    },
+    [],
+  )
   const trimmable = !held && !returnTo && !gap && shownFrom < items.length - KEEP_ITEMS
   const trim = useCallback(() => showFrom(items.length - FIRST_ITEMS), [items.length, showFrom])
   // From the first paint of its items, so the thread never shows before it enters.
@@ -553,7 +684,7 @@ export const Thread = memo(function Thread({
       <MessageScroller className="ks-thread min-h-0 flex-1 scroll-fade-top-overlay">
         <MessageScrollerViewport
           ref={viewport}
-          onScroll={nearStart}
+          onScroll={scheduleScrollSync}
           aria-label={t('thread.label')}
           // Transparent rather than invisible: visibility is inherited, so showing the thread again
           // restyled every element in it, and ran each button's transition.
@@ -578,6 +709,24 @@ export const Thread = memo(function Thread({
                     key={item.key}
                     messageId={item.key}
                     style={{ height: estimate, containIntrinsicSize: `auto ${estimate}px` }}
+                    className={cn(index > 0 && spacing(item, items[index - 1]!))}
+                  />
+                )
+              }
+              const measured = windowState?.heights.get(item.key)
+              const virtualized =
+                windowState !== null &&
+                measured !== undefined &&
+                items.length - shownFrom > WINDOW_THRESHOLD &&
+                index < items.length - PIN_TAIL &&
+                item.key !== pinnedKey &&
+                (index < windowState.start || index > windowState.end)
+              if (virtualized) {
+                return (
+                  <MessageScrollerItem
+                    key={item.key}
+                    messageId={item.key}
+                    style={{ height: measured, containIntrinsicSize: `auto ${measured}px` }}
                     className={cn(index > 0 && spacing(item, items[index - 1]!))}
                   />
                 )
@@ -610,6 +759,8 @@ export const Thread = memo(function Thread({
                     <TurnStatus sessionId={sessionId} afterSent={item.afterSent} />
                   ) : item.type === 'hidden' ? (
                     <HiddenSteps count={item.count} onShow={() => openTurn(item.turn)} />
+                  ) : item.type === 'still' ? (
+                    <StillRunningLine sessionId={sessionId} />
                   ) : item.type === 'reply' ? (
                     <ReplyFooter
                       replyKey={item.key}
@@ -619,6 +770,7 @@ export const Thread = memo(function Thread({
                       toolIds={item.toolIds}
                       endId={item.endId}
                       latest={item.latest}
+                      still={item.still ?? false}
                     />
                   ) : item.type === 'run' ? (
                     <RunGroup

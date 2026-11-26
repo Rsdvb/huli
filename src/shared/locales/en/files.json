@@ -11,6 +11,7 @@
     "allFiles": "All files",
     "findFile": "Find file",
     "openInEditor": "Open in editor",
+    "showIgnored": "Show ignored files",
     "close": "Close panel",
     "title": "Files",
     "folder": "Project folder",
@@ -43,6 +44,9 @@
     "copyPath": "Copy path",
     "showChanges": "Show changes",
     "reference": "Reference in conversation",
+    "quoteLine": "Quote line {{line}} in conversation",
+    "quoteLines": "Quote lines {{start}}–{{end}} in conversation",
+    "quoteSelection": "Quote the selection in conversation",
     "openFailed": "Couldn't open this file",
     "missing": "This file is no longer on disk.",
     "readFailed": "Couldn't read this file again: {{message}}",
@@ -50,6 +54,9 @@
     "showIn": "Show in {{name}}",
     "binaryTitle": "Binary file",
     "binaryDescription": "{{size}}, not shown.",
+    "oldHostTitle": "Update Kettu on {{name}} to preview this file",
+    "oldHostDescription": "Kettu there is {{version}}, too old to preview PDF, Word and Excel files.",
+    "oldHostOpen": "Open {{name}} in Settings",
     "tooLargeTitle": "Too large to preview",
     "tooLargeDescription": "{{size}}; the preview shows files up to {{limit}}.",
     "mediaTooLargeTitle": "Too large to show here",
@@ -84,6 +91,14 @@
   "link": {
     "open": "Open {{target}}",
     "openInPanel": "Open in Side Panel"
+  },
+  "htmlPreview": {
+    "preview": "Preview",
+    "inKettu": "Preview in Kettu's browser",
+    "inDefault": "Open in default browser",
+    "openFile": "Open file",
+    "failed": "Couldn't preview the page: {{error}}",
+    "tooManyTabs": "The session's browser has as many tabs as it can hold. Close one, then preview again."
   },
   "unsaved": {
     "title": "Save changes to {{name}}?",
@@ -136,7 +151,10 @@
     "previous": "Previous change",
     "next": "Next change",
     "position": "{{current}} / {{total}}",
-    "openFile": "Open file"
+    "openFile": "Open file",
+    "style": "Diff view",
+    "unified": "Unified",
+    "split": "Side by side"
   },
   "notes": {
     "comment": "Comment",
@@ -207,6 +225,9 @@
     "nameTaken": "“{{name}}” already exists here. Choose another name.",
     "taken": "Something with that name is already there.",
     "failed": "Couldn't change the files: {{message}}",
+    "readFailed": "Couldn't read {{name}}: {{message}}",
+    "readTruncated_one": "Showing the first item in {{name}}.",
+    "readTruncated_other": "Showing the first {{count, number}} items in {{name}}.",
     "trash": {
       "mac": "Trash",
       "windows": "Recycle Bin",
@@ -265,5 +286,37 @@
     "dismissed_other": "{{count}} dismissed",
     "hideDismissed": "Hide dismissed",
     "allHandled": "Every finding of this review is dismissed"
+  },
+  "upload": {
+    "choose": "Upload files…",
+    "uploading": "Uploading {{name}}…",
+    "uploadingOf": "Uploading {{current}} of {{total}}: {{name}}…",
+    "doneOne": "Uploaded {{name}} to {{place}}",
+    "done_one": "Uploaded {{count}} item to {{place}}",
+    "done_other": "Uploaded {{count}} items to {{place}}",
+    "partly_one": "Uploaded {{count}} of {{total}} items",
+    "partly_other": "Uploaded {{count}} of {{total}} items",
+    "failedOne": "Couldn't upload {{name}}",
+    "failed_one": "Couldn't upload {{count}} item",
+    "failed_other": "Couldn't upload {{count}} items",
+    "stopped_one": "Upload stopped after {{count}} item",
+    "stopped_other": "Upload stopped after {{count}} items",
+    "none": "Nothing was uploaded",
+    "why": "{{name}}: {{reason}}",
+    "moreFailed_one": "{{count}} more failed",
+    "moreFailed_other": "{{count}} more failed",
+    "skipped_one": "{{count}} skipped",
+    "skipped_other": "{{count}} skipped",
+    "noFolders": "Only files can be uploaded here, not folders",
+    "tooLarge": "Larger than {{limit}}, the most one upload takes",
+    "unreadable": "Couldn't read the file",
+    "hostTooOld": "Kettu on that computer is too old to take uploads. Update it there.",
+    "replaceTitle": "Replace “{{name}}”?",
+    "replaceFile": "“{{name}}” is already in {{place}}. Replacing it overwrites the one there.",
+    "replaceFolder": "A folder “{{name}}” is already in {{place}}. Replacing merges the two: files with the same names are overwritten, and the rest are kept.",
+    "forTheRest": "Do the same for the rest",
+    "replace": "Replace",
+    "skip": "Skip",
+    "stop": "Stop uploading"
   }
 }

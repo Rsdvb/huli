@@ -30,6 +30,7 @@ import {
 import {
   DEFAULT_SETTINGS,
   NEW_SESSION_LISTS,
+  RUNNING_SENDS,
   ZOOM_LEVELS,
   stepZoom,
   type LightModel,
@@ -255,7 +256,7 @@ export function GeneralSwitch({
   label: string
   disabled?: boolean
 }) {
-  // A host older than a field sends none, and works as its default.
+  // A host older than one of its keys leaves it out, and works as its default.
   const checked = useSettings().general[field] ?? DEFAULT_SETTINGS.general[field]
   const [apply, error] = useApply()
   return (
@@ -518,6 +519,26 @@ export function SendKey() {
           },
         ]}
         onChange={(v) => apply({ general: { sendKey: v } })}
+      />
+    </>
+  )
+}
+
+export function RunningSend() {
+  const { t } = useTranslation('settings')
+  const value = useSettings().general.runningSend ?? DEFAULT_SETTINGS.general.runningSend
+  const [apply, error] = useApply()
+  return (
+    <>
+      <ControlError error={error} />
+      <Segmented
+        label={t('general.runningSend.name')}
+        value={value}
+        options={RUNNING_SENDS.map((mode) => ({
+          value: mode,
+          label: t(`general.runningSend.${mode}`),
+        }))}
+        onChange={(v) => apply({ general: { runningSend: v } })}
       />
     </>
   )

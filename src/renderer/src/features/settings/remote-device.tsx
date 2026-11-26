@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Edit02Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { DeviceActivity } from '@shared/remote/activity'
-import type { PairedDevice } from '@shared/remote/device'
+import { otherAccount, type PairedDevice } from '@shared/remote/device'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,13 +17,14 @@ import { basename, monthDay } from '@renderer/lib/format'
 import { useHostContext } from '@renderer/lib/host-features'
 import { useAppInfo } from '@renderer/lib/use-app-info'
 import { useNow } from '@renderer/lib/use-now'
-import { useHostScope } from '@renderer/stores/host-scope'
+import { useHostScope, useSettingsHostStore } from '@renderer/stores/host-scope'
 import { useProjectsStore } from '@renderer/stores/projects'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { openSettingsItem } from '@renderer/stores/view'
 import { useWebHostStore } from '@renderer/stores/web-host'
 import { Fact } from './agent-parts'
 import { CONFIRM, ControlError, DangerButton, IconAction, Pill, Spin } from './controls'
+import { useDeviceRemove } from './device-remove'
 import { DeviceIcon, DeviceTile } from './remote-parts'
 import { ThisBrowserBadge } from './remote-section'
 import { changeDevice, deviceLine, nextDeviceName, olderDeviceVersion, whenAt } from './remote-text'
@@ -37,6 +38,9 @@ export function DevicePage({ id }: { id: string }) {
   const { t } = useTranslation('settings')
   const device = useRemoteStore((s) => s.status?.devices.find((entry) => entry.id === id) ?? null)
   const online = useRemoteStore((s) => s.status?.online.includes(id) ?? false)
+  const away = useRemoteStore(
+    (s) => device !== null && otherAccount(device, s.status?.account ?? null),
+  )
   if (!device) {
     return (
       <>
@@ -51,10 +55,19 @@ export function DevicePage({ id }: { id: string }) {
       </>
     )
   }
-  return <DevicePageBody device={device} online={online} />
+  return <DevicePageBody device={device} online={online} away={away} />
 }
 
-function DevicePageBody({ device, online }: { device: PairedDevice; online: boolean }) {
+function DevicePageBody({
+  device,
+  online,
+  away,
+}: {
+  device: PairedDevice
+  online: boolean
+  /** Its last connection named another account than the host's, so it cannot connect. */
+  away: boolean
+}) {
   const { t } = useTranslation('settings')
   const onHost = useHostContext()
   const now = useNow()
@@ -65,9 +78,13 @@ function DevicePageBody({ device, online }: { device: PairedDevice; online: bool
   const joined = t(
     paired?.via === 'account'
       ? 'remote.device.joinedAccount'
-      : device.kind === 'desktop'
-        ? 'remote.device.joinedLink'
-        : 'remote.device.joinedScan',
+      : paired?.via === 'ssh'
+        ? 'remote.device.joinedSsh'
+        : paired?.via === 'reverse'
+          ? 'remote.device.joinedReverse'
+          : device.kind === 'desktop'
+            ? 'remote.device.joinedLink'
+            : 'remote.device.joinedScan',
     {
       date: monthDay(device.addedAt),
     },
@@ -89,6 +106,7 @@ function DevicePageBody({ device, online }: { device: PairedDevice; online: bool
         subtitle={<span className="k-name">{deviceLine(t, device)}</span>}
       >
         {online && <Pill tone="success">{t('remote.devices.online')}</Pill>}
+        {!online && away && <Pill tone="warning">{t('remote.devices.otherAccount')}</Pill>}
       </ItemPageHeader>
 
       <div className="k-groups">
@@ -103,6 +121,7 @@ function DevicePageBody({ device, online }: { device: PairedDevice; online: bool
             )}
           </RowGroup>
           {old && <GroupNote>{t('remote.device.oldApp', { version: old })}</GroupNote>}
+          {away && <GroupNote>{t('remote.device.otherAccount', onHost)}</GroupNote>}
         </section>
         <Activity device={device} events={events} />
         <section aria-label={t('remote.device.remove.name')} className="k-group">
@@ -215,9 +234,13 @@ function eventText(
       return t(
         event.via === 'account'
           ? 'remote.device.events.pairedAccount'
-          : kind === 'desktop'
-            ? 'remote.device.events.pairedLink'
-            : 'remote.device.events.paired',
+          : event.via === 'ssh'
+            ? 'remote.device.events.pairedSsh'
+            : event.via === 'reverse'
+              ? 'remote.device.events.pairedReverse'
+              : kind === 'desktop'
+                ? 'remote.device.events.pairedLink'
+                : 'remote.device.events.paired',
         onHost,
       )
     case 'connected':
@@ -386,9 +409,12 @@ function RemoveDevice({ device }: { device: PairedDevice }) {
   const onHost = useHostContext()
   // The web client removing its own browser ends this page's connection for good.
   const own = useWebHostStore((s) => s.host?.device.id === device.id)
-  const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const hostId = useSettingsHostStore((s) => s.hostId)
+  const open = useDeviceRemove((s) => s.open?.hostId === hostId && s.open.id === device.id)
+  const setOpen = (next: boolean): void =>
+    useDeviceRemove.setState({ open: next ? { hostId, id: device.id } : null })
   const remove = async (): Promise<void> => {
     setBusy(true)
     setError(null)

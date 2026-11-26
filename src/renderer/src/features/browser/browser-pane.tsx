@@ -12,14 +12,35 @@ import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
   Cancel01Icon,
+  ComputerIcon,
   Globe02Icon,
   LinkSquare02Icon,
   ReloadIcon,
+  SmartPhone01Icon,
+  Tablet01Icon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
-import { fitViewport, type BrowserNotice, type BrowserViewport } from '@shared/browser'
+import {
+  fitViewport,
+  PAGE_SIZE_NAMES,
+  PAGE_SIZES,
+  SIZE_LINE_ROOM,
+  type BrowserNotice,
+  type BrowserViewport,
+  type PageSize,
+  type PageSizeName,
+} from '@shared/browser'
 import { onAppEvent } from '@renderer/app/events'
 import { useControlAgent } from '@renderer/components/control/use-control-agent'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@renderer/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { PaneBody, PaneEmpty, PaneIcon, PanelButton } from '@renderer/features/shell/panel-button'
 import { hostOfPath } from '@renderer/lib/host-paths'
@@ -27,7 +48,7 @@ import { isMac } from '@renderer/lib/platform'
 import { agentName } from '@renderer/stores/agents'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { useBrowserStore } from '@renderer/stores/browser'
-import { useOverlayOpen } from '@renderer/stores/overlays'
+import { useOpenOverlays, useOverlayStore } from '@renderer/stores/overlays'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { panelSession } from '@renderer/stores/view'
 import { AddressField } from './address-field'
@@ -79,11 +100,14 @@ export function BrowserPane({ panel, maximized }: { panel: string; maximized: bo
   const agent = useControlAgent(agentId, hostId)
   // Huli: the dev servers the session's folder names in .claude/launch.json.
   const presets = useLaunchConfigs(sessionId)
-  const overlayOpen = useOverlayOpen()
+  const overlays = useOpenOverlays()
+  const showsPage = !!state && !!(state.url || state.page)
   const zoom = useSettingsStore((s) => s.settings.appearance.zoom)
   // The frame the page fills.
   const page = useRef<HTMLDivElement>(null)
   const address = useRef<HTMLInputElement>(null)
+  // The session the pane shows, so a capture that lands after the pane left it is dropped.
+  const live = useRef<string | null>(null)
   const name = agentId ? agentName(agentId, hostId) : t('empty.agent')
 
   // The pane shows the page, so the toggle's dot has done its work.
@@ -148,28 +172,14 @@ export function BrowserPane({ panel, maximized }: { panel: string; maximized: bo
     })
   }, [sessionId, zoom])
 
-  // A notice, the address row or the origin card moves the page's frame without resizing it.
-  useLayoutEffect(report)
-
-  // The frame is another element once the page appears, which the observer must follow: the pick
-  // mode's hint and the comments under the page resize it without this pane rendering again.
-  const framed = !!state && (!!state.url || state.page)
-  useLayoutEffect(() => {
-    const element = page.current
-    if (!element) return
-    const observer = new ResizeObserver(report)
-    observer.observe(element)
-    window.addEventListener('resize', report)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', report)
-    }
-  }, [report, framed])
-
   // An overlay that covers the page takes a still in its place: a web view is a native layer the
-  // renderer cannot draw over. A toast stays up while the pane maximizes or restores, so the
-  // check runs again then.
-  useEffect(() => {
+  // renderer cannot draw over. Whether one covers it depends on where the overlays and the page's
+  // frame are, so the check runs whenever an overlay opens or closes, since one that covers the
+  // page can open while another is already open, and whenever the frame moves or resizes, since a
+  // side panel opening or a pane maximizing brings the page under an overlay that stays up.
+  const coverCheck = useRef(0)
+  const checkCover = useCallback(() => {
+    cancelAnimationFrame(coverCheck.current)
     if (!sessionId) return
     const thaw = () => {
       if (!useBrowserStore.getState().stills[sessionId]) return
@@ -179,12 +189,11 @@ export function BrowserPane({ panel, maximized }: { panel: string; maximized: bo
         useBrowserStore.getState().setStill(sessionId, null)
       })
     }
-    if (!overlayOpen) {
+    if (Object.keys(useOverlayStore.getState().open).length === 0) {
       thaw()
       return
     }
-    let cancelled = false
-    const frame = requestAnimationFrame(() => {
+    coverCheck.current = requestAnimationFrame(() => {
       const area = page.current
       if (!area || !covers(area)) {
         thaw()
@@ -193,18 +202,48 @@ export function BrowserPane({ panel, maximized }: { panel: string; maximized: bo
       void window.kettu.browser
         .freeze(sessionId)
         .then((image) => {
-          // The overlay may have closed while the page was captured; then nothing is shown.
           if (!image) return
-          if (cancelled) void window.kettu.browser.thaw(sessionId)
-          else useBrowserStore.getState().setStill(sessionId, image)
+          // Overlays may open and close while the page is captured, and a later check finds the
+          // page already frozen, so whether to keep the still is decided by what covers it now.
+          const now = page.current
+          if (live.current === sessionId && now && covers(now)) {
+            useBrowserStore.getState().setStill(sessionId, image)
+          } else {
+            void window.kettu.browser.thaw(sessionId).finally(() => {
+              useBrowserStore.getState().setStill(sessionId, null)
+            })
+          }
         })
         .catch(() => {})
     })
+  }, [sessionId])
+
+  const frameChanged = useCallback(() => {
+    report()
+    checkCover()
+  }, [report, checkCover])
+
+  // A notice, the address row or the origin card moves the page's frame without resizing it.
+  useLayoutEffect(frameChanged)
+
+  // The frame is another element once the pane has a page, which the observer must follow: the
+  // pick mode's hint and the comments under the page resize it without this pane rendering again.
+  useLayoutEffect(() => {
+    const element = page.current
+    if (!element) return
+    const observer = new ResizeObserver(frameChanged)
+    observer.observe(element)
+    window.addEventListener('resize', frameChanged)
     return () => {
-      cancelled = true
-      cancelAnimationFrame(frame)
+      observer.disconnect()
+      window.removeEventListener('resize', frameChanged)
     }
-  }, [overlayOpen, sessionId, maximized])
+  }, [frameChanged, showsPage])
+
+  useEffect(() => {
+    checkCover()
+    return () => cancelAnimationFrame(coverCheck.current)
+  }, [checkCover, overlays, maximized])
 
   // Huli: leaving the pane or its session ends pick mode.
   useEffect(() => {
@@ -228,7 +267,9 @@ export function BrowserPane({ panel, maximized }: { panel: string; maximized: bo
   // Leaving the pane or its session drops a still that is no longer in front of anything.
   useEffect(() => {
     if (!sessionId) return
+    live.current = sessionId
     return () => {
+      live.current = null
       if (!useBrowserStore.getState().stills[sessionId]) return
       void window.kettu.browser.thaw(sessionId)
       useBrowserStore.getState().setStill(sessionId, null)
@@ -306,6 +347,13 @@ export function BrowserPane({ panel, maximized }: { panel: string; maximized: bo
                   sessionId={sessionId}
                   profile={state.profile}
                   canSave={!!url && !agentHasPage}
+                />
+              )}
+              {sessionId && (
+                <PageSizeMenu
+                  sessionId={sessionId}
+                  viewport={state.viewport}
+                  fills={!state.agentUsed}
                 />
               )}
               <PanelButton
@@ -411,8 +459,77 @@ export function BrowserPane({ panel, maximized }: { panel: string; maximized: bo
   )
 }
 
-/** How much room under the page's box its size line needs, in CSS pixels. */
-const SIZE_LINE_ROOM = 36
+const SIZE_ICONS = { desktop: ComputerIcon, tablet: Tablet01Icon, phone: SmartPhone01Icon }
+
+/**
+ * The size of the selected tab's page. Desktop lets a page no agent used fill the pane, and keeps
+ * one an agent used at the agent's size; a size the agent gave itself shows as custom.
+ */
+function PageSizeMenu({
+  sessionId,
+  viewport,
+  fills,
+}: {
+  sessionId: string
+  viewport: PageSize | null
+  /** At the desktop's size the page fills the pane, as one no agent used does. */
+  fills: boolean
+}) {
+  const { t } = useTranslation('browser')
+  const chosen = viewport?.name ?? 'desktop'
+  const label = t('viewport.menu')
+  const choose = (value: unknown) => {
+    if (!(PAGE_SIZE_NAMES as readonly unknown[]).includes(value) || value === chosen) return
+    void window.kettu.browser
+      .setPageSize(sessionId, value as PageSizeName)
+      .catch((error: unknown) => console.error('Could not resize the page', error))
+  }
+  const sizeOf = (size: BrowserViewport) =>
+    t('viewport.size', { width: size.width, height: size.height })
+  return (
+    <DropdownMenu>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <DropdownMenuTrigger
+              render={
+                <button type="button" aria-label={label} className="kp-tool app-region-no-drag" />
+              }
+            />
+          }
+        >
+          <PaneIcon icon={chosen === 'custom' ? ComputerIcon : SIZE_ICONS[chosen]} />
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="end" className="min-w-60">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{label}</DropdownMenuLabel>
+          <DropdownMenuRadioGroup value={chosen} onValueChange={choose}>
+            {PAGE_SIZE_NAMES.map((name) => (
+              <DropdownMenuRadioItem key={name} value={name}>
+                <PaneIcon icon={SIZE_ICONS[name]} size={16} />
+                <span className="min-w-0 flex-1 truncate">{t(`viewport.${name}`)}</span>
+                <span className="shrink-0 text-small text-tertiary tabular-nums">
+                  {name === 'desktop' && fills ? t('viewport.fits') : sizeOf(PAGE_SIZES[name])}
+                </span>
+              </DropdownMenuRadioItem>
+            ))}
+            {viewport?.name === 'custom' && (
+              <DropdownMenuRadioItem value="custom" disabled>
+                <PaneIcon icon={ComputerIcon} size={16} />
+                <span className="min-w-0 flex-1 truncate">{t('viewport.custom')}</span>
+                <span className="shrink-0 text-small text-tertiary tabular-nums">
+                  {sizeOf(viewport)}
+                </span>
+              </DropdownMenuRadioItem>
+            )}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
 
 /**
  * The box of a page that keeps its own size, where main draws it scaled inside the frame, and
@@ -435,7 +552,6 @@ function FittedPage({
     width: number
     height: number
     percent: number
-    room: number
   } | null>(null)
 
   useLayoutEffect(() => {
@@ -454,20 +570,20 @@ function FittedPage({
           radius: 0,
         },
         viewport,
+        Math.round(SIZE_LINE_ROOM * zoom),
       )
       const next = {
         left: bounds.x / zoom,
         width: bounds.width / zoom,
         height: bounds.height / zoom,
         percent: Math.round(scale * 100),
-        room: rect.height - bounds.height / zoom,
       }
       setBox((last) =>
         last &&
         last.left === next.left &&
         last.width === next.width &&
         last.height === next.height &&
-        last.room === next.room
+        last.percent === next.percent
           ? last
           : next,
       )
@@ -488,14 +604,12 @@ function FittedPage({
       >
         {still && <img src={still} alt="" aria-hidden className="kp-view__still" />}
       </div>
-      {box.room >= SIZE_LINE_ROOM && (
-        <Tooltip>
-          <TooltipTrigger render={<span className="kp-view__size" style={{ top: box.height }} />}>
-            {box.percent < 100 ? t('viewport.scaled', size) : t('viewport.size', size)}
-          </TooltipTrigger>
-          <TooltipContent>{t('viewport.hint')}</TooltipContent>
-        </Tooltip>
-      )}
+      <Tooltip>
+        <TooltipTrigger render={<span className="kp-view__size" style={{ top: box.height }} />}>
+          {box.percent < 100 ? t('viewport.scaled', size) : t('viewport.size', size)}
+        </TooltipTrigger>
+        <TooltipContent>{t('viewport.hint')}</TooltipContent>
+      </Tooltip>
     </>
   )
 }

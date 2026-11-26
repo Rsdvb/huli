@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  foldedHost,
+  parseHostPairingState,
   parseIdentityFile,
   parseHostStatus,
   parseKnownHost,
@@ -157,5 +159,54 @@ describe('parseHostStatus', () => {
     for (const region of ['', 'x'.repeat(65), 'Tokyo\nHong Kong', 'Tokyo\u0085', 42]) {
       expect(connection({ state: 'online', relay, region })).toEqual({ state: 'online', relay })
     }
+  })
+})
+
+describe('foldedHost', () => {
+  it("folds a host of another account than this computer's, and one that turned it away", () => {
+    expect(foldedHost({ account: 'acc_b' }, 'acc_a')).toBe(true)
+    expect(foldedHost({ account: 'acc_a' }, 'acc_a')).toBe(false)
+    expect(foldedHost({ account: null }, 'acc_a')).toBe(false)
+    expect(foldedHost({}, 'acc_a')).toBe(false)
+    expect(foldedHost({ account: null, otherAccount: 'acc_a' }, 'acc_a')).toBe(true)
+    expect(foldedHost({ account: null, otherAccount: 'acc_a' }, 'acc_c')).toBe(false)
+  })
+
+  it('folds nothing while this computer is signed in to no account', () => {
+    expect(foldedHost({ account: 'acc_b' }, null)).toBe(false)
+    expect(foldedHost({ account: 'acc_b', otherAccount: 'acc_a' }, null)).toBe(false)
+  })
+})
+
+describe('parseHostPairingState', () => {
+  const host = {
+    id: '0123456789abcdef0123456789abcdef',
+    publicKey: 'AAAA',
+    name: 'Studio',
+    platform: 'darwin',
+    version: '0.1.25',
+    addresses: [],
+    deviceName: 'Mac',
+    addedAt: 1,
+    lastOnlineAt: null,
+    removed: false,
+    connection: { state: 'online', relay: 'https://relay.example.com', own: true },
+  }
+
+  it('keeps updated: true on an added state and drops non-boolean values', () => {
+    expect(parseHostPairingState({ state: 'added', host, updated: true })).toMatchObject({
+      state: 'added',
+      updated: true,
+    })
+    expect(parseHostPairingState({ state: 'added', host, updated: 'yes' })).not.toHaveProperty(
+      'updated',
+    )
+  })
+
+  it('accepts other_host as a pairing failure reason', () => {
+    expect(parseHostPairingState({ state: 'failed', reason: 'other_host' })).toEqual({
+      state: 'failed',
+      reason: 'other_host',
+    })
   })
 })
