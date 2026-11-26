@@ -47,6 +47,7 @@ export const HOST_SETTING_KEYS = {
     'sessionTitles',
     'claudeRuns',
     'promptSuggestions',
+    'otherAgentSuggestions',
     'continueAfterLimit',
     'agentPasswords',
     'lightModel',
@@ -77,6 +78,7 @@ export interface HostSettingsPart {
     | 'sessionTitles'
     | 'claudeRuns'
     | 'promptSuggestions'
+    | 'otherAgentSuggestions'
     | 'continueAfterLimit'
     | 'agentPasswords'
     | 'lightModel'

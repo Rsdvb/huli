@@ -150,6 +150,36 @@ describe('prompt suggestions', () => {
   })
 })
 
+// Huli: other agents' suggestions cost a request of the plan each turn, so they wait to be asked for.
+describe("other agents' suggestions", () => {
+  it('are off for a file from before them, and an on reaches the host', async () => {
+    await save({ version: 1, general: { promptSuggestions: true } })
+    const settings = (await SettingsStore.load(dir)).get()
+    expect(settings.general.otherAgentSuggestions).toBe(false)
+    expect(hostSettings(settings, 'en').otherAgentSuggestions).toBe(false)
+    const on = mergeSettings(settings, { general: { otherAgentSuggestions: true } })
+    expect(on.general.promptSuggestions).toBe(true)
+    expect(hostSettings(on, 'en').otherAgentSuggestions).toBe(true)
+  })
+
+  it('keep a stored on and drop a value that is no boolean', async () => {
+    await save({ version: 1, general: { otherAgentSuggestions: true } })
+    expect((await SettingsStore.load(dir)).get().general.otherAgentSuggestions).toBe(true)
+    await save({ version: 1, general: { otherAgentSuggestions: 'yes' } })
+    expect((await SettingsStore.load(dir)).get().general.otherAgentSuggestions).toBe(false)
+  })
+
+  it('take only a boolean, kept by the host for a paired device', () => {
+    expect(() => validateSettingsPatch({ general: { otherAgentSuggestions: true } })).not.toThrow()
+    for (const value of ['true', 1, null, {}]) {
+      expect(() => validateSettingsPatch({ general: { otherAgentSuggestions: value } })).toThrow()
+    }
+    const split = splitSettingsPatch({ general: { otherAgentSuggestions: true, sendKey: 'enter' } })
+    expect(split.host).toEqual({ general: { otherAgentSuggestions: true } })
+    expect(split.client).toEqual({ general: { sendKey: 'enter' } })
+  })
+})
+
 describe("the agents' lower priority", () => {
   it('is on for a file from before it and reaches the host', async () => {
     await save({ version: 1, general: { language: 'en' } })
