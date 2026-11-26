@@ -241,6 +241,9 @@ const tabKind = (tab: MarketplaceTab): PublishKind | null =>
  * section, and the tab its empty state.
  */
 function pluginSections(src: Sources, t: TFunction<'marketplace'>): Section[] {
+  // Huli: Kite reads no Kettu community service, so it lists nothing to wait for; the tab shows
+  // its empty state, which points at Add.
+  if (!COMMUNITY_MARKETPLACE) return []
   const scope = communityScope('plugins', '')
   const pages = src.communityPages[communityScopeKey(scope)]
   if (!pages || (pages.at === 0 && pages.loading)) {

@@ -339,8 +339,8 @@
     "skillsTitle": "No skills to show",
     "skills": "The skills catalog is empty. Add a skill from GitHub or a folder with Add.",
     "pluginsTitle": "No plugins to show",
-    "plugins": "A Kettu plugin works on every agent you run. Add one from GitHub or a folder with Add.",
-    "pluginsWeb": "A Kettu plugin works on every agent you run. Add one from GitHub with Add."
+    "plugins": "Kite doesn't read Kettu's online plugin directory, so nothing is listed here. Use Add to install a plugin from a GitHub link or a folder; manage installed ones under Installed.",
+    "pluginsWeb": "Kite doesn't read Kettu's online plugin directory, so nothing is listed here. Use Add to install a plugin from a GitHub link; manage installed ones under Installed."
   },
   "plugin": {
     "installs_one": "{{value}} install",
