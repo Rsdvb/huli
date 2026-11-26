@@ -1,0 +1,76 @@
+# A long thought opened and left open: 思考 and its time alone in its header, its text cut to the
+# clamp with 显示全部 under it all along, and the app still there three and a half minutes later. The fake
+# agent's /thinking sends one thought, a single long paragraph, then its answer; when the thought
+# sits in a folded run, the first tap opens the run. The clamp used to measure that paragraph as
+# short as itself, let it go, measure it whole and cut it again on every frame, which held the JS
+# thread until the link to the computer dropped and the app crashed, a minute or three in.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/thinking'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- takeScreenshot: t01-closed
+- tapOn:
+    text: '.*The user wants to know why.*'
+    index: 0
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- tapOn:
+    text: '思考 The user wants to know why.*'
+    optional: true
+- extendedWaitUntil:
+    visible: '显示全部'
+    timeout: 10000
+- takeScreenshot: t02-open
+- assertNotVisible:
+    text: '思考 The user wants to know why.*'
+- assertVisible:
+    text: '思考'
+# Left open for three and a half minutes by the clock, looked at every few seconds. A wait for
+# something that never shows ends early on a screen that holds still, as this one now does, so the
+# clock decides when it is over.
+- evalScript: ${output.openedAt = Date.now()}
+- repeat:
+    times: 400
+    while:
+      true: ${Date.now() - output.openedAt < 210000}
+    commands:
+      - extendedWaitUntil:
+          visible: 'PAUSE_NEVER'
+          timeout: 5000
+          optional: true
+      - assertVisible: '显示全部'
+- assertVisible:
+    text: '思考'
+- takeScreenshot: t05-open-3m
+# Shown whole, then cut again.
+- tapOn: '显示全部'
+- extendedWaitUntil:
+    visible: '收起'
+    timeout: 5000
+- takeScreenshot: t06-whole
+- tapOn: '收起'
+- extendedWaitUntil:
+    visible: '显示全部'
+    timeout: 5000
