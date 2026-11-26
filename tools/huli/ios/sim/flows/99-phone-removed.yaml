@@ -1,0 +1,44 @@
+# The computer removes the phone while it shows a session: the session closes and the phone comes
+# back to pairing, saying it was removed. The screen used to throw as it closed, when it read the
+# link the phone had just dropped, and the app crashed. It removes the phone for good, so it runs
+# last; run.sh starts removal-server.mjs for it.
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/basic-turn'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息 回复.*'
+    timeout: 120000
+- takeScreenshot: r01-session
+- runScript: remove-phone.js
+- extendedWaitUntil:
+    visible:
+      text: '.*已在电脑上移除这台手机.*'
+    timeout: 30000
+- takeScreenshot: r02-removed
+# Still there a while later, and still not paired.
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 5000
+    optional: true
+- assertVisible:
+    text: '.*已在电脑上移除这台手机.*'
+- assertNotVisible:
+    text: '给 .* 发消息.*'
+- takeScreenshot: r03-later

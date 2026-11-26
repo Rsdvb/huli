@@ -294,9 +294,19 @@ export function useMaybeLink(): HostLink | null {
   return useHostSelector(selectLink)
 }
 
-/** The link, for a screen that only shows while one is up. */
+/**
+ * The link the app had last, stopped since its computer went (removed or unpaired), until another
+ * computer's link starts.
+ */
+let retired: HostLink | null = null
+
+/**
+ * The link, for a screen that only shows while one is up. Such a screen still renders for the
+ * moment it takes to close after its computer went; it then gets the stopped link it had, whose
+ * requests fail in words, rather than throwing.
+ */
 export function useLink(): HostLink {
-  const link = useMaybeLink()
+  const link = useMaybeLink() ?? retired
   if (!link) throw new Error('No link to the computer')
   return link
 }
@@ -533,6 +543,7 @@ export function HostProvider(props: { children: ReactNode }) {
       fresh.current = false
       clearLists()
       const saved = () => getHost().computers.hosts.find((h) => h.id === host.id) ?? host
+      retired = null
       setHost({
         unreachable: false,
         state: { kind: 'connecting' },
@@ -623,7 +634,10 @@ export function HostProvider(props: { children: ReactNode }) {
       }
       update(() => rest, successor?.id ?? null)
       generation.current++
-      getHost().ready?.link.stop()
+      const leaving = getHost().ready?.link ?? null
+      leaving?.stop()
+      // The screens dismissed above still render while they close, and some read the link then.
+      retired = leaving
       setHost({ ready: null })
       clearLists()
       if (successor && keyRef.current) {

@@ -92,6 +92,13 @@ if [ -z "${FLOWS:-}" ] || [[ "$FLOWS" == *dev-preview* ]]; then
   DEV_SERVER=$!
 fi
 
+# The owner removing the phone, which the removal flow asks for while it shows a session.
+REMOVAL=
+if [ -z "${FLOWS:-}" ] || [[ "$FLOWS" == *phone-removed* ]]; then
+  node tools/huli/ios/sim/removal-server.mjs > "$RESULTS/removal-server.log" 2>&1 &
+  REMOVAL=$!
+fi
+
 failed=0
 for flow in ${FLOWS:-$(ls tools/huli/ios/sim/flows/*.yaml)}; do
   # What the app costs at rest, sampled without a recording, which would load the runner.
@@ -146,6 +153,7 @@ xcrun simctl io "$UDID" screenshot "$RESULTS/last-light.png"
 
 cp -R "$KETTU_DAEMON_DATA/logs" "$RESULTS/daemon-logs" 2>/dev/null || true
 [ -n "$DEV_SERVER" ] && kill "$DEV_SERVER" 2>/dev/null || true
+[ -n "$REMOVAL" ] && kill "$REMOVAL" 2>/dev/null || true
 kill "$DAEMON" || true
 xcrun simctl shutdown "$UDID" || true
 xcrun simctl delete "$UDID" || true

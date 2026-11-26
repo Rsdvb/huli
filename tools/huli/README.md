@@ -3303,9 +3303,11 @@ disables every other workflow after each merge, new ones included.
   flows under `tools/huli/ios/sim/flows` (or those named in its `flows` input) while recording the
   screen. Two names in `flows` sample the app's processes instead: `measure`, what it costs in
   resting states (`measure.sh`), and `long-reply`, a session with a finished 120 KB reply opened
-  afresh (`long-reply.sh`). A flow whose header says `# Ends: both appearances` is shot at its
-  end in dark and in light (`<flow>-dark.png`, `<flow>-light.png`), as the system's own screens,
-  such as Quick Look, follow the system's appearance rather than the app's theme. The screenshots,
+  afresh (`long-reply.sh`). The `99-phone-removed` flow has the computer remove the phone while
+  it shows a session, through `kettu devices remove` on a POST to `removal-server.mjs`, which
+  `run.sh` starts for it; it runs last, as the phone stays removed. A flow whose header says
+  `# Ends: both appearances` is shot at its end in dark and in light (`<flow>-dark.png`,
+  `<flow>-light.png`), as the system's own screens, such as Quick Look, follow the system's appearance rather than the app's theme. The screenshots,
   recordings and logs are the run's `huli-sim` artifact, kept for a day. With `platform` android
   it builds a release for an x86_64 emulator on Linux and measures it (`tools/huli/android/run.sh`),
   or runs the flows of `tools/huli/android/flows` that `flows` names (`huli-emu`).
