@@ -10815,6 +10815,8 @@ export class SessionManager {
       this.handoffNotice(live, 'handoff.failed', (error as Error).message)
       return
     }
+    // A title of its own, as a fork's, so the one its agent gives the summary does not replace it.
+    if (this.has(next.id)) this.rename(next.id, handoffTitle(title))
     if (this.live.get(live.id) !== live || !this.has(live.id)) return
     old.handedOffTo = next.id
     this.emit(live, [

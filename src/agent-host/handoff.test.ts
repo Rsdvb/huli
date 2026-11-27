@@ -86,6 +86,8 @@ it('hands a session off to a new one that starts from its summary, and keeps bot
   // The old session stays where it was, idle and listed; the new one works in its folder.
   await window.until(() => window.summary(oldId)?.handedOffTo === newId)
   expect(window.summary(oldId)).toMatchObject({ status: 'ready', archivedAt: null })
+  // A title of its own, which the agent's title for the summary does not replace.
+  await window.until(() => /\(continued\)$/.test(window.summary(newId)?.title ?? ''))
   expect(window.summary(newId)).toMatchObject({
     handedOffFrom: oldId,
     projectPath: window.summary(oldId)!.projectPath,

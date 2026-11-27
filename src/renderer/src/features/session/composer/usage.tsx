@@ -885,15 +885,15 @@ function TrafficBlock({ usage }: { usage: SessionUsage }) {
       <dl className="kettu-ctx__figures tabular">
         <div>
           <dt>{t('usage.traffic.up')}</dt>
-          <dd>{spent ? about(spent.up) : '—'}</dd>
+          <dd>{spent ? traffic(spent.up) : '—'}</dd>
         </div>
         <div>
           <dt>{t('usage.traffic.down')}</dt>
-          <dd>{spent ? about(spent.down) : '—'}</dd>
+          <dd>{spent ? traffic(spent.down) : '—'}</dd>
         </div>
         <div>
           <dt>{t('usage.traffic.perRequest')}</dt>
-          <dd>{usage.used > 0 ? about(requestUpload(usage.used)) : '—'}</dd>
+          <dd>{usage.used > 0 ? traffic(requestUpload(usage.used)) : '—'}</dd>
         </div>
       </dl>
     </div>
