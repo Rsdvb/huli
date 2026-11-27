@@ -1516,7 +1516,14 @@ async function start(): Promise<void> {
     quitFlow.systemShutdown()
     updater.systemShutdown()
   })
-  powerMonitor.on('suspend', () => agentHost.power('suspend'))
+  // Huli: on macOS 'suspend' comes as the system leaves full wake and 'resume' as it enters it
+  // again (IOKit tells apps of no dark wake), so links let go here stay down through Power Nap.
+  powerMonitor.on('suspend', () => {
+    agentHost.power('suspend')
+    remoteHost.suspend()
+  })
+  // Huli: whoever unlocks is back, should a wake have gone unheard.
+  powerMonitor.on('unlock-screen', () => remoteHost.nudge())
   watchWindowsShown((shown) => agentHost.windowsVisible(shown))
   // Elsewhere the host reads the battery itself.
   if (process.platform === 'win32') {

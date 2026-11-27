@@ -508,6 +508,8 @@ class HostLink {
   private failures = 0
   /** When the last try began. */
   private triedAt = 0
+  /** A try came due while the computer slept, which its wake makes up for. */
+  private due = false
   private closed = false
   /** Main's port for the host's session, kept while the host keeps the session. */
   private port: PortChannel | null = null
@@ -631,7 +633,13 @@ class HostLink {
    */
   wake(): void {
     const session = this.session
-    if (this.closed || !session?.open) return this.retry()
+    if (this.closed || !session?.open) {
+      const due = this.due
+      this.due = false
+      // Only its timer tries a host that turned this computer away, and one came due.
+      if (due && this.stoppedFor('other_account')) return void this.connect()
+      return this.retry()
+    }
     session.pingNow()
     this.compareSoon(0)
   }
@@ -747,6 +755,30 @@ class HostLink {
     }
   }
 
+  /**
+   * The computer goes to sleep: the connection closes now, so the host hears it at once rather
+   * than once its pings go unanswered, and the link waits, trying nothing, until the computer
+   * wakes. The host keeps the session as after any drop, for the connection after the wake to
+   * resume.
+   */
+  suspend(): void {
+    if (this.closed) return
+    const session = this.session
+    const held = session !== null && (session.open || session === this.taking)
+    if (this.timer) this.due = true
+    this.cancel()
+    this.compares.stop()
+    if (this.joinTimer) clearTimeout(this.joinTimer)
+    this.joinTimer = null
+    this.forwards.dropConnections()
+    this.drop()
+    if (!session || !held) return
+    if (session.open) this.client.options.hosts.online(this.id)
+    if (this.resumeToken !== null && this.resumable) this.keep()
+    else this.lose()
+    this.set({ state: 'connecting' })
+  }
+
   /** Forgotten, or the client stops: the connection ends and is not tried again. */
   close(): void {
     this.closed = true
@@ -783,6 +815,11 @@ class HostLink {
   private async connect(): Promise<void> {
     const host = this.host
     if (this.closed || this.session || this.trying || !host || host.removed) return
+    // Asleep, timers still run in a Mac's dark wakes; the wake tries again.
+    if (this.client.asleep) {
+      this.due = true
+      return
+    }
     if (this.anotherAccount()) return this.set({ state: 'stopped', reason: 'other_account' })
     const { options } = this.client
     const trying = (this.trying = new AbortController())
@@ -1349,14 +1386,7 @@ class HostLink {
     const kept =
       (welcomed || taking) && reason === null && this.resumeToken !== null && this.resumable
     if (kept) {
-      // Counted from the first drop, which a promotion or a move after it does not put off.
-      if (!this.keptTimer) {
-        this.keptUntil = Date.now() + RESUME_MS
-        this.keptTimer = setTimeout(() => {
-          this.keptTimer = null
-          this.expireKept()
-        }, RESUME_MS)
-      }
+      this.keep()
       // The connection a move left, or the standby, takes the session over at once.
       const aside = this.aside?.open ? this.aside : this.standby?.standby ? this.standby : null
       if (aside) return this.promote(aside)
@@ -1401,6 +1431,19 @@ class HostLink {
     const port = this.port
     this.port = null
     port?.close()
+  }
+
+  /**
+   * The session dropped: what is in flight is kept for as long as the host keeps the session,
+   * counted from the first drop, which a promotion or a move after it does not put off.
+   */
+  private keep(): void {
+    if (this.keptTimer) return
+    this.keptUntil = Date.now() + RESUME_MS
+    this.keptTimer = setTimeout(() => {
+      this.keptTimer = null
+      this.expireKept()
+    }, RESUME_MS)
   }
 
   /** Gives up the session the host kept once it would keep it no longer, between tries. */
@@ -2259,6 +2302,7 @@ export class HostClient {
   /** The hosts an action of their page runs on, which stopping the client aborts. */
   private readonly managing = new Map<string, AbortController>()
   private stopped = false
+  private sleeping = false
   private networkTimer: ReturnType<typeof setInterval> | null = null
   private network = ''
 
@@ -2443,7 +2487,7 @@ export class HostClient {
   private watchNetwork(): void {
     const every =
       this.options.networkCheckMs === undefined ? NETWORK_CHECK_MS : this.options.networkCheckMs
-    if (this.stopped || every === null || this.links.size === 0) {
+    if (this.stopped || this.sleeping || every === null || this.links.size === 0) {
       if (this.networkTimer) clearInterval(this.networkTimer)
       this.networkTimer = null
       return
@@ -2718,8 +2762,9 @@ export class HostClient {
     }
   }
 
-  /** Tries a host not connected at once; settles once the try did. */
+  /** Tries a host not connected at once, as the user asked; settles once the try did. */
   reconnect(id: string): Promise<void> {
+    if (this.sleeping) this.resume()
     return this.links.get(id)?.reconnectNow() ?? Promise.resolve()
   }
 
@@ -2772,18 +2817,51 @@ export class HostClient {
     for (const link of this.links.values()) link.leaveRelay()
   }
 
+  /** Whether the computer sleeps, between `suspend` and `resume`: no host is tried meanwhile. */
+  get asleep(): boolean {
+    return this.sleeping
+  }
+
   /**
-   * The computer woke, maybe on another network: the hosts not connected are tried now, and the
-   * paths to those that are compared again.
+   * The computer goes to sleep: every host's connection closes now, so each host hears it at once,
+   * and none is tried again until `resume`. A Mac's dark wakes (Power Nap) run the timers but say
+   * nothing to the app, so a host reached then would drop again as it sleeps.
+   */
+  suspend(): void {
+    if (this.stopped || this.sleeping) return
+    this.sleeping = true
+    this.watchNetwork()
+    if (this.links.size > 0) this.options.log('info', 'Going to sleep; letting the hosts go')
+    for (const link of this.links.values()) link.suspend()
+  }
+
+  /**
+   * The computer woke for the user, maybe on another network: the hosts not connected are tried
+   * now, resuming what each kept, and the paths to those that are compared again.
    */
   resume(): void {
-    this.network = networkPrint()
+    if (this.stopped) return
+    if (this.sleeping && this.links.size > 0) {
+      this.options.log('info', 'Awake; trying the hosts again')
+    }
+    this.sleeping = false
+    if (this.networkTimer) this.network = networkPrint()
+    else this.watchNetwork()
     for (const link of this.links.values()) link.wake()
   }
 
-  /** Huli: the hosts may be back; those not connected are tried now, as `HostLink.nudge` says. */
+  /** Signed in again: the hosts not connected are tried now, unless the computer sleeps. */
+  retryAll(): void {
+    if (this.stopped || this.sleeping) return
+    for (const link of this.links.values()) link.wake()
+  }
+
+  /**
+   * Huli: the hosts may be back; those not connected are tried now, as `HostLink.nudge` says,
+   * unless the computer sleeps.
+   */
   nudge(): void {
-    if (this.stopped) return
+    if (this.stopped || this.sleeping) return
     for (const link of this.links.values()) link.nudge()
   }
 

@@ -597,6 +597,8 @@ export function startRemoteHost(
       },
       log,
     })
+    // Started while the computer sleeps, as after a crash in a dark wake: nothing is tried yet.
+    if (init!.asleep === true) started.suspend()
     started.start()
     const report = (): void => {
       ready = true
@@ -839,7 +841,7 @@ export function startRemoteHost(
           applyDiscovery(current)
         })
         // Hosts not reached for want of a sign-in are tried now.
-        if (!had && now) withRunning(() => client?.resume())
+        if (!had && now) withRunning(() => client?.retryAll())
         // Without a token the relay may not be used, so links through it end too.
         if (had && !now) withRunning(() => client?.leaveRelay())
         break
@@ -867,6 +869,10 @@ export function startRemoteHost(
         withServing(({ server: s }) => s.setFeaturesOff(off))
         break
       }
+      case 'remote-host:suspend':
+        withServing(({ server: s }) => s.suspend())
+        withRunning(() => client?.suspend())
+        break
       case 'remote-host:resume':
         withServing(({ direct }) => direct.checkAddresses())
         withRunning(() => client?.resume())
