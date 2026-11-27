@@ -4,7 +4,13 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ConfigOption, HarnessId } from '@shared/thread'
 import type { CodexRequest } from '../codex/rpc'
-import { checkAutoCompact, readAutoCompact, writeAutoCompact, type CompactPlace } from './settings'
+import {
+  checkAutoCompact,
+  readAutoCompact,
+  writeAutoCompact,
+  writeCompactChoice,
+  type CompactPlace,
+} from './settings'
 
 let dir: string
 
@@ -137,5 +143,62 @@ describe("an agent's auto-compact setting", () => {
     expect(() => checkAutoCompact('codex', null, { model: 'gpt-6', value: 272000 })).toThrow()
     expect(() => checkAutoCompact('cline', null, { model: null, value: 272000 })).toThrow()
     expect(() => checkAutoCompact('claude-code', null, { model: 'a b', value: 272000 })).toThrow()
+  })
+})
+
+describe('the 省流量 and default choices', () => {
+  it("sets Claude Code's window for all models in its settings file and drops each model's own", async () => {
+    const claude = place('claude-code', 'settings.json')
+    await writeFile(
+      claude.file,
+      JSON.stringify({
+        theme: 'dark',
+        autoCompactWindow: 900000,
+        modelSettings: {
+          'claude-fable-5-2': { autoCompactWindow: 700000, effort: 'high' },
+          'claude-opus-5-5': { autoCompactWindow: 400000 },
+        },
+      }),
+    )
+    expect(await writeCompactChoice(claude, 'traffic')).toBe(3)
+    expect(JSON.parse(await readFile(claude.file, 'utf8'))).toEqual({
+      theme: 'dark',
+      autoCompactWindow: 256000,
+      modelSettings: { 'claude-fable-5-2': { effort: 'high' } },
+    })
+    expect(await writeCompactChoice(claude, 'traffic')).toBe(0)
+    expect(await writeCompactChoice(claude, 'default')).toBe(1)
+    expect(JSON.parse(await readFile(claude.file, 'utf8'))).toEqual({
+      theme: 'dark',
+      modelSettings: { 'claude-fable-5-2': { effort: 'high' } },
+    })
+  })
+
+  it("writes Codex's token limit through its own config requests", async () => {
+    let held: unknown = null
+    const calls: [string, unknown][] = []
+    const request = (async (method: string, params?: unknown) => {
+      calls.push([method, params])
+      if (method === 'config/value/write') held = (params as { value: unknown }).value
+      return method === 'config/read' ? { config: { model_auto_compact_token_limit: held } } : {}
+    }) as CodexRequest
+    const codex = place('codex', '', { codex: async () => request })
+    await writeCompactChoice(codex, 'traffic')
+    expect(calls.at(-1)).toEqual([
+      'config/value/write',
+      { keyPath: 'model_auto_compact_token_limit', value: 220000, mergeStrategy: 'replace' },
+    ])
+    expect(await readAutoCompact(codex)).toMatchObject({ all: 220000 })
+    await writeCompactChoice(codex, 'default')
+    expect(held).toBeNull()
+  })
+
+  it('offers no 省流量 where the setting is a share of the window, and writes nothing', async () => {
+    const gemini = place('gemini', 'settings.json')
+    await writeFile(gemini.file, '{ "model": { "compressionThreshold": 0.7 } }')
+    await expect(writeCompactChoice(gemini, 'traffic')).rejects.toThrow()
+    expect(await readFile(gemini.file, 'utf8')).toBe('{ "model": { "compressionThreshold": 0.7 } }')
+    await writeCompactChoice(gemini, 'default')
+    expect(JSON.parse(await readFile(gemini.file, 'utf8'))).toEqual({})
   })
 })

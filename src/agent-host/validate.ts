@@ -2003,6 +2003,13 @@ export function createValidators(platform: Platform): Validators {
         change: { model: change.model === null ? null : string(change, 'model', 256), value },
       }
     },
+    'agents.setCompactChoice': (params) => {
+      const o = fields(params)
+      if (o.choice !== 'default' && o.choice !== 'traffic') {
+        throw invalidParams('choice must be "default" or "traffic"')
+      }
+      return { agentId: agentId(o), choice: o.choice }
+    },
     'agents.codebuddySettings': agent,
     'agents.codexSettings': agent,
     'agents.setCodexSetting': (params) => {
@@ -2702,6 +2709,7 @@ export function createValidators(platform: Platform): Validators {
         ...(o.worktree === undefined ? {} : { worktree: o.worktree }),
       }
     },
+    'sessions.handoff': session,
     'sessions.revert': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), entryId: string(o, 'entryId', ACP_ID_CHARS) }

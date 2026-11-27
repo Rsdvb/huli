@@ -2496,6 +2496,7 @@
     "parentNotTable": "{{key}} in {{file}} is not a table; fix it or set the key there yourself",
     "noAutoCompact": "This harness has no auto-compact setting",
     "oneValue": "This harness sets one value for every model",
+    "noTrafficPreset": "This harness has no data saver setting: its auto-compact setting is a share of the context window",
     "wholeNumber": "The value must be a whole number from {{min}} to {{max}}",
     "pluginRows": "{{file}} is not a list of plugin rows; fix it or set the threshold there yourself",
     "rowNotMap": "The {{row}} row's config in {{file}} is not a map; fix it first",
@@ -2723,5 +2724,17 @@
     "noList": "{{file}} lists no plugins.",
     "noFile": "The repository has no {{file}}.",
     "noSuchPlugin": "The plugin list no longer has {{name}}. Refresh the list and try again."
+  },
+  "handoff": {
+    "prompt": "Write a handoff summary, so that a new session can carry on with this work without the conversation so far. Cover the goal; the current state, what is done and what is not; the decisions made and why; the files that matter, with their paths; open questions; and the next steps, in order. Be specific and complete, but brief. Reply with the summary alone, in Markdown, and change no files and run no commands for it.",
+    "intro": "This session carries on from the session “{{title}}”, with a fresh context. Its agent left this handoff summary:",
+    "outro": "Read the files it names as you need them. First reply briefly with the goal and the next step you would take, then wait for the user to go ahead.",
+    "title": "{{title}} (continued)",
+    "topLevel": "Only a top-level session can be handed off to a new session",
+    "already": "This session is writing its handoff summary already",
+    "notice": "Not handed off to a new session",
+    "stopped": "The turn that was to write the handoff summary did not finish.",
+    "noSummary": "The agent wrote no handoff summary.",
+    "failed": "The new session could not start: {{error}}"
   }
 }

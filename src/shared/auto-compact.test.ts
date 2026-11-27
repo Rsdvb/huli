@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { compactLabel, compactSpec, compactSteps, parseCompactValue } from './auto-compact'
+import {
+  COMPACT_SPECS,
+  compactChanges,
+  compactChoice,
+  compactLabel,
+  compactSpec,
+  compactSteps,
+  inCompactRange,
+  parseCompactValue,
+  trafficPreset,
+  TRAFFIC_PRESETS,
+} from './auto-compact'
+import type { HarnessId } from './thread'
 
 describe('auto-compact values', () => {
   it('reads tokens written with or without K and M, and whole percents', () => {
@@ -22,5 +34,80 @@ describe('auto-compact values', () => {
     expect(compactSteps(compactSpec('claude-code')!)).toContain(272_000)
     expect(compactSteps(compactSpec('kimi')!)).toEqual([50, 60, 70, 75, 80, 85, 90, 95])
     expect(compactSpec('cline')).toBeNull()
+  })
+})
+
+describe('省流量', () => {
+  it('compacts Claude Code within 256K, and Codex at 220K tokens', () => {
+    expect(trafficPreset('claude-code')).toBe(256_000)
+    expect(compactSpec('claude-code')!.unit).toBe('window')
+    expect(trafficPreset('codex')).toBe(220_000)
+    expect(compactSpec('codex')!.unit).toBe('trigger')
+    expect(trafficPreset('codebuddy')).toBe(256_000)
+  })
+
+  it('takes a value in each harness’s range, and only where the setting is a size in tokens', () => {
+    for (const [harness, value] of Object.entries(TRAFFIC_PRESETS)) {
+      const spec = compactSpec(harness as HarnessId)!
+      expect(inCompactRange(spec, value)).toBe(true)
+      expect(['window', 'trigger']).toContain(spec.unit)
+    }
+    for (const harness of Object.keys(COMPACT_SPECS) as HarnessId[]) {
+      const unit = compactSpec(harness)!.unit
+      if (unit === 'percent' || unit === 'reserve') expect(trafficPreset(harness)).toBeNull()
+    }
+    expect(trafficPreset('cline')).toBeNull()
+  })
+
+  it('reads nothing set as the default, the preset alone as 省流量, and anything else as custom', () => {
+    const none = { all: null, allOther: null, models: null }
+    expect(compactChoice('codex', none)).toBe('default')
+    expect(compactChoice('codex', { ...none, all: 220_000 })).toBe('traffic')
+    expect(compactChoice('codex', { ...none, all: 272_000 })).toBe('custom')
+    expect(compactChoice('gemini', { ...none, all: 70 })).toBe('custom')
+    const rows = [
+      { model: 'claude-opus-5-5', value: null, other: null },
+      { model: 'claude-fable-5-2', value: 400_000, other: null },
+    ]
+    expect(compactChoice('claude-code', { all: 256_000, allOther: null, models: rows })).toBe(
+      'custom',
+    )
+    expect(compactChoice('claude-code', { all: 256_000, allOther: null, models: [rows[0]!] })).toBe(
+      'traffic',
+    )
+    expect(compactChoice('opencode', { all: null, allOther: '15%', models: null })).toBe('custom')
+  })
+
+  it('writes each model’s own value away, then the value for all of them', () => {
+    const values = {
+      all: 500_000,
+      allOther: null,
+      models: [
+        { model: 'claude-opus-5-5', value: null, other: null },
+        { model: 'claude-fable-5-2', value: 400_000, other: null },
+      ],
+    }
+    expect(compactChanges('claude-code', values, 'traffic')).toEqual([
+      { model: 'claude-fable-5-2', value: null },
+      { model: null, value: 256_000 },
+    ])
+    expect(compactChanges('claude-code', values, 'default')).toEqual([
+      { model: 'claude-fable-5-2', value: null },
+      { model: null, value: null },
+    ])
+    // Nothing to write where the setting holds it already.
+    expect(
+      compactChanges('codex', { all: 220_000, allOther: null, models: null }, 'traffic'),
+    ).toEqual([])
+    expect(compactChanges('codex', { all: null, allOther: null, models: null }, 'default')).toEqual(
+      [],
+    )
+    // A value the file holds as text goes too.
+    expect(
+      compactChanges('opencode', { all: null, allOther: '15%', models: null }, 'default'),
+    ).toEqual([{ model: null, value: null }])
+    expect(compactChanges('gemini', { all: 70, allOther: null, models: null }, 'traffic')).toEqual(
+      [],
+    )
   })
 })

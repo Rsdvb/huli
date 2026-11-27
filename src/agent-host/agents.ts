@@ -174,7 +174,12 @@ import { readClaudeSettings, writeClaudeSetting, type ListedModel } from './clau
 import { readOutputStyles } from './claude/output-styles'
 import { readCodexSettings, writeCodexSetting } from './codex/settings'
 import { readCodebuddySite, shellOverrides, writeCodebuddySite } from './codebuddy/user-settings'
-import { readAutoCompact, writeAutoCompact, type CompactPlace } from './auto-compact/settings'
+import {
+  readAutoCompact,
+  writeAutoCompact,
+  writeCompactChoice,
+  type CompactPlace,
+} from './auto-compact/settings'
 import { withCodexOriginator } from './codex/originator'
 import type { CodexRequest } from './codex/rpc'
 import { takesSkills } from './marketplace/skill-tools'
@@ -6904,6 +6909,20 @@ export class AgentManager {
   ): Promise<void> {
     await writeAutoCompact(await this.compactPlace(agentId, undefined, codex), change)
     this.deps.diagnostics.event(agentId, 'auto-compact', change.model === null ? 'all' : 'model')
+  }
+
+  /** Huli: makes it the harness's default or 省流量 for every model. */
+  async setCompactChoice(
+    agentId: AgentId,
+    choice: 'default' | 'traffic',
+    config: readonly ConfigOption[] | undefined,
+    codex: () => Promise<CodexRequest>,
+  ): Promise<void> {
+    const written = await writeCompactChoice(
+      await this.compactPlace(agentId, config, codex),
+      choice,
+    )
+    if (written > 0) this.deps.diagnostics.event(agentId, 'auto-compact', choice)
   }
 
   private async compactPlace(

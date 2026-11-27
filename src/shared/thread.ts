@@ -341,6 +341,11 @@ export interface FromSession {
   reports?: ReportedTurn[]
   /** Huli: set on manager mode's report to a manager: each worker it reports on. */
   digest?: DigestItem[]
+  /**
+   * Huli: set on a new session's first message when it goes on from the sender's handoff summary
+   * (接力), which the thread heads with "carries on from" the sender.
+   */
+  handoff?: true
 }
 
 /** Huli: a turn the receiver asked another session for, as Kettu's report of its end tells it. */
@@ -582,7 +587,14 @@ export type ThreadEntry =
   | ToolEntry
   | { kind: 'subagent'; id: string; sessionId: string } // a sub-session the agent started here
   // A session the agent started through the session tools, kept across a replay as an artifact's entry is.
-  | { kind: 'session_started'; id: string; sessionId: string; after: string | null }
+  // Huli: `handoff`: the session it was handed off to (接力), which goes on from its summary.
+  | {
+      kind: 'session_started'
+      id: string
+      sessionId: string
+      after: string | null
+      handoff?: true
+    }
   | { kind: 'session_message'; id: string; senderId: string | null; content: UserContent[] }
   | { kind: 'plan'; id: string; items: PlanItem[] }
   // Huli: the agent's own memory at work in a turn: what it recalled, or the memories it saved.

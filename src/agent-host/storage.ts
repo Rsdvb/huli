@@ -450,6 +450,10 @@ export interface SessionRecord {
   managerOff?: true
   /** Huli: moved to another computer, where it goes on; this one stays as it was left. */
   movedTo?: MovedTo
+  /** Huli: the latest session it was handed off to, which goes on from its summary (接力). */
+  handedOffTo?: string
+  /** Huli: the session it goes on from, whose handoff summary was its first message. */
+  handedOffFrom?: string
   /** Huli: snoozed or settled out of the active list, or kept from settling (会话整理). */
   tidy?: StoredTidy
   /** Huli: its finished turns and its agent's notes notify no device and no chat bridge. */
@@ -1463,6 +1467,12 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       ...(isTime(item.archivedAt) ? { archivedAt: item.archivedAt } : {}),
       ...leftSubSessionsOf(item.leftSubSessions),
       ...(isString(item.startedBy) ? { startedBy: item.startedBy } : {}),
+      ...(isString(item.handedOffTo) && item.handedOffTo !== ''
+        ? { handedOffTo: item.handedOffTo }
+        : {}),
+      ...(isString(item.handedOffFrom) && item.handedOffFrom !== ''
+        ? { handedOffFrom: item.handedOffFrom }
+        : {}),
       ...(isString(item.configDir) && item.configDir !== '' ? { configDir: item.configDir } : {}),
       ...(isProfileId(item.profileId) ? { profileId: item.profileId } : {}),
       ...sessionSandbox(item.sandbox, item.sandboxUnknown),
