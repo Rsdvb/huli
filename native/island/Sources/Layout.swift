@@ -1,7 +1,7 @@
 import CoreGraphics
 
 // Huli: the island keeps off the menu bar's items. This file is pure layout arithmetic, with no
-// AppKit, so `swift test` checks it on its own (Package.swift builds it alone for the tests).
+// AppKit, so `swift test` checks it on its own (Package.swift builds it without the views).
 
 /// The room the menu bar leaves free beside the notch, in points: on the left up to the end of the
 /// front app's menus, on the right up to the first status item. Zero where the island may not go.
