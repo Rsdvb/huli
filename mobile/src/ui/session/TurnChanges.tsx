@@ -38,6 +38,11 @@ export function Counts(props: { insertions: number; deletions: number; size?: nu
 
 /** The turn's change to a file on the diff screen, whose lines take comments for the session. */
 function openChange(change: FileChange, sessionId: string) {
+  // Huli: an edit a lean page held as counts alone shows as git has the file's change.
+  if (change.edits.some((edit) => edit.digest)) {
+    router.push({ pathname: '/diff', params: { path: change.path, id: sessionId } })
+    return
+  }
   const diff = mergedDiff(change)
   const first = change.edits[0]!
   const last = change.edits[change.edits.length - 1]!
