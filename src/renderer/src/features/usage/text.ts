@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { AgentId } from '@shared/thread'
-import { count, percent, usd } from '@renderer/lib/format'
+import { count, percent, traffic, usd } from '@renderer/lib/format'
 import { currentLocale } from '@renderer/lib/i18n'
 import {
   addDays,
@@ -60,15 +60,21 @@ export function dayText(day: number): string {
   }).format(day)
 }
 
+/** A sum in the metric, compact: "41K", "$4.20", or for traffic "1.2 GB". */
+export function metricFormat(kind: MetricKind): (value: number) => string {
+  return kind === 'cost' ? usd : kind === 'traffic' ? traffic : count
+}
+
 /** An amount in the metric, compact, and in words for screen readers. */
 export function useMetricText(kind: MetricKind) {
   const { t } = useTranslation('usage')
   return useMemo(() => {
-    const short = (value: number) => (kind === 'cost' ? usd(value) : count(value))
+    const short = metricFormat(kind)
     const unit = (value: number): string => {
       const text = count(value)
       if (kind === 'tokens') return t('units.tokens', { value: text })
       if (kind === 'cost') return usd(value)
+      if (kind === 'traffic') return t('units.traffic', { value: traffic(value) })
       return kind === 'requests'
         ? t(value === 1 ? 'units.request' : 'units.requests', { value: text })
         : t(value === 1 ? 'units.turn' : 'units.turns', { value: text })

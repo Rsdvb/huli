@@ -65,14 +65,16 @@
     "tokens": "Tokens",
     "requests": "Requests",
     "turns": "Turns",
-    "cost": "Cost"
+    "cost": "Cost",
+    "traffic": "Traffic"
   },
   "units": {
     "tokens": "{{value}} tokens",
     "request": "{{value}} request",
     "requests": "{{value}} requests",
     "turn": "{{value}} turn",
-    "turns": "{{value}} turns"
+    "turns": "{{value}} turns",
+    "traffic": "~{{value}}"
   },
   "figures": {
     "label": "Figures",
@@ -148,6 +150,10 @@
     "costWeekly": "Cost per week",
     "costMonthly": "Cost per month",
     "costHourly": "Cost per hour",
+    "trafficDaily": "Traffic per day (estimated)",
+    "trafficWeekly": "Traffic per week (estimated)",
+    "trafficMonthly": "Traffic per month (estimated)",
+    "trafficHourly": "Traffic per hour (estimated)",
     "hour": "{{from}} – {{to}}",
     "label": "{{date}}: {{tokens}} tokens",
     "labelCount": "{{date}}: {{value}}",
@@ -421,7 +427,8 @@
       "tokens": "<b>{{from}} – {{to}}</b> holds {{share}}",
       "requests": "<b>{{from}} – {{to}}</b> holds {{share}}",
       "turns": "<b>{{from}} – {{to}}</b> holds {{share}}",
-      "cost": "<b>{{from}} – {{to}}</b> holds {{share}}"
+      "cost": "<b>{{from}} – {{to}}</b> holds {{share}}",
+      "traffic": "<b>{{from}} – {{to}}</b> holds {{share}}"
     },
     "quietest": "Quietest <b>{{hour}}</b>"
   },

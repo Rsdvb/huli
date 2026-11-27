@@ -65,14 +65,16 @@
     "tokens": "Token",
     "requests": "请求数",
     "turns": "轮数",
-    "cost": "费用"
+    "cost": "费用",
+    "traffic": "流量"
   },
   "units": {
     "tokens": "{{value}} token",
     "request": "{{value}} 次请求",
     "requests": "{{value}} 次请求",
     "turn": "{{value}} 轮",
-    "turns": "{{value}} 轮"
+    "turns": "{{value}} 轮",
+    "traffic": "约 {{value}}"
   },
   "figures": {
     "label": "数据概览",
@@ -141,6 +143,10 @@
     "costWeekly": "每周费用",
     "costMonthly": "每月费用",
     "costHourly": "每小时费用",
+    "trafficDaily": "每日流量（估算）",
+    "trafficWeekly": "每周流量（估算）",
+    "trafficMonthly": "每月流量（估算）",
+    "trafficHourly": "每小时流量（估算）",
     "hour": "{{from}}–{{to}}",
     "label": "{{date}}：{{tokens}} token",
     "labelCount": "{{date}}：{{value}}",
@@ -393,7 +399,8 @@
       "tokens": "<b>{{from}}–{{to}}</b> 占 {{share}}",
       "requests": "<b>{{from}}–{{to}}</b> 占 {{share}}",
       "turns": "<b>{{from}}–{{to}}</b> 占 {{share}}",
-      "cost": "<b>{{from}}–{{to}}</b> 占 {{share}}"
+      "cost": "<b>{{from}}–{{to}}</b> 占 {{share}}",
+      "traffic": "<b>{{from}}–{{to}}</b> 占 {{share}}"
     },
     "quietest": "最闲 <b>{{hour}}</b>"
   },
