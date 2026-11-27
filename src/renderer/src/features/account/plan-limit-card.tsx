@@ -217,13 +217,17 @@ function CardFace({ card, wide }: { card: PlanCard; wide: boolean }) {
               {amount}
             </span>
           ))}
+          {/* The label gives way first; an amount wider than the column then puts its unit on a
+              line of its own rather than run past the card. */}
           {card.balances.map((balance) => (
             <span
               key={`${balance.label}/${balance.currency}`}
               className="flex min-w-0 justify-between gap-1 text-caption leading-3.25 whitespace-nowrap"
             >
-              <span className="min-w-0 truncate text-tertiary">{balanceLabel(balance.label)}</span>
-              <span className="shrink-0 text-primary tabular">
+              <span className="max-w-max min-w-0 flex-1 truncate text-tertiary">
+                {balanceLabel(balance.label)}
+              </span>
+              <span className="min-w-min text-right break-keep whitespace-normal text-primary tabular">
                 {planBalance(
                   balance.amount,
                   balance.currency,
