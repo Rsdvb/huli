@@ -1226,6 +1226,7 @@ function liveStats(thread: ThreadState): SessionStats {
   }
   return { tools, durationMs: end?.durationMs ?? null, stopReason: end?.stopReason ?? null }
 }
+
 /** Huli: a conversation brief keeps this much at most, and each message in it this much. */
 const BRIEF_CHARS = 6_000
 const BRIEF_MESSAGE_CHARS = 1_500
