@@ -93,10 +93,16 @@ appId: io.github.rsdvb.huli
     timeout: 6000
 - takeScreenshot: n07-strip
 - tapOn: '发送给 Agent'
-- extendedWaitUntil:
-    visible:
+# The fake agent answers the message with a whole turn, and Maestro waits for the turn's motion to
+# settle after the tap: by then the reply has scrolled the message up out of view. It is looked
+# for above the reply, the same while the turn still runs.
+- scrollUntilVisible:
+    element:
       text: '(?s).*请处理我对改动的 2 条意见.*'
-    timeout: 20000
+    direction: UP
+    visibilityPercentage: 50
+    centerElement: true
+    timeout: 30000
 - takeScreenshot: n08-sent
 # One more comment, to see the diff screen with its tray in both appearances.
 - scrollUntilVisible:
