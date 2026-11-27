@@ -7,7 +7,7 @@ import { memo, useCallback, useEffect, useState, type ReactElement } from 'react
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Stack, useLocalSearchParams } from 'expo-router'
 import type { SessionProcesses, TaskProcess } from '@shared/task-processes'
-import type { BackgroundTaskView, ForegroundTaskView } from '@shared/thread'
+import type { BackgroundTaskView, ForegroundTaskView, WorkflowView } from '@shared/thread'
 import { lastPort, type PortBlock } from '@shared/worktree-ports'
 import { call, errorText } from '../../git'
 import { useHostState, useLink, useSession } from '../../host'
@@ -325,11 +325,13 @@ const TaskRow = memo(function TaskRow(props: {
           icon={
             task.kind === 'monitor'
               ? G.eye
-              : running
-                ? G.terminal
-                : task.status === 'failed'
-                  ? G.failed
-                  : G.done
+              : task.kind === 'workflow' && running
+                ? G.layers
+                : running
+                  ? G.terminal
+                  : task.status === 'failed'
+                    ? G.failed
+                    : G.done
           }
           size={15}
           color={task.status === 'failed' ? c.danger : c.textSecondary}
@@ -360,6 +362,7 @@ const TaskRow = memo(function TaskRow(props: {
           {task.progress}
         </Text>
       ) : null}
+      {task.workflow ? <WorkflowAgents view={task.workflow} /> : null}
       {facts || (stats && stats.ports.length > 0) ? (
         <View style={styles.stats}>
           {facts ? <Text style={[styles.meta, { color: c.textTertiary }]}>{facts}</Text> : null}
@@ -398,11 +401,13 @@ const TaskRow = memo(function TaskRow(props: {
         </Text>
       ) : null}
       <View style={styles.actions}>
-        <Pressable onPress={toggle} accessibilityRole="button" style={styles.link}>
-          <Text style={[styles.linkText, { color: c.accent }]}>
-            {open ? '收起输出' : '查看输出'}
-          </Text>
-        </Pressable>
+        {task.kind === 'workflow' ? null : (
+          <Pressable onPress={toggle} accessibilityRole="button" style={styles.link}>
+            <Text style={[styles.linkText, { color: c.accent }]}>
+              {open ? '收起输出' : '查看输出'}
+            </Text>
+          </Pressable>
+        )}
         {open ? (
           <Pressable
             onPress={read}
@@ -437,6 +442,103 @@ const TaskRow = memo(function TaskRow(props: {
           </Text>
         </ScrollView>
       ) : null}
+    </View>
+  )
+})
+
+const AGENT_STATE = {
+  queued: '排队中',
+  running: '进行中',
+  done: '完成',
+  failed: '失败',
+  stopped: '已停止',
+} as const
+
+/**
+ * A workflow's agents as the board lists them, by phase: each phase with how many of its agents
+ * finished, each agent with how it stands and, at work, what it does; read with the list.
+ */
+const WorkflowAgents = memo(function WorkflowAgents(props: { view: WorkflowView }) {
+  const { c } = useSessionTokens()
+  const { phases, agents } = props.view
+  if (agents.length === 0) {
+    return <Text style={[styles.meta, { color: c.textTertiary }]}>还没有子智能体开始。</Text>
+  }
+  const known = new Set(phases.map((phase) => phase.index))
+  const groups = [
+    ...phases.map((phase) => ({
+      key: String(phase.index),
+      title: phase.title as string | null,
+      agents: agents.filter((agent) => agent.phase === phase.index),
+    })),
+    {
+      key: 'loose',
+      title: phases.length > 0 ? '其他' : null,
+      agents: agents.filter((agent) => agent.phase === null || !known.has(agent.phase)),
+    },
+  ].filter((group) => group.agents.length > 0)
+  return (
+    <View style={styles.agents}>
+      {groups.map((group) => {
+        const done = group.agents.filter((agent) => agent.state === 'done').length
+        const failed = group.agents.filter((agent) => agent.state === 'failed').length
+        return (
+          <View key={group.key} style={styles.phase}>
+            {group.title !== null ? (
+              <Text style={[styles.phaseTitle, { color: c.textSecondary }]} numberOfLines={1}>
+                {`${group.title} ${done}/${group.agents.length}`}
+                {failed > 0 ? (
+                  <Text style={{ color: c.danger }}>{` · ${failed} 个失败`}</Text>
+                ) : null}
+              </Text>
+            ) : null}
+            {group.agents.map((agent) => (
+              <View key={agent.index} style={styles.agent}>
+                <View style={styles.head}>
+                  <Icon
+                    icon={
+                      agent.state === 'done'
+                        ? G.done
+                        : agent.state === 'failed'
+                          ? G.failed
+                          : agent.state === 'running'
+                            ? G.doing
+                            : agent.state === 'stopped'
+                              ? G.stopOutline
+                              : G.todo
+                    }
+                    size={13}
+                    color={agent.state === 'failed' ? c.danger : c.textTertiary}
+                  />
+                  <Text style={[styles.agentName, { color: c.text }]} numberOfLines={1}>
+                    {agent.label}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.time,
+                      { color: agent.state === 'failed' ? c.danger : c.textTertiary },
+                    ]}
+                  >
+                    {agent.durationMs !== null && agent.state === 'done'
+                      ? durationText(agent.durationMs)
+                      : AGENT_STATE[agent.state]}
+                  </Text>
+                </View>
+                {agent.state === 'running' && agent.progress ? (
+                  <Text style={[styles.agentWhat, { color: c.textSecondary }]} numberOfLines={1}>
+                    {agent.progress}
+                  </Text>
+                ) : null}
+                {agent.state === 'failed' && agent.error ? (
+                  <Text style={[styles.agentWhat, { color: c.danger }]} numberOfLines={2}>
+                    {agent.error}
+                  </Text>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        )
+      })}
     </View>
   )
 })
@@ -486,4 +588,10 @@ const styles = StyleSheet.create({
   cleanText: { fontSize: 15, fontWeight: '500' },
   empty: { fontSize: 14, lineHeight: 20, paddingVertical: 24, textAlign: 'center' },
   footnote: { fontSize: 12, lineHeight: 17, paddingTop: 6 },
+  agents: { gap: 8, paddingTop: 2 },
+  phase: { gap: 4 },
+  phaseTitle: { fontSize: 12.5, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  agent: { gap: 1, paddingLeft: 2 },
+  agentName: { flex: 1, fontSize: 13.5 },
+  agentWhat: { fontSize: 12, lineHeight: 16, paddingLeft: 21 },
 })
