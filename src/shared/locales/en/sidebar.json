@@ -590,7 +590,12 @@
     "subagents_other": "{{count}} sub-agents",
     "commands_one": "{{count}} command",
     "commands_other": "{{count}} commands",
-    "both": "{{subagents}}, {{commands}}"
+    "both": "{{subagents}}, {{commands}}",
+    "three": "{{first}}, {{second}}, {{third}}",
+    "workflow": "a workflow",
+    "workflows_one": "{{count}} workflow",
+    "workflows_other": "{{count}} workflows",
+    "withAgents": "{{workflow}} · {{agents}}"
   },
   "subagents": {
     "title": "Sub-agents of this session",

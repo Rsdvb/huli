@@ -21,6 +21,7 @@ import { Clock, Fold } from './row-parts'
 import { TaskDetail } from './task-detail'
 import { useStopTask } from './use-stop-task'
 import { useTaskOutput } from './use-task-output'
+import { WorkflowLive } from './workflow-rows'
 
 // A row that only shows a command's last line reads it less often than an opened one.
 const GLANCE_MS = 5_000
@@ -135,6 +136,9 @@ export function TaskLive({
   block?: PortBlock | null
 }) {
   if (task.entryId !== undefined) return <CallLive task={task} compact={compact} />
+  if (task.kind === 'workflow') {
+    return <WorkflowLive sessionId={sessionId} task={task} compact={compact} />
+  }
   return <TaskRow sessionId={sessionId} task={task} compact={compact} stats={stats} block={block} />
 }
 

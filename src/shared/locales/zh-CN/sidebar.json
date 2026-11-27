@@ -533,7 +533,11 @@
   "stillRunning": {
     "subagents_other": "{{count}} 个子智能体",
     "commands_other": "{{count}} 条命令",
-    "both": "{{subagents}}、{{commands}}"
+    "both": "{{subagents}}、{{commands}}",
+    "three": "{{first}}、{{second}}、{{third}}",
+    "workflow": "工作流",
+    "workflows_other": "{{count}} 个工作流",
+    "withAgents": "{{workflow}} · {{agents}}"
   },
   "subagents": {
     "title": "这个会话的子智能体",

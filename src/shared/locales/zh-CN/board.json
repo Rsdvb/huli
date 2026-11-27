@@ -13,7 +13,29 @@
   "earlier": {
     "subagents": "子智能体",
     "commands": "命令",
+    "workflows": "工作流",
     "failed_other": "{{count}} 个失败"
+  },
+  "workflow": {
+    "phaseCount": "{{title}} {{done}}/{{total}}",
+    "doneCount": "完成 {{done}}/{{total}}",
+    "otherPhase": "其他",
+    "notReached": "未开始",
+    "noAgents": "还没有子智能体开始。",
+    "queued": "排队中",
+    "cached": "沿用上次",
+    "prompt": "任务",
+    "reply": "最后的回复",
+    "result": "结果",
+    "error": "出错",
+    "working": "还在做，结束后会显示结果。",
+    "noResult": "它没有给出结果。",
+    "previewOnly": "Claude Code 只报告了开头。",
+    "replyCut": "只显示开头 16 KiB。",
+    "readFailed": "读不到这个子智能体：{{error}}",
+    "tokens": "{{tokens}} tokens",
+    "toolCalls_other": "{{count}} 次工具调用",
+    "attempt": "第 {{attempt}} 次尝试"
   },
   "empty": {
     "title": "这里还没有内容",

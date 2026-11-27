@@ -2,8 +2,11 @@ import type { TFunction } from 'i18next'
 import type { StillRunning } from '@shared/agent-host'
 import type { SessionNode } from '@renderer/stores/sessions'
 
-/** What runs on after a turn: background commands and sub-agents at work. */
-export type Background = Pick<StillRunning, 'commands' | 'subagents'>
+/** What runs on after a turn: background commands, workflows and sub-agents at work. */
+export type Background = Pick<
+  StillRunning,
+  'commands' | 'subagents' | 'workflows' | 'workflowAgents'
+>
 
 /** What a row's status slot can show. */
 export interface RowStatus {
@@ -30,11 +33,20 @@ export function joinBackground(
 ): Background | null {
   let commands = 0
   let subagents = 0
+  let workflows = 0
+  let workflowAgents = 0
   for (const item of items) {
     commands += item?.commands ?? 0
     subagents += item?.subagents ?? 0
+    workflows += item?.workflows ?? 0
+    workflowAgents += item?.workflowAgents ?? 0
   }
-  return commands + subagents > 0 ? { commands, subagents } : null
+  if (commands + subagents + workflows === 0) return null
+  return {
+    commands,
+    subagents,
+    ...(workflows > 0 ? { workflows, workflowAgents } : {}),
+  }
 }
 
 const sumBackground = (nodes: readonly SessionNode[]): Background | null =>
@@ -68,11 +80,31 @@ export function rowStatus(node: SessionNode, rolledUp: boolean): RowStatus {
   }
 }
 
-/** What runs on, in words: "2 sub-agents, 1 command". */
-export function backgroundText(t: TFunction<'sidebar'>, { commands, subagents }: Background) {
-  const agents = t('stillRunning.subagents', { count: subagents })
-  const shell = t('stillRunning.commands', { count: commands })
-  if (commands === 0) return agents
-  if (subagents === 0) return shell
-  return t('stillRunning.both', { subagents: agents, commands: shell })
+/** What runs on, in words: "a workflow - 12 sub-agents, 2 sub-agents, 1 command". */
+export function backgroundText(
+  t: TFunction<'sidebar'>,
+  { commands, subagents, workflows = 0, workflowAgents = 0 }: Background,
+) {
+  const parts: string[] = []
+  if (workflows > 0) {
+    const flow =
+      workflows === 1
+        ? t('stillRunning.workflow')
+        : t('stillRunning.workflows', { count: workflows })
+    parts.push(
+      workflowAgents > 0
+        ? t('stillRunning.withAgents', {
+            workflow: flow,
+            agents: t('stillRunning.subagents', { count: workflowAgents }),
+          })
+        : flow,
+    )
+  }
+  if (subagents > 0 || (workflows === 0 && commands === 0)) {
+    parts.push(t('stillRunning.subagents', { count: subagents }))
+  }
+  if (commands > 0) parts.push(t('stillRunning.commands', { count: commands }))
+  if (parts.length === 1) return parts[0]!
+  if (parts.length === 2) return t('stillRunning.both', { subagents: parts[0], commands: parts[1] })
+  return t('stillRunning.three', { first: parts[0], second: parts[1], third: parts[2] })
 }

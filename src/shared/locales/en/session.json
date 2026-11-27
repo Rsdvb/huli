@@ -77,6 +77,11 @@
     "commands_one": "{{count}} command",
     "commands_other": "{{count}} commands",
     "both": "{{subagents}} and {{commands}}",
+    "three": "{{first}}, {{second}} and {{third}}",
+    "workflow": "a workflow",
+    "workflows_one": "{{count}} workflow",
+    "workflows_other": "{{count}} workflows",
+    "withAgents": "{{workflow}} · {{agents}}",
     "openBoard": "Open board"
   },
   "tool": {
