@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DigestedToolEntry, SessionSnapshot, ThreadEntry } from '@shared/thread'
 
 const hostMock = vi.fn()
+// Sessions on another computer, as the window learned their host.
+const remote = new Set<string>()
 
 vi.mock('@renderer/lib/host', () => ({
   host: (...args: unknown[]) => hostMock(...args),
+  sessionHost: (sessionId: string) => (remote.has(sessionId) ? 'mac' : null),
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : String(error)),
 }))
 
@@ -44,6 +47,7 @@ describe('threads store performance and digests', () => {
 
   beforeEach(() => {
     hostMock.mockReset()
+    remote.clear()
     rafQueue.length = 0
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
       rafQueue.push(cb)
@@ -164,6 +168,76 @@ describe('threads store performance and digests', () => {
     await Promise.resolve()
 
     expect(snapCalls).toHaveLength(1)
+  })
+
+  it("reads another computer's session lean and keeps a replica the host finds current", async () => {
+    remote.add('s1')
+    const entry: ThreadEntry = {
+      kind: 'agent',
+      id: 'a1',
+      markdown: 'done',
+      attachments: [],
+      streaming: false,
+    }
+    const reads: { method: string; params: Record<string, unknown> }[] = []
+    let answer: SessionSnapshot = { ...snapshot('s1', [entry], 4), epoch: 'run.0.tok.l' }
+    hostMock.mockImplementation((method: string, params: Record<string, unknown>) => {
+      if (method === 'sessions.open' || method === 'sessions.snapshot') {
+        reads.push({ method, params })
+        return Promise.resolve(answer)
+      }
+      return Promise.resolve()
+    })
+    const { focusSession, rewatchAll, useThreadsStore } = await import('./threads')
+    await focusSession('s1')
+    expect(reads[0]).toEqual({ method: 'sessions.open', params: { sessionId: 's1', lean: true } })
+    const held = useThreadsStore.getState().replicas.s1!.state!
+
+    // A reconnect: the host has nothing new and sends no entries; the replica keeps its own.
+    answer = {
+      ...snapshot('s1', [], 4),
+      epoch: 'run.0.tok.l',
+      unchanged: true,
+      session: { ...answer.session, title: 'renamed' },
+    }
+    rewatchAll()
+    await vi.waitFor(() => expect(reads).toHaveLength(2))
+    expect(reads[1]!.params).toEqual({
+      sessionId: 's1',
+      from: 0,
+      lean: true,
+      known: { epoch: 'run.0.tok.l', seq: 4 },
+    })
+    await vi.waitFor(() =>
+      expect(useThreadsStore.getState().replicas.s1?.state?.session.title).toBe('renamed'),
+    )
+    const kept = useThreadsStore.getState().replicas.s1!
+    expect(kept.state!.byId).toBe(held.byId)
+    expect(kept.state!.order).toEqual(['a1'])
+    expect(kept.seq).toBe(4)
+
+    // An older host names no epoch: the next read names nothing, and its page replaces the replica.
+    answer = snapshot('s1', [], 7)
+    rewatchAll()
+    await vi.waitFor(() => expect(useThreadsStore.getState().replicas.s1?.seq).toBe(7))
+    expect(useThreadsStore.getState().replicas.s1?.state?.order).toEqual([])
+    rewatchAll()
+    await vi.waitFor(() => expect(reads).toHaveLength(4))
+    expect(reads[3]!.params).toEqual({ sessionId: 's1', from: 0, lean: true })
+  })
+
+  it("reads this computer's sessions whole", async () => {
+    const reads: unknown[] = []
+    hostMock.mockImplementation((method: string, params: unknown) => {
+      if (method === 'sessions.open') {
+        reads.push(params)
+        return Promise.resolve(snapshot('s1', [], 1))
+      }
+      return Promise.resolve()
+    })
+    const { focusSession } = await import('./threads')
+    await focusSession('s1')
+    expect(reads).toEqual([{ sessionId: 's1' }])
   })
 
   it('keeps at most 1 recent unwatched session in the web client', async () => {

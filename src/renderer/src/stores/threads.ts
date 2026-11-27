@@ -14,11 +14,16 @@ import {
   type ThreadState,
   type UserContent,
 } from '@shared/thread'
-import { errorMessage, host } from '@renderer/lib/host'
+import { errorMessage, host, sessionHost } from '@renderer/lib/host'
 
 // The renderer's replicas of the sessions it shows. Each starts from a snapshot of the latest
 // page of the thread, takes older pages as the thread scrolls back, and applies patch batches in
 // sequence order; a gap or a patch for an unknown entry refetches a snapshot.
+//
+// Huli: a session on another computer, and every session of the web client, reads lean pages,
+// whose tool calls carry what their folded steps show and load the rest as they open
+// (`loadFullEntry`). A snapshot again names the thread the replica holds (`known`), which a host
+// with nothing new for it answers without entries; an older host ignores both.
 
 export interface Replica {
   state: ThreadState | null // null until the first snapshot arrives
@@ -35,6 +40,8 @@ export interface Replica {
   olderFailure: { message: string; count: number; retryAt: number } | null
   /** The latest plan when it lies before the loaded pages. */
   plan: PlanEntry | null
+  /** Huli: the copy of the thread `seq` counts in on its host; null from an older host. */
+  epoch: string | null
 }
 
 const EMPTY: Omit<Replica, 'status'> = {
@@ -45,6 +52,7 @@ const EMPTY: Omit<Replica, 'status'> = {
   loadingOlder: false,
   olderFailure: null,
   plan: null,
+  epoch: null,
 }
 
 // Scrolling asks again for an older page that failed only after 2 s, doubling to a minute.
@@ -64,6 +72,11 @@ const isWebClient = (): boolean =>
   typeof window !== 'undefined' &&
   (window as { kettu?: { client?: string } }).kettu?.client === 'web'
 const keepWatchedLimit = (): number => (isWebClient() ? KEEP_WATCHED_WEB : KEEP_WATCHED_DESKTOP)
+
+/** Huli: whether a session's pages come lean: one on another computer, or any of the web client. */
+export function readsLean(sessionId: string): boolean {
+  return isWebClient() || sessionHost(sessionId) !== null
+}
 
 const watched: string[] = [] // most recent last
 // The sessions the split shows, folded panes included; they stay watched however many there are.
@@ -128,11 +141,17 @@ function fetchSnapshot(
   const existing = snapshotsInFlight.get(sessionId)
   if (existing) return existing
   const current = useThreadsStore.getState().replicas[sessionId]
+  const lean = readsLean(sessionId) ? { lean: true } : {}
   // A replica that holds older pages keeps them: the snapshot reaches back as far as it does.
   const request =
     method === 'sessions.snapshot' && current?.state
-      ? host(method, { sessionId, from: current.older ?? 0 })
-      : host(method, { sessionId })
+      ? host(method, {
+          sessionId,
+          from: current.older ?? 0,
+          ...lean,
+          ...(current.epoch ? { known: { epoch: current.epoch, seq: current.seq } } : {}),
+        })
+      : host(method, { sessionId, ...lean })
   const run = request
     .then((snapshot) => receiveSnapshot(sessionId, snapshot))
     .catch((error: unknown) => {
@@ -156,6 +175,12 @@ function firstSeq(batch: PatchBatch): number {
 }
 
 function receiveSnapshot(sessionId: string, snapshot: SessionSnapshot): void {
+  const current = useThreadsStore.getState().replicas[sessionId]
+  // Huli: the thread is as the replica holds it: it keeps its entries, pages and plan.
+  if (snapshot.unchanged) {
+    if (current?.state) keepReplica(sessionId, current, snapshot)
+    return
+  }
   let state = threadFromSnapshot(snapshot)
   let seq = snapshot.seq
   const overflowed = pendingOverflow.delete(sessionId)
@@ -178,6 +203,39 @@ function receiveSnapshot(sessionId: string, snapshot: SessionSnapshot): void {
     loadingOlder: false,
     olderFailure: null,
     plan: snapshot.plan,
+    epoch: snapshot.epoch ?? null,
+  })
+  if (overflowed) {
+    queueMicrotask(() => {
+      if (useThreadsStore.getState().replicas[sessionId]?.state) {
+        void fetchSnapshot(sessionId, 'sessions.snapshot')
+      }
+    })
+  }
+}
+
+/** Huli: a replica a snapshot found current, with its session's view and what came in since. */
+function keepReplica(sessionId: string, current: Replica, snapshot: SessionSnapshot): void {
+  let state: ThreadState = { ...current.state!, session: snapshot.session }
+  let seq = snapshot.seq
+  const overflowed = pendingOverflow.delete(sessionId)
+  const buffered = (pending.get(sessionId) ?? []).sort((a, b) => a.seq - b.seq)
+  pending.delete(sessionId)
+  for (const batch of buffered) {
+    if (batch.seq <= seq) continue
+    if (firstSeq(batch) !== seq + 1) break
+    state = applyPatches(state, batch.patches, { partial: current.older !== null })
+    seq = batch.seq
+  }
+  if (sending.has(sessionId)) state = settleSnapshot(sessionId, state)
+  setReplica(sessionId, {
+    ...current,
+    state,
+    seq,
+    status: 'ready',
+    error: null,
+    loadingOlder: false,
+    epoch: snapshot.epoch ?? current.epoch,
   })
   if (overflowed) {
     queueMicrotask(() => {
@@ -353,9 +411,10 @@ function requestPage(
   from?: number,
 ): Promise<boolean> {
   setReplica(sessionId, { ...replica, loadingOlder: true })
+  const lean = readsLean(sessionId) ? { lean: true } : {}
   const run = host(
     'sessions.page',
-    from === undefined ? { sessionId, before } : { sessionId, before, from },
+    from === undefined ? { sessionId, before, ...lean } : { sessionId, before, from, ...lean },
   )
     .then((page) => {
       receivePage(sessionId, before, page)
@@ -492,11 +551,13 @@ export function focusSession(sessionId: string): Promise<void> {
  * `only`, the sessions it picks, as those on a host whose connection opened again.
  */
 export function rewatchAll(only?: (sessionId: string) => boolean): void {
-  for (const sessionId of watched) {
+  // Huli: watched again at once, read one at a time, the latest shown first: a reconnect is no
+  // burst of snapshots on a slow link, and a thread with nothing new answers in a few bytes.
+  let chain = Promise.resolve()
+  for (const sessionId of [...watched].reverse()) {
     if (only && !only(sessionId)) continue
-    void host('sessions.watch', { sessionId })
-      .catch(() => {})
-      .then(() => fetchSnapshot(sessionId, 'sessions.snapshot'))
+    const watching = host('sessions.watch', { sessionId }).catch(() => {})
+    chain = chain.then(() => watching).then(() => fetchSnapshot(sessionId, 'sessions.snapshot'))
   }
 }
 

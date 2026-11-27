@@ -5,7 +5,7 @@ import { subagentRunning } from '@shared/session-groups'
 import type { StopReason, ThreadEntry, ToolEntry } from '@shared/thread'
 import { errorMessage, host } from '@renderer/lib/host'
 import { secondsTime, subscribeSeconds } from '@renderer/lib/use-now'
-import { focusSession, useThreadsStore } from '@renderer/stores/threads'
+import { focusSession, readsLean, useThreadsStore } from '@renderer/stores/threads'
 
 export { subagentRunning }
 
@@ -114,7 +114,9 @@ export function readSubagent(
   if (reads.get(child.id)?.key === key) return Promise.resolve()
   const pending = reading.get(child.id)
   if (pending) return pending
-  const run = host('sessions.snapshot', { sessionId: child.id, from: 0 })
+  // Huli: a sub-agent on another computer comes lean, its screenshots by hash.
+  const lean = readsLean(child.id) ? { lean: true } : {}
+  const run = host('sessions.snapshot', { sessionId: child.id, from: 0, ...lean })
     .then((snapshot) => {
       reads.delete(child.id)
       reads.set(child.id, {
