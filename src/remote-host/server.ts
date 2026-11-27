@@ -150,6 +150,8 @@ const NOTED = {
 
 /** The requests of one connection waiting for an answer to note; more are not noted. */
 const MAX_NOTED = 64
+/** Requests to the agent host whose method an answer too long for the channel names in the log. */
+const MAX_METHODS = 256
 
 type NotedKind = (typeof NOTED)[keyof typeof NOTED]
 
@@ -770,7 +772,10 @@ class DeviceConnection {
       return
     }
     this.channel = new Channel(ciphers, {
-      write: (frame) => this.transport.send(frame),
+      write: (frame) => {
+        this.keepalive?.wrote(frame.length)
+        this.transport.send(frame)
+      },
       message: (channelMessage) => this.receive(channelMessage),
       end: () => this.end(),
     })
@@ -934,7 +939,7 @@ class DeviceConnection {
     if (this.state === 'closed') return
     if (this.keepalive && message.kind === 'json') {
       const keepalive = keepaliveMessage(message.value)
-      if (keepalive === 'ping') this.sendNow({ type: 'pong' } satisfies Pong)
+      if (keepalive === 'ping') void this.sendNow({ type: 'pong' } satisfies Pong)
       if (keepalive) return
     }
     if (this.session) return this.session.receive(this, message)
@@ -1128,13 +1133,15 @@ class DeviceConnection {
 
   /**
    * From version 3, pings the device after a quiet spell, and drops a connection that stays silent
-   * after it as if the network went, so its session waits for the device to resume.
+   * after it as if the network went, so its session waits for the device to resume. A ping behind
+   * what the session sent waits for that to leave, as long as it does.
    */
   private keepAlive(version: number): void {
     if (version < KEEPALIVE_VERSION) return
     this.keepalive = new Keepalive({
       ...(this.server.options.keepalive ?? HOST_KEEPALIVE),
       ping: () => this.sendNow({ type: 'ping' } satisfies Ping),
+      buffered: () => this.transport.buffered(),
       silent: () => {
         this.server.options.log('info', `Device ${this.device?.id} stopped answering`)
         this.end()
@@ -1142,9 +1149,12 @@ class DeviceConnection {
     })
   }
 
-  /** Sends on this connection, outside the session's numbered messages. */
-  private sendNow(value: Ping | Pong): void {
-    this.channel?.send({ kind: 'json', value }).catch(() => {})
+  /**
+   * Sends on this connection, outside the session's numbered messages; settles once it was handed
+   * to the transport, or could not be.
+   */
+  private sendNow(value: Ping | Pong): Promise<void> {
+    return this.channel?.send({ kind: 'json', value }).catch(() => {}) ?? Promise.resolve()
   }
 
   private end(): void {
@@ -1191,6 +1201,8 @@ class DeviceSession {
     { kind: NotedKind; sessionId: unknown; title: string | null }
   >()
   private readonly titles = new SessionTitles()
+  /** The methods of requests the agent host has not answered yet, by id, for the log. */
+  private readonly methods = new Map<number, string>()
   private readonly uploads: Uploads
   private readonly downloads: Downloads
   private readonly forwards: HostForwards
@@ -1478,6 +1490,7 @@ class DeviceSession {
     this.token = null
     this.outbox.close()
     this.handed.clear()
+    this.methods.clear()
     this.uploads.closeAll()
     this.downloads.closeAll()
     this.forwards.close()
@@ -1941,6 +1954,10 @@ class DeviceSession {
       const title = this.titles.get(sessionId) ?? null
       if (this.noted.size < MAX_NOTED) this.noted.set(id, { kind, sessionId, title })
     }
+    if (typeof id === 'number' && typeof method === 'string') {
+      if (this.methods.size >= MAX_METHODS) this.methods.delete(this.methods.keys().next().value!)
+      this.methods.set(id, method)
+    }
     this.port?.send(request)
   }
 
@@ -2168,12 +2185,17 @@ class DeviceSession {
 
   private send(value: unknown): void {
     if (!this.live) return
+    const { type, id } = value as { type?: unknown; id?: unknown }
+    let method: string | undefined
+    if ((type === 'response' || type === 'error') && typeof id === 'number') {
+      method = this.methods.get(id)
+      this.methods.delete(id)
+    }
     this.outbox.push({ kind: 'json', value }).catch((error: unknown) => {
       if (!this.live) return
-      const { type, id } = value as { type?: unknown; id?: unknown }
       this.server.options.log(
         'warn',
-        `A message for device ${this.device.id} could not be sent: ${(error as Error).message}`,
+        `A message for device ${this.device.id} (${described(value, method)}) could not be sent: ${(error as Error).message}`,
       )
       // A response too long for the channel still tells the device its request failed.
       if ((type === 'response' || type === 'error') && typeof id === 'number') {
@@ -2183,6 +2205,15 @@ class DeviceSession {
       }
     })
   }
+}
+
+/** What a message for a device is, for the log: an answer's method or an event's type. */
+function described(value: unknown, method: string | undefined): string {
+  const { type, event } = value as { type?: unknown; event?: unknown }
+  if (method) return `the answer to ${method}`
+  const kind = type === 'event' ? (event as { type?: unknown } | null)?.type : undefined
+  if (typeof kind === 'string') return `event ${kind}`
+  return typeof type === 'string' ? type : 'a message'
 }
 
 /** Built when needed, so its words follow the language the host was last told. */

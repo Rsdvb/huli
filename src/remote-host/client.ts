@@ -434,10 +434,12 @@ class HostSession {
       if (welcome.protocol >= KEEPALIVE_VERSION) {
         this.keepalive = new Keepalive({
           ...this.timings,
-          ping: () => {
-            this.pingedAt = Date.now()
-            this.send({ type: 'ping' } satisfies Ping)
+          ping: (timed) => {
+            this.pingedAt = timed ? Date.now() : null
+            return this.channel.send({ type: 'ping' } satisfies Ping).catch(() => {})
           },
+          buffered: () => this.channel.buffered(),
+          speak: true,
           // Ended now as if the network went, so the link reconnects and resumes the session: a
           // stopped host never finishes the close.
           silent: () => {
@@ -446,6 +448,7 @@ class HostSession {
             this.end()
           },
         })
+        this.channel.watch?.(this.keepalive)
       }
       return this.handlers.welcomed(welcome)
     }

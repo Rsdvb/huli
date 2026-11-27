@@ -37,15 +37,18 @@ export class AsideConnection<V = unknown> {
   ) {
     this.keepalive = new Keepalive({
       ...(options.timings ?? DEVICE_KEEPALIVE),
-      ping: () => {
-        this.pingedAt = Date.now()
-        this.send({ type: 'ping' } satisfies Ping)
+      ping: (timed) => {
+        this.pingedAt = timed ? Date.now() : null
+        return this.channel.send({ type: 'ping' } satisfies Ping).catch(() => this.channel.close())
       },
+      buffered: () => channel.buffered(),
+      speak: true,
       silent: () => {
         this.channel.close()
         this.end()
       },
     })
+    channel.watch?.(this.keepalive)
     channel.onMessage((value) => this.receive(value))
     channel.onBytes(() => this.keepalive.heard())
     void channel.closed.then(() => this.end())
