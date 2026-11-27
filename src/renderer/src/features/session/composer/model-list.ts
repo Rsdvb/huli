@@ -241,17 +241,24 @@ export function modelLists(
   const all = choices.filter((c) => !c.shownAs).map((c, i) => readModel(c, i))
   markOlder(all)
   const byValue = new Map(all.map((r) => [r.value, r]))
+  // A favorite or recent model kept under another of its names is the row it shows as; Default
+  // runs whichever model it stands for at the time, so it is none.
+  const rowOf = (value: string) => {
+    const choice = choices.find((c) => c.value === value)
+    if (!choice?.shownAs || isDefaultChoice(choice)) return byValue.get(value)
+    return byValue.get(choice.shownAs)
+  }
   const several = new Set(all.filter((r) => !r.isDefault).map((r) => r.provider)).size > 1
   const picked: ModelRead[] = []
   const take = (read: ModelRead | undefined) => {
     if (read && picked.length < MAIN_MODELS && !picked.includes(read)) picked.push(read)
   }
-  const favorites = (kept.pinned ?? []).flatMap((v) => byValue.get(v) ?? [])
+  const favorites = [...new Set((kept.pinned ?? []).flatMap((v) => rowOf(v) ?? []))]
   favorites.forEach(take)
   const self = (read: ModelRead) => read
   if (picked.length === 0) {
     const currentModels = all.filter((r) => !r.older)
-    if (several) for (const value of kept.recent ?? []) take(byValue.get(value))
+    if (several) for (const value of kept.recent ?? []) take(rowOf(value))
     else
       sortByFamily(
         currentModels.filter((r) => !r.isDefault),

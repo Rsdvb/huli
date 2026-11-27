@@ -12,7 +12,13 @@ import type { AgentOptions, AgentStatus } from '@shared/agent-host'
 import { isFullAccessMode, isStartMode } from '@shared/agents'
 import { limitsForModel } from '@shared/plan-limits'
 import { planQuota } from '@shared/plan-quota'
-import { booleanConfigValue, isConfigValue, type ConfigOption } from '@shared/thread'
+import {
+  booleanConfigValue,
+  configValueFor,
+  isConfigValue,
+  levelsFor,
+  type ConfigOption,
+} from '@shared/thread'
 import { SegmentedControl } from '../ui/SegmentedControl'
 import { AgentGlyph, G, Icon, type IconSpec } from '../ui/session/icons'
 import {
@@ -566,20 +572,22 @@ export function startConfig(
   picks: Record<string, string | boolean>,
 ): ConfigOption[] {
   const start = startModeOf(entry)
+  // A model kept under another of its names takes the name the list has it by.
   const valueOf = (option: ConfigOption): string | boolean => {
     const pick = picks[option.id]
-    if (pick !== undefined && isConfigValue(option, pick)) return pick
+    const picked = pick === undefined ? null : configValueFor(option, pick)
+    if (picked !== null) return picked
     if (start?.optionId === option.id) return start.value
     const remembered = REMEMBERED.has(option.category) ? entry.remembered[option.id] : undefined
-    if (remembered !== undefined && isConfigValue(option, remembered)) return remembered
-    return option.value
+    const kept = remembered === undefined ? null : configValueFor(option, remembered)
+    return kept ?? option.value
   }
   const model = optionOf(entry.config, 'model')
   const modelValue = model ? valueOf(model) : null
   return entry.config.map((option) => {
     const base =
       option.category === 'thought_level' && typeof modelValue === 'string'
-        ? (entry.levels[modelValue] ?? option)
+        ? (levelsFor(entry.levels, model, modelValue) ?? option)
         : option
     return { ...base, value: valueOf(base) }
   })
@@ -599,7 +607,7 @@ export function startNotices(
   return entry.config.flatMap((option) => {
     if (!REMEMBERED.has(option.category) || picks[option.id] !== undefined) return []
     const wanted = entry.remembered[option.id]
-    if (wanted === undefined || isConfigValue(option, wanted)) return []
+    if (wanted === undefined || configValueFor(option, wanted) !== null) return []
     const now = started.get(option.id)
     const nameOf = (value: string | boolean | undefined) => {
       const choice = now?.choices?.find((c) => c.value === value)
@@ -698,7 +706,8 @@ function defaultChoice(options: AgentOptions | undefined): Choice | null {
   if (!options) return null
   const model = optionOf(options.config, 'model')
   if (!model) return null
-  const value = options.remembered[model.id] ?? model.value
+  const remembered = options.remembered[model.id]
+  const value = (remembered === undefined ? null : configValueFor(model, remembered)) ?? model.value
   return model.choices.find((c) => c.value === value) ?? shownChoice(model) ?? null
 }
 

@@ -478,6 +478,84 @@ export function isConfigValue(option: ConfigOption, value: string | boolean): bo
   return typeof value === 'string' && !!option.choices?.some((choice) => choice.value === value)
 }
 
+/** A choice of a select option. */
+export type ConfigChoice = NonNullable<ConfigOption['choices']>[number]
+
+// Claude Code's Default runs whichever model it resolves to at the time, so it is never the same
+// model as a choice that names one.
+const FLOATING_MODEL = 'default'
+
+/** The model id `value` stands for among `choices`: its choice's `modelId`, else `value` itself. */
+function modelIdIn(choices: readonly ConfigChoice[], value: string): string {
+  return choices.find((choice) => choice.value === value)?.modelId ?? value
+}
+
+/**
+ * Whether two values of a model option name the same model: one is the model id the other stands
+ * for, as `choices` say, as the alias `fable` and its full id `claude-fable-5-2` are. Claude Code
+ * lists a model under the name its session runs it by, so either can be the one listed.
+ */
+export function sameModelValue(choices: readonly ConfigChoice[], a: string, b: string): boolean {
+  if (a === b) return true
+  if (a === FLOATING_MODEL || b === FLOATING_MODEL) return false
+  return modelIdIn(choices, a) === b || modelIdIn(choices, b) === a
+}
+
+/**
+ * The value `option` takes for `value`: `value` itself when it is one, else, for a model, the
+ * choice of the same model under another name, a visible one first. `known` are choices from
+ * another list of the option, which may say which model `value` is. Null when it takes neither.
+ */
+export function configValueFor(
+  option: ConfigOption,
+  value: string | boolean,
+  known: readonly ConfigChoice[] = [],
+): string | boolean | null {
+  if (isConfigValue(option, value)) return value
+  if (option.category !== 'model' || typeof value !== 'string' || !option.choices) return null
+  const choices = [...option.choices, ...known]
+  const same = option.choices.filter((choice) => sameModelValue(choices, choice.value, value))
+  return (same.find((choice) => !choice.shownAs) ?? same[0])?.value ?? null
+}
+
+/** The choice `option` lists for `value`, under that name or another of the same model's. */
+export function configChoiceFor(
+  option: ConfigOption,
+  value: string | boolean,
+): ConfigChoice | undefined {
+  const listed = configValueFor(option, value)
+  return typeof listed === 'string'
+    ? option.choices?.find((choice) => choice.value === listed)
+    : undefined
+}
+
+/** Whether `a` and `b` are the same value of `option`, a model under either of its names alike. */
+export function sameConfigValue(
+  option: ConfigOption,
+  a: string | boolean,
+  b: string | boolean,
+  known: readonly ConfigChoice[] = [],
+): boolean {
+  if (a === b) return true
+  if (option.category !== 'model' || typeof a !== 'string' || typeof b !== 'string') return false
+  return sameModelValue([...(option.choices ?? []), ...known], a, b)
+}
+
+/**
+ * The level option kept for `model`, or for the same model under another name of `option`'s, as
+ * the levels are kept by the name a session ran the model under.
+ */
+export function levelsFor(
+  levels: Readonly<Record<string, ConfigOption>>,
+  option: ConfigOption | undefined,
+  model: string,
+): ConfigOption | undefined {
+  const own = levels[model]
+  if (own || !option) return own
+  const key = Object.keys(levels).find((name) => sameConfigValue(option, name, model))
+  return key === undefined ? undefined : levels[key]
+}
+
 /**
  * Whether nobody was asked: a routine's scope, or Huli's host for a request its setting allows,
  * answered it, so the call folds as work with a quiet note rather than as an answered card.

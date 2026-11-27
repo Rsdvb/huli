@@ -7,7 +7,16 @@ import path from 'node:path'
 import { MAX_PINNED_MODELS, MAX_RECENT_MODELS, type AgentOptions } from '@shared/agent-host'
 import { isStartMode } from '@shared/agents'
 import type { HostSettings } from '@shared/settings'
-import { isAgentId, isConfigValue, type AgentId, type ConfigOption } from '@shared/thread'
+import {
+  configValueFor,
+  isAgentId,
+  isConfigValue,
+  sameConfigValue,
+  sameModelValue,
+  type AgentId,
+  type ConfigChoice,
+  type ConfigOption,
+} from '@shared/thread'
 import { HostError, notFound } from './errors'
 import { t } from './i18n'
 import { JsonFile, type LogFn } from './storage'
@@ -15,7 +24,21 @@ import { JsonFile, type LogFn } from './storage'
 export interface AgentOptionsFile {
   version: 1
   agents: Partial<Record<AgentId, AgentOptions>>
+  /** Huli: the values sessions with an API provider profile last chose, by `profileKey`. */
+  profiles?: Record<string, ProfileOptions>
 }
+
+/**
+ * Huli: what a profile's sessions keep apart from their agent's own: the values last chosen, and
+ * the models last listed, which say what a value is. A profile's provider lists other models, so
+ * its choices neither replace the agent's own nor count as a change of the agent's defaults.
+ */
+export interface ProfileOptions {
+  config: ConfigOption[]
+  remembered: Record<string, string | boolean>
+}
+
+const profileKey = (agentId: AgentId, profileId: string): string => `${agentId}/${profileId}`
 
 /** The categories whose values carry over to the next session; a mode never does. */
 export const REMEMBERED_CATEGORIES: ReadonlySet<ConfigOption['category']> = new Set([
@@ -74,6 +97,7 @@ function levelsOf(config: readonly ConfigOption[]): [string, ConfigOption] | nul
 
 export class AgentOptionsStore {
   private readonly byAgent = new Map<AgentId, AgentOptions>()
+  private readonly byProfile = new Map<string, ProfileOptions>()
 
   constructor(
     private readonly deps: {
@@ -88,6 +112,7 @@ export class AgentOptionsStore {
     for (const [agentId, entry] of Object.entries(file.agents) as [AgentId, AgentOptions][]) {
       this.byAgent.set(agentId, entry)
     }
+    for (const [key, entry] of Object.entries(file.profiles ?? {})) this.byProfile.set(key, entry)
   }
 
   flush(): Promise<void> {
@@ -106,20 +131,34 @@ export class AgentOptionsStore {
    * The options of a new session in the folder `folderKey`, at the agent's own values, before any
    * start value is set. A remembered value whose option's own value in that folder changed since
    * it was last seen there is dropped and returned: the change outside Kettu came after the
-   * user's choice, so it wins.
+   * user's choice, so it wins. A session with an API provider profile only lists its models for
+   * the profile's values.
    */
-  started(agentId: AgentId, config: readonly ConfigOption[], folderKey?: string): ReplacedValue[] {
+  started(
+    agentId: AgentId,
+    config: readonly ConfigOption[],
+    folderKey?: string,
+    profileId?: string,
+  ): ReplacedValue[] {
     if (config.length === 0) return []
+    if (profileId !== undefined) {
+      this.listedForProfile(agentId, profileId, config)
+      return []
+    }
     const current = this.byAgent.get(agentId)
     const remembered = { ...current?.remembered }
     const replaced: ReplacedValue[] = []
     const before = folderKey === undefined ? undefined : current?.defaults?.[folderKey]
+    const known = (id: string) => choicesOf(current?.config, id)
     if (before) {
       for (const [id, wanted] of Object.entries(remembered)) {
         const option = config.find((o) => o.id === id)
-        if (!option || !(id in before) || before[id] === option.value) continue
+        if (!option || !(id in before)) continue
+        if (sameConfigValue(option, before[id]!, option.value, known(id))) continue
         delete remembered[id]
-        if (wanted !== option.value) replaced.push({ option, wanted })
+        if (!sameConfigValue(option, wanted, option.value, known(id))) {
+          replaced.push({ option, wanted })
+        }
       }
     }
     const defaults =
@@ -128,7 +167,11 @@ export class AgentOptionsStore {
         : withDefaults(current?.defaults ?? {}, folderKey, config)
     this.put({
       agentId,
-      config: [...config],
+      config: withSpellings(config, current?.config, [
+        ...Object.values(remembered),
+        ...(current?.pinned ?? []),
+        ...(current?.recent ?? []),
+      ]),
       levels: withLevels(current?.levels ?? {}, config),
       remembered,
       ...(defaults ? { defaults } : {}),
@@ -139,9 +182,24 @@ export class AgentOptionsStore {
     return replaced
   }
 
-  /** The values last chosen for the agent, by option id. */
-  rememberedOf(agentId: AgentId): Record<string, string | boolean> {
+  /** The values last chosen for the agent, or for its sessions with the profile, by option id. */
+  rememberedOf(agentId: AgentId, profileId?: string): Record<string, string | boolean> {
+    if (profileId !== undefined) {
+      return { ...this.byProfile.get(profileKey(agentId, profileId))?.remembered }
+    }
     return { ...this.byAgent.get(agentId)?.remembered }
+  }
+
+  /**
+   * The model choices kept for `optionId` of the agent, or of its sessions with the profile: what
+   * a value names when a session lists the same model under another name.
+   */
+  knownChoices(agentId: AgentId, optionId: string, profileId?: string): ConfigChoice[] {
+    const config =
+      profileId === undefined
+        ? this.byAgent.get(agentId)?.config
+        : this.byProfile.get(profileKey(agentId, profileId))?.config
+    return choicesOf(config, optionId)
   }
 
   /**
@@ -150,13 +208,21 @@ export class AgentOptionsStore {
    * reports the agent's defaults; a mode and the other options are left out, since they never
    * carry over. They also add the model's levels.
    */
-  opened(agentId: AgentId, config: readonly ConfigOption[]): void {
+  opened(agentId: AgentId, config: readonly ConfigOption[], profileId?: string): void {
+    if (profileId !== undefined) {
+      this.listedForProfile(agentId, profileId, config)
+      return
+    }
     const current = this.byAgent.get(agentId)
     if (current) {
       // The models it lists are what the agent offers now; the values stay its own.
       this.put({
         ...current,
-        config: withModels(current.config, config),
+        config: withModels(current.config, config, [
+          ...Object.values(current.remembered),
+          ...(current.pinned ?? []),
+          ...(current.recent ?? []),
+        ]),
         levels: withLevels(current.levels, config),
         observedAt: this.now(),
       })
@@ -189,7 +255,18 @@ export class AgentOptionsStore {
     option: ConfigOption,
     value: string | boolean,
     config: readonly ConfigOption[],
+    profileId?: string,
   ): void {
+    if (profileId !== undefined) {
+      if (!REMEMBERED_CATEGORIES.has(option.category)) return
+      const key = profileKey(agentId, profileId)
+      const current = this.byProfile.get(key)
+      this.putProfile(key, {
+        config: current?.config ?? config.filter((o) => REMEMBERED_CATEGORIES.has(o.category)),
+        remembered: { ...current?.remembered, [option.id]: value },
+      })
+      return
+    }
     const current = this.byAgent.get(agentId)
     if (!current) return
     const remembered = REMEMBERED_CATEGORIES.has(option.category)
@@ -238,8 +315,12 @@ export class AgentOptionsStore {
     this.put(withList(current, 'pinned', [...new Set(models)]))
   }
 
-  /** A session of the agent with these options is used, so its model leads the recent ones. */
-  used(agentId: AgentId, config: readonly ConfigOption[]): void {
+  /**
+   * A session of the agent with these options is used, so its model leads the recent ones; one
+   * with a profile runs the profile's models, which are not the agent's own.
+   */
+  used(agentId: AgentId, config: readonly ConfigOption[], profileId?: string): void {
+    if (profileId !== undefined) return
     const current = this.byAgent.get(agentId)
     const model = modelInUse(config)
     if (current && model) this.put(withRecent(current, model))
@@ -249,8 +330,36 @@ export class AgentOptionsStore {
     const before = this.byAgent.get(next.agentId)
     this.byAgent.set(next.agentId, next)
     if (before && contentOf(before) === contentOf(next)) return
-    this.deps.file.save({ version: 1, agents: Object.fromEntries(this.byAgent) })
+    this.save()
     this.deps.changed(next)
+  }
+
+  /** Huli: the models a session with the profile listed, which say what its values are. */
+  private listedForProfile(agentId: AgentId, profileId: string, config: readonly ConfigOption[]) {
+    const key = profileKey(agentId, profileId)
+    const current = this.byProfile.get(key)
+    const remembered = current?.remembered ?? {}
+    const kept = config.filter((o) => REMEMBERED_CATEGORIES.has(o.category))
+    if (kept.length === 0) return
+    this.putProfile(key, {
+      config: withSpellings(kept, current?.config, Object.values(remembered)),
+      remembered,
+    })
+  }
+
+  private putProfile(key: string, next: ProfileOptions): void {
+    const before = this.byProfile.get(key)
+    this.byProfile.set(key, next)
+    if (before && JSON.stringify(before) === JSON.stringify(next)) return
+    this.save()
+  }
+
+  private save(): void {
+    this.deps.file.save({
+      version: 1,
+      agents: Object.fromEntries(this.byAgent),
+      ...(this.byProfile.size > 0 ? { profiles: Object.fromEntries(this.byProfile) } : {}),
+    })
   }
 
   private now(): number {
@@ -280,11 +389,67 @@ export function modelInUse(config: readonly ConfigOption[]): string | null {
   return option.choices?.find((c) => c.value === option.value)?.shownAs ?? option.value
 }
 
-/** The entry with `model` first among its recent models. */
+/** The entry with `model` first among its recent models, once under any of its names. */
 function withRecent(entry: AgentOptions, model: string): AgentOptions {
-  if (entry.recent?.[0] === model) return entry
-  const recent = [model, ...(entry.recent ?? []).filter((value) => value !== model)]
-  return withList(entry, 'recent', recent.slice(0, MAX_RECENT_MODELS))
+  const choices = entry.config.find((o) => o.category === 'model')?.choices ?? []
+  const others = (entry.recent ?? []).filter((value) => !sameModelValue(choices, value, model))
+  const recent = [model, ...others].slice(0, MAX_RECENT_MODELS)
+  if (JSON.stringify(recent) === JSON.stringify(entry.recent)) return entry
+  return withList(entry, 'recent', recent)
+}
+
+/** The choices of the option `id` in `config`. */
+function choicesOf(config: readonly ConfigOption[] | undefined, id: string): ConfigChoice[] {
+  return config?.find((o) => o.id === id)?.choices ?? []
+}
+
+/**
+ * `fresh`'s model choices, with each of `kept` and each of `values` that names one of them under
+ * another name, such as the alias `fable` of `claude-fable-5-2`, listed as shown as that one.
+ * Claude Code lists a model under the name its session runs it by, a resumed session its full id
+ * in its alias's place, so the kept list holds both names whichever session listed it last, and a
+ * value remembered under either still names a model the menus show. `values` are the values kept
+ * for the agent, such as the one remembered.
+ */
+export function withSpellings(
+  fresh: readonly ConfigOption[],
+  kept: readonly ConfigOption[] | undefined,
+  values: readonly (string | boolean)[] = [],
+): ConfigOption[] {
+  return fresh.map((option) => {
+    if (option.category !== 'model' || option.type !== 'select' || !option.choices) return option
+    const before = choicesOf(kept, option.id)
+    const choices = withNames(option.choices, before, values)
+    return choices === option.choices ? option : { ...option, choices }
+  })
+}
+
+function withNames(
+  fresh: readonly ConfigChoice[],
+  before: readonly ConfigChoice[],
+  values: readonly (string | boolean)[],
+): ConfigChoice[] {
+  const listed = new Set(fresh.map((c) => c.value))
+  const known = [...fresh, ...before]
+  const named = [
+    ...before.map((c) => c.value),
+    ...values.filter((v): v is string => typeof v === 'string'),
+  ]
+  const added: ConfigChoice[] = []
+  for (const value of named) {
+    if (listed.has(value)) continue
+    const same = fresh.find((c) => !c.shownAs && sameModelValue(known, c.value, value))
+    if (!same) continue
+    listed.add(value)
+    added.push({
+      value,
+      name: same.name,
+      ...(same.description ? { description: same.description } : {}),
+      modelId: same.modelId ?? same.value,
+      shownAs: same.value,
+    })
+  }
+  return added.length > 0 ? [...fresh, ...added] : (fresh as ConfigChoice[])
 }
 
 /** The entry with `list` set to `values`, or without it when they are none. */
@@ -311,16 +476,22 @@ function withDefaults(
   return next
 }
 
-/** The cached options with the model lists of `seen`, keeping each cached value it still offers. */
+/**
+ * The cached options with the model lists of `seen`, the names the cache knew for the same models
+ * kept, and each cached value they still offer.
+ */
 function withModels(
   cached: readonly ConfigOption[],
   seen: readonly ConfigOption[],
+  values: readonly (string | boolean)[],
 ): ConfigOption[] {
   return cached.map((option) => {
     if (option.category !== 'model') return option
-    const fresh = seen.find((o) => o.id === option.id && o.type === option.type)
-    if (!fresh) return option
-    return { ...fresh, value: isValueOf(fresh, option.value) ? option.value : fresh.value }
+    const listed = seen.find((o) => o.id === option.id && o.type === option.type)
+    if (!listed) return option
+    const [fresh] = withSpellings([listed], cached, [option.value, ...values])
+    const value = configValueFor(fresh!, option.value, choicesOf(cached, option.id))
+    return { ...fresh!, value: value ?? fresh!.value }
   })
 }
 
@@ -338,10 +509,12 @@ export function withFreshModels(
     if (option.category !== 'model' || option.type !== 'select' || !option.choices) return option
     const seen = fresh.find((o) => o.id === option.id && o.type === 'select')
     if (!seen?.choices || seen.choices.length === 0) return option
-    const kept = seen.choices.some((c) => c.value === option.value)
+    // The session's own value stays listed, as the same model under another name where it is one.
+    const named = withNames(seen.choices, option.choices, [option.value])
+    const kept = named.some((c) => c.value === option.value)
       ? []
       : option.choices.filter((c) => c.value === option.value)
-    const choices = [...seen.choices, ...kept]
+    const choices = [...named, ...kept]
     if (JSON.stringify(choices) === JSON.stringify(option.choices)) return option
     const before = new Set(option.choices.map((c) => c.value))
     added.push(...choices.filter((c) => !before.has(c.value)).map((c) => c.value))
@@ -473,7 +646,27 @@ export function parseAgentOptionsFile(data: Record<string, unknown>): AgentOptio
       ...(recent.length > 0 ? { recent } : {}),
     }
   }
-  return { version: 1, agents }
+  const profiles: Record<string, ProfileOptions> = {}
+  if (isRecord(data.profiles)) {
+    for (const [key, entry] of Object.entries(data.profiles)) {
+      const agentId = key.slice(0, key.indexOf('/'))
+      if (!isAgentId(agentId) || !isRecord(entry) || !Array.isArray(entry.config)) continue
+      profiles[key] = {
+        config: entry.config.map(optionOf).filter((o): o is ConfigOption => o !== null),
+        remembered: valuesOf(entry.remembered),
+      }
+    }
+  }
+  return { version: 1, agents, ...(Object.keys(profiles).length > 0 ? { profiles } : {}) }
+}
+
+function valuesOf(value: unknown): Record<string, string | boolean> {
+  const values: Record<string, string | boolean> = {}
+  if (!isRecord(value)) return values
+  for (const [id, v] of Object.entries(value)) {
+    if (typeof v === 'string' || typeof v === 'boolean') values[id] = v
+  }
+  return values
 }
 
 export function agentOptionsFile(userDataPath: string, log: LogFn): JsonFile<AgentOptionsFile> {
