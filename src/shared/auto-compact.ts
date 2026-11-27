@@ -103,3 +103,60 @@ export function compactLabel(unit: CompactUnit, value: number): string {
   if (value >= 1_000) return `${Math.round(value / 100) / 10}K`
   return String(value)
 }
+
+/**
+ * Huli: 省流量, an earlier compaction Settings offers beside the harness's own default, in its own
+ * setting: the request a long session sends then holds a few hundred thousand tokens, not the
+ * near million a 1M-token model's full window does, since every request uploads it all again.
+ * Only harnesses whose setting is a size in tokens get one; a share of the window or a reserve
+ * cannot say where a context of that size ends for every model.
+ */
+export const TRAFFIC_PRESETS: Readonly<Partial<Record<HarnessId, number>>> = {
+  // The window Claude Code works within before it compacts, capped at the model's own, so a 200K
+  // model keeps its default; a 1M model compacts at about 220K rather than about 967K.
+  'claude-code': 256_000,
+  codebuddy: 256_000,
+  // The tokens at which Codex compacts, about where Claude Code's preset does. Codex lowers a
+  // value past 90% of the model's window to that, its own default, so this is never later.
+  codex: 220_000,
+}
+
+export function trafficPreset(harness: HarnessId): number | null {
+  return TRAFFIC_PRESETS[harness] ?? null
+}
+
+/** What an agent's auto-compact setting amounts to, as Settings offers it. */
+export type CompactChoice = 'default' | 'traffic' | 'custom'
+
+/** The parts of an agent's setting a choice is read from and written to. */
+export interface CompactValues {
+  all: number | null
+  allOther: string | null
+  models: readonly { model: string; value: number | null; other: string | null }[] | null
+}
+
+/** Nothing set is the default, the preset alone for every model is 省流量, anything else custom. */
+export function compactChoice(harness: HarnessId, values: CompactValues): CompactChoice {
+  const ownModels = (values.models ?? []).some((row) => row.value !== null || row.other !== null)
+  if (values.allOther !== null || ownModels) return 'custom'
+  if (values.all === null) return 'default'
+  return values.all === trafficPreset(harness) ? 'traffic' : 'custom'
+}
+
+/**
+ * The writes that make the setting `choice`: each model's own value removed, then the value for
+ * every model, the preset's or none, so the harness picks. Empty when it holds that already.
+ */
+export function compactChanges(
+  harness: HarnessId,
+  values: CompactValues,
+  choice: Exclude<CompactChoice, 'custom'>,
+): { model: string | null; value: number | null }[] {
+  const value = choice === 'traffic' ? trafficPreset(harness) : null
+  if (choice === 'traffic' && value === null) return []
+  const changes: { model: string | null; value: number | null }[] = (values.models ?? [])
+    .filter((row) => row.value !== null || row.other !== null)
+    .map((row) => ({ model: row.model, value: null }))
+  if (values.all !== value || values.allOther !== null) changes.push({ model: null, value })
+  return changes
+}

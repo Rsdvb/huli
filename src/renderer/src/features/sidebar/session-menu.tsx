@@ -25,6 +25,7 @@ import {
   PinOffIcon,
   PlugSocketIcon,
   RefreshIcon,
+  RepeatIcon,
   SidebarBottomIcon,
   SidebarRightIcon,
   SlidersHorizontalIcon,
@@ -131,6 +132,7 @@ import { confirmArchive } from './archive-confirm-model'
 import { NeverSettleItem, SettleItem, SnoozeMenu } from './tidy-menu'
 import { ZenMenu } from '@renderer/features/session/zen-menu'
 import { MenuOptions } from '@renderer/features/session/menu-options'
+import { handoffSession } from '@renderer/features/session/composer/traffic-actions'
 import { useMenuOptions } from '@renderer/features/session/menu-options-model'
 import { undoToast } from './undo'
 import { binnedSessionsToast } from '@renderer/features/recycle-bin/undo'
@@ -479,6 +481,22 @@ export function SessionMenuItems({
           >
             <ForkIcon />
             {t('worktree.forkSame')}
+          </DropdownMenuItem>
+        )
+      case 'handoff':
+        return (
+          <DropdownMenuItem
+            key={name}
+            {...props}
+            onClick={() =>
+              void handoffSession(id).then(
+                () => toast(t('session:handoff.asked')),
+                (error: unknown) => toast(errorMessage(error)),
+              )
+            }
+          >
+            <MenuGlyph icon={RepeatIcon} />
+            {t('session:handoff.menu')}
           </DropdownMenuItem>
         )
       case 'removeWorktree':

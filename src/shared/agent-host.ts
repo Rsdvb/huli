@@ -1275,6 +1275,11 @@ export interface SessionSummary {
   worker?: WorkerSummary | null
   // Huli: moved to another computer, where it goes on; absent while it was not
   movedTo?: MovedTo
+  // Huli: handed off to a new session of its agent, which goes on from its summary: the latest
+  // one; absent while it was not
+  handedOffTo?: string
+  // Huli: the session it goes on from, whose handoff summary was its first message
+  handedOffFrom?: string
   // Huli: out of the active list until a time or its plan's reset, or settled, and the user's
   // 永不收起 (会话整理); absent from older hosts, null and absent while the feature is off.
   snooze?: SessionSnooze | null
@@ -1609,6 +1614,12 @@ export interface HostContract {
   'agents.autoCompact': { params: { agentId: AgentId }; result: AutoCompactSettings }
   // Writes one value there and nothing else.
   'agents.setAutoCompact': { params: { agentId: AgentId; change: AutoCompactChange }; result: void }
+  // Huli: makes that setting the harness's default or 省流量 (see `compactChanges`), for every
+  // model, removing the models' own values.
+  'agents.setCompactChoice': {
+    params: { agentId: AgentId; choice: 'default' | 'traffic' }
+    result: void
+  }
   // A Codebuddy Code agent's site, read from its settings file, and what overrides it; rejects
   // with the reason when the file cannot be read.
   'agents.codebuddySettings': { params: { agentId: AgentId }; result: CodebuddySettings }
@@ -2284,6 +2295,10 @@ export interface HostContract {
     params: { sessionId: string; entryId?: string; worktree?: 'new' | 'same' }
     result: SessionSummary
   }
+  // Huli: 接力到新会话: asks the session's agent for a handoff summary, then starts a new session
+  // of the agent in the same folder with it as the first message and links the two. Resolves once
+  // the summary was asked for; the new session comes when the turn ends.
+  'sessions.handoff': { params: { sessionId: string }; result: void }
   // Undoes the latest turn, which `entryId`, the user's message, starts: the agent's history loses
   // it and the thread its entries. What it changed on disk stays.
   'sessions.revert': { params: { sessionId: string; entryId: string }; result: void }
@@ -3216,6 +3231,7 @@ export const HOST_METHODS = [
   'agents.setClaudeSetting',
   'agents.autoCompact',
   'agents.setAutoCompact',
+  'agents.setCompactChoice',
   'agents.codebuddySettings',
   'agents.setCodebuddySite',
   'agents.codexSettings',
@@ -3347,6 +3363,7 @@ export const HOST_METHODS = [
   'sessions.rewind',
   'sessions.putBack',
   'sessions.fork',
+  'sessions.handoff',
   'sessions.revert',
   'sessions.rewindPreview',
   'sessions.restoreFiles',

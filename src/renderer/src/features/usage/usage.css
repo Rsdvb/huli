@@ -1092,6 +1092,10 @@ button.k-u-legend__item:hover {
 .k-u-bd__table thead th:nth-child(2) {
   width: 60px;
 }
+/* Huli: traffic reads "289.9 MB", wider than a count. */
+.k-u-bd__table[data-wide] thead th:nth-child(2) {
+  width: 72px;
+}
 .k-u-bd__table thead th:nth-child(3) {
   width: 56px;
 }

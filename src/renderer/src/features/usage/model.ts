@@ -2,6 +2,7 @@
 // breakdowns summed from the host's per-day rows. Pure, so it is tested without a window.
 
 import type { AgentId } from '@shared/thread'
+import { partsTraffic } from '@shared/traffic'
 import {
   partsTotal,
   type ClockZone,
@@ -18,9 +19,10 @@ export type RangeChoice = { kind: RangeKind } | { kind: 'custom'; from: number; 
 export type AgentFilter = AgentId | 'all'
 
 /** What the figures, the trend and the breakdowns count. */
-export type Metric = 'tokens' | 'requests' | 'cost'
+/** Huli: `traffic` is the bytes the requests moved, estimated from their tokens (shared/traffic). */
+export type Metric = 'tokens' | 'requests' | 'cost' | 'traffic'
 /** What the metric counts under the chosen scope: Kettu's turns stand in for requests there. */
-export type MetricKind = 'tokens' | 'requests' | 'turns' | 'cost'
+export type MetricKind = 'tokens' | 'requests' | 'turns' | 'cost' | 'traffic'
 
 export function metricKind(metric: Metric, scope: UsageScope): MetricKind {
   return metric === 'requests' && scope === 'kettu' ? 'turns' : metric
@@ -37,6 +39,10 @@ export function metricValue(parts: TokenParts, metric: Metric, scope: UsageScope
       return parts.turns
     case 'tokens':
       return partsTotal(parts)
+    case 'traffic': {
+      const { up, down } = partsTraffic(parts)
+      return up + down
+    }
   }
 }
 

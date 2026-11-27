@@ -4760,6 +4760,10 @@ export class AgentHost {
         ),
       'agents.setAutoCompact': ({ agentId, change }) =>
         agents.setAutoCompact(agentId, change, () => this.appServer(agentId)),
+      'agents.setCompactChoice': ({ agentId, choice }) =>
+        agents.setCompactChoice(agentId, choice, this.agentOptions.get(agentId)?.config, () =>
+          this.appServer(agentId),
+        ),
       'agents.codebuddySettings': ({ agentId }) => agents.codebuddySettings(agentId),
       'agents.codexSettings': ({ agentId }) =>
         agents.codexSettings(agentId, () => this.appServer(agentId)),
@@ -5018,6 +5022,7 @@ export class AgentHost {
       'sessions.sideAgents': ({ sessionId }) => ({ agents: sessions.sideAgents(sessionId) }),
       'sessions.fork': ({ sessionId, entryId, worktree }) =>
         sessions.fork(sessionId, entryId, worktree),
+      'sessions.handoff': ({ sessionId }) => sessions.handoff(sessionId),
       'sessions.revert': ({ sessionId, entryId }) => sessions.revert(sessionId, entryId),
       'sessions.rewindPreview': ({ sessionId, entryId }) =>
         sessions.rewindPreview(sessionId, entryId),

@@ -668,7 +668,14 @@
   },
   "sessionStarted": {
     "label": "已启动 <title>{{title}}</title>",
-    "missing": "已启动一个会话"
+    "missing": "已启动一个会话",
+    "handoff": "已接力到 <title>{{title}}</title>",
+    "handoffMissing": "已接力到一个新会话"
+  },
+  "handoff": {
+    "menu": "接力到新会话",
+    "asked": "正在写交接摘要，写好后会开一个新会话接着做",
+    "from": "接着"
   },
   "compaction": {
     "inProgress": "正在压缩上下文…",

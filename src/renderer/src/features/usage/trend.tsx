@@ -2,7 +2,6 @@ import { useMemo, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { Trans, useTranslation } from 'react-i18next'
 import { sortAgentIds, type AgentId } from '@shared/thread'
 import { useClock } from '@renderer/lib/use-now'
-import { count, usd } from '@renderer/lib/format'
 import { ChartTip, TipRow } from './chart'
 import {
   activeAverage,
@@ -15,7 +14,7 @@ import {
 } from './model'
 import { niceStep, rectIn, topRounded, useSize } from './plot'
 import { useAgentColor, usageAgentName } from './series'
-import { useMetricText, usePeriodText } from './text'
+import { metricFormat, useMetricText, usePeriodText } from './text'
 
 /** What the chart counts and by what unit. */
 const TITLE = {
@@ -42,6 +41,12 @@ const TITLE = {
     day: 'trend.costDaily',
     week: 'trend.costWeekly',
     month: 'trend.costMonthly',
+  },
+  traffic: {
+    hour: 'trend.trafficHourly',
+    day: 'trend.trafficDaily',
+    week: 'trend.trafficWeekly',
+    month: 'trend.trafficMonthly',
   },
 } as const satisfies Record<MetricKind, Record<TrendUnit, string>>
 
@@ -88,7 +93,7 @@ export function TrendCard({
   const { t } = useTranslation('usage')
   const color = useAgentColor()
   const text = useMetricText(kind)
-  const format = kind === 'cost' ? usd : count
+  const format = metricFormat(kind)
   const labels = usePeriodText(unit, bars, zoned)
   const [plot, size] = useSize<HTMLDivElement>()
   const series = useMemo(

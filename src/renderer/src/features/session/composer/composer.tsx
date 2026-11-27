@@ -99,6 +99,8 @@ import { SandboxChip } from './sandbox-chip'
 import { SwitchConfirm } from './switch-confirm'
 import { SwitchStrip } from './switch-strip'
 import { QuotaStrip } from './quota-strip'
+import { useTrafficHint } from './traffic-actions'
+import { HandoffOfferStrip, TrafficHint } from './traffic-hint'
 import { LimitPauseStrip } from './limit-pause-strip'
 import { StallStrip } from './stall-strip'
 import { useFallback } from '../plan-quota'
@@ -240,6 +242,23 @@ export function Composer({
   const openOutside = session.openOutside ?? null
   // A closed session attaches to its agent as the message goes.
   const idle = (status === 'ready' || status === 'closed') && !heldOutside
+  // Huli: what a large context costs in traffic, and the ways out of it (省流量).
+  const handedOff = useSessionsStore((s) => !!s.byId[sessionId]?.handedOffTo)
+  const trafficHint = useTrafficHint(sessionId, session.usage, handedOff)
+  const offerHandoff = useSettingsStore((s) => s.settings.thread.handoffOffer)
+  const canHandoff =
+    idle &&
+    session.parentId === null &&
+    session.origin !== 'subagent' &&
+    session.queue.length === 0 &&
+    !pending &&
+    !mustSwitch
+  const compactNow =
+    status === 'ready' && session.queue.length === 0 && !pending && !mustSwitch
+      ? compactPrompt(session.commands)
+      : null
+  // A turn ended with the context past the line: the card asks, where the user turned it on.
+  const handoffOffered = offerHandoff && trafficHint.shown && canHandoff
   const folder = useSessionFolder(sessionId) ?? session.projectPath
   const box = usePromptBox({
     draft: sessionId,
@@ -904,6 +923,16 @@ export function Composer({
                   )}
                 </AnimatePresence>
                 <AnimatePresence initial={false}>
+                  {handoffOffered && (
+                    <HandoffOfferStrip
+                      key="handoff-offer"
+                      sessionId={sessionId}
+                      used={session.usage?.used ?? 0}
+                      onDismiss={trafficHint.dismiss}
+                    />
+                  )}
+                </AnimatePresence>
+                <AnimatePresence initial={false}>
                   {cacheRestartShown && (
                     <CacheRestartStrip
                       key="cache-restart"
@@ -1046,71 +1075,81 @@ export function Composer({
           selected: (label) => t('controls.selected', { label }),
         }}
         foot={
-          <div className="ui-as-composer__tray kettu-tray">
-            <TrayStyles />
-            <span className="kettu-tray__group">
-              <SessionPlace sessionId={sessionId} projectPath={session.projectPath} />
-              <BranchTrayLink projectPath={folder} sessionId={sessionId} />
-              <FolderBranchLinks projectPath={session.projectPath} sessionId={sessionId} />
-              {!pending && !mustSwitch && (
-                <ProfileChip
-                  agentId={session.agentId}
-                  hostId={hostId}
-                  value={profileId}
-                  onChange={chooseProfile}
-                  disabledHint={profileHint}
-                  triggerRef={profileTrigger}
-                />
-              )}
-              {!pending && !mustSwitch && sandboxShown && (
-                <SandboxChip
-                  agentId={session.agentId}
-                  hostId={hostId}
-                  value={sandboxChoice ?? SANDBOX_OFF}
-                  folder={folder}
-                  onChange={chooseSandbox}
-                  disabledHint={sandboxHint}
-                />
-              )}
-            </span>
-            {shownError && (
-              <p className="kettu-tray__error" role="alert" title={shownError}>
-                {shownError}
-              </p>
-            )}
-            <span className="kettu-tray__group kettu-tray__group--end">
-              <SpeedButton speed={session.speed} />
-              <CacheButton
-                cache={timed}
-                lastRequest={session.lastRequest}
-                running={running}
-                used={session.usage?.used ?? 0}
-              />
-              <AgentMarkHost.Provider value={hostId}>
-                <ContextButton
+          <>
+            <AnimatePresence initial={false}>
+              {trafficHint.shown && !handoffOffered && (
+                <TrafficHint
+                  key="traffic"
                   sessionId={sessionId}
-                  agentId={session.agentId}
-                  idle={!running && !starting}
-                  closed={status === 'closed'}
-                  reports={agent?.capabilities.context ?? false}
-                  direct={agent?.capabilities.liveContext ?? false}
-                  live={running && (agent?.capabilities.liveContext ?? false)}
-                  estimates={agent?.capabilities.contextEstimates}
-                  usage={session.usage}
-                  context={session.context}
-                  limits={limits ?? []}
-                  holding={modelLimits}
-                  account={agent?.account ?? null}
-                  model={modelName}
-                  compact={
-                    status === 'ready' && session.queue.length === 0 && !pending && !mustSwitch
-                      ? compactPrompt(session.commands)
-                      : null
-                  }
+                  used={session.usage?.used ?? 0}
+                  compact={compactNow}
+                  canHandoff={canHandoff}
+                  onDismiss={trafficHint.dismiss}
                 />
-              </AgentMarkHost.Provider>
-            </span>
-          </div>
+              )}
+            </AnimatePresence>
+            <div className="ui-as-composer__tray kettu-tray">
+              <TrayStyles />
+              <span className="kettu-tray__group">
+                <SessionPlace sessionId={sessionId} projectPath={session.projectPath} />
+                <BranchTrayLink projectPath={folder} sessionId={sessionId} />
+                <FolderBranchLinks projectPath={session.projectPath} sessionId={sessionId} />
+                {!pending && !mustSwitch && (
+                  <ProfileChip
+                    agentId={session.agentId}
+                    hostId={hostId}
+                    value={profileId}
+                    onChange={chooseProfile}
+                    disabledHint={profileHint}
+                    triggerRef={profileTrigger}
+                  />
+                )}
+                {!pending && !mustSwitch && sandboxShown && (
+                  <SandboxChip
+                    agentId={session.agentId}
+                    hostId={hostId}
+                    value={sandboxChoice ?? SANDBOX_OFF}
+                    folder={folder}
+                    onChange={chooseSandbox}
+                    disabledHint={sandboxHint}
+                  />
+                )}
+              </span>
+              {shownError && (
+                <p className="kettu-tray__error" role="alert" title={shownError}>
+                  {shownError}
+                </p>
+              )}
+              <span className="kettu-tray__group kettu-tray__group--end">
+                <SpeedButton speed={session.speed} />
+                <CacheButton
+                  cache={timed}
+                  lastRequest={session.lastRequest}
+                  running={running}
+                  used={session.usage?.used ?? 0}
+                />
+                <AgentMarkHost.Provider value={hostId}>
+                  <ContextButton
+                    sessionId={sessionId}
+                    agentId={session.agentId}
+                    idle={!running && !starting}
+                    closed={status === 'closed'}
+                    reports={agent?.capabilities.context ?? false}
+                    direct={agent?.capabilities.liveContext ?? false}
+                    live={running && (agent?.capabilities.liveContext ?? false)}
+                    estimates={agent?.capabilities.contextEstimates}
+                    usage={session.usage}
+                    context={session.context}
+                    limits={limits ?? []}
+                    holding={modelLimits}
+                    account={agent?.account ?? null}
+                    model={modelName}
+                    compact={compactNow}
+                  />
+                </AgentMarkHost.Provider>
+              </span>
+            </div>
+          </>
         }
       />
       <SwitchConfirm

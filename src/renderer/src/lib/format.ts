@@ -325,6 +325,14 @@ export function bytes(n: number): string {
   return `${number} ${unit}`
 }
 
+/** Huli: network traffic, as "812 KB", "3.6 MB" or "1.2 GB": in units of 1000, as `bytes` writes. */
+export function traffic(n: number): string {
+  if (n < 1_000_000_000) return bytes(n)
+  const [value, unit] = n < 1e12 ? [n / 1e9, 'GB'] : [n / 1e12, 'TB']
+  const number = new Intl.NumberFormat(currentLocale(), { maximumFractionDigits: 1 }).format(value)
+  return `${number} ${unit}`
+}
+
 /**
  * Cloud storage, as "12.3 MB" or "2 GB": in units of 1024, as storage limits are set, so a limit
  * of 2 GiB reads 2 GB rather than 2.1.

@@ -10,6 +10,7 @@ import type { ContextBreakdown } from '@shared/context'
 import { expiryOf, knownExpiry, modelOption } from '@shared/prompt-cache'
 import type { HostLink } from '@shared/remote/link'
 import { compactPrompt, type SessionView } from '@shared/thread'
+import { requestUpload, sessionTraffic } from '@shared/traffic'
 import { hostErrorText } from '../hostErrors'
 import { BottomSheet } from '../ui/BottomSheet'
 import { Skeleton } from '../ui/Skeleton'
@@ -34,6 +35,13 @@ import { UsageRing } from '../ui/session/StatusLine'
 import type { Palette } from '../ui/tokens'
 import { modelName, optionOf, shownChoice } from './ConfigMenus'
 import { LimitChip, PlanUsageSheet, leadLimits, useTicking } from './PlanUsageSheet'
+
+/** Huli: traffic as 「812 KB」「3.6 MB」「1.2 GB」, in units of 1000. */
+function trafficText(bytes: number): string {
+  const [value, unit] =
+    bytes < 1e6 ? [bytes / 1e3, 'KB'] : bytes < 1e9 ? [bytes / 1e6, 'MB'] : [bytes / 1e9, 'GB']
+  return `${value >= 100 ? Math.round(value) : Math.round(value * 10) / 10} ${unit}`
+}
 
 type Category = ContextBreakdown['categories'][number]
 type Part = { kind: 'source'; color: number } | { kind: 'buffer' } | { kind: 'free' }
@@ -177,6 +185,8 @@ export function ContextSheet(props: {
         : fetched
       : (pushed ?? fetched)
   const usage = session?.usage ?? null
+  // Huli: estimated from the tokens, as the desktop's context card does.
+  const traffic = sessionTraffic(usage?.tokens)
   const used = usage && usage.used > 0 ? usage.used : (breakdown?.used ?? 0)
   const size = usage && usage.size > 0 ? usage.size : (breakdown?.size ?? 0)
   const share = size > 0 ? used / size : 0
@@ -469,6 +479,22 @@ export function ContextSheet(props: {
                 ]
                   .filter(Boolean)
                   .join(' · ')}
+              </Text>
+            </View>
+          ) : null}
+          {traffic ? (
+            <View style={styles.limitRow}>
+              <Text style={[styles.limitName, { color: c.textSecondary }]}>流量（估算）</Text>
+              <Text style={[styles.limitValue, { color: c.text }]}>
+                {`上传约 ${trafficText(traffic.up)} · 下载约 ${trafficText(traffic.down)}`}
+              </Text>
+            </View>
+          ) : null}
+          {traffic && used > 0 ? (
+            <View style={styles.limitRow}>
+              <Text style={[styles.limitName, { color: c.textSecondary }]}>每次请求</Text>
+              <Text style={[styles.limitValue, { color: c.text }]}>
+                {`约上传 ${trafficText(requestUpload(used))}`}
               </Text>
             </View>
           ) : null}

@@ -1165,7 +1165,16 @@
       "use": "Use {{value}}",
       "typeTokens": "Type a value, such as 272K",
       "typePercent": "Type a percent, such as 85%",
-      "typeModel": "Type a model id"
+      "typeModel": "Type a model id",
+      "choice": {
+        "default": "Default",
+        "traffic": "Data saver",
+        "custom": "Custom",
+        "note": {
+          "window": "Data saver, recommended: {{harness}} works within {{value}} of context and compacts as it nears that, so each request uploads far less. The trade-off: it compacts sooner and forgets early details sooner.",
+          "trigger": "Data saver, recommended: {{harness}} compacts once the conversation reaches {{value}} tokens, so each request uploads far less. The trade-off: it compacts sooner and forgets early details sooner."
+        }
+      }
     },
     "keyOnly": {
       "note": "This agent signs in only with an API key. {{name}} keeps its browser and WeChat sign-in for the whole computer, outside this agent’s folder, so a second agent would share that account."
@@ -1640,6 +1649,25 @@
       "reports": {
         "name": "Reports per message",
         "description": "How many times reports from started sessions may wake a session after you last wrote there."
+      }
+    },
+    "traffic": {
+      "group": "Data saver",
+      "compact": {
+        "name": "Auto-compact of every agent",
+        "description": "Every request uploads the whole context again, and prompt caching saves money, not bytes. Data saver has each agent that offers it compact earlier: Claude Code within {{claude}} of context, Codex at {{codex}} tokens. The trade-off: they forget early details sooner. It replaces what each agent’s page set; a project’s own settings still win, and the change applies from the next session.",
+        "keywords": "traffic data bandwidth proxy upload compact context saver",
+        "traffic": "Use data saver",
+        "default": "Back to default",
+        "done": "Data saver is on for {{count}} agents, from their next session",
+        "doneDefault": "Auto-compact is back to default for {{count}} agents",
+        "none": "No agent here offers data saver",
+        "failed": "{{agent}}: {{error}}"
+      },
+      "handoff": {
+        "name": "Offer a handoff when the context is large",
+        "description": "When a turn ends with over 300K tokens of context, or 60% of the window, a card above the composer offers to hand off to a new session: the agent writes a handoff summary, and a new session carries on from it alone. Nothing is handed off without you.",
+        "keywords": "handoff relay new session summary context traffic"
       }
     },
     "priority": {

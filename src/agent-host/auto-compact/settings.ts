@@ -2,7 +2,14 @@
 // harness that sets one per model, a row for each model it lists or its file names.
 
 import type { AutoCompactChange, AutoCompactRow, AutoCompactSettings } from '@shared/agent-host'
-import { compactSpec, inCompactRange, type CompactSpec } from '@shared/auto-compact'
+import {
+  compactChanges,
+  compactSpec,
+  inCompactRange,
+  type CompactChoice,
+  trafficPreset,
+  type CompactSpec,
+} from '@shared/auto-compact'
 import type { ConfigOption, HarnessId } from '@shared/thread'
 import {
   listedModels,
@@ -162,4 +169,21 @@ export async function writeAutoCompact(
   } else {
     await writeFileTarget(place.file, FILE_TARGETS[place.harness]!, change.model, change.value)
   }
+}
+
+/**
+ * Huli: makes the setting the harness's default or 省流量 for every model: each model's own value
+ * goes, then the value for all of them is set. Returns how many values it wrote.
+ */
+export async function writeCompactChoice(
+  place: CompactPlace,
+  choice: Exclude<CompactChoice, 'custom'>,
+): Promise<number> {
+  specOf(place.harness)
+  if (choice === 'traffic' && trafficPreset(place.harness) === null) {
+    throw new Error(t('agentConfig.noTrafficPreset'))
+  }
+  const changes = compactChanges(place.harness, await readAutoCompact(place), choice)
+  for (const change of changes) await writeAutoCompact(place, change)
+  return changes.length
 }

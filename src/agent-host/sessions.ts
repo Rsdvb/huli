@@ -221,6 +221,7 @@ import {
   writePatch,
   type ArtifactWrite,
 } from './artifacts/entries'
+import { handoffMessage, handoffPrompt, handoffReply, handoffTitle } from './handoff'
 import {
   allowOnceOption,
   changedFiles,
@@ -2249,6 +2250,8 @@ export class SessionManager {
       ...(record.manager ? { manager: this.manager.managerSummary(record) } : {}),
       ...(record.worker ? { worker: this.manager.workerSummary(record) } : {}),
       ...(record.movedTo ? { movedTo: { ...record.movedTo } } : {}),
+      ...(record.handedOffTo ? { handedOffTo: record.handedOffTo } : {}),
+      ...(record.handedOffFrom ? { handedOffFrom: record.handedOffFrom } : {}),
       ...(this.tidyOn() ? tidySummary(record.tidy) : {}),
       muted: record.muted === true,
       seen: record.seen ? { ...record.seen } : null,
@@ -6467,6 +6470,11 @@ export class SessionManager {
       manager?: ManagerChoices
       /** A role to start as, by its reference. */
       role?: string
+      /**
+       * Huli: the session it goes on from (接力): it works in that one's folder and worktree, and
+       * links back to it.
+       */
+      handoffFrom?: string
     },
     portId?: string,
   ): Promise<SessionSummary> {
@@ -6533,8 +6541,9 @@ export class SessionManager {
     if (!scratch.contains(projectPath)) await projects.add(projectPath)
     let worktree: WorktreeRecord | undefined
     let newWorktree = false
-    if (params.parentId !== undefined) {
-      const inherited = this.recordOf(params.parentId).worktree
+    const sharesWith = params.parentId ?? params.handoffFrom
+    if (sharesWith !== undefined) {
+      const inherited = this.recordOf(sharesWith).worktree
       if (inherited) worktree = { ...inherited }
     } else if (params.worktree !== undefined) {
       if (scratch.contains(projectPath)) {
@@ -6554,8 +6563,8 @@ export class SessionManager {
     // Huli: a new worktree gets a block of ports of its own; a sub-session shares its parent's.
     const ports = newWorktree
       ? await this.takePorts()
-      : params.parentId !== undefined && worktree
-        ? this.portsOf(this.recordOf(params.parentId))
+      : sharesWith !== undefined && worktree
+        ? this.portsOf(this.recordOf(sharesWith))
         : null
     const now = this.now()
     const record: SessionRecord = {
@@ -6581,6 +6590,7 @@ export class SessionManager {
       ...(ports ? { ports: { ...ports } } : {}),
     }
     if (params.startedBy !== undefined) record.startedBy = params.startedBy
+    if (params.handoffFrom !== undefined) record.handedOffFrom = params.handoffFrom
     const kept = joinNeeds(commandTools, roleTools)
     if (kept) record.commandTools = kept
     if (role) record.role = sessionRole(role)
@@ -9473,13 +9483,14 @@ export class SessionManager {
     device?: FromDevice,
     approval?: true,
     kettu?: true,
-  ): void {
+  ): string {
     live.used = true
     live.userTurn = kettu !== true && from === undefined && approval !== true
     if (live.userTurn) this.deps.options?.used(live.record.agentId, live.thread.session.config)
     const now = this.now()
     const entryId = this.addPrompt(live, content, now, from, device, approval, kettu)
     this.startTurn(live, content, now, entryId, portId)
+    return entryId
   }
 
   /**
@@ -10668,6 +10679,8 @@ export class SessionManager {
     delete record.leftSubSessions
     delete record.routine
     delete record.task
+    delete record.handedOffTo
+    delete record.handedOffFrom
     if (record.origin === 'task') record.origin = 'user'
     // A title of its own, so one the agent reports from the copied history does not replace it.
     if (title === null) delete record.customTitle
@@ -10735,6 +10748,114 @@ export class SessionManager {
     this.persist(live)
     this.touch(live.id)
     return this.summary(live.id)
+  }
+
+  // Huli: 接力到新会话.
+
+  /** The sessions whose agent writes a handoff summary now, by Kettu's message that asked for it. */
+  private readonly handoffs = new Map<string, string>()
+
+  /**
+   * Asks the session's agent for a handoff summary, in a message of Kettu's; once that turn ends,
+   * the new session starts from it. Only a top-level session, between turns.
+   */
+  async handoff(sessionId: string): Promise<void> {
+    const record = this.recordOf(sessionId)
+    if (record.origin === 'subagent' || record.parentId !== null) {
+      throw new HostError('restricted', t('handoff.topLevel'))
+    }
+    this.assertRegistered(sessionId)
+    this.refuseIfCannotSend(sessionId)
+    const live = await this.revive(sessionId)
+    const { status, queue } = live.thread.session
+    if (this.handoffs.has(sessionId) && live.turn) {
+      throw new HostError('busy', t('handoff.already'))
+    }
+    if (!canSend(status) || live.turn || queue.length > 0 || this.waitsForWorktree(live)) {
+      throw busyError(status)
+    }
+    const content: UserContent[] = [{ type: 'text', text: handoffPrompt() }]
+    const entryId = this.sendPrompt(live, content, undefined, undefined, undefined, undefined, true)
+    this.handoffs.set(sessionId, entryId)
+  }
+
+  /**
+   * The turn that wrote the summary ended: a new session of the agent starts from it in the same
+   * folder and worktree, with the same model, effort and mode, and the two are linked. The old
+   * session stays as it is, idle. Without a summary the thread says why nothing started.
+   */
+  private async finishHandoff(live: Live, entryId: string, stopReason: StopReason): Promise<void> {
+    const summary = stopReason === 'end_turn' ? handoffReply(live.thread, entryId) : null
+    if (summary === null) {
+      this.handoffNotice(live, stopReason === 'end_turn' ? 'handoff.noSummary' : 'handoff.stopped')
+      return
+    }
+    const old = live.record
+    const title = this.titleOf(live)
+    const options: Record<string, string | boolean> = {}
+    for (const option of live.thread.session.config) {
+      if (['model', 'thought_level', 'mode'].includes(option.category)) {
+        options[option.id] = option.value
+      }
+    }
+    let next: SessionSummary
+    try {
+      next = await this.create({
+        agentId: old.agentId,
+        projectPath: old.projectPath,
+        options,
+        prompt: [{ type: 'text', text: handoffMessage(title, summary) }],
+        from: { sessionId: live.id, title, report: false, handoff: true },
+        title: handoffTitle(title),
+        profileId: old.profileId ?? null,
+        ...(old.sandbox ? { sandbox: old.sandbox } : {}),
+        handoffFrom: live.id,
+      })
+    } catch (error) {
+      this.handoffNotice(live, 'handoff.failed', (error as Error).message)
+      return
+    }
+    // A title of its own, as a fork's, so the one its agent gives the summary does not replace it.
+    if (this.has(next.id)) this.rename(next.id, handoffTitle(title))
+    if (this.live.get(live.id) !== live || !this.has(live.id)) return
+    old.handedOffTo = next.id
+    this.emit(live, [
+      {
+        op: 'entry.add',
+        entry: {
+          kind: 'session_started',
+          id: this.nextId(live),
+          sessionId: next.id,
+          after: agentEntryBefore(live.thread),
+          handoff: true,
+        },
+      },
+    ])
+    this.persist(live)
+    this.touch(live.id)
+  }
+
+  private handoffNotice(
+    live: Live,
+    key: 'handoff.noSummary' | 'handoff.stopped' | 'handoff.failed',
+    error?: string,
+  ): void {
+    if (this.live.get(live.id) !== live) return
+    this.emit(live, [
+      {
+        op: 'entry.add',
+        entry: {
+          kind: 'notice',
+          id: this.nextId(live),
+          severity: 'warning',
+          title: t('handoff.notice'),
+          description: key === 'handoff.failed' ? t(key, { error: error ?? '' }) : t(key),
+          after: agentEntryBefore(live.thread),
+        },
+      },
+    ])
+    this.persist(live)
+    this.touch(live.id)
   }
 
   /**
@@ -11043,6 +11164,8 @@ export class SessionManager {
       'configDir',
       'cache',
       'model',
+      'handedOffTo',
+      'handedOffFrom',
     ] as const) {
       delete record[key]
     }
@@ -11667,6 +11790,16 @@ export class SessionManager {
       )
     }
     if (stopReason === 'end_turn') this.limitChecks.delete(live.id)
+    const handoff = this.handoffs.get(live.id)
+    if (handoff !== undefined && handoff === turn.entryId) {
+      this.handoffs.delete(live.id)
+      void this.finishHandoff(live, handoff, stopReason).catch((error: unknown) => {
+        this.deps.diagnostics.log(
+          'warn',
+          `Could not hand off ${live.id}: ${(error as Error).message}`,
+        )
+      })
+    }
     if (stopReason === 'end_turn' || chosen) this.drainQueue(live, chosen)
     else this.pauseQueue(live)
     this.suggestNext(live, turn, stopReason)

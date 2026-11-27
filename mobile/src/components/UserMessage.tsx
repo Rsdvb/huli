@@ -164,7 +164,9 @@ export const UserMessage = memo(function UserMessage(props: {
   ) : undefined
 
   const note = props.from
-    ? `来自 ${props.from.title}`
+    ? props.from.handoff
+      ? `接着 ${props.from.title}`
+      : `来自 ${props.from.title}`
     : props.device
       ? `从 ${props.device.name} 发送`
       : null

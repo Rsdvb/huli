@@ -22,7 +22,7 @@ import {
   type MetricKind,
 } from './model'
 import { useAgentColor, usageAgentName } from './series'
-import { shareWhole } from './text'
+import { metricFormat, shareWhole } from './text'
 
 type Grouping = 'model' | 'project' | 'agent' | 'type'
 
@@ -86,7 +86,7 @@ export function BreakdownCard({
   const grouping = groupings.includes(chosen) ? chosen : 'model'
   const [hover, setHover] = useState<{ key: string; at: DOMRect | null } | null>(null)
   const counted = kind === 'requests' || kind === 'turns'
-  const format = kind === 'cost' && grouping !== 'type' ? usd : count
+  const format = grouping === 'type' ? count : metricFormat(kind)
 
   const { lines, all } = useMemo((): { lines: Line[]; all: number } => {
     if (grouping === 'type') {
@@ -217,7 +217,10 @@ export function BreakdownCard({
               </span>
             </div>
           </div>
-          <table className="k-u-bd__table">
+          <table
+            className="k-u-bd__table"
+            data-wide={(kind === 'traffic' && grouping !== 'type') || undefined}
+          >
             <thead>
               <tr>
                 <th scope="col">{t(`breakdown.groups.${grouping}`)}</th>
@@ -294,8 +297,8 @@ export function BreakdownCard({
                 value={
                   line.value === null
                     ? t('noPrice')
-                    : kind === 'cost' && grouping !== 'type'
-                      ? usd(line.value)
+                    : (kind === 'cost' || kind === 'traffic') && grouping !== 'type'
+                      ? format(line.value)
                       : exactCount(line.value)
                 }
               />

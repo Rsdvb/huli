@@ -322,6 +322,24 @@ describe('createValidators', () => {
     bad({ value: 85 })
   })
 
+  it('takes the default or 省流量 for an agent’s auto-compact, and nothing else', () => {
+    expect(
+      posix['agents.setCompactChoice']({ agentId: 'codex', choice: 'traffic', value: 1 }),
+    ).toEqual({ agentId: 'codex', choice: 'traffic' })
+    expect(posix['agents.setCompactChoice']({ agentId: 'claude-code', choice: 'default' })).toEqual(
+      { agentId: 'claude-code', choice: 'default' },
+    )
+    rejects(() => posix['agents.setCompactChoice']({ agentId: 'codex', choice: 'custom' }))
+    rejects(() => posix['agents.setCompactChoice']({ agentId: 'codex' }))
+    rejects(() => posix['agents.setCompactChoice']({ agentId: 'nope!', choice: 'traffic' }))
+  })
+
+  it('takes a session alone for a handoff', () => {
+    expect(posix['sessions.handoff']({ sessionId: 's', prompt: 'x' })).toEqual({ sessionId: 's' })
+    rejects(() => posix['sessions.handoff']({}))
+    rejects(() => posix['sessions.handoff']({ sessionId: '' }))
+  })
+
   it('takes only the two Claude Code settings, each with a value of its own kind', () => {
     const window = { setting: 'autoCompactWindow', model: 'claude-sonnet-5-5', value: 200000 }
     expect(

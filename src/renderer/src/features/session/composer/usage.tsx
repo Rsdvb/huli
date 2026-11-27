@@ -25,7 +25,8 @@ import {
   type CachePhase,
   type KnownExpiry,
 } from '@shared/prompt-cache'
-import type { AgentId, SessionUsage, UserContent } from '@shared/thread'
+import type { AgentId, SessionUsage } from '@shared/thread'
+import { requestUpload, sessionTraffic } from '@shared/traffic'
 import { Button } from '@renderer/components/ui/button'
 import {
   Collapsible,
@@ -60,6 +61,7 @@ import {
   money,
   planAmount,
   tokens,
+  traffic,
   windowLabel,
 } from '@renderer/lib/format'
 import { errorMessage, host, sessionHost } from '@renderer/lib/host'
@@ -72,7 +74,6 @@ import {
 } from '@renderer/lib/plan-limit'
 import { useClock, useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
-import { showSending } from '@renderer/stores/threads'
 import { loadContext, refreshLimits, useUsageStore } from '@renderer/stores/usage'
 import { toggleSidePane } from '@renderer/stores/view'
 import { useSettingsStore } from '@renderer/stores/settings'
@@ -81,6 +82,7 @@ import { readsModelRequests } from '@renderer/features/requests/support'
 import { useSessionView } from '@renderer/features/session/use-thread'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { groupPlanLimits, type PlanLimitGroup, type PlanLimitItem } from './plan-limit-groups'
+import { compactContext } from './traffic-actions'
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -562,20 +564,6 @@ export function ContextButton({
   )
 }
 
-/** Huli: sends the agent's compaction command as the session's next message. */
-async function compactContext(sessionId: string, prompt: string): Promise<void> {
-  const content: UserContent[] = [{ type: 'text', text: prompt }]
-  const unshow = showSending(sessionId, content)
-  try {
-    const { itemId } = await host('sessions.queue', { sessionId, content })
-    // A turn started meanwhile, and it waits in the queue, which shows it there.
-    if (itemId) unshow()
-  } catch (error) {
-    unshow()
-    throw error
-  }
-}
-
 /**
  * The model's fullest plan limit on the tray: its short name and figure, and from 80% when it
  * resets, "5h 97% · resets in 2 h"; it re-renders only when that text changes.
@@ -858,6 +846,7 @@ function UsageLines({ sessionId, usage }: { sessionId: string; usage: SessionUsa
       ) : (
         sessionBlock
       )}
+      {usage && <TrafficBlock usage={usage} />}
       {last && (
         <UsageBlock
           label={t('usage.lastRequest.title')}
@@ -874,6 +863,39 @@ function UsageLines({ sessionId, usage }: { sessionId: string; usage: SessionUsa
           }}
         />
       )}
+    </div>
+  )
+}
+
+/**
+ * Huli: the session's traffic, estimated from its tokens since neither its agent nor its SDK
+ * reports the requests' sizes, and what one request uploads at the context it has now.
+ */
+function TrafficBlock({ usage }: { usage: SessionUsage }) {
+  const { t } = useTranslation('composer')
+  const spent = sessionTraffic(usage.tokens)
+  if (!spent && usage.used <= 0) return null
+  const about = (bytes: number) => t('usage.traffic.about', { value: traffic(bytes) })
+  return (
+    <div className="kettu-ctx__block" title={t('usage.traffic.hint')}>
+      <div className="kettu-ctx__block-head">
+        <span>{t('usage.traffic.title')}</span>
+        <span className="tabular">{spent ? about(spent.up + spent.down) : '—'}</span>
+      </div>
+      <dl className="kettu-ctx__figures tabular">
+        <div>
+          <dt>{t('usage.traffic.up')}</dt>
+          <dd>{spent ? traffic(spent.up) : '—'}</dd>
+        </div>
+        <div>
+          <dt>{t('usage.traffic.down')}</dt>
+          <dd>{spent ? traffic(spent.down) : '—'}</dd>
+        </div>
+        <div>
+          <dt>{t('usage.traffic.perRequest')}</dt>
+          <dd>{usage.used > 0 ? traffic(requestUpload(usage.used)) : '—'}</dd>
+        </div>
+      </dl>
     </div>
   )
 }

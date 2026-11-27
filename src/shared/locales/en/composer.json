@@ -99,6 +99,21 @@
     "note": "Runs as a shell command in the session's folder; Codex adds its output to the conversation",
     "noteAsks": "Runs as a shell command in the session's folder, once you allow it; Codex adds its output to the conversation"
   },
+  "trafficHint": {
+    "text": "The context is large: each request uploads ~{{size}}",
+    "why": "Every request uploads the whole context again, and prompt caching saves money, not bytes. Compact the context, or hand off to a new session that starts from a summary.",
+    "compact": "Compact",
+    "handoff": "Hand off to a new session",
+    "handoffHint": "The agent writes a handoff summary, and a new session carries on from it alone",
+    "handingOff": "Writing a handoff summary; a new session carries on from it once it is written",
+    "failed": "Couldn’t do it: {{error}}"
+  },
+  "handoffOffer": {
+    "title": "The context holds {{tokens}} tokens",
+    "text": "Each request uploads ~{{size}}. Hand off to a new session: the agent writes a handoff summary, and the new session carries on from it alone.",
+    "go": "Hand off",
+    "later": "Not now"
+  },
   "modelCache": {
     "note": "Now on {{model}}: the prompt cache starts over, so the next turn costs more"
   },
@@ -319,7 +334,15 @@
       "title": "Last request",
       "running": "running"
     },
-    "everyRequest": "Every request"
+    "everyRequest": "Every request",
+    "traffic": {
+      "title": "Traffic",
+      "about": "~{{value}}",
+      "up": "Up",
+      "down": "Down",
+      "perRequest": "Per request",
+      "hint": "Estimated from the tokens: about 4 bytes per input token and 16 per output token. Every request uploads the whole context again; prompt caching saves money, not bytes."
+    }
   },
   "attachments": {
     "label": "Attachments",

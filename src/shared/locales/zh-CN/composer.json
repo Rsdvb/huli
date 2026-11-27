@@ -99,6 +99,21 @@
     "note": "作为 shell 命令在会话的文件夹里运行；Codex 会把输出加进对话",
     "noteAsks": "作为 shell 命令在会话的文件夹里运行，你允许后才运行；Codex 会把输出加进对话"
   },
+  "trafficHint": {
+    "text": "上下文很大，每次请求约上传 {{size}}",
+    "why": "每次请求都会重新上传整个上下文，提示缓存省的是钱，不是流量。可以压缩上下文，或者接力到一个从摘要开始的新会话。",
+    "compact": "压缩",
+    "handoff": "接力到新会话",
+    "handoffHint": "智能体先写一份交接摘要，新会话只带着这份摘要接着做",
+    "handingOff": "正在写交接摘要，写好后会开一个新会话接着做",
+    "failed": "没能完成：{{error}}"
+  },
+  "handoffOffer": {
+    "title": "上下文已有 {{tokens}} token",
+    "text": "每次请求约上传 {{size}}。接力到新会话：智能体先写一份交接摘要，新会话只带着这份摘要接着做。",
+    "go": "接力",
+    "later": "先不用"
+  },
   "modelCache": {
     "note": "已换成 {{model}}：提示词缓存会重新开始，下一轮会贵一些"
   },
@@ -308,7 +323,15 @@
       "title": "上次请求",
       "running": "进行中"
     },
-    "everyRequest": "每次请求"
+    "everyRequest": "每次请求",
+    "traffic": {
+      "title": "流量",
+      "about": "约 {{value}}",
+      "up": "上传",
+      "down": "下载",
+      "perRequest": "每次请求",
+      "hint": "按 token 数估算：每个输入 token 约 4 字节，每个输出 token 约 16 字节。每次请求都会重新上传整个上下文，提示缓存省的是钱，不是流量。"
+    }
   },
   "attachments": {
     "label": "附件",

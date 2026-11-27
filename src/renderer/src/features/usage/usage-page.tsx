@@ -31,16 +31,7 @@ import { Notice } from '@renderer/features/routines/kit'
 import { useCornered } from '@renderer/features/shell/corner'
 import { CornerControlsSpace } from '@renderer/features/shell/top-bar'
 import { AwayContent, WindowHostAway } from '@renderer/features/shell/window-host-away'
-import {
-  basename,
-  bytes,
-  clockTime,
-  count,
-  longAgo,
-  monthDay,
-  tokens,
-  usd,
-} from '@renderer/lib/format'
+import { basename, bytes, clockTime, longAgo, monthDay, tokens } from '@renderer/lib/format'
 import { errorMessage, learnSessionHosts } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { useHostContext } from '@renderer/lib/host-features'
@@ -99,7 +90,7 @@ import { PlanLimits } from './plan-limits'
 import { usageAgentName } from './series'
 import { TimeOfDay } from './time-of-day'
 import { TrendCard } from './trend'
-import { useRangeText } from './text'
+import { metricFormat, useRangeText } from './text'
 import './usage.css'
 
 /** A scan with less than this to read is over before its progress is worth showing. */
@@ -429,6 +420,7 @@ function MetricSwitch() {
         { value: 'tokens', label: t('metrics.tokens') },
         { value: 'requests', label: t(`metrics.${metricKind('requests', scope)}`) },
         { value: 'cost', label: t('metrics.cost') },
+        { value: 'traffic', label: t('metrics.traffic') },
       ]}
     />
   )
@@ -1076,7 +1068,7 @@ function SessionItem({
             {usageAgentName(session.agentId)} · {project}
           </span>
         </span>
-        <span className="k-u-ss__value k-num">{kind === 'cost' ? usd(value) : count(value)}</span>
+        <span className="k-u-ss__value k-num">{metricFormat(kind)(value)}</span>
         <span className="k-u-ss__bar" aria-hidden="true">
           <i style={{ transform: `scaleX(${max > 0 ? value / max : 0})` }} />
         </span>

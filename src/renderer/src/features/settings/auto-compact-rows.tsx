@@ -9,10 +9,13 @@ import { useTranslation } from 'react-i18next'
 import type { AgentStatus, AutoCompactRow, AutoCompactSettings } from '@shared/agent-host'
 import { canonicalClaudeModel, KNOWN_CLAUDE_MODELS } from '@shared/agents'
 import {
+  compactChoice,
   compactLabel,
   compactSteps,
   inCompactRange,
   parseCompactValue,
+  trafficPreset,
+  type CompactChoice,
   type CompactSpec,
 } from '@shared/auto-compact'
 import { Icon } from '@renderer/components/affect/app-shell'
@@ -27,7 +30,7 @@ import {
 import { errorMessage } from '@renderer/lib/host'
 import { useHostScope } from '@renderer/stores/host-scope'
 import { useAction } from './agent-helpers'
-import { Skel } from './controls'
+import { Segmented, Skel } from './controls'
 import { BlockLine, RowShell, RowText } from './rows'
 
 const MAX_MODEL_CHARS = 256
@@ -337,13 +340,49 @@ export function AutoCompactRows({ status }: { status: AgentStatus }) {
       await load()
     })
 
+  // Huli: 默认 / 省流量 / 自定义 where the harness has a 省流量 value; custom shows the values.
+  const preset = trafficPreset(status.harnessId)
+  const [customOpen, setCustomOpen] = useState(false)
+  const actual: CompactChoice | null = settings ? compactChoice(status.harnessId, settings) : null
+  const choice: CompactChoice | null = preset === null ? null : customOpen ? 'custom' : actual
+  const choose = (next: CompactChoice): void => {
+    if (next === 'custom') {
+      setCustomOpen(true)
+      return
+    }
+    setCustomOpen(false)
+    save(async () => {
+      await request('agents.setCompactChoice', { agentId: status.id, choice: next })
+      await load()
+    })
+  }
+  const values = preset === null || choice === 'custom'
+
   const allName = t('agents.claudeSettings.compact.all')
   return (
     <RowShell id="auto-compact">
       <div className="k-block">
         <BlockLine text={<RowText name={name} description={description} />}>
-          {!perModel && read.state === 'loading' && <Skel width={210} className="k-skel--field" />}
-          {!perModel && settings && spec && (
+          {preset !== null && read.state === 'loading' && (
+            <Skel width={210} className="k-skel--field" />
+          )}
+          {preset !== null && choice !== null && (
+            <Segmented<CompactChoice>
+              label={name}
+              value={choice}
+              disabled={busy}
+              options={[
+                { value: 'default', label: t('agents.autoCompact.choice.default') },
+                { value: 'traffic', label: t('agents.autoCompact.choice.traffic') },
+                { value: 'custom', label: t('agents.autoCompact.choice.custom') },
+              ]}
+              onChange={choose}
+            />
+          )}
+          {preset === null && !perModel && read.state === 'loading' && (
+            <Skel width={210} className="k-skel--field" />
+          )}
+          {preset === null && !perModel && settings && spec && (
             <ValuePicker
               spec={spec}
               value={settings.all}
@@ -355,7 +394,28 @@ export function AutoCompactRows({ status }: { status: AgentStatus }) {
             />
           )}
         </BlockLine>
-        {perModel && settings && spec && (
+        {preset !== null && spec && (
+          <p className="k-row-note" data-wrap="">
+            {t(`agents.autoCompact.choice.note.${spec.unit === 'window' ? 'window' : 'trigger'}`, {
+              harness: status.harnessName,
+              value: compactLabel(spec.unit, preset),
+            })}
+          </p>
+        )}
+        {preset !== null && values && !perModel && settings && spec && (
+          <BlockLine text={<RowText name={allName} />}>
+            <ValuePicker
+              spec={spec}
+              value={settings.all}
+              other={settings.allOther}
+              auto={auto}
+              label={`${name}: ${allName}`}
+              disabled={busy}
+              onChange={(value) => write(null, value)}
+            />
+          </BlockLine>
+        )}
+        {values && perModel && settings && spec && (
           <>
             <BlockLine text={<RowText name={allName} />}>
               <ValuePicker

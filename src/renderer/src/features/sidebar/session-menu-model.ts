@@ -23,6 +23,7 @@ export type SessionMenuItem =
   | 'watchPr'
   | 'fork'
   | 'forkSame'
+  | 'handoff'
   | 'newSubSession'
   | 'subagents'
   | 'openInSplit'
@@ -156,8 +157,16 @@ export function sessionMenuGroups(
   }
   const topLevel = summary.parentId === null
   const { status } = summary
+  // Huli: 接力到新会话, between turns, for a session its agent can still go on in.
   const forks: SessionMenuItem[] =
-    topLevel && canFork ? (worktree ? ['fork', 'forkSame'] : ['fork']) : []
+    topLevel && canFork
+      ? [
+          ...(worktree ? (['fork', 'forkSame'] as const) : (['fork'] as const)),
+          ...(!running && status !== 'failed' && status !== 'auth_required' && !summary.archivedAt
+            ? (['handoff'] as const)
+            : []),
+        ]
+      : []
   const ending: SessionMenuItem[] = [
     ...(place === 'more' && leave ? (['leave'] as const) : []),
     ...(removeWorktree ? (['removeWorktree'] as const) : []),

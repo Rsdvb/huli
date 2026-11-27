@@ -577,6 +577,29 @@ function Session() {
   const forkAtMessage = !!agent?.capabilities.forkAtMessage
   const canFork = forkAtMessage || !!agent?.capabilities.forkSession
   const forking = useRef(false)
+  // Huli: 接力到新会话: the agent writes a handoff summary, then a new session starts from it.
+  const handoff = useCallback(() => {
+    Alert.alert(
+      '接力到新会话？',
+      '智能体先写一份交接摘要，写好后开一个新会话只带着摘要接着做，之后的请求上传得少。原来的会话保留。',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '接力',
+          onPress: () => {
+            link
+              .request('sessions.handoff', { sessionId: id })
+              .then(() => {
+                haptic.success()
+                showNotice({ text: '正在写交接摘要，写好后会开一个新会话' })
+              })
+              .catch((error: unknown) => Alert.alert('没能接力', hostErrorText(error)))
+          },
+        },
+      ],
+    )
+  }, [id, link])
+
   const fork = useCallback(
     (entryId: string | null, worktree?: 'same') => {
       const atMessage = forkAtMessage && entryId !== null
@@ -1081,6 +1104,7 @@ function Session() {
         muted,
         onMute: () => actions.toggleMute(summary, !muted),
         onFork: (worktree) => fork(null, worktree),
+        onHandoff: handoff,
         onNewSubSession: newChild,
         onShowParent: () => summary.parentId && openSession(summary.parentId),
         onOpenUrl: (url) => openUrl(url),
