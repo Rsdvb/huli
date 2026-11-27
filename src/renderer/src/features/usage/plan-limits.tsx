@@ -443,39 +443,43 @@ function PlanCard({ card, named, now }: { card: UsageCard; named: boolean; now: 
               </span>
             )
           )}
-          <span className="k-u-plan__extras">
-            {holds.map((balance) => (
-              <span
-                key={`${balance.label}/${balance.currency}`}
-                className="k-u-plan__extra"
-                title={`${balanceLabel(balance.label)} ${amountOf(balance)}`}
-              >
-                <span>{balanceLabel(balance.label)}</span>
-                <b className="k-num">{amountOf(balance)}</b>
-              </span>
-            ))}
-            {credits && (
-              <span className="k-u-plan__extra" title={creditsText!}>
-                <Icon icon={ArrowReloadHorizontalIcon} size={13} />
-                <b aria-hidden className="k-num">
-                  {credits.count}
-                </b>
-                <span className="sr-only">{creditsText}</span>
-              </span>
-            )}
-            {credits?.each && (
-              <button
-                type="button"
-                className="k-u-plan__use"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setSpending(true)
-                }}
-              >
-                {t('resets.use')}
-              </button>
-            )}
-          </span>
+          {(holds.length > 0 || credits) && (
+            <span className="k-u-plan__extras">
+              {holds.map((balance) => (
+                <span
+                  key={`${balance.label}/${balance.currency}`}
+                  className="k-u-plan__extra k-u-plan__extra--balance"
+                  title={`${balanceLabel(balance.label)} ${amountOf(balance)}`}
+                >
+                  <span>{balanceLabel(balance.label)}</span>
+                  <b className="k-num">{amountOf(balance)}</b>
+                </span>
+              ))}
+              {credits && (
+                <span className="k-u-plan__credits">
+                  <span className="k-u-plan__extra" title={creditsText!}>
+                    <Icon icon={ArrowReloadHorizontalIcon} size={13} />
+                    <b aria-hidden className="k-num">
+                      {credits.count}
+                    </b>
+                    <span className="sr-only">{creditsText}</span>
+                  </span>
+                  {credits.each && (
+                    <button
+                      type="button"
+                      className="k-u-plan__use"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setSpending(true)
+                      }}
+                    >
+                      {t('resets.use')}
+                    </button>
+                  )}
+                </span>
+              )}
+            </span>
+          )}
         </div>
       )}
       {named && (
