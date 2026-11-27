@@ -2143,6 +2143,33 @@ thread 64.1 and 104.7 MB, 723 KB lean; read again with nothing new, 9.8 KB; five
 sub-agents' rows on the phone 33.5 MB, 461 bytes with `sessions.stats`; the Mac's reconnect with
 four watched sessions that did not change 32.6 MB, 39 KB.
 
+### Keepalive behind large sends (大消息不再掉线)
+
+A connection's ping (`shared/remote/keepalive.ts`) goes on the channel after everything its side
+sent before, and the other side reads it only once all of that arrived. Through the relay and the
+owner's proxy a large send took longer than a ping's 5 s wait, so a live Mac was dropped ("Device
+… stopped answering" on the host, "A host stopped answering" on the Mac), resumed, got the same
+message again and was dropped again.
+
+- **A ping's wait starts once it left.** The keepalive counts what its side handed to the
+  transport and reads `Transport.buffered`: while bytes sent before the ping still leave, the
+  connection is alive; it is given up once none left for `stallMs` (15 s), and a ping hears
+  nothing for at most `limitMs` (60 s). A ping that left behind a backlog waits `stallMs` for its
+  answer, for what the relay and the proxy still hold ahead of it. Without a backlog it is 5 s, as
+  before, so a network that went is still noticed within 15 + 5 s on the host and 10 + 5 s on a
+  device.
+- **Devices hear every transport message.** The device channel tells the keepalive of each one
+  as it comes (`DeviceChannel.watch`), not of each whole message, so a long message keeps the
+  link alive while it arrives; the host always heard them so.
+- **Devices speak.** A device also pings after 10 s without writing anything, so a host, older
+  ones too, keeps hearing a device that only listens to a long message. Such a ping's round trip
+  waits behind that message, so only pings after a quiet spell time the route.
+- **A late check looks again.** A check that runs more than a second late, after a busy spell or
+  sleep, looks once more a second later, so an answer that came meanwhile is read first.
+- **Compatibility.** Nothing changes on the wire. An older device still drops itself when one
+  message takes longer than 15 s to reach it; a newer one with an older host is kept by its pings.
+- **Answers too long for the channel** are logged with their request's method or event's type.
+
 ### Kite's artwork
 
 `tools/huli/brand/` holds the masters, SVG on a 1024 grid: `kite-light.svg` (the icon, white kite
