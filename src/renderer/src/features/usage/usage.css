@@ -576,14 +576,16 @@
   white-space: nowrap;
   color: var(--strong);
 }
-/* Every card ends here: the next reset, then what the account holds beyond its windows */
+/* Every card ends here: the next reset, then what the account holds beyond its windows, which
+   takes a line of its own under it, to the right, when the two do not fit side by side */
 .k-u-plan__end {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   min-width: 0;
   margin-top: auto;
-  height: 30px;
+  min-height: 30px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
   font-size: 12.5px;
@@ -614,9 +616,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Sized to its figures with the balances' labels left out, so it moves under the next reset only
+   once the figures themselves would not fit; on a line still too narrow, the balances and the
+   reset credits take a line each */
 .k-u-plan__extras {
   display: flex;
-  flex: 1 1 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 6px 10px;
@@ -625,9 +631,27 @@
 .k-u-plan__extra > b {
   flex: none;
 }
+/* A balance counts as its amount alone and grows into the room its label wants, so the label is
+   cut first and the amount never */
+.k-u-plan__extra--balance {
+  display: inline-grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, auto) auto;
+  width: min-content;
+  min-width: auto;
+  max-width: max-content;
+}
+.k-u-plan__credits {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
 .k-u-plan__use {
   flex: none;
   height: 22px;
+  /* Half a pixel past the 21px line each side, so the line stays 30px tall with it */
+  margin-block: -0.5px;
   padding: 0 8px;
   border-radius: 6px;
   background: var(--chip);
