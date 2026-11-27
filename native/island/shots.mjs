@@ -61,6 +61,20 @@ const row = {
   phase: 'edit',
   cache: null,
 }
+/** The fullest plan limit window's notice under the sessions, as main words it. */
+function limitNotice(/** @type {number} */ percent) {
+  return {
+    key: 'limit',
+    kind: 'limit',
+    marks: [{ harness: 'claude-code', color: null }],
+    title: 'Claude Max',
+    detail: '5-hour',
+    meter: { percent, reached: false, text: `${percent}%` },
+    trailing: 'Resets 3:00 PM',
+    button: null,
+    link: null,
+  }
+}
 const lines = [
   {
     type: 'hello',
@@ -77,7 +91,7 @@ const lines = [
     seq: 1,
     rows: [row],
     requests: [],
-    notices: [],
+    notices: [limitNotice(91)],
     summary: { running: 1, waiting: 0, failed: 0, today: 3 },
   },
 ]
@@ -146,9 +160,9 @@ const set = spawnSync(
 console.log(`Grey desktop: ${set.stdout.trim() || set.stderr.trim()}`)
 await sleep(1000)
 
-function shoot(/** @type {string} */ name, whole = false) {
+function shoot(/** @type {string} */ name, whole = false, height = 150) {
   const file = join(outDir, `${name}.png`)
-  const region = !whole && width ? [`-R${Math.round(width / 2 - 360)},0,720,150`] : []
+  const region = !whole && width ? [`-R${Math.round(width / 2 - 360)},0,720,${height}`] : []
   const result = spawnSync('screencapture', ['-x', ...region, file], { encoding: 'utf8' })
   console.log(`${name}: ${result.status === 0 ? file : `screencapture failed ${result.stderr}`}`)
 }
@@ -167,7 +181,7 @@ async function run(/** @type {string} */ debug, /** @type {any[]} */ steps) {
   await sleep(1500)
   for (const step of steps) {
     if (typeof step === 'number') await sleep(step)
-    else if (step.shot) shoot(step.shot, step.whole)
+    else if (step.shot) shoot(step.shot, step.whole, step.height)
     else child.stdin.write(`${JSON.stringify(step)}\n`)
   }
   child.stdin.end()
@@ -203,3 +217,21 @@ await run('drive,fakenotch,room=0:0', [
   { shot: 'notch-room-0-0-pop' },
 ])
 await run('drive,fakenotch,room=60:120', [pop, 700, { shot: 'notch-room-60-120-pop' }])
+// The open island's plan limit ring follows the use main's next change carries.
+const fuller = {
+  type: 'change',
+  seq: 2,
+  rows: [],
+  removedRows: [],
+  requests: [],
+  removedRequests: [],
+  notices: [limitNotice(97)],
+}
+await run('drive,fakenotch,room=200:200', [
+  { type: 'debug', kind: 'click' },
+  900,
+  { shot: 'limit-open-91', height: 300 },
+  fuller,
+  700,
+  { shot: 'limit-open-97', height: 300 },
+])
