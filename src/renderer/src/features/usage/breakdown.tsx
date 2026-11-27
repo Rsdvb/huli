@@ -217,7 +217,10 @@ export function BreakdownCard({
               </span>
             </div>
           </div>
-          <table className="k-u-bd__table">
+          <table
+            className="k-u-bd__table"
+            data-wide={(kind === 'traffic' && grouping !== 'type') || undefined}
+          >
             <thead>
               <tr>
                 <th scope="col">{t(`breakdown.groups.${grouping}`)}</th>
