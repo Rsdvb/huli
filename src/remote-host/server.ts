@@ -150,6 +150,8 @@ const NOTED = {
 
 /** The requests of one connection waiting for an answer to note; more are not noted. */
 const MAX_NOTED = 64
+/** Requests to the agent host whose method an answer too long for the channel names in the log. */
+const MAX_METHODS = 256
 
 type NotedKind = (typeof NOTED)[keyof typeof NOTED]
 
@@ -1199,6 +1201,8 @@ class DeviceSession {
     { kind: NotedKind; sessionId: unknown; title: string | null }
   >()
   private readonly titles = new SessionTitles()
+  /** The methods of requests the agent host has not answered yet, by id, for the log. */
+  private readonly methods = new Map<number, string>()
   private readonly uploads: Uploads
   private readonly downloads: Downloads
   private readonly forwards: HostForwards
@@ -1486,6 +1490,7 @@ class DeviceSession {
     this.token = null
     this.outbox.close()
     this.handed.clear()
+    this.methods.clear()
     this.uploads.closeAll()
     this.downloads.closeAll()
     this.forwards.close()
@@ -1949,6 +1954,10 @@ class DeviceSession {
       const title = this.titles.get(sessionId) ?? null
       if (this.noted.size < MAX_NOTED) this.noted.set(id, { kind, sessionId, title })
     }
+    if (typeof id === 'number' && typeof method === 'string') {
+      if (this.methods.size >= MAX_METHODS) this.methods.delete(this.methods.keys().next().value!)
+      this.methods.set(id, method)
+    }
     this.port?.send(request)
   }
 
@@ -2176,12 +2185,17 @@ class DeviceSession {
 
   private send(value: unknown): void {
     if (!this.live) return
+    const { type, id } = value as { type?: unknown; id?: unknown }
+    let method: string | undefined
+    if ((type === 'response' || type === 'error') && typeof id === 'number') {
+      method = this.methods.get(id)
+      this.methods.delete(id)
+    }
     this.outbox.push({ kind: 'json', value }).catch((error: unknown) => {
       if (!this.live) return
-      const { type, id } = value as { type?: unknown; id?: unknown }
       this.server.options.log(
         'warn',
-        `A message for device ${this.device.id} could not be sent: ${(error as Error).message}`,
+        `A message for device ${this.device.id} (${described(value, method)}) could not be sent: ${(error as Error).message}`,
       )
       // A response too long for the channel still tells the device its request failed.
       if ((type === 'response' || type === 'error') && typeof id === 'number') {
@@ -2191,6 +2205,15 @@ class DeviceSession {
       }
     })
   }
+}
+
+/** What a message for a device is, for the log: an answer's method or an event's type. */
+function described(value: unknown, method: string | undefined): string {
+  const { type, event } = value as { type?: unknown; event?: unknown }
+  if (method) return `the answer to ${method}`
+  const kind = type === 'event' ? (event as { type?: unknown } | null)?.type : undefined
+  if (typeof kind === 'string') return `event ${kind}`
+  return typeof type === 'string' ? type : 'a message'
 }
 
 /** Built when needed, so its words follow the language the host was last told. */
