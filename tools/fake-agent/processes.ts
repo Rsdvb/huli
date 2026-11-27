@@ -16,21 +16,28 @@ export const KITE_TASKS = {
   output: '_kite/tasks/output',
   background: '_kite/tasks/background',
   clean: '_kite/tasks/clean',
+  agent: '_kite/tasks/agent',
 } as const
 
 const OUTPUT_KEPT = 8 * 1024
 
-interface Task {
+export interface Task {
   id: string
-  kind: 'shell' | 'monitor'
+  kind: 'shell' | 'monitor' | 'workflow'
   title: string
-  command: string
+  command?: string
   status: 'running' | 'completed' | 'failed' | 'stopped'
   startedAt: number
   endedAt: number | null
   summary: string | null
   child: ChildProcess | null
   output: string
+  /** A workflow's phases and agents, as `_kite/tasks` lists them. */
+  workflow?: { phases: unknown[]; agents: unknown[] }
+  /** What each of a workflow's agents was asked and gave back, by its index. */
+  details?: Map<number, Record<string, unknown>>
+  /** Stops a workflow's run along with the task. */
+  onStop?: () => void
 }
 
 interface Held {
@@ -46,7 +53,7 @@ interface Held {
 type Notify = (method: string, params: unknown) => Promise<void>
 
 /** One session's tasks, kept past its turns. */
-class Board {
+export class Board {
   readonly tasks = new Map<string, Task>()
   readonly held = new Map<string, Held>()
   readonly progress = new Map<string, string>()
@@ -72,6 +79,7 @@ class Board {
         endedAt: task.endedAt,
         summary: task.summary,
         ...(task.child?.pid && task.status === 'running' ? { pid: task.child.pid } : {}),
+        ...(task.workflow ? { workflow: task.workflow } : {}),
       })),
       foreground: [...this.held.values()].map((held) => ({
         toolCallId: held.toolCallId,
@@ -145,7 +153,15 @@ class Board {
     task.summary = `${task.title} was stopped`
     task.child?.kill()
     task.child = null
+    task.onStop?.()
     this.publish()
+  }
+
+  /** What one agent of a workflow task was asked and gave back. */
+  agent(taskId: string, index: number): Record<string, unknown> {
+    const detail = this.tasks.get(taskId)?.details?.get(index)
+    if (!detail) throw new Error('No such agent')
+    return detail
   }
 
   output(taskId: string): { output: string; truncated: boolean } {
@@ -169,6 +185,16 @@ class Board {
 }
 
 const boards = new Map<string, Board>()
+
+/** The board of a session, made on its first task. */
+export function sessionBoard(sessionId: string, notify: Notify): Board {
+  let board = boards.get(sessionId)
+  if (!board) {
+    board = new Board(sessionId, notify)
+    boards.set(sessionId, board)
+  }
+  return board
+}
 
 /** The board of a session a request names; throws for one without. */
 export function boardOf(params: unknown): {
@@ -224,11 +250,7 @@ async function say(turn: Turn, text: string): Promise<void> {
 
 export const processes: Scenario = async (turn) => {
   const sessionId = turn.session.id
-  let board = boards.get(sessionId)
-  if (!board) {
-    board = new Board(sessionId, turn.notify)
-    boards.set(sessionId, board)
-  }
+  const board = sessionBoard(sessionId, turn.notify)
   const n = turn.id
   const base = Number(process.env.KITE_PORT) || (await freePort())
   const outside = Number(process.env.KITE_PORT) ? base + 100 : await freePort()

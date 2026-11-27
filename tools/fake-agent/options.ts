@@ -54,6 +54,8 @@ export const SCENARIOS = [
   'anchors',
   // Huli: background tasks through Kite's own extension, for the session board.
   'processes',
+  // Huli: a multi-agent workflow on the session board, as Claude Code's Workflow tool runs one.
+  'workflow',
   // Huli: manager mode's manager, worker and reviewer.
   'manager-demo',
   'work',
@@ -143,6 +145,11 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   processes: {
     description:
       'Starts dev servers and a watcher listed on the session board, then a test run that waits to be moved to the background',
+  },
+  workflow: {
+    description:
+      'Starts a workflow of three phases and eleven agents on the session board, which holds mid-run',
+    hint: '--hold <ms the second phase holds>',
   },
   'agy-daemon': {
     description: 'Starts a server whose call runs on past the turn, as Google Antigravity does',

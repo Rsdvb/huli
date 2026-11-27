@@ -50,6 +50,7 @@ import { write } from './write.ts'
 import { managerDemo, review, work } from './manager.ts'
 import { delegate } from './delegate.ts'
 import { processes } from './processes.ts'
+import { workflow } from './workflow.ts'
 import type { ScenarioName } from './options.ts'
 import type { Scenario, Turn } from './turn.ts'
 
@@ -1855,6 +1856,7 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   write,
   anchors,
   processes,
+  workflow,
   'manager-demo': managerDemo,
   work,
   review,
