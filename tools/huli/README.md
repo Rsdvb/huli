@@ -2128,13 +2128,19 @@ was asked for again on each reconnect.
   `tool-digests` (the shared hello did) but could not draw a digest, and expanding one closed the
   app: a hello of kind `ios` or `android` gets digests only with `lean-threads` too
   (`drawsDigests`).
-- **Clients.** The phone reads lean pages, names `known` when it reads a thread again, asks
+- **Clients.** The phone reads lean pages, names `known` when the same screen reads its thread
+  again (back from the background, a new connection; a screen opened anew reads it whole), asks
   `sessions.stats` in one request for the rows that mount together, draws digests (a preview, an
   edit's counts, a picture by hash; a large edit opens as git has the file's change) and reads a
   step whole as its card opens (`mobile/src/ui/session/fullEntry.ts`); a memory warning drops the
   threads kept for reopening, the steps read whole and the sub-agents' numbers. The desktop reads a
   session on another computer, and the web client every session, lean with `known`, and a
   reconnect reads the watched sessions again one at a time (`rewatchAll`).
+- **Checks.** `lean-threads.test.ts` reads a session as the phone does, lean and then by `known`
+  after leaving it, and sends into it: a message, one queued while a permission waits and the
+  answer, and an edit sent again, each with its reply. The simulator's `86-lean-thread` flow opens
+  a long command whole and a screenshot by hash, sends after coming back from the background and
+  opens the session again from the list.
 
 Measured with the fake agent's `heavy-tools` scenario (`KITE_MEASURE_LEAN=1` on
 `agent-host/lean-threads.test.ts`), 740 commands of about 64 KB and a screenshot every fourth:
