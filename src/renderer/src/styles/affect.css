@@ -651,6 +651,7 @@
   padding: 2px 6px;
   border-radius: 5px;
   font-size: 12px;
+  font-weight: 400;
   line-height: 16px;
   color: var(--muted);
   transition:

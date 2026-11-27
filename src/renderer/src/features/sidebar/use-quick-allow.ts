@@ -21,8 +21,8 @@ interface Read {
 /**
  * What a Needs you row's 允许 would answer: read from the session its first wait is in while
  * `active` (the row under the pointer or the focus), and again whenever that session changes then.
- * Nothing is read for a row nobody points at. A read under way keeps the last one in view: each
- * names its requests by id, so a click on it answers just what it shows, or is told it was answered.
+ * Nothing is read for a row nobody points at. Each read names its requests by id, so a click
+ * answers just what it shows, or is told that was answered already.
  */
 export function useQuickAllow(rootId: string, count: number, active: boolean) {
   const key = useSessionsStore((s) => (active ? sourceKey(s.byId, rootId, count) : ''))
@@ -55,7 +55,18 @@ export function useQuickAllow(rootId: string, count: number, active: boolean) {
     )
   }, [])
 
-  return { allow: read?.allow ?? null, answered }
+  return { allow: read && stillShown(read.key, key) ? read.allow : null, answered }
+}
+
+/**
+ * Whether a read stays in view while the next one is under way: for the same session with as many
+ * requests waiting, as while its other calls stream. One answered or added hides it until read.
+ */
+function stillShown(readKey: string, key: string): boolean {
+  if (!key || readKey === key) return true
+  const [readId, , readCount] = readKey.split('\n')
+  const [id, , count] = key.split('\n')
+  return readId === id && readCount === count
 }
 
 /** Whether the pointer is on the row or the focus inside it, from the row's own events. */
