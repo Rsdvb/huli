@@ -356,6 +356,31 @@
       "publish": "确认发布"
     }
   },
+  "quickAllow": {
+    "allow": "允许",
+    "once": "允许一次",
+    "label": "允许一次：{{what}}（{{risk}}）",
+    "noRisk": "没有风险等级",
+    "later_other": "后面还有 {{count}} 个请求",
+    "moreLabel_other": "查看可以一起允许的 {{count}} 个请求",
+    "listTitle_other": "全部允许：以下 {{count}} 个请求各允许一次",
+    "skippedTitle": "这些不会一起允许，留给你逐个回答：",
+    "allowOldest": "只允许最早的",
+    "allowAll_other": "全部允许（{{count}}）",
+    "allowed": "已允许一次：{{what}}",
+    "allowedAll_other": "已允许 {{count}} 个请求",
+    "leftForYou_other": "{{count}} 个留给你逐个回答",
+    "failed": "没能允许：{{error}}",
+    "groupAllow": "全部允许",
+    "groupLabel": "全部允许：先列出各会话要允许的请求",
+    "loading": "正在读取请求…",
+    "groupTitle_other": "以下 {{count}} 个请求各允许一次：",
+    "groupNone": "没有能一键允许的请求。",
+    "groupDo_other": "允许 {{count}} 个",
+    "groupFailed_other": "{{count}} 个会话没能允许",
+    "groupNothing": "这些请求已经回答过了",
+    "cancel": "取消"
+  },
   "board": {
     "menu": "看板",
     "mark": "看板：{{status}}",

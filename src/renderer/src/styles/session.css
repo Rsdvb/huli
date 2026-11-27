@@ -1751,7 +1751,7 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.ks-queue .ks-risk {
+:is(.ks-queue, .kettu-allow-pop) .ks-risk {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -1762,15 +1762,15 @@
   font-size: 11px;
   font-weight: 500;
 }
-.ks-queue .ks-risk[data-level='low'] {
+:is(.ks-queue, .kettu-allow-pop) .ks-risk[data-level='low'] {
   background: color-mix(in srgb, var(--success) 10%, transparent);
   color: var(--success);
 }
-.ks-queue .ks-risk[data-level='medium'] {
+:is(.ks-queue, .kettu-allow-pop) .ks-risk[data-level='medium'] {
   background: color-mix(in srgb, var(--warning) 12%, transparent);
   color: var(--warning);
 }
-.ks-queue .ks-risk[data-level='high'] {
+:is(.ks-queue, .kettu-allow-pop) .ks-risk[data-level='high'] {
   background: color-mix(in srgb, var(--danger) 8%, transparent);
   color: var(--danger);
 }

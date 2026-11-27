@@ -74,6 +74,7 @@ import { SubagentBadge } from './subagent-badge'
 import { useRenaming } from './use-renaming'
 import { moveRow } from './row-drag'
 import { WaitingMark } from './waiting-mark'
+import { QuickAllowTools, type QuickAllowRoom } from './quick-allow'
 
 /**
  * A row's padding before its mark, as App Shell's chat rows: a session in a project's folder lines
@@ -101,6 +102,8 @@ interface SessionRowProps {
   indent?: boolean
   /** A sub-session's place under its parent, which the tree line follows. */
   branch?: 'middle' | 'last'
+  /** Huli: Needs you's row, whose tools offer 允许 for a plain request (quick-allow.tsx). */
+  quickAllow?: boolean
 }
 
 /** Whether the list's Tab stop is this row or one of its sub-sessions'. */
@@ -116,6 +119,7 @@ const sameRow = (a: SessionRowProps, b: SessionRowProps): boolean =>
   a.showHost === b.showHost &&
   a.indent === b.indent &&
   a.branch === b.branch &&
+  a.quickAllow === b.quickAllow &&
   (a.tabStopId === b.tabStopId ||
     (!holdsStop(a.node, a.tabStopId) && !holdsStop(b.node, b.tabStopId)))
 
@@ -125,6 +129,7 @@ export const SessionRow = memo(function SessionRow({
   showHost = false,
   indent = false,
   branch,
+  quickAllow = false,
 }: SessionRowProps) {
   const { t } = useTranslation('sidebar')
   const { summary, children } = node
@@ -185,6 +190,8 @@ export const SessionRow = memo(function SessionRow({
   const [moreOpen, setMoreOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [cardOpen, setCardOpen] = useState(false)
+  const [allowRoom, setAllowRoom] = useState<QuickAllowRoom | null>(null)
+  const [allowOpen, setAllowOpen] = useState(false)
   const issueBadge = useEntry('sidebar.issueBadge')
   const boardMark = useEntry('sidebar.boardMark')
   const [cardMounted, setCardMounted] = useState(false)
@@ -202,6 +209,7 @@ export const SessionRow = memo(function SessionRow({
   const status = rowStatus(node, hasChildren && !expanded)
   // What waits gets a button of its own in the row's tools, over the status slot.
   const waiting = !away && status.waiting > 0
+  const allowing = quickAllow && waiting
   // Huli: a manager's worker shows the task its manager gave it.
   const title = summary.worker?.title || sessionTitle(summary)
 
@@ -426,7 +434,8 @@ export const SessionRow = memo(function SessionRow({
         ref={row}
         className="ui-as-chat-row"
         data-indent={indent || undefined}
-        data-menu={menuOpen || moreOpen || undefined}
+        data-menu={menuOpen || moreOpen || (allowing && allowOpen) || undefined}
+        data-quick-allow={(allowing && allowRoom) || undefined}
       >
         {branch && <TreeLine last={branch === 'last'} left={base + 7} />}
         {rename.renaming ? (
@@ -496,6 +505,15 @@ export const SessionRow = memo(function SessionRow({
             </ContextMenu>
             {/* App Shell's row tools: the More menu and the pin, shown on hover. */}
             <span className="ui-as-chat-row__tools">
+              {allowing && (
+                <QuickAllowTools
+                  row={row}
+                  rootId={summary.id}
+                  count={status.waiting}
+                  onRoom={setAllowRoom}
+                  onOpenChange={setAllowOpen}
+                />
+              )}
               <DropdownMenu
                 open={moreOpen}
                 onOpenChange={setMoreOpen}

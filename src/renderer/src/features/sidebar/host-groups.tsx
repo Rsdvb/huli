@@ -33,6 +33,7 @@ import { RenameScope } from './rename-scope'
 import { SessionRow } from './session-row'
 import { TaskRow } from './task-row'
 import { RunGroupRow } from './run-group-row'
+import { NeedsYouAllowAll } from './quick-allow'
 
 // Its rows' group, for the rename keys at its end; no project path looks like it.
 const NEEDS_YOU_GROUP = 'needs-you'
@@ -73,19 +74,36 @@ export function NeedsYouGroup({
       ),
     [summaries, hosts, away, tasks, fold],
   )
+  // Huli: the sessions with requests waiting, for 全部允许 once two or more of them wait.
+  const waiting = useMemo(
+    () =>
+      rows
+        .flatMap((row) =>
+          row.kind === 'session'
+            ? [row.node]
+            : row.kind === 'group'
+              ? row.runs
+              : row.origin
+                ? [row.origin]
+                : [],
+        )
+        .filter((node) => node.permissionCount > 0),
+    [rows],
+  )
   if (rows.length === 0) return null
   return (
     <section aria-label={t('needsYou.label')} className="ui-as-side__group">
       <div className="ui-as-side__label kettu-host-label">
         <h3>{t('needsYou.label')}</h3>
         <span className="tabular-nums">{rows.length}</span>
+        {waiting.length > 1 && <NeedsYouAllowAll nodes={waiting} />}
       </div>
       <ul className="flex flex-col">
         <RenameScope value={NEEDS_YOU_GROUP}>
           <AnimatePresence initial={false}>
             {rows.map((row) =>
               row.kind === 'session' ? (
-                <SessionRow key={row.id} node={row.node} tabStopId={null} showHost />
+                <SessionRow key={row.id} node={row.node} tabStopId={null} showHost quickAllow />
               ) : row.kind === 'group' ? (
                 <RunGroupRow key={row.id} group={row.group} runs={row.runs} tabStopId={null} />
               ) : (
