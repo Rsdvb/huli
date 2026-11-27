@@ -62,6 +62,7 @@ import { useAgentHistoryRow } from '@renderer/features/agent-history/settings-ro
 import { pageRow } from '@renderer/features/sidebar/sidebar-pages'
 import { AboutHero, AutomaticUpdates, NewIssue, NoUpdates, UpdateRow } from './about-section'
 import { useIdleSessionRows } from './idle-sessions'
+import { useTrafficRows } from './traffic-rows'
 import { useAutoApproveRows } from './auto-approve'
 import { useSandboxRows } from './sandbox'
 import { ResumeAfterLimit, ResumeText, StallMinutesChoice } from './supervisor-rows'
@@ -832,6 +833,7 @@ export function useAgentsSection(): SectionDef {
   const { useAgentsStore } = useHostScope()
   const agents = useAgentsStore(useShallow((s) => usableAgents(s.order, s.byId)))
   const idleRows = useIdleSessionRows()
+  const trafficRows = useTrafficRows()
   const approvalRows = useAutoApproveRows()
   const sandboxRows = useSandboxRows()
   const sandboxOn = useEntry('settings.sandbox')
@@ -898,6 +900,7 @@ export function useAgentsSection(): SectionDef {
               render: () => null,
             },
           ] satisfies RowDef[])),
+      ...trafficRows,
       ...approvalRows,
       ...(sandboxOn ? sandboxRows : []),
       ...idleRows,

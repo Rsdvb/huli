@@ -363,6 +363,7 @@ const SECTION_FIELDS = {
     openLinksIn: oneOf('browser', 'session', 'ask'),
     alwaysOpenIn: isLinkSites,
     toolCalls: oneOf(...TOOL_CALL_VIEWS),
+    handoffOffer: isBoolean,
   },
   appearance: {
     theme: oneOf('system', 'light', 'dark'),

@@ -96,6 +96,8 @@ export interface SettingsFile {
     alwaysOpenIn: Record<string, LinkDestination>
     // Huli: how much of a turn's work a session shows unless it has its own choice (简洁视图).
     toolCalls: ToolCallView
+    // Huli: a turn that ends with a large context offers a handoff to a new session (接力); off.
+    handoffOffer: boolean
   }
   appearance: {
     theme: 'system' | 'light' | 'dark' // the color mode, which picks a theme's variant
@@ -477,6 +479,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
     openLinksIn: 'browser',
     alwaysOpenIn: {},
     toolCalls: 'all',
+    handoffOffer: false,
   },
   appearance: {
     theme: 'system',

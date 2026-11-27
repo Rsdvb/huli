@@ -1155,7 +1155,16 @@
       "use": "使用 {{value}}",
       "typeTokens": "输入数值，如 272K",
       "typePercent": "输入百分比，如 85%",
-      "typeModel": "输入模型名"
+      "typeModel": "输入模型名",
+      "choice": {
+        "default": "默认",
+        "traffic": "省流量（推荐）",
+        "custom": "自定义",
+        "note": {
+          "window": "省流量：{{harness}} 只在 {{value}} 的上下文里工作，快满时就压缩，每次请求上传少得多。代价是压缩得早，前面的细节会更早被忘掉。",
+          "trigger": "省流量：对话累积到 {{value}} token 时 {{harness}} 就压缩，每次请求上传少得多。代价是压缩得早，前面的细节会更早被忘掉。"
+        }
+      }
     },
     "keyOnly": {
       "note": "这个智能体只能用 API key 登录。{{name}} 的浏览器和微信登录整台电脑共用一份，存在这个智能体的目录之外，再加一个智能体也是同一个账号。"
@@ -1621,6 +1630,25 @@
       "reports": {
         "name": "每条消息后的回报次数",
         "description": "你在一个会话里发消息后，它开的会话的回报最多唤醒它几次。"
+      }
+    },
+    "traffic": {
+      "group": "省流量",
+      "compact": {
+        "name": "所有智能体的自动压缩",
+        "description": "每次请求都会重新上传整个上下文，提示缓存省的是钱，不是流量。省流量让支持它的智能体早一点压缩：Claude Code 只在 {{claude}} 的上下文里工作，Codex 到 {{codex}} token 就压缩。代价是前面的细节会更早被忘掉。它会替换各智能体页面上的设置；项目自己的设置仍然优先，改动从下一个会话起生效。",
+        "keywords": "流量 省流量 代理 上传 带宽 压缩 上下文 traffic proxy bandwidth compact",
+        "traffic": "全部用省流量",
+        "default": "全部恢复默认",
+        "done": "已为 {{count}} 个智能体打开省流量，从下一个会话起生效",
+        "doneDefault": "已把 {{count}} 个智能体的自动压缩恢复默认",
+        "none": "这里没有支持省流量的智能体",
+        "failed": "{{agent}}：{{error}}"
+      },
+      "handoff": {
+        "name": "上下文很大时提议接力",
+        "description": "一轮结束时，如果上下文超过 30 万 token 或窗口的 60%，输入框上方会提议接力到新会话：智能体先写一份交接摘要，新会话只带着这份摘要接着做。不经你同意不会接力。",
+        "keywords": "接力 新会话 交接 摘要 上下文 流量 handoff"
       }
     },
     "priority": {

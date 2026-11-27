@@ -1505,6 +1505,28 @@ const ENTRIES = {
     kind: 'info',
     on: () => false,
   },
+  // Huli: 省流量: every agent's auto-compact at once, and the offer of a handoff.
+  'agents.compact-preset': {
+    section: 'agents',
+    row: 'compact-preset',
+    group: 'agents.traffic.group',
+    name: 'agents.traffic.compact.name',
+    description: 'agents.traffic.compact.description',
+    keywords: 'agents.traffic.compact.keywords',
+    part: 'host',
+    kind: 'info',
+  },
+  'agents.handoff-offer': {
+    section: 'agents',
+    row: 'handoff-offer',
+    group: 'agents.traffic.group',
+    name: 'agents.traffic.handoff.name',
+    description: 'agents.traffic.handoff.description',
+    keywords: 'agents.traffic.handoff.keywords',
+    part: 'desktop',
+    access: 'change',
+    ...flag('thread', 'handoffOffer', (file) => file.thread.handoffOffer),
+  },
   'agents.lower-priority': {
     section: 'agents',
     row: 'lower-priority',
