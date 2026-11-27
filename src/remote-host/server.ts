@@ -71,7 +71,9 @@ import {
   BACKGROUND_PACE_MS,
   BACKGROUND_RESUME_MS,
   BROWSER_FEATURE,
+  drawsDigests,
   IMAGE_REFS_FEATURE,
+  LEAN_THREADS_FEATURE,
   LOAD_FEATURE,
   negotiate,
   parseHello,
@@ -79,7 +81,6 @@ import {
   RESUME_MS,
   RESUME_VERSION,
   STANDBY_FEATURE,
-  TOOL_DIGESTS_FEATURE,
   type Addresses,
   type RelayMoved,
   type Closing,
@@ -1003,7 +1004,8 @@ class DeviceConnection {
       name: device.name,
       ...(hello.features?.includes(BROWSER_FEATURE) ? { browser: true as const } : {}),
       ...(hello.features?.includes(IMAGE_REFS_FEATURE) ? { imageRefs: true as const } : {}),
-      ...(hello.features?.includes(TOOL_DIGESTS_FEATURE) ? { toolDigests: true as const } : {}),
+      // Huli: a phone from before lean threads named digests it could not draw.
+      ...(drawsDigests(hello) ? { toolDigests: true as const } : {}),
     })
     if (this.state !== 'opening') return port?.close()
     if (!port) return this.close('unavailable')
@@ -1573,6 +1575,7 @@ class DeviceSession {
       features: [
         BYTES_FEATURE,
         LOAD_FEATURE,
+        LEAN_THREADS_FEATURE,
         ...(this.version >= PUSH_VERSION && this.server.options.notifications?.()
           ? [PUSH_FEATURE, WEB_PUSH_FEATURE]
           : []),

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { parseClosing, parseHello, parseWelcome } from './protocol'
+import {
+  drawsDigests,
+  LEAN_THREADS_FEATURE,
+  parseClosing,
+  parseHello,
+  parseWelcome,
+  TOOL_DIGESTS_FEATURE,
+} from './protocol'
 
 const HELLO = {
   type: 'hello',
@@ -46,5 +53,29 @@ describe('the closing for another account', () => {
       type: 'closing',
       reason: 'other_account',
     })
+  })
+})
+
+describe("a hello's tool digests", () => {
+  const ios = HELLO.client
+  const web = { kind: 'web', version: '1.0.0', platform: 'Chrome' }
+  const desktop = { kind: 'desktop', version: '1.0.0', platform: 'darwin' }
+
+  it('reach a phone only when it draws lean pages too, as phones before them could not', () => {
+    expect(drawsDigests({ client: ios, features: [TOOL_DIGESTS_FEATURE] })).toBe(false)
+    expect(
+      drawsDigests({ client: ios, features: [TOOL_DIGESTS_FEATURE, LEAN_THREADS_FEATURE] }),
+    ).toBe(true)
+    expect(
+      drawsDigests({ client: { ...ios, kind: 'android' }, features: [TOOL_DIGESTS_FEATURE] }),
+    ).toBe(false)
+  })
+
+  it('reach any other client that names them, and none that does not', () => {
+    expect(drawsDigests({ client: web, features: [TOOL_DIGESTS_FEATURE] })).toBe(true)
+    expect(drawsDigests({ client: desktop, features: [TOOL_DIGESTS_FEATURE] })).toBe(true)
+    expect(drawsDigests({ client: web, features: [LEAN_THREADS_FEATURE] })).toBe(false)
+    expect(drawsDigests({ client: ios, features: [LEAN_THREADS_FEATURE] })).toBe(false)
+    expect(drawsDigests({ client: desktop })).toBe(false)
   })
 })

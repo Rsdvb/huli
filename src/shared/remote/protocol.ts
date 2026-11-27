@@ -64,6 +64,25 @@ export const IMAGE_REFS_FEATURE = 'image-refs'
 export const TOOL_DIGESTS_FEATURE = 'tool-digests'
 
 /**
+ * Huli: lean threads. In a hello, the client draws every digest a lean page holds; a phone that
+ * names `TOOL_DIGESTS_FEATURE` without it gets whole pages, as the phones before it could not draw
+ * digests. In a welcome, the host reads `lean` and `known` in `sessions.open`, `sessions.snapshot`
+ * and `sessions.page`, and answers `sessions.stats`; an older host ignores the parameters and has
+ * no such method.
+ */
+export const LEAN_THREADS_FEATURE = 'lean-threads'
+
+/** Huli: the client kinds that could not draw digests before `LEAN_THREADS_FEATURE`. */
+export const DIGESTLESS_CLIENTS: ReadonlySet<string> = new Set(['ios', 'android'])
+
+/** Huli: whether a hello's client draws the digests of `TOOL_DIGESTS_FEATURE`. */
+export function drawsDigests(hello: Pick<Hello, 'client' | 'features'>): boolean {
+  const features = hello.features ?? []
+  if (!features.includes(TOOL_DIGESTS_FEATURE)) return false
+  return !DIGESTLESS_CLIENTS.has(hello.client.kind) || features.includes(LEAN_THREADS_FEATURE)
+}
+
+/**
  * The welcome's feature of a host that reads its load: `host.load.watch` and `host.load.unwatch`.
  * An older host has neither.
  */

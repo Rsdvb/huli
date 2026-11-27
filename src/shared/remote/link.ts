@@ -31,6 +31,7 @@ import { CompareTimer, PathTimes, PROBE_TIMEOUT_MS, rankPaths, shouldMove } from
 import { bytesOf, isBinary } from './places'
 import {
   IMAGE_REFS_FEATURE,
+  LEAN_THREADS_FEATURE,
   MIN_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   RESUME_MS,
@@ -254,7 +255,8 @@ export function hello(
     client,
     ...(device ? { device } : {}),
     // The web client loads stored images by hash and expands digested tool calls on demand.
-    features: [IMAGE_REFS_FEATURE, TOOL_DIGESTS_FEATURE],
+    // Huli: so does the phone, which draws every digest of a lean page too.
+    features: [IMAGE_REFS_FEATURE, TOOL_DIGESTS_FEATURE, LEAN_THREADS_FEATURE],
     ...(account ? { account } : {}),
   }
 }
