@@ -236,10 +236,11 @@ const AgentRow = memo(
       ) : agent.state === 'stopped' ? (
         t('status.stopped')
       ) : null
+    // A stopped agent's reason is mostly the run's own end, which its time column says.
     const what =
       agent.state === 'running'
         ? (agent.progress ?? t('step.starting'))
-        : agent.state === 'failed' || agent.state === 'stopped'
+        : agent.state === 'failed'
           ? agent.error
           : null
     return (

@@ -726,3 +726,6 @@
 .kb-wfa__text--error {
   color: var(--danger);
 }
+.kb-wfa__detail .kb-detail__none {
+  margin-bottom: 8px;
+}
