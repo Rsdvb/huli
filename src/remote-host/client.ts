@@ -508,6 +508,8 @@ class HostLink {
   private failures = 0
   /** When the last try began. */
   private triedAt = 0
+  /** A try came due while the computer slept, which its wake makes up for. */
+  private due = false
   private closed = false
   /** Main's port for the host's session, kept while the host keeps the session. */
   private port: PortChannel | null = null
@@ -631,7 +633,13 @@ class HostLink {
    */
   wake(): void {
     const session = this.session
-    if (this.closed || !session?.open) return this.retry()
+    if (this.closed || !session?.open) {
+      const due = this.due
+      this.due = false
+      // Only its timer tries a host that turned this computer away, and one came due.
+      if (due && this.stoppedFor('other_account')) return void this.connect()
+      return this.retry()
+    }
     session.pingNow()
     this.compareSoon(0)
   }
@@ -757,6 +765,7 @@ class HostLink {
     if (this.closed) return
     const session = this.session
     const held = session !== null && (session.open || session === this.taking)
+    if (this.timer) this.due = true
     this.cancel()
     this.compares.stop()
     if (this.joinTimer) clearTimeout(this.joinTimer)
@@ -807,7 +816,10 @@ class HostLink {
     const host = this.host
     if (this.closed || this.session || this.trying || !host || host.removed) return
     // Asleep, timers still run in a Mac's dark wakes; the wake tries again.
-    if (this.client.asleep) return
+    if (this.client.asleep) {
+      this.due = true
+      return
+    }
     if (this.anotherAccount()) return this.set({ state: 'stopped', reason: 'other_account' })
     const { options } = this.client
     const trying = (this.trying = new AbortController())

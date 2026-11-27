@@ -20,6 +20,7 @@ import { RemoteServer } from './server'
 import { memoryPorts, memoryTransports } from './testing/memory'
 
 const LAN: DirectAddress = { host: '192.168.1.8', port: 47821 }
+const NONE = { host: null, laptop: null }
 const cleanups: (() => Promise<void> | void)[] = []
 
 afterEach(async () => {
@@ -34,8 +35,11 @@ function tempDir(): string {
 
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-/** A host at LAN and a laptop that knows it, which tries again 10 ms after a failure. */
-async function setup() {
+/**
+ * A host at LAN and a laptop that knows it, which tries again 10 ms after a failure; each signed in
+ * to the account `accounts` names, none by default.
+ */
+async function setup(accounts: { host: string | null; laptop: string | null } = NONE) {
   const hostDir = tempDir()
   const hostKey = await generateKeyPair()
   const laptopKey = await generateKeyPair()
@@ -62,6 +66,7 @@ async function setup() {
       counts.agentPorts++
       return memoryPorts()[0]
     },
+    account: () => accounts.host,
     changed: () => {},
     log,
   })
@@ -83,6 +88,7 @@ async function setup() {
     hosts,
     client: { kind: 'desktop', version: '1.0.0', platform: 'macOS 26.1' },
     name: () => 'Laptop',
+    account: () => accounts.laptop,
     openMainPort: async () => {
       counts.mainPorts++
       return memoryPorts()[0]
@@ -160,6 +166,19 @@ describe('a computer that goes to sleep', () => {
     t.lan.up = true
     await expect.poll(t.state).toBe('online')
     expect(t.counts.agentPorts).toBe(1)
+  })
+
+  it('makes up on the wake for the quiet try at a host that turned it away', async () => {
+    const accounts = { host: 'account-b', laptop: 'account-a' }
+    const t = await setup(accounts)
+    t.client.start()
+    // Another account's: stopped, and asked again quietly only every ten minutes.
+    await expect.poll(t.state).toBe('stopped')
+
+    t.client.suspend()
+    accounts.host = 'account-a'
+    t.client.resume()
+    await expect.poll(t.state).toBe('online')
   })
 
   it('takes a reconnect the user asks for as the wake', async () => {
