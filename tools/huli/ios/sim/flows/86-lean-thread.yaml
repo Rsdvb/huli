@@ -94,7 +94,6 @@ appId: io.github.rsdvb.huli
 - tapOn: '发送'
 # The list was left scrolled up at the screenshot step, so it does not follow its end: the reply
 # lands below, behind the jump-to-end button, and the flow scrolls down to it.
-- hideKeyboard
 - scrollUntilVisible:
     element:
       text: '.*Ran 2 commands.*'
