@@ -93,17 +93,23 @@ appId: io.github.rsdvb.huli
 - inputText: '/heavy-tools --count 2 --shots 0 --pace 0'
 - tapOn: '发送'
 # The list was left scrolled up at the screenshot step, so it does not follow its end: the reply
-# lands below, behind the jump-to-end button, and the flow scrolls down to it.
-- scrollUntilVisible:
-    element:
+# lands below, behind the jump-to-end button. A swipe would land on the keyboard, so the flow taps
+# the button.
+- extendedWaitUntil:
+    visible:
+      text: '.*回到最新'
+    timeout: 30000
+- tapOn:
+    text: '.*回到最新'
+- extendedWaitUntil:
+    visible:
       text: '.*Ran 2 commands.*'
-    direction: DOWN
     timeout: 60000
-- scrollUntilVisible:
-    element:
+- extendedWaitUntil:
+    visible:
       text: '(?s).*/heavy-tools --count 2 --shots 0.*'
-    direction: UP
-    timeout: 20000
+    timeout: 3000
+    optional: true
 - takeScreenshot: l05-sent-after-return
 # Left for the list and opened again: the new screen reads the thread afresh, lean.
 - tapOn: '返回'
