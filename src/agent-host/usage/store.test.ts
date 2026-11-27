@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { inUsageWorker } from '../testing/usage-worker'
 import type { UsageRow } from './model'
 import { UsageStore } from './store'
@@ -32,8 +32,6 @@ const row = (key: string, input: number): UsageRow => ({
   turn: 1,
 })
 
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
-
 it('stops its worker once unused and answers the next request from another', async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'kettu-usage-store-'))
   dirs.push(dir)
@@ -62,8 +60,11 @@ it('stops its worker once unused and answers the next request from another', asy
   stores.push(store)
   expect(await store.ready).toBe('created')
   expect(await store.write([row('a', 5)])).toBe(1)
-  await sleep(200)
-  expect(workers.map((w) => w.stopped)).toEqual([true])
+  // The idle stop is timer-driven: a fixed wait misses it on a busy machine.
+  await vi.waitFor(() => expect(workers.map((w) => w.stopped)).toEqual([true]), {
+    timeout: 5_000,
+    interval: 20,
+  })
   // Nothing to cancel, and no worker started for it.
   await store.cancel()
   expect(workers).toHaveLength(1)
