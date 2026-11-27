@@ -17,7 +17,7 @@ import {
   type TaskSummary,
   type TaskView,
 } from '@shared/workflow'
-import type { AgentId } from '@shared/thread'
+import { configChoiceFor, type AgentId } from '@shared/thread'
 import type { RowStatus } from '@renderer/features/sidebar/row-status'
 import { i18n } from '@renderer/lib/i18n'
 import { agentName } from '@renderer/stores/agents'
@@ -146,7 +146,7 @@ export function modelTextOf(
   const entry = optionsOn(s, hostId)[pick.agentId]
   const option = entry?.config.find((o) => o.category === 'model')
   const model = pick.model
-    ? (option?.choices?.find((c) => c.value === pick.model)?.name ?? pick.model)
+    ? ((option && configChoiceFor(option, pick.model)?.name) ?? pick.model)
     : null
   const level =
     (pick.model ? entry?.levels[pick.model] : undefined) ??

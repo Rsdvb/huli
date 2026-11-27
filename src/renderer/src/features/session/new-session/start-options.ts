@@ -1,7 +1,13 @@
 import type { AgentOptions, AgentStatus, HarnessReason } from '@shared/agent-host'
 import { isStartMode } from '@shared/agents'
 import { carriedLevel } from '@shared/effort'
-import { isConfigValue, type AgentId, type ConfigOption, type HarnessId } from '@shared/thread'
+import {
+  configValueFor,
+  levelsFor,
+  type AgentId,
+  type ConfigOption,
+  type HarnessId,
+} from '@shared/thread'
 import { harnessReason, programHere, sharedReason } from '@renderer/features/agents/harness-problem'
 import { cliOutdated, listedInstalled, readiness } from '@renderer/features/agents/readiness'
 import {
@@ -104,17 +110,22 @@ const REMEMBERED: ReadonlySet<ConfigOption['category']> = new Set([
   'thought_level',
 ])
 
-function takes(option: ConfigOption, value: string | boolean): boolean {
-  return isConfigValue(option, value)
+/** The value the option takes for `value`: itself, or a model under the name it lists it by. */
+function takes(option: ConfigOption, value: string | boolean): string | boolean | null {
+  return configValueFor(option, value)
 }
 
-/** The value the option holds for `value`: itself, or for a level the nearest lower one it offers. */
+/**
+ * The value the option holds for `value`: itself, a model under the name the option lists it by,
+ * or for a level the nearest lower one it offers.
+ */
 function heldBy(
   option: ConfigOption,
   value: string | boolean | undefined,
 ): string | boolean | null {
   if (value === undefined) return null
-  if (takes(option, value)) return value
+  const taken = takes(option, value)
+  if (taken !== null) return taken
   return option.category === 'thought_level' && typeof value === 'string'
     ? carriedLevel(option, value)
     : null
@@ -129,7 +140,7 @@ export interface StartFlags {
 function startModeOf(entry: AgentOptions): { optionId: string; value: string } | null {
   if (!isStartMode(entry.agentId, entry.startMode)) return null
   const option = entry.config.find((o) => o.category === 'mode' && o.type === 'select')
-  return option && takes(option, entry.startMode)
+  return option && takes(option, entry.startMode) !== null
     ? { optionId: option.id, value: entry.startMode }
     : null
 }
@@ -160,7 +171,7 @@ export function startConfig(
   return entry.config.map((option) => {
     const base =
       option.category === 'thought_level' && typeof modelValue === 'string'
-        ? (entry.levels[modelValue] ?? option)
+        ? (levelsFor(entry.levels, model, modelValue) ?? option)
         : option
     return { ...base, value: valueOf(base) }
   })
@@ -178,11 +189,11 @@ export function preparedConfig(
 ): ConfigOption[] {
   const model = config.find((o) => o.category === 'model' && o.type === 'select')
   const modelPick = model ? picks[model.id] : undefined
-  const pickedModel = model && modelPick !== undefined && takes(model, modelPick) ? modelPick : null
+  const pickedModel = model && modelPick !== undefined ? takes(model, modelPick) : null
   return config.map((option) => {
     const base =
       option.category === 'thought_level' && typeof pickedModel === 'string'
-        ? (levels[pickedModel] ?? option)
+        ? (levelsFor(levels, model, pickedModel) ?? option)
         : option
     const pick = heldBy(base, picks[base.id])
     return pick !== null ? { ...base, value: pick } : base
@@ -202,7 +213,7 @@ export function carryEffortPicks(
 ): OptionValues {
   const own = config.find((o) => o.category === 'model' && o.type === 'select')
   const level =
-    levels[model] ??
+    levelsFor(levels, own, model) ??
     (own?.value === model ? config.find((o) => o.category === 'thought_level') : undefined)
   const ids = new Set(
     [...config, ...Object.values(levels)]

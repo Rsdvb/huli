@@ -532,6 +532,14 @@ const CONFIG_CATEGORIES: ReadonlySet<string> = new Set([
   'thought_level',
 ])
 
+/** Kite's key in a choice's `_meta`: the model id it runs, as an alias's full id. */
+export const MODEL_ID_META = 'kite/modelId'
+
+function modelIdOf(choice: { _meta?: Record<string, unknown> | null }): { modelId?: string } {
+  const id = choice._meta?.[MODEL_ID_META]
+  return typeof id === 'string' && id !== '' ? { modelId: id } : {}
+}
+
 function mapConfigOption(option: acp.SessionConfigOption): ConfigOption | null {
   const category =
     option.category && CONFIG_CATEGORIES.has(option.category)
@@ -554,6 +562,7 @@ function mapConfigOption(option: acp.SessionConfigOption): ConfigOption | null {
             name: choice.name,
             ...(choice.description ? { description: choice.description } : {}),
             group: item.name,
+            ...modelIdOf(choice),
           })
         }
       } else {
@@ -561,6 +570,7 @@ function mapConfigOption(option: acp.SessionConfigOption): ConfigOption | null {
           value: item.value,
           name: item.name,
           ...(item.description ? { description: item.description } : {}),
+          ...modelIdOf(item),
         })
       }
     }

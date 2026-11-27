@@ -199,8 +199,11 @@ import {
   type UserContent,
   type OutsideKind,
   type BackgroundTaskView,
+  type ConfigChoice,
   appealConfirms,
+  configValueFor,
   PROMPT_SUGGESTION_CHARS,
+  sameConfigValue,
 } from '@shared/thread'
 import { MAX_CLOSED_TERMINALS, type ClosedTerminal } from '@shared/terminal-idle'
 import type { SessionProcesses } from '@shared/task-processes'
@@ -6629,7 +6632,7 @@ export class SessionManager {
       // under what the caller picked, which a client sends only when changed.
       live.startValues = {
         ...this.startModeOf(params.agentId),
-        ...this.deps.options?.rememberedOf(params.agentId),
+        ...this.deps.options?.rememberedOf(params.agentId, profileId),
         ...options,
       }
       await this.startNew(live)
@@ -7107,24 +7110,32 @@ export class SessionManager {
     this.attach(live, runtime.connection)
     this.attachedOn(live, setup.harnessVersion, false)
     // The cache names values the session no longer lists, so it is read before it takes them.
-    const cached = this.deps.options?.get(agentId)?.config ?? []
+    const { profileId } = live.record
+    const cached =
+      (profileId === undefined ? this.deps.options?.get(agentId)?.config : undefined) ?? []
     const own = setup.config
     const replaced =
       this.deps.options?.started(
         agentId,
         own,
         pathKey(live.record.projectPath, this.deps.platform),
+        profileId,
       ) ?? []
     this.update(live, {
       acpSessionId: setup.sessionId,
       config: setup.config,
       error: null,
     })
-    const wanted = {
-      ...this.startModeOf(agentId),
-      ...this.deps.options?.rememberedOf(agentId),
-      ...picks,
-    }
+    const wanted = this.listedValues(
+      live.record,
+      own,
+      {
+        ...this.startModeOf(agentId),
+        ...this.deps.options?.rememberedOf(agentId, profileId),
+        ...picks,
+      },
+      cached,
+    )
     const config = await this.applyStartOptions(live, runtime.connection, wanted, {
       stop: () => gone() || runtime.connection.isClosed,
     })
@@ -7348,11 +7359,14 @@ export class SessionManager {
         agentId,
         own,
         pathKey(live.record.projectPath, this.deps.platform),
+        live.record.profileId,
       ) ?? []
     // A remembered value that a later change outside Kettu replaced is not set again.
     for (const { option, wanted } of replaced) {
       if (live.startValues[option.id] === wanted) delete live.startValues[option.id]
     }
+    // A model named otherwise than this session lists it is set as it lists it.
+    live.startValues = this.listedValues(live.record, own, live.startValues)
     this.update(live, {
       acpSessionId: setup.sessionId,
       config: setup.config,
@@ -7596,7 +7610,7 @@ export class SessionManager {
         if (held) held = next
         else this.update(live, { config: next })
         if (!restore && remember && value === asked) {
-          this.deps.options?.chose(agentId, option, value, next)
+          this.deps.options?.chose(agentId, option, value, next, live.record.profileId)
         } else if (!restore) this.deps.options?.seen(agentId, next)
       } catch (error) {
         this.deps.diagnostics.log(
@@ -8841,6 +8855,7 @@ export class SessionManager {
         record.agentId,
         config,
         pathKey(record.projectPath, this.deps.platform),
+        record.profileId,
       )
     } else if (caps.resumeSession) {
       let attach = await this.attachOptions(live.id, record, runtime)
@@ -8863,6 +8878,7 @@ export class SessionManager {
             record.agentId,
             config,
             pathKey(record.projectPath, this.deps.platform),
+            record.profileId,
           )
         } else {
           if (!this.neverAnswered(live, error)) throw this.otherConfig(live, error)
@@ -8893,9 +8909,11 @@ export class SessionManager {
           )
         : own
     const wanted = takeover
-      ? this.takeoverValues(record.agentId, config, carry)
+      ? this.takeoverValues(record, config, carry)
       : carryMode(desiredOwn, config)
-    const values = agentValues(wanted)
+    // The session's own model, which the agent may list under another name now, as Claude Code
+    // lists the model a session it resumed runs under its full id.
+    const values = this.listedValues(record, config, agentValues(wanted), wanted)
     config = await this.applyStartOptions(live, connection, values, {
       restore: !takeover,
       from: config,
@@ -8930,7 +8948,61 @@ export class SessionManager {
     // one unseen.
     const modes = wanted.filter((option) => option.category === 'mode')
     if (lostValues(modes, config).length > 0) this.modeLost(live, lostValues(wanted, config))
+    else if (!takeover) this.modelLost(live, wanted, config)
     return connection
+  }
+
+  /**
+   * Huli: a session attached on another model than its own, which its agent no longer offers: the
+   * thread says so once, since the session's options now hold the model it runs.
+   */
+  private modelLost(live: Live, wanted: readonly ConfigOption[], config: ConfigOption[]): void {
+    const models = wanted.filter((option) => option.category === 'model')
+    const notice = lostValuesNotice(lostValues(models, config), { subject: 'session' })
+    if (!notice) return
+    this.emit(live, [
+      {
+        op: 'entry.add',
+        entry: {
+          kind: 'notice',
+          id: this.nextId(live),
+          ...notice,
+          after: agentEntryBefore(live.thread),
+        },
+      },
+    ])
+  }
+
+  /**
+   * `values` with each model put as `config` lists it, when it lists the same model under another
+   * name: `known` and the agent's kept choices say which model a value names.
+   */
+  private listedValues(
+    record: SessionRecord,
+    config: readonly ConfigOption[],
+    values: Record<string, string | boolean>,
+    known: readonly ConfigOption[] = [],
+  ): Record<string, string | boolean> {
+    const listed = { ...values }
+    for (const [id, value] of Object.entries(values)) {
+      const option = config.find((o) => o.id === id)
+      if (!option || option.category !== 'model' || isValueOf(option, value)) continue
+      const same = configValueFor(option, value, this.knownChoices(record, id, known))
+      if (same !== null) listed[id] = same
+    }
+    return listed
+  }
+
+  /** The choices of option `id` that say which model a value names: `known`'s, then the kept. */
+  private knownChoices(
+    record: SessionRecord,
+    id: string,
+    known: readonly ConfigOption[] = [],
+  ): ConfigChoice[] {
+    return [
+      ...(known.find((o) => o.id === id)?.choices ?? []),
+      ...(this.deps.options?.knownChoices(record.agentId, id, record.profileId) ?? []),
+    ]
   }
 
   /**
@@ -9000,27 +9072,32 @@ export class SessionManager {
    * remembered values, then what was chosen with the switch.
    */
   private takeoverValues(
-    agentId: AgentId,
+    record: SessionRecord,
     config: readonly ConfigOption[],
     carry: PendingCarry,
   ): ConfigOption[] {
+    const { agentId } = record
     const values = {
       ...this.startModeOf(agentId),
-      ...this.deps.options?.rememberedOf(agentId),
+      ...this.deps.options?.rememberedOf(agentId, record.profileId),
       ...carry.values,
     }
-    return config.flatMap((option): ConfigOption[] => {
-      const value = values[option.id]
-      return value !== undefined && isValueOf(option, value) ? [{ ...option, value }] : [option]
+    return config.map((option): ConfigOption => {
+      const asked = values[option.id]
+      const value =
+        asked === undefined
+          ? null
+          : configValueFor(option, asked, this.knownChoices(record, option.id))
+      return value === null ? option : { ...option, value }
     })
   }
 
   /** A loaded or resumed session's options, which New session also learns from. */
   private opened(live: Live, config: ConfigOption[]): void {
-    const { agentId } = live.record
+    const { agentId, profileId } = live.record
     live.refreshedModels.clear()
     this.update(live, { config })
-    this.deps.options?.opened(agentId, config)
+    this.deps.options?.opened(agentId, config, profileId)
   }
 
   /** Attaches a closed session for something only its agent can do, such as a setting or a fork. */
@@ -9486,7 +9563,13 @@ export class SessionManager {
   ): string {
     live.used = true
     live.userTurn = kettu !== true && from === undefined && approval !== true
-    if (live.userTurn) this.deps.options?.used(live.record.agentId, live.thread.session.config)
+    if (live.userTurn) {
+      this.deps.options?.used(
+        live.record.agentId,
+        live.thread.session.config,
+        live.record.profileId,
+      )
+    }
     const now = this.now()
     const entryId = this.addPrompt(live, content, now, from, device, approval, kettu)
     this.startTurn(live, content, now, entryId, portId)
@@ -10711,9 +10794,11 @@ export class SessionManager {
     const carried = source.thread.session.config
     const { connection } = runtime
     const gone = (): boolean => live.closing || this.live.get(live.id) !== live
-    const config = await this.applyStartOptions(live, connection, agentValues(carried), {
+    const from = mergeConfig(source.thread.session.config, setup.config)
+    const values = this.listedValues(record, from, agentValues(carried), carried)
+    const config = await this.applyStartOptions(live, connection, values, {
       restore: true,
-      from: mergeConfig(source.thread.session.config, setup.config),
+      from,
       stop: () => gone() || connection.isClosed,
     })
     if (gone()) {
@@ -14869,9 +14954,12 @@ export class SessionManager {
     if (this.manager.readOnly(sessionId) && !readOnlyMode(live.record.agentId, option, value)) {
       throw new HostError('restricted', t('manager.modeLocked'))
     }
-    if (!isValueOf(option, value)) {
+    // A model named otherwise than the session lists it, as a pick from New session's kept list.
+    const listed = configValueFor(option, value, this.knownChoices(live.record, optionId))
+    if (listed === null) {
       throw invalidParams(t('session.notAChoice', { value: String(value), option: option.name }))
     }
+    value = listed
     if (option.idleOnly && (live.turn || (status !== 'ready' && status !== 'closed'))) {
       throw new HostError('busy', t('session.configBetweenTurns', { option: option.name }))
     }
@@ -14898,7 +14986,7 @@ export class SessionManager {
         }
         const next = mergeConfig(live.thread.session.config, config)
         this.update(live, { config: next })
-        this.deps.options?.chose(live.record.agentId, option, value, next)
+        this.deps.options?.chose(live.record.agentId, option, value, next, live.record.profileId)
       }
       if (live.prepared) {
         // Chosen again, so whatever the notice said of it no longer holds.
@@ -15474,7 +15562,9 @@ export class SessionManager {
    */
   carriedOptions(callerId: string, agentId: AgentId): Record<string, string | boolean> {
     const caller = this.recordOf(callerId)
-    if (agentId !== caller.agentId) return this.deps.options?.rememberedOf(agentId) ?? {}
+    if (agentId !== caller.agentId) {
+      return this.deps.options?.rememberedOf(agentId, this.defaultProfile(agentId).profileId) ?? {}
+    }
     const options: Record<string, string | boolean> = {}
     const config = this.live.get(callerId)?.thread.session.config ?? []
     for (const option of config) {
@@ -16121,7 +16211,7 @@ export class SessionManager {
     const sandbox = this.sandboxFor(entry.agentId, manager.projectPath, entry.sandbox, managerId)
     const known = this.deps.options?.get(entry.agentId) ?? null
     const options: Record<string, string | boolean> = {
-      ...(this.deps.options?.rememberedOf(entry.agentId) ?? {}),
+      ...(this.deps.options?.rememberedOf(entry.agentId, profileId) ?? {}),
     }
     const modelOption = known?.config.find((option) => option.category === 'model')
     if (entry.model && modelOption) options[modelOption.id] = entry.model
@@ -19057,7 +19147,8 @@ function unmetValues(
   const out: StartNotice[] = []
   for (const [id, value] of Object.entries(wanted)) {
     const option = config.find((o) => o.id === id)
-    if (option?.value === value) continue
+    const kept = cached.find((o) => o.id === id)?.choices
+    if (option && sameConfigValue(option, option.value, value, kept)) continue
     const known = option ?? own.find((o) => o.id === id) ?? cached.find((o) => o.id === id)
     if (!known) continue
     out.push({

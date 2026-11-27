@@ -1,7 +1,7 @@
 // The notice a session shows when it could not keep values it was meant to have, such as a fork
 // whose agent refused its source's mode, or a session whose agent would not take its own back.
 
-import type { ConfigOption } from '@shared/thread'
+import { sameConfigValue, type ConfigOption } from '@shared/thread'
 import { isValueOf } from './agent-options'
 import { t } from './i18n'
 
@@ -58,7 +58,8 @@ export function lostValues(
     // 'default' keeps whatever the agent inherits, so there is nothing to lose.
     if (option.type === 'boolean' && option.value === 'default') continue
     const same = actual.find((o) => o.id === option.id && o.type === option.type)
-    if (same?.value === option.value) continue
+    // A model listed now under another of its names is the same model.
+    if (same && sameConfigValue(same, same.value, option.value, option.choices)) continue
     lost.push({ rank: RANK[option.category], value: lostValue(option, same) })
   }
   return lost.sort((a, b) => a.rank - b.rank).map(({ value }) => value)

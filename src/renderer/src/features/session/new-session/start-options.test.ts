@@ -57,3 +57,36 @@ describe('the effort New session carries to a picked model', () => {
     expect(effortOf(preparedConfig(ENTRY.config, ENTRY.levels, picks))).toBe('high')
   })
 })
+
+describe('a remembered model the agent now lists under another name', () => {
+  const XHIGH = select('effort', 'thought_level', 'xhigh', ['low', 'medium', 'high', 'xhigh'])
+  const MEDIUM = select('effort', 'thought_level', 'medium', ['low', 'medium', 'high'])
+  const claude = (fable: string): AgentOptions => ({
+    agentId: 'claude-code',
+    config: [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model',
+        type: 'select',
+        value: 'default',
+        choices: [
+          { value: 'default', name: 'Default', modelId: 'claude-opus-5-5', shownAs: 'opus' },
+          { value: 'opus', name: 'Opus 5.5', modelId: 'claude-opus-5-5' },
+          { value: fable, name: 'Fable 5.2', modelId: 'claude-fable-5-2' },
+        ],
+      },
+      MEDIUM,
+    ],
+    levels: { default: MEDIUM, 'claude-fable-5-2': XHIGH },
+    remembered: { model: 'claude-fable-5-2', effort: 'xhigh' },
+    observedAt: 0,
+  })
+
+  it('starts on it under the name listed now, at its remembered level', () => {
+    const config = startConfig(claude('fable'))
+    expect(config.find((o) => o.id === 'model')?.value).toBe('fable')
+    expect(effortOf(config)).toBe('xhigh')
+    expect(startValues(claude('fable'))).toEqual({ model: 'fable', effort: 'xhigh' })
+  })
+})

@@ -1,4 +1,5 @@
 import type { SessionSummary } from '@shared/agent-host'
+import { configChoiceFor } from '@shared/thread'
 import { optionsOn, useAgentOptionsStore } from '@renderer/stores/agent-options'
 import { agentName } from '@renderer/stores/agents'
 import { hostOfSession } from '@renderer/stores/sessions'
@@ -10,7 +11,7 @@ export function modelNameOf(state: OptionsState, run: SessionSummary | undefined
   if (!run?.model) return null
   const config = optionsOn(state, hostOfSession(run))[run.agentId]?.config
   const model = config?.find((o) => o.category === 'model' && o.type === 'select')
-  return model?.choices?.find((c) => c.value === run.model)?.name ?? run.model
+  return (model && configChoiceFor(model, run.model)?.name) ?? run.model
 }
 
 export function useModelName(run: SessionSummary | undefined): string | null {

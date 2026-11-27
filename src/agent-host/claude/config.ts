@@ -112,6 +112,65 @@ export function modelInfo(models: readonly ModelInfo[], value: string): ModelInf
   return models.find((model) => model.value === value)
 }
 
+/** Whether a row names a model by an alias, such as `fable`, that stands for another id. */
+function isAlias(model: ModelInfo): boolean {
+  return (
+    model.value !== DEFAULT_MODEL && !!model.resolvedModel && model.resolvedModel !== model.value
+  )
+}
+
+/** Keeps the aliases a list names, by alias, so a later list that leaves one out can name it. */
+export function rememberAliases(models: readonly ModelInfo[], into: Map<string, ModelInfo>): void {
+  for (const model of models) if (isAlias(model)) into.set(model.value, model)
+}
+
+/**
+ * The list with each alias it once had back in its place. Claude Code lists the model a session
+ * runs under the name it runs it by, so a session resumed on Fable 5.2 lists `claude-fable-5-2`
+ * where a new session lists `fable`. The alias goes back to its row, and the full id follows it
+ * as a row of its own, shown as the alias, so every session lists the model under both names.
+ */
+export function restoreAliases(
+  models: readonly ModelInfo[],
+  aliases: ReadonlyMap<string, ModelInfo>,
+): ModelInfo[] {
+  let list: ModelInfo[] = [...models]
+  for (const alias of aliases.values()) {
+    if (list.some((model) => model.value === alias.value)) continue
+    if (list.some((model) => isAlias(model) && model.resolvedModel === alias.resolvedModel))
+      continue
+    const at = list.findIndex(
+      (model) =>
+        model.value !== DEFAULT_MODEL &&
+        model.value === alias.resolvedModel &&
+        (model.resolvedModel ?? model.value) === model.value,
+    )
+    if (at < 0) continue
+    const row = list[at]!
+    list = [
+      ...list.slice(0, at),
+      { ...row, value: alias.value, resolvedModel: row.value },
+      ...list.slice(at + 1),
+      row,
+    ]
+  }
+  return list
+}
+
+/**
+ * The row of the model an alias the list leaves out stands for, when no row says so: the first
+ * whose name starts with the alias's word, as `Fable 5.2` does for `fable`, since Claude Code puts
+ * the model it lists under its full id in its alias's place.
+ */
+function namedBy(models: readonly ModelInfo[], alias: string): ModelInfo | undefined {
+  if (!/^[a-z]+$/i.test(alias)) return undefined
+  const word = alias.toLowerCase()
+  return models.find(
+    (model) =>
+      model.value !== DEFAULT_MODEL && model.displayName.split(/\s+/)[0]?.toLowerCase() === word,
+  )
+}
+
 /** Where a session at its default effort takes the level from, before the model's own default. */
 export interface InheritedEffort {
   /** `CLAUDE_CODE_EFFORT_LEVEL`. */
@@ -213,13 +272,17 @@ export function buildConfig(
         ...(same ? { shownAs: same.value } : {}),
       }
     })
-    // A model the settings name that the list leaves out still shows as the one in use.
+    // A model the settings name that the list leaves out still shows as the one in use, under the
+    // name of the row of the same model: an alias for a full id, or a full id for an alias.
     if (!listed.some((choice) => choice.value === choices.model)) {
       const same = aliasOf(choices.model)
+      const named = same ? undefined : namedBy(models, choices.model)
+      const row = same ?? named
       listed.push({
         value: choices.model,
-        name: same?.displayName ?? choices.model,
+        name: row?.displayName ?? choices.model,
         ...(same ? { modelId: choices.model, shownAs: same.value } : {}),
+        ...(named ? { modelId: named.resolvedModel ?? named.value, shownAs: named.value } : {}),
       })
     }
     options.push({

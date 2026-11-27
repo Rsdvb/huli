@@ -3,6 +3,7 @@ import {
   applyPatchInPlace,
   applyPatches,
   coalescePatches,
+  configValueFor,
   entryMessageId,
   isThreadEntry,
   mcpNoticeRecovered,
@@ -15,6 +16,7 @@ import {
   threadEntries,
   threadFromSnapshot,
   UnknownEntryError,
+  type ConfigOption,
   type Patch,
   type SessionView,
   type ThreadEntry,
@@ -1179,5 +1181,55 @@ describe('coalescePatches with a removal', () => {
       { op: 'entry.update', id: 'm:1', changes: { markdown: 'Again' } },
     ]
     expect(coalescePatches(patches)).toEqual(patches)
+  })
+})
+
+describe('the value a model option takes for a model under another name', () => {
+  const option = (choices: NonNullable<ConfigOption['choices']>): ConfigOption => ({
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    type: 'select',
+    value: 'default',
+    choices,
+  })
+  const DEFAULT = { value: 'default', name: 'Default', modelId: 'claude-opus-5-5', shownAs: 'opus' }
+  const OPUS = { value: 'opus', name: 'Opus 5.5', modelId: 'claude-opus-5-5' }
+
+  it('takes a full model id as the alias the list names it by', () => {
+    const listed = option([
+      DEFAULT,
+      OPUS,
+      { value: 'fable', name: 'Fable 5.2', modelId: 'claude-fable-5-2' },
+    ])
+    expect(configValueFor(listed, 'claude-fable-5-2')).toBe('fable')
+    expect(configValueFor(listed, 'claude-opus-5-5')).toBe('opus')
+  })
+
+  it('takes an alias as the full id the list names it by, when another list says what it is', () => {
+    const listed = option([
+      DEFAULT,
+      OPUS,
+      { value: 'claude-fable-5-2', name: 'Fable 5.2', modelId: 'claude-fable-5-2' },
+    ])
+    expect(configValueFor(listed, 'fable')).toBeNull()
+    const known = [{ value: 'fable', name: 'Fable 5.2', modelId: 'claude-fable-5-2' }]
+    expect(configValueFor(listed, 'fable', known)).toBe('claude-fable-5-2')
+  })
+
+  it('never takes Default for a model it happens to run, nor a model gone from the list', () => {
+    const listed = option([
+      DEFAULT,
+      { value: 'sonnet', name: 'Sonnet 5.5', modelId: 'claude-sonnet-5-5' },
+    ])
+    expect(configValueFor(listed, 'claude-opus-5-5')).toBeNull()
+    expect(configValueFor(listed, 'claude-fable-5-2')).toBeNull()
+  })
+
+  it('leaves routes of one model apart, whose values are no model id', () => {
+    const listed = option([
+      { value: 'official:deepseek-chat', name: 'DeepSeek', modelId: 'deepseek-chat' },
+    ])
+    expect(configValueFor(listed, 'openrouter:deepseek-chat')).toBeNull()
   })
 })

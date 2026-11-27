@@ -43,6 +43,8 @@ import type { FakeSessionState, Turn } from './turn.ts'
 
 // Kite's own ACP extension for background tasks, declared in the capabilities' `_meta`.
 const TASKS_META = 'kite/tasks'
+// Kite's own key in a model choice's `_meta`: the model id the choice runs.
+const MODEL_ID_META = 'kite/modelId'
 
 export const FAKE_AGENT_VERSION = '0.1.0'
 
@@ -79,6 +81,10 @@ interface ForkPoint {
 interface FakeSession extends FakeSessionState {
   /** The models its folder's `.fake-agent.json` listed when the session last started or attached. */
   moreModels: string[]
+  /** Its folder's aliases then, each a model under a short name, as Claude Code's `fable` is. */
+  aliases: Alias[]
+  /** The aliases it lists under their full ids, as Claude Code does the model a resume ran on. */
+  byId: Set<string>
   history: Recorded[]
   turnStarts: number[] // where each prompt's records begin in `history`
   updatedAt: string
@@ -134,6 +140,49 @@ function projectDefaults(
   } catch {
     return {}
   }
+}
+
+/** A model `.fake-agent.json` lists under an alias, and the full id the alias runs. */
+interface Alias {
+  value: string
+  id: string
+  name: string
+}
+
+/** The `.fake-agent.json` of `cwd`, parsed; empty when it is missing or not JSON. */
+function projectFile(cwd: string): Record<string, unknown> {
+  const file = join(cwd, '.fake-agent.json')
+  if (!existsSync(file)) return {}
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'))
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * The aliases of `.fake-agent.json`, each listed under its short name, or under its full id while
+ * the session runs that id, as Claude Code lists a model by the name its session runs it under.
+ */
+function projectAliases(cwd: string): Alias[] {
+  const { aliases } = projectFile(cwd)
+  if (!Array.isArray(aliases)) return []
+  return aliases.flatMap((item: unknown): Alias[] => {
+    const { value, id, name } = (item ?? {}) as Record<string, unknown>
+    return typeof value === 'string' && typeof id === 'string' && typeof name === 'string'
+      ? [{ value, id, name }]
+      : []
+  })
+}
+
+/**
+ * `resumedOn` of `.fake-agent.json`: the model a session it resumes or loads without having it,
+ * as after a restart, last ran, as Claude Code reads it from the session's transcript.
+ */
+function projectResumedOn(cwd: string): string | null {
+  const { resumedOn } = projectFile(cwd)
+  return typeof resumedOn === 'string' ? resumedOn : null
 }
 
 /**
@@ -351,6 +400,22 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
                 },
               ]
             : []),
+          ...(session.aliases.length > 0
+            ? [
+                {
+                  group: 'aliases',
+                  name: 'Aliases',
+                  options: session.aliases.map((alias) => ({
+                    value:
+                      session.model === alias.id || session.byId.has(alias.value)
+                        ? alias.id
+                        : alias.value,
+                    name: alias.name,
+                    _meta: { [MODEL_ID_META]: alias.id },
+                  })),
+                },
+              ]
+            : []),
         ],
       },
       {
@@ -436,6 +501,8 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
       systemPrompt: null,
       ...DEFAULT_CONFIG,
       moreModels: projectModels(cwd),
+      aliases: projectAliases(cwd),
+      byId: new Set(),
       history: [],
       turnStarts: [],
       updatedAt: new Date().toISOString(),
@@ -460,10 +527,18 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
   }
 
   /** Like codex-acp, which opens every session it resumes or loads at its defaults. */
-  const reopened = (session: FakeSession, mcpServers: McpServer[] = []): void => {
+  const reopened = (session: FakeSession, mcpServers: McpServer[] = [], known = true): void => {
     // Like the real agents, it connects to the servers of the latest attach.
     session.mcpServers = mcpServers
     session.moreModels = projectModels(session.cwd)
+    session.aliases = projectAliases(session.cwd)
+    // Like Claude Code, which resumes a session on the model it last ran, named by its full id.
+    const ran = known ? session.model : (projectResumedOn(session.cwd) ?? session.model)
+    const alias = session.aliases.find((item) => item.value === ran || item.id === ran)
+    if (alias) {
+      session.byId.add(alias.value)
+      session.model = alias.id
+    }
     if (resumeConfig === 'keep') return
     Object.assign(session, DEFAULT_CONFIG)
     if (resumeConfig === 'locked') lockedSessions.add(session.id)
@@ -760,6 +835,7 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
       requireSignedIn()
       if (oneSession) endOthers(ctx.params.sessionId)
       let session = sessions.get(ctx.params.sessionId)
+      const known = session !== undefined
       if (!session) {
         session = newSession(ctx.params.sessionId, ctx.params.cwd)
         session.title = 'Restored session'
@@ -773,12 +849,13 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
       }
       await replay(ctx.client, session)
       announceCommands(ctx.client, session.id)
-      reopened(session, ctx.params.mcpServers)
+      reopened(session, ctx.params.mcpServers, known)
       return sessionSetup(session)
     })
     .onRequest(methods.agent.session.resume, (ctx) => {
       requireSignedIn()
       let session = sessions.get(ctx.params.sessionId)
+      const known = session !== undefined
       if (!session) {
         // Like Claude Code, which keeps no history for a session nothing was sent to.
         if (env.FAKE_AGENT_RESUME_UNKNOWN === 'fail') {
@@ -788,7 +865,7 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
         session = newSession(ctx.params.sessionId, ctx.params.cwd)
         session.title = 'Restored session'
       }
-      reopened(session, ctx.params.mcpServers)
+      reopened(session, ctx.params.mcpServers, known)
       setTimeout(() => announceCommands(ctx.client, session.id), 0)
       return sessionSetup(session)
     })
@@ -975,11 +1052,19 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
         case 'model':
           if (
             typeof value !== 'string' ||
-            !['swift', 'balanced', 'deep', ...session.moreModels].includes(value)
+            ![
+              'swift',
+              'balanced',
+              'deep',
+              ...session.moreModels,
+              ...session.aliases.flatMap((alias) => [alias.value, alias.id]),
+            ].includes(value)
           ) {
             throw RequestError.invalidParams(undefined, 'Unknown model')
           }
           session.model = value
+          // Picked by its alias again, it is listed under the alias, as Claude Code does.
+          session.byId.delete(value)
           levelHidden.delete(session.id)
           break
         case 'thought_level':
