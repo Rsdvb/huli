@@ -52,8 +52,11 @@ appId: io.github.rsdvb.huli
     timeout: 3000
     optional: true
 - takeScreenshot: l02-step-open
-- assertNotVisible: '没能读取这一步的完整内容。.*'
 # The page gave the output's first and last lines; read whole, the step has hundreds more.
+- extendedWaitUntil:
+    notVisible: '正在读取完整内容…'
+    timeout: 20000
+- assertNotVisible: '没能读取这一步的完整内容。.*'
 - scrollUntilVisible:
     element:
       text: '显示全部，还有前面 [0-9]{3,} 行'
