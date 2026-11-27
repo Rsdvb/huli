@@ -245,6 +245,8 @@ export class RemoteHost {
   private waiting: Record<string, string[]> = {}
   private progress: Record<string, SessionProgress> = {}
   private present: boolean | null = null
+  /** Between the system's suspend and its wake, which a process starting meanwhile is told. */
+  private asleep = false
 
   constructor(private readonly deps: RemoteHostDeps) {}
 
@@ -523,13 +525,27 @@ export class RemoteHost {
     if (this.toServer({ type: 'remote-host:direct', direct })) this.direct = JSON.stringify(direct)
   }
 
+  /**
+   * The computer goes to sleep: devices and other hosts are let go of now, and no other host is
+   * tried until `resume` or the user is back.
+   */
+  suspend(): void {
+    this.asleep = true
+    this.host?.post({ type: 'remote-host:suspend' })
+  }
+
   /** The computer woke from sleep: the host reads its addresses again and tries its hosts. */
   resume(): void {
+    this.asleep = false
     this.host?.post({ type: 'remote-host:resume' })
   }
 
-  /** Huli: a window was focused: the hosts not connected are tried now, unless just tried. */
+  /**
+   * Huli: a window was focused or the screen unlocked: the hosts not connected are tried now,
+   * unless just tried. The user is here, so a computer still taken as asleep woke.
+   */
   nudge(): void {
+    if (this.asleep) return this.resume()
     this.host?.post({ type: 'remote-host:nudge' })
   }
 
@@ -953,6 +969,7 @@ export class RemoteHost {
       waiting: this.waiting,
       progress: this.progress,
       ...(this.present === null ? {} : { present: this.present }),
+      ...(this.asleep ? { asleep: true } : {}),
       discoverable: this.initDiscoverable(),
       account: this.initAccount(),
       reverseHosts: true,
