@@ -16,7 +16,7 @@ import type {
 } from '@shared/thread'
 import { startTestHost, type TestHost, type TestPort } from './testing/harness'
 import { tempFolder } from './testing/temp'
-import { LEAN_TITLE_CHARS } from './threads/digest'
+import { DIGEST_INPUT_BYTES, LEAN_TITLE_CHARS } from './threads/digest'
 import { INLINE_MEDIA_LIMIT } from './threads/model'
 
 // Two hosts start and restart, with turns of a few MB; a busy machine needs more than 5 s.
@@ -124,11 +124,15 @@ it('gives a lean page what folded steps show, and the rest on demand', async () 
     expect(output.startsWith(item.head!)).toBe(true)
     expect(output.endsWith(item.tail!)).toBe(true)
     expect(Buffer.byteLength(item.head!) + Buffer.byteLength(item.tail!)).toBeLessThan(1024)
-    // A long command's title is cut, and its input digested.
+    // A long command's title is cut, and its input digested past the digests' limit.
     expect(step.title).toHaveLength(LEAN_TITLE_CHARS + 1)
     expect(step.titleSize).toBe(Buffer.byteLength(whole.title))
-    expect(step).not.toHaveProperty('rawInput')
-    expect(step.rawInputDigest?.size).toBe(Buffer.byteLength(whole.rawInput!))
+    if (Buffer.byteLength(whole.rawInput!) > DIGEST_INPUT_BYTES) {
+      expect(step).not.toHaveProperty('rawInput')
+      expect(step.rawInputDigest?.size).toBe(Buffer.byteLength(whole.rawInput!))
+    } else {
+      expect(step.rawInput).toBe(whole.rawInput)
+    }
   }
 
   // The whole step, and a screenshot's bytes before any checkpoint stored them.

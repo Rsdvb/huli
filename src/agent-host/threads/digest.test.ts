@@ -14,7 +14,6 @@ import {
   DIGEST_OUTPUT_BYTES,
   digestEntries,
   digestEntry,
-  LEAN_INPUT_BYTES,
   LEAN_TITLE_CHARS,
   leanEntries,
   leanEntry,
@@ -159,20 +158,23 @@ describe('lean pages', () => {
     expect(item.tail).toBe('\u{1F600}'.repeat(PREVIEW_BYTES / 4))
   })
 
-  it('cuts a long title, saying its size, and digests an input sooner', () => {
+  it('cuts a long title, saying its size, and digests an input as other pages do', () => {
     const title = `Run ${'a'.repeat(LEAN_TITLE_CHARS - 5)}\u{1F600}${'b'.repeat(500)}`
-    const rawInput = 'x'.repeat(LEAN_INPUT_BYTES + 1)
+    const rawInput = 'x'.repeat(DIGEST_INPUT_BYTES + 1)
     const lean = leanEntry(tool({ title, rawInput }))
     // The cut falls inside the pair, which is left out whole.
     expect(lean).toMatchObject({
       title: `${title.slice(0, LEAN_TITLE_CHARS - 1)}…`,
       titleSize: Buffer.byteLength(title),
-      rawInputDigest: { size: LEAN_INPUT_BYTES + 1, lines: 1 },
+      rawInputDigest: { size: DIGEST_INPUT_BYTES + 1, lines: 1 },
     })
     expect(lean).not.toHaveProperty('rawInput')
     expect(hasToolDigest(lean)).toBe(true)
-    // Outside a lean page the title and that input stay whole.
-    expect(digestEntry(tool({ title, rawInput }))).toEqual(tool({ title, rawInput }))
+    // Outside a lean page the title stays whole.
+    expect(digestEntry(tool({ title, rawInput }))).toMatchObject({ title })
+    expect(leanEntry(tool({ title, rawInput: 'x'.repeat(DIGEST_INPUT_BYTES) }))).toMatchObject({
+      rawInput: 'x'.repeat(DIGEST_INPUT_BYTES),
+    })
     const short = tool({ title: 'Run ls', rawInput: 'ls' })
     expect(leanEntry(short)).toBe(short)
   })

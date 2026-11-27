@@ -1,7 +1,8 @@
 // A device that draws tool calls folded gets their long outputs and inputs as digests in the pages
 // it reads, which are most of their bytes; `sessions.entry` reads an entry whole when it opens one.
-// Huli: a lean page (`lean` in the read) goes further: its digests carry a short preview, a long
-// title is cut and an input digested sooner, so a step costs about what its folded row shows.
+// Huli: a lean page (`lean` in the read) goes further: its digests carry a short preview and a long
+// title is cut, so a step costs about what its folded row shows. Inputs keep the digests' limit:
+// cards such as a workflow suggestion's draw what a shorter input says.
 
 import type {
   DigestedThreadEntry,
@@ -21,8 +22,6 @@ export const DIGEST_DIFF_BYTES = 8 * 1024
 /** The steps comparing a diff's lines may take, a few milliseconds, before its counts are null. */
 export const DIFF_WORK = 2_000_000
 
-/** Huli: in a lean page, an input this long or shorter stays whole. */
-export const LEAN_INPUT_BYTES = 1024
 /** Huli: a lean page cuts a title longer than this many characters. */
 export const LEAN_TITLE_CHARS = 240
 /** Huli: a lean preview's head and tail each take at most this many lines and UTF-8 bytes. */
@@ -50,8 +49,7 @@ export function digestEntry(entry: ThreadEntry): DigestedThreadEntry {
 
 /**
  * Huli: `digestEntry` for a lean page: each digest of an output with its first and last lines, a
- * diff's saying whether it made the file, an input digested past `LEAN_INPUT_BYTES` and a title
- * cut at `LEAN_TITLE_CHARS`.
+ * diff's saying whether it made the file, and a title cut at `LEAN_TITLE_CHARS`.
  */
 export function leanEntry(entry: ThreadEntry): DigestedThreadEntry {
   return digested(entry, true)
@@ -64,7 +62,7 @@ function digested(entry: ThreadEntry, lean: boolean): DigestedThreadEntry {
     const digest = digestContent(item, lean)
     if (digest) (content ??= [...entry.content])[index] = digest
   })
-  const input = entry.rawInput === undefined ? null : digestInput(entry.rawInput, lean)
+  const input = entry.rawInput === undefined ? null : digestInput(entry.rawInput)
   const title = lean ? cutTitle(entry.title) : null
   if (!content && !input && title === null) return entry
   const out: DigestedToolEntry = { ...entry, content: content ?? entry.content }
@@ -101,11 +99,9 @@ function digestContent(item: ToolContent, lean: boolean): ToolContentDigest | nu
   return null
 }
 
-function digestInput(input: string, lean: boolean): ToolInputDigest | null {
+function digestInput(input: string): ToolInputDigest | null {
   const size = Buffer.byteLength(input)
-  return size > (lean ? LEAN_INPUT_BYTES : DIGEST_INPUT_BYTES)
-    ? { size, lines: lineCount(input) }
-    : null
+  return size > DIGEST_INPUT_BYTES ? { size, lines: lineCount(input) } : null
 }
 
 /** A title past `LEAN_TITLE_CHARS`, cut there with an ellipsis; null for one that fits. */
