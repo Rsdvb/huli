@@ -254,6 +254,84 @@ it('leaves out the entries of a thread the reader holds as it is', async () => {
   ).toMatchObject({ unchanged: true, entries: [] })
 })
 
+it('shows a phone what it sends after a lean read and a known one, and the replies', async () => {
+  dir = await tempFolder('kite-lean-send-')
+  const host = await startTestHost({ userDataPath: dir, agentEnv: AGENT_ENV })
+  hosts.push(host)
+  const phone = host.connect(PHONE)
+  // As the phone starts a session: the first message with sessions.create, then a lean read.
+  const { id } = await phone.request('sessions.create', {
+    agentId: 'fake-agent',
+    projectPath: host.project,
+    prompt: [{ type: 'text', text: '/heavy-tools --count 4 --shots 2 --pace 0' }],
+  })
+  const textOf = (entry: ThreadEntry): string | null =>
+    entry.kind === 'user' && entry.content[0]?.type === 'text' ? entry.content[0].text : null
+  const ends = () => phone.entries(id).filter((entry) => entry.kind === 'turn_end').length
+  // What follows the message `text` in the phone's copy; nothing while the copy lacks it.
+  const after = (text: string) => {
+    const entries = phone.entries(id)
+    const at = entries.findIndex((entry) => textOf(entry) === text)
+    return at < 0 ? [] : entries.slice(at + 1)
+  }
+  const send = (text: string) =>
+    phone.request('sessions.queue', { sessionId: id, content: [{ type: 'text', text }] })
+  await phone.request('sessions.watch', { sessionId: id })
+  const opened = await phone.request('sessions.open', { sessionId: id, lean: true })
+  phone.track(opened as SessionSnapshot)
+  await phone.until(() => ends() === 1, 30_000)
+
+  // Away and back: the screen lets the session go, then reads it again naming what it holds.
+  await phone.request('sessions.unwatch', { sessionId: id })
+  const held = phone.replicas.get(id)!
+  await phone.request('sessions.watch', { sessionId: id })
+  const again = await phone.request('sessions.open', {
+    sessionId: id,
+    lean: true,
+    known: { epoch: opened.epoch!, seq: held.seq },
+  })
+  expect(again).toMatchObject({ unchanged: true, entries: [] })
+  held.seq = again.seq
+
+  // A message to the idle session, as the composer and the diff notes send theirs.
+  expect(await send('请处理我对改动的 2 条意见')).toEqual({ itemId: null })
+  await phone.until(() => ends() === 2, 30_000)
+  expect(after('请处理我对改动的 2 条意见').some((entry) => entry.kind === 'agent')).toBe(true)
+
+  // One queued while the agent waits for an answer, and the answer: both turns show.
+  await send('/permission')
+  await phone.until(() =>
+    phone.entries(id).some((entry) => entry.kind === 'tool' && entry.permission !== null),
+  )
+  const asked = phone.entries(id).find((entry) => entry.kind === 'tool' && entry.permission)!
+  expect((await send('queued while asked')).itemId).toEqual(expect.any(String))
+  if (asked.kind !== 'tool' || !asked.permission) throw new Error('no request')
+  await phone.request('permissions.respond', {
+    sessionId: id,
+    requestId: asked.permission.requestId,
+    optionId: 'allow-once',
+  })
+  await phone.until(() => ends() === 4, 30_000)
+  expect(after('/permission').some((entry) => entry.kind === 'agent')).toBe(true)
+  expect(after('queued while asked').some((entry) => entry.kind === 'agent')).toBe(true)
+
+  // An edit sent again: the turns from it go, and the new message and its reply show.
+  const edited = phone.entries(id).find((entry) => textOf(entry) === 'queued while asked')!
+  await phone.request('sessions.rewind', { sessionId: id, entryId: edited.id, draft: [] })
+  await phone.until(() => !phone.entries(id).some((entry) => entry.id === edited.id))
+  await send('sent again')
+  await phone.until(
+    () => ends() === 4 && after('sent again').some((e) => e.kind === 'agent'),
+    30_000,
+  )
+  expect(phone.entries(id).flatMap((entry) => textOf(entry) ?? [])).toEqual([
+    '/heavy-tools --count 4 --shots 2 --pace 0',
+    '请处理我对改动的 2 条意见',
+    '/permission',
+    'sent again',
+  ])
+})
+
 it("tells sub-agents' rows their tool calls and latest run, live and stored", async () => {
   dir = await tempFolder('kite-lean-stats-')
   const first = await startTestHost({ userDataPath: dir, agentEnv: AGENT_ENV })
