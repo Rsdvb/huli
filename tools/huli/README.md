@@ -631,6 +631,29 @@ deterministic classifier, and the user may have the host answer low ones by itse
   project's tests runs its code, which edits allowed by the agent's own mode (or the edits level)
   may have changed.
 
+### Allowing from Needs you (一键允许)
+
+The sidebar's 等你处理 (shown once other computers are added) answers plain requests without
+opening their sessions, through the same host requests as the thread's cards, so another
+computer's sessions work alike.
+
+- A row whose session's oldest request (`permission-queue.ts`) is a plain one the host does not
+  judge high shows 允许 on hover and keyboard focus, before More: allow once for that request
+  (`permissions.respond`). Its tooltip and accessible label say what it allows and the risk level
+  with the host's reason. With two or more plain requests waiting there, a second button lists them
+  and offers 全部允许（N） through `permissions.respondAll`, which leaves high requests, questions,
+  plans and forms for the user. A row whose oldest request is a question, a plan, a form or a high
+  one shows neither, and a click opens the session as before.
+- The group's title gets 全部允许 once two or more of its sessions wait. It reads each session's
+  requests when chosen and lists what it allows and what it leaves per session; nothing is sent
+  before the confirming click.
+- A row reads its session (`sessions.requests`) only while the pointer or the focus is on it, and
+  again when that session changes then; nothing is read for rows nobody points at.
+- A toast confirms, with no 撤销: the host hands an answer to the agent at once, so there is never a
+  moment an undo could take it back.
+- `features/sidebar/quick-allow.tsx`, `quick-allow-model.ts`, `use-quick-allow.ts`; the row's
+  `quickAllow` in `session-row.tsx`.
+
 ### Sandbox (沙箱)
 
 Agents run commands with the user's rights. A session may instead run in a sandbox the user picks,
