@@ -533,6 +533,7 @@ export class RemoteServer {
    */
   suspend(): void {
     if (this.stopped) return
+    if (this.sessions.size > 0) this.options.log('info', 'Going to sleep; letting the devices go')
     for (const connection of [...this.connections]) connection.drop()
     for (const session of [...this.sessions]) session.dropConnections()
   }
@@ -1456,6 +1457,7 @@ class DeviceSession {
     if (this.state !== 'open') return
     if (!this.resumable) return this.end()
     this.state = 'away'
+    this.server.options.log('info', `Device ${this.device.id} went away; its session waits`)
     this.frontChanged(this.paceMs < BACKGROUND_PACE_MS)
     // Their bytes on the way are lost; the device sends them again in uploads of their own.
     this.uploads.dropUnfinished()

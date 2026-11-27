@@ -2831,6 +2831,7 @@ export class HostClient {
     if (this.stopped || this.sleeping) return
     this.sleeping = true
     this.watchNetwork()
+    if (this.links.size > 0) this.options.log('info', 'Going to sleep; letting the hosts go')
     for (const link of this.links.values()) link.suspend()
   }
 
@@ -2840,6 +2841,9 @@ export class HostClient {
    */
   resume(): void {
     if (this.stopped) return
+    if (this.sleeping && this.links.size > 0) {
+      this.options.log('info', 'Awake; trying the hosts again')
+    }
     this.sleeping = false
     if (this.networkTimer) this.network = networkPrint()
     else this.watchNetwork()
