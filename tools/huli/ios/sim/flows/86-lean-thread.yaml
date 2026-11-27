@@ -1,0 +1,68 @@
+# Lean threads: a turn of long commands with 64 KB outputs and screenshots, as the fake agent's
+# /heavy-tools plays it, read lean. The run of steps opens, a long command opens to the preview the
+# page gave and then its whole output read with sessions.entry, and the app is still there after
+# the session is left and opened again (a read that names the thread it holds). Before lean
+# threads the phone named tool digests it could not draw: opening such a step threw and closed
+# the app.
+# Ends: both appearances
+appId: io.github.rsdvb.huli
+---
+- launchApp:
+    stopApp: true
+    arguments:
+      huliNoAsk: 'YES'
+- tapOn:
+    text: '允许'
+    optional: true
+- tapOn: '会话'
+- tapOn: '新会话'
+- waitForAnimationToEnd
+- tapOn:
+    text: '(想让|给) .*'
+- inputText: '/heavy-tools --count 24 --shots 3 --pace 40'
+- tapOn:
+    text: '选一个项目，或者直接说你要什么。'
+    optional: true
+- tapOn: '发送'
+- extendedWaitUntil:
+    visible:
+      text: '.*Ran 24 commands.*'
+    timeout: 180000
+- takeScreenshot: l01-thread
+# The run folds its steps; the first tap opens it, the next a long command.
+- tapOn:
+    text: '.*运行了.*'
+    index: 0
+    optional: true
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 1500
+    optional: true
+- tapOn:
+    text: '.*bash -lc.*'
+    index: 0
+- extendedWaitUntil:
+    visible: 'PAUSE_NEVER'
+    timeout: 3000
+    optional: true
+- takeScreenshot: l02-step-open
+- assertNotVisible: '没能读取这一步的完整内容。.*'
+- scrollUntilVisible:
+    element:
+      text: '.*screenshot --window app.*'
+    direction: DOWN
+    optional: true
+- takeScreenshot: l03-screenshot-step
+# Away and back: the thread reads again naming the copy the phone holds.
+- back
+- waitForAnimationToEnd
+- tapOn:
+    text: '.*Run the long build scripts.*'
+    index: 0
+- extendedWaitUntil:
+    visible:
+      text: '给 .* 发消息.*'
+    timeout: 30000
+- takeScreenshot: l04-reopened
+- assertVisible:
+    text: '给 .* 发消息.*'
