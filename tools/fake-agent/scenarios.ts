@@ -227,6 +227,86 @@ const longStream: Scenario = async (turn) => {
 
 const TOOL_KINDS: ToolKind[] = ['read', 'search', 'edit', 'execute', 'read', 'fetch', 'think']
 
+// Huli: heavy-tools caps an output where Claude Code's own cap lies, and makes screenshots this big.
+const HEAVY_OUTPUT_MAX = 64 * 1024
+const HEAVY_SHOT_BYTES = 240 * 1024
+
+/** Bytes that do not compress, as a JPEG's, base64; each index gives different ones. */
+function noiseBase64(bytes: number, seed: number): string {
+  const out = new Uint8Array(bytes)
+  let state = (seed * 2654435761 + 1) >>> 0
+  for (let i = 0; i < bytes; i++) {
+    state = (state * 1103515245 + 12345) >>> 0
+    out[i] = state >>> 24
+  }
+  return Buffer.from(out).toString('base64')
+}
+
+/** A command whose text runs to a few KB, as a script an agent writes inline does. */
+function longCommand(index: number): string {
+  const lines = 20 + (index % 5) * 30
+  const body = Array.from(
+    { length: lines },
+    (_, i) => `echo "step ${i} of call ${index}: checking the build output and the logs"`,
+  )
+  return `bash -lc '\n${body.join('\n')}\n'`
+}
+
+/** An output of about `bytes`, fenced as a command's. */
+function heavyOutput(command: string, index: number, bytes: number): string {
+  const lines: string[] = []
+  let size = 0
+  for (let i = 0; size < bytes; i++) {
+    const line = `[${index}:${i}] ${command.slice(0, 40)} -> ok ${'.'.repeat(i % 60)}`
+    lines.push(line)
+    size += line.length + 1
+  }
+  return '```\n' + lines.join('\n') + '\n```'
+}
+
+/**
+ * Huli: commands with long inputs and outputs near Claude Code's 64 KB cap, a screenshot every
+ * `--shots` calls: a long thread whose tool calls are most of its bytes, as a session of a
+ * workflow with many sub-agents makes.
+ */
+const heavyTools: Scenario = async (turn) => {
+  const output = Math.min(turn.options.size, HEAVY_OUTPUT_MAX)
+  for (let i = 0; i < turn.options.count; i++) {
+    if (turn.signal.aborted) return 'cancelled'
+    const toolCallId = `heavy-${turn.id}-${i}`
+    const shot = turn.options.shots > 0 && i % turn.options.shots === turn.options.shots - 1
+    const command = shot ? `screenshot --window app --index ${i}` : longCommand(i)
+    await turn.send({
+      sessionUpdate: 'tool_call',
+      toolCallId,
+      title: `Run ${command}`,
+      kind: 'execute',
+      status: 'in_progress',
+      rawInput: { command },
+    })
+    await turn.sleep(turn.options.paceMs)
+    await turn.send({
+      sessionUpdate: 'tool_call_update',
+      toolCallId,
+      status: 'completed',
+      content: shot
+        ? [
+            {
+              type: 'content',
+              content: {
+                type: 'image',
+                mimeType: 'image/jpeg',
+                data: noiseBase64(HEAVY_SHOT_BYTES, i),
+              },
+            },
+          ]
+        : [{ type: 'content', content: { type: 'text', text: heavyOutput(command, i, output) } }],
+    })
+  }
+  if (!(await stream(turn, `Ran ${turn.options.count} commands.`))) return 'cancelled'
+  return 'end_turn'
+}
+
 const toolStorm: Scenario = async (turn) => {
   if (!(await stream(turn, 'Scanning the repository before I change anything.\n\n'))) {
     return 'cancelled'
@@ -1833,6 +1913,7 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   usage,
   'extra-usage': extraUsage,
   'big-context': bigContext,
+  'heavy-tools': heavyTools,
   status,
   context,
   recall,
