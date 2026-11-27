@@ -67,6 +67,7 @@ Code (kept small so upstream merges stay clean):
 | `src/agent-host/{agents,host,validate}.ts`, `acp/connection.ts`, `src/shared/agent-host.ts`, `agents-section.tsx`, `mobile/src/app/settings/agent.tsx` | an agent added, turned on or whose page opens is started (never installed) to learn its sign-in methods and state (`agents.readSignIn`, `readingSignIn` while it runs), asked once without a session that would stay in an unchecked agent's history; a sign-in waiting on a browser or terminal is checked every 4 s for 3 minutes, at once when its page is done and when the window comes back, and a check that finds it signed in ends a pending `authenticate` as signed in (`sign-in-watch.test.ts`) |
 | ----------------------------------------------------------------------------------------------------------------------------------------               | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------                                                                                                                                                                                         |
 | `native/island/Sources/*.swift`, `src/main/island/{bridge,protocol}.ts`, `island-row.tsx`, `sections.tsx`                                              | the notch island's wings take only the room the menu bar leaves, let clicks through to it, and stay out of a menu bar without a notch; Settings › Notifications chooses `notifications.islandSides` (see The island beside the menu bar)                                                                                                                                                                                                                                                                    |
+| `src/main/island/{bridge,notices,view}.ts`, `src/shared/plan-readings.ts`, `lib/plan-readings.ts`, `app.ts`                                            | the island's plan limits are each account's newest reading, without turned-off agents, and follow a reset with no word from a host (see Plan limits on the island)                                                                                                                                                                                                                                                                                                                                          |
 | `src/agent-host/{agents,host,validate}.ts`, `src/shared/{agent-host,host-request-limits}.ts`, `agents-section.tsx`, `app/bootstrap.ts`                 | an agent's Remove… also offers to uninstall its program from the computer and to delete its own data there (see Removing an agent from the computer)                                                                                                                                                                                                                                                                                                                                                        |
 | `src/agent-host/{agents,sessions,started-mode}.ts`, `agents-section.tsx`, `agent-sign-in.ts`, `sign-in-actions.tsx`, `new-session.tsx`                 | a signed-out agent's status leaves out the account, plan and balances an earlier sign-in read, which go once it names another account; a changed key or a reset reads the sign-in again (`readingSignIn`); a sign-in stops after 5 minutes; a session's sign-in notice leaves once it no longer waits (`signed-out-readings.test.ts`); New session and a waiting session offer the sign-in in place                                                                                                         |
 
@@ -1843,7 +1844,8 @@ hidden and could not be clicked. Kite's island takes only the room the menu bar 
   for; without it the left side counts as taken. A menu bar with no status item on it (hidden, as
   in a full-screen app, or unreadable) and one that hides itself (`_HIHideMenuBar`) leave no room.
   The arithmetic is `native/island/Sources/Layout.swift`, pure, with `swift test` cases in
-  `native/island/Tests` (`Package.swift` builds that file alone for them).
+  `native/island/Tests` (`Package.swift` builds that file for them, with the store's two and no
+  views).
 - **When.** On events only, never on a timer: the active app or Space changing (and once more
   0.5 s later, as menus settle), the screens changing, an app launching (1.5 s later, when its
   status item is up) or quitting, the island about to collapse or grow, Settings' choice changing,
@@ -1873,6 +1875,22 @@ hidden and could not be clicked. Kite's island takes only the room the menu bar 
 
 `huli-island.yml` builds and runs the helper on GitHub's macOS runner (see Workflows); its
 `fakenotch` and `room=L:R` debug switches draw a notch on a screen without one and give the room.
+
+### Plan limits on the island (灵动岛的用量)
+
+The island's plan limit notice (the fullest window at 90% or more, with its ring) and a session
+row held by a used-up window stood still while the window's numbers moved: main built them only
+when a host said something, took the fullest reading of every agent on every host, and kept a
+turned-off agent's last one. So a window that reset while the agents sat idle stayed used up on
+the island, and an older reading another host or agent kept outranked the account's newest.
+Now `src/main/island/notices.ts` takes each account's newest reading on any host, as the window
+does (`src/shared/plan-readings.ts`, which the renderer's `lib/plan-readings.ts` re-exports),
+leaves out turned-off agents and windows that no longer hold (`limitHolds`), and names when the
+view next changes by time alone: the soonest a window at 90% or more stops holding. The bridge
+keeps one timer for that moment and none while no window is that full, and builds the view again
+when the island opens and when the Mac wakes (`powerMonitor` `resume`), since timers stand still
+while it sleeps. No read is added: the island still asks only running agents, at most once a
+minute, when it opens.
 
 ### Kite in development
 
