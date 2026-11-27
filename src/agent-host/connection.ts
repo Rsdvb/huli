@@ -27,6 +27,7 @@ import type {
   TokenTotals,
   TurnRefusal,
   UserContent,
+  WorkflowAgentDetail,
 } from '@shared/thread'
 import type { RiskSubject } from './risk/classify'
 import type { SessionSandbox } from './sandbox/native'
@@ -724,6 +725,8 @@ export interface AgentConnection {
   stopTask?(sessionId: string, taskId: string): Promise<void>
   /** The end of a background task's output, at most 8 KiB. */
   taskOutput?(sessionId: string, taskId: string): Promise<{ output: string; truncated: boolean }>
+  /** Huli: what one agent of a workflow task was asked and gave back, by its index in the run. */
+  workflowAgent?(sessionId: string, taskId: string, index: number): Promise<WorkflowAgentDetail>
   /**
    * Huli: moves the command or subagent that holds up the tool call `toolCallId` to the
    * background, or without it every one; false when none matched. Absent where the agent cannot.

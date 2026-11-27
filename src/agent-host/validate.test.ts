@@ -226,6 +226,21 @@ describe('createValidators', () => {
     }
   })
 
+  it("Huli: takes a workflow task and a whole agent index for an agent's detail", () => {
+    const method = posix['sessions.workflowAgent']
+    expect(method({ sessionId: 's', taskId: 'w1', index: 3, other: 1 })).toEqual({
+      sessionId: 's',
+      taskId: 'w1',
+      index: 3,
+    })
+    rejects(() => method({ sessionId: 's', taskId: 'w1' }))
+    rejects(() => method({ sessionId: 's', taskId: 'w1', index: -1 }))
+    rejects(() => method({ sessionId: 's', taskId: 'w1', index: 1.5 }))
+    rejects(() => method({ sessionId: 's', taskId: 'w1', index: '3' }))
+    rejects(() => method({ sessionId: 's', taskId: 'w1', index: 2_000_000 }))
+    rejects(() => method({ sessionId: 's', index: 1 }))
+  })
+
   it('takes a session for its processes and Clean, and a bounded call to move', () => {
     for (const method of ['sessions.processes', 'sessions.cleanTasks'] as const) {
       expect(posix[method]({ sessionId: 's', other: 1 })).toEqual({ sessionId: 's' })

@@ -21,6 +21,7 @@
     "noTurn": "当前没有进行中的对话",
     "noBackgroundTasks": "{{agent}} 不提供后台任务",
     "noBackgroundTask": "这个后台任务不在会话中",
+    "noWorkflowAgent": "这个工作流里没有这个智能体",
     "backgroundTaskEnded": "这个后台任务已结束",
     "side": {
       "subagent": "子智能体没有侧聊",
@@ -945,6 +946,7 @@
     "notStarted": "Claude Code 还没有启动",
     "noProgram": "找不到 SDK 要用的 Claude Code 程序",
     "noTaskOutput": "这个版本的 Claude Code 读不了任务输出",
+    "noWorkflowAgent": "Claude Code 还没报告过这个工作流智能体",
     "stoppedEarly": "Claude Code 在本轮对话结束前停止了",
     "ultracodeUnknown": "Ultracode 继承的值未知，所以无法应用",
     "auth": {

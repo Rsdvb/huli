@@ -199,6 +199,7 @@ import {
   type UserContent,
   type OutsideKind,
   type BackgroundTaskView,
+  type WorkflowAgentDetail,
   appealConfirms,
   PROMPT_SUGGESTION_CHARS,
 } from '@shared/thread'
@@ -8278,12 +8279,27 @@ export class SessionManager {
       return null
     }
     let commands = 0
+    let workflows = 0
+    let workflowAgents = 0
     for (const task of live.thread.session.background ?? []) {
-      if (task.status === 'running') commands++
+      if (task.status !== 'running') continue
+      if (task.kind !== 'workflow') {
+        commands++
+        continue
+      }
+      workflows++
+      for (const agent of task.workflow?.agents ?? []) {
+        if (agent.state === 'running' || agent.state === 'queued') workflowAgents++
+      }
     }
     const subagents = this.workingSubagents(live).length
-    if (commands + subagents === 0) return null
-    return { commands, subagents, reportsBack: live.connection?.reportsBack === true }
+    if (commands + subagents + workflows === 0) return null
+    return {
+      commands,
+      subagents,
+      ...(workflows > 0 ? { workflows, workflowAgents } : {}),
+      reportsBack: live.connection?.reportsBack === true,
+    }
   }
 
   /** Sends the session's summary again once what it runs on between turns changed. */
@@ -13396,6 +13412,26 @@ export class SessionManager {
     if (!connection.taskOutput) return printedBy(live.thread, task.toolCallId)
     try {
       return await connection.taskOutput(live.record.acpSessionId, taskId)
+    } catch (error) {
+      throw agentError(error)
+    }
+  }
+
+  /** Huli: what one agent of a workflow the session lists was asked and gave back. */
+  async workflowAgent(
+    sessionId: string,
+    taskId: string,
+    index: number,
+  ): Promise<WorkflowAgentDetail> {
+    const { live, connection, task } = this.backgroundTask(sessionId, taskId)
+    if (
+      !connection.workflowAgent ||
+      !task.workflow?.agents.some((agent) => agent.index === index)
+    ) {
+      throw new HostError('not_found', t('session.noWorkflowAgent'))
+    }
+    try {
+      return await connection.workflowAgent(live.record.acpSessionId, taskId, index)
     } catch (error) {
       throw agentError(error)
     }
