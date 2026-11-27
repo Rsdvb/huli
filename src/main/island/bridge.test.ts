@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ALREADY_ANSWERED, type HostEvent, type SessionSummary } from '@shared/agent-host'
+import {
+  ALREADY_ANSWERED,
+  type AgentStatus,
+  type HostEvent,
+  type PlanLimit,
+  type SessionSummary,
+} from '@shared/agent-host'
 import type { IslandState } from '@shared/island'
 import type { ThreadEntry } from '@shared/thread'
 import type { UpdateStatus } from '@shared/updates'
 import { COALESCE_MS, IslandBridge, type HelperProcess, type IslandBridgeDeps } from './bridge'
 import { ISLAND_HOST_METHODS } from './host-feed'
-import { ISLAND_PROTOCOL, type MainToIsland } from './protocol'
+import { ISLAND_PROTOCOL, type IslandNotice, type IslandRow, type MainToIsland } from './protocol'
 
 class FakeHelper implements HelperProcess {
   sent: MainToIsland[] = []
@@ -770,6 +776,165 @@ describe('notices', () => {
     s.helper().say({ type: 'notice', notice: 'limit' })
     await vi.advanceTimersByTimeAsync(0)
     expect(s.actions).toEqual(['restart', 'usage'])
+  })
+})
+
+describe('plan limits', () => {
+  const studio = 'c'.repeat(32)
+  const MINUTE = 60_000
+
+  function limit(over: Partial<PlanLimit>): PlanLimit {
+    return {
+      window: 'five_hour',
+      label: '5-hour',
+      usedPercent: 92,
+      resetsAt: Date.now() + 60 * MINUTE,
+      state: 'ok',
+      observedAt: Date.now(),
+      ...over,
+    }
+  }
+
+  function claude(limits: PlanLimit[], over: Partial<AgentStatus> = {}): AgentStatus {
+    return {
+      id: 'claude-code',
+      name: 'Claude Code',
+      harnessId: 'claude-code',
+      state: 'available',
+      account: { kind: 'account', label: 'Claude Max', email: 'me@example.com' },
+      limits,
+      ...over,
+    } as AgentStatus
+  }
+
+  /** What the helper holds now: the last view, with each change after it applied. */
+  function shown(s: Setup): { notices: IslandNotice[]; rows: IslandRow[] } {
+    const view = s.helper().of('view').at(-1)!
+    let { notices } = view
+    const rows = new Map(view.rows.map((row) => [row.key, row]))
+    for (const change of s
+      .helper()
+      .of('change')
+      .filter((c) => c.seq > view.seq)) {
+      if (change.notices) notices = change.notices
+      for (const row of change.rows) rows.set(row.key, row)
+    }
+    return { notices, rows: [...rows.values()] }
+  }
+
+  const meter = (s: Setup) => shown(s).notices.find((n) => n.key === 'limit')?.meter ?? null
+
+  it('follows a window’s use as the agents’ status says it, on this computer and another host', async () => {
+    const s = setup([], {}, [{ id: studio, name: 'Studio', sessions: [] }])
+    await started(s)
+    s.emit({ type: 'agent.status', status: claude([limit({ usedPercent: 91 })]) })
+    await vi.advanceTimersByTimeAsync(COALESCE_MS)
+    expect(meter(s)).toEqual({ percent: 91, reached: false, text: '91%' })
+
+    s.emit({ type: 'agent.status', status: claude([limit({ usedPercent: 94 })]) })
+    await vi.advanceTimersByTimeAsync(COALESCE_MS)
+    expect(s.helper().of('change').at(-1)!.notices?.[0]?.meter?.percent).toBe(94)
+
+    // A newer reading of the same account on another host is the account's.
+    vi.advanceTimersByTime(MINUTE)
+    s.bridge.remoteEvent(studio, {
+      type: 'agent.status',
+      status: claude([limit({ usedPercent: 97 })]),
+    })
+    await vi.advanceTimersByTimeAsync(COALESCE_MS)
+    expect(meter(s)?.percent).toBe(97)
+  })
+
+  it('drops a used-up window once it resets, with no word from any host', async () => {
+    const s = setup([summary('s1', { agentId: 'claude-code' })])
+    await started(s)
+    const resetsAt = Date.now() + 10 * MINUTE
+    s.emit({
+      type: 'agent.status',
+      status: claude([limit({ usedPercent: 100, state: 'reached', resetsAt })]),
+    })
+    await vi.advanceTimersByTimeAsync(COALESCE_MS)
+    expect(meter(s)?.reached).toBe(true)
+    expect(shown(s).rows[0]!.status).toBe('limited')
+    const sent = s.helper().sent.length
+
+    await vi.advanceTimersByTimeAsync(5 * MINUTE)
+    expect(s.helper().sent).toHaveLength(sent)
+    await vi.advanceTimersByTimeAsync(5 * MINUTE + COALESCE_MS)
+    expect(meter(s)).toBeNull()
+    expect(shown(s).rows[0]!.status).toBe('idle')
+    // Nothing more is due, so nothing wakes again.
+    const after = s.helper().sent.length
+    await vi.advanceTimersByTimeAsync(24 * 60 * MINUTE)
+    expect(s.helper().sent).toHaveLength(after)
+  })
+
+  it('catches up on a reset its timer slept through, on waking or opening', async () => {
+    const s = setup([])
+    await started(s)
+    const start = Date.now()
+    s.emit({
+      type: 'agent.status',
+      status: claude([
+        limit({ usedPercent: 100, state: 'reached', resetsAt: start + 10 * MINUTE }),
+        limit({
+          window: 'seven_day',
+          label: 'Weekly',
+          usedPercent: 95,
+          resetsAt: start + 120 * MINUTE,
+        }),
+      ]),
+    })
+    await vi.advanceTimersByTimeAsync(COALESCE_MS)
+    expect(meter(s)?.reached).toBe(true)
+
+    // Timers stand still while a Mac sleeps; the clock does not.
+    vi.setSystemTime(start + 15 * MINUTE)
+    s.bridge.timeChanged()
+    await vi.advanceTimersByTimeAsync(COALESCE_MS)
+    expect(meter(s)).toEqual({ percent: 95, reached: false, text: '95%' })
+
+    vi.setSystemTime(start + 130 * MINUTE)
+    s.helper().say({ type: 'expanded' })
+    await vi.advanceTimersByTimeAsync(COALESCE_MS)
+    expect(meter(s)).toBeNull()
+  })
+
+  it('shows an account’s newest reading, never an older one another host or agent kept', async () => {
+    const s = setup([summary('s1', { agentId: 'claude-code' })], {}, [
+      { id: studio, name: 'Studio', sessions: [] },
+    ])
+    await started(s)
+    s.emit({
+      type: 'agent.status',
+      status: claude([limit({ usedPercent: 100, state: 'reached' })]),
+    })
+    await vi.advanceTimersByTimeAsync(COALESCE_MS)
+    expect(meter(s)?.reached).toBe(true)
+
+    // A reset credit spent through the other host: its reading is the account's now.
+    vi.advanceTimersByTime(MINUTE)
+    s.bridge.remoteEvent(studio, {
+      type: 'agent.status',
+      status: claude([limit({ usedPercent: 3 })]),
+    })
+    await vi.advanceTimersByTimeAsync(COALESCE_MS)
+    expect(meter(s)).toBeNull()
+    expect(shown(s).rows[0]!.status).toBe('idle')
+
+    // A turned-off agent keeps its last reading, which nothing reads again.
+    s.emit({
+      type: 'agent.status',
+      status: claude([limit({ usedPercent: 99 })], {
+        id: 'codex',
+        name: 'Codex',
+        harnessId: 'codex',
+        account: { kind: 'account', label: 'ChatGPT Pro', email: 'me@example.com' },
+        disabled: true,
+      }),
+    })
+    await vi.advanceTimersByTimeAsync(COALESCE_MS)
+    expect(meter(s)).toBeNull()
   })
 })
 

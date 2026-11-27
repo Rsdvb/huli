@@ -23,12 +23,13 @@ import {
   sessionModel,
 } from '@shared/session-groups'
 import type { AgentId, PermissionKind, ToolKind } from '@shared/thread'
+import { newestLimits, type PlanReading } from '@shared/plan-readings'
 import type { TurnPhase } from '@shared/turn-phase'
 import type { StepState } from '@shared/workflow'
 import { KETTU_SERVER, mcpCallOf } from '@shared/mcp-call'
 import type { UpdateStatus } from '@shared/updates'
 import { islandT, kettuToolT } from '../i18n'
-import { buildNotices, type NoticeAction } from './notices'
+import { buildNotices, limitsChangeAt, planReadings, type NoticeAction } from './notices'
 import { limitLabel, limitPhrase } from './windows'
 import type {
   IslandGroup,
@@ -113,6 +114,8 @@ export interface BuiltView {
   owners: ReadonlyMap<string, RequestOwner>
   /** What each notice does when clicked. */
   notices: ReadonlyMap<string, NoticeAction>
+  /** When the view changes next with no word from any host, as a plan limit resets; null for never. */
+  changesAt: number | null
 }
 
 export type RequestOwner =
@@ -492,10 +495,13 @@ function buildRow(
   group: IslandGroup,
   now: number,
   requests: { requests: PendingRequest[]; askedAt: Record<string, number> } | undefined,
+  readings: ReadonlyMap<string, PlanReading>,
 ): IslandRow {
   const agent = state.agents.get(summary.agentId)
   const options = state.options.get(summary.agentId)
-  const limit = reachedLimit(agent, sessionModel(options, summary.model), now)
+  // The account's newest reading, as the window's composer shows it.
+  const read = agent && { ...agent, limits: newestLimits(readings, agent) }
+  const limit = reachedLimit(read, sessionModel(options, summary.model), now)
   const waiting = needsYou(summary)
   const status: IslandStatus = waiting
     ? 'waiting'
@@ -651,6 +657,7 @@ export function buildView(
   update: UpdateStatus | null = null,
 ): BuiltView {
   const owners = new Map<SessionSummary, HostState>()
+  const readings = planReadings(hosts)
   for (const state of hosts)
     for (const summary of state.sessions.values()) owners.set(summary, state)
   const all = [...owners.keys()]
@@ -674,7 +681,8 @@ export function buildView(
   for (const summary of [...shown, ...idle]) {
     const state = owners.get(summary)!
     const waiting = needsYou(summary) ? state.requests.get(summary.id) : undefined
-    const row = buildRow({ state, summary }, listedIn.get(summary) ?? 'idle', now, waiting)
+    const group = listedIn.get(summary) ?? 'idle'
+    const row = buildRow({ state, summary }, group, now, waiting, readings)
     rows.push(row)
     rowMap.set(row.key, { hostKey: state.key, sessionId: summary.id })
     // An offline host's requests cannot be answered until it is back.
@@ -704,7 +712,7 @@ export function buildView(
   }
   // The oldest request first, as the island answers them in turn.
   requests.sort((a, b) => (a.askedAt ?? Infinity) - (b.askedAt ?? Infinity))
-  const notices = buildNotices(update, hosts, now)
+  const notices = buildNotices(update, hosts, readings, now)
   return {
     view: {
       rows,
@@ -716,6 +724,7 @@ export function buildView(
     requests: sent,
     owners: requestOwners,
     notices: notices.actions,
+    changesAt: limitsChangeAt(hosts, readings, now),
   }
 }
 
