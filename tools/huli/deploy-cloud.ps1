@@ -48,6 +48,8 @@ try {
     # The hosted web client is public, so the update channel's path stays out of it.
     Invoke-Checked 'rebrand' { node tools/huli/rebrand.mjs --no-update-path }
     Invoke-Checked 'cloud build' { npx.cmd vite build -c vite.cloud.config.mts }
+    # The web build copies the artifact viewers in, so they are built first (as build:web:hosted).
+    Invoke-Checked 'viewers build' { npx.cmd vite build -c vite.viewers.config.mts }
     Invoke-Checked 'web build' { npx.cmd vite build -c vite.web.config.mts --mode hosted }
   } finally {
     Pop-Location
