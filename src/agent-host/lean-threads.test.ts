@@ -31,9 +31,10 @@ afterEach(async () => {
   dir = null
 })
 
-// `KITE_MEASURE_LEAN=1` plays a thread the size of the one that froze the phone and prints bytes.
+// `KITE_MEASURE_LEAN=1` also plays threads the size of those that froze the phone and prints what
+// clients pull before and after lean threads; it takes a minute and about a GB of memory.
 const MEASURE = process.env.KITE_MEASURE_LEAN === '1'
-const CALLS = MEASURE ? 740 : 24
+const CALLS = 24
 const SHOTS = 4
 const PHONE = {
   id: 'b'.repeat(32),
@@ -58,7 +59,12 @@ function imagesIn(value: unknown, found: ContentRef[] = []): ContentRef[] {
 }
 
 /** A session that ran the heavy-tools scenario to its end, watched by the window. */
-async function heavySession(host: TestHost, window: TestPort, count = CALLS): Promise<string> {
+async function heavySession(
+  host: TestHost,
+  window: TestPort,
+  count = CALLS,
+  shots = SHOTS,
+): Promise<string> {
   const { id } = await window.request('sessions.create', {
     agentId: 'fake-agent',
     projectPath: host.project,
@@ -67,7 +73,7 @@ async function heavySession(host: TestHost, window: TestPort, count = CALLS): Pr
   await window.untilStatus(id, 'ready')
   await window.request('sessions.prompt', {
     sessionId: id,
-    content: [{ type: 'text', text: `/heavy-tools --count ${count} --shots ${SHOTS} --pace 0` }],
+    content: [{ type: 'text', text: `/heavy-tools --count ${count} --shots ${shots} --pace 0` }],
   })
   await window.untilStatus(id, 'running')
   await window.untilStatus(id, 'ready')
@@ -96,12 +102,6 @@ it('gives a lean page what folded steps show, and the rest on demand', async () 
   const old = await host
     .connect({ id: 'c'.repeat(32), name: 'Old phone' })
     .request('sessions.snapshot', { sessionId: id, from: 0 })
-  if (MEASURE) {
-    console.log(
-      `thread of ${full.entries.length} entries: window ${bytes(full)} B, device without image ` +
-        `refs ${bytes(old)} B, lean ${bytes(lean)} B`,
-    )
-  }
   expect(tools(full.entries)).toHaveLength(CALLS)
   expect(tools(lean.entries)).toHaveLength(CALLS)
   expect(bytes(lean)).toBeLessThan(bytes(full) / 20)
@@ -302,3 +302,93 @@ it("reads a device an entry only of the session it names, and that session's own
     phone.request('sessions.blob', { sessionId: id, hash: 'a'.repeat(64) }),
   ).rejects.toMatchObject({ code: 'not_found' })
 })
+
+it.runIf(MEASURE)(
+  'measures what a phone and a computer pull, before and after',
+  async () => {
+    dir = await tempFolder('kite-lean-measure-')
+    const host = await startTestHost({ userDataPath: dir, agentEnv: AGENT_ENV })
+    hosts.push(host)
+    const window = host.connect()
+    // As an older host served them: the phone's digests and the computer's whole pages, a live
+    // thread's screenshots as base64 to both.
+    const oldPhone = host.connect({ id: 'c'.repeat(32), name: 'Old phone', toolDigests: true })
+    const oldMac = host.connect({ id: 'd'.repeat(32), name: 'Old Mac' })
+    const phone = host.connect(PHONE)
+    const mac = host.connect({ id: 'e'.repeat(32), name: 'Mac', imageRefs: true })
+    const rows: string[] = []
+    const note = (what: string, before: unknown, after: unknown) => {
+      const [b, a] = [bytes(before), bytes(after)]
+      rows.push(`${what}: ${b} B -> ${a} B (${((a / b) * 100).toFixed(2)}%)`)
+    }
+
+    // One long session: 740 commands of about 64 KB, a screenshot every fourth call.
+    const big = await heavySession(host, window, 740, 4)
+    const snap = (port: TestPort, params: object) =>
+      port.request('sessions.snapshot', { sessionId: big, ...params })
+    const open = (port: TestPort, params: object) =>
+      port.request('sessions.open', { sessionId: big, ...params })
+    note(
+      'one session, open, old phone vs lean',
+      await open(oldPhone, {}),
+      await open(phone, { lean: true }),
+    )
+    note(
+      'one session, open, old Mac vs lean',
+      await open(oldMac, {}),
+      await open(mac, { lean: true }),
+    )
+    note(
+      'one session from its start, old phone vs lean',
+      await snap(oldPhone, { from: 0 }),
+      await snap(phone, { from: 0, lean: true }),
+    )
+    note(
+      'one session from its start, old Mac vs lean',
+      await snap(oldMac, { from: 0 }),
+      await snap(mac, { from: 0, lean: true }),
+    )
+    const held = await open(mac, { lean: true })
+    const from = held.older ?? 0
+    const known = { epoch: held.epoch!, seq: held.seq }
+    note(
+      'one session again, nothing new, old Mac vs known',
+      await snap(oldMac, { from }),
+      await snap(mac, { from, lean: true, known }),
+    )
+
+    // A parent whose page shows five sub-agents that took screenshots, as the phone opens it.
+    const children: string[] = []
+    for (let i = 0; i < 5; i++) children.push(await heavySession(host, window, 40, 2))
+    const whole = []
+    for (const child of children) {
+      whole.push(await oldPhone.request('sessions.snapshot', { sessionId: child, from: 0 }))
+    }
+    note(
+      "five sub-agents' rows, old phone vs sessions.stats",
+      whole,
+      await phone.request('sessions.stats', { sessionIds: children }),
+    )
+
+    // The Mac's reconnect with four watched sessions that did not change.
+    const macBefore = []
+    const macAfter = []
+    for (const child of children.slice(0, 4)) {
+      const kept = await mac.request('sessions.open', { sessionId: child, lean: true })
+      macBefore.push(
+        await oldMac.request('sessions.snapshot', { sessionId: child, from: kept.older ?? 0 }),
+      )
+      macAfter.push(
+        await mac.request('sessions.snapshot', {
+          sessionId: child,
+          from: kept.older ?? 0,
+          lean: true,
+          known: { epoch: kept.epoch!, seq: kept.seq },
+        }),
+      )
+    }
+    note('Mac reconnect, four watched sessions, nothing new', macBefore, macAfter)
+    console.log(rows.join('\n'))
+  },
+  600_000,
+)
