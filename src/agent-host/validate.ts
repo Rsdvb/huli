@@ -3,6 +3,7 @@
 
 import {
   MAX_PINNED_MODELS,
+  MAX_STATS_SESSIONS,
   type AgentInstallMethod,
   type HostMethod,
   type HostParams,
@@ -144,6 +145,7 @@ import {
   type AgentId,
   type ContentRef,
   type FormValues,
+  type KnownThread,
   type ProblemReportOutcome,
   type QuestionAnswer,
   type UserContent,
@@ -1178,6 +1180,18 @@ function routineChanges(value: unknown, platform: Platform): RoutineChanges {
 
 function sessionId(o: Fields): string {
   return string(o, 'sessionId', ID_CHARS)
+}
+
+/** Huli: the longest `known.epoch` a snapshot gives. */
+const EPOCH_CHARS = 128
+
+/** Huli: `lean` and `known` of a session's read, as `sessions.open` and `sessions.snapshot` take. */
+function leanRead(o: Fields): { lean?: true; known?: KnownThread } {
+  const lean = optionalFlag(o, 'lean')
+  if (o.known === undefined) return lean ? { lean } : {}
+  if (!isRecord(o.known)) throw invalidParams('known must be an object')
+  const known = { epoch: string(o.known, 'epoch', EPOCH_CHARS), seq: position(o.known, 'seq') }
+  return { ...(lean ? { lean } : {}), known }
 }
 
 /** Huli: a file's size and time, as a `files.readBytes` expects to find it. */
@@ -2547,20 +2561,36 @@ export function createValidators(platform: Platform): Validators {
         ...(o.source !== undefined ? { source: 'claude-desktop' as const } : {}),
       }
     },
-    'sessions.open': session,
+    'sessions.open': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), ...leanRead(o) }
+    },
     'sessions.snapshot': (params) => {
       const o = fields(params)
       return {
         sessionId: sessionId(o),
         ...(o.from === undefined ? {} : { from: position(o, 'from') }),
+        ...leanRead(o),
       }
     },
     'sessions.page': (params) => {
       const o = fields(params)
+      const lean = optionalFlag(o, 'lean')
       return {
         sessionId: sessionId(o),
         before: position(o, 'before'),
         ...(o.from === undefined ? {} : { from: position(o, 'from') }),
+        ...(lean ? { lean } : {}),
+      }
+    },
+    'sessions.stats': (params) => {
+      const o = fields(params)
+      if (!Array.isArray(o.sessionIds)) throw invalidParams('sessionIds must be a list')
+      if (o.sessionIds.length > MAX_STATS_SESSIONS) {
+        throw invalidParams(`sessionIds holds more than ${MAX_STATS_SESSIONS}`)
+      }
+      return {
+        sessionIds: [...new Set(o.sessionIds.map((value) => sessionId({ sessionId: value })))],
       }
     },
     'sessions.entry': (params) => {

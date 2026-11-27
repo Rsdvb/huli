@@ -240,7 +240,7 @@ describe('a paired device', () => {
       type: 'welcome',
       protocol: 1,
       host: { name: 'Studio', platform: process.platform, version: '0.0.0-test' },
-      features: ['bytes', 'load'],
+      features: ['bytes', 'load', 'lean-threads'],
       role: 'owner',
       device: { id: t.phone.id, name: 'Phone' },
       terminal: false,
@@ -597,7 +597,7 @@ describe("a device's notifications", () => {
     const device = await t.connect(undefined, { protocol: { min: 1, max: PROTOCOL_VERSION } })
     expect(await device.first).toMatchObject({
       protocol: 4,
-      features: ['bytes', 'load', 'push', 'web-push', 'standby'],
+      features: ['bytes', 'load', 'lean-threads', 'push', 'web-push', 'standby'],
     })
     const state = await ask(device, 'notifications.set', {
       target,
@@ -624,13 +624,18 @@ describe("a device's notifications", () => {
   it('are not offered to an older device, or by a host without its signing key', async () => {
     const t = await setup({ push: true })
     const older = await t.connect(undefined, { protocol: { min: 1, max: 3 } })
-    expect(await older.first).toMatchObject({ protocol: 3, features: ['bytes', 'load', 'standby'] })
+    expect(await older.first).toMatchObject({
+      protocol: 3,
+      features: ['bytes', 'load', 'lean-threads', 'standby'],
+    })
     await expect(ask(older, 'notifications.get', undefined)).rejects.toMatchObject({
       code: 'unavailable',
     })
     const plain = await setup()
     const device = await plain.connect(undefined, { protocol: { min: 1, max: PROTOCOL_VERSION } })
-    expect(await device.first).toMatchObject({ features: ['bytes', 'load', 'standby'] })
+    expect(await device.first).toMatchObject({
+      features: ['bytes', 'load', 'lean-threads', 'standby'],
+    })
     await expect(ask(device, 'notifications.set', { target })).rejects.toMatchObject({
       code: 'unavailable',
     })
@@ -1651,6 +1656,39 @@ describe("the host's events", () => {
     await expect.poll(() => pad.port.events.filter(isHostAdminEvent)).toEqual([changed, pairing])
     await expect.poll(() => phone.port.events.filter(isHostAdminEvent)).toEqual([changed])
   })
+})
+
+describe("a phone's tool digests", () => {
+  /** The first tool output of a session that ran two long commands, as the phone's page holds it. */
+  async function firstOutput(features: string[]): Promise<unknown> {
+    const t = await setup()
+    const phone = await t.connect(undefined, {
+      client: { kind: 'ios', version: '1.0.0', platform: 'iOS 26.1' },
+      features,
+    })
+    await phone.first
+    const { id } = await phone.port.request('sessions.create', {
+      agentId: 'fake-agent',
+      projectPath: t.agent.project,
+    })
+    await phone.port.open(id)
+    await phone.port.request('sessions.prompt', {
+      sessionId: id,
+      content: [{ type: 'text', text: '/heavy-tools --count 2 --shots 0 --pace 0' }],
+    })
+    await phone.port.untilEntry(id, (entry) => entry.kind === 'turn_end')
+    const page = await phone.port.request('sessions.snapshot', { sessionId: id, from: 0 })
+    const step = page.entries.find((entry) => entry.kind === 'tool')
+    return step?.kind === 'tool' ? step.content[0] : null
+  }
+
+  it('reach a phone that draws lean pages, not one from before them', async () => {
+    expect(await firstOutput(['image-refs', 'tool-digests'])).toMatchObject({ type: 'markdown' })
+    expect(await firstOutput(['image-refs', 'tool-digests', 'lean-threads'])).toMatchObject({
+      type: 'digest',
+      of: 'markdown',
+    })
+  }, 60_000)
 })
 
 describe("a desktop app's browser", () => {

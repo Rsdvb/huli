@@ -18,6 +18,7 @@ import type {
   StoredEntry,
   StoredOutline,
   StoredOutputs,
+  StoredStats,
   StoredThread,
   ThreadPage,
   ThreadWrite,
@@ -430,6 +431,11 @@ export class ThreadStore {
   /** Huli: the bytes each session's stored thread keeps, by id, for the recycle bin. */
   sizes(sessionIds: readonly string[]): Promise<Record<string, number>> {
     return this.readAll({ op: 'sizes', sessionIds: [...sessionIds] })
+  }
+
+  /** Huli: each stored thread's tool calls and latest run, by id; one without a thread is left out. */
+  stats(sessionIds: readonly string[]): Promise<Record<string, StoredStats>> {
+    return this.readAll({ op: 'stats', sessionIds: [...sessionIds] })
   }
 
   /** How many media files the threads keep and their bytes, and what is not moved into files yet. */

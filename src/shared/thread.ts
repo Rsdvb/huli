@@ -423,6 +423,11 @@ const STOP_REASONS: readonly (StopReason | null)[] = [
   null,
 ]
 
+/** Huli: whether a value is a turn's stop reason, null not counted. */
+export function isStopReason(value: unknown): value is StopReason {
+  return value !== null && STOP_REASONS.includes(value as StopReason | null)
+}
+
 export function isReportedTurn(value: unknown): value is ReportedTurn {
   if (typeof value !== 'object' || value === null) return false
   const { sessionId, title, agent, stopReason } = value as Record<string, unknown>
@@ -1763,6 +1768,23 @@ export interface SessionSnapshot {
   older: number | null
   /** The latest plan when it lies before `entries`, for the plan in the top bar. */
   plan: PlanEntry | null
+  /**
+   * Huli: which copy of the thread `seq` counts in on the host. A reader that holds the thread at
+   * `seq`, the patches it applied since included, names both in `known` to read it again; absent
+   * from older hosts.
+   */
+  epoch?: string
+  /**
+   * Huli: the thread is still as `known` said: `entries` is empty, and the reader keeps its
+   * entries, `older` and `plan`, taking `session` and `seq` from here.
+   */
+  unchanged?: true
+}
+
+/** Huli: the thread a reader holds, as `sessions.open` and `sessions.snapshot` take it. */
+export interface KnownThread {
+  epoch: string
+  seq: number
 }
 
 /** A page of older entries, read with the `older` cursor of the page after it. */
@@ -1777,7 +1799,18 @@ export interface OlderPage {
  * length in UTF-8 bytes, a diff's old and new text together.
  */
 export type ToolContentDigest =
-  | { type: 'digest'; of: 'markdown'; size: number; lines: number }
+  | {
+      type: 'digest'
+      of: 'markdown'
+      size: number
+      lines: number
+      /**
+       * Huli: in a lean page, the text's first and last lines, a few hundred bytes each, for the
+       * folded step's preview; absent from older hosts and from other pages.
+       */
+      head?: string
+      tail?: string
+    }
   | {
       type: 'digest'
       of: 'diff'
@@ -1786,6 +1819,8 @@ export type ToolContentDigest =
       /** Lines added and removed; null when the change is too large to compare quickly. */
       added: number | null
       removed: number | null
+      /** Huli: in a lean page, the change made the file; absent from older hosts. */
+      created?: true
     }
 
 /** What stands for a tool call's input too long to send, in place of `rawInput`. */
@@ -1802,6 +1837,11 @@ export type DigestedToolEntry = Omit<ToolEntry, 'content' | 'rawInput'> & {
   content: (ToolContent | ToolContentDigest)[]
   rawInput?: string
   rawInputDigest?: ToolInputDigest
+  /**
+   * Huli: a lean page cut the title, which ends in an ellipsis; its whole length in UTF-8 bytes.
+   * A later patch that sets `title` drops it.
+   */
+  titleSize?: number
 }
 
 export type DigestedThreadEntry = Exclude<ThreadEntry, ToolEntry> | DigestedToolEntry
@@ -1833,6 +1873,7 @@ export function toolContentItems(
 /** Whether a tool entry still contains digested input or content that needs `sessions.entry`. */
 export function hasToolDigest(entry: ThreadEntry | DigestedThreadEntry | undefined): boolean {
   if (!entry || entry.kind !== 'tool') return false
+  if ('titleSize' in entry && entry.titleSize !== undefined) return true
   if (
     'rawInputDigest' in entry &&
     entry.rawInputDigest !== undefined &&
@@ -1841,6 +1882,15 @@ export function hasToolDigest(entry: ThreadEntry | DigestedThreadEntry | undefin
     return true
   }
   return toolContentItems(entry).some(isToolContentDigest)
+}
+
+/**
+ * Huli: a markdown digest's preview, its first lines, a line with an ellipsis and its last lines;
+ * null without one. A fenced output keeps its fences, so it reads as the output did.
+ */
+export function digestPreview(item: ToolContentDigest): string | null {
+  if (item.of !== 'markdown' || (item.head === undefined && item.tail === undefined)) return null
+  return [item.head, '…', item.tail].filter((part) => part !== undefined).join('\n')
 }
 
 /** `SessionSnapshot` as a device that sent `TOOL_DIGESTS_FEATURE` gets it. */
@@ -2113,6 +2163,7 @@ export function applyPatches(
         }
         const merged = { ...entry, ...patch.changes } as ThreadEntry & {
           rawInputDigest?: ToolInputDigest
+          titleSize?: number
         }
         if (
           merged.kind === 'tool' &&
@@ -2121,6 +2172,7 @@ export function applyPatches(
         ) {
           delete merged.rawInputDigest
         }
+        if (merged.kind === 'tool' && 'title' in patch.changes) delete merged.titleSize
         writableById()[patch.id] = merged
         break
       }

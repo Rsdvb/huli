@@ -206,6 +206,7 @@ const SCENARIO_TITLES: Partial<Record<ScenarioName | 'compact', string>> = {
   'basic-turn': 'Fix the flaky login test',
   'long-stream': 'A very long answer',
   'tool-storm': 'Scan the whole repository',
+  'heavy-tools': 'Run the long build scripts',
   permission: 'Run the login tests',
   'parallel-permissions': 'Three approvals at once',
   subagent: 'Explore with a subagent',

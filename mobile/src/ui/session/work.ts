@@ -4,7 +4,16 @@
 // counts the rows show. Ported from the desktop's entries/helpers.ts, tool-call-model.ts,
 // read-code.ts, turn-phase.ts and tool-times.ts.
 
-import type { ThreadEntry, ThreadState, ToolContent, ToolEntry, ToolKind } from '@shared/thread'
+import {
+  isDiffContentItem,
+  toolContentItems,
+  type DiffContentItem,
+  type ThreadEntry,
+  type ThreadState,
+  type ToolContent,
+  type ToolEntry,
+  type ToolKind,
+} from '@shared/thread'
 import { turnDoing, type TurnDoing, type TurnPhaseName } from '@shared/turn-phase'
 
 export { writingId } from '@shared/turn-phase'
@@ -117,7 +126,13 @@ export function numberedRead(markdown: string, path: string | undefined): string
   return `${fence}${language} startLine=${start}\n${code.join('\n')}\n${fence}`
 }
 
-type Diff = Extract<ToolContent, { type: 'diff' }>
+// Huli: an edit's diff, or the counts a lean page holds of a large one.
+type Diff = DiffContentItem
+
+/** Huli: whether an edit made its file, from its diff or a lean page's digest of it. */
+export function madeFile(diff: Diff): boolean {
+  return diff.type === 'diff' ? diff.oldText === null : diff.created === true
+}
 
 /** A step of a folded run, as its summary counts it. */
 export type RunStep =
@@ -143,7 +158,7 @@ export function toolStep(entry: ToolEntry): RunStep {
     const first = entry.locations[0]?.path
     return { ...base, paths: first !== undefined ? [first] : [], ...description }
   }
-  const diffs = entry.content.filter((c): c is Diff => c.type === 'diff')
+  const diffs = toolContentItems(entry).filter(isDiffContentItem)
   const paths = diffs.length > 0 ? diffs.map((d) => d.path) : entry.locations.map((l) => l.path)
   return { ...base, paths: [...new Set(paths)], diffs, ...description }
 }
@@ -304,7 +319,7 @@ export function runSummary(steps: RunStep[]): {
   const created = new Set<string>()
   for (const step of steps) {
     if (step.kind !== 'tool') continue
-    for (const diff of step.diffs ?? []) if (diff.oldText === null) created.add(diff.path)
+    for (const diff of step.diffs ?? []) if (madeFile(diff)) created.add(diff.path)
   }
   const byPart = new Map<RunPart, Unit[]>()
   for (const unit of steps.flatMap((step) => unitsOf(step, created))) {
@@ -355,8 +370,12 @@ export function diffStats(diffs: readonly Diff[]): { insertions: number; deletio
   for (const diff of diffs) {
     let known = statsKept.get(diff)
     if (!known) {
-      const made = diffTexts(diff.oldText, diff.newText)
-      known = { insertions: made.insertions, deletions: made.deletions }
+      if (diff.type === 'digest') {
+        known = { insertions: diff.added ?? 0, deletions: diff.removed ?? 0 }
+      } else {
+        const made = diffTexts(diff.oldText, diff.newText)
+        known = { insertions: made.insertions, deletions: made.deletions }
+      }
       statsKept.set(diff, known)
     }
     insertions += known.insertions

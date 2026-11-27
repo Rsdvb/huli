@@ -47,6 +47,54 @@ describe('createValidators', () => {
     rejects(() => posix['agents.logout']({ agentId: 'unknown-agent' }))
   })
 
+  it('takes lean reads and the thread a reader holds, and nothing beyond them', () => {
+    const known = { epoch: 'run.0.token.l', seq: 12 }
+    expect(posix['sessions.open']({ sessionId: 's', lean: true, known, more: 1 })).toEqual({
+      sessionId: 's',
+      lean: true,
+      known,
+    })
+    expect(posix['sessions.open']({ sessionId: 's', lean: false })).toEqual({ sessionId: 's' })
+    expect(
+      posix['sessions.snapshot']({ sessionId: 's', from: 0, known: { ...known, other: 1 } }),
+    ).toEqual({ sessionId: 's', from: 0, known })
+    expect(posix['sessions.page']({ sessionId: 's', before: 9, lean: true, known })).toEqual({
+      sessionId: 's',
+      before: 9,
+      lean: true,
+    })
+    rejects(() => posix['sessions.open']({ sessionId: 's', lean: 'yes' }))
+    rejects(() => posix['sessions.page']({ sessionId: 's', before: 9, lean: 1 }))
+    for (const bad of [
+      'epoch',
+      { epoch: 'e' },
+      { seq: 1 },
+      { epoch: '', seq: 1 },
+      { epoch: 'e', seq: -1 },
+      { epoch: 'e', seq: 1.5 },
+      { epoch: 'x'.repeat(129), seq: 1 },
+      { epoch: 7, seq: 1 },
+    ]) {
+      rejects(() => posix['sessions.snapshot']({ sessionId: 's', known: bad }))
+    }
+  })
+
+  it("takes a bounded list of session ids for sub-agents' stats", () => {
+    expect(posix['sessions.stats']({ sessionIds: ['a', 'b', 'a'], other: 1 })).toEqual({
+      sessionIds: ['a', 'b'],
+    })
+    expect(posix['sessions.stats']({ sessionIds: [] })).toEqual({ sessionIds: [] })
+    rejects(() => posix['sessions.stats']({}))
+    rejects(() => posix['sessions.stats']({ sessionIds: 'a' }))
+    rejects(() => posix['sessions.stats']({ sessionIds: [1] }))
+    rejects(() => posix['sessions.stats']({ sessionIds: [''] }))
+    rejects(() => posix['sessions.stats']({ sessionIds: ['x'.repeat(257)] }))
+    rejects(() =>
+      posix['sessions.stats']({ sessionIds: Array.from({ length: 101 }, (_, i) => `s${i}`) }),
+    )
+    expect(forbiddenToDevices('sessions.stats', { sessionIds: ['a'] })).toBe(false)
+  })
+
   it('takes nothing for the idle sessions’ rule, which the host decides alone', () => {
     expect(posix['sessions.idleRelease'](undefined)).toBeUndefined()
     expect(posix['sessions.idleRelease']({})).toBeUndefined()

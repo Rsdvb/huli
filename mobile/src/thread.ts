@@ -2,6 +2,11 @@
 // by the host's patches while the screen watches it, with older pages read on demand. A gap in
 // the patches, or a new connection, reads the snapshot again.
 //
+// Huli: pages are lean (`lean`): a tool call carries what its folded step shows, and its card reads
+// the rest when it opens (fullEntry.ts). A read again names the thread the phone holds (`known`),
+// which a computer that has nothing new for it answers without entries; an older computer ignores
+// both and sends the page whole.
+//
 // The thread lives in a store, not in the screen's state: the screen selects what it needs (its
 // session, the turn's phase, what waits) and only the conversation list follows every patch.
 
@@ -17,6 +22,7 @@ import {
   type OlderPage,
   type PatchBatch,
   type PlanEntry,
+  type KnownThread,
   type SessionSnapshot,
   type ThreadEntry,
   type ThreadState,
@@ -97,6 +103,8 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const [plan, setPlan] = useState<PlanEntry | null>(null)
   const [reads, setReads] = useState(0)
   const seq = useRef(-1)
+  // Huli: the copy of the thread `seq` counts in on the computer, from the last page it sent.
+  const epoch = useRef<string | null>(null)
   const pending = useRef<PatchBatch[] | null>(null)
   const generation = useRef(0)
   const live = useRef(false)
@@ -206,9 +214,38 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
     dropQueued()
     pending.current = []
     try {
+      // Only the computer's own copy is named, never the cache's.
+      const held = live.current && store.get() !== null && epoch.current !== null
+      const known: KnownThread | undefined = held
+        ? { epoch: epoch.current!, seq: seq.current }
+        : undefined
       await link.request('sessions.watch', { sessionId })
-      const snapshot = (await link.request('sessions.open', { sessionId })) as SessionSnapshot
+      const snapshot = (await link.request('sessions.open', {
+        sessionId,
+        lean: true,
+        ...(known ? { known } : {}),
+      })) as SessionSnapshot
       if (mine !== generation.current) return
+      epoch.current = snapshot.epoch ?? null
+      const current = store.get()
+      if (snapshot.unchanged && known && current) {
+        // Nothing new: the thread stays, with what came in since the computer answered.
+        let kept = current
+        seq.current = snapshot.seq
+        for (const batch of pending.current ?? []) {
+          if (batch.seq <= seq.current) continue
+          kept = applyPatches(kept, batch.patches, { partial: true })
+          seq.current = batch.seq
+        }
+        pending.current = null
+        setThread({ ...kept, session: { ...kept.session, ...snapshot.session } })
+        setError(null)
+        setReads((count) => count + 1)
+        failures.current = 0
+        void link.request('sessions.show', { sessionIds: [sessionId] }).catch(() => {})
+        reloadRequests()
+        return
+      }
       let next = threadFromSnapshot(snapshot)
       seq.current = snapshot.seq
       for (const batch of pending.current ?? []) {
@@ -241,7 +278,7 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
         void openRef.current()
       }, wait)
     }
-  }, [link, sessionId, reloadRequests, setThread])
+  }, [link, sessionId, reloadRequests, setThread, store])
   openRef.current = open
 
   useEffect(() => {
@@ -306,7 +343,9 @@ export function useThread(link: HostLink, sessionId: string, state: LinkState): 
   const loadOlder = useCallback(() => {
     if (older === null || loadingOlder || !store.get()) return
     setLoadingOlder(true)
-    void (link.request('sessions.page', { sessionId, before: older }) as Promise<OlderPage>)
+    void (
+      link.request('sessions.page', { sessionId, before: older, lean: true }) as Promise<OlderPage>
+    )
       .then((page) => {
         setThread((current) => (current ? prependEntries(current, page.entries) : current))
         setOlder(page.older)

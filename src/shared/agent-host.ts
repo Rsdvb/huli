@@ -215,6 +215,7 @@ import type {
   ProblemReportOutcome,
   QuestionAnswer,
   FormValues,
+  KnownThread,
   MarketPublishAsk,
   SessionSnapshot,
   SessionStatus,
@@ -226,6 +227,18 @@ import type {
   UserContent,
   WorkflowAgentDetail,
 } from './thread'
+
+/** Huli: what `sessions.stats` tells of a session's thread. */
+export interface SessionStats {
+  /** Its tool calls. */
+  tools: number
+  /** How long its latest run took, from that run's end; null before one ended. */
+  durationMs: number | null
+  stopReason: StopReason | null
+}
+
+/** Huli: the most sessions one `sessions.stats` names. */
+export const MAX_STATS_SESSIONS = 100
 
 export interface AttachmentBytes {
   mimeType: string
@@ -2142,22 +2155,32 @@ export interface HostContract {
     }
     result: SessionSummary
   }
+  // Huli: `lean`, a page whose tool calls carry what their folded steps show (`LEAN_THREADS_FEATURE`
+  // in remote/protocol.ts), the rest read with `sessions.entry`; `known`, the thread the reader
+  // holds, which an answer that is still the same leaves out (`SessionSnapshot.unchanged`).
   'sessions.open': {
-    params: { sessionId: string }
+    params: { sessionId: string; lean?: boolean; known?: KnownThread }
     result: SessionSnapshot
     deviceResult: SessionSnapshot | DigestedSnapshot
   }
   // With `from`, every entry from that position on, as a replica that holds older pages needs.
   'sessions.snapshot': {
-    params: { sessionId: string; from?: number }
+    params: { sessionId: string; from?: number; lean?: boolean; known?: KnownThread }
     result: SessionSnapshot
     deviceResult: SessionSnapshot | DigestedSnapshot
   }
   // With `from`, reaching back to the turn holding that position, for a jump in the outline.
   'sessions.page': {
-    params: { sessionId: string; before: number; from?: number }
+    params: { sessionId: string; before: number; from?: number; lean?: boolean }
     result: OlderPage
     deviceResult: OlderPage | DigestedPage
+  }
+  // Huli: what sub-agents' rows show of sessions, by id, without reading their threads: their tool
+  // calls and their latest run. A session the host does not know is left out. Absent from older
+  // hosts, which answer `unknown_method`.
+  'sessions.stats': {
+    params: { sessionIds: string[] }
+    result: Record<string, SessionStats>
   }
   // One entry whole, as a device whose page held its tool output as a digest opens it.
   'sessions.entry': { params: { sessionId: string; entryId: string }; result: ThreadEntry }
@@ -3336,6 +3359,7 @@ export const HOST_METHODS = [
   'sessions.snapshot',
   'sessions.page',
   'sessions.entry',
+  'sessions.stats',
   'sessions.requests',
   'sessions.outline',
   'sessions.modelRequests',

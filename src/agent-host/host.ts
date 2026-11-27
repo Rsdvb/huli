@@ -295,7 +295,7 @@ import { WebReaderService } from './web-reader/service'
 import { ComputerUse } from './computer/service'
 import { ComputerToolError } from './computer/tools'
 import { SessionFiles } from './session-files'
-import { SessionManager, type SessionTimings } from './sessions'
+import { SessionManager, type ReadImages, type SessionTimings } from './sessions'
 import { EnvironmentService, type EnvironmentServiceDeps } from './shell-env'
 import {
   agentProcessesFile,
@@ -318,8 +318,8 @@ import {
 } from './storage'
 import { GitHubStar, gitHubStarFile } from './github-star'
 import { PlanAlerts, planAlertsFile } from './plan-alerts'
-import { digestEntries } from './threads/digest'
-import type { ImageMode } from './threads/model'
+import { digestEntries, leanEntries } from './threads/digest'
+import { hashedBatch } from './threads/live-images'
 import { ThreadStore, type ThreadWorkerFactory } from './threads/store'
 import { watchMigration } from './migration-watch'
 import { UsageManager, type UsageTimings } from './usage/manager'
@@ -375,16 +375,25 @@ function brief(
   return { id, version, createdAt, updatedAt, deleted }
 }
 
-/** A window, and a device that said so, read stored images by hash; other devices get bytes. */
-function imagesFor(device: PortDevice | null): ImageMode {
-  return device && !device.imageRefs ? 'inline' : 'refs'
+/**
+ * A window, and a device that said so, read stored images by hash; other devices get bytes. Huli:
+ * such a device gets a live thread's large images by hash too.
+ */
+function imagesFor(device: PortDevice | null): ReadImages {
+  if (!device) return 'refs'
+  return device.imageRefs ? 'hashed' : 'inline'
 }
 
-/** A page as a device reads it: with long tool outputs and inputs as digests, when it said so. */
+/**
+ * A page as a device reads it: with long tool outputs and inputs as digests, when it said so.
+ * Huli: a lean read gets a lean page, whoever asks.
+ */
 function digestsFor<T extends { entries: ThreadEntry[] }>(
   device: PortDevice | null,
   page: T,
+  lean?: boolean,
 ): T | (Omit<T, 'entries'> & { entries: DigestedThreadEntry[] }) {
+  if (lean) return leanEntries(page)
   return device?.toolDigests ? digestEntries(page) : page
 }
 
@@ -1881,7 +1890,12 @@ export class AgentHost {
         turnStarted: (sessionId) => void this.workflowSuggestions.turnStarted(sessionId),
       },
       events: {
-        patches: (batch, portIds) => this.hub.send(portIds, { type: 'session.patches', batch }),
+        // Huli: a device that reads stored images by hash gets a live thread's by hash too.
+        patches: (batch, portIds) =>
+          this.hub.send(portIds, { type: 'session.patches', batch }, () => ({
+            type: 'session.patches',
+            batch: hashedBatch(batch),
+          })),
         summary: (summary, portIds) => {
           if (portIds) {
             this.hub.send(portIds, { type: 'session.summary', summary })
@@ -4955,14 +4969,19 @@ export class AgentHost {
           params,
           this.agentHistory.keptFor(params.agentId, params.acpSessionId, source ?? null),
         ),
-      'sessions.open': async ({ sessionId }, { device }) =>
-        digestsFor(device, await sessions.open(sessionId, imagesFor(device))),
-      'sessions.snapshot': async ({ sessionId, from }, { device }) =>
-        digestsFor(device, await sessions.snapshot(sessionId, from, imagesFor(device))),
-      'sessions.page': async ({ sessionId, before, from }, { device }) =>
-        digestsFor(device, await sessions.page(sessionId, before, from, imagesFor(device))),
+      'sessions.open': async ({ sessionId, lean, known }, { device }) =>
+        digestsFor(device, await sessions.open(sessionId, imagesFor(device), known), lean),
+      'sessions.snapshot': async ({ sessionId, from, lean, known }, { device }) =>
+        digestsFor(
+          device,
+          await sessions.snapshot(sessionId, from, imagesFor(device), known),
+          lean,
+        ),
+      'sessions.page': async ({ sessionId, before, from, lean }, { device }) =>
+        digestsFor(device, await sessions.page(sessionId, before, from, imagesFor(device)), lean),
       'sessions.entry': ({ sessionId, entryId }, { device }) =>
         sessions.entry(sessionId, entryId, imagesFor(device)),
+      'sessions.stats': ({ sessionIds }) => sessions.stats(sessionIds),
       'sessions.requests': async ({ sessionId }, { device }) => ({
         ...(await sessions.requests(sessionId, imagesFor(device))),
         suggestions: await this.workflowSuggestions.waitingFor(sessionId),
@@ -5461,7 +5480,10 @@ export class AgentHost {
         const before = scope === 'older' ? Date.now() - days * 24 * 60 * 60 * 1000 : null
         const sessionIds = sessions.imageClearTargets(scope === 'archived', before)
         if (!this.threads || sessionIds.length === 0) return { sessions: 0, images: 0, bytes: 0 }
-        return this.threads.clearImages(sessionIds, dryRun)
+        const cleared = await this.threads.clearImages(sessionIds, dryRun)
+        // Huli: no device's copy of a thread is known to be current once its pictures changed.
+        if (!dryRun) sessions.imagesCleared()
+        return cleared
       },
       'artifacts.list': async ({ deleted }) => {
         const keep = this.binKeepMs()

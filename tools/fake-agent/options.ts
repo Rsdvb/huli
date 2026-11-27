@@ -31,6 +31,8 @@ export const SCENARIOS = [
   'extra-usage',
   // Huli: a 1M-window session's large context, for the traffic hint and the handoff.
   'big-context',
+  // Huli: many tool calls with long commands, 64 KB outputs and screenshots, for lean threads.
+  'heavy-tools',
   'status',
   'context',
   'recall',
@@ -182,6 +184,10 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   'big-context': {
     description: 'A long turn of a 1M-token model: 640K of context and forty requests of tokens',
   },
+  'heavy-tools': {
+    description: 'Commands with long inputs and 64 KB outputs, and a screenshot every few calls',
+    hint: '--count <n> --size <output bytes, at most 64k> --shots <a screenshot every n calls>',
+  },
   recall: { description: 'Answers with your previous message, as the agent remembers it' },
   instructions: {
     description: 'Answers with the text its session was started with in its system prompt',
@@ -278,6 +284,7 @@ export interface ScenarioOptions {
   summaries: boolean // reasoning: short summaries in place of the raw reasoning
   finished: number // subagent: quick subagents that run and end before the one that asks
   busy: number // subagent: reads its child makes, a second each, before it asks
+  shots: number // heavy-tools: a screenshot every this many calls; 0 for none
   // titles: a branch name is held until this file exists, FAKE_AGENT_BRANCH_NAME_GATE
   branchNameGate: string | null
 }
@@ -395,6 +402,7 @@ export function chooseScenario(prompt: string, env: Env): ScenarioChoice {
     summaries: flagValue(args, 'summaries') !== undefined,
     finished: parseNumber(flagValue(args, 'finished')) ?? 0,
     busy: parseNumber(flagValue(args, 'busy')) ?? 0,
+    shots: parseNumber(flagValue(args, 'shots')) ?? 4,
     branchNameGate: env.FAKE_AGENT_BRANCH_NAME_GATE || null,
   }
   return { scenario, options, text }

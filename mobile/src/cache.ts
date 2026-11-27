@@ -108,6 +108,11 @@ function remember(computer: string, sessionId: string, thread: CachedThread): vo
   }
 }
 
+/** Huli: forgets the copies in memory, as when the system runs short of it; the files stay. */
+export function dropRecentThreads(): void {
+  recent.clear()
+}
+
 /** The copy read or saved latest in this run, at once; null when there is none in memory. */
 export function recentThread(computer: string, sessionId: string): CachedThread | null {
   return recent.get(`${computer}/${sessionId}`) ?? null

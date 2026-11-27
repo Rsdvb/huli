@@ -63,6 +63,7 @@ export type ThreadRequest =
   | { id: number; op: 'blob'; sessionId: string; hash: string }
   | { id: number; op: 'mediaTotals' }
   | { id: number; op: 'sizes'; sessionIds: string[] }
+  | { id: number; op: 'stats'; sessionIds: string[] }
   | { id: number; op: 'clearImages'; sessionIds: string[]; dryRun: boolean }
   | { id: number; op: 'mentions'; sessionId: string; text: string }
   | { id: number; op: 'outline'; sessionId: string }

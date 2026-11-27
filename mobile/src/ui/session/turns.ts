@@ -3,6 +3,8 @@
 
 import {
   answeredUnasked,
+  isDiffContentItem,
+  toolContentItems,
   type PlanEntry,
   type ThreadEntry,
   type ThreadState,
@@ -21,6 +23,11 @@ export interface FileEdit {
   oldText: string | null
   newText: string
   diff: Diff
+  /**
+   * Huli: a lean page held the edit as its counts alone: `diff` has them and no rows, and its
+   * diff screen reads the file's change from git.
+   */
+  digest?: true
 }
 
 export interface FileChange {
@@ -66,18 +73,22 @@ const edits = new WeakMap<ToolEntry, FileEdit[]>()
 export function toolEdits(tool: ToolEntry): FileEdit[] {
   const known = edits.get(tool)
   if (known) return known
-  const made = tool.content.flatMap((part): FileEdit[] =>
-    part.type === 'diff'
-      ? [
-          {
-            path: part.path,
-            oldText: part.oldText,
-            newText: part.newText,
-            diff: diffTexts(part.oldText, part.newText),
-          },
-        ]
-      : [],
-  )
+  const made = toolContentItems(tool).flatMap((part): FileEdit[] => {
+    if (part.type === 'diff') {
+      const diff = diffTexts(part.oldText, part.newText)
+      return [{ path: part.path, oldText: part.oldText, newText: part.newText, diff }]
+    }
+    if (part.type !== 'digest' || part.of !== 'diff') return []
+    const diff: Diff = {
+      rows: [],
+      insertions: part.added ?? 0,
+      deletions: part.removed ?? 0,
+      columns: 0,
+      lastLine: 0,
+      rough: false,
+    }
+    return [{ path: part.path, oldText: part.created ? null : '', newText: '', diff, digest: true }]
+  })
   edits.set(tool, made)
   return made
 }
@@ -135,7 +146,7 @@ export function mergedDiff(change: FileChange): Diff {
 }
 
 function hasEdits(tool: ToolEntry): boolean {
-  return tool.content.some((part) => part.type === 'diff')
+  return toolContentItems(tool).some(isDiffContentItem)
 }
 
 /**

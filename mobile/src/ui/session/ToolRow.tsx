@@ -9,15 +9,24 @@ import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import type { PermissionRisk } from '@shared/risk'
-import type { ThreadEntry, ToolEntry } from '@shared/thread'
+import {
+  digestPreview,
+  isDiffContentItem,
+  toolContentItems,
+  type ThreadEntry,
+  type ToolEntry,
+} from '@shared/thread'
 import { ShellBlock, StepSection } from '../../components/entries/ShellBlock'
 import { Markdown } from '../../components/Markdown'
+import { pictureOf, PictureStrip } from '../../components/Pictures'
 import { handDiff } from '../../diff'
+import { useLink } from '../../host'
 import { opensInViewer } from '../../preview/kinds'
 import { Clamp, clampedText, useClampOpen } from './Clamp'
 import { useSessionRows } from './context'
 import { useDisclosure } from './disclosure'
 import { plainText } from './feedback'
+import { useFullEntry } from './fullEntry'
 import { folderFile, openFile } from './fileRefs'
 import { durationText, relativePath } from './format'
 import { FileMark, G, Icon, TOOL_ICONS, type IconSpec } from './icons'
@@ -119,15 +128,18 @@ export function EditLine(props: { edit: FileEdit; root: string | null }) {
       onPress={() =>
         router.push({
           pathname: '/diff',
-          params: {
-            key: handDiff({
-              path: edit.path,
-              oldText: edit.oldText,
-              newText: edit.newText,
-              diff: edit.diff,
-            }),
-            ...(sessionId ? { id: sessionId } : {}),
-          },
+          // Huli: an edit a lean page held as counts alone shows as git has the file's change.
+          params: edit.digest
+            ? { path: edit.path, ...(sessionId ? { id: sessionId } : {}) }
+            : {
+                key: handDiff({
+                  path: edit.path,
+                  oldText: edit.oldText,
+                  newText: edit.newText,
+                  diff: edit.diff,
+                }),
+                ...(sessionId ? { id: sessionId } : {}),
+              },
         })
       }
       accessibilityRole="button"
@@ -366,7 +378,7 @@ export const ToolRow = memo(function ToolRow(props: { entry: ToolEntry; note?: s
   }
   const label = toolLabel(entry, root, entry.status === 'completed')
   const time = toolTime(sessionId, entry.id)
-  const diffs = entry.content.filter((part) => part.type === 'diff')
+  const diffs = toolContentItems(entry).filter(isDiffContentItem)
   const stats = diffs.length > 0 ? diffStats(diffs) : null
   const result = entry.permissionResult
   const note =
@@ -462,10 +474,22 @@ function DiffPreview(props: { edit: FileEdit; root: string | null }) {
 function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
   const { c, s } = useSessionTokens()
   const { root, sessionId } = useSessionRows((r) => ({ root: r.root, sessionId: r.sessionId }))
-  const { entry, label } = props
+  const link = useLink()
+  // Huli: a step a lean page held in part is read whole as its card opens; until then its output
+  // shows as the preview the page gave.
+  const whole = useFullEntry(link, sessionId, props.entry)
+  const entry = whole.entry
+  const label =
+    entry === props.entry ? props.label : toolLabel(entry, root, entry.status === 'completed')
   const command = label.kind === 'command' ? label.target : null
-  const output = command ? commandOutput(entry.content) : null
-  const content = output === null ? entry.content : entry.content.slice(1)
+  const items = toolContentItems(entry)
+  const first = items[0]
+  const previewed =
+    command && first?.type === 'digest' && first.of === 'markdown' ? digestPreview(first) : null
+  const output = command
+    ? (commandOutput(entry.content) ?? (previewed !== null ? fenceBody(previewed) : null))
+    : null
+  const content = output === null ? items : items.slice(1)
   const path = entry.locations[0]?.path
   const edits = toolEdits(entry)
   const files = toolFiles(entry, root)
@@ -486,7 +510,36 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
           status={entry.status}
         />
       ) : null}
+      {whole.loading || whole.error ? (
+        <Text
+          style={[
+            styles.description,
+            styles.lead,
+            { color: whole.error ? c.danger : c.textTertiary },
+          ]}
+          onPress={whole.error ? whole.retry : undefined}
+          accessibilityRole={whole.error ? 'button' : undefined}
+        >
+          {whole.error ? `${whole.error} 点按重试。` : '正在读取完整内容…'}
+        </Text>
+      ) : null}
       {content.map((part, i) => {
+        if (part.type === 'digest') {
+          if (part.of === 'diff') {
+            const made = edits[edit++]
+            return made ? (
+              <StepSection key={i} label="更改">
+                <DiffPreview edit={made} root={root} />
+              </StepSection>
+            ) : null
+          }
+          const preview = digestPreview(part)
+          return preview ? (
+            <StepSection key={i} label="结果">
+              <ClampedResult id={`result:${entry.id}:${i}`} text={fenceBody(preview)} />
+            </StepSection>
+          ) : null
+        }
         if (part.type === 'markdown') {
           if (!part.markdown.trim()) return null
           const read = entry.toolKind === 'read' ? numberedRead(part.markdown, path) : null
@@ -513,6 +566,15 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
           ) : null
         }
         const ref = part.ref
+        // Huli: a picture the computer keeps by hash, as a lean page names a screenshot.
+        if (ref.kind === 'image' && 'blob' in ref) {
+          const picture = pictureOf(ref)
+          return picture ? (
+            <View key={i} style={[styles.pictureBox, { borderTopColor: c.border }]}>
+              <PictureStrip pictures={[picture]} align="start" />
+            </View>
+          ) : null
+        }
         if (ref.kind === 'image' && 'data' in ref) {
           return (
             <View key={i} style={[styles.pictureBox, { borderTopColor: c.border }]}>
@@ -538,11 +600,9 @@ function ToolBody(props: { entry: ToolEntry; label: ToolLabel }) {
                 ? ref.label
                 : ref.kind === 'attachment'
                   ? ref.attachment.name
-                  : ref.kind === 'image'
-                    ? '图片'
-                    : ref.kind === 'audio'
-                      ? '音频'
-                      : '视频'}
+                  : ref.kind === 'audio'
+                    ? '音频'
+                    : '视频'}
           </Text>
         )
       })}
