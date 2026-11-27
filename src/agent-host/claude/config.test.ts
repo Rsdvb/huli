@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildConfig, type SessionChoices } from './config'
+import { buildConfig, rememberAliases, restoreAliases, type SessionChoices } from './config'
 import type { ModelInfo } from './sdk'
 
 const MODELS: ModelInfo[] = [
@@ -70,5 +70,60 @@ describe('the model choices of a Claude Code session', () => {
     const listed = modelChoices(MODELS, 'default')
     expect(listed.find((c) => c.value === 'default')?.shownAs).toBe('opus')
     expect(listed.find((c) => c.value === 'opus')?.shownAs).toBeUndefined()
+  })
+})
+
+// As Claude Code lists them in a session it resumed on Fable 5.2: the alias's row under the full id.
+const RESUMED: ModelInfo[] = MODELS.map((model) =>
+  model.value === 'fable'
+    ? {
+        ...model,
+        value: 'claude-fable-5-2',
+        supportsEffort: true,
+        supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+      }
+    : model,
+)
+
+describe('a model Claude Code lists under the full id its session runs it by', () => {
+  const known = (): Map<string, ModelInfo> => {
+    const aliases = new Map<string, ModelInfo>()
+    rememberAliases(MODELS, aliases)
+    return aliases
+  }
+
+  it('lists it as the alias an earlier list named it by, with its full id shown as that', () => {
+    const models = restoreAliases(RESUMED, known())
+    const listed = modelChoices(models, 'claude-fable-5-2')
+    expect(listed.filter((c) => !c.shownAs).map((c) => c.value)).toEqual([
+      'opus',
+      'fable',
+      'claude-fable-5-1',
+    ])
+    expect(listed.find((c) => c.value === 'claude-fable-5-2')).toMatchObject({
+      name: 'Fable 5.2',
+      shownAs: 'fable',
+    })
+  })
+
+  it('keeps the levels of the model under either name', () => {
+    const models = restoreAliases(RESUMED, known())
+    for (const model of ['fable', 'claude-fable-5-2']) {
+      const config = buildConfig(models, { ...choices(model), effort: 'xhigh' }, ['default'])
+      expect(config.find((o) => o.id === 'effort')?.value).toBe('xhigh')
+    }
+  })
+
+  it('never names an alias the list leaves out by its bare value', () => {
+    const listed = modelChoices(RESUMED, 'fable')
+    const fable = listed.find((c) => c.value === 'fable')
+    expect(fable?.name).toBe('Fable 5.2')
+    expect(fable?.shownAs).toBe('claude-fable-5-2')
+    expect(listed.filter((c) => !c.shownAs && c.name === 'Fable 5.2')).toHaveLength(1)
+  })
+
+  it('leaves a list alone that names no alias it once had', () => {
+    expect(restoreAliases(MODELS, known())).toEqual(MODELS)
+    expect(restoreAliases(RESUMED, new Map())).toEqual(RESUMED)
   })
 })

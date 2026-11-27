@@ -79,6 +79,8 @@ import {
   modelInfo,
   OPTION_IDS,
   outputStyleOption,
+  rememberAliases,
+  restoreAliases,
   settingsModel,
   type InheritedEffort,
   type SessionChoices,
@@ -582,6 +584,8 @@ export class ClaudeConnection implements AgentConnection {
   private sdk: ClaudeSdk | null = null
   private cli: string | null = null
   private readonly sessions = new Map<string, Session>()
+  /** The aliases each sign-in's lists named, by profile id, '' for the agent's own sign-in. */
+  private readonly aliases = new Map<string, Map<string, ModelInfo>>()
   private readonly targets = new Map<string, SessionTarget>()
   private readonly pending = new Map<string, Pending>()
   private readonly unregistered = new Set<string>()
@@ -1399,7 +1403,11 @@ export class ClaudeConnection implements AgentConnection {
     }
     // Huli: a profile's session tells nothing of the agent's own account.
     if (!provider) this.reportAccount(init.account)
-    session.models = init.models ?? []
+    // A resumed session lists the model it runs under its full id, in its alias's place.
+    const aliases = this.aliases.get(provider?.profileId ?? '') ?? new Map<string, ModelInfo>()
+    this.aliases.set(provider?.profileId ?? '', aliases)
+    rememberAliases(init.models ?? [], aliases)
+    session.models = restoreAliases(init.models ?? [], aliases)
     session.choices.model = settingsModel(session.models, mainModel)
     if (typeof settings.values.effortLevel === 'string') {
       session.choices.effort = settings.values.effortLevel
