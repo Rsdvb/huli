@@ -260,10 +260,20 @@ export class PortHub {
     }
   }
 
-  send(portIds: Iterable<string>, event: HostEvent): void {
+  /**
+   * Huli: `hashed` makes the event a device that reads stored images by hash gets, made once for
+   * them all; windows get `event` as it is.
+   */
+  send(portIds: Iterable<string>, event: HostEvent, hashed?: () => HostEvent): void {
     let bytesOnly: HostEvent | null = null
+    let byHash: HostEvent | null = null
     for (const portId of portIds) {
-      const sent = this.readsImageRefs(portId) ? event : (bytesOnly ??= withoutImageRefs(event))
+      const device = this.devices.get(portId)
+      const sent = !this.readsImageRefs(portId)
+        ? (bytesOnly ??= withoutImageRefs(event))
+        : device && hashed
+          ? (byHash ??= hashed())
+          : event
       this.ports.get(portId)?.send({ type: 'event', event: sent })
     }
   }

@@ -20,7 +20,7 @@ import type { SessionOutputs } from '@shared/agent-host'
 import { githubReferenceFromLink, schemelessGitHubLinks } from '@shared/git'
 import { OUTLINE_TEXT } from '@shared/outline'
 import { isRoutineRun, type RoutineRun } from '@shared/routines'
-import { isThreadEntry, type ThreadEntry } from '@shared/thread'
+import { isStopReason, isThreadEntry, type ThreadEntry } from '@shared/thread'
 import {
   contentHash,
   moveContent,
@@ -57,6 +57,7 @@ import {
   type StoredOutline,
   type StoredOutputs,
   type StoredSession,
+  type StoredStats,
   type StoredThread,
   type ThreadHead,
   type ThreadPage,
@@ -589,6 +590,10 @@ function prepareAll(db: DatabaseSync) {
     lastTurnMs: sql(`
       SELECT json_extract(json, '$.durationMs') AS ms FROM entries
       WHERE session_id = ? AND kind = 'turn_end' ORDER BY pos DESC LIMIT 1`),
+    toolCount: sql("SELECT count(*) AS n FROM entries WHERE session_id = ? AND kind = 'tool'"),
+    lastTurnEnd: sql(`
+      SELECT json_extract(json, '$.durationMs') AS ms, json_extract(json, '$.stopReason') AS reason
+      FROM entries WHERE session_id = ? AND kind = 'turn_end' ORDER BY pos DESC LIMIT 1`),
     titles: sql('SELECT pos, title FROM outline_titles WHERE session_id = ?'),
     userAt: sql("SELECT 1 FROM entries WHERE session_id = ? AND pos = ? AND kind = 'user'"),
     putTitle: sql(`
@@ -1752,6 +1757,32 @@ export class ThreadDb {
       },
       { files: 0, bytes: 0 },
     )
+  }
+
+  /**
+   * Huli: each thread's tool calls and its latest run's length and stop reason, by id, read from
+   * the kind index without parsing its entries; a session without a thread is left out.
+   */
+  stats(sessionIds: readonly string[]): Record<string, StoredStats> {
+    return this.guard((sql) => {
+      const out: Record<string, StoredStats> = {}
+      for (const id of sessionIds) {
+        const head = this.headOf(sql, id)
+        if (!head) continue
+        const end = sql.lastTurnEnd.get(id)
+        const ms = end?.ms
+        const reason = optionalText(end?.reason)
+        out[id] = {
+          head: { agentId: head.agentId, acpSessionId: head.acpSessionId },
+          stats: {
+            tools: Number(sql.toolCount.get(id)?.n ?? 0),
+            durationMs: typeof ms === 'number' || typeof ms === 'bigint' ? Number(ms) : null,
+            stopReason: isStopReason(reason) ? reason : null,
+          },
+        }
+      }
+      return out
+    }, {})
   }
 
   /** Huli: the bytes each session's thread keeps, by id; a session without one is left out. */

@@ -1,5 +1,7 @@
 // A device that draws tool calls folded gets their long outputs and inputs as digests in the pages
 // it reads, which are most of their bytes; `sessions.entry` reads an entry whole when it opens one.
+// Huli: a lean page (`lean` in the read) goes further: its digests carry a short preview, a long
+// title is cut and an input digested sooner, so a step costs about what its folded row shows.
 
 import type {
   DigestedThreadEntry,
@@ -19,6 +21,14 @@ export const DIGEST_DIFF_BYTES = 8 * 1024
 /** The steps comparing a diff's lines may take, a few milliseconds, before its counts are null. */
 export const DIFF_WORK = 2_000_000
 
+/** Huli: in a lean page, an input this long or shorter stays whole. */
+export const LEAN_INPUT_BYTES = 1024
+/** Huli: a lean page cuts a title longer than this many characters. */
+export const LEAN_TITLE_CHARS = 240
+/** Huli: a lean preview's head and tail each take at most this many lines and UTF-8 bytes. */
+export const PREVIEW_LINES = 5
+export const PREVIEW_BYTES = 384
+
 /** The entries with each long tool output and input as a digest; the same entries otherwise. */
 export function digestEntries<T extends { entries: ThreadEntry[] }>(
   page: T,
@@ -26,42 +36,127 @@ export function digestEntries<T extends { entries: ThreadEntry[] }>(
   return { ...page, entries: page.entries.map(digestEntry) }
 }
 
+/** Huli: the entries of a lean page, each tool call as `leanEntry` makes it. */
+export function leanEntries<T extends { entries: ThreadEntry[] }>(
+  page: T,
+): Omit<T, 'entries'> & { entries: DigestedThreadEntry[] } {
+  return { ...page, entries: page.entries.map(leanEntry) }
+}
+
 /** A tool call that waits for an answer stays whole, since its card shows what it asks about. */
 export function digestEntry(entry: ThreadEntry): DigestedThreadEntry {
+  return digested(entry, false)
+}
+
+/**
+ * Huli: `digestEntry` for a lean page: each digest of an output with its first and last lines, a
+ * diff's saying whether it made the file, an input digested past `LEAN_INPUT_BYTES` and a title
+ * cut at `LEAN_TITLE_CHARS`.
+ */
+export function leanEntry(entry: ThreadEntry): DigestedThreadEntry {
+  return digested(entry, true)
+}
+
+function digested(entry: ThreadEntry, lean: boolean): DigestedThreadEntry {
   if (entry.kind !== 'tool' || entry.permission !== null) return entry
   let content: (ToolContent | ToolContentDigest)[] | null = null
   entry.content.forEach((item, index) => {
-    const digest = digestContent(item)
+    const digest = digestContent(item, lean)
     if (digest) (content ??= [...entry.content])[index] = digest
   })
-  const input = entry.rawInput === undefined ? null : digestInput(entry.rawInput)
-  if (!content && !input) return entry
-  const digested: DigestedToolEntry = { ...entry, content: content ?? entry.content }
+  const input = entry.rawInput === undefined ? null : digestInput(entry.rawInput, lean)
+  const title = lean ? cutTitle(entry.title) : null
+  if (!content && !input && title === null) return entry
+  const out: DigestedToolEntry = { ...entry, content: content ?? entry.content }
   if (input) {
-    delete digested.rawInput
-    digested.rawInputDigest = input
+    delete out.rawInput
+    out.rawInputDigest = input
   }
-  return digested
+  if (title !== null) {
+    out.title = title
+    out.titleSize = Buffer.byteLength(entry.title)
+  }
+  return out
 }
 
-function digestContent(item: ToolContent): ToolContentDigest | null {
+function digestContent(item: ToolContent, lean: boolean): ToolContentDigest | null {
   if (item.type === 'markdown') {
     const size = Buffer.byteLength(item.markdown)
     if (size <= DIGEST_OUTPUT_BYTES) return null
-    return { type: 'digest', of: 'markdown', size, lines: lineCount(item.markdown) }
+    const digest = {
+      type: 'digest',
+      of: 'markdown',
+      size,
+      lines: lineCount(item.markdown),
+    } as const
+    return lean ? { ...digest, ...preview(item.markdown) } : digest
   }
   if (item.type === 'diff') {
     const size = Buffer.byteLength(item.oldText ?? '') + Buffer.byteLength(item.newText)
     if (size <= DIGEST_DIFF_BYTES) return null
     const { added, removed } = diffCounts(item.oldText, item.newText)
-    return { type: 'digest', of: 'diff', path: item.path, size, added, removed }
+    const digest = { type: 'digest', of: 'diff', path: item.path, size, added, removed } as const
+    return lean && item.oldText === null ? { ...digest, created: true } : digest
   }
   return null
 }
 
-function digestInput(input: string): ToolInputDigest | null {
+function digestInput(input: string, lean: boolean): ToolInputDigest | null {
   const size = Buffer.byteLength(input)
-  return size > DIGEST_INPUT_BYTES ? { size, lines: lineCount(input) } : null
+  return size > (lean ? LEAN_INPUT_BYTES : DIGEST_INPUT_BYTES)
+    ? { size, lines: lineCount(input) }
+    : null
+}
+
+/** A title past `LEAN_TITLE_CHARS`, cut there with an ellipsis; null for one that fits. */
+function cutTitle(title: string): string | null {
+  if (title.length <= LEAN_TITLE_CHARS) return null
+  let end = LEAN_TITLE_CHARS
+  // A cut between a surrogate pair's halves would leave a lone half.
+  if (isHighSurrogate(title.charCodeAt(end - 1))) end--
+  return `${title.slice(0, end)}\u2026`
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff
+}
+
+/**
+ * A long text's first and last lines, each at most `PREVIEW_LINES` lines and `PREVIEW_BYTES`
+ * UTF-8 bytes; a line longer than that is cut, from its end for the head and its start for the
+ * tail, at a character.
+ */
+export function preview(text: string): { head: string; tail: string } {
+  const all = lines(text)
+  const head = fitStart(all.slice(0, PREVIEW_LINES).join('\n'), PREVIEW_BYTES)
+  const tail = fitEnd(all.slice(-PREVIEW_LINES).join('\n'), PREVIEW_BYTES)
+  return { head, tail }
+}
+
+function fitStart(text: string, bytes: number): string {
+  let used = 0
+  let end = 0
+  for (const char of text) {
+    used += Buffer.byteLength(char)
+    if (used > bytes) break
+    end += char.length
+  }
+  return text.slice(0, end)
+}
+
+function fitEnd(text: string, bytes: number): string {
+  let used = 0
+  let start = text.length
+  while (start > 0) {
+    const low = text.charCodeAt(start - 1)
+    const pair =
+      start > 1 && low >= 0xdc00 && low <= 0xdfff && isHighSurrogate(text.charCodeAt(start - 2))
+    const size = pair ? 2 : 1
+    used += Buffer.byteLength(text.slice(start - size, start))
+    if (used > bytes) break
+    start -= size
+  }
+  return text.slice(start)
 }
 
 /** A text's lines, a final line break ending the last rather than starting another. */

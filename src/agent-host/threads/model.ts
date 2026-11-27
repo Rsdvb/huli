@@ -1,7 +1,7 @@
 // The stored form of a session's thread: what is kept beside the entries, where turns start,
 // and the content refs that large images are moved out of.
 
-import type { SessionOutputs } from '@shared/agent-host'
+import type { SessionOutputs, SessionStats } from '@shared/agent-host'
 import { parseStoredReview, type ReviewRun } from '@shared/review'
 import { parseSideChat, type StoredSideChat } from './side-chat'
 import type { ContextBreakdown } from '@shared/context'
@@ -219,6 +219,12 @@ export interface StoredOutline {
 export interface StoredOutputs {
   head: ThreadHead
   outputs: SessionOutputs
+}
+
+/** Huli: what `sessions.stats` tells of a stored thread. */
+export interface StoredStats {
+  head: ThreadHead
+  stats: SessionStats
 }
 
 export interface StoredThread {

@@ -44,6 +44,7 @@ import {
   type SessionPullRequest,
   type SearchIndexing,
   type SessionFindMatch,
+  type SessionStats,
   type SessionSummary,
   type SideChatAgent,
   type LightAgent,
@@ -150,6 +151,7 @@ import {
   type PlanItem,
   type QuestionAnswer,
   type ReportedTurn,
+  type KnownThread,
   type SessionSnapshot,
   type QueuedComments,
   type SessionStatus,
@@ -512,10 +514,12 @@ import {
   type StoredBlob,
   type StoredEntry,
   type StoredOutline,
+  type StoredStats,
   type StoredThread,
   type ThreadPage,
   type ThreadWrite,
 } from './threads/model'
+import { hashedImages, heldImage } from './threads/live-images'
 import { originOf, originText, restoredOrigins, type StoredOrigin } from './threads/origins'
 import { ThreadStoreError, type ThreadStore } from './threads/store'
 import { normalizeModel, priceFor, type UsageRow } from './usage/model'
@@ -1194,6 +1198,34 @@ interface Live {
 }
 
 const TITLE_LENGTH = 60
+
+/**
+ * Huli: how a read gives the images a thread holds: `hashed`, as `refs` but with a live thread's
+ * large images named by hash too, for a device that reads stored images by hash.
+ */
+export type ReadImages = ImageMode | 'hashed'
+
+/** What the thread store reads for `images`: it names every stored image by hash but for `inline`. */
+function storeImages(images: ReadImages): ImageMode {
+  return images === 'inline' ? 'inline' : 'refs'
+}
+
+/** Huli: a snapshot of a thread the reader holds as it is, which leaves its entries out. */
+function unchanged(snapshot: SessionSnapshot): SessionSnapshot {
+  return { ...snapshot, entries: [], unchanged: true }
+}
+
+/** Huli: a live thread's tool calls and latest run, as `sessions.stats` tells them. */
+function liveStats(thread: ThreadState): SessionStats {
+  let tools = 0
+  let end: Extract<ThreadEntry, { kind: 'turn_end' }> | null = null
+  for (const id of thread.order) {
+    const entry = thread.byId[id]
+    if (entry?.kind === 'tool') tools++
+    else if (entry?.kind === 'turn_end') end = entry
+  }
+  return { tools, durationMs: end?.durationMs ?? null, stopReason: end?.stopReason ?? null }
+}
 /** Huli: a conversation brief keeps this much at most, and each message in it this much. */
 const BRIEF_CHARS = 6_000
 const BRIEF_MESSAGE_CHARS = 1_500
@@ -1730,6 +1762,11 @@ export class SessionManager {
   private readonly summaryFailedAt = new Map<string, number>()
   /** The last `seq` of sessions that are not live, so a reopened session continues it. */
   private readonly seqs = new Map<string, number>()
+  /** Huli: each session's token in `epochOf`, gone with the session. */
+  private readonly epochs = new Map<string, string>()
+  /** Huli: this run of the host, and how often the store changed under the sessions. */
+  private readonly runId = randomUUID().slice(0, 8)
+  private storeChanges = 0
   private readonly listed = new Map<string, { title: string | null; updatedAt: string | null }>()
   /** Sessions being brought back from their stored threads, by id. */
   private readonly reviving = new Map<string, Promise<Live>>()
@@ -4506,25 +4543,92 @@ export class SessionManager {
     return head.agentId === record.agentId && head.acpSessionId === record.acpSessionId
   }
 
-  /** `images`: `inline` for a client that reads only the bytes of the images the thread holds. */
+  /**
+   * `images`: `inline` for a client that reads only the bytes of the images the thread holds.
+   * Huli: with `known`, a thread still as the reader holds it comes without its entries.
+   */
   async snapshot(
     sessionId: string,
     from?: number,
-    images: ImageMode = 'refs',
+    images: ReadImages = 'refs',
+    known?: KnownThread,
   ): Promise<SessionSnapshot> {
     const live = this.live.get(sessionId)
-    if (live) return this.withBytes(live, images, () => this.liveSnapshot(live, from))
+    if (live) {
+      // Patches go out first, so the seq compared is the one the reader's patches reach.
+      this.flushPatches(live)
+      if (known && this.isKnown(live, known)) return unchanged(this.liveSnapshot(live, undefined))
+      return this.withBytes(live, images, () => this.liveSnapshot(live, from))
+    }
     const record = this.recordOf(sessionId)
+    // A thread the reader holds still is read from its latest page alone, for the session's view.
+    const same = known !== undefined && this.isKnown(record, known)
     const page = await this.readPage(record, (store) =>
-      from === undefined
-        ? store.page(sessionId, null, null, images)
-        : store.tail(sessionId, from, images),
+      from === undefined || same
+        ? store.page(sessionId, null, null, storeImages(images))
+        : store.tail(sessionId, from, storeImages(images)),
     )
     // It went live, or away, while the page was read.
     if (this.live.has(sessionId) || !this.has(sessionId)) {
-      return this.snapshot(sessionId, from, images)
+      return this.snapshot(sessionId, from, images, known)
     }
-    return this.storedSnapshot(record, page)
+    const snapshot = this.storedSnapshot(record, page)
+    return same && this.isKnown(record, known) ? unchanged(snapshot) : snapshot
+  }
+
+  /**
+   * Huli: which copy of a session's thread its seq counts in: this run of the host, the store's
+   * changes made outside the sessions (`imagesCleared`), the session's own token, and whether the
+   * thread is live or stored, since a stored page settles what a live one leaves running.
+   */
+  private epochOf(sessionId: string, live: boolean): string {
+    let token = this.epochs.get(sessionId)
+    if (!token) this.epochs.set(sessionId, (token = randomUUID().slice(0, 8)))
+    return `${this.runId}.${this.storeChanges}.${token}.${live ? 'l' : 's'}`
+  }
+
+  /** Huli: whether the reader holds the thread as it is now. */
+  private isKnown(of: Live | SessionRecord, known: KnownThread): boolean {
+    const live = 'thread' in of
+    const seq = live ? of.seq : (this.seqs.get(of.id) ?? 0)
+    return known.seq === seq && known.epoch === this.epochOf(of.id, live)
+  }
+
+  /**
+   * Huli: the thread store changed under every session, as when Settings cleared their pictures:
+   * no reader's copy is known to be current any more.
+   */
+  imagesCleared(): void {
+    this.storeChanges++
+  }
+
+  /**
+   * Huli: each session's tool calls and latest run, by id, from its live thread or its stored
+   * one's index, so a sub-agent's row needs no thread. A session it does not know is left out.
+   */
+  async stats(sessionIds: readonly string[]): Promise<Record<string, SessionStats>> {
+    const out: Record<string, SessionStats> = {}
+    const stored: SessionRecord[] = []
+    for (const sessionId of sessionIds) {
+      const live = this.live.get(sessionId)
+      if (live) out[sessionId] = liveStats(live.thread)
+      else if (this.records.has(sessionId)) stored.push(this.records.get(sessionId)!)
+    }
+    const store = this.deps.threads
+    if (!store || stored.length === 0) return out
+    let read: Record<string, StoredStats> = {}
+    try {
+      read = await store.stats(stored.map((record) => record.id))
+    } catch (error) {
+      this.deps.diagnostics.log('warn', `Could not read thread stats: ${(error as Error).message}`)
+    }
+    for (const record of stored) {
+      const live = this.live.get(record.id)
+      const found = read[record.id]
+      if (live) out[record.id] = liveStats(live.thread)
+      else if (found && this.isCurrent(record, found.head)) out[record.id] = found.stats
+    }
+    return out
   }
 
   /**
@@ -4533,10 +4637,14 @@ export class SessionManager {
    */
   private async withBytes<T extends { entries: ThreadEntry[] }>(
     live: Live,
-    images: ImageMode,
+    images: ReadImages,
     take: () => T,
   ): Promise<T> {
     if (images === 'refs') return take()
+    if (images === 'hashed') {
+      const taken = take()
+      return { ...taken, entries: taken.entries.map(hashedImages) }
+    }
     const bytes = new Map<string, string | null>()
     for (;;) {
       const missing = [...imageBlobs(take().entries)].filter((hash) => !bytes.has(hash))
@@ -4563,6 +4671,7 @@ export class SessionManager {
       seq: live.seq,
       older: start > 0 ? this.posAt(live, start) : null,
       plan: this.planBefore(live, start),
+      epoch: this.epochOf(live.id, true),
     }
   }
 
@@ -4585,6 +4694,7 @@ export class SessionManager {
       seq: this.seqs.get(record.id) ?? 0,
       older: page?.older ?? null,
       plan: page?.plan ?? null,
+      epoch: this.epochOf(record.id, false),
     }
   }
 
@@ -4624,7 +4734,7 @@ export class SessionManager {
     sessionId: string,
     before: number,
     from?: number,
-    images: ImageMode = 'refs',
+    images: ReadImages = 'refs',
   ): Promise<OlderPage> {
     const live = this.live.get(sessionId)
     if (live) {
@@ -4646,7 +4756,7 @@ export class SessionManager {
     }
     const record = this.recordOf(sessionId)
     const page = await this.readPage(record, (store) =>
-      store.page(sessionId, before, from ?? null, images),
+      store.page(sessionId, before, from ?? null, storeImages(images)),
     )
     if (this.live.has(sessionId) || !this.has(sessionId)) {
       return this.page(sessionId, before, from, images)
@@ -4660,7 +4770,7 @@ export class SessionManager {
   async entry(
     sessionId: string,
     entryId: string,
-    images: ImageMode = 'refs',
+    images: ReadImages = 'refs',
   ): Promise<ThreadEntry> {
     const live = this.live.get(sessionId)
     if (live) {
@@ -4678,7 +4788,7 @@ export class SessionManager {
     let stored: StoredEntry | null = null
     if (store && record.acpSessionId) {
       try {
-        stored = await store.entry(sessionId, entryId, images)
+        stored = await store.entry(sessionId, entryId, storeImages(images))
       } catch (error) {
         this.deps.diagnostics.log(
           'warn',
@@ -4701,7 +4811,7 @@ export class SessionManager {
   /** What waits for the user's answer in a session, for a client that shows only that. */
   async requests(
     sessionId: string,
-    images: ImageMode = 'refs',
+    images: ReadImages = 'refs',
   ): Promise<{ entries: ThreadEntry[] }> {
     this.recordOf(sessionId)
     const live = this.live.get(sessionId)
@@ -7736,31 +7846,40 @@ export class SessionManager {
    * session, loads its history from the agent and stays live. Agent-side failures leave the
    * session live in `failed` or `auth_required`, so the snapshot shows them with Retry.
    */
-  async open(sessionId: string, images: ImageMode = 'refs'): Promise<SessionSnapshot> {
+  async open(
+    sessionId: string,
+    images: ReadImages = 'refs',
+    known?: KnownThread,
+  ): Promise<SessionSnapshot> {
     const existing = this.live.get(sessionId)
     if (existing) {
       if (existing.opening) await existing.opening
-      return this.snapshot(sessionId, undefined, images)
+      return this.snapshot(sessionId, undefined, images, known)
     }
     const record = this.recordOf(sessionId)
-    const page = await this.readPage(record, (store) => store.page(sessionId, null, null, images))
-    if (this.live.has(sessionId) || !this.has(sessionId)) return this.open(sessionId, images)
+    const page = await this.readPage(record, (store) =>
+      store.page(sessionId, null, null, storeImages(images)),
+    )
+    if (this.live.has(sessionId) || !this.has(sessionId)) return this.open(sessionId, images, known)
     if (page) {
       // A program outside Kettu holds the session or wrote to it: it comes back through its revive.
       // Huli: so does one an idle program has open, which the composer names.
       const outside = await this.outsideState(record)
-      if (outside.state === 'current' && !outside.by) return this.storedSnapshot(record, page)
+      if (outside.state === 'current' && !outside.by) {
+        const snapshot = this.storedSnapshot(record, page)
+        return known && this.isKnown(record, known) ? unchanged(snapshot) : snapshot
+      }
       await this.revive(sessionId)
-      return this.snapshot(sessionId, undefined, images)
+      return this.snapshot(sessionId, undefined, images, known)
     }
     if (record.origin === 'subagent' && record.parentId) {
       // A subagent's thread comes back with its parent's load, which replays the children.
       await this.open(record.parentId)
-      return this.snapshot(sessionId, undefined, images)
+      return this.snapshot(sessionId, undefined, images, known)
     }
     const live = this.makeLive(record, true, 'starting')
     await this.runOpening(live)
-    return this.snapshot(sessionId, undefined, images)
+    return this.snapshot(sessionId, undefined, images, known)
   }
 
   private runOpening(live: Live): Promise<void> {
@@ -10099,7 +10218,12 @@ export class SessionManager {
     const live = this.live.get(sessionId)
     const pending = live?.blobs.get(hash)
     if (pending) return pending
-    return (await this.deps.threads?.blob(sessionId, hash)) ?? null
+    const stored = (await this.deps.threads?.blob(sessionId, hash)) ?? null
+    if (stored) return stored
+    // Huli: an image a page named by hash before a checkpoint stored it.
+    const now = this.live.get(sessionId)
+    const held = now ? heldImage(Object.values(now.thread.byId), hash) : null
+    return held ? { hash, mime: held.mimeType, data: Buffer.from(held.data, 'base64') } : null
   }
 
   // The queue: Kettu's own, for every agent, since ACP has none. One turn runs at a time,
@@ -17764,6 +17888,7 @@ export class SessionManager {
     this.missing.delete(sessionId)
     this.watchers.delete(sessionId)
     this.seqs.delete(sessionId)
+    this.epochs.delete(sessionId)
     this.idleReleased.delete(sessionId)
     const limitTimer = this.limitTimers.get(sessionId)
     if (limitTimer) clearTimeout(limitTimer)
