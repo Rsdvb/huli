@@ -436,8 +436,10 @@ class HostSession {
           ...this.timings,
           ping: () => {
             this.pingedAt = Date.now()
-            this.send({ type: 'ping' } satisfies Ping)
+            return this.channel.send({ type: 'ping' } satisfies Ping).catch(() => {})
           },
+          buffered: () => this.channel.buffered(),
+          speak: true,
           // Ended now as if the network went, so the link reconnects and resumes the session: a
           // stopped host never finishes the close.
           silent: () => {
@@ -446,6 +448,7 @@ class HostSession {
             this.end()
           },
         })
+        this.channel.watch?.(this.keepalive)
       }
       return this.handlers.welcomed(welcome)
     }

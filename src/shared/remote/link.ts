@@ -595,8 +595,10 @@ export class HostLink {
         ...(this.options.keepalive ?? DEVICE_KEEPALIVE),
         ping: () => {
           session.pingedAt = Date.now()
-          void session.channel.send({ type: 'ping' } satisfies Ping).catch(() => {})
+          return session.channel.send({ type: 'ping' } satisfies Ping).catch(() => {})
         },
+        buffered: () => session.channel.buffered(),
+        speak: true,
         // Ended now as if the network went, so the link reconnects and resumes the session: a
         // stopped host never finishes the close.
         silent: () => {
@@ -604,6 +606,7 @@ export class HostLink {
           this.ended(session)
         },
       })
+      session.channel.watch?.(session.keepalive)
     }
     const resumed = askedResume && welcome.resumed !== undefined
     if (this.keptTimer) clearTimeout(this.keptTimer)

@@ -185,6 +185,81 @@ export function heldTransports(): HeldTransports {
   }
 }
 
+/** A connection with a slow way from the host to the device, as a relay behind a proxy. */
+export interface SlowTransports {
+  device: Transport
+  host: Transport
+  /** No message passes either way from now on, as on a network that went; closes still do. */
+  cut(): void
+}
+
+/** How often a slow way hands on what its rate allows. */
+const SLOW_TICK_MS = 10
+
+/**
+ * The host's sends leave for the device at `bytesPerSecond`, whole transport messages in order;
+ * those waiting count as buffered. The device's reach the host at once, until `cut`.
+ */
+export function slowTransports(bytesPerSecond: number): SlowTransports {
+  const [device, host] = memoryTransports()
+  const queue: Uint8Array[] = []
+  let queued = 0
+  let allowance = 0
+  let last = 0
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let cut = false
+  const drains: (() => void)[] = []
+  const pump = (): void => {
+    timer = null
+    if (cut) return
+    const now = performance.now()
+    allowance += ((now - last) / 1000) * bytesPerSecond
+    last = now
+    while (queue.length > 0 && allowance >= queue[0]!.length) {
+      const message = queue.shift()!
+      allowance -= message.length
+      queued -= message.length
+      host.send(message)
+    }
+    if (queue.length > 0) timer = setTimeout(pump, SLOW_TICK_MS)
+    else {
+      allowance = 0
+      for (const resolve of drains.splice(0)) resolve()
+    }
+  }
+  return {
+    device: {
+      ...device,
+      send: (message) => {
+        if (!cut) device.send(message)
+      },
+    },
+    host: {
+      ...host,
+      send: (message) => {
+        if (cut) return
+        queue.push(message)
+        queued += message.length
+        if (timer) return
+        last = performance.now()
+        timer = setTimeout(pump, SLOW_TICK_MS)
+      },
+      buffered: () => queued,
+      drained: () =>
+        queued === 0 ? Promise.resolve() : new Promise((resolve) => drains.push(resolve)),
+      close: () => {
+        for (const resolve of drains.splice(0)) resolve()
+        host.close()
+      },
+    },
+    cut: () => {
+      cut = true
+      if (timer) clearTimeout(timer)
+      timer = null
+    },
+  }
+}
+
 /** The two ends of a port, as a MessageChannel's. */
 export function memoryPorts(): [PortChannel, PortChannel] {
   return pair<unknown>((message) => structuredClone(message))

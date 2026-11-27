@@ -770,7 +770,10 @@ class DeviceConnection {
       return
     }
     this.channel = new Channel(ciphers, {
-      write: (frame) => this.transport.send(frame),
+      write: (frame) => {
+        this.keepalive?.wrote(frame.length)
+        this.transport.send(frame)
+      },
       message: (channelMessage) => this.receive(channelMessage),
       end: () => this.end(),
     })
@@ -934,7 +937,7 @@ class DeviceConnection {
     if (this.state === 'closed') return
     if (this.keepalive && message.kind === 'json') {
       const keepalive = keepaliveMessage(message.value)
-      if (keepalive === 'ping') this.sendNow({ type: 'pong' } satisfies Pong)
+      if (keepalive === 'ping') void this.sendNow({ type: 'pong' } satisfies Pong)
       if (keepalive) return
     }
     if (this.session) return this.session.receive(this, message)
@@ -1128,13 +1131,15 @@ class DeviceConnection {
 
   /**
    * From version 3, pings the device after a quiet spell, and drops a connection that stays silent
-   * after it as if the network went, so its session waits for the device to resume.
+   * after it as if the network went, so its session waits for the device to resume. A ping behind
+   * what the session sent waits for that to leave, as long as it does.
    */
   private keepAlive(version: number): void {
     if (version < KEEPALIVE_VERSION) return
     this.keepalive = new Keepalive({
       ...(this.server.options.keepalive ?? HOST_KEEPALIVE),
       ping: () => this.sendNow({ type: 'ping' } satisfies Ping),
+      buffered: () => this.transport.buffered(),
       silent: () => {
         this.server.options.log('info', `Device ${this.device?.id} stopped answering`)
         this.end()
@@ -1142,9 +1147,12 @@ class DeviceConnection {
     })
   }
 
-  /** Sends on this connection, outside the session's numbered messages. */
-  private sendNow(value: Ping | Pong): void {
-    this.channel?.send({ kind: 'json', value }).catch(() => {})
+  /**
+   * Sends on this connection, outside the session's numbered messages; settles once it was handed
+   * to the transport, or could not be.
+   */
+  private sendNow(value: Ping | Pong): Promise<void> {
+    return this.channel?.send({ kind: 'json', value }).catch(() => {}) ?? Promise.resolve()
   }
 
   private end(): void {

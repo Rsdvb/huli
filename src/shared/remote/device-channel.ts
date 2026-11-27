@@ -3,6 +3,7 @@
 // connects to other hosts with it, and the tests connect to the remote host as a device.
 
 import { Channel } from './channel'
+import type { TrafficWatcher } from './keepalive'
 import { Handshake, type KeyPair } from './noise'
 import type { Transport } from './transport'
 
@@ -36,6 +37,11 @@ export interface DeviceChannel {
   /** What the transport holds that has not left yet, and when it has, as `Transport` says. */
   buffered(): number
   drained(): Promise<void>
+  /**
+   * Tells `watcher` of each transport message as it comes, before it is read, and as it goes, so
+   * a keepalive hears a long message while it arrives; null stops.
+   */
+  watch?(watcher: TrafficWatcher | null): void
   close(): void
 }
 
@@ -74,6 +80,7 @@ export async function startDeviceChannel(
   const opened = new Promise<DeviceChannel>((resolve, reject) => (settle = { resolve, reject }))
   let sentAt = 0
   let handshakeMs = 0
+  let watcher: TrafficWatcher | null = null
   // A refusal can come before the caller takes `opened`; it still hears it there.
   opened.catch(() => {})
   const fail = (error: unknown): void => {
@@ -108,6 +115,9 @@ export async function startDeviceChannel(
     },
     buffered: () => transport.buffered(),
     drained: () => transport.drained(),
+    watch: (next) => {
+      watcher = next
+    },
     close: () => transport.close(),
   }
 
@@ -122,6 +132,7 @@ export async function startDeviceChannel(
     })
   })
   transport.onMessage((message) => {
+    watcher?.heard()
     reading = reading.then(async () => {
       if (channel) return channel.receive(message)
       if (settled) return
@@ -129,7 +140,10 @@ export async function startDeviceChannel(
         await handshake.readMessage(message)
         handshakeMs = Date.now() - sentAt
         channel = new Channel(await handshake.split(), {
-          write: (frame) => transport.send(frame),
+          write: (frame) => {
+            watcher?.wrote(frame.length)
+            transport.send(frame)
+          },
           message: (received) => {
             if (received.kind === 'bytes') bytesListener?.(received.stream, received.data)
             else if (listener) listener(received.value)
