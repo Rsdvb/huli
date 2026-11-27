@@ -2170,6 +2170,46 @@ message again and was dropped again.
   message takes longer than 15 s to reach it; a newer one with an older host is kept by its pings.
 - **Answers too long for the channel** are logged with their request's method or event's type.
 
+### Sleep and Power Nap (睡眠时断开、Power Nap 里不重连)
+
+A Mac that slept left its links open, so the host logged "Device … stopped answering" about 20 s
+later. Its dark wakes (Power Nap, maintenance, network wakes) then ran the timers: the link saw the
+dead connection, reconnected, resumed, pulled what had piled up and was cut again as the Mac slept.
+The owner's PC logged 337 such drops in a week, at every hour, most followed by 5–30 minutes or
+more of silence.
+
+- **What fires.** Electron's `powerMonitor` takes `suspend` and `resume` from Chromium's
+  `base::PowerMonitor`. On macOS that registers with `IORegisterForSystemPower` and emits `suspend`
+  on `kIOMessageSystemWillSleep` and `resume` on `kIOMessageSystemWillPowerOn`
+  (`base/power_monitor/power_monitor_device_source_mac.mm`). The kernel sends those to such
+  clients only as the system leaves full wake and as it enters it again: in xnu's
+  `IOPMrootDomain.cpp` a wake into dark wake leaves `_systemMessageClientMask` without
+  `kSystemMessageClientLegacyApp`, `willEnterFullWake()` adds it and sends
+  `kIOMessageSystemWillPowerOn`, and `tellChangeDown` notes that legacy apps "were already told in
+  the full->dark transition". So a dark wake, and the sleep after it, say nothing to the app; a lid
+  opened during one promotes it to full wake, which sends `resume`. Apple's DTS confirms that dark
+  wake is not "on" and has no public API (developer forums thread 770517). `unlock-screen` is the
+  distributed `com.apple.screenIsUnlocked`, which needs a user. Since Electron 35.5 (#47162) the
+  mac module no longer emits suspend and resume of its own. On Windows `suspend` is
+  `PBT_APMSUSPEND` and `resume` `PBT_APMRESUMEAUTOMATIC`, which comes on every resume, also an
+  unattended one (`power_monitor_device_source_win.cc`); on Linux they are logind's
+  `PrepareForSleep(true/false)` (Electron's `power_observer_linux.cc`).
+- **On `suspend`** main sends `remote-host:suspend`. The client (`HostClient.suspend`) closes every
+  host's connection at once and keeps what the host keeps of the session (`RESUME_MS`), and its
+  links try nothing until the wake: retries, nudges, the network check and the retry after a
+  sign-in all wait (`HostClient.asleep`). The server (`RemoteServer.suspend`) drops its devices'
+  connections without a word, so they hear at once that the host went and resume once it is back;
+  its relay sign-in is left to reconnect as before. A remote host process started while asleep is
+  told so in its init.
+- **The wake** is `resume`, or, should one go unheard, a focused window, an unlocked screen or a
+  Reconnect the user presses: the hosts are tried at once and the session resumes as after any
+  drop, or starts anew when the host no longer kept it. Windows and Linux reconnect on every
+  `resume`, as before; only what happens between suspend and resume changed. `lock-screen` alone
+  changes nothing: a locked Mac that stays awake keeps its links.
+- **The relay** (`cloud/src/relay.ts`) stops reading a sender while more than 1 MiB waits toward
+  its slow peer, so that sender's pong cannot be read; it is kept while its peer answers, and any
+  message counts as an answer, which a device that keeps speaking gives.
+
 ### Kite's artwork
 
 `tools/huli/brand/` holds the masters, SVG on a 1024 grid: `kite-light.svg` (the icon, white kite
