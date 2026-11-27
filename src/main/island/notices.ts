@@ -4,7 +4,8 @@
 
 import type { AgentStatus, PlanLimit } from '@shared/agent-host'
 import { updateOffer } from '@shared/agent-update-offer'
-import { limitLevel, resetTimeText } from '@shared/plan-limits'
+import { limitHolds, limitHoldsUntil, limitLevel, resetTimeText } from '@shared/plan-limits'
+import { newestLimits, newestReadings, type PlanReading } from '@shared/plan-readings'
 import type { UpdateStatus } from '@shared/updates'
 import { islandT, locale } from '../i18n'
 import type { IslandMark, IslandNotice } from './protocol'
@@ -97,20 +98,52 @@ function agentNotice(local: HostState | undefined): [IslandNotice, NoticeAction]
   ]
 }
 
+/** Each account's newest reading on any host, which the window shows too. */
+export function planReadings(hosts: readonly HostState[]): ReadonlyMap<string, PlanReading> {
+  return newestReadings(
+    hosts.map((state) => ({ hostId: state.host?.id ?? null, agents: [...state.agents.values()] })),
+  )
+}
+
 /**
- * The fullest window at 90% or more across every host's agents, used up first; an account signed
- * in on several agents or hosts counts once. Windows whose reset already passed are left out.
+ * When the island's limits next change with no word from any host: the soonest a window at 90% or
+ * more stops holding, as when a used-up one resets. Null while none is that full.
+ */
+export function limitsChangeAt(
+  hosts: readonly HostState[],
+  readings: ReadonlyMap<string, PlanReading>,
+  now: number,
+): number | null {
+  let at: number | null = null
+  for (const state of hosts) {
+    for (const status of state.agents.values()) {
+      for (const limit of newestLimits(readings, status)) {
+        if (limitLevel(limit) !== 'bad') continue
+        const until = limitHoldsUntil(limit)
+        if (until > now && (at === null || until < at)) at = until
+      }
+    }
+  }
+  return at
+}
+
+/**
+ * The fullest window at 90% or more across every host's agents, used up first, from its account's
+ * newest reading as the window shows it, so an older reading another agent or host kept never
+ * stands in for it. A turned-off agent's last reading, which nothing reads again, is left out, and
+ * so are windows that no longer hold.
  */
 function limitNotice(
   hosts: readonly HostState[],
+  readings: ReadonlyMap<string, PlanReading>,
   now: number,
 ): [IslandNotice, NoticeAction] | null {
   let best: { status: AgentStatus; limit: PlanLimit; used: number } | null = null
   for (const state of hosts) {
     for (const status of state.agents.values()) {
-      for (const limit of status.limits) {
-        if (limit.resetsAt !== null && limit.resetsAt <= now) continue
-        if (limitLevel(limit) !== 'bad') continue
+      if (status.registered === false || status.disabled) continue
+      for (const limit of newestLimits(readings, status)) {
+        if (!limitHolds(limit, now) || limitLevel(limit) !== 'bad') continue
         const used = limit.state === 'reached' ? Infinity : Math.round(limit.usedPercent ?? 0)
         if (!best || used > best.used) best = { status, limit, used }
       }
@@ -145,12 +178,13 @@ function limitNotice(
 export function buildNotices(
   update: UpdateStatus | null,
   hosts: readonly HostState[],
+  readings: ReadonlyMap<string, PlanReading>,
   now: number,
 ): BuiltNotices {
   const built = [
     appNotice(update),
     agentNotice(hosts.find((state) => state.host === null)),
-    limitNotice(hosts, now),
+    limitNotice(hosts, readings, now),
   ].filter((entry) => entry !== null)
   return {
     notices: built.map(([notice]) => notice),

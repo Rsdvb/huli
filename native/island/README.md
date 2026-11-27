@@ -108,5 +108,5 @@ on the helper's stdin send `{ "type": "debug", "kind": ... }` with `expand`, `cl
 for this Mac's architecture, for macOS 13 and later, and copies `kettu-island` into the
 destination. It needs Xcode or the Command Line Tools and the repository's packages, Electron
 included, and does nothing on other platforms. Huli: `--no-marks` leaves the marks out and needs
-no packages, as `huli-island.yml` builds it; `swift test` in this folder runs the layout tests. `tools/install/device-helpers.mjs`, which the release run calls,
+no packages, as `huli-island.yml` builds it; `swift test` in this folder runs the layout and store tests. `tools/install/device-helpers.mjs`, which the release run calls,
 builds it with the other helpers.

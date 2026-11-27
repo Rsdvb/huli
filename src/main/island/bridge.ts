@@ -50,6 +50,8 @@ const QUIT_WAIT_MS = 1_000
 const MAX_BAD_LINES = 5
 /** How often expanding the island may have the agents read their plan limits again. */
 const LIMITS_EVERY_MS = 60_000
+/** The longest wait a timer takes; one for a later time wakes there and waits again. */
+const MAX_TIMER_MS = 2 ** 31 - 1
 /** A tool call with no result for this long shows as stuck. */
 export const STUCK_AFTER_MS = 5 * 60_000
 /** What the helper may leave unread on its input before it counts as hung. */
@@ -146,6 +148,7 @@ const EMPTY_BUILT: BuiltView = {
   requests: new Map(),
   owners: new Map(),
   notices: new Map(),
+  changesAt: null,
 }
 
 /** What a click on a pop with no row does. */
@@ -168,6 +171,8 @@ export class IslandBridge {
   private restartTimer: ReturnType<typeof setTimeout> | null = null
   private readyTimer: ReturnType<typeof setTimeout> | null = null
   private flushTimer: ReturnType<typeof setTimeout> | null = null
+  /** Builds the view again when it changes by time alone, as when a plan limit resets. */
+  private clockTimer: ReturnType<typeof setTimeout> | null = null
   private badLines = 0
   private seq = 0
   /** What the helper was last sent, which its answers and opens are checked against. */
@@ -373,6 +378,14 @@ export class IslandBridge {
   }
 
   /**
+   * The computer woke from sleep, during which timers stand still on macOS: what changed by time
+   * alone meanwhile, such as a plan limit that reset, follows now.
+   */
+  timeChanged(): void {
+    this.changed()
+  }
+
+  /**
    * Kettu's update, downloaded or waiting for a step of the user's, pops out once; false when the
    * island is not running or its switch is off, so a notification may say it instead.
    */
@@ -521,10 +534,10 @@ export class IslandBridge {
   }
 
   private clearTimers(): void {
-    for (const timer of [this.restartTimer, this.readyTimer, this.flushTimer]) {
+    for (const timer of [this.restartTimer, this.readyTimer, this.flushTimer, this.clockTimer]) {
       if (timer) clearTimeout(timer)
     }
-    this.restartTimer = this.readyTimer = this.flushTimer = null
+    this.restartTimer = this.readyTimer = this.flushTimer = this.clockTimer = null
   }
 
   private exited(helper: HelperProcess, code: number | null, signal: string | null): void {
@@ -619,6 +632,8 @@ export class IslandBridge {
         return
       case 'expanded':
         this.readLimits()
+        // What the open island shows holds now, even after a wake its timer missed.
+        this.changed()
         return
       case 'answer':
         void this.answer(message.id, message.request, message.option)
@@ -833,6 +848,7 @@ export class IslandBridge {
     if (!built) return
     const change = diffView(this.sent.view, built.view)
     this.sent = built
+    this.wakeAt(built.changesAt)
     if (!change) return
     this.send({ type: 'change', seq: ++this.seq, ...change })
   }
@@ -843,7 +859,20 @@ export class IslandBridge {
     const built = this.build()
     if (!built) return
     this.sent = built
+    this.wakeAt(built.changesAt)
     this.send({ type: 'view', seq: ++this.seq, ...built.view })
+  }
+
+  /** One timer for the next time the view changes by itself; none while nothing will. */
+  private wakeAt(at: number | null): void {
+    if (this.clockTimer) clearTimeout(this.clockTimer)
+    this.clockTimer = null
+    if (at === null) return
+    const wait = Math.min(Math.max(0, at - this.now()), MAX_TIMER_MS)
+    this.clockTimer = setTimeout(() => {
+      this.clockTimer = null
+      this.changed()
+    }, wait)
   }
 
   private send(message: MainToIsland): void {

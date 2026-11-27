@@ -43,8 +43,14 @@ export function limitHolds(
   limit: Pick<PlanLimit, 'window' | 'resetsAt' | 'observedAt'>,
   now: number,
 ): boolean {
-  if (limit.resetsAt !== null) return limit.resetsAt > now
-  return now - limit.observedAt < windowPeriod(limit.window)
+  return limitHoldsUntil(limit) > now
+}
+
+/** Huli: when a window's reading stops holding, as `limitHolds` counts it. */
+export function limitHoldsUntil(
+  limit: Pick<PlanLimit, 'window' | 'resetsAt' | 'observedAt'>,
+): number {
+  return limit.resetsAt ?? limit.observedAt + windowPeriod(limit.window)
 }
 
 /** Huli: whether a window has no reset and its reading is a period old: it is shown no more. */

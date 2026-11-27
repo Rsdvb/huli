@@ -1,6 +1,6 @@
 name: Huli island helper
 
-# The notch island's macOS helper, on a push that changes it: its layout tests (swift test), a build
+# The notch island's macOS helper, on a push that changes it: its tests (swift test), a build
 # of the whole helper as the release compiles it, without the marks, which need the repository's
 # packages, and screenshots of it on the runner's screen, which has no notch, and beside a notch it
 # draws there (native/island/shots.mjs). The release run builds the real helper. Huli's own; see
@@ -29,7 +29,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: Layout tests
+      - name: Helper tests
         working-directory: native/island
         run: swift test
       - name: Build the helper

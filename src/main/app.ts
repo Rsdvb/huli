@@ -1526,6 +1526,7 @@ async function start(): Promise<void> {
   powerMonitor.on('resume', () => {
     agentHost.power('resume')
     remoteHost.resume()
+    island.timeChanged()
   })
   // Huli: the user looks at the app again, so a host that came back meanwhile is tried now rather
   // than at the end of its backoff, which reaches a minute.
