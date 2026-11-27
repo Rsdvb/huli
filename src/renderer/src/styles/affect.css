@@ -6564,6 +6564,43 @@ li[data-row-exit='dust'] > * {
   background: var(--hover);
   color: var(--ink);
 }
+/* Huli: the line over the tray when a large context makes each request upload a lot. */
+.kettu-traffic-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 2px 6px 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.kettu-traffic-hint__text {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kettu-traffic-hint__action {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: var(--ink);
+}
+.kettu-traffic-hint__action:hover:not(:disabled) {
+  background: var(--hover);
+}
+.kettu-traffic-hint__action:disabled {
+  color: var(--text-disabled);
+}
+.kettu-traffic-hint__action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
 .ui-as-tray-link:is(.kettu-tray-link--meter, .kettu-tray-link--agent) {
   gap: 6px;
 }

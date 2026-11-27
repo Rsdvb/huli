@@ -688,7 +688,14 @@
   },
   "sessionStarted": {
     "label": "Started <title>{{title}}</title>",
-    "missing": "Started a session"
+    "missing": "Started a session",
+    "handoff": "Handed off to <title>{{title}}</title>",
+    "handoffMissing": "Handed off to a new session"
+  },
+  "handoff": {
+    "menu": "Hand off to a new session",
+    "asked": "Writing a handoff summary; a new session carries on from it once it is written",
+    "from": "Carries on from"
   },
   "compaction": {
     "inProgress": "Compacting context…",

@@ -30,7 +30,10 @@ export const SessionStartedEntry = memo(function SessionStartedEntry({
     child?.status === 'starting'
   const waiting = child?.attention === 'permission'
   const failed = child?.attention === 'error' || child?.status === 'failed'
-  const title = child ? sessionTitle(child) : t('sessionStarted.missing')
+  const handoff = entry.handoff === true
+  const title = child
+    ? sessionTitle(child)
+    : t(handoff ? 'sessionStarted.handoffMissing' : 'sessionStarted.missing')
 
   return (
     <button
@@ -58,7 +61,7 @@ export const SessionStartedEntry = memo(function SessionStartedEntry({
         {child ? (
           <Trans
             t={t}
-            i18nKey="sessionStarted.label"
+            i18nKey={handoff ? 'sessionStarted.handoff' : 'sessionStarted.label'}
             values={{ title }}
             components={{ title: <span className="text-primary" /> }}
           />

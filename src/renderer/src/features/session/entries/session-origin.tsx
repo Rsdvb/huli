@@ -40,12 +40,14 @@ function useSender(sessionId: string) {
  * user's own bubble at the right stays the only one. Its title opens the sender.
  */
 export function FromSessionCard({ from, children }: { from: FromSession; children: ReactNode }) {
-  useTranslation('session')
+  const { t } = useTranslation('session')
   const sender = useSender(from.sessionId)
   const title = sender?.title ?? from.title
   return (
     <figure className="ks-from">
       <figcaption className="ks-from__head">
+        {/* Huli: a handoff's summary says the session carries on from its sender (接力). */}
+        {from.handoff && <span className="shrink-0">{t('handoff.from')}</span>}
         {sender && <AgentMark agent={sender.agentId} size={14} hostId={hostOfSession(sender)} />}
         {sender ? (
           <button
