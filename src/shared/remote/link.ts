@@ -593,8 +593,8 @@ export class HostLink {
     if (welcome.protocol >= KEEPALIVE_VERSION) {
       session.keepalive = new Keepalive({
         ...(this.options.keepalive ?? DEVICE_KEEPALIVE),
-        ping: () => {
-          session.pingedAt = Date.now()
+        ping: (timed) => {
+          session.pingedAt = timed ? Date.now() : null
           return session.channel.send({ type: 'ping' } satisfies Ping).catch(() => {})
         },
         buffered: () => session.channel.buffered(),

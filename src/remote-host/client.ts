@@ -434,8 +434,8 @@ class HostSession {
       if (welcome.protocol >= KEEPALIVE_VERSION) {
         this.keepalive = new Keepalive({
           ...this.timings,
-          ping: () => {
-            this.pingedAt = Date.now()
+          ping: (timed) => {
+            this.pingedAt = timed ? Date.now() : null
             return this.channel.send({ type: 'ping' } satisfies Ping).catch(() => {})
           },
           buffered: () => this.channel.buffered(),

@@ -29,14 +29,17 @@ function watched(options: { speak?: boolean; hold?: boolean } = {}) {
   const t = {
     buffered: 0,
     pings: 0,
+    /** Whether each ping's round trip times the route. */
+    timed: [] as boolean[],
     silent: false,
     held: [] as (() => void)[],
   }
   const keepalive: Keepalive = new Keepalive({
     ...TIMINGS,
     ...(options.speak ? { speak: true } : {}),
-    ping: () => {
+    ping: (timed) => {
       t.pings++
+      t.timed.push(timed)
       return new Promise<void>((resolve) => {
         const write = (): void => {
           keepalive.wrote(PING)
@@ -73,6 +76,7 @@ describe('a keepalive on an idle connection', () => {
     expect(t.pings).toBe(0)
     await vi.advanceTimersByTimeAsync(1)
     expect(t.pings).toBe(1)
+    expect(t.timed).toEqual([true])
     // The ping left at once; the transport drains it.
     t.buffered = 0
     await vi.advanceTimersByTimeAsync(4_999)
@@ -184,8 +188,10 @@ describe('a keepalive while a long message comes in', () => {
       speaking.buffered = 0
     }
     expect(quiet.pings).toBe(0)
-    // Every ten seconds without a word of its own, so the other side hears it.
+    // Every ten seconds without a word of its own, so the other side hears it; their answers wait
+    // behind what the other side sends, so they time nothing.
     expect(speaking.pings).toBe(3)
+    expect(speaking.timed).toEqual([false, false, false])
     expect(speaking.silent).toBe(false)
   })
 })

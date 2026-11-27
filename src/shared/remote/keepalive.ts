@@ -75,8 +75,12 @@ export interface TrafficWatcher {
 }
 
 export interface KeepaliveOptions extends KeepaliveTimings {
-  /** Sends a ping; a promise it returns settles once the ping was handed to the transport. */
-  ping(): Promise<unknown> | void
+  /**
+   * Sends a ping; a promise it returns settles once the ping was handed to the transport. `timed`
+   * is false for one that went while the other side was sending, whose answer may wait behind
+   * what it sends, so its round trip says nothing of the route.
+   */
+  ping(timed: boolean): Promise<unknown> | void
   /** Nothing came within `answerMs` of a ping: the connection is to be ended. */
   silent(): void
   /** The bytes handed to the transport that have not left yet, as `Transport.buffered` says. */
@@ -150,7 +154,7 @@ export class Keepalive implements TrafficWatcher {
     if (this.stopped || this.out !== null) return
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
-    this.sendPing()
+    this.sendPing(true)
   }
 
   stop(): void {
@@ -181,7 +185,7 @@ export class Keepalive implements TrafficWatcher {
     this.timer = setTimeout(() => this.check(), delay)
   }
 
-  private sendPing(): void {
+  private sendPing(timed: boolean): void {
     const at = this.now()
     const out: Out = {
       at,
@@ -193,7 +197,7 @@ export class Keepalive implements TrafficWatcher {
       graced: false,
     }
     this.out = out
-    const sent = this.options.ping() as Promise<unknown> | undefined
+    const sent = this.options.ping(timed) as Promise<unknown> | undefined
     // A send that failed ends the connection anyway.
     const placed = (): void => this.placed(out)
     if (sent) sent.then(placed, placed)
@@ -220,8 +224,9 @@ export class Keepalive implements TrafficWatcher {
       else return this.awaitAnswer(out, now, late)
     }
     const { quietMs } = this.options
-    const quiet = Math.max(now - this.heardAt, this.options.speak ? now - this.wroteAt : 0)
-    if (quiet >= quietMs) return this.sendPing()
+    const unheard = now - this.heardAt
+    const quiet = Math.max(unheard, this.options.speak ? now - this.wroteAt : 0)
+    if (quiet >= quietMs) return this.sendPing(unheard >= quietMs)
     this.schedule(quietMs - quiet)
   }
 
