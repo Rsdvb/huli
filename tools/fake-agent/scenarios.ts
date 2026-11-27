@@ -1387,6 +1387,20 @@ const usage: Scenario = async (turn) => {
  * The rate limit events of a used-up 5-hour window that extra usage covers; `off` for the window
  * reset, `refused` for the window still used up with extra usage no longer letting requests through.
  */
+/**
+ * Huli: a long turn of a 1M-token model: the context it reports is 640K of 1M, and the turn's
+ * counts are forty requests' worth, for the traffic estimate and the handoff hint.
+ */
+const bigContext: Scenario = async (turn) => {
+  turn.session.bigTurn = turn.session.turns
+  turn.session.usedTokens = 640_000
+  await turn.send({ sessionUpdate: 'usage_update', used: 640_000, size: 1_000_000 })
+  const text =
+    'Read the whole repository and ran the test suite forty times; the context now holds 640K tokens.'
+  await stream(turn, text, { chunks: [text], delayMs: 0 })
+  return 'end_turn'
+}
+
 const extraUsage: Scenario = async (turn) => {
   const now = Math.floor(Date.now() / 1000)
   const mode = turn.text.trim()
@@ -1818,6 +1832,7 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   shell,
   usage,
   'extra-usage': extraUsage,
+  'big-context': bigContext,
   status,
   context,
   recall,

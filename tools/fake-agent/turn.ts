@@ -16,6 +16,8 @@ export interface FakeSessionState {
   title: string | null
   turns: number
   usedTokens: number
+  /** Huli: the turn the big-context scenario ran, whose counts are a long 1M-window turn's. */
+  bigTurn?: number
   /** The entries its `session/load` replay synthesizes; null replays what it recorded. */
   largeHistory: number | null
   /** Its last prompt signed the agent out with the auth-required scenario. */

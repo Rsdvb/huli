@@ -29,6 +29,8 @@ export const SCENARIOS = [
   'shell',
   'usage',
   'extra-usage',
+  // Huli: a 1M-window session's large context, for the traffic hint and the handoff.
+  'big-context',
   'status',
   'context',
   'recall',
@@ -170,6 +172,9 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   },
   status: { description: "The plan limits, as Codex's /status reports them" },
   context: { description: "What fills the context, as Claude Code's /context reports it" },
+  'big-context': {
+    description: 'A long turn of a 1M-token model: 640K of context and forty requests of tokens',
+  },
   recall: { description: 'Answers with your previous message, as the agent remembers it' },
   instructions: {
     description: 'Answers with the text its session was started with in its system prompt',

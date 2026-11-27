@@ -551,6 +551,17 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
 
   // The turn's own counts, as every adapter reports them; cache reads grow with the context.
   const tokenUsage = (session: FakeSession): Usage => {
+    // Huli: forty requests at 600K tokens of context, nearly all read from the cache.
+    if (session.bigTurn === session.turns) {
+      return {
+        totalTokens: 24_100_000,
+        inputTokens: 12_000,
+        outputTokens: 18_000,
+        thoughtTokens: 4_000,
+        cachedReadTokens: 24_000_000,
+        cachedWriteTokens: 70_000,
+      }
+    }
     const input = 900
     const output = 420
     const cacheRead = 1200 * session.turns
