@@ -523,6 +523,50 @@ background so the turn goes on (转到后台), and cleans the list.
   `codex/connection.test.ts` (terminals listed, ended, missing), `acp/kite-tasks.test.ts`,
   `validate.test.ts`.
 
+### A workflow's agents on the board (工作流、子智能体)
+
+Claude Code's Workflow tool (asked for, or turned on by Ultracode) runs many agents in phases
+inside one background task (`task_type` `local_workflow`). Those agents send no `task_started` of
+their own and are no sessions; the task's `task_progress` carries them instead.
+
+- What Claude Code sends (2.1.326; none of it is in the SDK's public types): `task_progress` for
+  the workflow's task carries `workflow_progress`, the run's whole list of rows, each replaced in
+  place: `workflow_phase` (`index`, `title`, `kind`) and `workflow_agent` (`index`, `label`,
+  `phaseIndex`, `phaseTitle`, `agentId`, `model`, `state` `start`|`progress`|`done`|`error`,
+  `queuedAt`, `startedAt`, `durationMs`, `attempt`, `lastToolName`, `lastToolSummary`,
+  `promptPreview`, `resultPreview`, `error`, `tokens`, `toolCalls`, `cached`, `skipped`,
+  `endedWithRun`). The list comes again whenever an agent is queued, starts or ends, and at most
+  every ten seconds while agents only make progress; between lists its `description` names the
+  latest agent and `summary` is the workflow's name, or the wait for a usage limit with
+  `usage_limit_wait`. A run that hides its script withholds phase titles, prompts and errors. An
+  ended task's `task_notification` may carry the list too, cut down to fit
+  (`workflow_progress_omitted`). The Workflow tool's result names `runId` and `transcriptDir`
+  (`<session>/subagents/workflows/<runId>/agent-<agentId>.jsonl`), and `parent_task_id` never names
+  a workflow: an agent inside one has no task id of its own.
+- Mapping (`claude/workflow-progress.ts`, used by `mapper.ts`): each workflow task keeps a
+  `WorkflowRun`; the task's `BackgroundTaskView.workflow` lists phases and agents (`queued`,
+  `running`, `done`, `failed`, `stopped`; a `start` row without `startedAt` is queued, an error the
+  run itself caused or a skip is stopped), with a one-line progress (`lastToolSummary`) and error.
+  A new list goes out only when what the board shows changed, and unchanged agents keep their
+  objects. What an agent was asked and returned stays in the host: `sessions.workflowAgent`
+  answers it, with the agent's last message read through the SDK's `getSubagentMessages` (which
+  finds workflow transcripts too) once it ended, cut at 16 KiB and kept for 50 agents. When the
+  task ends, agents still queued or at work become stopped.
+- A subagent whose `parent_task_id` names a task this process never reported (the SDK says to take
+  an unknown id as none) starts under the session instead of waiting for a parent that never comes.
+- Board (`features/board/workflow-rows.tsx`): the workflow's row says the phases at work as
+  审核 3/6 and how many failed; a click opens its agents by phase, made only once opened, each row
+  memoized on its own fields; an agent opens to 任务, 最后的回复 (or the run's 结果 preview), 出错
+  and its model, tokens and calls, read while open and again when its state changes, never on a
+  timer. Ended workflows have a 工作流 group of their own under 已结束. The still-running line and
+  the sidebar say 工作流 · N 个子智能体 (agents at work or queued), no longer counting the workflow as
+  a command (`stillRunning.workflows`, `workflowAgents`).
+- Phone: 后台任务 lists a workflow's agents by phase under its row, from the same task list.
+- Fake agent: `/workflow` (`tools/fake-agent/workflow.ts`) runs three phases and eleven agents
+  through Kite's task extension (`workflow` on a task, `_kite/tasks/agent` for the detail) and holds
+  mid-run (`--hold <ms>`).
+- Tests: `claude/workflow-progress.test.ts`, `acp/kite-tasks.test.ts`, `validate.test.ts`.
+
 ### A session's MCP servers (MCP 服务器…, 重新加载技能和插件)
 
 The session's More menu opens MCP 服务器…, which lists the MCP servers the session's agent

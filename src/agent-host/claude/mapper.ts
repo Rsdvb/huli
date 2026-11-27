@@ -62,6 +62,7 @@ import type {
 import { isClaudeRowlessCall, isClaudeRowWhenFailed } from '../plan-tool'
 import { SERVICE_NAME } from '../service-name'
 import { workflowToolStructured } from '../workflow/tools'
+import { WorkflowRun } from './workflow-progress'
 import {
   isServerToolResult,
   PLAN_TOOLS,
@@ -262,6 +263,8 @@ export class ClaudeMapper {
   private saved: { id: string; memories: RecalledMemory[] } | null = null
   /** Huli: the goal Claude Code pursues, and the notice that shows it. */
   private goal: { id: string; condition: string } | null = null
+  /** Huli: each workflow task's run as it reported its agents, by task id. */
+  private readonly workflows = new Map<string, WorkflowRun>()
 
   constructor(
     /** The session's own id, Claude Code's. */
@@ -271,6 +274,8 @@ export class ClaudeMapper {
     private readonly windowOf: (model: string) => number | null = () => null,
     /** The folder Claude Code keeps its Plan mode plans in, outside the project; null if unknown. */
     private readonly plans: string | null = null,
+    /** Huli: whether a subagent task has a session, as one this process did not start may. */
+    private readonly subagentKnown: (taskId: string) => boolean = () => false,
   ) {}
 
   /** The session a message belongs to: a subagent's, or this one. */
@@ -1471,8 +1476,13 @@ export class ClaudeMapper {
     }
     const toolUseId = typeof message.tool_use_id === 'string' ? message.tool_use_id : null
     if (toolUseId) this.subagents.set(toolUseId, taskId)
+    // Huli: the SDK says to take a parent it does not know as none: one this process never
+    // reported has no session, which would hold the subagent's start until it is dropped.
     const parentTask = typeof message.parent_task_id === 'string' ? message.parent_task_id : null
-    const parent = parentTask ?? this.sessionId
+    const parent =
+      parentTask !== null && (this.running.has(parentTask) || this.subagentKnown(parentTask))
+        ? parentTask
+        : this.sessionId
     this.running.set(taskId, parent)
     const description = typeof message.description === 'string' ? message.description : null
     const kind = typeof message.subagent_type === 'string' ? message.subagent_type : null
@@ -1559,6 +1569,12 @@ export class ClaudeMapper {
     const taskId = typeof message.task_id === 'string' ? message.task_id : null
     const summary =
       typeof message.summary === 'string' ? message.summary.replace(/\s+/g, ' ').trim() : ''
+    if (
+      taskId !== null &&
+      (Array.isArray(message.workflow_progress) || this.background.get(taskId)?.kind === 'workflow')
+    ) {
+      return this.workflowProgress(taskId, message, summary)
+    }
     if (taskId === null || summary === '') return []
     const line = clip(summary, TASK_PROGRESS_LIMIT)
     const parent = this.running.get(taskId)
@@ -1575,6 +1591,53 @@ export class ClaudeMapper {
     if (task?.status !== 'running' || task.progress === line) return []
     this.background.set(taskId, { ...task, progress: line })
     return this.backgroundDelivery()
+  }
+
+  /**
+   * Huli: a workflow's progress: the rows of its agents, which its board row lists, and its own
+   * summary, which is only its name but while it waits for a usage limit to reset. Rows that come
+   * before the task is listed wait for it.
+   */
+  private workflowProgress(taskId: string, message: SystemMessage, summary: string): Delivery[] {
+    const task = this.background.get(taskId)
+    if (task && task.status !== 'running') return []
+    const run = this.workflowRun(taskId, message.workflow_progress)
+    if (!task) return []
+    const line = summary === '' ? null : clip(summary, TASK_PROGRESS_LIMIT)
+    const waits = typeof message.usage_limit_wait === 'object' && message.usage_limit_wait !== null
+    const progress = waits && line !== null ? line : run ? undefined : (line ?? task.progress)
+    const next: BackgroundTaskView = { ...task }
+    if (progress === undefined) delete next.progress
+    else next.progress = progress
+    if (run) next.workflow = run.view
+    if (next.progress === task.progress && next.workflow === task.workflow) return []
+    this.background.set(taskId, next)
+    return this.backgroundDelivery()
+  }
+
+  /** Huli: a workflow task's run, after the rows it reported now, if any; null before its first. */
+  private workflowRun(taskId: string, rows: unknown): WorkflowRun | null {
+    let run = this.workflows.get(taskId) ?? null
+    if (!Array.isArray(rows)) return run
+    if (!run) {
+      run = new WorkflowRun()
+      this.workflows.set(taskId, run)
+    }
+    run.take(rows)
+    return run
+  }
+
+  /**
+   * Huli: what one agent of a workflow task was asked and returned, as its run reported it, and
+   * whether it ended; null for an agent no report named.
+   */
+  workflowAgent(
+    taskId: string,
+    index: number,
+  ): (NonNullable<ReturnType<WorkflowRun['detail']>> & { ended: boolean }) | null {
+    const run = this.workflows.get(taskId)
+    const detail = run?.detail(index)
+    return run && detail ? { ...detail, ended: run.ended(index) } : null
   }
 
   /**
@@ -1691,6 +1754,10 @@ export class ClaudeMapper {
     if (!taskId) return []
     const summary = typeof message.summary === 'string' ? message.summary : ''
     const usage = inputOf(message.usage)
+    // Huli: an ended workflow's own list of its agents, where Claude Code sends one.
+    if (this.background.get(taskId)?.kind === 'workflow') {
+      this.workflowRun(taskId, message.workflow_progress)
+    }
     const board = this.backgroundEnded(
       taskId,
       message.status === 'completed' || message.status === 'stopped' ? message.status : 'failed',
@@ -1763,6 +1830,8 @@ export class ClaudeMapper {
     )
     const command = this.taskCommand(kind, message.tool_use_id)
     const known = this.background.get(taskId)
+    // Huli: a workflow resumed under its task id starts a run of its own.
+    if (known && known.status !== 'running') this.workflows.delete(taskId)
     if (known?.status === 'running') {
       // The report that listed it first may have come without its description or its call.
       const next = {
@@ -1774,6 +1843,7 @@ export class ClaudeMapper {
       this.background.set(taskId, next)
       return this.backgroundDelivery()
     }
+    const run = kind === 'workflow' ? this.workflows.get(taskId) : undefined
     const view: BackgroundTaskView = {
       id: taskId,
       kind,
@@ -1783,6 +1853,7 @@ export class ClaudeMapper {
       startedAt: Date.now(),
       endedAt: null,
       summary: null,
+      ...(run ? { workflow: run.view } : {}),
     }
     if (message.is_backgrounded === false) {
       this.foreground.set(taskId, view)
@@ -1830,6 +1901,7 @@ export class ClaudeMapper {
       if (entry.ambient === true) {
         changed = this.background.delete(id) || changed
         this.foreground.delete(id)
+        this.workflows.delete(id)
         continue
       }
       const kind = typeof entry.subagent_type === 'string' ? null : backgroundKind(entry.task_type)
@@ -1837,6 +1909,7 @@ export class ClaudeMapper {
       const held = this.foreground.get(id)
       this.foreground.delete(id)
       const command = this.taskCommand(kind, entry.tool_use_id)
+      const run = kind === 'workflow' ? this.workflows.get(id) : undefined
       this.background.set(
         id,
         held ?? {
@@ -1848,6 +1921,7 @@ export class ClaudeMapper {
           startedAt: Date.now(),
           endedAt: null,
           summary: null,
+          ...(run ? { workflow: run.view } : {}),
         },
       )
       changed = true
@@ -1903,7 +1977,10 @@ export class ClaudeMapper {
   cleanEnded(): Delivery[] {
     let changed = false
     for (const [id, task] of this.background) {
-      if (task.status !== 'running') changed = this.background.delete(id) || changed
+      if (task.status !== 'running') {
+        changed = this.background.delete(id) || changed
+        this.workflows.delete(id)
+      }
     }
     return changed ? this.backgroundDelivery() : []
   }
@@ -1925,13 +2002,18 @@ export class ClaudeMapper {
     const task = this.background.get(taskId)
     if (!task) return []
     const how = summary.trim() === '' ? null : clip(summary.trim(), TASK_SUMMARY_LIMIT)
+    // Huli: what still ran of a workflow ended with it.
+    const run = task.kind === 'workflow' ? this.workflows.get(taskId) : undefined
+    run?.settle()
+    const workflow = run ? { workflow: run.view } : {}
     if (task.status !== 'running') {
-      if (task.summary !== null || how === null) return []
-      this.background.set(taskId, { ...task, summary: how })
+      const told = task.summary === null && how !== null
+      if (!told && (!run || task.workflow === run.view)) return []
+      this.background.set(taskId, { ...task, ...(told ? { summary: how } : {}), ...workflow })
       return this.backgroundDelivery()
     }
     const endedAt = endTime ?? Date.now()
-    const ended: BackgroundTaskView = { ...task }
+    const ended: BackgroundTaskView = { ...task, ...workflow }
     delete ended.progress
     this.background.set(taskId, {
       ...ended,
@@ -1950,7 +2032,10 @@ export class ClaudeMapper {
       .map((task, index) => ({ task, index }))
       .filter(({ task }) => task.status !== 'running')
       .sort((a, b) => (b.task.endedAt ?? 0) - (a.task.endedAt ?? 0) || b.index - a.index)
-    for (const { task } of ended.slice(ENDED_TASKS_KEPT)) this.background.delete(task.id)
+    for (const { task } of ended.slice(ENDED_TASKS_KEPT)) {
+      this.background.delete(task.id)
+      this.workflows.delete(task.id)
+    }
     const tasks = [...this.background.values()].map((task) => ({ ...task }))
     return [
       {
@@ -1981,6 +2066,7 @@ export class ClaudeMapper {
           },
         ]
       : []
+    this.workflows.clear()
     if (this.background.size === 0) return [...work, ...held]
     this.background.clear()
     return [...this.backgroundDelivery(), ...work, ...held]

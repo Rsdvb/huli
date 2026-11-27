@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isThreadEntry } from '@shared/thread'
-import { kiteTasks } from './kite-tasks'
+import { agentDetail, kiteTasks } from './kite-tasks'
 
 describe('Huli: the _kite/tasks extension', () => {
   it('takes the lists it sends, each item checked and cut to size', () => {
@@ -48,6 +48,94 @@ describe('Huli: the _kite/tasks extension', () => {
       tasks: [{ toolCallId: 't1', taskId: 'k1', kind: 'shell', title: 'npm test', startedAt: 5 }],
     })
     expect(rest).toEqual([{ kind: 'subagent', sessionId: 'child', progress: 'Reading files' }])
+  })
+
+  it("takes a workflow's phases and agents, each checked, and only on a workflow", () => {
+    const workflow = {
+      phases: [
+        { index: 1, title: 'Review' },
+        { index: 'x', title: 'bad' },
+      ],
+      agents: [
+        {
+          index: 1,
+          label: 'Review a.ts',
+          phase: 1,
+          state: 'running',
+          startedAt: 5,
+          durationMs: null,
+          progress: 'Reading a.ts',
+          error: null,
+        },
+        { index: 2, label: 'x', phase: 1, state: 'thinking' },
+        { index: -1, label: 'x', phase: 1, state: 'done' },
+        { index: 3, label: 'y'.repeat(400), phase: null, state: 'done', cached: true },
+      ],
+    }
+    const read = kiteTasks({
+      sessionId: 's1',
+      tasks: [
+        { id: 'w', kind: 'workflow', title: 'Review', status: 'running', startedAt: 1, workflow },
+        { id: 'b', kind: 'shell', title: 'Build', status: 'running', startedAt: 1, workflow },
+      ],
+    })
+    const tasks = read!.effects[0]
+    if (tasks?.kind !== 'tasks') throw new Error('no tasks')
+    expect(tasks.tasks[1]).not.toHaveProperty('workflow')
+    expect(tasks.tasks[0]!.workflow).toEqual({
+      phases: [{ index: 1, title: 'Review' }],
+      agents: [
+        {
+          index: 1,
+          label: 'Review a.ts',
+          phase: 1,
+          state: 'running',
+          startedAt: 5,
+          durationMs: null,
+          progress: 'Reading a.ts',
+          error: null,
+        },
+        {
+          index: 3,
+          label: 'y'.repeat(300),
+          phase: null,
+          state: 'done',
+          startedAt: null,
+          durationMs: null,
+          progress: null,
+          error: null,
+          cached: true,
+        },
+      ],
+    })
+  })
+
+  it("reads an agent's detail only in its shape", () => {
+    expect(
+      agentDetail({
+        prompt: 'Review a.ts',
+        result: 'ok',
+        reply: { text: 'All fine', truncated: true },
+        error: 7,
+        model: 'm',
+        tokens: -1,
+        toolCalls: 3,
+        lastTool: 'Read',
+        attempt: 2,
+        extra: 'x',
+      }),
+    ).toEqual({
+      prompt: 'Review a.ts',
+      result: 'ok',
+      reply: { text: 'All fine', truncated: true },
+      error: null,
+      model: 'm',
+      tokens: null,
+      toolCalls: 3,
+      lastTool: 'Read',
+      attempt: 2,
+    })
+    expect(agentDetail(null)).toMatchObject({ prompt: null, reply: null, attempt: null })
   })
 
   it('leaves out the lists it does not send, and refuses what names no session', () => {

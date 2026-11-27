@@ -3,9 +3,18 @@
 // capabilities' `_meta` sends `_kite/tasks` with the session's whole list of background tasks
 // and of what holds up a tool call, each list replacing the last, and its running subagents'
 // summaries of what they do. It takes requests to stop a task, read its output, move what holds
-// up a call to the background and forget ended tasks.
+// up a call to the background and forget ended tasks. A workflow task may carry its phases and
+// agents, and `_kite/tasks/agent` answers what one of them was asked and gave back.
 
-import type { BackgroundTaskView, ForegroundTaskView } from '@shared/thread'
+import {
+  WORKFLOW_AGENTS_MAX,
+  WORKFLOW_PHASES_MAX,
+  type BackgroundTaskView,
+  type ForegroundTaskView,
+  type WorkflowAgentDetail,
+  type WorkflowAgentView,
+  type WorkflowView,
+} from '@shared/thread'
 import type { MapperEffect } from '../session-updates'
 
 export const KITE_TASKS_META = 'kite/tasks'
@@ -16,6 +25,7 @@ export const KITE_TASKS = {
   output: '_kite/tasks/output',
   background: '_kite/tasks/background',
   clean: '_kite/tasks/clean',
+  agent: '_kite/tasks/agent',
 } as const
 
 const MAX_TASKS = 50
@@ -23,6 +33,7 @@ const MAX_ID = 256
 const MAX_TITLE = 300
 const MAX_COMMAND = 2_000
 const MAX_SUMMARY = 1_000
+const MAX_DETAIL = 16 * 1024
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -35,6 +46,65 @@ const time = (value: unknown): number | null =>
 
 const KINDS: ReadonlySet<string> = new Set(['shell', 'monitor', 'workflow', 'other'])
 const STATUSES: ReadonlySet<string> = new Set(['running', 'completed', 'failed', 'stopped'])
+const AGENT_STATES: ReadonlySet<string> = new Set([
+  'queued',
+  'running',
+  'done',
+  'failed',
+  'stopped',
+])
+
+const whole = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+
+function agent(value: unknown): WorkflowAgentView | null {
+  if (!isRecord(value)) return null
+  const index = whole(value.index)
+  const label = text(value.label, MAX_TITLE)
+  if (index === null || label === null || !AGENT_STATES.has(value.state as string)) return null
+  return {
+    index,
+    label,
+    phase: whole(value.phase),
+    state: value.state as WorkflowAgentView['state'],
+    startedAt: time(value.startedAt),
+    durationMs: time(value.durationMs),
+    progress: text(value.progress, MAX_TITLE),
+    error: text(value.error, MAX_TITLE),
+    ...(value.cached === true ? { cached: true } : {}),
+  }
+}
+
+function workflow(value: unknown): WorkflowView | null {
+  if (!isRecord(value) || !Array.isArray(value.phases) || !Array.isArray(value.agents)) return null
+  const phases = value.phases.slice(0, WORKFLOW_PHASES_MAX).flatMap((item) => {
+    const index = isRecord(item) ? whole(item.index) : null
+    const title = isRecord(item) ? text(item.title, MAX_TITLE) : null
+    return index !== null && title !== null ? [{ index, title }] : []
+  })
+  const agents = value.agents.slice(0, WORKFLOW_AGENTS_MAX).flatMap((item) => agent(item) ?? [])
+  return { phases, agents }
+}
+
+/** A `_kite/tasks/agent` answer as the board shows it; fields that do not fit are left out. */
+export function agentDetail(value: unknown): WorkflowAgentDetail {
+  const o = isRecord(value) ? value : {}
+  const reply = isRecord(o.reply) ? text(o.reply.text, MAX_DETAIL) : null
+  return {
+    prompt: text(o.prompt, MAX_DETAIL),
+    result: text(o.result, MAX_DETAIL),
+    reply:
+      reply === null
+        ? null
+        : { text: reply, truncated: isRecord(o.reply) && o.reply.truncated === true },
+    error: text(o.error, MAX_DETAIL),
+    model: text(o.model, MAX_TITLE),
+    tokens: whole(o.tokens),
+    toolCalls: whole(o.toolCalls),
+    lastTool: text(o.lastTool, MAX_TITLE),
+    attempt: whole(o.attempt),
+  }
+}
 
 function task(value: unknown): BackgroundTaskView | null {
   if (!isRecord(value)) return null
@@ -46,6 +116,7 @@ function task(value: unknown): BackgroundTaskView | null {
   const command = text(value.command, MAX_COMMAND)
   const progress = text(value.progress, MAX_TITLE)
   const pid = value.pid
+  const run = value.kind === 'workflow' ? workflow(value.workflow) : null
   return {
     id,
     kind: value.kind as BackgroundTaskView['kind'],
@@ -57,6 +128,7 @@ function task(value: unknown): BackgroundTaskView | null {
     summary: text(value.summary, MAX_SUMMARY),
     ...(progress !== null ? { progress } : {}),
     ...(typeof pid === 'number' && Number.isSafeInteger(pid) && pid > 0 ? { pid } : {}),
+    ...(run ? { workflow: run } : {}),
   }
 }
 

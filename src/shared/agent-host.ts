@@ -224,6 +224,7 @@ import type {
   ThreadEntry,
   ToolKind,
   UserContent,
+  WorkflowAgentDetail,
 } from './thread'
 
 export interface AttachmentBytes {
@@ -1307,8 +1308,13 @@ export interface SessionSummary {
  * session board lists and the subagents at work. Agents that list no tasks count subagents alone.
  */
 export interface StillRunning {
+  /** Background tasks at work other than workflows: commands, monitors and the like. */
   commands: number
   subagents: number
+  /** Huli: workflows at work, set while one is. */
+  workflows?: number
+  /** Huli: their agents that work or wait for their turn, set with `workflows`. */
+  workflowAgents?: number
   /** The agent starts a turn of its own to report once that work ends. */
   reportsBack: boolean
 }
@@ -2230,6 +2236,11 @@ export interface HostContract {
   'sessions.taskOutput': {
     params: { sessionId: string; taskId: string }
     result: { output: string; truncated: boolean }
+  }
+  // Huli: what one agent of a workflow task was asked and gave back, read when its board row opens.
+  'sessions.workflowAgent': {
+    params: { sessionId: string; taskId: string; index: number }
+    result: WorkflowAgentDetail
   }
   // Huli: the session's background processes for its board, read now: their CPU, memory and
   // ports, and the tasks of an agent whose tasks no event lists.
@@ -3346,6 +3357,7 @@ export const HOST_METHODS = [
   'host.load.unwatch',
   'sessions.stopTask',
   'sessions.taskOutput',
+  'sessions.workflowAgent',
   'sessions.processes',
   'sessions.mcp',
   'sessions.mcpAct',

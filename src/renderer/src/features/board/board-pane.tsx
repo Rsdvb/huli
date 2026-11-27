@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   ComputerTerminal01Icon,
   DashboardSquare02Icon,
+  Flowchart01Icon,
   UserMultiple02Icon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
@@ -29,6 +30,7 @@ import { AgentLive, TaskLive } from './live-rows'
 import { HeldLive, TakenPorts } from './process-parts'
 import { useBoardActivity } from './use-board-activity'
 import { useSessionProcesses } from './use-session-processes'
+import { EndedWorkflow } from './workflow-rows'
 import './board.css'
 
 const NO_ARTIFACTS: BoardArtifact[] = []
@@ -107,7 +109,10 @@ export default function BoardPane({ sessionId }: { sessionId: string }) {
   const endedAgents = subagents.filter((child) => !subagentRunning(child))
   const ordered = backgroundOrder(tasks)
   const liveTasks = ordered.filter((task) => task.status === 'running')
-  const endedTasks = ordered.filter((task) => task.status !== 'running')
+  const endedTasks = ordered.filter((task) => task.status !== 'running' && task.kind !== 'workflow')
+  const endedWorkflows = ordered.filter(
+    (task) => task.status !== 'running' && task.kind === 'workflow',
+  )
   const heldCommands = held.filter((task) => task.kind === 'shell')
   const heldAgents = new Map(
     held.filter((task) => task.kind === 'subagent').map((task) => [task.taskId, task]),
@@ -186,11 +191,11 @@ export default function BoardPane({ sessionId }: { sessionId: string }) {
             </div>
           </section>
         )}
-        {(endedAgents.length > 0 || endedTasks.length > 0) && (
+        {(endedAgents.length > 0 || endedTasks.length > 0 || endedWorkflows.length > 0) && (
           <section aria-label={t('sections.earlier')}>
             <div className="kb-label kb-label--acts">
               <h3>{t('sections.earlier')}</h3>
-              {clean === 'ended' && endedTasks.length > 0 && (
+              {clean === 'ended' && endedTasks.length + endedWorkflows.length > 0 && (
                 <Button
                   variant="ghost"
                   size="xs"
@@ -218,6 +223,18 @@ export default function BoardPane({ sessionId }: { sessionId: string }) {
                     child={child}
                     digest={digests[child.id]?.digest ?? null}
                   />
+                ))}
+              </EndedGroup>
+            )}
+            {endedWorkflows.length > 0 && (
+              <EndedGroup
+                icon={Flowchart01Icon}
+                name={t('earlier.workflows')}
+                count={endedWorkflows.length}
+                failed={endedWorkflows.filter((task) => task.status === 'failed').length}
+              >
+                {failedFirst(endedWorkflows, (task) => task.status === 'failed').map((task) => (
+                  <EndedWorkflow key={task.id} sessionId={sessionId} task={task} />
                 ))}
               </EndedGroup>
             )}

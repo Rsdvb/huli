@@ -38,7 +38,7 @@ import type {
   TokenTotals,
   ToolEntry,
 } from '@shared/thread'
-import { kiteTasks, KITE_TASKS, KITE_TASKS_META } from './kite-tasks'
+import { agentDetail, kiteTasks, KITE_TASKS, KITE_TASKS_META } from './kite-tasks'
 import {
   AgentRequestError,
   optionAnswer,
@@ -448,6 +448,7 @@ export class AcpConnection implements AgentConnection {
   // Huli: Kite's own extension for background tasks, set for an agent that declares it.
   stopTask?: AgentConnection['stopTask']
   taskOutput?: AgentConnection['taskOutput']
+  workflowAgent?: AgentConnection['workflowAgent']
   toBackground?: AgentConnection['toBackground']
   cleanTasks?: AgentConnection['cleanTasks']
   private readonly connection: ClientConnection
@@ -1235,6 +1236,8 @@ export class AcpConnection implements AgentConnection {
     this.cleanTasks = async (sessionId) => {
       await request(KITE_TASKS.clean, { sessionId })
     }
+    this.workflowAgent = async (sessionId, taskId, index) =>
+      agentDetail(await request<unknown>(KITE_TASKS.agent, { sessionId, taskId, index }))
   }
 
   /**

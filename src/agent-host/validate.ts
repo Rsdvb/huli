@@ -885,6 +885,9 @@ function workflowSettingsChange(value: unknown): HostParams<'workflows.setSettin
   return { ...(suggest === undefined ? {} : { suggest }), ...(autoPick ? { autoPick } : {}) }
 }
 
+/** Huli: past any run's agent count; a workflow's agents are numbered from its first call. */
+const MAX_WORKFLOW_AGENT_INDEX = 1_000_000
+
 function count(o: Fields, key: string): number {
   const value = o[key]
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
@@ -2633,6 +2636,12 @@ export function createValidators(platform: Platform): Validators {
     'sessions.taskOutput': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), taskId: string(o, 'taskId', ID_CHARS) }
+    },
+    'sessions.workflowAgent': (params) => {
+      const o = fields(params)
+      const index = count(o, 'index')
+      if (index > MAX_WORKFLOW_AGENT_INDEX) throw invalidParams('index is out of range')
+      return { sessionId: sessionId(o), taskId: string(o, 'taskId', ID_CHARS), index }
     },
     'sessions.processes': session,
     'sessions.toBackground': (params) => {

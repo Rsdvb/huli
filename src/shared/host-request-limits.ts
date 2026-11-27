@@ -172,6 +172,7 @@ export const HOST_REQUEST_LIMITS: Readonly<Record<HostMethod, number | null>> = 
   'host.load.unwatch': HOST_MS,
   'sessions.stopTask': AGENT_MS,
   'sessions.taskOutput': AGENT_MS,
+  'sessions.workflowAgent': AGENT_MS,
   'sessions.processes': AGENT_MS,
   'sessions.mcp': AGENT_MS,
   'sessions.mcpAct': AGENT_MS,

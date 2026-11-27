@@ -69,6 +69,7 @@ const READS = new Set([
   'status',
   'summary',
   'taskOutput',
+  'workflowAgent',
   'tools',
   'total',
   'unwatch',

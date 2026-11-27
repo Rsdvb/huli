@@ -15,8 +15,31 @@
   "earlier": {
     "subagents": "Sub-agents",
     "commands": "Commands",
+    "workflows": "Workflows",
     "failed_one": "{{count}} failed",
     "failed_other": "{{count}} failed"
+  },
+  "workflow": {
+    "phaseCount": "{{title}} {{done}}/{{total}}",
+    "doneCount": "{{done}}/{{total}} done",
+    "otherPhase": "Other",
+    "notReached": "Not started",
+    "noAgents": "No sub-agent has started yet.",
+    "queued": "Queued",
+    "cached": "From last run",
+    "prompt": "Asked",
+    "reply": "Last reply",
+    "result": "Result",
+    "error": "Error",
+    "working": "Still at work; its result shows once it ends.",
+    "noResult": "It gave no result.",
+    "previewOnly": "Claude Code reported only the start.",
+    "replyCut": "Only the first 16 KiB are shown.",
+    "readFailed": "Could not read this sub-agent: {{error}}",
+    "tokens": "{{tokens}} tokens",
+    "toolCalls_one": "{{count}} tool call",
+    "toolCalls_other": "{{count}} tool calls",
+    "attempt": "Attempt {{attempt}}"
   },
   "empty": {
     "title": "Nothing here yet",

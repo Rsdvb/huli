@@ -63,6 +63,10 @@
     "subagents_other": "{{count}} 个子智能体",
     "commands_other": "{{count}} 条命令",
     "both": "{{subagents}}和 {{commands}}",
+    "three": "{{first}}、{{second}}和 {{third}}",
+    "workflow": "工作流",
+    "workflows_other": "{{count}} 个工作流",
+    "withAgents": "{{workflow}} · {{agents}}",
     "openBoard": "打开看板"
   },
   "tool": {

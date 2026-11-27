@@ -21,6 +21,7 @@
     "noTurn": "No turn is running",
     "noBackgroundTasks": "{{agent}} does not report background tasks",
     "noBackgroundTask": "This background task is not in the session",
+    "noWorkflowAgent": "This workflow has no such agent",
     "backgroundTaskEnded": "This background task has ended",
     "side": {
       "subagent": "Subagents have no side chat",
@@ -957,6 +958,7 @@
     "notStarted": "Claude Code has not started",
     "noProgram": "No Claude Code program was found for the SDK",
     "noTaskOutput": "This Claude Code cannot read task output",
+    "noWorkflowAgent": "Claude Code has not reported this workflow agent",
     "stoppedEarly": "Claude Code stopped before the turn ended",
     "ultracodeUnknown": "Ultracode's inherited value is unknown, so it cannot be applied",
     "auth": {

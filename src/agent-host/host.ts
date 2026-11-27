@@ -4993,6 +4993,8 @@ export class AgentHost {
       'host.load.unwatch': (_, { portId }) => this.load.unwatch(portId),
       'sessions.stopTask': ({ sessionId, taskId }) => sessions.stopTask(sessionId, taskId),
       'sessions.taskOutput': ({ sessionId, taskId }) => sessions.taskOutput(sessionId, taskId),
+      'sessions.workflowAgent': ({ sessionId, taskId, index }) =>
+        sessions.workflowAgent(sessionId, taskId, index),
       'sessions.processes': ({ sessionId }) => sessions.processes(sessionId),
       'sessions.mcp': ({ sessionId }) => sessions.mcp(sessionId),
       'sessions.mcpAct': ({ sessionId, action, server }) =>

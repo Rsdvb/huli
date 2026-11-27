@@ -241,6 +241,61 @@ export interface BackgroundTaskView {
    * while it does. Kettu can neither stop it nor read its output before the call ends.
    */
   entryId?: string
+  /** Huli: a workflow's phases and the agents it runs, as far as its run reported them. */
+  workflow?: WorkflowView
+}
+
+/** Huli: the most agents and phases a workflow's view lists. */
+export const WORKFLOW_AGENTS_MAX = 200
+export const WORKFLOW_PHASES_MAX = 50
+
+/** Huli: a workflow task's phases and agents, each list in the run's order. */
+export interface WorkflowView {
+  phases: WorkflowPhaseView[]
+  agents: WorkflowAgentView[]
+}
+
+export interface WorkflowPhaseView {
+  index: number
+  title: string
+}
+
+/** Huli: one agent a workflow runs: what the board's row of it shows. */
+export interface WorkflowAgentView {
+  /** Its number in the run, which its detail is asked for by. */
+  index: number
+  label: string
+  /** The index of the phase it runs in; null outside every phase. */
+  phase: number | null
+  state: 'queued' | 'running' | 'done' | 'failed' | 'stopped'
+  /** When it began its work; null while it waits for its turn. */
+  startedAt: number | null
+  /** How long it worked, once it ended; null when the run did not say. */
+  durationMs: number | null
+  /** What it does now, in a line, while it runs. */
+  progress: string | null
+  /** Why it failed or stopped, in a line. */
+  error: string | null
+  /** Its result was taken from an earlier run of the workflow. */
+  cached?: boolean
+}
+
+/** Huli: what a workflow agent was asked and what it gave back, read when its row opens. */
+export interface WorkflowAgentDetail {
+  /** The start of what it was asked. */
+  prompt: string | null
+  /** The start of what it returned, as the run reported it. */
+  result: string | null
+  /** Its last message, from its own transcript, once it ended and that could be read. */
+  reply: { text: string; truncated: boolean } | null
+  error: string | null
+  model: string | null
+  tokens: number | null
+  toolCalls: number | null
+  /** The tool it called last. */
+  lastTool: string | null
+  /** Which attempt this is, from 1, when it was tried again. */
+  attempt: number | null
 }
 
 /** Huli: a command or subagent that holds up the tool call that started it. */

@@ -896,6 +896,14 @@ export function createFakeAgent(options: FakeAgentOptions = {}): AgentApp {
       },
     )
     .onRequest(
+      KITE_TASKS.agent,
+      (params: unknown) => params,
+      (ctx) => {
+        const { board, params } = boardOf(ctx.params)
+        return board.agent(String(params.taskId), Number(params.index))
+      },
+    )
+    .onRequest(
       KITE_TASKS.clean,
       (params: unknown) => params,
       (ctx) => {

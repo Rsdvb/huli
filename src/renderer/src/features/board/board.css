@@ -554,3 +554,178 @@
 .kb-note {
   color: var(--text-tertiary);
 }
+
+/* Huli: a workflow's agents, opened under its row: each phase a quiet head with its count, each
+   agent a row of how it stands, its label and its time, what it does under them. */
+.kb-wf {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 0 6px 10px 32px;
+}
+.kb-end-item .kb-wf {
+  padding-left: 20px;
+}
+.kb-wf__phase {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.kb-wf__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 6px 2px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.kb-wf__title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-wf__head[data-idle] .kb-wf__title {
+  color: var(--text-tertiary);
+}
+.kb-wf__failed {
+  flex: none;
+  color: var(--danger);
+}
+.kb-wf__n {
+  flex: none;
+  margin-left: auto;
+}
+.kb-wf__none,
+.kb-wf__summary {
+  margin: 0;
+  padding: 0 12px 10px 44px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+.kb-wf__summary {
+  color: var(--danger);
+}
+.kb-end-item .kb-wf__none,
+.kb-end-item .kb-wf__summary {
+  padding-left: 32px;
+}
+.kb-wfa {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 0 8px;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 8px;
+  text-align: left;
+  outline: none;
+  transition: background-color var(--duration-fast) ease;
+}
+.kb-wfa:hover {
+  background: var(--bg-hover);
+}
+.kb-wfa:focus-visible {
+  outline: 1.5px solid var(--focus-ring-color);
+  outline-offset: -1.5px;
+}
+.kb-wfa__mark {
+  display: grid;
+  grid-row: 1;
+  place-items: center;
+  width: 16px;
+  height: 18px;
+  color: var(--success);
+}
+.kb-wfa[data-state='running'] .kb-wfa__mark {
+  color: var(--text-secondary);
+}
+.kb-wfa[data-state='queued'] .kb-wfa__mark,
+.kb-wfa[data-state='stopped'] .kb-wfa__mark {
+  color: var(--text-tertiary);
+}
+.kb-wfa[data-state='failed'] .kb-wfa__mark,
+.kb-wfa[data-state='failed'] .kb-wfa__end {
+  color: var(--danger);
+}
+.kb-wfa__ring {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid currentcolor;
+  border-radius: 50%;
+}
+.kb-wfa__name {
+  grid-row: 1;
+  grid-column: 2;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-wfa[data-state='queued'] .kb-wfa__name,
+.kb-wfa[data-state='stopped'] .kb-wfa__name {
+  color: var(--text-secondary);
+}
+.kb-wfa__end {
+  grid-row: 1;
+  grid-column: 3;
+  font-size: 11.5px;
+  line-height: 18px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.kb-wfa__what {
+  grid-row: 2;
+  grid-column: 2 / -1;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-wfa[data-state='failed'] .kb-wfa__what {
+  color: var(--danger);
+}
+.kb-wfa__detail {
+  padding: 2px 6px 8px 30px;
+}
+.kb-wfa__loading {
+  display: grid;
+  gap: 6px;
+  padding: 4px 0;
+}
+.kb-wfa__text {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.kb-wfa__text--clip {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+}
+.kb-wfa__text--scroll {
+  max-height: 220px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.kb-wfa__text--error {
+  color: var(--danger);
+}
+.kb-wfa__detail .kb-detail__none {
+  margin-bottom: 8px;
+}

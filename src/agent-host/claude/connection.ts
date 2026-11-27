@@ -24,6 +24,7 @@ import {
   type TokenTotals,
   type ToolEntry,
   type TurnRefusal,
+  type WorkflowAgentDetail,
 } from '@shared/thread'
 import {
   AgentRequestError,
@@ -122,6 +123,7 @@ import { forkedUuids, rewindCut, RewindPointMissing, transcriptRecords } from '.
 import { TerminalCommands } from './terminal-commands'
 import type { RiskSubject } from '../risk/classify'
 import { askedQuestions } from './tools'
+import { lastReply } from './workflow-progress'
 import type {
   AccountInfo,
   AssistantMessage,
@@ -178,6 +180,8 @@ const TITLE_MINIMUM = 10
 const EXIT_WAIT_MS = 5_000
 /** The most of a task's output the board reads, which is the tail Claude Code itself answers. */
 const TASK_OUTPUT_LIMIT = 8 * 1024
+/** Huli: the workflow agents' last messages kept read. */
+const AGENT_REPLIES_KEPT = 50
 const AUTH_STATUS_MS = 10_000
 /** How long a context read waits for a query it just opened to connect its MCP servers. */
 const MCP_CONNECT_MS = 10_000
@@ -591,6 +595,8 @@ export class ClaudeConnection implements AgentConnection {
   private readonly unregistered = new Set<string>()
   /** The session each subagent's task runs under. */
   private readonly children = new Map<string, string>()
+  /** Huli: workflow agents' last messages read for their board rows, by session and agent. */
+  private readonly agentReplies = new Map<string, WorkflowAgentDetail['reply']>()
   /** How many permissions each subagent has open. */
   private readonly asking = new Map<string, number>()
   /** The entry of each accepted `url` request, by elicitation id, until its server reports done. */
@@ -1124,7 +1130,9 @@ export class ClaudeConnection implements AgentConnection {
       options,
       query: null,
       input,
-      mapper: new ClaudeMapper(sessionId, cwd, windowOf, this.plansFolder()),
+      mapper: new ClaudeMapper(sessionId, cwd, windowOf, this.plansFolder(), (id) =>
+        this.children.has(id),
+      ),
       models: [],
       modes,
       choices: {
@@ -2392,6 +2400,57 @@ export class ClaudeConnection implements AgentConnection {
       output: cut ? output.slice(-TASK_OUTPUT_LIMIT) : output,
       truncated: cut || read.truncated === true,
     }
+  }
+
+  /**
+   * Huli: what one agent of a workflow task was asked and gave back, as the run reported it, with
+   * its last message read from its own transcript once it ended.
+   */
+  async workflowAgent(
+    sessionId: string,
+    taskId: string,
+    index: number,
+  ): Promise<WorkflowAgentDetail> {
+    const session = this.sessions.get(sessionId)
+    const found = session?.mapper.workflowAgent(taskId, index)
+    if (!session || !found) {
+      throw new AgentRequestError('agent_error', t('claude.noWorkflowAgent'))
+    }
+    const { agentId, ended, ...detail } = found
+    const reply = ended && agentId ? await this.agentReply(session, agentId) : null
+    return { ...detail, reply }
+  }
+
+  /** Huli: a workflow agent's last message, from the transcript Claude Code keeps of it. */
+  private async agentReply(
+    session: Session,
+    agentId: string,
+  ): Promise<WorkflowAgentDetail['reply']> {
+    const key = `${session.id}:${agentId}`
+    const known = this.agentReplies.get(key)
+    if (known !== undefined) return known
+    const sdk = this.requireSdk()
+    let reply: WorkflowAgentDetail['reply']
+    try {
+      const messages = await this.withConfigDir(() =>
+        sdk.getSubagentMessages(session.id, agentId, { dir: session.cwd }),
+      )
+      reply = lastReply(messages)
+    } catch (error) {
+      this.context.hooks.log(
+        'warn',
+        `Could not read workflow agent ${agentId}: ${errorText(error)}`,
+      )
+      return null
+    }
+    // A transcript not written yet is read again next time.
+    if (reply === null) return null
+    if (this.agentReplies.size >= AGENT_REPLIES_KEPT) {
+      const oldest = this.agentReplies.keys().next().value
+      if (oldest !== undefined) this.agentReplies.delete(oldest)
+    }
+    this.agentReplies.set(key, reply)
+    return reply
   }
 
   async sideQuestion(
