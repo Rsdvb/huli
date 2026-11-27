@@ -158,10 +158,12 @@ interface Waiting {
 /** What the relay keeps of each socket. */
 interface Peer {
   address: string
-  /** Whether it answered the last WebSocket ping. */
+  /** Whether it answered the last WebSocket ping, or sent anything since. */
   alive: boolean
   /** Bytes sent to it not yet written out. */
   queued: number
+  /** Whether it is not read until its joined side takes what waits for it. */
+  paused: boolean
 }
 
 const PATH = /^\/v1\/hosts\/([a-z2-7]{26})(?:\/(connect)|\/accept\/([A-Za-z0-9_-]{16,128}))?$/
@@ -381,10 +383,13 @@ export class Relay {
   }
 
   private opened(ws: WebSocket, address: string, pathname: string): void {
-    const peer: Peer = { address, alive: true, queued: 0 }
+    const peer: Peer = { address, alive: true, queued: 0, paused: false }
     this.peers.set(ws, peer)
     this.perAddress.set(address, (this.perAddress.get(address) ?? 0) + 1)
     ws.on('pong', () => (peer.alive = true))
+    // Its pong comes after what it sent before, which says as much: a slow uplink sending a lot
+    // is no dead one.
+    ws.on('message', () => (peer.alive = true))
     // A protocol error, which ws closes the socket for; 'close' follows. A message over maxPayload
     // closes with 1009, which the other side of a pair hears too.
     ws.on('error', (error: Error & { code?: string }) => {
@@ -626,11 +631,18 @@ export class Relay {
       : Buffer.isBuffer(data)
         ? data
         : Buffer.from(data)
+    const source = this.peers.get(from)
     target.queued += bytes.length
-    if (target.queued > this.limits.highWater) from.pause()
+    if (target.queued > this.limits.highWater) {
+      from.pause()
+      if (source) source.paused = true
+    }
     to.send(bytes, { binary: true }, () => {
       target.queued -= bytes.length
-      if (target.queued <= this.limits.lowWater && from.readyState === from.OPEN) from.resume()
+      if (target.queued <= this.limits.lowWater && from.readyState === from.OPEN) {
+        from.resume()
+        if (source) source.paused = false
+      }
     })
   }
 
@@ -674,13 +686,22 @@ export class Relay {
     }
   }
 
-  /** Pings every socket; one that did not answer the ping before is cut. */
+  /**
+   * Pings every socket; one that did not answer the ping before is cut. One the relay stopped
+   * reading for its slow joined side cannot have its answer read, so while that side answers it
+   * stays: it is read again once that side took what waits for it, and is cut then if silent, or
+   * with that side if that side goes.
+   */
   private ping(): void {
+    const cut = new Set<WebSocket>()
     for (const [socket, peer] of this.peers) {
-      if (!peer.alive) {
-        socket.terminate()
-        continue
-      }
+      if (peer.alive) continue
+      const other = this.joined.get(socket)
+      if (peer.paused && other && this.peers.get(other)?.alive) continue
+      cut.add(socket)
+    }
+    for (const [socket, peer] of this.peers) {
+      if (cut.has(socket)) continue
       peer.alive = false
       try {
         socket.ping()
@@ -688,6 +709,7 @@ export class Relay {
         // Closing already.
       }
     }
+    for (const socket of cut) socket.terminate()
   }
 
   private refuse(ws: WebSocket, code: number): void {
