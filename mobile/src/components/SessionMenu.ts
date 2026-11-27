@@ -33,6 +33,8 @@ export interface SessionMenuContext {
   muted: boolean
   onMute(): void
   onFork(worktree?: 'same'): void
+  /** Huli: 接力到新会话; left out where the session cannot be handed off. */
+  onHandoff?(): void
   onNewSubSession(): void
   onShowParent(): void
   onOpenUrl(url: string): void
@@ -225,6 +227,16 @@ export function sessionMenuPages(ctx: SessionMenuContext): (id: string) => MenuP
         : []
     const make: MenuEntry[] = [
       ...forks,
+      ...(topLevel && ctx.canFork && !running && ctx.onHandoff
+        ? [
+            {
+              key: 'handoff',
+              label: '接力到新会话',
+              icon: G.handoff,
+              onPress: () => ctx.onHandoff?.(),
+            },
+          ]
+        : []),
       { key: 'child', label: '新建子会话', icon: G.child, onPress: ctx.onNewSubSession },
     ]
     const resume = actions.resumeOf(summary)

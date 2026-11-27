@@ -240,7 +240,12 @@ export function ChildEntry(props: { entry: Of<'subagent'> | Of<'session_started'
     : entry.kind === 'subagent'
       ? '子 Agent'
       : '已启动一个会话'
-  const label = entry.kind === 'session_started' && child ? `已启动 ${title}` : title
+  const label =
+    entry.kind === 'session_started' && child
+      ? entry.handoff
+        ? `已接力到 ${title}`
+        : `已启动 ${title}`
+      : title
   // While it runs, the time since it started; once it ends, its run's.
   const ticking = running && child && digest?.durationMs == null ? child.createdAt : null
   if (entry.kind === 'subagent') {

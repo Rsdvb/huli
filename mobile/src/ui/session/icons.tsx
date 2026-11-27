@@ -179,6 +179,7 @@ export const G = {
   devServer: { sf: 'server.rack', lucide: Server },
   plug: { sf: 'powerplug', lucide: Plug },
   globe: { sf: 'globe', lucide: Globe },
+  handoff: { sf: 'arrow.triangle.2.circlepath', lucide: Repeat },
 } satisfies Record<string, IconSpec>
 
 export const TOOL_ICONS: Record<ToolKind, IconSpec> = {
