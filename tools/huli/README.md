@@ -2052,6 +2052,53 @@ what it holds, and its `NodeWorker` domain reaches the worker threads. Still loa
 `tldts` (300 KB, for sign-ins, site icons and the MCP registry's publishers) in main and the host,
 and `yaml` in the host; the renderer bundles both languages' catalogs.
 
+### Lean threads for phones and other computers (精简会话内容)
+
+What a phone or another computer reads of a session, which goes through the relay and the owner's
+proxy. Before it, a session of a workflow with many sub-agents pulled 10-18 MB per sub-agent,
+five at once on the phone (which froze it) and again after every reconnect of the Mac (10-24 MB an
+hour idle, 736 MB in an hour of work); a thread past the channel's 32 MiB limit never arrived and
+was asked for again on each reconnect.
+
+- **Lean pages.** `lean` on `sessions.open`, `sessions.snapshot` and `sessions.page`
+  (`leanEntries` in `agent-host/threads/digest.ts`): Kettu's tool digests (`ToolContentDigest`,
+  outputs past 1 KB, diffs past 8 KB, inputs past 2 KB), each output's with its first and last
+  five lines (`head`, `tail`, 384 bytes each at most), a large diff's with `created`, and titles
+  cut at 240 characters (`titleSize`). A call that waits for an answer stays whole. A card reads
+  the step whole with `sessions.entry` when it opens.
+- **Screenshots by hash.** A device that reads image refs gets a live thread's images larger than
+  `INLINE_MEDIA_LIMIT` by the hash the store keeps them under, in pages and in patches
+  (`agent-host/threads/live-images.ts`), as it would once the thread is stored; `sessions.blob`
+  finds them in the live thread until a checkpoint stores them. Windows and devices without image
+  refs get the bytes as before.
+- **Nothing new, no entries.** Every snapshot names its `epoch` (the host's run, the store's changes
+  made outside the sessions such as clearing pictures, the session's token, live or stored). A
+  reader that names `known: { epoch, seq }` of the thread it holds gets `unchanged: true` and no
+  entries when it is still the same; it keeps its own and takes `session` and `seq`.
+- **Sub-agents' rows.** `sessions.stats` tells up to 100 sessions' tool calls and latest run,
+  from the live thread or the store's kind index, so no client reads a child's thread for two
+  numbers.
+- **Compatibility.** The welcome names `lean-threads` (`LEAN_THREADS_FEATURE`). An older host drops
+  the unknown parameters and has no `sessions.stats`: clients then read as before, and the phone's
+  sub-agent rows read nothing and show what the summaries say. The phones before this named
+  `tool-digests` (the shared hello did) but could not draw a digest, and expanding one closed the
+  app: a hello of kind `ios` or `android` gets digests only with `lean-threads` too
+  (`drawsDigests`).
+- **Clients.** The phone reads lean pages, names `known` when it reads a thread again, asks
+  `sessions.stats` in one request for the rows that mount together, draws digests (a preview, an
+  edit's counts, a picture by hash; a large edit opens as git has the file's change) and reads a
+  step whole as its card opens (`mobile/src/ui/session/fullEntry.ts`); a memory warning drops the
+  threads kept for reopening, the steps read whole and the sub-agents' numbers. The desktop reads a
+  session on another computer, and the web client every session, lean with `known`, and a
+  reconnect reads the watched sessions again one at a time (`rewatchAll`).
+
+Measured with the fake agent's `heavy-tools` scenario (`KITE_MEASURE_LEAN=1` on
+`agent-host/lean-threads.test.ts`), 740 commands of about 64 KB and a screenshot every fourth:
+opening the session 43.3 MB to the phone and 70.6 MB to the Mac before, 488 KB lean; the whole
+thread 64.1 and 104.7 MB, 723 KB lean; read again with nothing new, 9.8 KB; five screenshot-heavy
+sub-agents' rows on the phone 33.5 MB, 461 bytes with `sessions.stats`; the Mac's reconnect with
+four watched sessions that did not change 32.6 MB, 39 KB.
+
 ### Kite's artwork
 
 `tools/huli/brand/` holds the masters, SVG on a 1024 grid: `kite-light.svg` (the icon, white kite
