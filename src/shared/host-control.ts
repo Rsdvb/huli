@@ -691,6 +691,8 @@ export type MainToRemoteHost =
       /** What waits for the user and whether they are at the computer, as last told. */
       waiting?: Record<string, string[]>
       present?: boolean
+      /** Asleep, as `remote-host:suspend` told: no other host is tried until it wakes. */
+      asleep?: boolean
       /** The sessions at work, as `remote-host:progress` last told them. */
       progress?: Record<string, SessionProgress>
       /**
@@ -820,8 +822,11 @@ export type MainToRemoteHost =
   | { type: 'remote-host:forward-close'; hostId: string; sessionId: string }
   // Huli: the user stopped one forward.
   | { type: 'remote-host:forward-stop'; hostId: string; sessionId: string; forward: BrowserForward }
-  // The computer woke from sleep, maybe on another network: the direct addresses are read again
-  // and the hosts not connected are tried at once.
+  // The computer goes to sleep: devices' connections and those to other hosts close now, and no
+  // other host is tried until remote-host:resume.
+  | { type: 'remote-host:suspend' }
+  // The computer woke from sleep for the user, maybe on another network: the direct addresses are
+  // read again and the hosts not connected are tried at once.
   | { type: 'remote-host:resume' }
   // Huli: a window of the app was focused, so the hosts not connected are tried now, unless
   // tried a moment ago.

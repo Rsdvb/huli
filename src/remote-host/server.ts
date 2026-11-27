@@ -526,6 +526,17 @@ export class RemoteServer {
     await Promise.all([this.options.devices.flush(), this.options.activity.flush()])
   }
 
+  /**
+   * The computer goes to sleep: every connection ends now, without a word, so each device hears it
+   * at once rather than once its pings go unanswered, and resumes its session when the host is
+   * back, as after its network went.
+   */
+  suspend(): void {
+    if (this.stopped) return
+    for (const connection of [...this.connections]) connection.drop()
+    for (const session of [...this.sessions]) session.dropConnections()
+  }
+
   /** Tells every device why, ends every connection and writes the devices' last connections. */
   async stop(reason: 'remote_off' | 'stopping'): Promise<void> {
     this.stopped = true
@@ -1474,6 +1485,12 @@ class DeviceSession {
       this.end(),
     )
     return this.closing
+  }
+
+  /** Drops its connections without a word: the session waits for its device as after any drop. */
+  dropConnections(): void {
+    this.standby?.drop()
+    this.connection?.drop()
   }
 
   /** Ends the session at once: its device's next hello finds no session to resume. */
