@@ -1966,8 +1966,9 @@ plugin in `electron.vite.config.ts`'s main and renderer builds that applies only
 mode (`electron-vite dev`), makes the rebrand's swaps from the same tables in `brand-text.mjs` as
 each file loads. Locale files get `brandLocale`, the files `CODE` lists get their swaps (the HTML
 pages through `transformIndexHtml`), and an import of Kettu's artwork that Kite has its own of in
-`ARTWORK` resolves to Kite's. The window's icon (`build/icon.png`) and the tray's images
-(`resources/tray`), which an unpackaged run reads from the tree, point at Kite's in `ARTWORK`. The
+`ARTWORK` resolves to Kite's. The window's icon (`resources/app-icons`, which `main/app-icon.ts`
+reads) and the tray's images (`resources/tray`), which an unpackaged run reads from the tree, point
+at Kite's in `ARTWORK`. The
 name in the taskbar and the tray's tooltip is `app.name`, the `productName` Kite; the data folder
 stays `Huli Dev` (or `KETTU_USER_DATA`). It never fills in the update channel's path, so a dev run
 has no updates, as before. A spelling upstream changed shows as a Vite warning,
@@ -2128,6 +2129,14 @@ was asked for again on each reconnect.
   `tool-digests` (the shared hello did) but could not draw a digest, and expanding one closed the
   app: a hello of kind `ios` or `android` gets digests only with `lean-threads` too
   (`drawsDigests`).
+- **Appended output.** Kettu's `tool-output-append` (#2958) is negotiated apart from
+  `lean-threads`: a window, or a device whose hello names it (the shared hello does, so the phone
+  and the web client), gets a running command's new output as `entry.appendOutput`; any other
+  device gets the same batch as full `entry.update`s (`legacy()` in `host.ts`), each send keeping
+  `hashedBatch`. So appends always add to real text, a running call's text output is never
+  digested (`leanEntry` in `threads/digest.ts`, up to its 64 KiB cap while it runs); it is once it
+  ends. Windows read digests too since that merge (#2794), opening a step whole with
+  `sessions.entry` as phones do.
 - **Clients.** The phone reads lean pages, names `known` when the same screen reads its thread
   again (back from the background, a new connection; a screen opened anew reads it whole), asks
   `sessions.stats` in one request for the rows that mount together, draws digests (a preview, an
@@ -2671,14 +2680,16 @@ starts sessions and reads on; simulator flow `86-reports`.
 Upstream's `get_session` cuts another session's latest reply to 8 KB and says only in the result's
 text, which agents that take the structured value never see, that `read_session_history` reads
 more; that tool cuts each turn to 24 KB in turn. An agent then asked the other one to send its
-review again in parts, spending that session's turns and the user's quota. Kite gives a long reply
-in parts: `get_session` takes `offset` and returns up to 16 KB (`LAST_REPLY_BYTES`), cut after a
-line when one ends in the part's second half, with `next_offset`, `reply_chars` and `read_more`
-(the call that reads the next part) in the structured value and the text alike, and
-`read_session_history` takes `turn` and `offset` to read one long turn the same way (`textPart` in
-`src/agent-host/session-tools.ts`). The hints hold Kite's own words, the session id and a number,
-never the reply's text. The sessions topic and the MCP server instructions tell agents to read on
-rather than ask for a resend. Tests in `session-tools.test.ts`.
+review again in parts, spending that session's turns and the user's quota. Kite gave a long reply
+in parts; since the 2026-11-28 merge `get_session` pages it with Kettu's parameters (#2946):
+`reply_offset` and `reply_limit` (8 KB by default, up to 32K characters), returning
+`next_reply_offset` and `reply_length`, and the reply in the result's text behind a data note.
+Kite keeps `read_more` (the call that reads the next part, with the session id and a number,
+never the reply's text) in the structured value and the text alike. `read_session_history` takes
+`turn` and `offset` to read one long turn in parts (`textPart` in
+`src/agent-host/session-tools.ts`); a page that shortened a turn marks it `cut`. The sessions topic
+and the MCP server instructions tell agents to read on rather than ask for a resend. Tests in
+`session-tools.test.ts`.
 
 ### Concise thread (简洁视图)
 
@@ -3198,7 +3209,7 @@ conflict, someone on a branch:
   `harnesses`.
 - `git grep` for Kettu's domain (`kettu` dot `sh`) must find no more lines than
   before: 185 after the 2026-11-23 merge and again after the 2026-11-24 and 2026-11-25 ones, 184
-  after the 2026-11-26 one, its dot also matching the code's `window.kettu` shell calls and names such as the sharing partition's. New code that calls
+  after the 2026-11-26 one and 185 after the 2026-11-28 one, its dot also matching the code's `window.kettu` shell calls and names such as the sharing partition's. New code that calls
   Kettu's services points at Kite Cloud or stays off; a test that spells out its download service
   as a place of its own takes one of its own (`downloads.example`); Kettu's own Android download
   lines stay out of the READMEs.
@@ -3209,13 +3220,14 @@ conflict, someone on a branch:
   `claudeRuns`, `promptSuggestions`, `agentNetwork`, …; Kettu's `continueAfterLimit`,
   `agentPasswords`, …).
 - The thread database: Kite's schema 10 is `MEDIA`, so each of Kettu's migrations takes the next
-  number up, and `SCHEMA_VERSION` with them (Kettu's 10–13 are Kite's 11–14: `ORIGINS`,
-  `SET_ASIDE`, `ARTIFACT_SEEN`, `TOKENS_APART`), and so does a test that builds a database
-  at the version before one (`schemaAt(13)` for `TOKENS_APART`). Never renumber a migration an
-  installed Kite has run.
+  number up, and `SCHEMA_VERSION` with them (Kettu's 10–14 are Kite's 11–15: `ORIGINS`,
+  `SET_ASIDE`, `ARTIFACT_SEEN`, `TOKENS_APART`, `ARTIFACT_OWNER`), and so does a test that builds a
+  database at the version before one (`schemaAt(14)` for `ARTIFACT_OWNER`). Never renumber a
+  migration an installed Kite has run.
 - The usage database: Kite's schema 4 is the image columns (`addImageColumns`), so a usage migration
-  of Kettu's takes the next number up, and `SCHEMA_VERSION` with it; `addImageColumns` adds only
-  what is missing, so it may run after Kettu's.
+  of Kettu's takes the next number up, and `SCHEMA_VERSION` with it (Kettu's 4, the cost column, is
+  Kite's 5, `UPGRADE_4`); `addImageColumns` and the cost upgrade each add only what is missing, so
+  a Kite 3 or 4 file and a Kettu 4 file all upgrade.
 - Code of Kettu's that lists the kinds of a union Kite extended drops Kite's: `coalescePatches`
   dropped Kite's `entry.remove` until it got its case. Read such switches in a merge's diff.
 
@@ -3357,6 +3369,62 @@ And as the 2026-11-26 merge settled it:
 - Codex's fast mode (#2674) works through Kite's tiers (`priority` reads as a fast tier).
 - The thread database took no migration (still 14). No new dependencies; the `@shadcn/react` patch
   changed, so a worktree needs its own install.
+
+And as the 2026-11-28 merge settled it:
+
+- The composer's live dock (#2959) is Kettu's; `computer-bar.tsx`, `still-running-line.tsx` and
+  `control-label.tsx` are gone. Kite's elevated helper (a red `computer-elevated` row with its Stop),
+  the administrator waiting card and a workflow's agents ("a workflow · 12 sub-agents") are rows and
+  text of the dock (`live-dock-model.ts`, `session-live-dock.tsx`); its dots are Kite's stepped Web
+  Animations. The status label's shimmer is left off, since it repaints all turn long.
+- The context popover (#2739) is Kettu's compact parts with Kite's traffic, image traffic, Compact
+  link and plan rules; the plan cards (#2937) are Kettu's wave fill with Kite's pace tick as a line
+  across each card and its end line.
+- Waiting on background work (#2873, #2947) is `waiting_background` in `turnPhase()` only; the
+  summary's `TurnWork`, which phones read, stays `working`.
+- Kettu's five-state Live Activity (#2935), its quick options (#2952) and `host:live-activity` are
+  left out: they draw Kettu's own iOS app, and Kite's phone reads any other content as a waiting
+  state. Kite's progress and waiting activities are the one engine. Kettu's plan-limit push (#2957)
+  only adds `limitLevel` to Kite's `plan-limit` push; Kite's `limits` switch is the only one.
+- Output appended to a running call (#2958): see Lean threads. Optimistic echoes (#2897) match by
+  device and fingerprint in `stores/threads.ts`, beside Kite's `rewatchAll`.
+- Report rounds (#2987): `ReportedTurn` extends `FromSessionEnded`, so Kite's merged reports carry
+  the round; the thread's line is Kite's `ReportLine`, a single report's queue row Kettu's
+  `QueueReportRow`.
+- `get_session` pages a reply with Kettu's `reply_offset` (#2946), with Kite's `read_more`.
+- A project's further folders and Kettu's project folders (#2761) are one stored list
+  (`record.folders`). The wire keeps Kite's `Project.folders` (the further folders, with name and
+  state, which phones and older hosts read) plus Kettu's `missingFolders`; `projectFolders()` in
+  `stores/projects.ts` gives Kettu's code its primary-first list. The project menu has Kettu's Edit
+  and Kite's Folders; adding a folder another project holds is refused.
+- Archived projects (#2895) sit beside the recycle bin, which Remove still uses.
+- Codex speeds (#2769, #2822) are Kettu's `serviceTier`, replacing Kite's tiers (a stored tier of
+  Kite's menu still reads); its config warnings (#2914) are Kettu's labeled notices, which replace
+  Kite's per-session "Codex config" notice.
+- Claude Code's MCP servers go in a `--mcp-config` file (#2862); Kite's `addSecretServers` went with
+  Kettu's, and `toggleMcp` still uses `setMcpServers`.
+- `session-router` takes Kite's `--dir-flag=` and Kettu's `--session-arg=` (#2726) together.
+- The browser's annotation mode (#2990) and Kite's pick mode are two buttons; turning one on turns
+  the other off.
+- A Changes row opens its diff inline (#2970); review findings and line notes are in the diff tab.
+- A file link has Kettu's hover preview and Mod+click (#2969, #2905) with Kite's `FileLinkMenu`,
+  which gains Open with default app.
+- The app icon picker (#2968) is left out (row and catalog entry): its other icons are Kettu's fox.
+  Kite's icon is the mirror's `resources/app-icons/kettu.*`, and the five variants' SVGs are copies
+  of Kite's icon.
+- The hosted client's one-click pairing through the relay (#2816) is not wired; Huli Cloud's
+  computers list stays.
+- Port forwards (#2758) try the host's own port first, skipping reserved ones, which replaces Kite's
+  `samePort`.
+- Terminal busy detection (#2872) is Kite's process listing; Windows console hosts no longer count
+  as a command.
+- agent-device stays Kite's 0.21.41 (batch commands); Kettu's patch to 0.21.36 (#2757, no
+  `xcdevice wait`) and its tests are dropped until it is ported.
+- Vendor release checks (#2892) go through Kite's transport (`downloadsFetch` in `agents.ts`).
+  Plugins' requests to reserved local names are refused on direct connections too.
+- The harness capability matrix (#2996) has Kite's kiro, fx and doubao.
+- Thread database 15 (`ARTIFACT_OWNER`), usage database 5 (cost). No new dependencies; a
+  `pdfjs-dist` patch came in.
 
 ## Tests
 
