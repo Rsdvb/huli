@@ -75,6 +75,8 @@ const ZERO: TokenParts = {
   cost: null,
   unpricedTokens: 0,
   cacheSaved: 0,
+  images: 0,
+  imageBytes: 0,
 }
 
 /** The start of the local day `at` falls in. */
@@ -275,6 +277,8 @@ function addInto(sum: TokenParts, add: TokenParts): void {
   sum.turns += add.turns
   sum.unpricedTokens += add.unpricedTokens
   sum.cacheSaved += add.cacheSaved
+  sum.images = (sum.images ?? 0) + (add.images ?? 0)
+  sum.imageBytes = (sum.imageBytes ?? 0) + (add.imageBytes ?? 0)
   if (add.cost !== null) sum.cost = (sum.cost ?? 0) + add.cost
 }
 

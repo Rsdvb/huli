@@ -7192,6 +7192,16 @@ li[data-row-exit='dust'] > * {
   margin: 0;
   color: var(--composer-text);
 }
+/* Huli: what the images make of each request, under the traffic's figures. It wraps in the
+   block's width and never widens the shared columns. */
+.kettu-ctx__block-note {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--composer-muted);
+  contain: inline-size;
+}
 .kettu-ctx__link {
   display: flex;
   align-items: center;

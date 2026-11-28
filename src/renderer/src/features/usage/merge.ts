@@ -22,6 +22,9 @@ export function addCost(a: number | null, b: number | null): number | null {
 function addParts(a: TokenParts, b: TokenParts): TokenParts {
   const sum = { cost: addCost(a.cost, b.cost) } as TokenParts
   for (const key of COUNTS) sum[key] = a[key] + b[key]
+  // Huli: absent from an older host's rows.
+  sum.images = (a.images ?? 0) + (b.images ?? 0)
+  sum.imageBytes = (a.imageBytes ?? 0) + (b.imageBytes ?? 0)
   return sum
 }
 

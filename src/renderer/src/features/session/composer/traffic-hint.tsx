@@ -1,6 +1,7 @@
 // Huli: what a large context costs in traffic, under the composer: every request uploads the whole
-// context again, so a long session at a large context sends megabytes with each one. The line
-// offers the two ways out, compacting and a handoff to a new session, and is dismissed per session.
+// context again, so a long session at a large context, or one with screenshots in it, sends
+// megabytes with each one. The line offers the two ways out, compacting, which drops the old
+// images, and a handoff to a new session, and is dismissed per session.
 
 import { useState } from 'react'
 import {
@@ -11,7 +12,8 @@ import {
 } from '@hugeicons/core-free-icons'
 import { motion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
-import { requestUpload } from '@shared/traffic'
+import type { ContextImages } from '@shared/thread'
+import { imagesDominate, requestSize, requestUpload } from '@shared/traffic'
 import { Button } from '@renderer/components/ui/button'
 import { toast } from '@renderer/components/ui/toast'
 import { Glyph } from '@renderer/features/shell/glyph'
@@ -47,12 +49,14 @@ function useActions(sessionId: string) {
 export function TrafficHint({
   sessionId,
   used,
+  images,
   compact,
   canHandoff,
   onDismiss,
 }: {
   sessionId: string
   used: number
+  images: ContextImages | null
   /** The agent's compaction command while the session can take it; null otherwise. */
   compact: string | null
   /** The session is between turns and can be handed off. */
@@ -61,11 +65,20 @@ export function TrafficHint({
 }) {
   const { t } = useTranslation(['composer', 'common'])
   const actions = useActions(sessionId)
-  const text = t('trafficHint.text', { size: traffic(requestUpload(used)) })
+  const request = requestSize(used, images)
+  const size = traffic(request.text + request.images)
+  // Screenshots make most of each request: compacting drops them, which the line says.
+  const pictures = imagesDominate(used, images)
+  const text = pictures
+    ? t('trafficHint.imagesText', { count: request.count, size, images: traffic(request.images) })
+    : t('trafficHint.text', { size })
   return (
     <motion.div role="status" exit={fadeExit} className="kettu-traffic-hint">
       <Glyph icon={ArrowDataTransferVerticalIcon} className="size-3.5 shrink-0" />
-      <span className="kettu-traffic-hint__text" title={t('trafficHint.why')}>
+      <span
+        className="kettu-traffic-hint__text"
+        title={t(pictures ? 'trafficHint.whyImages' : 'trafficHint.why')}
+      >
         {text}
       </span>
       {compact && (
@@ -73,11 +86,11 @@ export function TrafficHint({
           type="button"
           className="kettu-traffic-hint__action"
           disabled={actions.busy}
-          title={t('usage.compactHint')}
+          title={t(pictures ? 'trafficHint.compactImagesHint' : 'usage.compactHint')}
           onClick={() => actions.compact(compact)}
         >
           <Glyph icon={ArrowShrink02Icon} className="size-3.5" />
-          {t('trafficHint.compact')}
+          {t(pictures ? 'trafficHint.compactImages' : 'trafficHint.compact')}
         </button>
       )}
       {canHandoff && (
@@ -112,14 +125,17 @@ export function TrafficHint({
 export function HandoffOfferStrip({
   sessionId,
   used,
+  images,
   onDismiss,
 }: {
   sessionId: string
   used: number
+  images: ContextImages | null
   onDismiss: () => void
 }) {
   const { t } = useTranslation(['composer', 'common'])
   const actions = useActions(sessionId)
+  const pictures = imagesDominate(used, images)
   return (
     <motion.div
       role="status"
@@ -128,9 +144,13 @@ export function HandoffOfferStrip({
     >
       <Glyph icon={RepeatIcon} className="size-4 shrink-0 text-tertiary" />
       <div className="min-w-0 flex-[1_1_14rem] text-primary">
-        <p>{t('handoffOffer.title', { tokens: tokens(used) })}</p>
+        <p>
+          {pictures
+            ? t('handoffOffer.imagesTitle', { count: images?.count ?? 0 })
+            : t('handoffOffer.title', { tokens: tokens(used) })}
+        </p>
         <p className="text-xs text-tertiary">
-          {t('handoffOffer.text', { size: traffic(requestUpload(used)) })}
+          {t('handoffOffer.text', { size: traffic(requestUpload(used, images)) })}
         </p>
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-2">
