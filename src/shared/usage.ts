@@ -28,6 +28,12 @@ export interface TokenParts extends UsageFigures {
   reasoning: number
   cacheRead: number
   cacheWrite: number
+  /**
+   * Huli: the images the requests carried, one per image a request uploaded again, and their
+   * bytes as base64, for the traffic estimate (`shared/traffic.ts`); absent from older hosts.
+   */
+  images?: number
+  imageBytes?: number
 }
 
 export interface DayUsage extends TokenParts {

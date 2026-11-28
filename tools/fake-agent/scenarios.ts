@@ -243,6 +243,64 @@ function noiseBase64(bytes: number, seed: number): string {
   return Buffer.from(out).toString('base64')
 }
 
+// Huli: image-context's screenshots, about as large as a full-window PNG an agent takes.
+const IMAGE_SHOT_BYTES = 480 * 1024
+
+/**
+ * A screenshot that shows as one but weighs `bytes`, as base64 SVG: a window drawn in a few
+ * shapes, padded with a comment of noise that does not compress.
+ */
+function heavyShot(index: number, bytes: number): string {
+  const hue = (index * 47) % 360
+  const shapes = Buffer.from(screenshot(hue), 'base64').toString('utf8').replace('</svg>', '')
+  const noise = noiseBase64(Math.max(0, Math.floor((bytes * 3) / 4)), index + 7)
+  return Buffer.from(`${shapes}<!-- ${noise} --></svg>`).toString('base64')
+}
+
+/**
+ * Huli: screenshots that stay in the context, each a tool call whose result is one, then the
+ * request that read it, reported as claude-agent-acp reports a request: the host counts the images
+ * every later request uploads again, until `/compact` drops them.
+ */
+const imageContext: Scenario = async (turn) => {
+  const shots = Math.min(turn.options.shots || 4, 20)
+  if (!(await stream(turn, 'Taking a screenshot of each screen.\n\n'))) return 'cancelled'
+  for (let i = 0; i < shots; i++) {
+    if (turn.signal.aborted) return 'cancelled'
+    const toolCallId = `image-${turn.id}-${i}`
+    await turn.send({
+      sessionUpdate: 'tool_call',
+      toolCallId,
+      title: `Take a screenshot of screen ${i + 1}`,
+      kind: 'other',
+      status: 'in_progress',
+      rawInput: { screen: i + 1 },
+    })
+    await turn.sleep(150)
+    await turn.send({
+      sessionUpdate: 'tool_call_update',
+      toolCallId,
+      status: 'completed',
+      content: [
+        {
+          type: 'content',
+          content: {
+            type: 'image',
+            mimeType: 'image/svg+xml',
+            data: heavyShot(turn.session.turns * 31 + i, IMAGE_SHOT_BYTES),
+          },
+        },
+      ],
+    })
+    // The next request carries the screenshot: its context grows by the image's tokens.
+    turn.session.usedTokens += 1_700
+    await turn.send({ sessionUpdate: 'usage_update', used: turn.session.usedTokens, size: 200_000 })
+  }
+  const done = `Took ${shots} screenshots; they stay in the context until it is compacted.`
+  if (!(await stream(turn, done, { messageId: turn.messageId() }))) return 'cancelled'
+  return 'end_turn'
+}
+
 /** A command whose text runs to a few KB, as a script an agent writes inline does. */
 function longCommand(index: number): string {
   const lines = 20 + (index % 5) * 30
@@ -1915,6 +1973,7 @@ export const SCENARIO_RUNNERS: Record<ScenarioName, Scenario> = {
   'extra-usage': extraUsage,
   'big-context': bigContext,
   'heavy-tools': heavyTools,
+  'image-context': imageContext,
   status,
   context,
   recall,

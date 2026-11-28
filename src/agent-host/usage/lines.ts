@@ -176,8 +176,11 @@ export async function resumeOffset(
 }
 
 export interface EachLineOptions {
-  /** Only lines holding these bytes are decoded and passed on; the rest are skipped unread. */
-  contains?: string
+  /**
+   * Only lines holding these bytes, or one of these lists', are decoded and passed on; the rest are
+   * skipped unread.
+   */
+  contains?: string | readonly string[]
   signal?: AbortSignal
 }
 
@@ -191,7 +194,12 @@ export async function eachLine(
   line: (text: string, end: number) => void,
   options: EachLineOptions = {},
 ): Promise<number> {
-  const needle = options.contains ? Buffer.from(options.contains) : null
+  const needles =
+    options.contains === undefined
+      ? null
+      : (typeof options.contains === 'string' ? [options.contains] : options.contains).map((text) =>
+          Buffer.from(text),
+        )
   let carry: Buffer | null = null
   // The file offset of carry's first byte, or of the next chunk when there is no carry.
   let base = start
@@ -205,7 +213,7 @@ export async function eachLine(
       if (newline < 0) break
       const end = base + newline + 1
       const slice = buffer.subarray(from, newline)
-      if (slice.length > 0 && (!needle || slice.indexOf(needle) >= 0)) {
+      if (slice.length > 0 && (!needles || needles.some((needle) => slice.indexOf(needle) >= 0))) {
         line(slice.toString('utf8').replace(/\r$/, ''), end)
       }
       offset = end

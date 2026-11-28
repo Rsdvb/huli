@@ -103,6 +103,11 @@
     "text": "The context is large: each request uploads ~{{size}}",
     "why": "Every request uploads the whole context again, and prompt caching saves money, not bytes. Compact the context, or hand off to a new session that starts from a summary.",
     "compact": "Compact",
+    "imagesText_one": "An image in the context makes each request ~{{size}} (the image: {{images}})",
+    "imagesText_other": "{{count}} images in the context make each request ~{{size}} (images: {{images}})",
+    "whyImages": "Every request uploads the images in the context again: a screenshot is hundreds of KB, though it counts as only about 1.6K tokens. Compacting the context drops the old images; a handoff carries on from a summary alone.",
+    "compactImages": "Compact to drop images",
+    "compactImagesHint": "Has the agent compact its context, which drops the old images so later requests no longer upload them",
     "handoff": "Hand off to a new session",
     "handoffHint": "The agent writes a handoff summary, and a new session carries on from it alone",
     "handingOff": "Writing a handoff summary; a new session carries on from it once it is written",
@@ -110,6 +115,8 @@
   },
   "handoffOffer": {
     "title": "The context holds {{tokens}} tokens",
+    "imagesTitle_one": "The context holds an image",
+    "imagesTitle_other": "The context holds {{count}} images",
     "text": "Each request uploads ~{{size}}. Hand off to a new session: the agent writes a handoff summary, and the new session carries on from it alone.",
     "go": "Hand off",
     "later": "Not now"
@@ -341,7 +348,10 @@
       "up": "Up",
       "down": "Down",
       "perRequest": "Per request",
-      "hint": "Estimated from the tokens: about 4 bytes per input token and 16 per output token. Every request uploads the whole context again; prompt caching saves money, not bytes."
+      "images_one": "~{{size}} per request, {{images}} of it an image",
+      "images_other": "~{{size}} per request, {{images}} of it {{count}} images",
+      "imagesSent": "images ~{{size}} so far",
+      "hint": "Estimated: text by its tokens, about 4 bytes per input token and 16 per output token; images in the context by their size as base64, their ~1.6K tokens each taken out of the text so they count once. Every request uploads the whole context again, images too, until a compaction drops them; prompt caching saves money, not bytes."
     }
   },
   "attachments": {

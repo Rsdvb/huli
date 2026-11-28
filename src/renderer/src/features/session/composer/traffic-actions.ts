@@ -1,7 +1,7 @@
 // Huli: what the traffic hint and the handoff do, and whether the hint shows for a session.
 
 import { largeContext } from '@shared/traffic'
-import type { SessionUsage, UserContent } from '@shared/thread'
+import type { ContextImages, SessionUsage, UserContent } from '@shared/thread'
 import { host } from '@renderer/lib/host'
 import { keptPerArtifact } from '@renderer/stores/artifact-kept'
 import { showSending } from '@renderer/stores/threads'
@@ -13,15 +13,19 @@ const dismissed = keptPerArtifact<boolean>(
   (value): value is boolean => typeof value === 'boolean',
 )
 
-/** Whether the session's hint or offer shows: a large context, not dismissed, not handed off. */
+/**
+ * Whether the session's hint or offer shows: a large context, or images that make each request
+ * large, not dismissed, not handed off.
+ */
 export function useTrafficHint(
   sessionId: string,
   usage: SessionUsage | null,
+  images: ContextImages | null,
   handedOff: boolean,
 ): { shown: boolean; dismiss: () => void } {
   const gone = dismissed.use(sessionId)
   return {
-    shown: !gone && !handedOff && largeContext(usage),
+    shown: !gone && !handedOff && largeContext(usage, images),
     dismiss: () => dismissed.set(sessionId, true),
   }
 }

@@ -1353,8 +1353,14 @@ export class ThreadDb {
         const entry = this.entryOf(sql, sessionId, row, 'refs')
         if (entry) setAside.push({ pos: Number(row.pos), entry })
       }
+      // Huli: the stored sizes of its pictures, read from the rows rather than the files.
+      const imageSizes: Record<string, number> = {}
+      for (const row of sql.legacyImagesOf.all(sessionId)) {
+        imageSizes[String(row.hash)] = Number(row.size)
+      }
+      for (const row of sql.imagesOf.all(sessionId)) imageSizes[String(row.hash)] = Number(row.size)
       const { session, ...rest } = head
-      return { head: rest, session, entries, setAside }
+      return { head: rest, session, entries, setAside, imageSizes }
     }, null)
   }
 

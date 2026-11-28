@@ -208,6 +208,7 @@ import {
   PROMPT_SUGGESTION_CHARS,
   sameConfigValue,
 } from '@shared/thread'
+import { imagesInContext, imagesSent, NO_IMAGES, touchesImages } from '@shared/traffic'
 import { MAX_CLOSED_TERMINALS, type ClosedTerminal } from '@shared/terminal-idle'
 import type { SessionProcesses } from '@shared/task-processes'
 import { readTaskProcesses } from './task-processes'
@@ -930,6 +931,8 @@ interface Turn {
   fallback: ReturnType<typeof setTimeout> | null
   /** The agent reported a request of the session's thread during the turn. */
   requested: boolean
+  /** Huli: the images its requests carried, and their bytes, for the usage record. */
+  images: { sent: number; bytes: number }
   /** The agent started it between the host's turns, with no message, and says when it ends. */
   byAgent: boolean
   /** Told once it has ended, as an edit from a message waits for the turn it stops. */
@@ -1089,6 +1092,8 @@ interface Live {
   partial: boolean
   /** Bytes of sent attachments for the next checkpoint, by hash. */
   blobs: Map<string, StoredBlob>
+  /** Huli: the stored bytes of the images the thread names by hash, for the traffic estimate. */
+  imageSizes: Map<string, number>
   /** The entries the host keeps while a replay rebuilds the thread, which the agent does not send. */
   keeper: ReplayKeeper | null
   checkpointTimer: ReturnType<typeof setTimeout> | null
@@ -2533,7 +2538,9 @@ export class SessionManager {
   private emit(live: Live, patches: readonly Patch[]): void {
     let plan = false
     let activity = false
+    let images = false
     for (const patch of patches) {
+      images ||= !live.replaying && touchesImages(live.thread, patch)
       if (patch.op === 'thread.reset') {
         const keeper = new ReplayKeeper(live.thread)
         live.keeper = keeper.empty ? null : keeper
@@ -2549,11 +2556,34 @@ export class SessionManager {
         for (const entry of keeper.after(patch.entry)) this.apply(live, { op: 'entry.add', entry })
       }
     }
+    if (images) this.countImages(live)
     this.scheduleFlush(live)
     this.scheduleCheckpoint(live)
     // A replay ends with a summary of its own, which carries the plan it brought back.
     if ((plan || activity) && !live.replaying) this.touch(live.id)
     if (!live.replaying) this.watchWork(live)
+  }
+
+  /**
+   * Huli: the images the agent's context holds, counted again after a change that can move them
+   * (`touchesImages`), never on a timer; the view changes only when the count does.
+   */
+  private countImages(live: Live): void {
+    const now = imagesInContext(live.thread, (hash) => live.imageSizes.get(hash))
+    const was = live.thread.session.images ?? null
+    if (was ? was.count === now.count && was.bytes === now.bytes : now.count === 0) return
+    this.update(live, { images: { ...(was ?? NO_IMAGES), ...now } })
+  }
+
+  /** Huli: a request of the session's went up, carrying the images its context holds now. */
+  private imagesRequested(live: Live, turn: Turn | null = live.turn): void {
+    const images = live.thread.session.images
+    if (live.replaying || !images || images.count === 0) return
+    if (turn) {
+      turn.images.sent += images.count
+      turn.images.bytes += images.bytes
+    }
+    this.update(live, { images: imagesSent(images) })
   }
 
   /**
@@ -4693,6 +4723,7 @@ export class SessionManager {
             ...storedContext(page.session.context),
             ...storedSide(view, page.session.sideChat),
             ...(page.session.review ? { review: page.session.review } : {}),
+            ...(page.session.images ? { images: page.session.images } : {}),
           }
         : view,
       entries: page ? page.entries.map(settled) : [],
@@ -5194,6 +5225,7 @@ export class SessionManager {
       fullNoticed: false,
       partial: false,
       blobs: new Map(),
+      imageSizes: new Map(),
       keeper: null,
       checkpointTimer: null,
       used: false,
@@ -6046,6 +6078,7 @@ export class SessionManager {
         this.agentTurn(live, effect)
         break
       case 'request':
+        this.imagesRequested(live)
         if (live.resumeRead) this.checkResumeRead(live, effect.cache)
         this.refreshContext(live, this.timings.contextDebounceMs)
         // A turn's transcript is read as it ends; a request between turns has a read of its own.
@@ -8077,11 +8110,13 @@ export class SessionManager {
     live.partial = !ok
     this.restoreOrigins(live, kept)
     this.restoreKept(live)
+    this.countImages(live)
     for (const record of this.descendants(live.id, 'subagent')) {
       const child = this.live.get(record.id)
       if (!child) continue
       child.replaying = false
       this.restoreKept(child)
+      this.countImages(child)
       if (ok && child.mentioned) {
         if (child.thread.session.status === 'starting') this.update(child, { status: 'ready' })
         this.touch(child.id)
@@ -8916,7 +8951,8 @@ export class SessionManager {
       live.nextPos = Math.max(live.nextPos, pos + 1)
       live.counter = Math.max(live.counter, idNumber(entry.id))
     }
-    const { config, commands, usage, context, sideChat, review } = stored.session
+    const { config, commands, usage, context, sideChat, review, images } = stored.session
+    live.imageSizes = new Map(Object.entries(stored.imageSizes ?? {}))
     live.thread = {
       session: {
         ...live.thread.session,
@@ -8926,10 +8962,12 @@ export class SessionManager {
         ...storedContext(context),
         ...storedSide(live.thread.session, sideChat),
         ...(review ? { review } : {}),
+        ...(images ? { images } : {}),
       },
       order,
       byId,
     }
+    this.countImages(live)
     this.scheduleCheckpoint(live)
   }
 
@@ -10598,6 +10636,7 @@ export class SessionManager {
       prompted: byAgent,
       fallback: null,
       requested: false,
+      images: { sent: 0, bytes: 0 },
       byAgent,
       ends: [],
       suggestion: null,
@@ -11941,6 +11980,9 @@ export class SessionManager {
       updatedAt: now,
     }
     const turnTokens = models.length > 0 ? sumModelTokens(models, tokens) : tokens
+    // Huli: an agent that reports no requests of its own made at least the one before its answer.
+    if (turnTokens && !turn.requested && stopReason !== 'cancelled')
+      this.imagesRequested(live, turn)
     if (turnTokens) {
       const usage = live.thread.session.usage
       // An agent that reports a turn's tokens only in its response made its last request just
@@ -11976,6 +12018,7 @@ export class SessionManager {
           tokens,
           models,
           model: modelOf(live.thread.session.config),
+          images: turn.images,
         }),
       )
     }

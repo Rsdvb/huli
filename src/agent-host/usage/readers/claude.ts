@@ -1,5 +1,7 @@
 // Claude Code's usage from its session logs: one row per API message, taken from the assistant
-// lines that carry the message's usage.
+// lines that carry the message's usage. Huli: each row also carries the images the log's context
+// held when the message was asked for, those of the prompts and tool results since its latest
+// compaction, which the request uploaded again (`shared/traffic.ts`).
 // Ported from cc-switch, https://github.com/farion1231/cc-switch/blob/7da2553/src-tauri/src/services/session_usage.rs
 // Copyright (c) 2025 Jason Young. MIT License.
 
@@ -18,16 +20,22 @@ import {
 } from '../model'
 
 const AGENT_ID = 'claude-code'
-/** Lines without it cannot carry a message's usage, so they are never parsed. */
-const NEEDLE = '"usage"'
+/**
+ * Lines without one of these cannot carry a message's usage, an image or a compaction, so they are
+ * never parsed. Claude Code writes its lines without spaces.
+ */
+const NEEDLES = ['"usage"', '"type":"image"', '"compact_boundary"']
 
 /** The fields read from a log line; any of them may be missing or of another type. */
 interface Line {
   type?: unknown
+  subtype?: unknown
+  isSidechain?: unknown
   timestamp?: unknown
   sessionId?: unknown
   cwd?: unknown
   message?: {
+    content?: unknown
     id?: unknown
     model?: unknown
     stop_reason?: unknown
@@ -47,6 +55,46 @@ interface Line {
 interface Message {
   row: UsageRow
   stopped: boolean
+}
+
+/** Huli: the images the log's context holds, and their bytes as base64. */
+interface Held {
+  count: number
+  bytes: number
+}
+
+/** The images a cursor's state says its log's context held where it stopped. */
+function heldOf(cursor: FileCursor | null, start: number): Held {
+  if (!cursor?.state || start === 0) return { count: 0, bytes: 0 }
+  try {
+    const value = JSON.parse(cursor.state) as { images?: unknown; imageBytes?: unknown }
+    return { count: count(value.images), bytes: count(value.imageBytes) }
+  } catch {
+    return { count: 0, bytes: 0 }
+  }
+}
+
+/** The base64 of a content block that is an image, or null. */
+function imageData(block: unknown): string | null {
+  if (typeof block !== 'object' || block === null) return null
+  const { type, source } = block as { type?: unknown; source?: { type?: unknown; data?: unknown } }
+  if (type !== 'image' || source?.type !== 'base64' || typeof source.data !== 'string') return null
+  return source.data
+}
+
+/** Adds the images of a prompt or of its tool results to what the context holds. */
+function holdImages(content: unknown, held: Held): void {
+  if (!Array.isArray(content)) return
+  for (const block of content) {
+    const data = imageData(block)
+    if (data !== null) {
+      held.count++
+      held.bytes += data.length
+      continue
+    }
+    const inner = (block as { type?: unknown; content?: unknown } | null)?.content
+    if ((block as { type?: unknown } | null)?.type === 'tool_result') holdImages(inner, held)
+  }
 }
 
 interface Pending {
@@ -171,11 +219,27 @@ function replaces(known: Message | undefined, stopped: boolean, output: number):
   return output > known.row.output
 }
 
-function readLine(json: string, messages: Map<string, Message>, fallbackAt: number): void {
+function readLine(
+  json: string,
+  messages: Map<string, Message>,
+  fallbackAt: number,
+  held: Held,
+): void {
   let line: Line | null
   try {
     line = JSON.parse(json) as Line | null
   } catch {
+    return
+  }
+  // A sidechain's context is its own, which the main thread's requests do not carry.
+  const main = line?.isSidechain !== true
+  if (line?.type === 'system' && line.subtype === 'compact_boundary') {
+    held.count = 0
+    held.bytes = 0
+    return
+  }
+  if (line?.type === 'user') {
+    if (main) holdImages(line.message?.content, held)
     return
   }
   const message = line?.message
@@ -184,7 +248,11 @@ function readLine(json: string, messages: Map<string, Message>, fallbackAt: numb
   const id = message.id
   const stopped = typeof message.stop_reason === 'string'
   const output = count(usage.output_tokens)
-  if (!replaces(messages.get(id), stopped, output)) return
+  const known = messages.get(id)
+  if (!replaces(known, stopped, output)) return
+  // The images as the message's first line found them, which its request carried.
+  const images = known ? (known.row.images ?? 0) : main ? held.count : 0
+  const imageBytes = known ? (known.row.imageBytes ?? 0) : main ? held.bytes : 0
   const at = typeof line.timestamp === 'string' ? Date.parse(line.timestamp) : NaN
   messages.set(id, {
     stopped,
@@ -204,11 +272,13 @@ function readLine(json: string, messages: Map<string, Message>, fallbackAt: numb
       // Read apart only here; the total still includes it.
       cacheWrite1h: count(usage.cache_creation?.ephemeral_1h_input_tokens),
       turn: 0,
+      ...(images > 0 ? { images, imageBytes } : {}),
     },
   })
 }
 
-async function readLog(
+/** One log's rows since its cursor, and the cursor after them. */
+export async function readLog(
   file: string,
   cursor: FileCursor | null,
   signal: AbortSignal,
@@ -216,12 +286,15 @@ async function readLog(
   const log = await openLog(file)
   const start = await resumeOffset(log.source, cursor)
   const messages = new Map<string, Message>()
+  const held = heldOf(cursor, start)
   // For a line without a usable timestamp, which no Claude Code log seen so far has.
   const fallbackAt = Number(log.mtimeNs / 1_000_000n)
-  const offset = await eachLine(log.source, start, (json) => readLine(json, messages, fallbackAt), {
-    contains: NEEDLE,
-    signal,
-  })
+  const offset = await eachLine(
+    log.source,
+    start,
+    (json) => readLine(json, messages, fallbackAt, held),
+    { contains: NEEDLES, signal },
+  )
   const rows: UsageRow[] = []
   for (const { row } of messages.values()) {
     // Requests that end without a stop_reason still count when they used anything.
@@ -236,7 +309,7 @@ async function readLog(
       mtimeNs: log.mtimeNs,
       offset,
       tail: await tailHash(log.source, offset),
-      state: null,
+      state: held.count > 0 ? JSON.stringify({ images: held.count, imageBytes: held.bytes }) : null,
     },
   }
 }

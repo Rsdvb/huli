@@ -739,6 +739,41 @@ describe('the thread database', () => {
     db.close()
   })
 
+  it('tells a loaded thread the stored size of each image it names, and keeps its counts', () => {
+    const db = open()
+    const bytes = Buffer.alloc(INLINE_MEDIA_LIMIT + 10, 9)
+    const hash = createHash('sha256').update(bytes).digest('hex')
+    const shot: ThreadEntry = {
+      ...(tool('t1') as Extract<ThreadEntry, { kind: 'tool' }>),
+      content: [
+        {
+          type: 'ref',
+          ref: { kind: 'image', mimeType: 'image/png', data: bytes.toString('base64') },
+        },
+      ],
+    }
+    const images = { count: 1, bytes: 44_000, sent: 12, sentBytes: 528_000 }
+    db.write('s1', {
+      head,
+      session: { ...EMPTY_SESSION, images },
+      entries: [
+        { pos: 0, entry: user('u1') },
+        { pos: 1, entry: shot },
+      ],
+    })
+    const thread = db.load('s1')!
+    expect(thread.imageSizes).toEqual({ [hash]: bytes.length })
+    expect(thread.session.images).toEqual(images)
+    // A thread of text names none; a damaged count starts again.
+    db.write('s2', {
+      head,
+      session: { ...EMPTY_SESSION, images: { count: -1 } as never },
+      entries: [{ pos: 0, entry: user('u1') }],
+    })
+    expect(db.load('s2')).toMatchObject({ imageSizes: {}, session: { images: null } })
+    db.close()
+  })
+
   it('keeps the bytes of sent attachments through a whole write that still names them', () => {
     const file = tempFile()
     const db = open(file)

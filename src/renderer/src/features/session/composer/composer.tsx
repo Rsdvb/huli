@@ -244,7 +244,8 @@ export function Composer({
   const idle = (status === 'ready' || status === 'closed') && !heldOutside
   // Huli: what a large context costs in traffic, and the ways out of it (省流量).
   const handedOff = useSessionsStore((s) => !!s.byId[sessionId]?.handedOffTo)
-  const trafficHint = useTrafficHint(sessionId, session.usage, handedOff)
+  const contextImages = session.images ?? null
+  const trafficHint = useTrafficHint(sessionId, session.usage, contextImages, handedOff)
   const offerHandoff = useSettingsStore((s) => s.settings.thread.handoffOffer)
   const canHandoff =
     idle &&
@@ -928,6 +929,7 @@ export function Composer({
                       key="handoff-offer"
                       sessionId={sessionId}
                       used={session.usage?.used ?? 0}
+                      images={contextImages}
                       onDismiss={trafficHint.dismiss}
                     />
                   )}
@@ -1082,6 +1084,7 @@ export function Composer({
                   key="traffic"
                   sessionId={sessionId}
                   used={session.usage?.used ?? 0}
+                  images={contextImages}
                   compact={compactNow}
                   canHandoff={canHandoff}
                   onDismiss={trafficHint.dismiss}

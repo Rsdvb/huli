@@ -25,8 +25,8 @@ import {
   type CachePhase,
   type KnownExpiry,
 } from '@shared/prompt-cache'
-import type { AgentId, SessionUsage } from '@shared/thread'
-import { requestUpload, sessionTraffic } from '@shared/traffic'
+import type { AgentId, ContextImages, SessionUsage } from '@shared/thread'
+import { requestSize, sessionTraffic } from '@shared/traffic'
 import { Button } from '@renderer/components/ui/button'
 import {
   Collapsible,
@@ -802,7 +802,9 @@ const hitPercent = (share: number | null): string =>
  */
 function UsageLines({ sessionId, usage }: { sessionId: string; usage: SessionUsage | null }) {
   const { t } = useTranslation('composer')
-  const last = useSessionView(sessionId)?.lastRequest
+  const view = useSessionView(sessionId)
+  const last = view?.lastRequest
+  const images = view?.images ?? null
   const totals = usage?.tokens ?? null
   const session = usage && (totals || usage.cost)
   if (!session && !last) return null
@@ -846,7 +848,7 @@ function UsageLines({ sessionId, usage }: { sessionId: string; usage: SessionUsa
       ) : (
         sessionBlock
       )}
-      {usage && <TrafficBlock usage={usage} />}
+      {usage && <TrafficBlock usage={usage} images={images} />}
       {last && (
         <UsageBlock
           label={t('usage.lastRequest.title')}
@@ -868,13 +870,16 @@ function UsageLines({ sessionId, usage }: { sessionId: string; usage: SessionUsa
 }
 
 /**
- * Huli: the session's traffic, estimated from its tokens since neither its agent nor its SDK
- * reports the requests' sizes, and what one request uploads at the context it has now.
+ * Huli: the session's traffic, estimated from its tokens and the images in its context since
+ * neither its agent nor its SDK reports the requests' sizes, and what one request uploads at the
+ * context it has now, its images apart.
  */
-function TrafficBlock({ usage }: { usage: SessionUsage }) {
+function TrafficBlock({ usage, images }: { usage: SessionUsage; images: ContextImages | null }) {
   const { t } = useTranslation('composer')
-  const spent = sessionTraffic(usage.tokens)
-  if (!spent && usage.used <= 0) return null
+  const spent = sessionTraffic(usage.tokens, images)
+  const request = requestSize(usage.used, images)
+  const perRequest = request.text + request.images
+  if (!spent && perRequest <= 0) return null
   const about = (bytes: number) => t('usage.traffic.about', { value: traffic(bytes) })
   return (
     <div className="kettu-ctx__block" title={t('usage.traffic.hint')}>
@@ -893,9 +898,26 @@ function TrafficBlock({ usage }: { usage: SessionUsage }) {
         </div>
         <div>
           <dt>{t('usage.traffic.perRequest')}</dt>
-          <dd>{usage.used > 0 ? traffic(requestUpload(usage.used)) : '—'}</dd>
+          <dd>{perRequest > 0 ? traffic(perRequest) : '—'}</dd>
         </div>
       </dl>
+      {request.count > 0 && (
+        <p className="kettu-ctx__block-note tabular">
+          {t('usage.traffic.images', {
+            count: request.count,
+            size: traffic(perRequest),
+            images: traffic(request.images),
+          })}
+          {images && images.sentBytes > 0 && (
+            <>
+              {' · '}
+              <span className="whitespace-nowrap">
+                {t('usage.traffic.imagesSent', { size: traffic(images.sentBytes) })}
+              </span>
+            </>
+          )}
+        </p>
+      )}
     </div>
   )
 }
