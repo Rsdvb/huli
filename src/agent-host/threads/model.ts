@@ -5,9 +5,11 @@ import type { SessionOutputs, SessionStats } from '@shared/agent-host'
 import { parseStoredReview, type ReviewRun } from '@shared/review'
 import { parseSideChat, type StoredSideChat } from './side-chat'
 import type { ContextBreakdown } from '@shared/context'
+import { isContextImages } from '@shared/traffic'
 import type {
   AgentId,
   ConfigOption,
+  ContextImages,
   SessionUsage,
   SessionView,
   SlashCommand,
@@ -41,6 +43,8 @@ export type StoredSession = Pick<
   sideChat: StoredSideChat | null
   /** Huli: the latest review of the session's changes, with its findings. */
   review?: ReviewRun | null
+  /** Huli: the images in its context and what its requests uploaded of them (`shared/traffic`). */
+  images?: ContextImages | null
 }
 
 export const EMPTY_SESSION: StoredSession = {
@@ -52,10 +56,11 @@ export const EMPTY_SESSION: StoredSession = {
   context: null,
   sideChat: null,
   review: null,
+  images: null,
 }
 
 export function storedSession(view: SessionView): StoredSession {
-  const { title, config, commands, usage, subagent, sideChat, review } = view
+  const { title, config, commands, usage, subagent, sideChat, review, images } = view
   return {
     title,
     // 挂起的切换仅在进程运行期有效，落盘时剥离以免重开会话出现残留提示。
@@ -74,6 +79,7 @@ export function storedSession(view: SessionView): StoredSession {
         ? { answerAgent: sideChat.answerAgent, entries: sideChat.entries }
         : null,
     review: review ?? null,
+    images: images ?? null,
   }
 }
 
@@ -87,6 +93,7 @@ export function changesStored(changes: Partial<SessionView>): boolean {
     'subagent' in changes ||
     'sideChat' in changes ||
     'review' in changes ||
+    'images' in changes ||
     // A read that starts or fails keeps the breakdown it had.
     ('context' in changes && !changes.context?.loading && !changes.context?.error)
   )
@@ -151,6 +158,8 @@ export function parseStoredSession(value: unknown): StoredSession | null {
     sideChat: parseSideChat(value.sideChat),
     // Absent from sessions stored before reviews; a damaged one is dropped, its bad findings alone.
     review: parseStoredReview(value.review),
+    // Huli: absent from sessions stored before images were counted; a damaged one starts again.
+    images: isContextImages(value.images) ? value.images : null,
   }
 }
 
@@ -233,6 +242,11 @@ export interface StoredThread {
   entries: PositionedEntry[]
   /** What an edit from a message set aside, until the next send. */
   setAside: PositionedEntry[]
+  /**
+   * Huli: the bytes of each image the entries name by hash, as stored, for the traffic estimate;
+   * absent where the store did not read them.
+   */
+  imageSizes?: Record<string, number>
 }
 
 /**

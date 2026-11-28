@@ -33,6 +33,8 @@ export const SCENARIOS = [
   'big-context',
   // Huli: many tool calls with long commands, 64 KB outputs and screenshots, for lean threads.
   'heavy-tools',
+  // Huli: screenshots that stay in the context, each followed by its request, for the traffic.
+  'image-context',
   'status',
   'context',
   'recall',
@@ -187,6 +189,11 @@ export const SCENARIO_DESCRIPTIONS: Record<ScenarioName, { description: string; 
   'heavy-tools': {
     description: 'Commands with long inputs and 64 KB outputs, and a screenshot every few calls',
     hint: '--count <n> --size <output bytes, at most 64k> --shots <a screenshot every n calls>',
+  },
+  'image-context': {
+    description:
+      'Screenshots of about 640 KB of base64 that stay in the context, each followed by the request that read it; /compact drops them',
+    hint: '--shots <how many, at most 20>',
   },
   recall: { description: 'Answers with your previous message, as the agent remembers it' },
   instructions: {
