@@ -10,7 +10,7 @@ import type { ContextBreakdown } from '@shared/context'
 import { expiryOf, knownExpiry, modelOption } from '@shared/prompt-cache'
 import type { HostLink } from '@shared/remote/link'
 import { compactPrompt, type SessionView } from '@shared/thread'
-import { requestUpload, sessionTraffic } from '@shared/traffic'
+import { requestSize, sessionTraffic } from '@shared/traffic'
 import { hostErrorText } from '../hostErrors'
 import { BottomSheet } from '../ui/BottomSheet'
 import { Skeleton } from '../ui/Skeleton'
@@ -185,9 +185,12 @@ export function ContextSheet(props: {
         : fetched
       : (pushed ?? fetched)
   const usage = session?.usage ?? null
-  // Huli: estimated from the tokens, as the desktop's context card does.
-  const traffic = sessionTraffic(usage?.tokens)
+  // Huli: estimated from the tokens and the images in the context, as the desktop's card does.
+  const images = session?.images ?? null
+  const traffic = sessionTraffic(usage?.tokens, images)
   const used = usage && usage.used > 0 ? usage.used : (breakdown?.used ?? 0)
+  const request = requestSize(used, images)
+  const perRequest = request.text + request.images
   const size = usage && usage.size > 0 ? usage.size : (breakdown?.size ?? 0)
   const share = size > 0 ? used / size : 0
   const percent = Math.round(share * 100)
@@ -490,11 +493,19 @@ export function ContextSheet(props: {
               </Text>
             </View>
           ) : null}
-          {traffic && used > 0 ? (
+          {perRequest > 0 && (traffic || request.count > 0) ? (
             <View style={styles.limitRow}>
               <Text style={[styles.limitName, { color: c.textSecondary }]}>每次请求</Text>
               <Text style={[styles.limitValue, { color: c.text }]}>
-                {`约上传 ${trafficText(requestUpload(used))}`}
+                {`约上传 ${trafficText(perRequest)}`}
+              </Text>
+            </View>
+          ) : null}
+          {request.count > 0 ? (
+            <View style={styles.limitRow}>
+              <Text style={[styles.limitName, { color: c.textSecondary }]}>其中图片</Text>
+              <Text style={[styles.limitValue, { color: c.text }]}>
+                {`${trafficText(request.images)} · ${request.count} 张`}
               </Text>
             </View>
           ) : null}
