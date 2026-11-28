@@ -54,6 +54,7 @@ describe("Kettu's own skills", () => {
       'kettu-marketplace',
       'kettu-settings',
       'kettu-routines',
+      'kettu-mcp',
     ])
     expect(names(NONE)).toEqual([
       'kettu-artifacts',
@@ -64,6 +65,7 @@ describe("Kettu's own skills", () => {
       'kettu-terminals',
       'kettu-settings',
       'kettu-routines',
+      'kettu-mcp',
     ])
   })
 
@@ -124,6 +126,7 @@ describe('read_kettu_guide', () => {
       'marketplace',
       'settings',
       'routines',
+      'mcp',
     ])
     expect(guideTopics(NONE)).not.toContain('computer')
     expect(guideTopics(NONE)).not.toContain('marketplace')
@@ -238,5 +241,15 @@ describe('what the guide says about passwords', () => {
       "Type a password or code yourself only when the user gave it to you for that or the project's files hold it",
     )
     expect(browser).toContain('never ask for passwords or codes in the thread.')
+  })
+})
+
+describe('what the guide says about reading another session', () => {
+  it('pages long replies through get_session instead of sending callers to read_session_history', () => {
+    const text = guideText('sessions', ALL)!
+    expect(text).toContain('call `get_session` again with `reply_offset`')
+    expect(text).not.toContain(
+      '`read_session_history` its earlier turns or a reply that came back cut short',
+    )
   })
 })

@@ -4,17 +4,21 @@ import { addressText, isLocalHost } from '@shared/remote/address'
 import type { HostChangeFailure, HostStatus } from '@shared/remote/hosts'
 import type { DirectAddress } from '@shared/remote/protocol'
 import { isOwnRelay, RELAY_URL } from '@shared/remote/relay'
+import { localizedRegionName } from '@shared/remote/relay-regions'
 import { mediumAgo } from '@renderer/lib/format'
 import { errorMessage } from '@renderer/lib/host'
+import { currentLocale } from '@renderer/lib/i18n'
 import { isRelayPage, isWeb } from '@renderer/lib/platform'
 import { useSettingsStore } from '@renderer/stores/settings'
 import type { WebHost } from '@renderer/stores/web-host'
 import { relayHostName } from './relay-text'
 
-/** "iOS", "macOS", "Windows": what a host or device runs, by the platform it sent. */
+/** "iOS", "Android", "macOS", "Windows": what a host or device runs, by the platform it sent. */
 export function platformName(platform: Platform | string): string {
   if (platform === 'ios') return 'iOS'
   if (platform === 'ipados') return 'iPadOS'
+  if (platform === 'android') return 'Android'
+  if (/^android\s+/i.test(platform)) return platform.replace(/^android/i, 'Android')
   if (platform === 'darwin') return 'macOS'
   if (platform === 'win32') return 'Windows'
   if (platform === 'linux') return 'Linux'
@@ -67,9 +71,8 @@ export function routeText(
   }
   if (!('relay' in connection)) return directAt(t, connection.address)
   if (connection.own) return t('hosts.via.ownRelayAt', { host: relayHostName(connection.relay) })
-  return connection.region
-    ? t('hosts.via.relayAt', { region: connection.region })
-    : t('hosts.via.relay')
+  const region = localizedRegionName(connection.region, connection.regionNames, currentLocale())
+  return region ? t('hosts.via.relayAt', { region }) : t('hosts.via.relay')
 }
 
 /** The route alone, as the sidebar names it beside a host online. */

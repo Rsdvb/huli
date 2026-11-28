@@ -6,10 +6,12 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@renderer/compone
 import { ReferenceHoverCard } from '@renderer/features/git/gh-reference'
 import { PrIcon } from '@renderer/features/git/pr-icon'
 import { prStateText } from '@renderer/features/git/pr-text'
+import { sessionLinkProps } from '@renderer/features/session/open-link'
 import { shortAgo } from '@renderer/lib/format'
 import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
-import { loadReference, useGitStore, watchReference } from '@renderer/stores/git'
+import { loadReference, pullRequestOf, useGitStore, watchReference } from '@renderer/stores/git'
+import { hostOfSession } from '@renderer/stores/sessions'
 import { sessionPullRequests } from './session-prs'
 
 // The most that the list shows; the rest are counted under it.
@@ -54,17 +56,34 @@ export function PrBadge({
   /** The badge's card opened, taking the place of the row's own. */
   onOpen: () => void
 }) {
-  return <PullRequestsBadge prs={sessionPullRequests(summary)} onOpen={onOpen} />
+  return (
+    <PullRequestsBadge
+      prs={sessionPullRequests(summary)}
+      sessionId={summary.id}
+      hostId={hostOfSession(summary)}
+      onOpen={onOpen}
+    />
+  )
 }
 
 /** The badge for a list of pull requests, such as those on a task's branch. */
 export function PullRequestsBadge({
   prs,
+  sessionId = null,
+  sessionIdOf,
+  hostId,
   onOpen,
 }: {
   prs: SessionPullRequest[]
+  /** The owning session for all listed pull requests, when there is one. */
+  sessionId?: string | null
+  /** Resolves the owning session for an individual pull request, e.g. across a task's steps. */
+  sessionIdOf?: (pr: SessionPullRequest) => string | null
+  hostId: string | null
   onOpen: () => void
 }) {
+  const resolveSession = (pr: SessionPullRequest): string | null =>
+    sessionIdOf?.(pr) ?? sessionId ?? null
   const label = useBadgeLabel(prs)
   const self = useRef<HTMLSpanElement>(null)
   // The host keeps the ones that can still change current while the row is shown.
@@ -73,9 +92,10 @@ export function PullRequestsBadge({
     .map((pr) => pr.url)
     .join('\n')
   useEffect(() => {
-    const releases = openUrls === '' ? [] : openUrls.split('\n').map(watchReference)
+    const releases =
+      openUrls === '' ? [] : openUrls.split('\n').map((url) => watchReference(url, hostId))
     return () => releases.forEach((release) => release())
-  }, [openUrls])
+  }, [openUrls, hostId])
   // Beside the sidebar, as the row's own card is, so it hides none of the rows.
   const row = () => self.current?.closest('[data-sidebar-row]') ?? self.current
   if (prs.length === 0) return null
@@ -106,9 +126,12 @@ export function PullRequestsBadge({
   )
   const change = (open: boolean) => open && onOpen()
   if (prs.length === 1) {
+    const pr = prs[0]!
     return (
       <ReferenceHoverCard
-        reference={referenceOf(prs[0]!)}
+        reference={referenceOf(pr)}
+        sessionId={resolveSession(pr)}
+        hostId={hostId}
         side="right"
         trigger={badge}
         onOpenChange={change}
@@ -125,13 +148,21 @@ export function PullRequestsBadge({
         anchor={row}
         className="w-[340px] p-1.5"
       >
-        <PrList prs={prs} />
+        <PrList prs={prs} sessionIdOf={resolveSession} hostId={hostId} />
       </HoverCardContent>
     </HoverCard>
   )
 }
 
-function PrList({ prs }: { prs: SessionPullRequest[] }) {
+function PrList({
+  prs,
+  sessionIdOf,
+  hostId,
+}: {
+  prs: SessionPullRequest[]
+  sessionIdOf: (pr: SessionPullRequest) => string | null
+  hostId: string | null
+}) {
   const { t } = useTranslation('sidebar')
   const listed = prs.slice(0, LISTED)
   return (
@@ -142,7 +173,7 @@ function PrList({ prs }: { prs: SessionPullRequest[] }) {
       <ul className="flex flex-col">
         {listed.map((pr) => (
           <li key={pr.url}>
-            <PrListItem pr={pr} />
+            <PrListItem pr={pr} sessionId={sessionIdOf(pr)} hostId={hostId} />
           </li>
         ))}
       </ul>
@@ -155,11 +186,19 @@ function PrList({ prs }: { prs: SessionPullRequest[] }) {
   )
 }
 
-function PrListItem({ pr }: { pr: SessionPullRequest }) {
+function PrListItem({
+  pr,
+  sessionId,
+  hostId,
+}: {
+  pr: SessionPullRequest
+  sessionId: string | null
+  hostId: string | null
+}) {
   const now = useNow()
   const reference = useMemo(() => referenceOf(pr), [pr])
-  const details = useGitStore((s) => s.pullRequests[pr.url])
-  useEffect(() => loadReference(reference), [reference])
+  const details = useGitStore((s) => pullRequestOf(s, hostId, pr.url))
+  useEffect(() => loadReference(reference, false, hostId), [reference, hostId])
   const state = details?.state ?? pr.state
   const at = details
     ? details.state === 'merged'
@@ -171,12 +210,12 @@ function PrListItem({ pr }: { pr: SessionPullRequest }) {
   return (
     <ReferenceHoverCard
       reference={reference}
+      sessionId={sessionId}
+      hostId={hostId}
       side="right"
       trigger={
         <a
-          href={pr.url}
-          target="_blank"
-          rel="noreferrer"
+          {...sessionLinkProps(pr.url, sessionId)}
           className="flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 text-small text-primary no-underline outline-none hover:bg-hover focus-ring data-popup-open:bg-hover"
         >
           <PrIcon state={state} size={14} />

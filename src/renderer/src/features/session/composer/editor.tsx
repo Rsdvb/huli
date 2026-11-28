@@ -16,7 +16,9 @@ import { Annotation, Compartment, EditorState, Prec, type Extension } from '@cod
 import { EditorView, keymap, placeholder as placeholderText } from '@codemirror/view'
 import { MAX_HEIGHT_SHARE, useComposerHeight } from '@renderer/stores/composer-height'
 import { chipHooks, chips, keepAsText, type ChipHooks } from './editor-chips'
+import { focusOnContextMenu } from './editor-context-menu'
 import { markdownPreview } from './markdown-preview'
+import { clampTriggerRect, type BoxRect } from './popover-position'
 
 export interface ComposerEditorHandle {
   /** Focuses the box with the editor's own selection, which a DOM focus would lose. */
@@ -33,8 +35,13 @@ export interface ComposerEditorHandle {
   keepAsText(from: number, to: number): void
   /** The chip that starts at `pos`, as drawn. */
   chipElement(pos: number): HTMLElement | null
-  /** Where the character at `pos` starts on screen, or null while it is not drawn. */
-  leftOf(pos: number): number | null
+  /**
+   * The viewport rect of the character at `pos`, clamped to the editor's visible scroll area, or
+   * null while it is not drawn.
+   */
+  rectOf(pos: number): BoxRect | null
+  /** The editor's scrollable container, so popovers anchored to a line follow inner scrolls. */
+  scrollElement(): HTMLElement | null
   /** The box's height now and the least it can take, in pixels. */
   measure(): { height: number; least: number }
 }
@@ -61,6 +68,9 @@ function editability(disabled: boolean): Extension {
   return [EditorView.editable.of(!disabled), EditorState.readOnly.of(disabled)]
 }
 
+/** A predicted prompt on one line: a line break in it would push the key out of the box. */
+const ghostLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
+
 /** The placeholder, or a predicted prompt drawn as one, faint, with the key that takes it. */
 function placeholderOf(placeholder: string, ghost: GhostPrompt | null): Extension {
   if (!ghost) return placeholderText(placeholder)
@@ -68,7 +78,7 @@ function placeholderOf(placeholder: string, ghost: GhostPrompt | null): Extensio
   element.className = 'cm-ghost'
   const text = document.createElement('span')
   text.className = 'cm-ghost-text'
-  text.textContent = ghost.text
+  text.textContent = ghostLine(ghost.text)
   const key = document.createElement('kbd')
   // The Kbd component's cap, which a widget cannot render.
   key.className =
@@ -126,6 +136,9 @@ const theme = EditorView.theme({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     color: 'var(--text-placeholder)',
+    // Let right-clicks on the placeholder hit the editable `.cm-content` underneath so an empty
+    // composer stays editable for the native context menu.
+    pointerEvents: 'none',
   },
   // A predicted prompt is cut on its line too, but its key stays in view, its edge too.
   '.cm-placeholder:has(.cm-ghost)': { overflow: 'visible' },
@@ -324,7 +337,8 @@ export function ComposerEditor({
   const ghostText = ghost?.text
   const ghostKey = ghost?.key
   const ghostLabel = ghost?.label
-  useEffect(() => {
+  // Reconfigure before paint so clearing the editor on send never flashes the previous prompt.
+  useLayoutEffect(() => {
     const shown =
       ghostText !== undefined && ghostKey !== undefined && ghostLabel !== undefined
         ? { text: ghostText, key: ghostKey, label: ghostLabel }
@@ -360,8 +374,10 @@ export function ComposerEditor({
         if (!editor) return false
         const { selection, doc } = editor.state
         if (selection.ranges.length !== 1 || !selection.main.empty) return false
+        const target = forward ? doc.length : 0
+        if (selection.main.head === target) return true
         const edge = editor.moveToLineBoundary(selection.main, forward, true).head
-        return edge === (forward ? doc.length : 0)
+        return edge === target
       },
       insert: (text) => {
         const editor = view.current
@@ -392,11 +408,15 @@ export function ComposerEditor({
         const element = at instanceof HTMLElement ? at : at.parentElement
         return element?.closest<HTMLElement>('.cm-chip') ?? null
       },
-      leftOf: (pos) => {
+      rectOf: (pos) => {
         const editor = view.current
         if (!editor) return null
-        return editor.coordsAtPos(Math.min(pos, editor.state.doc.length), 1)?.left ?? null
+        const clamped = Math.max(0, Math.min(pos, editor.state.doc.length))
+        const coords = editor.coordsAtPos(clamped, 1)
+        if (!coords) return null
+        return clampTriggerRect(coords, editor.scrollDOM.getBoundingClientRect())
       },
+      scrollElement: () => view.current?.scrollDOM ?? null,
       measure: () => {
         const element = host.current
         if (!element) return { height: 0, least: 0 }
@@ -417,6 +437,7 @@ export function ComposerEditor({
     <div
       ref={host}
       className="min-w-0"
+      onContextMenuCapture={() => focusOnContextMenu(view.current)}
       style={
         {
           '--box-padding': size.padding,

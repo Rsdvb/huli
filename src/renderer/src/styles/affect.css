@@ -154,6 +154,9 @@
   pointer-events: none;
   -webkit-app-region: drag;
 }
+:root[data-overlay-open] .kettu-frame.ui-as-app > .ui-as-main::before {
+  -webkit-app-region: no-drag;
+}
 /* Leaving the onboarding, whose stage drew this window: the main area grows into place and the
    sidebar slides in beside it. The main area settles last, which ends it. */
 [data-arriving] .kettu-frame.ui-as-app > .ui-as-main {
@@ -240,9 +243,61 @@
   border-width: 0;
 }
 /* Short enough that the search sits 12px under the corner's buttons (their bottom at 49px), as
-   far as the list starts under it; App Shell's 50px left it floating halfway. */
+   far as the list starts under it; App Shell's 50px left it floating halfway. When compact head
+   actions replace the search field, align them vertically with the corner controls (y: 21..49px)
+   on the right side of the sidebar head so the navigation starts directly below. */
 .kettu-frame.ui-as-app:not(.kettu-band) > .ui-as-side > .ui-as-side__head[data-chrome='mac'] {
   height: 33px;
+}
+.kettu-frame.ui-as-app:not(.kettu-band)
+  > .ui-as-side
+  > .ui-as-side__head[data-chrome='mac'][data-has-actions] {
+  height: 39px;
+  padding-top: 11px;
+  margin-bottom: 0;
+  align-items: center;
+  justify-content: flex-end;
+}
+:root[data-client='desktop'][data-platform='darwin']
+  .kettu-frame.ui-as-app:not(.kettu-band)
+  > .ui-as-side {
+  container: kettu-side / inline-size;
+}
+/* On macOS desktop, when the sidebar is resized narrower than the corner controls plus the head
+   actions, drop the actions onto a clean row below the corner controls so they never collide. */
+@container kettu-side (max-width: 235px) {
+  :root[data-client='desktop'][data-platform='darwin']
+    .kettu-frame.ui-as-app:not(.kettu-band)
+    > .ui-as-side
+    > .ui-as-side__head[data-chrome='mac'][data-has-actions] {
+    height: auto;
+    padding-top: 45px;
+    justify-content: flex-start;
+  }
+}
+@container kettu-side (max-width: 269px) {
+  :root[data-debug][data-client='desktop'][data-platform='darwin']
+    .kettu-frame.ui-as-app:not(.kettu-band)
+    > .ui-as-side
+    > .ui-as-side__head[data-chrome='mac'][data-has-actions] {
+    height: auto;
+    padding-top: 45px;
+    justify-content: flex-start;
+  }
+}
+.kettu-side-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+.kettu-side-head-actions .ui-as-icon-btn[aria-pressed='true'] {
+  background: var(--select);
+  color: var(--ink);
+}
+.kettu-side-head-actions .ui-as-icon-btn[aria-pressed='true']:hover {
+  background: var(--select);
+  color: var(--ink);
 }
 /* A narrow window's sidebar is a drawer: the sheets keep the gap on their left too, the drawer
    takes the sidebar's color, and the corner controls stay over it. */
@@ -394,6 +449,9 @@
   pointer-events: none;
   -webkit-app-region: drag;
 }
+:root[data-overlay-open] .kettu-frame.ui-as-app::before {
+  -webkit-app-region: no-drag;
+}
 .kettu-frame > .ui-as-resizer {
   -webkit-app-region: no-drag;
 }
@@ -416,6 +474,16 @@
 .kettu-frame.kettu-band .ui-as-side__head[data-chrome='mac'] {
   height: 0;
   margin-bottom: 0;
+}
+.kettu-frame.kettu-band .ui-as-side__head[data-chrome='mac'][data-has-actions] {
+  height: 30px;
+  margin-top: 4px;
+  margin-bottom: 0;
+  align-items: center;
+  justify-content: flex-end;
+}
+.kettu-frame.kettu-band .ui-as-side:has(> .ui-as-side__head[data-has-actions]) > .ui-as-side__nav {
+  margin-top: 6px;
 }
 .kettu-frame.kettu-band .ui-as-side {
   padding-top: 0;
@@ -510,6 +578,86 @@
   background: var(--hover);
   color: var(--ink);
 }
+/* Activity view rows carry a second line for project/host context while keeping hover tools aligned
+   with the first line (title + status indicator). */
+.ui-as.ui-as .ui-as-chat-row > .ui-as-chat-row__link.kettu-activity-row__link {
+  height: auto;
+  min-height: 44px;
+  padding-block: 5px;
+  align-items: flex-start;
+}
+.ui-as-chat-row:has(> .kettu-activity-row__link) > .ui-as-chat-row__tools {
+  top: 4px;
+}
+.kettu-activity-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.kettu-activity-head__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.kettu-activity-head__back {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted);
+  transition:
+    background-color var(--duration-fast) ease,
+    color var(--duration-fast) ease;
+}
+.kettu-activity-head__back:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.kettu-activity-section {
+  display: flex;
+  flex-direction: column;
+}
+.kettu-activity-section__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--faint);
+}
+.kettu-activity-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 12px 6px 8px;
+}
+.kettu-activity-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  background: var(--hover);
+  color: var(--faint);
+}
+.kettu-activity-empty__title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--text);
+}
+.kettu-activity-empty__body {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--faint);
+}
 /* Kettu's marks in a sidebar row (the turn's dots, an error, a pull request, a caret) keep their
    own colors instead of the row's. */
 .ui-as.ui-as
@@ -522,39 +670,86 @@
   ) {
   color: revert-layer;
 }
-/* A session's or task's row keeps no room for its tools, More and Pin: on hover or focus they sit
-   over its end, which fades out under them through a mask, since the sidebar's fill is translucent.
-   A row with a badge (sub-agents, worktree, pull requests) keeps their room instead, as a project's
-   row does, so no badge goes under them. Nothing moves. Touch keeps App Shell's layout.
-   Huli: a badge is found as the status slot's sibling: a :has() on the row would restyle the page
-   on every added element. */
+/* A session's or task's row keeps no room for its tools, More and Pin, while idle. Plain rows
+   fade their end under the tools through a mask on hover or focus, since the sidebar's fill is
+   translucent. Rows with a badge (sub-agents, worktree, pull requests) also release the idle
+   reservation so badges align flush at the right edge (or keep only the 16 px status slot while
+   an indicator shows), then slide left smoothly to clear More and Pin on hover, focus, or an open
+   menu. A project's row keeps its tools' room. Touch and phone widths keep App Shell's layout.
+   Huli: a badge is found as the status slot's sibling and a tool by its class: a :has() on the row
+   would restyle the page on every added element. */
 @property --kettu-row-cover {
   syntax: '<number>';
   inherits: false;
   initial-value: 0;
 }
-@media (hover: none) {
-  /* An empty status slot leaves a sub-agent badge at the row's end. */
-  .kettu-subagent-badge ~ .kettu-row-end:not(:has(> :not(:empty))) {
+@media (hover: none), (pointer: coarse), (max-width: 719px) {
+  /* An empty status slot leaves row content and badges flush against the always-visible tools. */
+  :is(.ui-as-chat-row, .ui-as-chat-folder-row) .kettu-row-end:not(:has(> :not(:empty))) {
     display: none;
   }
 }
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) and (min-width: 720px) {
   .ui-as.ui-as .ui-as-chat-row:is(:hover, :has(:focus-visible), [data-menu]) .ui-as-chat-row__link,
   .ui-as.ui-as
     .ui-as-chat-folder-row:is(:hover, :has(:focus-visible), [data-menu])
     > .ui-as-chat-folder {
     padding-right: 6px;
   }
-  .ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > .ui-as-chat-row__tool) .kettu-row-end,
-  :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge]) ~ .kettu-row-end {
+  .ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > .ui-as-chat-row__tool) .kettu-row-end {
     min-width: 42px;
+  }
+  .ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > .ui-as-chat-row__tool):is(
+      :hover,
+      :has(:focus-visible),
+      [data-menu]
+    )
+    .kettu-row-end {
+    opacity: 0;
+    transition: none;
+  }
+  /* Badged rows stay flush right while idle, then expand the end slot to 42 px (+ 8 px gap + 6 px
+     padding = 56 px) so badges glide clear of More and Pin without overlapping them. */
+  :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge]) ~ .kettu-row-end {
+    min-width: 16px;
+    margin-left: 0;
+    transition:
+      width var(--duration-base) var(--ease-standard),
+      min-width var(--duration-base) var(--ease-standard),
+      margin-left var(--duration-base) var(--ease-standard),
+      opacity var(--duration-fast) ease;
+  }
+  :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge])
+    ~ .kettu-row-end:not(:has(> :not(:empty))) {
+    width: 0;
+    min-width: 0;
+    margin-left: -8px;
+    overflow: hidden;
+  }
+  .ui-as-chat-row:is(:hover, :has(:focus-visible), [data-menu])
+    :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge])
+    ~ .kettu-row-end,
+  :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge])[data-popup-open]
+    ~ .kettu-row-end {
+    min-width: 42px;
+  }
+  .ui-as-chat-row:is(:hover, :has(:focus-visible), [data-menu])
+    :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge])
+    ~ .kettu-row-end:not(:has(> :not(:empty))),
+  :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge])[data-popup-open]
+    ~ .kettu-row-end:not(:has(> :not(:empty))) {
+    width: 42px;
+    margin-left: 0;
   }
   .ui-as-chat-row:is(:hover, :has(:focus-visible), [data-menu])
     :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge])
     ~ .kettu-row-end {
     opacity: 0;
-    transition: none;
+    transition:
+      width var(--duration-base) var(--ease-standard),
+      min-width var(--duration-base) var(--ease-standard),
+      margin-left var(--duration-base) var(--ease-standard),
+      opacity 90ms ease;
   }
   .ui-as-chat-row:has(> .ui-as-chat-row__tools > .ui-as-chat-row__tool):not(
       :has(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge])
@@ -594,21 +789,22 @@
     transition: opacity var(--duration-fast) ease;
   }
 }
-.ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > .ui-as-chat-row__tool):is(
-    :hover,
-    :has(:focus-visible),
-    [data-menu]
-  )
-  .kettu-row-end {
-  opacity: 0;
-  transition: none;
+@media (prefers-reduced-motion: reduce) {
+  :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge]) ~ .kettu-row-end {
+    transition: none !important;
+  }
+}
+:root[data-reduce-motion='always']
+  :is(.kettu-subagent-badge, [data-worktree-mark], [data-pr-badge])
+  ~ .kettu-row-end {
+  transition: none !important;
 }
 /* A row's wait is a tool of its own in the pin's place, over the status slot: it stays in view and
    in place when the pointer comes, and only More joins it then. */
 .ui-as-chat-row:has(.kettu-waiting-mark) .ui-as-chat-row__tools {
   opacity: 1;
 }
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) and (min-width: 720px) {
   .ui-as-chat-row:has(.kettu-waiting-mark):not(:hover, :has(:focus-visible), [data-menu])
     .ui-as-chat-row__tools
     > .ui-as-chat-row__tool:not(.kettu-waiting-mark) {
@@ -761,6 +957,11 @@ li[data-row-exit='dust'] > * {
 }
 .kettu-side-label:is(:hover, :focus-visible) .kettu-side-label__arrow {
   opacity: 1;
+}
+@media (hover: none), (pointer: coarse), (max-width: 719px) {
+  .kettu-side-label__arrow {
+    opacity: 1;
+  }
 }
 .ui-as.ui-as .ui-as-side__item.kettu-side-more {
   padding-left: 30px;
@@ -1283,6 +1484,77 @@ li[data-row-exit='dust'] > * {
 .kp-head--cornered {
   padding-left: var(--corner-inset);
 }
+.kp-head--dock {
+  height: 38px;
+  padding: 0 8px;
+}
+
+/* Main session column with an optional bottom-docked terminal below the session sheet. */
+.kp-main-col {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+.kp-main-col__body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.kp-dock-resizer {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: var(--sheet-gap);
+  cursor: row-resize;
+  touch-action: none;
+  outline: none;
+}
+.kp-dock-resizer::after {
+  content: '';
+  position: absolute;
+  inset: -2px 0;
+}
+.kp-dock-resizer__grip {
+  z-index: 1;
+  width: 48px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--text-tertiary);
+  opacity: 0;
+  transition:
+    opacity var(--duration-fast) ease,
+    background-color var(--duration-fast) ease;
+}
+.kp-dock-resizer:hover .kp-dock-resizer__grip,
+.kp-dock-resizer:focus-visible .kp-dock-resizer__grip {
+  opacity: 0.7;
+}
+.kp-dock-resizer[data-separator='active'] .kp-dock-resizer__grip {
+  background: var(--primary);
+  opacity: 1;
+}
+.kp-dock-resizer:focus-visible .kp-dock-resizer__grip {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
+}
+.kp-bottom-dock {
+  flex: none;
+  width: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kp-dock-resizer__grip {
+    transition: none;
+  }
+}
+:root[data-reduce-motion='always'] .kp-dock-resizer__grip {
+  transition: none;
+}
 .kp-head__main {
   display: flex;
   flex: 1;
@@ -1340,6 +1612,16 @@ li[data-row-exit='dust'] > * {
   height: 24px;
   border-radius: 6px;
 }
+.kp-ctx .kp-size-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
 .kp-ctx__place {
   display: flex;
   align-items: center;
@@ -1392,6 +1674,15 @@ li[data-row-exit='dust'] > * {
 .kp-tool[aria-expanded='true'] {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+.kp-tool--annotate[aria-pressed='true'] {
+  background: var(--control-on-tint);
+  box-shadow: inset 0 0 0 var(--hairline) color-mix(in srgb, var(--control-on) 30%, transparent);
+  color: var(--control-on);
+}
+.kp-tool--annotate[aria-pressed='true']:hover {
+  background: color-mix(in srgb, var(--control-on) 12%, transparent);
+  color: var(--control-on);
 }
 .kp-tool--stop,
 .kp-tool--stop:hover {
@@ -2273,6 +2564,28 @@ li[data-row-exit='dust'] > * {
 }
 .kp-addr-row--empty .kp-addr {
   margin: 0;
+}
+.kp-annotate-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: var(--hairline) solid var(--border-subtle);
+  background: var(--control-on-tint);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.kp-annotate-bar__text {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.kp-annotate-bar__icon {
+  color: var(--control-on);
 }
 .kp-load {
   position: absolute;
@@ -3782,6 +4095,161 @@ li[data-row-exit='dust'] > * {
   display: grid;
   gap: 6px;
 }
+/* Floating selection toolbar and anchored note popover in the Files pane editor. */
+.kp-sel-pop {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.kp-sel-pills {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--thread-ink);
+  box-shadow: var(--thread-pill-shadow);
+}
+.kp-sel-pill {
+  height: 24px;
+  gap: 5px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--bg-app);
+}
+.kp-sel-pill:hover {
+  background: color-mix(in srgb, var(--bg-app) 16%, transparent);
+  color: var(--bg-app);
+}
+.kp-sel-pill + .kp-sel-pill {
+  position: relative;
+  margin-left: 1px;
+}
+.kp-sel-pill + .kp-sel-pill::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: color-mix(in srgb, var(--bg-app) 28%, transparent);
+}
+.kp-note-pop {
+  width: min(368px, calc(100vw - 24px));
+  gap: 8px;
+  padding: 10px;
+}
+.kp-note-pop__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.kp-note-pop__file {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+  color: var(--text-secondary);
+}
+.kp-note-pop__path {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.kp-note-pop__lines {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--control-on-tint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--control-on);
+  font-variant-numeric: tabular-nums;
+}
+.kp-note-pop__close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  transition:
+    background-color var(--duration-fast) ease,
+    color var(--duration-fast) ease;
+}
+.kp-note-pop__close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.kp-note-pop__excerpt {
+  margin: 0;
+  max-height: 96px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 6px 8px;
+  border: var(--hairline) solid var(--border-subtle);
+  border-left: 2px solid var(--control-on);
+  border-radius: 7px;
+  background: var(--bg-subtle);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.kp-note-pop__input {
+  min-height: 62px;
+  max-height: 136px;
+  resize: none;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.kp-note-pop__status {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+.kp-note-pop__error {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--danger);
+}
+.kp-note-pop__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 2px;
+}
+.kp-note-pop__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.kp-note-pop__kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  opacity: 0.78;
+}
 .kp-files__foot {
   display: flex;
   flex: none;
@@ -3851,7 +4319,7 @@ li[data-row-exit='dust'] > * {
   opacity: 1;
 }
 
-/* settings: the Settings modal over the app, drawn as the hi-fi draws it: the command menu's scrim,
+/* settings: the Settings modal over the app, drawn as the hi-fi draws it: the shared modal scrim,
    a box with the section list on the left in the sidebar's rows, and the section on the right in
    affectUI's settings cards of rows. The box carries .ui-as, so the shell's variables hold inside
    it wherever it is mounted. Rules sit under .kettu-settings to outrank the vendored sheets,
@@ -4331,6 +4799,15 @@ li[data-row-exit='dust'] > * {
 :is(.kettu-settings, .kettu-sd) .k-inset.markdown {
   font-size: calc(var(--thread-prose-size) * var(--prose-scale));
   line-height: var(--text-prose--line-height);
+}
+/* Code size's preview: monospace code at the selected code size and line height. */
+:is(.kettu-settings, .kettu-sd) .k-inset.k-code-preview {
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--code-size);
+  font-variant-ligatures: none;
+  line-height: var(--code-line-height);
+  white-space: pre;
 }
 :is(.kettu-settings, .kettu-sd) .k-block .k-inset {
   margin: 0;
@@ -5086,6 +5563,102 @@ li[data-row-exit='dust'] > * {
 .ui-ss-select.k-select.k-select--wide {
   width: 240px;
 }
+:is(.kettu-settings, .kettu-sd) .ui-ss-select.k-select.k-select--full {
+  width: 100%;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-role {
+  gap: 12px;
+  padding: 12px 16px 14px;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-role__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-field {
+  position: relative;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-field > .k-flash {
+  inset: -4px -6px;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-field__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-clear {
+  flex: none;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-clear:hover {
+  color: var(--ink);
+}
+:is(.kettu-settings, .kettu-sd) .k-font-clear:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-preview-row {
+  padding-top: 12px;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-preview__line {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-preview__tag {
+  font-family: var(--ui-face);
+  font-size: 11.5px;
+  line-height: 18px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-preview__sample {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+:is(.kettu-settings, .kettu-sd) .k-font-preview__line--ui .k-font-preview__sample {
+  font-size: 13px;
+  line-height: 20px;
+}
+:is(.kettu-settings, .kettu-sd) .k-font-preview__line--prose .k-font-preview__sample {
+  font-size: calc(var(--thread-prose-size) * var(--prose-scale));
+  line-height: var(--text-prose--line-height);
+}
+:is(.kettu-settings, .kettu-sd) .k-font-preview__line--code .k-font-preview__sample {
+  font-size: calc(12.5px + var(--code-size-offset));
+  line-height: calc(20px + var(--code-line-height-offset));
+}
+@media (max-width: 719px) {
+  :is(.kettu-settings, .kettu-sd) .k-font-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  :is(.kettu-settings, .kettu-sd) .k-font-preview__line {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
 
 /* Inside Settings, on, checked and picked are blue, as everywhere in affectUI */
 .kettu-settings.ui-as,
@@ -5370,6 +5943,93 @@ li[data-row-exit='dust'] > * {
 :is(.kettu-settings, .kettu-sd) .k-theme-cell:is(:hover, :focus-within) .k-theme__more,
 :is(.kettu-settings, .kettu-sd) .k-theme__more:has([aria-expanded='true']) {
   opacity: 1;
+}
+
+/* Appearance: the six selectable desktop app icons in a balanced three-column grid */
+:is(.kettu-settings, .kettu-sd) .k-app-icons-wrap {
+  display: grid;
+  gap: 10px;
+}
+:is(.kettu-settings, .kettu-sd) .k-app-icons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+@container ui-as-main (max-width: 420px) {
+  :is(.kettu-settings, .kettu-sd) .k-app-icons {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+:is(.kettu-settings, .kettu-sd) .k-app-icon {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 10px 12px;
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  text-align: center;
+  cursor: pointer;
+  transition: box-shadow 160ms ease;
+}
+:is(.kettu-settings, .kettu-sd) button.k-app-icon:hover {
+  box-shadow: var(--card-shadow-hover);
+}
+:is(.kettu-settings, .kettu-sd) .k-app-icon[aria-pressed='true'] {
+  box-shadow:
+    0 0 0 2px var(--control-on),
+    var(--card-shadow);
+}
+:is(.kettu-settings, .kettu-sd) .k-app-icon__preview {
+  position: relative;
+  display: block;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  overflow: hidden;
+  border-radius: 13px;
+}
+:is(.kettu-settings, .kettu-sd) .k-app-icon__preview > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: scale(1.067);
+}
+:is(.kettu-settings, .kettu-sd) .k-app-icon__preview::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 0.5px var(--line-strong);
+  pointer-events: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-app-icon__name {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+:is(.kettu-settings, .kettu-sd) .k-app-icon__name > b {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+:is(.kettu-settings, .kettu-sd) .k-app-icon[aria-pressed='true'] .k-app-icon__name > b {
+  color: var(--ink);
+}
+:is(.kettu-settings, .kettu-sd) .k-app-icon__check {
+  display: inline-grid;
+  flex: none;
+  color: var(--control-on);
 }
 :is(.kettu-settings, .kettu-sd) .k-warn {
   display: inline-grid;
@@ -6361,6 +7021,43 @@ li[data-row-exit='dust'] > * {
 .kettu-composer > .ui-ccc {
   max-width: none;
 }
+/* Editing a workflow suggestion via the composer: highlight the writing surface and pulse once on each Edit click. */
+.kettu-composer[data-editing-workflow] > .ui-ccc .ui-ccc__write {
+  box-shadow:
+    0 0 0 1.5px var(--focus-ring-color),
+    var(--elevation-card);
+  transition: box-shadow var(--duration-fast) var(--ease-standard);
+}
+.kettu-composer[data-attention] > .ui-ccc .ui-ccc__write {
+  animation: kettu-composer-attention 650ms var(--ease-standard);
+}
+@keyframes kettu-composer-attention {
+  0% {
+    box-shadow:
+      0 0 0 1.5px var(--focus-ring-color),
+      0 0 0 0 var(--focus-ring-color),
+      var(--elevation-card);
+  }
+  40% {
+    box-shadow:
+      0 0 0 1.5px var(--focus-ring-color),
+      0 0 0 5px var(--focus-ring-color),
+      var(--elevation-card);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1.5px var(--focus-ring-color),
+      var(--elevation-card);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kettu-composer[data-attention] > .ui-ccc .ui-ccc__write {
+    animation: none;
+  }
+}
+:root[data-reduce-motion='always'] .kettu-composer[data-attention] > .ui-ccc .ui-ccc__write {
+  animation: none;
+}
 /* The model and permission menus open inside the main area, which sits under the toast layer, so
    the toasts step aside while one is open (components/ui/toast.tsx). */
 .kettu-toasts[data-aside] {
@@ -6800,23 +7497,23 @@ li[data-row-exit='dust'] > * {
   text-overflow: ellipsis;
 }
 
-/* 四级用量语义色：供上下文圆环、托盘限额与套餐限额双轨条共用 */
-:is(.kettu-meter-ring, .kettu-tray-limit, .kettu-limit) {
+/* Four-level usage semantic colors shared by the context ring, tray limits, and context bar. */
+:is(.kettu-meter-ring, .kettu-tray-limit, .kettu-ctx__main) {
   --meter: var(--composer-meter-ok);
   --meter-wash: var(--composer-meter-ok-wash);
   --meter-text: var(--composer-ink);
 }
-:is(.kettu-meter-ring, .kettu-tray-limit, .kettu-limit)[data-level='mid'] {
+:is(.kettu-meter-ring, .kettu-tray-limit, .kettu-ctx__main)[data-level='mid'] {
   --meter: var(--composer-meter-mid);
   --meter-wash: var(--composer-meter-mid-wash);
   --meter-text: var(--composer-ink);
 }
-:is(.kettu-meter-ring, .kettu-tray-limit, .kettu-limit)[data-level='high'] {
+:is(.kettu-meter-ring, .kettu-tray-limit, .kettu-ctx__main)[data-level='high'] {
   --meter: var(--composer-meter-high);
   --meter-wash: var(--composer-meter-high-wash);
   --meter-text: var(--plan-warn-text);
 }
-:is(.kettu-meter-ring, .kettu-tray-limit, .kettu-limit)[data-level='full'] {
+:is(.kettu-meter-ring, .kettu-tray-limit, .kettu-ctx__main)[data-level='full'] {
   --meter: var(--composer-meter-full);
   --meter-wash: var(--composer-meter-full-wash);
   --meter-text: var(--plan-bad-text);
@@ -6982,47 +7679,417 @@ li[data-row-exit='dust'] > * {
   display: flex;
   flex-direction: column;
 }
-.kettu-ctx__window > .ui-cwc {
-  max-width: none;
-  border-radius: 0;
-  background: none;
-  box-shadow: none;
+/* Compact context usage header, horizontal meter bar, summary line, and optional breakdown. */
+.kettu-ctx__main {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
 }
-.kettu-ctx__window .ui-cwc__card {
-  padding: 12px 14px 6px;
-}
-.kettu-ctx__window .ui-cwc__figure {
-  margin-top: 6px;
-}
-.kettu-ctx__window .ui-cwc__big {
-  font-size: 20px;
-  line-height: 28px;
-}
-.kettu-ctx__window[data-busy] {
+.kettu-ctx__main[data-busy] {
   opacity: 0.6;
 }
-/* affectUI pulls a part's rows 4px past its clip, which cuts off their counts' last digit. */
-.kettu-ctx__window .ui-cwc__item {
-  margin-right: 0;
+.kettu-ctx__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
 }
-/* Denser rows than affectUI's 32px and items than its 28px; a touch screen keeps its own. */
-@media (pointer: fine) {
-  .kettu-ctx__window :is(.ui-cwc__row, .ui-cwc__main) {
-    min-height: 26px;
-    height: 26px;
-  }
-  .kettu-ctx__window .ui-cwc__item {
-    height: 22px;
-  }
+.kettu-ctx__title {
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--composer-strong);
 }
-/* Nine rows at most: an open list scrolls inside them instead of growing the card. The inline
-   padding keeps the rows' own -8px margins inside the scroller. */
-.kettu-ctx__window .ui-cwc__parts {
-  max-height: calc(9 * 26px);
-  margin-inline: -8px;
-  padding-inline: 8px;
+.kettu-ctx__model {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 68%;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--composer-chip-hover);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--composer-text);
+  white-space: nowrap;
+}
+.kettu-ctx__model > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kettu-ctx__model-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+}
+.kettu-ctx__bar {
+  display: flex;
+  gap: 1px;
+  height: 6px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--composer-chip-hover);
+}
+.kettu-ctx__seg {
+  flex: none;
+  height: 100%;
+  transition:
+    width var(--duration-slow) var(--ease-out-quint),
+    opacity var(--duration-fast);
+}
+.kettu-ctx__seg[data-kind='used'] {
+  background: var(--meter);
+}
+:is(.kettu-ctx__seg, .kettu-ctx__swatch)[data-color='1'] {
+  background: var(--context-1);
+}
+:is(.kettu-ctx__seg, .kettu-ctx__swatch)[data-color='2'] {
+  background: var(--context-2);
+}
+:is(.kettu-ctx__seg, .kettu-ctx__swatch)[data-color='3'] {
+  background: var(--context-3);
+}
+:is(.kettu-ctx__seg, .kettu-ctx__swatch)[data-color='4'] {
+  background: var(--context-4);
+}
+:is(.kettu-ctx__seg, .kettu-ctx__swatch)[data-color='5'] {
+  background: var(--context-5);
+}
+:is(.kettu-ctx__seg, .kettu-ctx__swatch)[data-color='6'] {
+  background: var(--context-6);
+}
+:is(.kettu-ctx__seg, .kettu-ctx__swatch)[data-color='7'] {
+  background: var(--context-7);
+}
+:is(.kettu-ctx__seg, .kettu-ctx__swatch)[data-kind='buffer'] {
+  background-image: var(--context-hatch);
+}
+.kettu-ctx__seg[data-tiny] {
+  min-width: 3px;
+}
+.kettu-ctx__bar[data-hot] .kettu-ctx__seg:not([data-on]) {
+  opacity: 0.28;
+}
+.kettu-ctx__metrics {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.kettu-ctx__stat {
+  display: inline-flex;
+  flex: none;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+.kettu-ctx__percent {
+  font-weight: 600;
+  color: var(--composer-strong);
+}
+.kettu-ctx__main[data-level='high'] .kettu-ctx__percent {
+  color: var(--plan-warn-text);
+}
+.kettu-ctx__main[data-level='full'] .kettu-ctx__percent {
+  color: var(--plan-bad-text);
+}
+.kettu-ctx__sep {
+  color: var(--composer-faint);
+}
+.kettu-ctx__counts {
+  color: var(--composer-text);
+}
+.kettu-ctx__free {
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  color: var(--composer-muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kettu-ctx__free[data-tone='hot'] {
+  color: var(--composer-ink);
+}
+.kettu-ctx__free[data-tone='warn'] {
+  color: var(--plan-warn-text);
+}
+.kettu-ctx__free[data-tone='full'] {
+  color: var(--plan-bad-text);
+}
+/* Compact breakdown list: scrolls inside eight rows instead of inflating the popover. */
+.kettu-ctx__parts {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(8 * 22px + 4px);
+  margin: 8px -6px -2px;
+  padding: 6px 0 0;
+  border-top: 0.5px solid var(--composer-line);
+  list-style: none;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+.kettu-ctx__part {
+  margin: 0;
+  border-radius: 5px;
+  transition:
+    background-color var(--duration-fast),
+    opacity var(--duration-fast);
+}
+.kettu-ctx__part[data-on] {
+  background: var(--bg-hover);
+}
+.kettu-ctx__part[data-dim] {
+  opacity: 0.55;
+}
+.kettu-ctx__part-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: left;
+  outline: none;
+}
+button.kettu-ctx__part-row {
+  cursor: pointer;
+}
+button.kettu-ctx__part-row:focus-visible {
+  outline: 1.5px solid var(--focus-ring-color);
+  outline-offset: -1.5px;
+}
+.kettu-ctx__swatch {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
+.kettu-ctx__swatch[data-kind='buffer'] {
+  box-shadow: inset 0 0 0 0.5px var(--composer-line-strong);
+}
+.kettu-ctx__part-label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  color: var(--composer-ink);
+}
+.kettu-ctx__part-chevron {
+  flex: none;
+  color: var(--composer-muted);
+  transition: transform var(--duration-fast);
+}
+.kettu-ctx__part-share {
+  flex: none;
+  min-width: 28px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--composer-faint);
+}
+.kettu-ctx__part[data-on] .kettu-ctx__part-share {
+  color: var(--composer-muted);
+}
+.kettu-ctx__part-value {
+  flex: none;
+  min-width: 42px;
+  text-align: right;
+  color: var(--composer-text);
+}
+.kettu-ctx__part[data-on] .kettu-ctx__part-value {
+  color: var(--composer-ink);
+}
+.kettu-ctx__part-items {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0 6px 4px 20px;
+  list-style: none;
+  font-size: 11.5px;
+  line-height: 16px;
+}
+.kettu-ctx__part-items > li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  height: 20px;
+  color: var(--composer-text);
+}
+.kettu-ctx__part-items > li > :last-child {
+  flex: none;
+  color: var(--composer-muted);
+}
+.kettu-ctx__part-empty {
+  color: var(--composer-muted);
+}
+@media (pointer: coarse) {
+  .kettu-ctx__part-row {
+    min-height: 30px;
+  }
+  .kettu-ctx__part-items > li {
+    height: 26px;
+  }
+}
+/* The session's MCP servers; the notice of what changed since its agent attached is blue-tinted. */
+.kettu-ctx__mcp {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 0.5px solid var(--composer-line);
+}
+.kettu-ctx__mcp-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-from);
+  color: var(--primary-foreground);
+  font-size: 12px;
+  line-height: 17px;
+}
+.kettu-ctx__mcp-notice > span {
+  flex: 1;
+  min-width: 0;
+}
+.kettu-ctx__mcp-use {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  color: var(--primary-foreground);
+}
+.kettu-ctx__mcp-use:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.kettu-ctx__mcp-use:disabled {
+  opacity: 0.5;
+}
+/* The session's servers: a head with the count and Manage, then one row each. */
+.kettu-ctx__mcp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.kettu-ctx__mcp-count {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--composer-muted);
+}
+.kettu-ctx__mcp-manage,
+.kettu-ctx__mcp-act {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--primary-foreground);
+}
+.kettu-ctx__mcp-manage:hover,
+.kettu-ctx__mcp-act:hover {
+  text-decoration: underline;
+}
+.kettu-ctx__mcp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.kettu-ctx__mcp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+}
+.kettu-ctx__mcp-row[data-off] > :not(.kettu-ctx__mcp-act) {
+  opacity: 0.5;
+}
+.kettu-ctx__mcp-name {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.kettu-ctx__mcp-title,
+.kettu-ctx__mcp-facts {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kettu-ctx__mcp-title {
+  font-size: 12.5px;
+  line-height: 17px;
+  color: var(--composer-strong);
+}
+.kettu-ctx__mcp-project {
+  margin-inline-start: 6px;
+  color: var(--composer-muted);
+}
+.kettu-ctx__mcp-held {
+  display: flex;
+  margin-block-start: 2px;
+}
+.kettu-ctx__mcp-held .k-mcp-held-tag {
+  font-size: 11px;
+}
+.kettu-ctx__mcp-facts {
+  font-size: 11.5px;
+  line-height: 15px;
+  color: var(--composer-muted);
+}
+.kettu-ctx__mcp-facts[data-tone='error'] {
+  color: var(--danger);
+}
+.kettu-ctx__mcp-facts[data-tone='warn'] {
+  color: var(--warning);
+}
+.kettu-ctx__mcp-tokens {
+  flex: none;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--composer-muted);
+}
+.kettu-ctx__mcp-more {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--composer-muted);
+}
+.kettu-ctx__mcp-more:hover,
+.kettu-ctx__mcp-more[data-popup-open] {
+  background: var(--bg-hover);
+  color: var(--composer-strong);
+}
+.kettu-ctx__mcp-more:focus-visible,
+.kettu-ctx__mcp-manage:focus-visible,
+.kettu-ctx__mcp-act:focus-visible {
+  outline: 1.5px solid var(--focus-ring-color);
+  outline-offset: 1px;
 }
 .kettu-ctx__note {
   margin: 0;
@@ -7031,14 +8098,14 @@ li[data-row-exit='dust'] > * {
   color: var(--composer-muted);
 }
 .kettu-ctx__pad {
-  padding: 0 14px 10px;
+  padding: 0 14px 8px;
 }
 /* What the agent can load, by estimate: a section of its own, so its sizes do not read as parts
-   of the measured total. Its rows follow the Context Window's: 26px, the name at the same inset. */
+   of the measured total. Its rows follow the context breakdown's height and inset. */
 .kettu-ctx__defs {
   display: flex;
   flex-direction: column;
-  padding: 10px 14px 8px;
+  padding: 8px 14px;
   border-top: 0.5px solid var(--composer-line);
 }
 .kettu-ctx__defs-head {
@@ -7070,12 +8137,13 @@ li[data-row-exit='dust'] > * {
 .kettu-ctx__def {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: calc(100% + 16px);
-  height: 26px;
-  margin: 0 -8px;
-  padding: 0 8px;
-  border-radius: 6px;
+  gap: 7px;
+  width: calc(100% + 12px);
+  height: 22px;
+  margin: 0 -6px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-size: 12px;
   outline: none;
   text-align: left;
   transition: background-color var(--duration-fast);
@@ -7088,12 +8156,11 @@ li[data-row-exit='dust'] > * {
   outline: 1.5px solid var(--focus-ring-color);
   outline-offset: -1.5px;
 }
-/* An outline where a measured part has its color: an estimate fills no cell of the grid. */
+/* An outline where a measured part has its color: an estimate is not counted in the bar above. */
 .kettu-ctx__def-swatch {
   flex: none;
-  width: 8px;
-  height: 8px;
-  margin-right: 2px;
+  width: 7px;
+  height: 7px;
   border: 1px dashed var(--composer-muted);
   border-radius: 2px;
 }
@@ -7115,12 +8182,12 @@ li[data-row-exit='dust'] > * {
 .kettu-ctx__def-items {
   display: flex;
   flex-direction: column;
-  max-height: calc(6 * 22px);
+  max-height: calc(6 * 20px);
   margin: 0 0 4px;
-  padding: 0 0 0 18px;
+  padding: 0 0 0 14px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  font-size: 12px;
+  font-size: 11.5px;
   line-height: 16px;
 }
 .kettu-ctx__def-items > li {
@@ -7129,7 +8196,7 @@ li[data-row-exit='dust'] > * {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  height: 22px;
+  height: 20px;
   color: var(--composer-text);
 }
 .kettu-ctx__def-items > li > :last-child {
@@ -7142,8 +8209,8 @@ li[data-row-exit='dust'] > * {
 .kettu-ctx__usage {
   display: grid;
   grid-template-columns: repeat(3, minmax(max-content, 1fr));
-  gap: 8px 12px;
-  padding: 9px 14px 10px;
+  gap: 6px 12px;
+  padding: 8px 14px;
   border-top: 0.5px solid var(--composer-line);
 }
 .kettu-ctx__block {
@@ -7160,6 +8227,8 @@ li[data-row-exit='dust'] > * {
   align-items: baseline;
   justify-content: space-between;
   gap: 0 12px;
+  font-size: 12.5px;
+  line-height: 18px;
   color: var(--composer-ink);
 }
 .kettu-ctx__block-head > :first-child {
@@ -7174,9 +8243,9 @@ li[data-row-exit='dust'] > * {
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
-  margin: 1px 0 0;
-  font-size: 12px;
-  line-height: 18px;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 17px;
   color: var(--composer-muted);
 }
 .kettu-ctx__figures > div {
@@ -7208,9 +8277,10 @@ li[data-row-exit='dust'] > * {
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  height: 36px;
+  height: 32px;
   padding: 0 14px;
   border-top: 0.5px solid var(--composer-line);
+  font-size: 12.5px;
   text-align: left;
   color: var(--composer-ink);
   transition: background-color var(--duration-fast);
@@ -7236,7 +8306,7 @@ li[data-row-exit='dust'] > * {
 .kettu-ctx__plan {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
   padding: 10px 14px 12px;
   border-top: 0.5px solid var(--composer-line);
 }
@@ -7257,10 +8327,11 @@ li[data-row-exit='dust'] > * {
 .kettu-ctx__plan-view {
   display: inline-flex;
   align-items: center;
-  margin-left: 5px;
-  padding: 0 4px;
+  height: 18px;
+  margin-left: 4px;
+  padding: 0 5px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 400;
   color: var(--composer-muted);
   outline: none;
@@ -7279,7 +8350,7 @@ li[data-row-exit='dust'] > * {
 .kettu-ctx__tier {
   flex: none;
   height: 20px;
-  padding: 0 6px;
+  padding: 0 6.5px;
   border-radius: 5px;
   background: var(--composer-chip-hover);
   font-size: 11px;
@@ -7288,48 +8359,62 @@ li[data-row-exit='dust'] > * {
   color: var(--composer-text);
   white-space: nowrap;
 }
-/* 套餐限额分组双轨卡片（方案 A）：组名独占顶行零折行，组内窗口左右并排对照 */
+/* 套餐限额 L1 横向柔波液面槽（配色 1：冰川蓝 → 钴靛紫蓝 → 琥珀金 → 朱红） */
 .kettu-plan-groups {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
 .kettu-plan-group {
-  padding: 7px 10px 8px;
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--composer-strong) 2.8%, transparent);
-  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--composer-strong) 7%, transparent);
-}
-.kettu-plan-group[data-current] {
-  background: color-mix(in srgb, var(--control-on) 4.5%, transparent);
-  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--control-on) 22%, transparent);
-}
-.kettu-plan-group[data-solo] {
-  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5.5px;
 }
 .kettu-plan-group__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  padding: 0 1px;
 }
 .kettu-plan-group__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  overflow: hidden;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 500;
   line-height: 16px;
-  color: var(--composer-ink);
+  color: var(--composer-muted);
+}
+.kettu-plan-group__name > span:last-child {
+  min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.kettu-plan-group__badge {
+.kettu-plan-group[data-current] .kettu-plan-group__name {
+  color: var(--composer-ink);
+}
+.kettu-plan-group__dot {
   flex: none;
-  font-size: 10.5px;
-  font-weight: 500;
-  line-height: 16px;
-  color: var(--control-on);
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--control-on);
+}
+.kettu-plan-group__badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 17px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--control-on) 15%, transparent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 17px;
+  color: var(--primary-foreground);
   white-space: nowrap;
 }
 .kettu-plan-group__models {
@@ -7338,6 +8423,7 @@ li[data-row-exit='dust'] > * {
   line-height: 16px;
   color: var(--composer-faint);
   white-space: nowrap;
+  cursor: default;
   transition: color var(--duration-fast);
 }
 .kettu-plan-group__models:hover {
@@ -7346,107 +8432,213 @@ li[data-row-exit='dust'] > * {
 .kettu-plan-group__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 .kettu-plan-group__grid[data-single] {
   grid-template-columns: minmax(0, 1fr);
 }
-.kettu-limit {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  min-width: 0;
-}
-.kettu-plan-group__grid:not([data-single]) > .kettu-limit:nth-child(odd):not(:last-child) {
-  padding-right: 10px;
-}
-.kettu-plan-group__grid:not([data-single]) > .kettu-limit:nth-child(even) {
-  padding-left: 10px;
-  border-left: 0.5px solid var(--composer-line);
-}
 .kettu-plan-group__grid:not([data-single]) > .kettu-limit:nth-child(odd):last-child {
   grid-column: 1 / -1;
 }
-.kettu-plan-group__grid:not([data-single]) > .kettu-limit:nth-child(n + 3) {
-  margin-top: 7px;
-  padding-top: 7px;
-  border-top: 0.5px solid var(--composer-line);
+.kettu-limit {
+  --wave-color: var(--plan-wave-safe);
+  --wave-alt: var(--plan-wave-safe-alt);
+  --wave-val: var(--composer-strong);
+  --wave-fill-b: var(--plan-wave-b);
+  --wave-edge-opacity: var(--plan-wave-stroke);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2.5px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 8px 10px 8.5px;
+  border-radius: 10px;
+  background: var(--plan-wave-surface);
+  box-shadow: inset 0 0 0 0.5px var(--plan-wave-border);
+  transition:
+    box-shadow var(--duration-fast),
+    background-color var(--duration-fast);
+}
+.kettu-limit[data-compact] {
+  padding: 8.5px 10px;
+}
+.kettu-limit:hover {
+  box-shadow: inset 0 0 0 0.5px var(--plan-wave-border-hover);
+}
+.kettu-limit[data-tier='mid'] {
+  --wave-color: var(--plan-wave-mid);
+  --wave-alt: var(--plan-wave-mid-alt);
+  --wave-val: var(--composer-strong);
+}
+.kettu-limit[data-tier='warn'] {
+  --wave-color: var(--plan-wave-warn);
+  --wave-alt: var(--plan-wave-warn-alt);
+  --wave-val: var(--plan-warn-text);
+  box-shadow: inset 0 0 0 0.5px
+    color-mix(in srgb, var(--wave-color) var(--plan-wave-ring), transparent);
+}
+.kettu-limit[data-tier='crit'] {
+  --wave-color: var(--plan-wave-crit);
+  --wave-alt: var(--plan-wave-crit-alt);
+  --wave-val: var(--plan-bad-text);
+  --wave-fill-b: var(--plan-wave-crit-b);
+  --wave-edge-opacity: var(--plan-wave-crit-stroke);
+  box-shadow: inset 0 0 0 0.5px
+    color-mix(in srgb, var(--wave-color) var(--plan-wave-crit-ring), transparent);
+}
+/* 0% 已耗尽空槽：叠加极淡红底晕，一眼识别触顶状态 */
+.kettu-limit[data-tier='crit'][data-zero] {
+  background: color-mix(in srgb, var(--wave-color) 5%, var(--plan-wave-surface));
+}
+/* 当前活跃组轻焦点描边（仅安全/过半档位生效，不覆盖预警/危急色） */
+.kettu-plan-group[data-current] .kettu-limit:is([data-tier='safe'], [data-tier='mid']) {
+  box-shadow: inset 0 0 0 0.5px
+    color-mix(in srgb, var(--wave-color) var(--plan-wave-ring), transparent);
+}
+.kettu-limit__wave {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.kettu-limit__wave-edge {
+  fill: none;
+  stroke: var(--wave-color);
+  stroke-opacity: var(--wave-edge-opacity);
+  stroke-width: 1.15;
+}
+.kettu-limit__wave-hi {
+  stroke: var(--plan-wave-hi);
+  stroke-width: 1;
+  opacity: 0.65;
+}
+@keyframes kettu-wave-float-a {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4.5px);
+  }
+}
+@keyframes kettu-wave-float-b {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(4.5px);
+  }
+}
+.kettu-limit__wave-front {
+  animation: kettu-wave-float-a 5.4s ease-in-out infinite;
+}
+.kettu-limit__wave-back {
+  animation: kettu-wave-float-b 7.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kettu-limit__wave-front,
+  .kettu-limit__wave-back {
+    animation: none;
+  }
 }
 .kettu-limit__row {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 6px;
-  line-height: 16px;
+  line-height: 17px;
 }
 .kettu-limit__label {
   min-width: 0;
   overflow: hidden;
-  font-size: 11.5px;
-  font-weight: 400;
-  color: var(--composer-text);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--composer-ink);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 .kettu-limit__value {
   flex: none;
-  font-size: 12px;
+  font-size: 13.5px;
   font-weight: 600;
-  color: var(--meter-text);
+  letter-spacing: -0.015em;
+  color: var(--wave-val);
   text-align: right;
 }
-.kettu-limit__bar {
-  height: 4px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--composer-chip-hover);
-}
-.kettu-limit__bar > span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--meter);
-  transition:
-    width var(--duration-slow) var(--ease-out-quint),
-    background-color var(--duration-fast);
-}
-.kettu-limit__bar > span[data-tiny] {
-  min-width: 6px;
-}
 .kettu-limit__meta {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 2px 6px;
   min-width: 0;
+  font-size: 10.5px;
+  line-height: 14px;
+  color: var(--composer-muted);
 }
 .kettu-limit__reset {
   display: inline-flex;
   align-items: center;
-  gap: 3.5px;
+  gap: 3px;
+  min-width: 0;
   max-width: 100%;
-  font-size: 10.5px;
-  line-height: 14px;
-  color: var(--composer-faint);
   white-space: nowrap;
 }
 .kettu-limit__reset > svg {
   flex: none;
-  opacity: 0.78;
+  opacity: 0.72;
 }
 .kettu-limit__reset > span {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.kettu-limit[data-level='full'] .kettu-limit__reset {
-  color: var(--plan-bad-text);
+.kettu-limit[data-tier='warn'] .kettu-limit__reset {
+  color: var(--wave-val);
+  opacity: 0.88;
+}
+.kettu-limit[data-tier='crit'] .kettu-limit__reset {
+  color: var(--wave-val);
 }
 .kettu-limit__amount {
   min-width: 0;
   overflow: hidden;
-  font-size: 10.5px;
-  line-height: 14px;
-  color: var(--composer-faint);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* 侧边栏账号悬浮卡底部紧凑脚注（积分余额 / 重置卡） */
+.kettu-plan-hover__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--composer-line);
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--composer-muted);
+}
+.kettu-plan-hover__foot-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.kettu-plan-hover__foot-val {
+  flex: none;
+  max-width: 65%;
+  overflow: hidden;
+  font-weight: 500;
+  color: var(--composer-ink);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -7463,11 +8655,20 @@ li[data-row-exit='dust'] > * {
   background: var(--text-secondary);
   pointer-events: none;
 }
-.kettu-limit__bar[data-paced],
 :is(.kettu-settings, .kettu-sd) .k-meter__bar[data-paced],
 .kettu-pace-host {
   position: relative;
   overflow: visible;
+}
+/* On a plan card, whose fill is the card itself, the tick crosses it under the figures. */
+.kettu-limit > .kettu-pace {
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 1.5px;
+  margin-left: -0.75px;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--text-secondary) 55%, transparent);
 }
 
 /* The Model Picker's model marks without a tile, a size up from the picker's own. */
@@ -7534,6 +8735,29 @@ li[data-row-exit='dust'] > * {
     transform 280ms var(--ui-mdpc-ease),
     width 280ms var(--ui-mdpc-ease);
 }
+.kettu-model-picker .ui-mdpc__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--ui-mdpc-accent);
+  background: color-mix(in srgb, var(--ui-mdpc-accent) 12%, transparent);
+}
+.kettu-model-picker .ui-mdpc__badge[data-tone='intense'] {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+.kettu-model-picker .ui-mdpc__badge > svg {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
 /* More models: names end in an ellipsis, under a heading per provider when the agent's models come
    from several. */
 .kettu-model-picker .ui-mdpc__fly-row {
@@ -7546,12 +8770,16 @@ li[data-row-exit='dust'] > * {
   text-overflow: ellipsis;
 }
 .kettu-model-picker .ui-mdpc__fly-group {
+  min-width: 0;
+  overflow: hidden;
   padding: 8px 8px 2px;
   font-size: 10px;
   font-weight: var(--weight-medium);
   line-height: 16px;
   letter-spacing: 0.5px;
   text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--ui-mdpc-muted);
 }
 .kettu-model-picker .ui-mdpc__fly-group:first-child {
@@ -7971,6 +9199,62 @@ li[data-row-exit='dust'] > * {
   line-height: 1.2;
   color: var(--composer-muted);
 }
+.kettu-queue__report {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+.kettu-queue__report-sentence {
+  flex: none;
+  color: var(--composer-muted);
+}
+.kettu-queue__report-link,
+.kettu-queue__report-static {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  color: var(--composer-text);
+  transition: color 160ms ease;
+}
+.kettu-queue__report-link {
+  border-radius: 4px;
+  outline: none;
+}
+.kettu-queue__report-link:is(:hover, :focus-visible) {
+  color: var(--composer-ink);
+  text-decoration: underline;
+  text-decoration-color: var(--composer-line-strong);
+  text-underline-offset: 2px;
+}
+.kettu-queue[data-open]:not([data-scrolling])
+  .kettu-queue__card:is(:hover, :focus-visible, :focus-within)
+  .kettu-queue__report-link,
+.kettu-queue[data-open]:not([data-scrolling])
+  .kettu-queue__card:is(:hover, :focus-visible, :focus-within)
+  .kettu-queue__report-static {
+  color: var(--composer-ink);
+}
+.kettu-queue__report-round {
+  flex: none;
+  font-weight: 400;
+  color: var(--composer-muted);
+  font-variant-numeric: tabular-nums;
+}
+.kettu-queue__report-arrow {
+  flex: none;
+  color: var(--composer-muted);
+}
+.kettu-queue__report-time {
+  flex: none;
+  font-size: 12px;
+  color: var(--composer-faint);
+  font-variant-numeric: tabular-nums;
+}
 .kettu-queue__paused {
   display: inline-flex;
   flex: none;
@@ -8040,7 +9324,9 @@ li[data-row-exit='dust'] > * {
 @media (prefers-reduced-motion: reduce) {
   .kettu-queue__card,
   .kettu-queue__card > *,
-  .kettu-queue__count svg {
+  .kettu-queue__count svg,
+  .kettu-queue__report-link,
+  .kettu-queue__report-static {
     transition: none;
   }
 }
@@ -8988,7 +10274,7 @@ li[data-row-exit='dust'] > * {
   border: 0;
   background: transparent;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: calc(12.5px + var(--code-size-offset));
   font-variant-ligatures: none;
   line-height: 1.75;
   color: var(--ink);
@@ -9779,6 +11065,110 @@ li[data-row-exit='dust'] > * {
   flex-direction: column;
   padding-bottom: 56px;
 }
+:is(.kettu-settings, .kettu-sd) .k-ar-proj-sec {
+  margin-top: 20px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj-sec + .k-ar-sess-head {
+  margin-top: 22px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-sess-head + .k-ar-tb {
+  margin-top: 8px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj {
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  transition: background 100ms ease;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__head:hover,
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__head:focus-within {
+  background: var(--bg-hover);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__toggle {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__toggle:focus-visible {
+  outline: 2px solid var(--control-on);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 1px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__name-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__path {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__acts {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__sessions {
+  margin-top: 2px;
+  padding-top: 4px;
+  padding-left: 18px;
+  border-top: 1px solid var(--border-subtle);
+}
+:is(.kettu-settings, .kettu-sd) .k-ar-proj__empty {
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
 :is(.kettu-settings, .kettu-sd) .k-ar-tb {
   display: flex;
   flex-wrap: wrap;
@@ -10239,7 +11629,9 @@ li[data-row-exit='dust'] > * {
 :is(.kettu-settings, .kettu-sd) .k-ar-row:not(.is-selecting):is(:hover, :focus-within) .k-ar-acts {
   display: inline-flex;
 }
-:is(.kettu-settings, .kettu-sd) .k-ar-row:not(.is-selecting):is(:hover, :focus-within) .k-ar-when {
+:is(.kettu-settings, .kettu-sd)
+  .k-ar-row:not(.is-selecting):has(.k-ar-acts):is(:hover, :focus-within)
+  .k-ar-when {
   display: none;
 }
 
@@ -10373,6 +11765,84 @@ li[data-row-exit='dust'] > * {
   }
 }
 
-:root[data-reduce-motion='always'] :is(.k-ar-search, .k-ar-fb, .k-ar-row) {
+:root[data-reduce-motion='always'] :is(.k-ar-search, .k-ar-fb, .k-ar-row, .k-ar-proj__head) {
   transition: none;
+}
+
+/* Agent integration capability checklist (Settings > Agents) */
+:is(.kettu-settings, .kettu-sd) .k-cap-head {
+  justify-content: space-between;
+  gap: 8px;
+}
+:is(.kettu-settings, .kettu-sd) .k-cap-head__title {
+  flex: none;
+}
+:is(.kettu-settings, .kettu-sd) .k-cap-head__summary {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+:is(.kettu-settings, .kettu-sd) .k-cap-row {
+  gap: 12px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+:is(.kettu-settings, .kettu-sd) .k-cap-meta {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+:is(.kettu-settings, .kettu-sd) .k-cap-reason {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 450;
+  line-height: 1;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+:is(.kettu-settings, .kettu-sd) .k-cap-status {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+:is(.kettu-settings, .kettu-sd) .k-cap-status[data-status='supported'] {
+  background: var(--success-tint);
+  color: var(--success);
+}
+:is(.kettu-settings, .kettu-sd) .k-cap-status[data-status='partial'] {
+  background: var(--warning-tint);
+  color: var(--warning);
+}
+:is(.kettu-settings, .kettu-sd) .k-cap-status[data-status='unavailable'] {
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+}
+@container ui-as-main (max-width: 600px) {
+  :is(.kettu-settings, .kettu-sd) .k-cap-head {
+    flex-wrap: wrap;
+  }
+  :is(.kettu-settings, .kettu-sd) .k-cap-row {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  :is(.kettu-settings, .kettu-sd) .k-cap-meta {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
 }

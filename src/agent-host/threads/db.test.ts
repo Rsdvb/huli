@@ -12,6 +12,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
+import { isPending } from '@shared/artifact-comments'
 import type { ContextBreakdown } from '@shared/context'
 import type { ContentRef, SessionView, ThreadEntry } from '@shared/thread'
 import { contentHash, contentPath } from '../artifacts/content'
@@ -440,6 +441,7 @@ describe('the thread database', () => {
         'a3',
         'And github.com/KettuAI/Kettu/issues/31, not gist.github.com/KettuAI/Kettu/issues/1',
       ),
+      reply('a4', '   \n\t '),
       { kind: 'turn_end', id: 'end1', stopReason: 'end_turn', durationMs: 9000 },
       user('u2'),
     ]
@@ -2003,16 +2005,74 @@ describe("the thread database's comments", () => {
       [T1, null],
       [T2, 's2'],
     ])
-    expect(
-      db.resolveThread({ id: ID, project: '/p', threadId: T2, resolved: true, at: 10 }),
-    ).toMatchObject({
+    const resolved = db.resolveThread({
+      id: ID,
+      project: '/p',
+      threadId: T2,
+      resolved: true,
+      at: 10,
+    })
+    expect(resolved).toMatchObject({
       resolvedAt: 10,
+      sentAt: 8,
+      sentTo: 's2',
     })
-    expect(
-      db.resolveThread({ id: ID, project: null, threadId: T2, resolved: false, at: 11 }),
-    ).toMatchObject({
+    expect(isPending(resolved)).toBe(false)
+    const reopened = db.resolveThread({
+      id: ID,
+      project: null,
+      threadId: T2,
+      resolved: false,
+      at: 11,
+    })
+    expect(reopened).toMatchObject({
       resolvedAt: null,
+      sentAt: null,
+      sentTo: null,
     })
+    expect(isPending(reopened)).toBe(true)
+    expect(db.artifactThreads({ id: ID, project: null }).find((t) => t.id === T2)).toMatchObject({
+      resolvedAt: null,
+      sentAt: null,
+      sentTo: null,
+    })
+    db.close()
+  })
+
+  it('keeps sentAt and sentTo on resolve and clears both when reopening', () => {
+    const db = withArtifact()
+    add(db)
+    db.markThreadsSent({ id: ID, threadIds: [T1], sessionId: 's2', at: 8 })
+
+    const resolved = db.resolveThread({
+      id: ID,
+      project: '/p',
+      threadId: T1,
+      resolved: true,
+      at: 10,
+    })
+    expect(resolved).toMatchObject({ resolvedAt: 10, sentAt: 8, sentTo: 's2' })
+    expect(isPending(resolved)).toBe(false)
+
+    const reopened = db.resolveThread({
+      id: ID,
+      project: null,
+      threadId: T1,
+      resolved: false,
+      at: 11,
+    })
+    expect(reopened).toMatchObject({ resolvedAt: null, sentAt: null, sentTo: null })
+    expect(isPending(reopened)).toBe(true)
+
+    db.markThreadsSent({ id: ID, threadIds: [T1], sessionId: 's3', at: 12 })
+    const resolvedAgain = db.resolveThread({
+      id: ID,
+      project: '/p',
+      threadId: T1,
+      resolved: true,
+      at: 13,
+    })
+    expect(resolvedAgain).toMatchObject({ resolvedAt: 13, sentAt: 12, sentTo: 's3' })
     db.close()
   })
 
@@ -2056,6 +2116,57 @@ describe("the thread database's comments", () => {
     const moved = { ...anchor, version: 2, offset: 42 }
     db.reanchorThreads({ id: ID, anchors: [{ threadId: T1, anchor: moved }] })
     expect(db.artifactThreads({ id: ID, project: null })[0]!.anchor).toEqual(moved)
+    db.close()
+  })
+
+  it('deletes a thread and cascades its comments while leaving sibling threads intact', () => {
+    const db = withArtifact()
+    add(db, T1)
+    add(db, T2)
+    db.replyThread({
+      id: ID,
+      project: '/p',
+      threadId: T1,
+      author: agent,
+      body: 'Reply on T1',
+      at: 6,
+    })
+    db.replyThread({
+      id: ID,
+      project: null,
+      threadId: T2,
+      author: owner,
+      body: 'Follow-up on T2',
+      at: 7,
+    })
+
+    db.deleteThread({ id: ID, project: null, threadId: T1 })
+
+    const remaining = db.artifactThreads({ id: ID, project: null })
+    expect(remaining.map((t) => t.id)).toEqual([T2])
+    expect(remaining[0]?.comments).toHaveLength(2)
+
+    const raw = (db as unknown as { db: DatabaseSync }).db
+    expect(
+      raw
+        .prepare(
+          'SELECT COUNT(*) AS n FROM artifact_comments WHERE artifact_id = ? AND thread_id = ?',
+        )
+        .get(ID, T1)!.n,
+    ).toBe(0)
+    expect(
+      raw
+        .prepare(
+          'SELECT COUNT(*) AS n FROM artifact_comments WHERE artifact_id = ? AND thread_id = ?',
+        )
+        .get(ID, T2)!.n,
+    ).toBe(2)
+
+    // Deleting a missing thread, another project's thread, or one in Recently deleted fails cleanly.
+    expect(() => db.deleteThread({ id: ID, project: null, threadId: T1 })).toThrow(/no thread/)
+    expect(() => db.deleteThread({ id: ID, project: '/q', threadId: T2 })).toThrow(ThreadDbError)
+    db.deleteArtifact({ id: ID, project: null, at: 8 })
+    expect(() => db.deleteThread({ id: ID, project: null, threadId: T2 })).toThrow(ThreadDbError)
     db.close()
   })
 
@@ -2287,5 +2398,35 @@ describe("the thread database's token counts", () => {
     expect(runUsage('none')).toBeNull()
     expect(check.prepare('PRAGMA user_version').get()!.user_version).toBe(SCHEMA_VERSION)
     check.close()
+  })
+
+  it('reads stored usages in batch, returning null for missing or usage-less threads', () => {
+    const db = open()
+    const withUsage: StoredSession = {
+      ...EMPTY_SESSION,
+      usage: {
+        used: 12_000,
+        size: 200_000,
+        cost: { amount: 0.42, currency: 'USD' },
+        tokens: {
+          total: 25_000,
+          input: 4_000,
+          output: 1_000,
+          thought: null,
+          cacheRead: 18_000,
+          cacheWrite: 2_000,
+        },
+      },
+    }
+    const withoutUsage: StoredSession = { ...EMPTY_SESSION, usage: null }
+    db.write('s-with', { head, session: withUsage, entries: [] })
+    db.write('s-without', { head, session: withoutUsage, entries: [] })
+
+    expect(db.usages(['s-with', 's-without', 's-missing', 's-with'])).toEqual({
+      's-with': withUsage.usage,
+      's-without': null,
+      's-missing': null,
+    })
+    db.close()
   })
 })

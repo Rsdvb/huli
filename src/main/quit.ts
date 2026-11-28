@@ -1,8 +1,18 @@
+import { randomUUID } from 'node:crypto'
 import { app, BrowserWindow, dialog, type WebContents } from 'electron'
 import type { BusySession, BusyTerminal } from '@shared/host-control'
 import type { QuitRequest, RunningWork, UnsavedFile } from '@shared/ipc'
 import type { SettingsFile } from '@shared/settings'
-import { restartWaitsFor } from '@shared/updates'
+import {
+  LOCAL_UPDATE_INITIATOR,
+  restartWaitsFor,
+  updateConfirmationChoices,
+  type UpdateBusySummary,
+  type UpdateConfirmationAction,
+  type UpdateConfirmationRequest,
+  type UpdateInitiator,
+  type UpdateOutcomeCode,
+} from '@shared/updates'
 import { sendEvent } from './events'
 import { t } from './i18n'
 import { createLogger } from './log'
@@ -14,17 +24,48 @@ const BUSY_TIMEOUT_MS = 2000
 // If installing an update does not quit the app, quit anyway: the hosts are already stopped.
 const INSTALL_FALLBACK_MS = 10_000
 
+export type UpdateRestartPrepareResult = 'proceed' | 'launched' | 'aborted'
+
+export interface QuitRequestOptions {
+  initiator?: UpdateInitiator
+  requestId?: string
+}
+
 export interface QuitDeps {
   settings(): SettingsFile
   busySessions(timeoutMs: number): Promise<BusySession[]>
   busyTerminals(timeoutMs: number): Promise<BusyTerminal[]>
   /** Stops both hosts and flushes every pending write. */
   shutDown(): Promise<void>
+  /** Captures running user sessions right before stopping hosts for an immediate update restart. */
+  captureUpdateResume?(timeoutMs: number): Promise<void>
+  /** Clears any staged update-resume file when an update restart fails, cancels, or is skipped. */
+  clearUpdateResume?(): Promise<void>
+  /** Runs once shutdown is finished and quitting is irreversible, before handing off to quit/update. */
+  onCleanExit?(): void
   installUpdate(): Promise<void>
   /** Update on a read-only volume: moves the app to /Applications; false when it stays. */
   moveApp(): Promise<boolean>
-  /** The user chose to restart to update once the working sessions finish. */
-  restartWhenIdle(): void
+  /** The user chose to restart to update once the working sessions or busy terminals finish. */
+  restartWhenIdle(initiator?: UpdateInitiator, requestId?: string, busy?: UpdateBusySummary): void
+  /** Current ready/available update version, for confirmation payloads. */
+  updateVersion?(): string | null
+  /** Reports when an update restart enters or leaves the timing confirmation state. */
+  onUpdateConfirmation?(confirmation: UpdateConfirmationRequest | null): void
+  /** Reports when a pending update confirmation was cancelled. */
+  onUpdateCancelled?(info: {
+    requestId: string | null
+    by: 'local' | 'remote' | 'host'
+    code: UpdateOutcomeCode
+  }): void
+  /**
+   * Runs right before `shutDown()` for an update restart so main can flush final remote status
+   * and (on Windows) handle native host confirmation while remote access is still connected.
+   */
+  onUpdateRestarting?(info: {
+    requestId: string | null
+    initiator: UpdateInitiator
+  }): Promise<UpdateRestartPrepareResult> | UpdateRestartPrepareResult | void
 }
 
 type Phase = 'idle' | 'asking' | 'stopping' | 'done'
@@ -36,10 +77,18 @@ type QuitReason = Exclude<QuitRequest['reason'], 'close'> | 'move'
  */
 export type QuitAnswer = boolean | 'background' | 'when-idle'
 
+interface AskResolution {
+  answer: QuitAnswer
+  by: 'local' | 'remote' | 'host'
+  cancelCode?: UpdateOutcomeCode
+}
+
 interface PendingAnswer {
   request: QuitRequest
   webContents: WebContents | null
-  resolve(answer: QuitAnswer): void
+  remoteInitiated: boolean
+  updateRequestId: string | null
+  resolve(resolution: AskResolution): void
 }
 
 /**
@@ -104,12 +153,21 @@ export class QuitFlow {
   /**
    * Starts quitting, or restarting, unless that is under way already. `confirmed`: the user saw
    * the running work and chose to stop it, so only unsaved files are asked about.
+   * `resumeAfterUpdate`: only true for immediate user-initiated update restarts, never for normal
+   * quits, wait-for-idle restarts, or system shutdowns.
    */
-  request(reason: QuitReason, confirmed = false): boolean {
+  request(
+    reason: QuitReason,
+    confirmed = false,
+    resumeAfterUpdate = reason === 'update',
+    options?: QuitRequestOptions,
+  ): boolean {
     if (this.phase !== 'idle') return false
-    void this.run(reason, confirmed).catch((error: unknown) => {
+    void this.run(reason, confirmed, resumeAfterUpdate, options).catch(async (error: unknown) => {
       log.error('Quit failed; quitting anyway', error)
+      await this.deps.clearUpdateResume?.().catch(() => {})
       this.phase = 'done'
+      this.deps.onCleanExit?.()
       app.quit()
     })
     return true
@@ -120,12 +178,48 @@ export class QuitFlow {
     if (this.pending?.request.id !== id) return
     if (answer === 'background' && !this.pending.request.keepRunning) return
     if (answer === 'when-idle' && !this.pending.request.whenIdle) return
-    this.pending.resolve(answer)
+    this.pending.resolve({ answer, by: 'local' })
   }
 
-  /** The page had no listener for `app:confirm-quit`; ask natively instead. */
+  /**
+   * Resolves a pending update confirmation by its remote `requestId` (from the initiating device
+   * or a local caller), dismissing any open desktop confirmation dialog.
+   */
+  respondUpdate(
+    requestId: string,
+    action: UpdateConfirmationAction,
+    by: 'local' | 'remote' = 'remote',
+  ): boolean {
+    const pending = this.pending
+    if (!pending || pending.updateRequestId !== requestId) return false
+    if (action === 'whenIdle' && !pending.request.whenIdle) return false
+    const answer: QuitAnswer = action === 'now' ? true : action === 'whenIdle' ? 'when-idle' : false
+    this.dismissRendererPrompt(pending)
+    pending.resolve({
+      answer,
+      by,
+      ...(action === 'cancel' ? { cancelCode: 'user_cancelled' as const } : {}),
+    })
+    return true
+  }
+
+  /** Cancels a pending update confirmation from the host (for example when device access is revoked). */
+  cancelPendingUpdate(requestId: string, code: UpdateOutcomeCode = 'permission_revoked'): boolean {
+    const pending = this.pending
+    if (!pending || pending.updateRequestId !== requestId) return false
+    this.dismissRendererPrompt(pending)
+    pending.resolve({ answer: false, by: 'host', cancelCode: code })
+    return true
+  }
+
+  /** The page had no listener for `app:confirm-quit`; ask natively instead for local prompts. */
   unhandled(id: number, webContents: WebContents): void {
     if (this.pending?.request.id !== id || this.pending.webContents !== webContents) return
+    if (this.pending.remoteInitiated) {
+      // Remote update requests stay pending for the initiating device instead of blocking on a native modal.
+      this.pending.webContents = null
+      return
+    }
     void this.askNatively(this.pending)
   }
 
@@ -192,7 +286,7 @@ export class QuitFlow {
     if (this.phase !== 'idle') return
     this.phase = 'asking'
     const unsaved = this.unsaved.get(window.webContents.id) ?? []
-    const confirmed = await this.ask(
+    const { answer } = await this.ask(
       {
         id: this.nextId++,
         reason: 'close',
@@ -205,13 +299,21 @@ export class QuitFlow {
       window,
     )
     this.phase = 'idle'
-    if (!confirmed || window.isDestroyed()) return
+    if (!answer || window.isDestroyed()) return
     this.closing = window
     window.close()
   }
 
-  private async run(reason: QuitReason, confirmed: boolean): Promise<void> {
+  private async run(
+    reason: QuitReason,
+    confirmed: boolean,
+    resumeAfterUpdate: boolean,
+    options?: QuitRequestOptions,
+  ): Promise<void> {
     this.phase = 'asking'
+    const isUpdate = reason === 'update' || reason === 'move'
+    const initiator = options?.initiator ?? LOCAL_UPDATE_INITIATOR
+    const requestId = options?.requestId ?? (isUpdate ? randomUUID() : null)
     if (!this.systemShuttingDown) {
       // Unsaved edits are lost on quitting, so they ask whatever the setting says.
       const unsaved = this.unsavedFiles()
@@ -223,21 +325,53 @@ export class QuitFlow {
             ])
           : [[], []]
       if (sessions.length > 0 || terminals.length > 0 || unsaved.length > 0) {
-        const answer = await this.ask({
-          id: this.nextId++,
-          // Moving the app restarts it to update, so it asks the same question.
-          reason: reason === 'move' ? 'update' : reason,
-          sessions,
-          terminals,
-          unsaved,
-          // Closing the windows would lose unsaved edits.
-          keepRunning: reason === 'quit' && unsaved.length === 0,
-          whenIdle: reason === 'update' && sessions.some(restartWaitsFor),
-        })
+        const waitableSessions = sessions.filter(restartWaitsFor).length
+        const busy: UpdateBusySummary = {
+          sessions: sessions.length,
+          waitableSessions,
+          terminals: terminals.length,
+          unsavedFiles: unsaved.length,
+        }
+        const choices = updateConfirmationChoices(busy)
+        const whenIdle = reason === 'update' && choices.includes('whenIdle')
+        if (isUpdate && requestId) {
+          this.deps.onUpdateConfirmation?.({
+            requestId,
+            version: this.deps.updateVersion?.() ?? null,
+            initiator,
+            busy,
+            choices,
+            requestedAt: Date.now(),
+          })
+        }
+        const resolution = await this.ask(
+          {
+            id: this.nextId++,
+            // Moving the app restarts it to update, so it asks the same question.
+            reason: reason === 'move' ? 'update' : reason,
+            sessions,
+            terminals,
+            unsaved,
+            // Closing the windows would lose unsaved edits.
+            keepRunning: reason === 'quit' && unsaved.length === 0,
+            whenIdle,
+          },
+          undefined,
+          {
+            remoteInitiated: isUpdate && initiator.kind === 'remote',
+            updateRequestId: isUpdate ? requestId : null,
+          },
+        )
+        if (isUpdate) this.deps.onUpdateConfirmation?.(null)
+        const { answer } = resolution
         if (answer === 'when-idle') {
-          log.info('Restart to update turned into restarting once the working sessions finish')
+          log.info('Restart to update turned into restarting once the running work finishes')
           this.phase = 'idle'
-          this.deps.restartWhenIdle()
+          if (initiator.kind === 'remote') {
+            this.deps.restartWhenIdle(initiator, requestId ?? undefined, busy)
+          } else {
+            this.deps.restartWhenIdle()
+          }
           return
         }
         if (answer === 'background') {
@@ -249,6 +383,13 @@ export class QuitFlow {
         if (!answer) {
           log.info(`${reason === 'quit' ? 'Quit' : 'Restart'} cancelled`)
           this.phase = 'idle'
+          if (isUpdate) {
+            this.deps.onUpdateCancelled?.({
+              requestId,
+              by: resolution.by,
+              code: resolution.cancelCode ?? 'user_cancelled',
+            })
+          }
           return
         }
       }
@@ -259,6 +400,29 @@ export class QuitFlow {
     if (reason === 'move' && !(await this.deps.moveApp())) {
       this.phase = 'idle'
       return
+    }
+    const shouldResumeAfterUpdate =
+      reason === 'update' && resumeAfterUpdate && !this.systemShuttingDown
+    let capturedUpdateResume = false
+    if (shouldResumeAfterUpdate) {
+      try {
+        await this.deps.captureUpdateResume?.(BUSY_TIMEOUT_MS)
+        capturedUpdateResume = true
+      } catch (error) {
+        log.warn(`Could not capture sessions to resume after update: ${String(error)}`)
+      }
+    } else {
+      await this.deps.clearUpdateResume?.().catch(() => {})
+    }
+    let prepareResult: UpdateRestartPrepareResult = 'proceed'
+    if (reason === 'update' && !this.systemShuttingDown && this.deps.onUpdateRestarting) {
+      const prepared = await this.deps.onUpdateRestarting({ requestId, initiator })
+      if (prepared) prepareResult = prepared
+      if (prepareResult === 'aborted') {
+        if (capturedUpdateResume) await this.deps.clearUpdateResume?.().catch(() => {})
+        this.phase = 'idle'
+        return
+      }
     }
     const started = performance.now()
     await this.deps.shutDown()
@@ -271,10 +435,25 @@ export class QuitFlow {
       }
     }
     this.phase = 'done'
+    this.deps.onCleanExit?.()
     if (reason === 'update') {
-      // After the install starts: it may first wait for the update to be prepared.
-      await this.deps.installUpdate()
-      setTimeout(() => app.quit(), INSTALL_FALLBACK_MS).unref()
+      if (prepareResult === 'launched') {
+        app.quit()
+      } else {
+        // After the install starts: it may first wait for the update to be prepared.
+        try {
+          await this.deps.installUpdate()
+        } catch (error) {
+          if (capturedUpdateResume) await this.deps.clearUpdateResume?.().catch(() => {})
+          throw error
+        }
+      }
+      setTimeout(() => {
+        // If quitAndInstall failed to relaunch the app, drop the manifest before forcing a plain quit.
+        void Promise.resolve(capturedUpdateResume ? this.deps.clearUpdateResume?.() : undefined)
+          .catch(() => {})
+          .finally(() => app.quit())
+      }, INSTALL_FALLBACK_MS).unref()
     } else {
       if (reason === 'restart') app.relaunch(this.relaunch?.())
       app.quit()
@@ -289,13 +468,31 @@ export class QuitFlow {
     }
   }
 
-  private ask(request: QuitRequest, target?: BrowserWindow): Promise<QuitAnswer> {
+  private dismissRendererPrompt(pending: PendingAnswer): void {
+    const { webContents } = pending
+    if (webContents && !webContents.isDestroyed()) {
+      sendEvent(webContents, 'app:confirm-quit-resolved', pending.request.id)
+    }
+  }
+
+  private ask(
+    request: QuitRequest,
+    target?: BrowserWindow,
+    options: { remoteInitiated?: boolean; updateRequestId?: string | null } = {},
+  ): Promise<AskResolution> {
     return new Promise((resolve) => {
+      const remoteInitiated = options.remoteInitiated === true
       const window = target ?? shownWindow()
       const webContents = window && !window.webContents.isDestroyed() ? window.webContents : null
-      // A page that goes away mid-question cannot answer; fall back to a native dialog.
+      // A page that goes away mid-question cannot answer; local prompts fall back to a native
+      // dialog, while remote update requests remain open for the initiating device.
       const fallBack = (): void => {
-        if (this.pending === pending) void this.askNatively(pending)
+        if (this.pending !== pending) return
+        if (remoteInitiated) {
+          pending.webContents = null
+          return
+        }
+        void this.askNatively(pending)
       }
       const onNavigation = (
         details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>,
@@ -305,26 +502,30 @@ export class QuitFlow {
       const pending: PendingAnswer = {
         request,
         webContents,
-        resolve: (answer) => {
+        remoteInitiated,
+        updateRequestId: options.updateRequestId ?? null,
+        resolve: (resolution) => {
           if (this.pending !== pending) return
           this.pending = null
           if (webContents && !webContents.isDestroyed()) {
             webContents.off('destroyed', fallBack)
             webContents.off('did-start-navigation', onNavigation)
           }
-          resolve(answer)
+          resolve(resolution)
         },
       }
       this.pending = pending
       if (!window || !webContents || webContents.isLoadingMainFrame() || webContents.isCrashed()) {
-        void this.askNatively(pending)
+        if (!remoteInitiated) void this.askNatively(pending)
         return
       }
       webContents.once('destroyed', fallBack)
       webContents.on('did-start-navigation', onNavigation)
-      if (window.isMinimized()) window.restore()
-      window.show()
-      window.focus()
+      if (!remoteInitiated) {
+        if (window.isMinimized()) window.restore()
+        window.show()
+        window.focus()
+      }
       sendEvent(webContents, 'app:confirm-quit', request)
     })
   }
@@ -360,7 +561,10 @@ export class QuitFlow {
     const { response } = window
       ? await dialog.showMessageBox(window, options)
       : await dialog.showMessageBox(options)
-    pending.resolve(response === 2 ? (keepRunning ? 'background' : 'when-idle') : response === 1)
+    pending.resolve({
+      answer: response === 2 ? (keepRunning ? 'background' : 'when-idle') : response === 1,
+      by: 'local',
+    })
   }
 }
 

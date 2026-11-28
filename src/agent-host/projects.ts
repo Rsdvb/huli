@@ -3,6 +3,7 @@
 import { realpath as fsRealpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { MAX_PROJECT_FOLDERS, type NoProject, type Project } from '@shared/agent-host'
+import { validateProjectIcon, type ProjectIcon } from '@shared/project-icon'
 import { DEFAULT_WORKTREE_SETTINGS, type ProjectWorktreeSettings } from '@shared/git'
 import type { ProjectManagerSettings } from '@shared/manager'
 import type { Platform } from '@shared/platform'
@@ -13,6 +14,9 @@ import { t } from './i18n'
 import { canonicalizePath, folderName, isAbsolutePath, pathKey } from './paths'
 import { folderProblem, type MountProblem } from './sandbox/mounts'
 import type { JsonFile, ProjectRecord, ProjectsFile } from './storage'
+
+export const PROJECT_NAME_MAX = 200
+export { MAX_PROJECT_FOLDERS }
 
 export interface ProjectsDeps {
   file: JsonFile<ProjectsFile>
@@ -50,6 +54,12 @@ function refused(problem: MountProblem | null): problem is RefusedFolder {
 
 function sameIds(a: readonly string[] | undefined, b: readonly string[]): boolean {
   return a !== undefined && a.length === b.length && a.every((id, index) => id === b[index])
+}
+
+export interface ProjectUpdate {
+  name?: string | null
+  folders?: string[]
+  icon?: ProjectIcon | null
 }
 
 async function isDirectory(value: string): Promise<boolean> {
@@ -93,24 +103,36 @@ export class Projects {
     return pathKey(value, this.deps.platform)
   }
 
-  list(): Project[] {
-    return this.ordered().map((record) => ({
+  private toProject(record: ProjectRecord): Project {
+    const extra = record.folders ?? []
+    const all = [record.path, ...extra]
+    const missingFolders =
+      extra.length > 0 ? all.filter((folder) => this.missing.get(this.key(folder)) ?? false) : []
+    return {
       path: record.path,
       name: record.name,
+      ...(record.customName ? { customName: true as const } : {}),
+      ...(record.icon ? { icon: { ...record.icon } } : {}),
+      ...(missingFolders.length > 0 ? { missingFolders } : {}),
       missing: this.missing.get(this.key(record.path)) ?? false,
       lastOpenedAt: record.lastOpenedAt,
       pinnedAt: record.pinnedAt ?? null,
+      archivedAt: record.archivedAt ?? null,
       order: record.order ?? null,
       autoApprove: record.autoApprove ?? null,
       sandbox: record.sandbox ? { ...record.sandbox } : null,
-      folders: (record.folders ?? []).map((folder) => ({
+      folders: extra.map((folder) => ({
         path: folder,
         name: folderName(folder, this.deps.platform),
         missing: this.missing.get(this.key(folder)) ?? false,
       })),
       ...(record.manager ? { manager: record.manager } : {}),
       sessionOrder: record.sessionOrder ? [...record.sessionOrder] : null,
-    }))
+    }
+  }
+
+  list(): Project[] {
+    return this.ordered().map((record) => this.toProject(record))
   }
 
   /** The user's order once they moved a project, the latest opened first until then. */
@@ -132,8 +154,23 @@ export class Projects {
     }
   }
 
+  /** All folders associated with a project record, primary folder first. */
+  foldersOf(record: ProjectRecord): string[] {
+    return record.folders && record.folders.length > 0
+      ? [record.path, ...record.folders]
+      : [record.path]
+  }
+
+  /** All folders across every registered project (primary + additional), deduplicated. */
   paths(): string[] {
-    return this.records.map((record) => record.path)
+    const out = new Map<string, string>()
+    for (const record of this.records) {
+      for (const folder of this.foldersOf(record)) {
+        const key = this.key(folder)
+        if (!out.has(key)) out.set(key, folder)
+      }
+    }
+    return [...out.values()]
   }
 
   /** Huli: the projects' folders, the latest opened first. */
@@ -154,17 +191,25 @@ export class Projects {
     this.changed()
   }
 
-  find(value: string): ProjectRecord | undefined {
+  /** Matches a project strictly by its primary path. */
+  findPrimary(value: string): ProjectRecord | undefined {
     const key = this.key(value)
     return this.records.find((record) => this.key(record.path) === key)
   }
 
-  /** Huli: the project's further folders as stored, missing ones included; none for no project. */
+  /**
+   * Huli: the other folders of the project a session in `value` works in, missing ones included:
+   * a project's further folders for its own folder, and for one of its further folders the
+   * project's folder and the rest; none for no project.
+   */
   folders(value: string): string[] {
-    return [...(this.find(value)?.folders ?? [])]
+    const record = this.find(value)
+    if (!record) return []
+    const key = this.key(value)
+    return this.foldersOf(record).filter((folder) => this.key(folder) !== key)
   }
 
-  /** Huli: the further folders that were there when last looked at, for its sessions' agents. */
+  /** Huli: those that were there when last looked at, for its sessions' agents. */
   presentFolders(value: string): string[] {
     return this.folders(value).filter((folder) => this.missing.get(this.key(folder)) !== true)
   }
@@ -174,6 +219,15 @@ export class Projects {
     const key = this.key(value)
     return this.records.some((record) =>
       (record.folders ?? []).some((folder) => this.key(folder) === key),
+    )
+  }
+
+  /** Matches a project by its primary path or any of its associated source folders. */
+  find(value: string): ProjectRecord | undefined {
+    const key = this.key(value)
+    return (
+      this.records.find((record) => this.key(record.path) === key) ??
+      this.records.find((record) => record.folders?.some((folder) => this.key(folder) === key))
     )
   }
 
@@ -197,8 +251,9 @@ export class Projects {
   }
 
   /**
-   * Adds a folder, or marks an existing project as opened now. Huli: one whose record waits in the
-   * recycle bin comes back with its settings; the sessions its removal took stay in the bin.
+   * Adds a folder, or marks an existing project (its own folder or a further one) as opened now.
+   * Huli: one whose record waits in the recycle bin comes back with its settings; the sessions its
+   * removal took stay in the bin.
    */
   async add(value: string): Promise<Project> {
     const canonical = await this.resolveDirectory(value)
@@ -207,22 +262,37 @@ export class Projects {
     const existing = this.find(canonical)
     if (existing) {
       existing.lastOpenedAt = this.now()
-      this.missing.set(this.key(existing.path), false)
-    } else {
-      const now = this.now()
-      const places = this.records.flatMap((record) => record.order ?? [])
-      this.records.push({
-        path: canonical,
-        name: folderName(canonical, this.deps.platform),
-        addedAt: now,
-        lastOpenedAt: now,
-        // Once the user has an order, a new project goes to its end.
-        ...(places.length > 0 ? { order: Math.max(...places) + 1 } : {}),
-      })
+      // Re-opening an archived project restores it to the sidebar while keeping its settings.
+      delete existing.archivedAt
       this.missing.set(this.key(canonical), false)
+      this.changed()
+      return this.toProject(existing)
     }
+    const now = this.now()
+    const places = this.records.flatMap((record) => record.order ?? [])
+    const created: ProjectRecord = {
+      path: canonical,
+      name: folderName(canonical, this.deps.platform),
+      addedAt: now,
+      lastOpenedAt: now,
+      // Once the user has an order, a new project goes to its end.
+      ...(places.length > 0 ? { order: Math.max(...places) + 1 } : {}),
+    }
+    this.records.push(created)
+    this.missing.set(this.key(canonical), false)
     this.changed()
-    return this.list().find((project) => this.key(project.path) === this.key(canonical))!
+    return this.toProject(created)
+  }
+
+  /** The stored project for a primary path that may no longer exist, matched without realpath. */
+  matchPrimary(value: string): ProjectRecord {
+    if (!isAbsolutePath(value, this.deps.platform)) {
+      throw invalidParams('path must be an absolute path')
+    }
+    const api = this.deps.platform === 'win32' ? path.win32 : path.posix
+    const record = this.findPrimary(api.resolve(value))
+    if (!record) throw notFound(t('project.noProject', { path: value }))
+    return record
   }
 
   /**
@@ -238,6 +308,7 @@ export class Projects {
     }
     const folders = record.folders ?? []
     if (!folders.some((folder) => this.key(folder) === this.key(canonical))) {
+      this.refuseOthers(record, canonical, value)
       if (folders.length >= MAX_PROJECT_FOLDERS) {
         throw invalidParams(t('projectFolders.tooMany', { count: MAX_PROJECT_FOLDERS }))
       }
@@ -264,6 +335,14 @@ export class Projects {
     this.changed()
   }
 
+  /** A folder the project does not hold yet may not be another project's, its own or further. */
+  private refuseOthers(record: ProjectRecord, canonical: string, asked: string): void {
+    const owner = this.find(canonical)
+    if (owner && owner !== record) {
+      throw invalidParams(t('project.folderInOtherProject', { path: asked, name: owner.name }))
+    }
+  }
+
   private folderProblem(canonical: string): RefusedFolder | null {
     const { home, dataDir, platform } = this.deps
     if (home === undefined || dataDir === undefined) {
@@ -274,7 +353,7 @@ export class Projects {
     return refused(problem) ? problem : null
   }
 
-  /** The stored project for a path that may no longer exist, matched without realpath. */
+  /** The stored project for a path (its own or a further folder) that may no longer exist. */
   match(value: string): ProjectRecord {
     if (!isAbsolutePath(value, this.deps.platform)) {
       throw invalidParams('path must be an absolute path')
@@ -283,6 +362,120 @@ export class Projects {
     const record = this.find(api.resolve(value))
     if (!record) throw notFound(t('project.noProject', { path: value }))
     return record
+  }
+
+  /**
+   * Updates a project's display name and/or associated source folders.
+   * Clearing `name` (empty or null) restores the primary folder basename.
+   * `folders` must retain the primary folder, reject duplicates, invalid paths, and folders
+   * already belonging to another project.
+   */
+  async update(record: ProjectRecord, changes: ProjectUpdate): Promise<Project> {
+    const api = this.deps.platform === 'win32' ? path.win32 : path.posix
+    const primaryKey = this.key(record.path)
+    let nextFolders: string[] | undefined
+    const nextMissing = new Map<string, boolean>()
+
+    if (changes.folders !== undefined) {
+      if (changes.folders.length === 0) {
+        throw invalidParams(t('project.atLeastOneFolder'))
+      }
+      // The project's own folder and at most MAX_PROJECT_FOLDERS further ones.
+      if (changes.folders.length > MAX_PROJECT_FOLDERS + 1) {
+        throw invalidParams(t('projectFolders.tooMany', { count: MAX_PROJECT_FOLDERS }))
+      }
+      const existingByKey = new Map<string, string>(
+        this.foldersOf(record).map((folder) => [this.key(folder), folder]),
+      )
+      const seen = new Set<string>()
+      const resolvedList: string[] = []
+      for (const raw of changes.folders) {
+        if (!isAbsolutePath(raw, this.deps.platform)) {
+          throw invalidParams(t('project.notAbsolute'))
+        }
+        const resolved = api.resolve(raw)
+        const existing = existingByKey.get(this.key(resolved))
+        let canonical: string
+        let isMissing = false
+        try {
+          canonical = await this.resolveDirectory(raw)
+        } catch (error) {
+          // Keep an already-associated folder that is currently unmounted/missing so renaming or
+          // editing other folders still succeeds; newly added folders must exist on disk.
+          if (existing !== undefined) {
+            canonical = existing
+            isMissing = true
+          } else {
+            throw error
+          }
+        }
+        const key = this.key(canonical)
+        if (seen.has(key)) {
+          throw invalidParams(t('project.duplicateFolder', { path: raw }))
+        }
+        // Huli: what the project holds already stays; a new one passes the further folders' checks.
+        if (existing === undefined) {
+          this.refuseOthers(record, canonical, raw)
+          const problem = this.folderProblem(canonical)
+          if (problem) {
+            throw invalidParams(t(`projectFolders.refused.${problem}`, { folder: canonical }))
+          }
+        }
+        seen.add(key)
+        nextMissing.set(key, isMissing)
+        resolvedList.push(canonical)
+      }
+      if (!seen.has(primaryKey)) {
+        throw invalidParams(t('project.primaryFolderRequired'))
+      }
+      nextFolders = resolvedList.filter((folder) => this.key(folder) !== primaryKey)
+    }
+
+    let nextIcon: ProjectIcon | null | undefined
+    if (changes.icon !== undefined) {
+      if (changes.icon === null) {
+        nextIcon = null
+      } else {
+        const checked = validateProjectIcon(changes.icon)
+        if (!checked.ok) throw invalidParams(checked.reason)
+        nextIcon = checked.icon
+      }
+    }
+
+    if (changes.name !== undefined) {
+      const trimmed = changes.name === null ? '' : changes.name.trim()
+      if (trimmed.length > PROJECT_NAME_MAX) {
+        throw invalidParams(t('project.nameTooLong', { max: PROJECT_NAME_MAX }))
+      }
+      const fallback = folderName(record.path, this.deps.platform)
+      if (trimmed === '' || trimmed === fallback) {
+        record.name = fallback
+        delete record.customName
+      } else {
+        record.name = trimmed
+        record.customName = true
+      }
+    }
+
+    if (nextIcon !== undefined) {
+      if (nextIcon === null) delete record.icon
+      else record.icon = nextIcon
+    }
+
+    if (nextFolders !== undefined) {
+      for (const oldFolder of record.folders ?? []) {
+        const oldKey = this.key(oldFolder)
+        if (!nextMissing.has(oldKey)) this.missing.delete(oldKey)
+      }
+      for (const [key, isMissing] of nextMissing) {
+        this.missing.set(key, isMissing)
+      }
+      if (nextFolders.length > 0) record.folders = nextFolders
+      else delete record.folders
+    }
+
+    this.changed()
+    return this.toProject(record)
   }
 
   /** How the project names and prepares its sessions' worktrees, with the defaults filled in. */
@@ -346,8 +539,7 @@ export class Projects {
   /** Huli: into the recycle bin, with its settings; `purge` deletes it for good. */
   remove(record: ProjectRecord): void {
     this.records = this.records.filter((item) => item !== record)
-    this.missing.delete(this.key(record.path))
-    for (const folder of record.folders ?? []) {
+    for (const folder of this.foldersOf(record)) {
       if (!this.isFolder(folder) && !this.find(folder)) this.missing.delete(this.key(folder))
     }
     record.deletedAt = this.now()
@@ -373,7 +565,7 @@ export class Projects {
     const record = this.binnedRecord(value)
     if (!record) return false
     // A project added again meanwhile is the one listed; the binned one goes.
-    if (this.find(record.path)) {
+    if (this.findPrimary(record.path)) {
       this.binned = this.binned.filter((item) => item !== record)
       this.changed()
       return true
@@ -398,12 +590,31 @@ export class Projects {
     if (this.binned.length !== before) this.changed()
   }
 
+  /** Hides a project from the sidebar while keeping its record, settings and history. */
+  archive(record: ProjectRecord): Project {
+    if (record.archivedAt !== undefined) return this.toProject(record)
+    delete record.pinnedAt
+    record.archivedAt = this.now()
+    this.changed()
+    return this.toProject(record)
+  }
+
+  /** Restores an archived project back to the sidebar. */
+  unarchive(record: ProjectRecord): Project {
+    if (record.archivedAt === undefined) return this.toProject(record)
+    delete record.archivedAt
+    record.lastOpenedAt = this.now()
+    this.changed()
+    return this.toProject(record)
+  }
+
   touch(record: ProjectRecord): void {
     record.lastOpenedAt = this.now()
     this.changed()
   }
 
   pin(record: ProjectRecord, pinned: boolean): void {
+    if (pinned && record.archivedAt !== undefined) return
     if (pinned === (record.pinnedAt !== undefined)) return
     if (pinned) record.pinnedAt = this.now()
     else delete record.pinnedAt
@@ -439,7 +650,7 @@ export class Projects {
     this.changed()
   }
 
-  /** Marks projects whose folder is gone; they stay listed, so an unmounted drive loses nothing. */
+  /** Marks projects whose folders are gone; they stay listed, so an unmounted drive loses nothing. */
   async refreshMissing(notify = true): Promise<void> {
     let changed = false
     const folders = this.records.flatMap((record) => [record.path, ...(record.folders ?? [])])
@@ -464,7 +675,10 @@ export class Projects {
   private changed(): void {
     this.deps.file.save({
       version: 1,
-      projects: [...this.records, ...this.binned].map((record) => ({ ...record })),
+      projects: [...this.records, ...this.binned].map((record) => ({
+        ...record,
+        ...(record.folders ? { folders: [...record.folders] } : {}),
+      })),
       ...(this.noProjectPinnedAt === undefined
         ? {}
         : { noProjectPinnedAt: this.noProjectPinnedAt }),

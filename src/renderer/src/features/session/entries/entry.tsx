@@ -19,6 +19,7 @@ import { SurfaceAccessEntry } from './surface-access-entry'
 import { MarketPublishEntry } from './market-publish-entry'
 import { PluginDenialEntry } from './plugin-denial-entry'
 import { RoutineChangeEntry } from './routine-change-entry'
+import { McpChangeEntry } from './mcp-change-entry'
 import { SettingsChangeEntry } from './settings-change-entry'
 import { SecretRequestEntry } from './secret-request-entry'
 import { ThemeChangeEntry } from './theme-change-entry'
@@ -72,7 +73,7 @@ export const Entry = memo(function Entry({
     case 'recall':
       return <RecallEntry {...props} />
     case 'notice':
-      return <NoticeEntry {...props} />
+      return <NoticeEntry {...props} projectPath={projectPath} />
     case 'compaction':
       return <CompactionEntry {...props} />
     case 'turn_end':
@@ -111,6 +112,8 @@ export const Entry = memo(function Entry({
       return <ThemeChangeEntry {...props} agentName={agentName} />
     case 'routine_change':
       return <RoutineChangeEntry {...props} agentName={agentName} />
+    case 'mcp_change':
+      return <McpChangeEntry {...props} agentName={agentName} />
     case 'control_ask':
       return <ControlAskEntry {...props} agentName={agentName} />
     case 'control_note':

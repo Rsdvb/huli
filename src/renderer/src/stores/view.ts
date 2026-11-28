@@ -26,13 +26,15 @@ import {
   type PaneView,
   type Place,
 } from '@renderer/features/split/layout'
-import { newSessionProject } from '@renderer/features/split/new-session-project'
+import { newSessionFolder, newSessionProject } from '@renderer/features/split/new-session-project'
+import { isFolderMissing } from '@renderer/stores/projects'
 import type { RoutineExampleId } from '@renderer/features/routines/examples'
 import { NARROW_WINDOW, PHONE_WINDOW } from '@renderer/features/shell/narrow'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { readJson, writeJson } from '@renderer/lib/storage'
 import { useArtifactsStore } from '@renderer/stores/artifacts'
 import { useProjectsStore } from '@renderer/stores/projects'
+import { useSettingsStore } from '@renderer/stores/settings-store'
 import type { SettingsSection } from '@shared/settings-catalog'
 
 type PageView =
@@ -140,6 +142,7 @@ export type SidePane =
   | 'terminal'
   | 'files'
   | 'git'
+  | 'gitGraph'
   | 'browser'
   | 'devices'
   | 'surfaces'
@@ -219,6 +222,7 @@ export function docRoot(tab: DocTab | null | undefined, projectPath: string): st
 const SINGLE_TABS: readonly SidePane[] = [
   'files',
   'git',
+  'gitGraph',
   'board',
   'sideChat',
   'requests',
@@ -237,7 +241,21 @@ const NEW_SESSION_PANEL = 'new-session:'
 /** How many sessions' open panes a restart brings back; the most recently changed win. */
 const REMEMBERED_PANELS = 200
 
+/** Which list fills the sidebar body under the top menu. */
+export type SidebarView = 'projects' | 'activity'
+
 export type { SettingsSection }
+
+/** Where the terminal docks relative to the session main area. */
+export type TerminalPlacement = 'side' | 'bottom'
+
+/** Validates a persisted terminal placement, defaulting existing and invalid values to `'side'`. */
+export function readTerminalPlacement(value: unknown): TerminalPlacement {
+  return value === 'bottom' ? 'bottom' : 'side'
+}
+
+/** Fallback tab when moving the terminal out of a side panel that may still hold other tabs. */
+export type SidePanelFallback = SidePane | { docKey: string } | null
 
 interface ViewStore {
   /** The regular New session draft's choices, kept while another view replaces its pane. */
@@ -266,6 +284,8 @@ interface ViewStore {
   searchOpen: boolean
   /** Initial scope and query for the next Search open, cleared when it closes. */
   searchInit: { scope?: string; query?: string } | null
+  /** Whether the sidebar body shows the project list or the Activity view. Not persisted. */
+  sidebarView: SidebarView
   /** Back and Forward through what the main area showed, nearest last. Not persisted. */
   history: { back: Step[]; forward: Step[] }
   sidebarCollapsed: boolean
@@ -324,6 +344,10 @@ interface ViewStore {
   /** A canvas page asked to be shown in a panel's artifact pane, until it is. Not persisted. */
   sideArtifactPage: Record<string, ArtifactPageRequest>
   sidePaneMaximized: boolean
+  /** Where terminals dock: beside the session in the side panel, or below the session main area. */
+  terminalPlacement: TerminalPlacement
+  /** Panels whose bottom terminal dock is open while `terminalPlacement === 'bottom'`. */
+  bottomTerminalOpen: Record<string, true>
   /** How the Artifacts page groups and sorts, for the whole app. */
   artifactsView: { arrange: ArtifactArrange }
 }
@@ -346,6 +370,8 @@ interface Persisted {
   sideDoc?: Record<string, string>
   /** Earlier versions had one artifact tab per panel, which showed this artifact. */
   sideArtifact?: Record<string, string>
+  terminalPlacement?: TerminalPlacement
+  bottomTerminals?: Record<string, true>
   /** One pane per column, the pane in focus; read back as the split a restart opens. */
   layout?: unknown
   /** Under a new name since the page went flat: every run saved the old grouping as it was. */
@@ -370,6 +396,7 @@ export const useViewStore = create<ViewStore>()(() => ({
   shortcutsOpen: false,
   searchOpen: false,
   searchInit: null,
+  sidebarView: 'projects',
   history: { back: [], forward: [] },
   sidebarCollapsed: saved.sidebarCollapsed ?? false,
   sidebarDrawer: false,
@@ -393,8 +420,43 @@ export const useViewStore = create<ViewStore>()(() => ({
 
 type SidePanels = Pick<
   ViewStore,
-  'sidePane' | 'sideLast' | 'sideTabs' | 'sideOrder' | 'sideDocs' | 'sideDoc'
+  | 'sidePane'
+  | 'sideLast'
+  | 'sideTabs'
+  | 'sideOrder'
+  | 'sideDocs'
+  | 'sideDoc'
+  | 'terminalPlacement'
+  | 'bottomTerminalOpen'
 >
+
+/** Picks the nearest non-terminal tab already open in `panel`, or null when none remains. */
+function defaultNonTerminalFallback(
+  s: Pick<ViewStore, 'sideOrder' | 'sideTabs' | 'sideDocs'>,
+  panel: string,
+): SidePanelFallback {
+  const order = s.sideOrder[panel] ?? []
+  const lastTerminal = order.findLastIndex((key) => key.startsWith('terminal:'))
+  const singleTabs = new Set<string>(s.sideTabs[panel] ?? [])
+  const docKeys = new Set((s.sideDocs[panel] ?? []).map(docKey))
+  const others = order
+    .map((key, index) => ({
+      key,
+      kind: key.slice(0, key.indexOf(':')) as SidePane,
+      index,
+    }))
+    .filter((other) => {
+      if (other.kind === 'terminal') return false
+      if (isDocKind(other.kind)) return docKeys.has(other.key)
+      if (other.kind === 'browser' || other.kind === 'devices') return true
+      return singleTabs.has(other.kind)
+    })
+  const next = others.find((other) => other.index > lastTerminal) ?? others.at(-1)
+  if (next) return isDocKind(next.kind) ? { docKey: next.key } : next.kind
+  if (s.sideDocs[panel]?.[0]) return { docKey: docKey(s.sideDocs[panel][0]) }
+  if (s.sideTabs[panel]?.[0]) return s.sideTabs[panel][0]
+  return null
+}
 
 /**
  * The side panels as saved. A save from before every pane was a tab has no row, so the pane it
@@ -438,7 +500,45 @@ function savedPanels(from: Partial<Persisted>): SidePanels {
       sideTabs[panel] = [...(sideTabs[panel] ?? []), pane]
     }
   }
-  return { sidePane, sideLast, sideTabs, sideOrder, sideDocs, sideDoc }
+  const terminalPlacement = readTerminalPlacement(from.terminalPlacement)
+  const bottomTerminalOpen: Record<string, true> = {}
+  if (from.bottomTerminals && typeof from.bottomTerminals === 'object') {
+    for (const [panel, open] of Object.entries(from.bottomTerminals)) {
+      if (open === true) bottomTerminalOpen[panel] = true
+    }
+  }
+  // Keep side and bottom terminal state consistent if persisted state mixed them.
+  if (terminalPlacement === 'bottom') {
+    for (const [panel, pane] of Object.entries(sidePane)) {
+      if (pane !== 'terminal') continue
+      bottomTerminalOpen[panel] = true
+      const fallback = defaultNonTerminalFallback({ sideOrder, sideTabs, sideDocs }, panel)
+      if (!fallback) {
+        delete sidePane[panel]
+      } else if (typeof fallback === 'object') {
+        const kind = fallback.docKey.slice(0, fallback.docKey.indexOf(':')) as SidePane
+        sidePane[panel] = kind
+        sideDoc[panel] = fallback.docKey
+      } else {
+        sidePane[panel] = fallback
+      }
+    }
+    for (const [panel, pane] of Object.entries(sideLast)) {
+      if (pane === 'terminal') delete sideLast[panel]
+    }
+  } else {
+    for (const panel of Object.keys(bottomTerminalOpen)) delete bottomTerminalOpen[panel]
+  }
+  return {
+    sidePane,
+    sideLast,
+    sideTabs,
+    sideOrder,
+    sideDocs,
+    sideDoc,
+    terminalPlacement,
+    bottomTerminalOpen,
+  }
 }
 
 /** Whether a saved tab can be one: any tab but a plugin's, which must name a plugin and its view. */
@@ -483,6 +583,8 @@ useViewStore.subscribe((state) => {
       sideOrder: remembered(state.sideOrder),
       sideDocs: remembered(state.sideDocs),
       sideDoc: remembered(state.sideDoc),
+      terminalPlacement: state.terminalPlacement,
+      bottomTerminals: remembered(state.bottomTerminalOpen),
       layout: saveLayout(state.layout),
       artifactsDisplay: state.artifactsView,
     }
@@ -536,15 +638,41 @@ export function panelSession(panel: string): string | null {
   return panel.startsWith(NEW_SESSION_PANEL) ? null : panel
 }
 
+/**
+ * The folder a pane's side panel works in: a session's project, a sub-session's parent project,
+ * or New session's chosen project (falling back to the selected or first project on its host).
+ * Null for New session with No project or without an existing project to work in.
+ */
+export function paneProjectPath(
+  view: PaneView,
+  selected: string | null = null,
+  projects?: readonly Project[],
+): string | null {
+  if (view.kind === 'session') return view.projectPath
+  if (view.noProject) return null
+  if (view.parentId) return view.projectPath
+  if (projects) {
+    const project = newSessionProject(view, selected, projects)
+    const folder = newSessionFolder(view, selected, project)
+    return project && folder && !isFolderMissing(project, folder) ? folder : null
+  }
+  return view.projectPath
+}
+
 /** Whose side panel a pane's view has: its session's, or New session's in its project. */
-export function panelOf(view: PaneView): string | null {
+export function panelOf(
+  view: PaneView,
+  selected: string | null = null,
+  projects?: readonly Project[],
+): string | null {
   if (view.kind === 'session') return view.sessionId
-  return view.projectPath ? newSessionPanel(view.projectPath) : null
+  const path = paneProjectPath(view, selected, projects)
+  return path ? newSessionPanel(path) : null
 }
 
 /** The panel the side panel shows, the pane in focus's; null at New session with No project. */
-export function shownPanel(state: ViewStore): string | null {
-  return panelOf(focusedPane(state.layout).view)
+export function shownPanel(state: ViewStore, projects?: readonly Project[]): string | null {
+  return panelOf(focusedPane(state.layout).view, state.projectPath, projects)
 }
 
 export function shownSidePane(state: ViewStore): SidePane | undefined {
@@ -581,7 +709,13 @@ export function shownProjects(state: ViewStore, projects: readonly Project[]): s
     if (!panes.has(pane.id)) return []
     const { view } = pane
     const fallback =
-      view.kind === 'new' ? newSessionProject(view, state.projectPath, projects)?.path : undefined
+      view.kind === 'new'
+        ? newSessionFolder(
+            view,
+            state.projectPath,
+            newSessionProject(view, state.projectPath, projects),
+          )
+        : undefined
     return [view.projectPath, fallback].filter((path): path is string => !!path)
   })
   return [...new Set(paths)].join('\n')
@@ -741,7 +875,7 @@ export function showCreatedSession(
   const { layout } = useViewStore.getState()
   const pane = findPane(layout, paneId)
   if (!pane || pane.view.kind !== 'new') return false
-  const from = panelOf(pane.view)
+  const from = panelOf(pane.view) ?? (pane.view.noProject ? null : newSessionPanel(projectPath))
   inPlace(() =>
     useViewStore.setState((s) => ({
       ...withLayout(
@@ -756,7 +890,7 @@ export function showCreatedSession(
 }
 
 /** New session's side panel, given to the session it created and closed for the next one. */
-function handPanel(s: ViewStore, from: string, to: string): SidePanels {
+function handPanel(s: ViewStore, from: string, to: string): Omit<SidePanels, 'terminalPlacement'> {
   return {
     sidePane: handed(s.sidePane, from, to),
     sideLast: handed(s.sideLast, from, to),
@@ -764,6 +898,7 @@ function handPanel(s: ViewStore, from: string, to: string): SidePanels {
     sideOrder: handed(s.sideOrder, from, to),
     sideDocs: handed(s.sideDocs, from, to),
     sideDoc: handed(s.sideDoc, from, to),
+    bottomTerminalOpen: handed(s.bottomTerminalOpen, from, to),
   }
 }
 
@@ -996,6 +1131,45 @@ export function closeArtifact(): void {
 }
 
 /**
+ * Closes any open artifact viewer or side-panel artifact tab belonging to `hidden` (e.g. after
+ * switching Kettu accounts or restoring persisted panels under another account).
+ */
+export function closeHiddenArtifacts(hidden: ReadonlySet<string>): void {
+  if (hidden.size === 0) return
+  const state = useViewStore.getState()
+  if (state.main.kind === 'artifact' && hidden.has(state.main.id)) {
+    inPlace(() =>
+      useViewStore.setState((s) => {
+        if (s.main.kind !== 'artifact' || !hidden.has(s.main.id)) return s
+        const sideArtifactPage = { ...s.sideArtifactPage }
+        delete sideArtifactPage[MAIN_ARTIFACT_PANEL]
+        return { main: s.main.back, sideArtifactPage }
+      }),
+    )
+  }
+  const toClose: { panel: string; key: string }[] = []
+  for (const [panel, docs] of Object.entries(useViewStore.getState().sideDocs)) {
+    for (const tab of docs) {
+      if (tab.kind === 'artifact' && hidden.has(tab.id)) {
+        toClose.push({ panel, key: docKey(tab) })
+      }
+    }
+  }
+  for (const { panel, key } of toClose) closeDoc(panel, key)
+  useViewStore.setState((s) => {
+    let changed = false
+    const sideArtifactPage = { ...s.sideArtifactPage }
+    for (const [panel, req] of Object.entries(sideArtifactPage)) {
+      if (hidden.has(req.artifactId)) {
+        delete sideArtifactPage[panel]
+        changed = true
+      }
+    }
+    return changed ? { sideArtifactPage } : s
+  })
+}
+
+/**
  * The New session screen, in the given project, with No project, or in the selected project; a
  * shown one keeps its agent, and its No project unless given a project.
  */
@@ -1202,6 +1376,18 @@ export function toggleSearch(layerOpen: boolean): void {
   )
 }
 
+/** Switches the sidebar body between the project list and the Activity view. */
+export function setSidebarView(sidebarView: SidebarView): void {
+  useViewStore.setState({ sidebarView })
+}
+
+/** Toggles the sidebar body between the Activity view and the project list. */
+export function toggleSidebarActivity(): void {
+  useViewStore.setState((s) => ({
+    sidebarView: s.sidebarView === 'activity' ? 'projects' : 'activity',
+  }))
+}
+
 /** The panes with `panel` set to `pane`, or closed when null; the last changed comes last. */
 function withPane(
   panes: Record<string, SidePane>,
@@ -1238,6 +1424,37 @@ function closedPanel(
 }
 
 /**
+ * State update when a panel's last open tab closes: collapses the panel when
+ * `appearance.closeSidePanelWithLastTab` is on, otherwise falls back to `'surfaces'`.
+ */
+function emptySidePanelState(
+  s: ViewStore,
+  panel: string,
+): Pick<ViewStore, 'sidePane' | 'sideLast' | 'sidePaneMaximized'> {
+  if (useSettingsStore.getState().settings.appearance.closeSidePanelWithLastTab) {
+    return {
+      sidePane: withPane(s.sidePane, panel, null),
+      sideLast: withPane(s.sideLast, panel, null),
+      sidePaneMaximized: shownPanel(s) === panel ? false : s.sidePaneMaximized,
+    }
+  }
+  return {
+    sidePane: withPane(s.sidePane, panel, 'surfaces'),
+    sideLast: s.sideLast,
+    sidePaneMaximized: s.sidePaneMaximized,
+  }
+}
+
+/**
+ * Handles a side panel whose last tab closed: collapses the panel when
+ * `appearance.closeSidePanelWithLastTab` is enabled, or shows `'surfaces'` otherwise.
+ * Leaves a panel that is already closed untouched.
+ */
+export function leaveEmptySidePanel(panel: string): void {
+  useViewStore.setState((s) => (s.sidePane[panel] ? emptySidePanelState(s, panel) : s))
+}
+
+/**
  * Shows a kind in a session's side panel, a one-per-session kind joining the row as its tab, or
  * closes the panel when it already shows that kind. The row and its tabs stay when it closes.
  */
@@ -1265,6 +1482,32 @@ export function addSideTab(panel: string, tab: SingleTab): void {
   useViewStore.setState((s) => {
     const sideTabs = withTab(s.sideTabs, panel, tab)
     return sideTabs === s.sideTabs ? s : { sideTabs }
+  })
+}
+
+/**
+ * Opens or focuses a one-per-session tab. When opened from inside the panel for the first time,
+ * places it directly after the currently selected tab so related views stay grouped.
+ */
+export function openSingleTab(
+  panel: string,
+  tab: SingleTab,
+  { fromPanel = false }: { fromPanel?: boolean } = {},
+): void {
+  useViewStore.setState((s) => {
+    const alreadyOpen = !!s.sideTabs[panel]?.includes(tab)
+    const key = `${tab}:`
+    const order = s.sideOrder[panel] ?? []
+    const after = !alreadyOpen && fromPanel ? order.indexOf(selectedKeys.get(panel) ?? '') : -1
+    return {
+      sidePane: withPane(s.sidePane, panel, tab),
+      sideTabs: withTab(s.sideTabs, panel, tab),
+      sidePaneMaximized: s.sidePane[panel] ? s.sidePaneMaximized : false,
+      ...(after >= 0 &&
+        !order.includes(key) && {
+          sideOrder: { ...s.sideOrder, [panel]: order.toSpliced(after + 1, 0, key) },
+        }),
+    }
   })
 }
 
@@ -1502,9 +1745,13 @@ export function closeDoc(panel: string, key: string): void {
         open.has(other),
     )
     const index = order.indexOf(key)
-    const next = index < 0 ? undefined : (order[index + 1] ?? order[index - 1])
-    const pane = (next?.slice(0, next.indexOf(':')) ?? 'surfaces') as SidePane
-    if (next && isDocKind(pane)) sideDoc[panel] = next
+    const fallback =
+      (left[0] ? docKey(left[0]) : undefined) ??
+      (s.sideTabs[panel]?.[0] ? `${s.sideTabs[panel][0]}:` : undefined)
+    const next = (index < 0 ? undefined : (order[index + 1] ?? order[index - 1])) ?? fallback
+    if (!next) return { sideDocs, sideDoc, ...emptySidePanelState(s, panel) }
+    const pane = next.slice(0, next.indexOf(':')) as SidePane
+    if (isDocKind(pane)) sideDoc[panel] = next
     return { sideDocs, sideDoc, sidePane: withPane(s.sidePane, panel, pane) }
   })
 }
@@ -1587,7 +1834,149 @@ export function openSessionWithArtifact(sessionId: string, projectPath: string, 
   openArtifactTab(sessionId, id)
 }
 
+function isPhoneViewport(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(PHONE_WINDOW).matches
+    : false
+}
+
+/** Whether the bottom terminal dock is open for `panel`. */
+export function isBottomTerminalOpen(
+  state: Pick<ViewStore, 'terminalPlacement' | 'bottomTerminalOpen'>,
+  panel: string | null,
+): boolean {
+  return state.terminalPlacement === 'bottom' && !!panel && state.bottomTerminalOpen[panel] === true
+}
+
+/** Sets whether `panel` has its bottom terminal dock open; the most recently changed comes last. */
+function withBottomOpen(
+  openMap: Record<string, true>,
+  panel: string,
+  open: boolean,
+): Record<string, true> {
+  const next = { ...openMap }
+  delete next[panel]
+  if (open) next[panel] = true
+  return next
+}
+
+/** Collapses the bottom terminal dock for `panel` without closing any running PTYs. */
+export function closeBottomTerminal(panel: string): void {
+  useViewStore.setState((s) =>
+    s.bottomTerminalOpen[panel]
+      ? { bottomTerminalOpen: withBottomOpen(s.bottomTerminalOpen, panel, false) }
+      : s,
+  )
+}
+
+/**
+ * Switches terminal placement between `'side'` and `'bottom'` and remembers the user's choice.
+ * Moving to `'bottom'` opens the bottom dock while keeping any non-terminal tabs open in the side
+ * panel (or closing the side panel gracefully when terminal was the only open tab). Moving back to
+ * `'side'` re-docks open bottom terminals into the side panel and clears the bottom dock.
+ */
+export function setTerminalPlacement(
+  placement: TerminalPlacement,
+  options?: {
+    panel?: string | null
+    fallbackPane?: (panel: string) => SidePanelFallback
+  },
+): void {
+  useViewStore.setState((s) => {
+    const activePanel = options?.panel ?? null
+    if (s.terminalPlacement === placement) {
+      if (placement === 'bottom' && activePanel && !s.bottomTerminalOpen[activePanel]) {
+        return { bottomTerminalOpen: withBottomOpen(s.bottomTerminalOpen, activePanel, true) }
+      }
+      return s
+    }
+
+    const focused = shownPanel(s)
+
+    if (placement === 'bottom') {
+      let sidePane = { ...s.sidePane }
+      let sideLast = { ...s.sideLast }
+      const sideDoc = { ...s.sideDoc }
+      let bottomTerminalOpen = { ...s.bottomTerminalOpen }
+      let sidePaneMaximized = s.sidePaneMaximized
+
+      for (const [panel, pane] of Object.entries(s.sidePane)) {
+        if (pane !== 'terminal') continue
+        bottomTerminalOpen = withBottomOpen(bottomTerminalOpen, panel, true)
+        const fallback = options?.fallbackPane
+          ? options.fallbackPane(panel)
+          : defaultNonTerminalFallback(s, panel)
+        if (!fallback) {
+          sidePane = withPane(sidePane, panel, null)
+          if (sideLast[panel] === 'terminal') sideLast = withPane(sideLast, panel, null)
+        } else if (typeof fallback === 'object') {
+          const kind = fallback.docKey.slice(0, fallback.docKey.indexOf(':')) as SidePane
+          sidePane = withPane(sidePane, panel, kind)
+          sideDoc[panel] = fallback.docKey
+        } else {
+          sidePane = withPane(sidePane, panel, fallback)
+        }
+        if (focused === panel) sidePaneMaximized = false
+      }
+
+      if (activePanel) {
+        bottomTerminalOpen = withBottomOpen(bottomTerminalOpen, activePanel, true)
+        if (focused === activePanel) sidePaneMaximized = false
+      }
+
+      for (const [panel, last] of Object.entries(sideLast)) {
+        if (last === 'terminal') sideLast = withPane(sideLast, panel, null)
+      }
+
+      return {
+        terminalPlacement: 'bottom',
+        sidePane,
+        sideLast,
+        sideDoc,
+        bottomTerminalOpen,
+        sidePaneMaximized,
+      }
+    }
+
+    // Moving back to 'side': re-dock any open bottom terminals into the side panel.
+    let sidePane = { ...s.sidePane }
+    let sidePaneMaximized = s.sidePaneMaximized
+    const panelsToDock = new Set(Object.keys(s.bottomTerminalOpen))
+    if (activePanel && s.bottomTerminalOpen[activePanel]) panelsToDock.add(activePanel)
+
+    for (const panel of panelsToDock) {
+      const hadSidePane = !!sidePane[panel]
+      sidePane = withPane(sidePane, panel, 'terminal')
+      if (focused === panel && !hadSidePane) sidePaneMaximized = false
+    }
+
+    return {
+      terminalPlacement: 'side',
+      sidePane,
+      bottomTerminalOpen: {},
+      sidePaneMaximized,
+    }
+  })
+}
+
 export function toggleTerminal(panel: string, open?: boolean): void {
+  const { terminalPlacement } = useViewStore.getState()
+  if (terminalPlacement === 'bottom' && !isPhoneViewport()) {
+    useViewStore.setState((s) => {
+      const shown = s.bottomTerminalOpen[panel] === true
+      const next = open ?? !shown
+      if (next === shown) return s
+      return {
+        bottomTerminalOpen: withBottomOpen(s.bottomTerminalOpen, panel, next),
+        // Unmaximize the side panel if opening the bottom terminal for the focused panel so the
+        // dock is immediately visible.
+        ...(next && s.sidePaneMaximized && shownPanel(s) === panel
+          ? { sidePaneMaximized: false }
+          : {}),
+      }
+    })
+    return
+  }
   toggleSidePane(panel, 'terminal', open)
 }
 

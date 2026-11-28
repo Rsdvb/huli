@@ -8,32 +8,23 @@ import {
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { Trans, useTranslation } from 'react-i18next'
-import { useShallow } from 'zustand/react/shallow'
 import { reportedTurns, type FromSession, type ReportedTurn, type StopReason } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { BrandIcon } from '@renderer/components/brand'
+import { useClock } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
-import { hostOfSession, sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
+import { hostOfSession } from '@renderer/stores/sessions'
 import { openSession } from '@renderer/stores/view'
 import { reportState, type ReportState } from './helpers'
+import {
+  openSessionReport,
+  sessionReportDisplay,
+  useSender,
+  type SessionReportTime,
+} from './session-report'
 import { TurnEndTag } from './turn-end-tag'
 
-/** The session a message or report came from, while Kettu still holds it. */
-function useSender(sessionId: string) {
-  return useSessionsStore(
-    useShallow((s) => {
-      const sender = s.byId[sessionId]
-      return sender
-        ? {
-            id: sender.id,
-            title: sessionTitle(sender),
-            agentId: sender.agentId,
-            projectPath: sender.projectPath,
-          }
-        : null
-    }),
-  )
-}
+const dayStart = (now: number): number => new Date(now).setHours(0, 0, 0, 0)
 
 /**
  * A message another session's agent sent: a quoted card on the agent's side of the thread, so the
@@ -109,9 +100,12 @@ export function ReportLine({
   const turns = reportedTurns(from)
   const first = turns[0]
   const sender = useSender(first?.sessionId ?? '')
+  const today = useClock(dayStart)
   if (!first) return null
   const many = turns.length > 1
   const state = many ? worstState(turns) : reportState(first.stopReason)
+  const title = sender?.title ?? first.title
+  const display = sessionReportDisplay(first, title, today)
   return (
     <div className={cn('flex flex-col', className)} data-selectable="">
       <div className="flex min-h-6 min-w-0 items-center gap-2 text-ui text-muted-foreground">
@@ -123,18 +117,24 @@ export function ReportLine({
             <Trans
               t={t}
               i18nKey={`sessionReport.line.${state}`}
-              values={{ title: sender?.title ?? first.title }}
-              components={{ title: <SessionLink sender={sender} /> }}
+              values={{ title }}
+              components={{
+                title: <SessionLink sender={sender} turn={first} label={display.openLabel} />,
+              }}
             />
+          )}
+          {!many && display.roundLabel && (
+            <span className="tabular-nums"> · {display.roundLabel}</span>
           )}
           <span aria-hidden> · </span>
           {t('sessionReport.told')}
         </span>
+        {!many && <ReportTime time={display.time} />}
       </div>
       {many && (
         <ul className="flex flex-col pl-5.5">
-          {turns.map((turn) => (
-            <ReportedRow key={turn.sessionId} turn={turn} />
+          {turns.map((turn, index) => (
+            <ReportedRow key={`${turn.sessionId}:${turn.round ?? index}`} turn={turn} />
           ))}
         </ul>
       )}
@@ -143,21 +143,43 @@ export function ReportLine({
   )
 }
 
-/** One session of a report of several: how its turn ended, and its title, which opens it. */
+/**
+ * One session of a report of several: how its turn ended, and its title, which opens it at the
+ * round it reports.
+ */
 function ReportedRow({ turn }: { turn: ReportedTurn }) {
   const { t } = useTranslation('session')
   const sender = useSender(turn.sessionId)
+  const today = useClock(dayStart)
   const state = reportState(turn.stopReason)
+  const title = sender?.title ?? turn.title
+  const display = sessionReportDisplay(turn, title, today)
   return (
     <li className="flex min-h-6 min-w-0 items-center gap-2 text-ui text-muted-foreground">
       <ReportIcon state={state} />
       <span className="min-w-0 truncate">
-        <SessionLink sender={sender} arrow>
-          {sender?.title ?? turn.title}
+        <SessionLink sender={sender} turn={turn} label={display.openLabel} arrow>
+          {title}
         </SessionLink>
+        {display.roundLabel && <span className="tabular-nums"> · {display.roundLabel}</span>}
       </span>
       <span className="shrink-0">{t(`sessionReport.state.${state}`)}</span>
+      <ReportTime time={display.time} />
     </li>
+  )
+}
+
+/** When a reported round finished: its clock time today, else its day too. */
+function ReportTime({ time }: { time: SessionReportTime | null }) {
+  if (!time) return null
+  return (
+    <time
+      dateTime={time.iso}
+      title={time.title}
+      className="shrink-0 text-xs text-muted-foreground tabular-nums"
+    >
+      {time.label}
+    </time>
   )
 }
 
@@ -187,15 +209,19 @@ function ReportIcon({ state }: { state: ReportState }) {
 }
 
 /**
- * A reported session's title, which opens it while Kettu still holds it; quoted in a sentence, it
- * goes without the arrow.
+ * A reported session's title, which opens it while Kettu still holds it, at the reported round
+ * when the report names one; quoted in a sentence, it goes without the arrow.
  */
 function SessionLink({
   sender,
+  turn,
+  label,
   arrow = false,
   children,
 }: {
   sender: ReturnType<typeof useSender>
+  turn: ReportedTurn
+  label: string
   arrow?: boolean
   children?: ReactNode
 }) {
@@ -204,7 +230,9 @@ function SessionLink({
     <button
       type="button"
       className="rounded-sm font-medium text-foreground outline-none hover:underline focus-visible:underline"
-      onClick={() => openSession(sender.id, sender.projectPath)}
+      aria-label={label}
+      title={label}
+      onClick={() => openSessionReport(sender, turn)}
     >
       {children}
       {arrow && (

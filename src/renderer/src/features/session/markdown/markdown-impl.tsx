@@ -18,7 +18,6 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react'
-import { cjk } from '@streamdown/cjk'
 import type { CodeHighlighterPlugin, HighlightResult } from '@streamdown/code'
 import { createCodePlugin } from './code-plugin'
 import { Tick02Icon } from '@hugeicons/core-free-icons'
@@ -58,6 +57,7 @@ import { HAN } from '@renderer/lib/han'
 import { cn } from '@renderer/lib/utils'
 import { markdownHeight } from '@renderer/features/session/thread-items'
 import { Blockquote } from './alert'
+import { restoreIpv6Hrefs } from './bare-host-links'
 import { splitIntoChunks } from './chunks'
 import { codeThemeInput, useCodeThemes, type CodeThemes } from './code-themes'
 import { localImageTarget, pictureRun, spacedImages } from './local-images'
@@ -65,7 +65,7 @@ import { ArtifactLink } from './artifact-link'
 import { INCOMPLETE_LINK, localTarget, unopenedTarget } from './local-links'
 import { githubAlerts } from './github-alerts'
 import { bareReferenceNumber } from './github-refs'
-import { remarkPlugins } from './remark'
+import { cjkPlugin, remarkPlugins } from './remark'
 import { BlockCode } from './code-frame'
 import { MarkdownTable } from './markdown-table'
 import {
@@ -117,7 +117,7 @@ function createPlugins({ light, dark }: CodeThemes) {
     code: highlightClosed(
       createCodePlugin({ themes: [codeThemeInput(light), codeThemeInput(dark)] }),
     ),
-    cjk,
+    cjk: cjkPlugin,
   }
 }
 
@@ -350,9 +350,12 @@ const components: Components = {
   kbd: Key,
 }
 
-// The alerts are marked after the sanitizer, which would drop the mark.
+// Restore IPv6 host brackets before rehype-harden parses anchor URLs, and mark alerts after the
+// sanitizer, which would drop the mark.
 const rehypePlugins: NonNullable<StreamdownProps['rehypePlugins']> = [
-  ...Object.values(defaultRehypePlugins),
+  ...Object.entries(defaultRehypePlugins).flatMap(([name, plugin]) =>
+    name === 'harden' ? [restoreIpv6Hrefs, plugin] : [plugin],
+  ),
   githubAlerts,
 ]
 

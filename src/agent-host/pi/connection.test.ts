@@ -27,11 +27,13 @@ import {
 import type { HostedSpawnOptions } from '../driver'
 import { newTurnScope, type MapperEffect } from '../session-updates'
 import { dialogTimeout, PiConnection, promptMessage, turnError } from './connection'
+import { NAVIGATE_COMMAND, NAVIGATE_READY_STATUS, NAVIGATE_STATUS } from './extension'
 import stored from './fixtures/entries.json'
 import old from './fixtures/old-081.json'
 import failed from './fixtures/provider-error.json'
 import reply from './fixtures/reply.json'
 import { readJsonLines } from './jsonl'
+import type { PiEntry } from './protocol'
 import { folderName } from './session-files'
 
 type Command = Record<string, unknown> & { type: string; id?: string }
@@ -369,6 +371,20 @@ describe('starting a session', () => {
     ])
   })
 
+  it("keeps a session's file where the user's pi keeps it, whatever the folder's .pi says", async () => {
+    const { connection, spawned, cwd, agentDir } = await connect()
+    await mkdir(path.join(cwd, '.pi'), { recursive: true })
+    await writeFile(
+      path.join(cwd, '.pi', 'settings.json'),
+      JSON.stringify({ sessionDir: './transcripts' }),
+    )
+    await connection.newSession(cwd, {})
+    const { args } = spawned[0]!.options
+    expect(args[args.indexOf('--session-dir') + 1]).toBe(
+      path.join(agentDir, 'sessions', folderName(path.resolve(cwd))),
+    )
+  })
+
   it("runs the user's pi in RPC mode with Kettu's extension, and takes pi's id for it", async () => {
     const { connection, spawned, cwd } = await connect()
     const opened = await connection.newSession(cwd, { mcpServers: [KETTU] })
@@ -379,7 +395,8 @@ describe('starting a session', () => {
     expect(options.cwd).toBe(cwd)
     expect(options.args.slice(0, 4)).toEqual(['--mode', 'rpc', '--no-themes', '-e'])
     expect(options.args[4]).toMatch(/kettu-[0-9a-f]{12}\.mjs$/)
-    expect(options.args).toHaveLength(5)
+    expect(options.args.slice(5, 6)).toEqual(['--session-dir'])
+    expect(options.args).toHaveLength(7)
     // A token reaches pi in its environment alone, never on its command line.
     expect(options.args.join(' ')).not.toContain('session-token')
     expect(JSON.parse(options.env.KETTU_MCP_SERVERS!)).toMatchObject([
@@ -416,10 +433,30 @@ describe('starting a session', () => {
         pi.models = [...MODELS, { provider: 'deepseek', id: 'deepseek-v4', name: 'V4' }]
       },
     })
-    await connection.newSession(cwd)
+    const { config } = await connection.newSession(cwd)
     expect(providers.at(-1)).toEqual([
       { id: 'example', models: 2 },
       { id: 'deepseek', models: 1 },
+    ])
+    expect(config[0]?.choices).toEqual([
+      {
+        value: 'example/small-model',
+        name: 'example/Small',
+        modelId: 'small-model',
+        group: 'example',
+      },
+      {
+        value: 'example/big/model',
+        name: 'example/Big',
+        modelId: 'big/model',
+        group: 'example',
+      },
+      {
+        value: 'deepseek/deepseek-v4',
+        name: 'deepseek/V4',
+        modelId: 'deepseek-v4',
+        group: 'deepseek',
+      },
     ])
   })
 
@@ -466,7 +503,12 @@ describe('starting a session', () => {
     const init = await connection.initialize()
     expect(init.capabilities).toMatchObject({ mcpHttp: false, mcpStdio: false, steering: true })
     await connection.newSession(cwd, { mcpServers: [KETTU] })
-    expect(spawned[0]!.options.args).toEqual(['--mode', 'rpc', '--no-themes'])
+    expect(spawned[0]!.options.args.slice(0, 4)).toEqual([
+      '--mode',
+      'rpc',
+      '--no-themes',
+      '--session-dir',
+    ])
     expect(spawned[0]!.options.env.KETTU_MCP_SERVERS).toBeUndefined()
     const oldest = await connect({ version: '0.81.0' })
     expect((await oldest.connection.initialize()).capabilities.steering).toBe(false)
@@ -476,11 +518,18 @@ describe('starting a session', () => {
 describe('a turn', () => {
   it('shows the reply and resolves with its tokens once pi settled', async () => {
     const { connection, spawned, cwd } = await connect()
+    const init = await connection.initialize()
+    expect(init.capabilities.rewind).toBe(true)
+    expect(init.capabilities.rewindFiles).toBeUndefined()
     const { sessionId } = await connection.newSession(cwd)
     const seen = watch()
     connection.register(sessionId, seen.target)
     spawned[0]!.runs.push(reply)
-    const result = await connection.prompt(sessionId, text('Reply with exactly: pong'))
+    const refs: string[] = []
+    const result = await connection.prompt(sessionId, text('Reply with exactly: pong'), (ref) =>
+      refs.push(ref),
+    )
+    expect(refs).toEqual(['ts:1795102903349'])
     expect(result).toEqual({
       stopReason: 'end_turn',
       tokens: { total: 3216, input: 2956, output: 4, thought: 0, cacheRead: 256, cacheWrite: 0 },
@@ -826,6 +875,120 @@ describe('sessions pi keeps', () => {
     await expect(stat(copy)).rejects.toThrow()
     expect((await stat(source)).isFile()).toBe(true)
   })
+
+  it('rewinds before a middle user message with native fork, keeping the source file intact', async () => {
+    const setup = await connect({
+      script: (pi, index) => {
+        if (index !== 1) return
+        pi.handlers.get_entries = () => stored
+        pi.handlers.fork = (command) => {
+          pi.state = {
+            ...pi.state,
+            sessionId: 'pi-rewound',
+            sessionFile: path.join(setup.agentDir, 'sessions', 'x', 't_pi-rewound.jsonl'),
+          }
+          return { text: String(command.entryId), cancelled: false }
+        }
+        pi.handlers.set_session_name = () => undefined
+      },
+    })
+    const { connection, spawned, cwd } = setup
+    const source = await sessionFile(setup, 'pi-session-1')
+    await connection.resumeSession('pi-session-1', cwd)
+    await connection.closeSession('pi-session-1')
+
+    const rewoundFile = path.join(setup.agentDir, 'sessions', 'x', 't_pi-rewound.jsonl')
+    await mkdir(path.dirname(rewoundFile), { recursive: true })
+    await writeFile(
+      rewoundFile,
+      `${JSON.stringify({ type: 'session', version: 3, id: 'pi-rewound', cwd })}\n`,
+    )
+
+    const target = stored.entries.find((entry) =>
+      JSON.stringify(entry).includes('Read notes.txt with the read tool'),
+    )!
+    const cut = await connection.rewindSession(
+      'pi-session-1',
+      cwd,
+      { ref: `ts:${target.message!.timestamp}`, text: 'Read notes.txt', occurrence: 1 },
+      'Fix notes',
+    )
+    expect(cut).toEqual({ sessionId: 'pi-rewound' })
+    expect(spawned[1]!.options.args.slice(-2)).toEqual(['--session', source])
+    expect(spawned[1]!.sent('fork')[0]).toMatchObject({ entryId: target.id })
+    expect(spawned[1]!.sent('set_session_name')[0]).toMatchObject({ name: 'Fix notes' })
+    expect(spawned[1]!.exitCode).toBe(0)
+    // Source file stays untouched, and resuming the rewound session opens its new file.
+    expect((await stat(source)).isFile()).toBe(true)
+    await connection.resumeSession('pi-rewound', cwd)
+    expect(spawned[2]!.options.args.slice(-2)).toEqual(['--session', rewoundFile])
+  })
+
+  it('returns an empty session id without forking when rewinding the first user message', async () => {
+    const setup = await connect({
+      script: (pi) => {
+        pi.handlers.get_entries = () => stored
+      },
+    })
+    const { connection, spawned, cwd } = setup
+    await sessionFile(setup, 'pi-session-1')
+    const first = stored.entries.find((entry) =>
+      JSON.stringify(entry).includes('Reply with exactly: pong'),
+    )!
+    const cut = await connection.rewindSession(
+      'pi-session-1',
+      cwd,
+      { ref: first.id, text: 'Reply with exactly: pong', occurrence: 1 },
+      null,
+    )
+    expect(cut).toEqual({ sessionId: '' })
+    expect(spawned[0]!.sent('fork')).toEqual([])
+    expect(spawned[0]!.exitCode).toBe(0)
+  })
+
+  it('fails cleanly when the rewind target is missing or an extension cancels the fork', async () => {
+    const setup = await connect({
+      script: (pi, index) => {
+        pi.handlers.get_entries = () => stored
+        if (index === 1) {
+          pi.handlers.fork = () => ({ cancelled: true })
+        }
+      },
+    })
+    const { connection, spawned, cwd } = setup
+    await expect(
+      connection.rewindSession(
+        'missing-session',
+        cwd,
+        { ref: null, text: 'anything', occurrence: 1 },
+        null,
+      ),
+    ).rejects.toBeInstanceOf(AgentRequestError)
+
+    await sessionFile(setup, 'pi-session-1')
+    await expect(
+      connection.rewindSession(
+        'pi-session-1',
+        cwd,
+        { ref: 'not-in-branch', text: 'does not exist', occurrence: 1 },
+        null,
+      ),
+    ).rejects.toBeInstanceOf(AgentRequestError)
+    expect(spawned[0]!.exitCode).toBe(0)
+
+    const second = stored.entries.find((entry) =>
+      JSON.stringify(entry).includes('Read notes.txt with the read tool'),
+    )!
+    await expect(
+      connection.rewindSession(
+        'pi-session-1',
+        cwd,
+        { ref: second.id, text: 'Read notes.txt', occurrence: 1 },
+        null,
+      ),
+    ).rejects.toBeInstanceOf(AgentRequestError)
+    expect(spawned[1]!.exitCode).toBe(0)
+  })
 })
 
 describe("an extension's dialogs", () => {
@@ -960,5 +1123,548 @@ describe("Kettu's own commands for pi", () => {
       'agent',
       'agent',
     ])
+  })
+})
+
+describe('native session branches', () => {
+  function branchedEntries(): PiEntry[] {
+    return [
+      {
+        type: 'model_change',
+        id: 'm0',
+        parentId: null,
+        timestamp: '2026-11-20T10:00:00.000Z',
+      },
+      {
+        type: 'message',
+        id: 'u1',
+        parentId: 'm0',
+        timestamp: '2026-11-20T10:00:01.000Z',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'Shared start' }],
+          timestamp: 1795102901000,
+        },
+      },
+      {
+        type: 'message',
+        id: 'a1',
+        parentId: 'u1',
+        timestamp: '2026-11-20T10:00:02.000Z',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Shared reply' }],
+          timestamp: 1795102902000,
+          stopReason: 'stop',
+        },
+      },
+      {
+        type: 'message',
+        id: 'u2a',
+        parentId: 'a1',
+        timestamp: '2026-11-20T10:01:00.000Z',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'Branch A prompt' }],
+          timestamp: 1795102960000,
+        },
+      },
+      {
+        type: 'message',
+        id: 'a2a',
+        parentId: 'u2a',
+        timestamp: '2026-11-20T10:01:02.000Z',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Branch A reply' }],
+          timestamp: 1795102962000,
+          stopReason: 'stop',
+        },
+      },
+      {
+        type: 'message',
+        id: 'u2b',
+        parentId: 'a1',
+        timestamp: '2026-11-20T10:02:00.000Z',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'Branch B prompt' }],
+          timestamp: 1795103020000,
+        },
+      },
+      {
+        type: 'message',
+        id: 'a2b',
+        parentId: 'u2b',
+        timestamp: '2026-11-20T10:02:02.000Z',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Branch B reply' }],
+          timestamp: 1795103022000,
+          stopReason: 'stop',
+        },
+      },
+    ]
+  }
+
+  async function writeBranchedFile(
+    setup: Setup,
+    sessionId: string,
+    entries: readonly PiEntry[],
+  ): Promise<string> {
+    const dir = path.join(setup.agentDir, 'sessions', folderName(setup.cwd))
+    await mkdir(dir, { recursive: true })
+    const file = path.join(dir, `2026-11-20T10-00-00-000Z_${sessionId}.jsonl`)
+    const header = { type: 'session', version: 3, id: sessionId, cwd: setup.cwd }
+    const lines = [header, ...entries].map((item) => JSON.stringify(item))
+    await writeFile(file, `${lines.join('\n')}\n`)
+    return file
+  }
+
+  it('advertises branches capability and lists multi-branch Pi sessions both from disk and live RPC', async () => {
+    const entries = branchedEntries()
+    let activeLeaf: string | null = 'a2b'
+    const setup = await connect({
+      script: (pi) => {
+        pi.handlers.get_entries = () => ({ entries, leafId: activeLeaf })
+      },
+    })
+    const init = await setup.connection.initialize()
+    expect(init.capabilities.branches).toBe(true)
+
+    await writeBranchedFile(setup, 'pi-session-1', entries)
+    // Closed session: read straight from JSONL without spawning a Pi process.
+    const fromDisk = await setup.connection.listBranches('pi-session-1', setup.cwd)
+    expect(setup.spawned).toHaveLength(0)
+    expect(fromDisk.activeLeafId).toBe('a2b')
+    expect(fromDisk.branchCount).toBe(2)
+    expect(fromDisk.hasBranches).toBe(true)
+    expect(fromDisk.nodes.map((node) => node.id)).toEqual(['a1', 'a2a', 'a2b'])
+
+    // Respects a remembered preferred leaf when closed on disk.
+    const preferred = await setup.connection.listBranches('pi-session-1', setup.cwd, 'a2a')
+    expect(preferred.activeLeafId).toBe('a2a')
+    expect(preferred.nodes.find((node) => node.id === 'a2a')?.isCurrent).toBe(true)
+
+    // Live session: reads from RPC `get_entries`.
+    activeLeaf = 'a2a'
+    await setup.connection.resumeSession('pi-session-1', setup.cwd)
+    const fromLive = await setup.connection.listBranches('pi-session-1', setup.cwd)
+    expect(fromLive.activeLeafId).toBe('a2a')
+    expect(fromLive.nodes.find((node) => node.id === 'a2a')?.isCurrent).toBe(true)
+  })
+
+  it('switches branches via native navigate_tree RPC, replays the target path, and restores on reopen', async () => {
+    const entries = branchedEntries()
+    const leavesByProc: (string | null)[] = ['a2b', 'a2b']
+    const setup = await connect({
+      script: (pi, index) => {
+        pi.handlers.get_entries = () => ({ entries, leafId: leavesByProc[index] ?? 'a2b' })
+        pi.handlers.navigate_tree = (command) => {
+          leavesByProc[index] = String(command.targetId)
+          return { cancelled: false }
+        }
+      },
+    })
+    await writeBranchedFile(setup, 'pi-session-1', entries)
+    const seen = watch()
+    setup.connection.register('pi-session-1', seen.target)
+    await setup.connection.loadSession('pi-session-1', setup.cwd)
+    expect(
+      seen
+        .entries()
+        .filter((e) => e.kind === 'user')
+        .map((e) => (e.content[0]?.type === 'text' ? e.content[0].text : '')),
+    ).toEqual(['Shared start', 'Branch B prompt'])
+
+    let resetCount = 0
+    const switched = await setup.connection.switchBranch(
+      'pi-session-1',
+      setup.cwd,
+      'a2a',
+      {},
+      () => {
+        resetCount++
+        seen.target.apply({ patches: [{ op: 'thread.reset' }], effects: [] })
+      },
+    )
+    expect(resetCount).toBe(1)
+    expect(setup.spawned[0]!.sent('navigate_tree')).toEqual([
+      expect.objectContaining({ type: 'navigate_tree', targetId: 'a2a', summarize: false }),
+    ])
+    expect(switched.branches.activeLeafId).toBe('a2a')
+    expect(
+      seen
+        .entries()
+        .filter((e) => e.kind === 'user')
+        .map((e) => (e.content[0]?.type === 'text' ? e.content[0].text : '')),
+    ).toEqual(['Shared start', 'Branch A prompt'])
+
+    // Close and reopen: Pi reloads the JSONL tail ('a2b') by default, so Kettu navigates back to 'a2a'.
+    await setup.connection.closeSession('pi-session-1')
+    seen.target.apply({ patches: [{ op: 'thread.reset' }], effects: [] })
+    await setup.connection.loadSession('pi-session-1', setup.cwd, { branchLeafId: 'a2a' })
+    expect(setup.spawned[1]!.sent('navigate_tree')).toEqual([
+      expect.objectContaining({ type: 'navigate_tree', targetId: 'a2a', summarize: false }),
+    ])
+    expect(
+      seen
+        .entries()
+        .filter((e) => e.kind === 'user')
+        .map((e) => (e.content[0]?.type === 'text' ? e.content[0].text : '')),
+    ).toEqual(['Shared start', 'Branch A prompt'])
+  })
+
+  it('falls back to Kettu extension tree navigation when Pi lacks top-level navigate_tree RPC', async () => {
+    const entries = branchedEntries()
+    let activeLeaf: string | null = 'a2b'
+    const setup = await connect({
+      script: (pi) => {
+        pi.handlers.get_entries = () => ({ entries, leafId: activeLeaf })
+        pi.handlers.get_commands = () => ({
+          commands: [{ name: NAVIGATE_COMMAND, description: 'Internal', source: 'extension' }],
+        })
+        pi.handlers.prompt = (command) => {
+          const message = String(command.message ?? '')
+          if (message.startsWith(`/${NAVIGATE_COMMAND} `)) {
+            const payload = JSON.parse(message.slice(`/${NAVIGATE_COMMAND} `.length)) as {
+              reqId: string
+              targetId: string
+            }
+            activeLeaf = payload.targetId
+            pi.send({
+              type: 'extension_ui_request',
+              id: 'nav-status-1',
+              method: 'setStatus',
+              statusKey: NAVIGATE_STATUS,
+              statusText: JSON.stringify({ reqId: payload.reqId, ok: true, cancelled: false }),
+            })
+            return { disposition: 'handled' }
+          }
+          return { disposition: 'started' }
+        }
+      },
+    })
+    await writeBranchedFile(setup, 'pi-session-1', entries)
+    const seen = watch()
+    setup.connection.register('pi-session-1', seen.target)
+    await setup.connection.loadSession('pi-session-1', setup.cwd)
+    setup.spawned[0]!.send({
+      type: 'extension_ui_request',
+      id: 'ready-1',
+      method: 'setStatus',
+      statusKey: NAVIGATE_READY_STATUS,
+      statusText: '1',
+    })
+    await tick()
+
+    const switched = await setup.connection.switchBranch('pi-session-1', setup.cwd, 'a2a', {}, () =>
+      seen.target.apply({ patches: [{ op: 'thread.reset' }], effects: [] }),
+    )
+    expect(switched.branches.activeLeafId).toBe('a2a')
+    expect(activeLeaf).toBe('a2a')
+    expect(
+      seen
+        .entries()
+        .filter((e) => e.kind === 'user')
+        .map((e) => (e.content[0]?.type === 'text' ? e.content[0].text : '')),
+    ).toEqual(['Shared start', 'Branch A prompt'])
+  })
+
+  it('refuses switching when running, when node is missing, or when neither RPC nor extension supports it', async () => {
+    const entries = branchedEntries()
+    const setup = await connect({
+      script: (pi) => {
+        pi.handlers.get_entries = () => ({ entries, leafId: 'a2b' })
+        // Neither top-level navigate_tree nor extension command is registered.
+        pi.handlers.get_commands = () => ({ commands: [] })
+      },
+    })
+    await writeBranchedFile(setup, 'pi-session-1', entries)
+    await setup.connection.resumeSession('pi-session-1', setup.cwd)
+
+    // Missing target node rejects without touching the thread.
+    let resetCalled = false
+    await expect(
+      setup.connection.switchBranch('pi-session-1', setup.cwd, 'does-not-exist', {}, () => {
+        resetCalled = true
+      }),
+    ).rejects.toBeInstanceOf(AgentRequestError)
+    expect(resetCalled).toBe(false)
+
+    // Unsupported navigation fails safely without leaking an internal slash command as a prompt.
+    await expect(
+      setup.connection.switchBranch('pi-session-1', setup.cwd, 'a2a', {}, () => {
+        resetCalled = true
+      }),
+    ).rejects.toBeInstanceOf(AgentRequestError)
+    expect(resetCalled).toBe(false)
+    expect(setup.spawned[0]!.sent('prompt')).toEqual([])
+
+    // Switching while a turn is running is rejected immediately.
+    const pi = setup.spawned[0]!
+    pi.handlers.navigate_tree = () => ({ cancelled: false })
+    const turnPromise = setup.connection.prompt('pi-session-1', text('still working'))
+    await tick()
+    await expect(
+      setup.connection.switchBranch('pi-session-1', setup.cwd, 'a2a'),
+    ).rejects.toBeInstanceOf(AgentRequestError)
+    pi.send({ type: 'agent_settled', aborted: false })
+    await turnPromise
+  })
+
+  it('rewinds cleanly on a switched non-tail branch for #2698 Edit from here', async () => {
+    const entries = branchedEntries()
+    let forkedEntryId: string | null = null
+    const setup = await connect({
+      script: (pi, index) => {
+        pi.handlers.get_entries = () => ({ entries, leafId: index === 0 ? 'a2a' : 'a2b' })
+        pi.handlers.navigate_tree = () => ({ cancelled: false })
+        pi.handlers.fork = (command) => {
+          forkedEntryId = String(command.entryId)
+          pi.state = {
+            ...pi.state,
+            sessionId: 'pi-rewound-a',
+            sessionFile: path.join(setup.agentDir, 'sessions', 'x', 't_pi-rewound-a.jsonl'),
+          }
+          return { text: '', cancelled: false }
+        }
+      },
+    })
+    await writeBranchedFile(setup, 'pi-session-1', entries)
+    await setup.connection.resumeSession('pi-session-1', setup.cwd)
+    await setup.connection.switchBranch('pi-session-1', setup.cwd, 'a2a')
+
+    // Even though the disposable rewind process opens with default leaf 'a2b', PiConnection uses
+    // the remembered active leaf 'a2a' so editing Branch A's prompt locates 'u2a' cleanly.
+    const rewound = await setup.connection.rewindSession(
+      'pi-session-1',
+      setup.cwd,
+      { ref: 'u2a', text: 'Branch A prompt', occurrence: 1 },
+      null,
+    )
+    expect(rewound).toEqual({ sessionId: 'pi-rewound-a' })
+    expect(forkedEntryId).toBe('u2a')
+  })
+})
+
+describe('extension status and widgets (#1837)', () => {
+  it('syncs fire-and-forget setStatus and setWidget updates, strips ANSI, ignores internal keys, and clears on empty', async () => {
+    const { connection, spawned, cwd } = await connect({
+      script: (pi) => {
+        // Extensions may publish status/widget during session_start before register() runs.
+        pi.send(
+          {
+            type: 'extension_ui_request',
+            id: 'kettu-scope',
+            method: 'setStatus',
+            statusKey: 'kettu.model-scope',
+            statusText: JSON.stringify({ models: ['example/small-model'] }),
+          },
+          {
+            type: 'extension_ui_request',
+            id: 'kettu-nav',
+            method: 'setStatus',
+            statusKey: NAVIGATE_READY_STATUS,
+            statusText: '1',
+          },
+          {
+            type: 'extension_ui_request',
+            id: 's-init',
+            method: 'setStatus',
+            statusKey: 'git',
+            statusText: '\x1b[32mmain\x1b[0m',
+          },
+          {
+            type: 'extension_ui_request',
+            id: 'w-init',
+            method: 'setWidget',
+            widgetKey: 'tasks',
+            widgetLines: ['\x1b[1mTasks\x1b[0m', '1/3 done'],
+            widgetPlacement: 'aboveEditor',
+          },
+        )
+      },
+    })
+    const { sessionId } = await connection.newSession(cwd)
+    const seen = watch()
+    connection.register(sessionId, seen.target)
+
+    // Startup status & widget arrive on register(), without internal kettu.* statuses.
+    expect(seen.thread().session.extensionUi).toEqual({
+      statuses: [{ key: 'git', text: 'main' }],
+      widgets: [{ key: 'tasks', lines: ['Tasks', '1/3 done'], placement: 'aboveEditor' }],
+    })
+
+    const pi = spawned[0]!
+    // Live updates, in-place replacement, belowEditor placement, and unsupported TUI hooks.
+    pi.send(
+      {
+        type: 'extension_ui_request',
+        id: 's-update',
+        method: 'setStatus',
+        statusKey: 'git',
+        statusText: 'feat/1837',
+      },
+      {
+        type: 'extension_ui_request',
+        id: 'w-below',
+        method: 'setWidget',
+        widgetKey: 'footer-note',
+        widgetLines: ['Watch mode active'],
+        widgetPlacement: 'belowEditor',
+      },
+      {
+        type: 'extension_ui_request',
+        id: 'title-1',
+        method: 'setTitle',
+        title: 'Ignored title',
+      },
+      {
+        type: 'extension_ui_request',
+        id: 'custom-1',
+        method: 'custom',
+      },
+    )
+    await tick()
+
+    expect(seen.thread().session.extensionUi).toEqual({
+      statuses: [{ key: 'git', text: 'feat/1837' }],
+      widgets: [
+        { key: 'tasks', lines: ['Tasks', '1/3 done'], placement: 'aboveEditor' },
+        { key: 'footer-note', lines: ['Watch mode active'], placement: 'belowEditor' },
+      ],
+    })
+    // Fire-and-forget: never send extension_ui_response, and keep transcript empty.
+    expect(pi.sent('extension_ui_response')).toEqual([])
+    expect(seen.entries()).toEqual([])
+
+    // Clearing all keys sets extensionUi back to null.
+    pi.send(
+      {
+        type: 'extension_ui_request',
+        id: 's-clear',
+        method: 'setStatus',
+        statusKey: 'git',
+        statusText: undefined,
+      },
+      {
+        type: 'extension_ui_request',
+        id: 'w-clear-1',
+        method: 'setWidget',
+        widgetKey: 'tasks',
+        widgetLines: undefined,
+      },
+      {
+        type: 'extension_ui_request',
+        id: 'w-clear-2',
+        method: 'setWidget',
+        widgetKey: 'footer-note',
+        widgetLines: [],
+      },
+    )
+    await tick()
+
+    expect(seen.thread().session.extensionUi).toBeNull()
+    expect(pi.sent('extension_ui_response')).toEqual([])
+  })
+
+  it('isolates extension UI across concurrent Pi sessions and clears on process exit or close', async () => {
+    const { connection, spawned, cwd } = await connect({
+      script: (pi, index) => {
+        pi.state = { ...pi.state, sessionId: `pi-session-${index + 1}` }
+      },
+    })
+    const first = await connection.newSession(cwd)
+    const second = await connection.newSession(cwd)
+    const seenA = watch()
+    const seenB = watch()
+    connection.register(first.sessionId, seenA.target)
+    connection.register(second.sessionId, seenB.target)
+
+    const piA = spawned[0]!
+    const piB = spawned[1]!
+
+    piA.send({
+      type: 'extension_ui_request',
+      id: 'a1',
+      method: 'setStatus',
+      statusKey: 'lint',
+      statusText: 'Session A: ok',
+    })
+    piB.send({
+      type: 'extension_ui_request',
+      id: 'b1',
+      method: 'setWidget',
+      widgetKey: 'summary',
+      widgetLines: ['Session B only'],
+    })
+    await tick()
+
+    expect(seenA.thread().session.extensionUi).toEqual({
+      statuses: [{ key: 'lint', text: 'Session A: ok' }],
+      widgets: [],
+    })
+    expect(seenB.thread().session.extensionUi).toEqual({
+      statuses: [],
+      widgets: [{ key: 'summary', lines: ['Session B only'], placement: 'aboveEditor' }],
+    })
+
+    // Unexpected exit of session A clears only A; B stays untouched.
+    piA.exit(1)
+    await tick()
+    expect(seenA.thread().session.extensionUi).toBeNull()
+    expect(seenB.thread().session.extensionUi).toEqual({
+      statuses: [],
+      widgets: [{ key: 'summary', lines: ['Session B only'], placement: 'aboveEditor' }],
+    })
+
+    // Closing session B clears B's live extension UI.
+    await connection.closeSession(second.sessionId)
+    expect(seenB.thread().session.extensionUi).toBeNull()
+  })
+
+  it('keeps hidden sessions silent and resyncs extension UI on target re-registration', async () => {
+    const { connection, spawned, cwd } = await connect({
+      script: (pi, index) => {
+        pi.state = { ...pi.state, sessionId: `pi-s-${index + 1}` }
+      },
+    })
+    const visible = await connection.newSession(cwd)
+    const hidden = await connection.newSession(cwd, { hidden: 'side' })
+    const seenVisible = watch()
+    const seenHidden = watch()
+    connection.register(visible.sessionId, seenVisible.target)
+    connection.register(hidden.sessionId, seenHidden.target)
+
+    spawned[0]!.send({
+      type: 'extension_ui_request',
+      id: 'v1',
+      method: 'setStatus',
+      statusKey: 'mode',
+      statusText: 'Watch',
+    })
+    spawned[1]!.send({
+      type: 'extension_ui_request',
+      id: 'h1',
+      method: 'setStatus',
+      statusKey: 'mode',
+      statusText: 'Should not show',
+    })
+    await tick()
+
+    expect(seenVisible.thread().session.extensionUi).toEqual({
+      statuses: [{ key: 'mode', text: 'Watch' }],
+      widgets: [],
+    })
+    expect(seenHidden.thread().session.extensionUi).toBeUndefined()
+
+    // A fresh target registering for the same live session receives current extensionUi immediately.
+    const reconnected = watch()
+    connection.register(visible.sessionId, reconnected.target)
+    expect(reconnected.thread().session.extensionUi).toEqual({
+      statuses: [{ key: 'mode', text: 'Watch' }],
+      widgets: [],
+    })
   })
 })

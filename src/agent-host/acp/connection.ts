@@ -7,6 +7,7 @@
 // response's `usage`, and `session/fork` with its fork point in `_meta`); nothing else
 // unstable is advertised or called.
 
+import os from 'node:os'
 import { Readable, Writable } from 'node:stream'
 import {
   client,
@@ -17,6 +18,7 @@ import {
   type AgentApp,
   type AnyMessage,
   type AuthMethod,
+  type AvailableCommand,
   type ClientConnection,
   type ContentBlock,
   type CreateElicitationRequest,
@@ -28,7 +30,7 @@ import {
   type Stream,
   type ToolCallUpdate,
 } from '@agentclientprotocol/sdk/unstable'
-import type { ContextEstimates } from '@shared/context'
+import type { ContextBreakdown, ContextEstimates } from '@shared/context'
 import type { Platform } from '@shared/platform'
 import type {
   AgentId,
@@ -78,6 +80,7 @@ import { compareVersions } from '../versions'
 import {
   ANTIGRAVITY_TIER_VERSION,
   antigravityTier,
+  antigravityTierMultiple,
   antigravityTierSignIn,
 } from '../vendor-usage/antigravity'
 import {
@@ -86,6 +89,7 @@ import {
   chunkTokens,
   gooseCallUsage,
   mapAuthStatus,
+  mapCommands,
   mapReportedAuthStatus,
   mapConfig,
   mapModelUsage,
@@ -125,8 +129,9 @@ import {
   buildSessionGrantOption,
   evaluateAgyPermission,
 } from './agy-auto-policy'
+import { AgyBackgroundWait, agyTailReader, type AgyTailReader } from './agy-background-wait'
 import { AgyCommands } from './agy-commands'
-import { AgyContextEstimator } from './agy-context'
+import { AgyContextEstimator, readAgyContextBreakdown, scanAgySkillsOnDisk } from './agy-context'
 import { AgyMetrics, agyStepReader, type AgyStepReader } from './agy-metrics'
 import { systemPromptMeta, takesSystemPromptAppend } from './agy-prompt'
 import { AGY_ELICITATION, askInCard, asksQuestions, OpenAsks } from './agy-questions'
@@ -138,9 +143,18 @@ import {
   PARENT_SESSION_META,
   type AgyStore,
 } from './agy-subagents'
+import {
+  AGY_APP_DATA_DIR_FLAG,
+  DEFAULT_AGY_APP_DATA_DIR,
+  isSafeAgyAppDataDir,
+  offersSessionArg,
+  resolveAgyAppDataDir,
+  SESSION_ARGS_META,
+} from './agy-store'
 import { PromptChain, steersAgy, type ChainAnswer } from './agy-steering'
 import {
   agyAutoAllowed,
+  agyPlanUpdate,
   agyQuestion,
   agySummary,
   fromAgy,
@@ -233,6 +247,16 @@ export interface AcpOptions {
   agyStepReader?: AgyStepReader
   /** agy 上下文定义估算器，便于单元测试注入。 */
   agyContext?: AgyContextEstimator
+  /** Optional agy transcript tail reader for background-wait detection, injectable for tests. */
+  agyTailReader?: AgyTailReader | null
+  /** Optional settle delay (ms) for agy background-wait detection, injectable for tests. */
+  agyWaitSettleMs?: number
+  /** Optional fallback quiet delay (ms) for agy background-wait detection, injectable for tests. */
+  agyWaitFallbackMs?: number
+  /** Optional transcript-flush retry delays (ms) for agy background-wait detection, injectable for tests. */
+  agyWaitRetryDelaysMs?: readonly number[]
+  /** Optional resolver for which agy `app_data_dir` owns a session, injectable for tests. */
+  agyAppDataDir?: (sessionId: string) => Promise<string | null>
 }
 
 export type AcpHooks = ConnectionHooks & AcpOptions
@@ -488,6 +512,14 @@ export class AcpConnection implements AgentConnection {
   private readonly agyBuildModes = new Map<string, string>()
   /** agy offers full access, once `initialize` has answered. */
   private fullAccess = false
+
+  offersFullAccess(): boolean {
+    return this.fullAccess
+  }
+  /** The session router accepts per-session `--app-data-dir` routing, once `initialize` answered. */
+  private agyAppDataDirRouting = false
+  /** Resolved `app_data_dir` for loaded/resumed agy sessions (e.g. `'antigravity'` for IDE). */
+  private readonly agyAppDataDirs = new Map<string, string>()
   /** agy takes a system prompt addition for a new session, once `initialize` has answered. */
   private appendsSystemPrompt = false
   /** Huli: the agent takes ACP's `additionalDirectories`, once `initialize` has answered. */
@@ -500,6 +532,8 @@ export class AcpConnection implements AgentConnection {
   private readonly agyAccess = new Map<string, AgyAccess>()
   /** Pages a session's elicitation opened, by its id, until the agent says they are done. */
   private readonly openPages = new Map<string, { sessionId: string; entryId: string }>()
+  /** Per-session serialization tail for config mutations and agy access restarts. */
+  private readonly configQueues = new Map<string, Promise<void>>()
   /** agy 根会话（及其子智能体共享）的「本会话总是允许」授权记忆。 */
   private readonly agySessionGrants = new Map<string, AgySessionGrants>()
   /** agy 用户 settings.json 中 permissions.ask 规则缓存（按文件 mtime 自动刷新）。 */
@@ -512,12 +546,24 @@ export class AcpConnection implements AgentConnection {
   private subagents: AgySubagents | null = null
   /** Where each agy session was opened and with which servers, which its sub-agents load with. */
   private readonly agyOpened = new Map<string, { cwd: string; options: SessionOptions }>()
+  /** Skill names discovered on disk for each agy working directory, to tag skills as stackable. */
+  private readonly agySkillNames = new Map<string, ReadonlySet<string>>()
+  /** Latest raw commands received per agy session, re-mapped once disk skill scan finishes. */
+  private readonly agyRawCommands = new Map<string, readonly AvailableCommand[]>()
   /** The session each of agy's sub-agents was loaded under. */
   private readonly subagentParents = new Map<string, string>()
   /** Sub-agents opened again whose replay Kettu already shows. */
   private readonly muted = new Set<string>()
   /** agy 会话的单步请求计时器，结合 transcript.jsonl 输出 TPS 与最近一次请求统计。 */
   private readonly agyMetrics: AgyMetrics | null = null
+  /** Detects when agy finished replying and is idle waiting on background work. */
+  private agyWait: AgyBackgroundWait | null = null
+  /** 仅在 Antigravity 连接上挂载：从本地轨迹库只读获取官方精确上下文分类构成。 */
+  readonly readContext?: (
+    sessionId: string,
+    cwd: string,
+    options: SessionOptions,
+  ) => Promise<ContextBreakdown | null>
   /** 仅在 Antigravity 连接上挂载：估算当前会话可加载的 Skills 与 MCP 工具定义大小。 */
   readonly readContextEstimates?: (sessionId: string, cwd: string) => Promise<ContextEstimates>
 
@@ -559,6 +605,7 @@ export class AcpConnection implements AgentConnection {
             sessionGrants: agyGrants,
             userAskRules,
             agentHome: this.hooks.home,
+            agyAppDataDir: this.agyAppDataDirs.get(rootId),
           })
           if (agyDecision.action === 'allow' && allowOnceId !== null) {
             // 遵守 PLUG-7：即便命中自动放行，也必须先经过已安装插件的权限预检（插件可拒绝、不能批准）。
@@ -610,21 +657,27 @@ export class AcpConnection implements AgentConnection {
           if (insertAt >= 0) options.splice(insertAt + 1, 0, sessionOption)
           else options.unshift(sessionOption)
         }
-        const answer = await target.requestPermission(
-          {
-            toolCallId: ctx.params.toolCall.toolCallId,
-            toolEntryId: entryId,
-            output,
-            options,
-            ...(agyDecision?.action === 'ask'
-              ? {
-                  risk: agyDecision.risk,
-                  ...(agyDecision.reason ? { reason: agyDecision.reason } : {}),
-                }
-              : {}),
-          },
-          ctx.signal,
-        )
+        this.agyWait?.onCardStart(ctx.params.sessionId)
+        let answer: PermissionAnswer
+        try {
+          answer = await target.requestPermission(
+            {
+              toolCallId: ctx.params.toolCall.toolCallId,
+              toolEntryId: entryId,
+              output,
+              options,
+              ...(agyDecision?.action === 'ask'
+                ? {
+                    risk: agyDecision.risk,
+                    ...(agyDecision.reason ? { reason: agyDecision.reason } : {}),
+                  }
+                : {}),
+            },
+            ctx.signal,
+          )
+        } finally {
+          this.agyWait?.onCardEnd(ctx.params.sessionId)
+        }
         const picked = optionAnswer(answer)
         if (picked === 'cancelled') return { outcome: { outcome: 'cancelled' } }
         // 用户点击 Kettu 合成的「本会话总是允许」时记住授权，并把原 allow_once ID 回传给 agy。
@@ -644,11 +697,16 @@ export class AcpConnection implements AgentConnection {
         const sessionId = (ctx.params as { sessionId?: unknown }).sessionId
         // agy's questions are shown in the question card, in the session they were asked in.
         const asked = typeof sessionId === 'string' ? this.targets.get(sessionId) : undefined
-        if (this.agy && asksQuestions(this.version) && asked) {
-          const answer = await this.openAsks.run(ctx.params, ctx.signal, (signal) =>
-            askInCard(ctx.params, asked, signal),
-          )
-          if (answer) return answer
+        if (this.agy && asksQuestions(this.version) && asked && typeof sessionId === 'string') {
+          this.agyWait?.onCardStart(sessionId)
+          try {
+            const answer = await this.openAsks.run(ctx.params, ctx.signal, (signal) =>
+              askInCard(ctx.params, asked, signal),
+            )
+            if (answer) return answer
+          } finally {
+            this.agyWait?.onCardEnd(sessionId)
+          }
         }
         // A sign-in's page opens on the client that asked for that sign-in.
         const page = requestUrlElicitation(ctx.params)
@@ -716,9 +774,12 @@ export class AcpConnection implements AgentConnection {
       })
     this.connection = app.connect(this.tap(transport.stream))
     if (this.agy) {
-      this.agyMetrics = new AgyMetrics(hooks.agyStepReader ?? agyStepReader(hooks.home), {
-        target: (id) => this.targets.get(id),
-      })
+      this.agyMetrics = new AgyMetrics(
+        hooks.agyStepReader ?? agyStepReader(hooks.home, (id) => this.agyAppDataDirOf(id)),
+        {
+          target: (id) => this.targets.get(id),
+        },
+      )
       // agy's print mode takes no `--gemini-dir`, so an added agent's runs with its folder as home.
       const platform = process.platform as Platform
       const estimator =
@@ -730,6 +791,15 @@ export class AcpConnection implements AgentConnection {
           platform,
           ...(hooks.home ? { home: hooks.home } : {}),
         })
+      this.readContext = async (sessionId) => {
+        const appDataDir =
+          this.agyAppDataDirOf(sessionId) ??
+          (this.hooks.agyAppDataDir
+            ? await this.hooks.agyAppDataDir(sessionId)
+            : await resolveAgyAppDataDir(sessionId, hooks.home)) ??
+          DEFAULT_AGY_APP_DATA_DIR
+        return readAgyContextBreakdown(sessionId, hooks.home, appDataDir)
+      }
       this.readContextEstimates = (sessionId, cwd) => {
         const opened = this.agyOpened.get(sessionId)
         return estimator.read(cwd, opened?.options.mcpServers ?? [])
@@ -914,11 +984,21 @@ export class AcpConnection implements AgentConnection {
     return this.hooks.agentId === 'goose'
   }
 
-  private map(update: SessionUpdate, ctx: MapperContext): MapperOutput {
+  private map(sessionId: string, update: SessionUpdate, ctx: MapperContext): MapperOutput {
     if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') {
+      if (this.agy && update.sessionUpdate === 'available_commands_update') {
+        this.agyRawCommands.set(sessionId, update.availableCommands)
+        const cwd = this.agyOpened.get(this.agyRootOf(sessionId))?.cwd
+        return mapSessionUpdate(update, ctx, cwd ? this.agySkillNames.get(cwd) : undefined)
+      }
       return mapSessionUpdate(update, ctx)
     }
     if (this.agy && onAgyOwnFiles(update, ctx)) return { patches: [], effects: [] }
+    if (this.agy) {
+      const plan = agyPlanUpdate(update, ctx)
+      if (plan === 'suppress') return { patches: [], effects: [] }
+      if (plan !== null) return mapSessionUpdate({ sessionUpdate: 'plan', ...plan }, ctx)
+    }
     const shaped = this.agy
       ? fromAgy(throughGateway(update))
       : this.naming === 'code'
@@ -955,7 +1035,8 @@ export class AcpConnection implements AgentConnection {
     if (target) {
       this.notePlanWrite(sessionId, update)
       const replaying = target.context().replaying
-      target.apply(this.withAccess(sessionId, this.map(update, target.context())))
+      this.agyWait?.onUpdate(sessionId, update, replaying)
+      target.apply(this.withAccess(sessionId, this.map(sessionId, update, target.context())))
       this.noteCommand(sessionId, update, target)
       this.subagents?.noted(sessionId, update, replaying)
       this.agyMetrics?.onUpdate(sessionId, update, replaying)
@@ -1042,7 +1123,7 @@ export class AcpConnection implements AgentConnection {
     if (!early) return
     this.pending.delete(sessionId)
     for (const update of early.updates) {
-      target.apply(this.withAccess(sessionId, this.map(update, target.context())))
+      target.apply(this.withAccess(sessionId, this.map(sessionId, update, target.context())))
     }
   }
 
@@ -1052,8 +1133,10 @@ export class AcpConnection implements AgentConnection {
     this.pending.delete(sessionId)
     this.agyPlans.delete(sessionId)
     this.agyBuildModes.delete(sessionId)
+    this.agyCommands.get(sessionId)?.dispose()
     this.agyCommands.delete(sessionId)
     this.agyMetrics?.forget(sessionId)
+    this.agyWait?.forget(sessionId)
     this.unregistered.add(sessionId)
     if (this.unregistered.size > CLOSED_SESSIONS) {
       this.unregistered.delete(this.unregistered.values().next().value!)
@@ -1078,7 +1161,11 @@ export class AcpConnection implements AgentConnection {
   }
 
   close(): void {
+    this.configQueues.clear()
+    for (const commands of this.agyCommands.values()) commands.dispose()
+    this.agyCommands.clear()
     this.agyMetrics?.stop()
+    this.agyWait?.stop()
     this.connection.close()
     this.transport.close()
   }
@@ -1183,6 +1270,7 @@ export class AcpConnection implements AgentConnection {
     }
     this.version = result.version
     this.fullAccess = this.agy && offersFullAccess(result.version, init._meta)
+    this.agyAppDataDirRouting = this.agy && offersSessionArg(init._meta, AGY_APP_DATA_DIR_FLAG)
     this.appendsSystemPrompt = this.agy && takesSystemPromptAppend(result.version, caps)
     this.takesDirectories = session.additionalDirectories != null
     this.routesDirectories =
@@ -1196,17 +1284,69 @@ export class AcpConnection implements AgentConnection {
     this.subagents?.stop()
     this.subagents =
       this.agy && followsSubagents(result.version)
-        ? new AgySubagents(this.hooks.agyStore ?? agyStore(agyStoreFile(this.hooks.home)), {
-            target: (id) => this.targets.get(id),
-            prompting: (id) => this.prompting.has(id),
-            load: (childId, parentId, quiet) => this.loadSubagent(childId, parentId, quiet),
-            settled: (id) => void this.switchPending(id),
-            log: (level, message) => this.hooks.log(level, message),
-          })
+        ? new AgySubagents(
+            this.hooks.agyStore ??
+              agyStore(agyStoreFile(this.hooks.home), (parentId) => {
+                const dir = this.agyAppDataDirOf(parentId)
+                return dir ? agyStoreFile(this.hooks.home, dir) : undefined
+              }),
+            {
+              target: (id) => this.targets.get(id),
+              prompting: (id) => this.prompting.has(id),
+              load: (childId, parentId, quiet) => this.loadSubagent(childId, parentId, quiet),
+              settled: (id) => void this.switchPending(id),
+              childEnded: (parentId, childId) => {
+                const commands = this.agyCommands.get(parentId)
+                const target = this.targets.get(parentId)
+                if (commands && target && commands.onSenderEvent(childId, Date.now())) {
+                  this.showCommands(target, commands)
+                }
+              },
+              log: (level, message) => this.hooks.log(level, message),
+            },
+          )
         : null
     if (this.subagents) {
       const subagents = this.subagents
       void this.connection.closed.then(() => subagents.stop())
+    }
+    this.agyWait?.stop()
+    this.agyWait =
+      this.agy && steersAgy(result.version)
+        ? new AgyBackgroundWait({
+            tailReader:
+              this.hooks.agyTailReader !== undefined
+                ? this.hooks.agyTailReader
+                : agyTailReader(this.hooks.home, (id) => this.agyAppDataDirOf(id)),
+            hasActiveBackground: (sessionId) =>
+              this.agyCommands.get(sessionId)?.hasActiveBackground === true ||
+              this.subagents?.running(sessionId) === true,
+            settleMs: this.hooks.agyWaitSettleMs,
+            fallbackMs: this.hooks.agyWaitFallbackMs,
+            retryDelaysMs: this.hooks.agyWaitRetryDelaysMs,
+            onWaitingChange: (sessionId, waiting, reason) => {
+              const target = this.targets.get(sessionId)
+              if (!target) return
+              const commands = this.agyCommands.get(sessionId)
+              if (commands) {
+                const now = Date.now()
+                const changed = waiting
+                  ? commands.setWaiting(true, now)
+                  : reason === 'activity'
+                    ? commands.onWakeup(now) || commands.setWaiting(false, now)
+                    : commands.setWaiting(false, now)
+                if (changed) this.showCommands(target, commands)
+              }
+              target.apply({
+                patches: [],
+                effects: [{ kind: 'waitingBackground', waiting }],
+              })
+            },
+          })
+        : null
+    if (this.agyWait) {
+      const wait = this.agyWait
+      void this.connection.closed.then(() => wait.stop())
     }
     return result
   }
@@ -1301,6 +1441,59 @@ export class AcpConnection implements AgentConnection {
     return this.foldered.has(sessionId)
   }
 
+  /** Resolved `app_data_dir` for a session (or its root parent for agy sub-agents), if non-default. */
+  private agyAppDataDirOf(sessionId: string): string | undefined {
+    return this.agyAppDataDirs.get(this.agyRootOf(sessionId))
+  }
+
+  /**
+   * Resolves which `app_data_dir` owns an existing agy session and returns router `_meta` for
+   * non-default stores (such as `'antigravity'` for imported IDE sessions). Never called for
+   * `session/new`, which must stay in the default `'antigravity-cli'` store.
+   */
+  private async agySessionArgsMeta(
+    sessionId: string,
+    useCached = false,
+  ): Promise<Record<string, unknown> | undefined> {
+    if (!this.agy) return undefined
+    let dir: string | null | undefined = useCached ? this.agyAppDataDirs.get(sessionId) : undefined
+    if (dir === undefined) {
+      try {
+        dir = this.hooks.agyAppDataDir
+          ? await this.hooks.agyAppDataDir(sessionId)
+          : await resolveAgyAppDataDir(sessionId, this.hooks.home)
+      } catch (error) {
+        this.hooks.log(
+          'warn',
+          `Could not resolve agy app_data_dir for ${sessionId}: ${(error as Error).message}`,
+        )
+        dir = null
+      }
+      if (dir !== null && isSafeAgyAppDataDir(dir)) this.agyAppDataDirs.set(sessionId, dir)
+      else this.agyAppDataDirs.delete(sessionId)
+    }
+    if (
+      !this.agyAppDataDirRouting ||
+      !dir ||
+      dir === DEFAULT_AGY_APP_DATA_DIR ||
+      !isSafeAgyAppDataDir(dir)
+    ) {
+      return undefined
+    }
+    return { [SESSION_ARGS_META]: { [AGY_APP_DATA_DIR_FLAG]: dir } }
+  }
+
+  private mergeMeta(
+    ...parts: readonly (Record<string, unknown> | undefined)[]
+  ): Record<string, unknown> | undefined {
+    let out: Record<string, unknown> | undefined
+    for (const part of parts) {
+      if (!part) continue
+      out = out ? { ...out, ...part } : { ...part }
+    }
+    return out && Object.keys(out).length > 0 ? out : undefined
+  }
+
   async newSession(cwd: string, options: SessionOptions = {}): Promise<OpenedSession> {
     const started = this.meta(options)
     const meta =
@@ -1355,7 +1548,7 @@ export class AcpConnection implements AgentConnection {
     cwd: string,
     options: SessionOptions = {},
   ): Promise<SessionSetup> {
-    const meta = this.meta(options)
+    const meta = this.mergeMeta(this.meta(options), await this.agySessionArgsMeta(sessionId))
     // The replay shows its sub-agents again, below.
     this.subagents?.forget(sessionId)
     const response = await this.call(() =>
@@ -1387,7 +1580,7 @@ export class AcpConnection implements AgentConnection {
     cwd: string,
     options: SessionOptions = {},
   ): Promise<SessionSetup> {
-    const meta = this.meta(options)
+    const meta = this.mergeMeta(this.meta(options), await this.agySessionArgsMeta(sessionId))
     const open = (flagged: boolean) => {
       const sent = flagged ? { ...meta, [SESSION_FLAG_META]: true } : meta
       return this.call(() =>
@@ -1428,9 +1621,28 @@ export class AcpConnection implements AgentConnection {
     }
   }
 
-  /** 记录每个 agy 会话打开时的目录与 MCP 服务器，供子代理加载和上下文估算复用。 */
+  /** Records the cwd and MCP servers for each agy session and discovers disk skills for tagging. */
   private openedAgy(sessionId: string, cwd: string, options: SessionOptions): void {
-    if (this.agy) this.agyOpened.set(sessionId, { cwd, options })
+    if (!this.agy) return
+    this.agyOpened.set(sessionId, { cwd, options })
+    if (this.agySkillNames.has(cwd)) return
+    const home = this.hooks.home ?? os.homedir()
+    void scanAgySkillsOnDisk(cwd, home)
+      .then((entries) => {
+        const names = new Set(entries.map((entry) => entry.name))
+        this.agySkillNames.set(cwd, names)
+        if (names.size === 0 || this.isClosed) return
+        for (const [id, raw] of this.agyRawCommands) {
+          if (this.agyOpened.get(this.agyRootOf(id))?.cwd !== cwd) continue
+          const target = this.targets.get(id)
+          if (!target) continue
+          target.apply({
+            patches: [{ op: 'session.update', changes: { commands: mapCommands(raw, names) } }],
+            effects: [],
+          })
+        }
+      })
+      .catch(() => {})
   }
 
   /**
@@ -1478,21 +1690,27 @@ export class AcpConnection implements AgentConnection {
   private forgetSession(sessionId: string): void {
     this.autoAllowed.delete(sessionId)
     this.agyAccess.delete(sessionId)
+    this.configQueues.delete(sessionId)
+    this.agyAppDataDirs.delete(sessionId)
     this.agySessionGrants.delete(sessionId)
+    this.agyCommands.get(sessionId)?.dispose()
     this.agyCommands.delete(sessionId)
     this.agyOpened.delete(sessionId)
+    this.agyRawCommands.delete(sessionId)
     this.subagentParents.delete(sessionId)
     this.subagents?.forget(sessionId)
     this.foldered.delete(sessionId)
     this.agyMetrics?.forget(sessionId)
+    this.agyWait?.forget(sessionId)
     this.chunkUsage.delete(sessionId)
     this.gooseCalls.delete(sessionId)
   }
 
   async listSessions(
-    cwd: string,
+    cwd: string | null,
     cursor: string | null,
   ): Promise<{ sessions: ListedSession[]; nextCursor: string | null }> {
+    if (cwd === null) return { sessions: [], nextCursor: null }
     const response = await this.call(() =>
       this.connection.agent.request(methods.agent.session.list, {
         cwd,
@@ -1536,6 +1754,7 @@ export class AcpConnection implements AgentConnection {
     if (this.unprompted.has(sessionId)) {
       throw new Error(`${this.hooks.name ?? 'The agent'}'s hidden sessions are never prompted`)
     }
+    await this.configQueues.get(sessionId)
     await this.agyAccess.get(sessionId)?.restarting
     const planning = this.agy && plansAgy(this.version) && this.targets.has(sessionId)
     if (planning) {
@@ -1543,6 +1762,10 @@ export class AcpConnection implements AgentConnection {
       this.agyPlans.set(sessionId, { calls: new Map(), written: null, last: plans?.last ?? null })
     }
     this.prompting.add(sessionId)
+    this.agyWait?.onPromptStart(
+      sessionId,
+      this.targets.get(sessionId)?.context().thread.session.usage?.used ?? null,
+    )
     this.chunkUsage.delete(sessionId)
     this.gooseCalls.delete(sessionId)
     let answer: ChainAnswer | null = null
@@ -1573,6 +1796,7 @@ export class AcpConnection implements AgentConnection {
       throw error
     } finally {
       this.prompting.delete(sessionId)
+      this.agyWait?.onPromptEnd(sessionId)
       chunked = this.chunkUsage.get(sessionId) ?? null
       this.chunkUsage.delete(sessionId)
       called = this.gooseCalls.get(sessionId)?.tokens ?? null
@@ -1613,18 +1837,35 @@ export class AcpConnection implements AgentConnection {
    */
   private noteCommand(sessionId: string, update: SessionUpdate, target: SessionTarget): void {
     if (!this.agy) return
+    if (update.sessionUpdate === 'session_message' && update.senderSessionId) {
+      const commands = this.agyCommands.get(sessionId)
+      if (commands?.onSenderEvent(update.senderSessionId, Date.now())) {
+        this.showCommands(target, commands)
+      }
+      return
+    }
     if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return
     if (target.context().replaying) return
     const inTurn = this.prompting.has(sessionId)
     let commands = this.agyCommands.get(sessionId)
     if (!commands) {
       if (!inTurn) return
-      commands = new AgyCommands()
+      commands = new AgyCommands({
+        onChange: () => {
+          const current = this.targets.get(sessionId)
+          const tracked = this.agyCommands.get(sessionId)
+          if (!current || !tracked || tracked !== commands) return
+          this.showCommands(current, tracked)
+          if (!this.prompting.has(sessionId) && !this.runsCommands(sessionId)) {
+            void this.switchPending(sessionId)
+          }
+        },
+      })
       this.agyCommands.set(sessionId, commands)
     }
     if (!commands.follow(update, inTurn, Date.now())) return
     this.showCommands(target, commands)
-    if (!inTurn && !commands.running) void this.switchPending(sessionId)
+    if (!inTurn && !this.runsCommands(sessionId)) void this.switchPending(sessionId)
   }
 
   /** The turn ended: the commands still running carry on, on the session board. */
@@ -1641,17 +1882,20 @@ export class AcpConnection implements AgentConnection {
       effects: [
         { kind: 'tasks', tasks: commands.tasks() },
         { kind: 'backgroundRunning', running: commands.running, listed: false },
+        { kind: 'scheduled', jobs: commands.scheduledCount },
       ],
     })
   }
 
   /**
-   * Whether one of agy's commands outlived its turn and runs on, or one of its sub-agents runs,
-   * which a restart would stop.
+   * Whether one of agy's commands or scheduled jobs outlived its turn and runs on, or one of its
+   * sub-agents runs, which a restart would stop.
    */
   private runsCommands(sessionId: string): boolean {
+    const commands = this.agyCommands.get(sessionId)
     return (
-      this.agyCommands.get(sessionId)?.running === true ||
+      commands?.running === true ||
+      (commands?.scheduledCount ?? 0) > 0 ||
       this.subagents?.running(sessionId) === true
     )
   }
@@ -1809,7 +2053,11 @@ export class AcpConnection implements AgentConnection {
     if (this.agy && steersAgy(this.version)) {
       // agy takes the message as a prompt of its own, which ends the one before it.
       const chain = this.chains.get(sessionId)
-      return chain ? chain.steer(() => this.sendPrompt(sessionId, prompt)) : 'promptRequired'
+      if (!chain) return 'promptRequired'
+      const before = this.agyWait?.generationOf(sessionId)
+      const outcome = await chain.steer(() => this.sendPrompt(sessionId, prompt))
+      if (outcome === 'injected') this.agyWait?.onSteered(sessionId, before)
+      return outcome
     }
     const response = await this.call(() =>
       this.connection.agent.request<{ outcome?: unknown }>('_session/steering', {
@@ -1837,55 +2085,72 @@ export class AcpConnection implements AgentConnection {
     )
   }
 
-  async setConfigOption(
+  /** Runs config mutations for a session strictly one at a time so restarts snapshot settled config. */
+  private serializeConfig<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.configQueues.get(sessionId)
+    const result = previous ? previous.then(run) : run()
+    const tail = result.then(
+      () => {},
+      () => {},
+    )
+    this.configQueues.set(sessionId, tail)
+    void tail.finally(() => {
+      if (this.configQueues.get(sessionId) === tail) this.configQueues.delete(sessionId)
+    })
+    return result
+  }
+
+  setConfigOption(
     sessionId: string,
     optionId: string,
     value: string | boolean,
   ): Promise<ConfigOption[]> {
-    const access = this.agyAccess.get(sessionId)
-    if (access) {
-      await access.restarting
-    }
-    if (this.agy && optionId === MODE_OPTION && value === PLAN_MODE) {
-      const mode =
-        this.agyMode(sessionId) ??
-        currentMode(this.targets.get(sessionId)?.context().thread.session.config ?? [])
-      if (mode !== null && mode !== PLAN_MODE) this.agyBuildModes.set(sessionId, mode)
-    }
-    if (access && optionId === MODE_OPTION && typeof value === 'string') {
-      // 进入或退出完全访问（或取消挂起中的完全访问切换）需要走 switchAccess 逻辑。
-      if ((this.fullAccess && value === FULL_ACCESS) || access.full || access.pending !== null) {
-        const switched = await this.switchAccess(sessionId, access, value)
-        if (switched) return switched
+    return this.serializeConfig(sessionId, async () => {
+      const access = this.agyAccess.get(sessionId)
+      if (access) {
+        await access.restarting
       }
-      // 切入 Kettu 托管 Auto 模式：底层 agy 保持 default，由 Kettu 统一做风险评估与审批拦截。
-      if (value === AUTO_MODE) {
-        let base = access.config
-        if (access.rawMode !== HELD_MODE) {
-          base = await this.requestConfig(sessionId, MODE_OPTION, HELD_MODE)
-          access.rawMode = currentMode(base) ?? HELD_MODE
+      if (this.agy && optionId === MODE_OPTION && value === PLAN_MODE) {
+        const mode =
+          this.agyMode(sessionId) ??
+          currentMode(this.targets.get(sessionId)?.context().thread.session.config ?? [])
+        if (mode !== null && mode !== PLAN_MODE) this.agyBuildModes.set(sessionId, mode)
+      }
+      if (access && optionId === MODE_OPTION && typeof value === 'string') {
+        // Entering/leaving full access or cancelling a pending full-access switch goes via switchAccess.
+        if ((this.fullAccess && value === FULL_ACCESS) || access.full || access.pending !== null) {
+          const switched = await this.switchAccess(sessionId, access, value)
+          if (switched) return switched
         }
-        access.managedAuto = true
-        access.config = this.formatAgyConfig(base, access, this.pendingState(sessionId, access))
-        return access.config
-      }
-      // 从托管 Auto 切回 default：底层已在 default 时无需冗余 RPC，直接还原展示值。
-      if (value === HELD_MODE && access.managedAuto && access.rawMode === HELD_MODE) {
+        // Managed Auto mode keeps the underlying agy process in default so Kettu evaluates every ask.
+        if (value === AUTO_MODE) {
+          let base = access.config
+          if (access.rawMode !== HELD_MODE) {
+            base = await this.requestConfig(sessionId, MODE_OPTION, HELD_MODE)
+            access.rawMode = currentMode(base) ?? HELD_MODE
+          }
+          access.managedAuto = true
+          access.config = this.formatAgyConfig(base, access, this.pendingState(sessionId, access))
+          return access.config
+        }
+        // Returning from managed Auto to default needs no RPC when the underlying process is already in default.
+        if (value === HELD_MODE && access.managedAuto && access.rawMode === HELD_MODE) {
+          access.managedAuto = false
+          access.config = this.formatAgyConfig(
+            withModeValue(access.config, HELD_MODE),
+            access,
+            this.pendingState(sessionId, access),
+          )
+          return access.config
+        }
         access.managedAuto = false
-        access.config = this.formatAgyConfig(
-          withModeValue(access.config, HELD_MODE),
-          access,
-          this.pendingState(sessionId, access),
-        )
-        return access.config
       }
-      access.managedAuto = false
-    }
-    const config = await this.requestConfig(sessionId, optionId, value)
-    if (!access) return config
-    access.rawMode = currentMode(config) ?? access.rawMode
-    access.config = this.formatAgyConfig(config, access, this.pendingState(sessionId, access))
-    return access.config
+      const config = await this.requestConfig(sessionId, optionId, value)
+      if (!access) return config
+      access.rawMode = currentMode(config) ?? access.rawMode
+      access.config = this.formatAgyConfig(config, access, this.pendingState(sessionId, access))
+      return access.config
+    })
   }
 
   private async requestConfig(
@@ -2022,55 +2287,59 @@ export class AcpConnection implements AgentConnection {
   }
 
   /**
-   * 在回合或后台任务结束后执行挂起的模式切换；若仍被后台任务阻塞则刷新等待原因，失败时回滚并通知。
+   * Executes a pending full-access switch once turns and background work finish, serialized behind
+   * any in-flight config mutation so restarts snapshot settled config.
    */
   private async switchPending(sessionId: string): Promise<void> {
-    const access = this.agyAccess.get(sessionId)
-    const mode = access?.pending
-    if (!access || !mode) return
-    if (this.prompting.has(sessionId) || this.runsCommands(sessionId)) {
-      const next = this.pendingState(sessionId, access)
-      const prev = access.config.find((option) => option.id === MODE_OPTION)?.pending
-      if (next && (prev?.wait !== next.wait || prev?.value !== next.value)) {
-        access.config = this.formatAgyConfig(access.config, access, next)
+    if (!this.agyAccess.get(sessionId)?.pending) return
+    await this.serializeConfig(sessionId, async () => {
+      const access = this.agyAccess.get(sessionId)
+      const mode = access?.pending
+      if (!access || !mode) return
+      if (this.prompting.has(sessionId) || this.runsCommands(sessionId)) {
+        const next = this.pendingState(sessionId, access)
+        const prev = access.config.find((option) => option.id === MODE_OPTION)?.pending
+        if (next && (prev?.wait !== next.wait || prev?.value !== next.value)) {
+          access.config = this.formatAgyConfig(access.config, access, next)
+          this.targets.get(sessionId)?.apply({
+            patches: [{ op: 'session.update', changes: { config: access.config } }],
+            effects: [],
+          })
+        }
+        return
+      }
+      access.pending = null
+      const full = mode === FULL_ACCESS
+      if (full === access.full || this.isClosed) return
+      try {
+        const config = await this.restartAgy(sessionId, access, full, mode)
         this.targets.get(sessionId)?.apply({
-          patches: [{ op: 'session.update', changes: { config: access.config } }],
+          patches: [{ op: 'session.update', changes: { config } }],
           effects: [],
         })
+      } catch (error) {
+        const message = (error as Error).message
+        this.hooks.log('warn', `Could not switch agy session ${sessionId} to ${mode}: ${message}`)
+        const target = this.targets.get(sessionId)
+        if (!target) return
+        const ctx = target.context()
+        const out: MapperOutput = {
+          patches: [{ op: 'session.update', changes: { config: access.config } }],
+          effects: [],
+        }
+        addEntry(ctx, out, {
+          kind: 'notice',
+          id: ctx.nextId(),
+          severity: 'error',
+          title: t(
+            full ? 'antigravity.fullAccess.enterFailed' : 'antigravity.fullAccess.leaveFailed',
+          ),
+          description: message,
+          after: agentEntryBefore(ctx.thread),
+        })
+        target.apply(out)
       }
-      return
-    }
-    access.pending = null
-    const full = mode === FULL_ACCESS
-    if (full === access.full || this.isClosed) return
-    try {
-      const config = await this.restartAgy(sessionId, access, full, mode)
-      this.targets.get(sessionId)?.apply({
-        patches: [{ op: 'session.update', changes: { config } }],
-        effects: [],
-      })
-    } catch (error) {
-      const message = (error as Error).message
-      this.hooks.log('warn', `Could not switch agy session ${sessionId} to ${mode}: ${message}`)
-      const target = this.targets.get(sessionId)
-      if (!target) return
-      const ctx = target.context()
-      const out: MapperOutput = {
-        patches: [{ op: 'session.update', changes: { config: access.config } }],
-        effects: [],
-      }
-      addEntry(ctx, out, {
-        kind: 'notice',
-        id: ctx.nextId(),
-        severity: 'error',
-        title: t(
-          full ? 'antigravity.fullAccess.enterFailed' : 'antigravity.fullAccess.leaveFailed',
-        ),
-        description: message,
-        after: agentEntryBefore(ctx.thread),
-      })
-      target.apply(out)
-    }
+    })
   }
 
   /**
@@ -2151,13 +2420,17 @@ export class AcpConnection implements AgentConnection {
     mode: string,
     values: readonly ConfigOption[],
   ): Promise<ConfigOption[]> {
-    const meta = { ...this.meta(access.options), ...(full ? { [SESSION_FLAG_META]: true } : {}) }
+    const meta = this.mergeMeta(
+      this.meta(access.options),
+      await this.agySessionArgsMeta(sessionId, true),
+      full ? { [SESSION_FLAG_META]: true } : undefined,
+    )
     const response = await this.connection.agent.request(methods.agent.session.resume, {
       sessionId,
       cwd: access.cwd,
       mcpServers: mcpServers(access.options.mcpServers),
       ...this.directories(sessionId, access.options),
-      ...(Object.keys(meta).length > 0 ? { _meta: meta } : {}),
+      ...(meta ? { _meta: meta } : {}),
     })
     const managedAuto = !full && mode === AUTO_MODE
     access.full = full
@@ -2243,7 +2516,15 @@ export class AcpConnection implements AgentConnection {
     if (this.hooks.agentId !== 'antigravity') return
     if (this.version === null || compareVersions(this.version, ANTIGRAVITY_TIER_VERSION) < 0) return
     const plan = antigravityTier(meta)
-    if (plan) this.hooks.account({ kind: 'account', label: plan, email: null })
+    const tier = antigravityTierMultiple(meta)
+    if (plan) {
+      this.hooks.account({
+        kind: 'account',
+        label: plan,
+        email: null,
+        ...(tier ? { tier } : {}),
+      })
+    }
     this.hooks.signInShown?.(plan ? antigravityTierSignIn(meta) : null)
   }
 

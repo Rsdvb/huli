@@ -36,6 +36,7 @@
   --thread-quiet: rgb(0 0 0 / 58%);
   --thread-muted: rgb(0 0 0 / 52%);
   --thread-faint: rgb(0 0 0 / 42%);
+  --thread-shimmer: rgb(255 255 255 / 82%);
   --thread-chip: var(--bg-hover);
   --thread-hover: rgb(0 0 0 / 3%);
   --thread-line: var(--border-subtle);
@@ -90,6 +91,15 @@
   --agent-rose: #c0466c;
   --agent-green: #4b8a39;
   --agent-slate: #66707e;
+  /* Preset colors for custom project icons in the sidebar and project pickers. */
+  --project-icon-red: #cf4237;
+  --project-icon-orange: #d45e16;
+  --project-icon-yellow: #b07908;
+  --project-icon-green: #2a854e;
+  --project-icon-blue: #246fd1;
+  --project-icon-purple: #7a56c4;
+  --project-icon-pink: #c44474;
+  --project-icon-slate: #626d7c;
   /* Kettu's own MCP server's tile in Settings, in the fox's orange. */
   --brand-kettu-tile: linear-gradient(180deg, #ff7a3d, #e8540f);
   /* Running work, in the ink's grays: blue is kept for data and code. */
@@ -227,6 +237,28 @@
   --limit-ok: #2a78d6;
   --limit-warn: #e5a000;
   --limit-bad: #dc3f3a;
+
+  /* 套餐限额柔波液面槽（配色 1：0–49% 晴空冰川蓝 → 50–69% 钴靛紫蓝 → 70–89% 琥珀金 → 90%+ 朱红） */
+  --plan-wave-surface: #f5f6f8;
+  --plan-wave-border: rgb(15 23 42 / 8%);
+  --plan-wave-border-hover: rgb(15 23 42 / 15%);
+  --plan-wave-hi: rgb(255 255 255 / 65%);
+  --plan-wave-safe: #1a8ae8;
+  --plan-wave-safe-alt: #44b2fa;
+  --plan-wave-mid: #5c56d6;
+  --plan-wave-mid-alt: #847ef6;
+  --plan-wave-warn: #e09800;
+  --plan-wave-warn-alt: #f4b82a;
+  --plan-wave-crit: #e03e38;
+  --plan-wave-crit-alt: #f66656;
+  --plan-wave-a: 0.09;
+  --plan-wave-b: 0.21;
+  --plan-wave-back: 0.11;
+  --plan-wave-stroke: 0.36;
+  --plan-wave-crit-b: 0.27;
+  --plan-wave-crit-stroke: 0.48;
+  --plan-wave-ring: 26%;
+  --plan-wave-crit-ring: 34%;
 
   /* The context ring: under 50% used, 50 to 79%, 80 to 94%, and 95% or more. */
   --usage-green: #2b9a3f;
@@ -552,8 +584,8 @@
     inset 0 0 0 0.5px var(--shell-line-strong), 0 24px 64px -16px rgb(0 0 0 / 28%),
     0 4px 12px rgb(0 0 0 / 6%);
 
-  /* settings: the Settings modal, in affectUI's look. */
-  --settings-scrim: rgb(0 0 0 / 12%);
+  /* settings: the Settings modal, over the shared modal scrim. */
+  --settings-scrim: var(--scrim);
   --settings-drop: 0 24px 64px -16px rgb(0 0 0 / 28%), 0 4px 12px rgb(0 0 0 / 6%);
   --settings-notify-drop: 0 8px 24px -10px rgb(0 0 0 / 25%);
   --settings-warn-bg: rgb(217 119 6 / 10%);
@@ -733,6 +765,7 @@
     --thread-quiet: rgb(255 255 255 / 60%);
     --thread-muted: rgb(255 255 255 / 54%);
     --thread-faint: rgb(255 255 255 / 42%);
+    --thread-shimmer: #ffffff;
     --thread-chip: var(--bg-hover);
     --thread-hover: rgb(255 255 255 / 5%);
     --thread-line: var(--border-subtle);
@@ -772,6 +805,14 @@
     --agent-rose: #da6489;
     --agent-green: #6aac55;
     --agent-slate: #8d96a4;
+    --project-icon-red: #f07b72;
+    --project-icon-orange: #f5904c;
+    --project-icon-yellow: #e6b84c;
+    --project-icon-green: #5cc185;
+    --project-icon-blue: #68a6f8;
+    --project-icon-purple: #a98be8;
+    --project-icon-pink: #eb7ca4;
+    --project-icon-slate: #9aa4b2;
     --brand-kettu-tile: linear-gradient(180deg, #ff7a3d, #e8540f);
     --info: #aeb6c1;
     --warning: #d9b463;
@@ -846,6 +887,27 @@
     --limit-ok: #3987e5;
     --limit-warn: #d4a017;
     --limit-bad: #e5605a;
+
+    --plan-wave-surface: rgb(255 255 255 / 4.4%);
+    --plan-wave-border: rgb(255 255 255 / 8.5%);
+    --plan-wave-border-hover: rgb(255 255 255 / 16%);
+    --plan-wave-hi: rgb(255 255 255 / 14%);
+    --plan-wave-safe: #369af6;
+    --plan-wave-safe-alt: #60c0ff;
+    --plan-wave-mid: #7c78f8;
+    --plan-wave-mid-alt: #9e9aff;
+    --plan-wave-warn: #e2aa1c;
+    --plan-wave-warn-alt: #f8c846;
+    --plan-wave-crit: #ee605a;
+    --plan-wave-crit-alt: #fe8072;
+    --plan-wave-a: 0.14;
+    --plan-wave-b: 0.3;
+    --plan-wave-back: 0.16;
+    --plan-wave-stroke: 0.52;
+    --plan-wave-crit-b: 0.36;
+    --plan-wave-crit-stroke: 0.62;
+    --plan-wave-ring: 36%;
+    --plan-wave-crit-ring: 44%;
 
     --usage-green: #4cc15a;
     --usage-blue: #3987e5;
@@ -995,9 +1057,9 @@
       inset 0 0 0 0.5px var(--shell-line-strong), 0 24px 64px -16px rgb(0 0 0 / 60%),
       0 4px 12px rgb(0 0 0 / 30%);
 
-    /* settings: the Settings modal, in affectUI's look. */
-    --settings-scrim: rgb(0 0 0 / 45%);
-    --settings-drop: 0 24px 64px -16px rgb(0 0 0 / 28%), 0 4px 12px rgb(0 0 0 / 6%);
+    /* settings: the Settings modal, over the shared modal scrim. */
+    --settings-scrim: var(--scrim);
+    --settings-drop: 0 24px 64px -16px rgb(0 0 0 / 60%), 0 4px 12px rgb(0 0 0 / 30%);
     --settings-notify-drop: 0 8px 24px -10px rgb(0 0 0 / 50%);
     --settings-warn-bg: rgb(251 191 36 / 12%);
     --settings-warn-ink: #fbbf24;
@@ -1141,6 +1203,7 @@
   --thread-quiet: rgb(255 255 255 / 60%);
   --thread-muted: rgb(255 255 255 / 54%);
   --thread-faint: rgb(255 255 255 / 42%);
+  --thread-shimmer: #ffffff;
   --thread-chip: var(--bg-hover);
   --thread-hover: rgb(255 255 255 / 5%);
   --thread-line: var(--border-subtle);
@@ -1180,6 +1243,14 @@
   --agent-rose: #da6489;
   --agent-green: #6aac55;
   --agent-slate: #8d96a4;
+  --project-icon-red: #f07b72;
+  --project-icon-orange: #f5904c;
+  --project-icon-yellow: #e6b84c;
+  --project-icon-green: #5cc185;
+  --project-icon-blue: #68a6f8;
+  --project-icon-purple: #a98be8;
+  --project-icon-pink: #eb7ca4;
+  --project-icon-slate: #9aa4b2;
   --brand-kettu-tile: linear-gradient(180deg, #ff7a3d, #e8540f);
   --info: #aeb6c1;
   --warning: #d9b463;
@@ -1253,6 +1324,27 @@
   --limit-ok: #3987e5;
   --limit-warn: #d4a017;
   --limit-bad: #e5605a;
+
+  --plan-wave-surface: rgb(255 255 255 / 4.4%);
+  --plan-wave-border: rgb(255 255 255 / 8.5%);
+  --plan-wave-border-hover: rgb(255 255 255 / 16%);
+  --plan-wave-hi: rgb(255 255 255 / 14%);
+  --plan-wave-safe: #369af6;
+  --plan-wave-safe-alt: #60c0ff;
+  --plan-wave-mid: #7c78f8;
+  --plan-wave-mid-alt: #9e9aff;
+  --plan-wave-warn: #e2aa1c;
+  --plan-wave-warn-alt: #f8c846;
+  --plan-wave-crit: #ee605a;
+  --plan-wave-crit-alt: #fe8072;
+  --plan-wave-a: 0.14;
+  --plan-wave-b: 0.3;
+  --plan-wave-back: 0.16;
+  --plan-wave-stroke: 0.52;
+  --plan-wave-crit-b: 0.36;
+  --plan-wave-crit-stroke: 0.62;
+  --plan-wave-ring: 36%;
+  --plan-wave-crit-ring: 44%;
 
   --usage-green: #4cc15a;
   --usage-blue: #3987e5;
@@ -1402,9 +1494,9 @@
     inset 0 0 0 0.5px var(--shell-line-strong), 0 24px 64px -16px rgb(0 0 0 / 60%),
     0 4px 12px rgb(0 0 0 / 30%);
 
-  /* settings: the Settings modal, in affectUI's look. */
-  --settings-scrim: rgb(0 0 0 / 45%);
-  --settings-drop: 0 24px 64px -16px rgb(0 0 0 / 28%), 0 4px 12px rgb(0 0 0 / 6%);
+  /* settings: the Settings modal, over the shared modal scrim. */
+  --settings-scrim: var(--scrim);
+  --settings-drop: 0 24px 64px -16px rgb(0 0 0 / 60%), 0 4px 12px rgb(0 0 0 / 30%);
   --settings-notify-drop: 0 8px 24px -10px rgb(0 0 0 / 50%);
   --settings-warn-bg: rgb(251 191 36 / 12%);
   --settings-warn-ink: #fbbf24;
@@ -1601,6 +1693,18 @@
   --plan-bad-text: var(--danger);
   --plan-bad-chip: color-mix(in srgb, var(--danger) 12%, transparent);
   --plan-bad-chip-text: var(--danger);
+  --plan-wave-surface: color-mix(in srgb, var(--composer-strong) 3.8%, transparent);
+  --plan-wave-border: color-mix(in srgb, var(--composer-strong) 8.5%, transparent);
+  --plan-wave-border-hover: color-mix(in srgb, var(--composer-strong) 16%, transparent);
+  --plan-wave-hi: color-mix(in srgb, var(--bg-surface) 45%, transparent);
+  --plan-wave-safe: var(--limit-ok);
+  --plan-wave-safe-alt: color-mix(in srgb, var(--limit-ok) 72%, var(--bg-app));
+  --plan-wave-mid: color-mix(in srgb, var(--limit-ok) 58%, var(--series-2));
+  --plan-wave-mid-alt: color-mix(in srgb, var(--series-2) 64%, var(--limit-ok));
+  --plan-wave-warn: var(--limit-warn);
+  --plan-wave-warn-alt: color-mix(in srgb, var(--limit-warn) 76%, var(--bg-app));
+  --plan-wave-crit: var(--limit-bad);
+  --plan-wave-crit-alt: color-mix(in srgb, var(--limit-bad) 76%, var(--bg-app));
   --tray-edge: var(--border-subtle);
   --sketch-accent: var(--context-1);
   --series-1: var(--context-1);
@@ -1725,6 +1829,15 @@
   --destructive-tint-hover: color-mix(in srgb, var(--danger) 13%, transparent);
   /* The line a reference points at, in the Files pane's editor. */
   --marked-line: color-mix(in srgb, var(--info) 7%, transparent);
+  /* Branch graph lanes: semantic palette derived from the theme's icon hues. */
+  --git-graph-lane-0: var(--project-icon-blue);
+  --git-graph-lane-1: var(--project-icon-green);
+  --git-graph-lane-2: var(--project-icon-purple);
+  --git-graph-lane-3: var(--project-icon-orange);
+  --git-graph-lane-4: var(--project-icon-pink);
+  --git-graph-lane-5: var(--project-icon-yellow);
+  --git-graph-lane-6: var(--project-icon-red);
+  --git-graph-lane-7: var(--project-icon-slate);
   /* What a typed filter matched in a menu's rows: the fox, faint. */
   --match: color-mix(in srgb, var(--attention-dot) 16%, transparent);
 

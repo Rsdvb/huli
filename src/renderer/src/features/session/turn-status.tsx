@@ -3,6 +3,7 @@ import { WifiDisconnected01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
 import type { SessionSummary } from '@shared/agent-host'
+import { activeBrowserControl } from '@shared/browser'
 import { clockTime, daysBefore, duration, monthDayTime, tokens } from '@renderer/lib/format'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { useBrowserStore } from '@renderer/stores/browser'
@@ -15,7 +16,14 @@ import { askedStep, turnDoing, turnTokens, writingId, type TurnPhaseName } from 
 import { useSessionAwaySince } from './use-away-since'
 
 /** Phases in which the agent thinks or writes rather than works in the app it uses. */
-const QUIET_PHASES = new Set(['thinking', 'writing', 'compacting', 'approval', 'question'])
+const QUIET_PHASES = new Set([
+  'thinking',
+  'writing',
+  'compacting',
+  'approval',
+  'question',
+  'waiting_background',
+])
 
 /** The `thread.doing` copy for a phase that names what it works on. */
 function doingKey(phase: TurnPhaseName, count: number, quoted: boolean) {
@@ -116,7 +124,7 @@ export const TurnStatus = memo(function TurnStatus({
   const asked = useThreadsStore((s) => askedStep(s.replicas[sessionId]?.state))
   // The session's page on this computer: the user holds it, or a call of the agent's acts on it.
   const page = useBrowserStore((s) => {
-    const control = s.bySession[sessionId]?.control
+    const control = activeBrowserControl(s.bySession[sessionId])
     if (control?.kind === 'you') return 'you'
     return control?.kind === 'agent' && control.acting ? 'using' : null
   })
@@ -144,8 +152,6 @@ export const TurnStatus = memo(function TurnStatus({
   const subagentWaiting = useSessionsStore((s) => subagentWaits(s.byId, sessionId))
   const awaySince = useSessionAwaySince(sessionId)
   const stale = awaySince !== undefined
-  if (writing && !stale) return null
-  const separator = <i aria-hidden>·</i>
   const app = computer?.app ?? null
   const appHeld = computer?.control === 'you'
   const appUsed = !!app && !appHeld && !QUIET_PHASES.has(phase)
@@ -163,6 +169,11 @@ export const TurnStatus = memo(function TurnStatus({
     appHeld ||
     holding !== null ||
     subagentHolds
+  // While an agent message carries the turn's writing indicator (or whenever the phase is writing
+  // without a user-hold prompt taking precedence), step aside so only AIAnswer renders Writing.
+  // Huli: a turn last seen before its host went away still says so.
+  if (!stale && !waiting && (writing || phase === 'writing')) return null
+  const separator = <i aria-hidden>·</i>
   const text = asked
     ? t(`control:status.asks.${asked}`)
     : page === 'you'
@@ -232,7 +243,7 @@ export const TurnStatus = memo(function TurnStatus({
           phase
         }
         title={text}
-        className="min-w-0 truncate"
+        className="ks-status__label min-w-0 truncate"
       >
         {text}
       </span>

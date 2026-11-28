@@ -9,7 +9,6 @@ import {
   applyPatches,
   threadFromSnapshot,
   type ConfigOption,
-  type DeclaredMcpServer,
   type SessionView,
   type ThreadEntry,
   type ThreadState,
@@ -17,6 +16,7 @@ import {
 } from '@shared/thread'
 import type { LaunchSpec } from '../catalog'
 import { CLAUDE_CODE } from '../catalog'
+import type { MarketServer } from '@shared/marketplace'
 import {
   AgentRequestError,
   LimitsReadFailed,
@@ -26,9 +26,9 @@ import {
   type SessionTarget,
   type FolderHooks,
   type ProjectHooksGate,
-  type ProjectMcpGate,
 } from '../connection'
 import type { HostedContext, HostedSpawnOptions } from '../driver'
+import { libraryServers, parseMarketKeys, type OwnServer } from '../marketplace/servers'
 import { planMarkdown } from '../plan-revision'
 import {
   newTurnScope,
@@ -321,12 +321,13 @@ describe('the Claude Agent SDK driver', () => {
       permissionMode: 'acceptEdits',
       includePartialMessages: true,
       settingSources: ['user', 'project', 'local'],
-      mcpServers: {
-        kettu: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { 'X-Key': 'k' } },
-      },
       allowedTools: ['mcp__kettu__set_plan'],
       systemPrompt: { type: 'preset', preset: 'claude_code', append: 'Plan first.' },
-      extraArgs: { 'replay-user-messages': null },
+      extraArgs: { 'replay-user-messages': null, 'mcp-config': expect.any(String) },
+    })
+    expect(options.mcpServers).toBeUndefined()
+    expect(sdk.last.mcpServers).toEqual({
+      kettu: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { 'X-Key': 'k' } },
     })
     expect(sdk.last.flagSettings).toBeUndefined()
     expect(options.disallowedTools).toEqual(['EnterWorktree', 'ExitWorktree'])
@@ -340,7 +341,7 @@ describe('the Claude Agent SDK driver', () => {
     expect(spawned).toEqual([
       expect.objectContaining({
         command: '/opt/claude/bin/claude',
-        args: ['--output-format', 'stream-json'],
+        args: ['--output-format', 'stream-json', '--mcp-config', options.extraArgs!['mcp-config']],
         cwd: '/repo',
         env: options.env,
         signal: expect.any(AbortSignal),
@@ -557,8 +558,10 @@ describe('the Claude Agent SDK driver', () => {
     expect(sdk.last.options.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code' })
     expect(sdk.last.options).toMatchObject({
       resume: 'from-terminal',
-      mcpServers: { kettu: expect.objectContaining({ url: 'http://127.0.0.1:9/mcp' }) },
       env: expect.objectContaining({ CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }),
+    })
+    expect(sdk.last.mcpServers).toEqual({
+      kettu: expect.objectContaining({ url: 'http://127.0.0.1:9/mcp' }),
     })
   })
 
@@ -595,9 +598,9 @@ describe('the Claude Agent SDK driver', () => {
     expect(sdk.last.options.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code' })
   })
 
-  it('keeps a server that holds a key off the command line and adds it once the query starts', async () => {
-    const { sdk, connection } = await setup()
-    await connection.newSession('/repo', {
+  it('passes all MCP servers at startup via a user-only --mcp-config file without leaking secrets', async () => {
+    const { sdk, connection, spawned, settingsDir } = await setup()
+    const { sessionId } = await connection.newSession('/repo', {
       mcpServers: [
         {
           type: 'http',
@@ -637,41 +640,173 @@ describe('the Claude Agent SDK driver', () => {
       ],
     })
     const query = sdk.last
-    const initial = {
+    expect(query.options.mcpServers).toBeUndefined()
+    expect(JSON.stringify(query.options)).not.toContain('secret')
+    const args = spawned.at(-1)!.args
+    expect(args.join(' ')).not.toContain('secret')
+    const mcpFile = args[args.indexOf('--mcp-config') + 1]!
+    expect(path.dirname(mcpFile)).toBe(settingsDir)
+    if (process.platform !== 'win32') {
+      expect((await stat(mcpFile)).mode & 0o777).toBe(0o600)
+      expect((await stat(settingsDir)).mode & 0o777).toBe(0o700)
+    }
+    expect(query.mcpServers).toEqual({
       kettu: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { 'X-Key': 'k' } },
       playwright: { type: 'stdio', command: 'npx', args: ['-y', '@playwright/mcp@1'], env: {} },
+      github: {
+        type: 'http',
+        url: 'https://api.githubcopilot.com/mcp/',
+        headers: { Authorization: 'Bearer ghp_secret' },
+      },
+      context7: {
+        type: 'stdio',
+        command: 'npx',
+        args: ['-y', '@upstash/context7-mcp@4.6.0'],
+        env: { CONTEXT7_API_KEY: 'c7-secret' },
+      },
       notion: { type: 'sse', url: 'https://mcp.notion.com/sse', headers: {} },
-    }
-    expect(query.options.mcpServers).toEqual(initial)
-    expect(JSON.stringify(query.options)).not.toContain('secret')
+    })
     expect(query.options.allowedTools).toEqual(['mcp__kettu__set_plan'])
-    const set = query.calls.filter((call) => call.method === 'setMcpServers')
-    expect(set).toEqual([
-      {
-        method: 'setMcpServers',
-        args: [
+    // All servers are handed at launch so Claude Code never spawns its own copy first.
+    expect(query.calls.some((call) => call.method === 'setMcpServers')).toBe(false)
+    await connection.closeSession(sessionId)
+    await vi.waitFor(async () => expect(await readdir(settingsDir)).toEqual([]))
+  })
+
+  it('removes both settings and MCP config files when a query fails to start', async () => {
+    const s = await setup()
+    s.sdk.settings = { env: { ANTHROPIC_AUTH_TOKEN: 'fake-token-1234' } }
+    s.sdk.initError = () => new Error('Claude Code did not start')
+    await expect(
+      s.connection.newSession('/repo', {
+        mcpServers: [
           {
-            ...initial,
-            github: {
-              type: 'http',
-              url: 'https://api.githubcopilot.com/mcp/',
-              headers: { Authorization: 'Bearer ghp_secret' },
-            },
-            context7: {
-              type: 'stdio',
-              command: 'npx',
-              args: ['-y', '@upstash/context7-mcp@4.6.0'],
-              env: { CONTEXT7_API_KEY: 'c7-secret' },
-            },
+            type: 'http',
+            name: 'github',
+            url: 'http://127.0.0.1:9/servers/abc',
+            headers: [{ name: 'Authorization', value: 'Bearer token-secret' }],
+            secret: true,
+            replaces: ['gh-alias'],
           },
         ],
+      }),
+    ).rejects.toThrow()
+    await vi.waitFor(async () => expect(await readdir(s.settingsDir)).toEqual([]))
+  })
+
+  it('shadows overlapping Claude Code servers at startup on new, resume and fork sessions', async () => {
+    const { sdk, connection, init, settingsDir } = await setup()
+    const makeServer = (
+      name: string,
+      spec: MarketServer['spec'],
+      run?: MarketServer['run'],
+    ): MarketServer => ({
+      id: `manual:${name}`,
+      name,
+      title: name,
+      source: 'manual',
+      version: null,
+      spec,
+      agents: 'all',
+      on: true,
+      ...(run ? { run } : {}),
+    })
+    const own: OwnServer[] = [
+      // Same server under another name in ~/.claude.json.
+      { name: 'gh', endpoint: { type: 'http', url: 'https://api.githubcopilot.com/mcp' } },
+      // Extra alias for the same server (e.g. user + local copy).
+      { name: 'gh-extra', endpoint: { type: 'http', url: 'https://api.githubcopilot.com/mcp/' } },
+      // Same name with a different endpoint.
+      { name: 'docs', endpoint: { type: 'stdio', command: 'uvx', args: ['old-docs'] } },
+      // Non-overlapping server that Claude Code should keep running.
+      { name: 'custom-own', endpoint: { type: 'stdio', command: 'custom-mcp', args: [] } },
+    ]
+    const projectOwn: OwnServer[] = [
+      // Same server under a project-local alias in .mcp.json.
+      {
+        name: 'repo-agent-tool',
+        endpoint: { type: 'stdio', command: 'node', args: ['agent-tool.js'] },
       },
-    ])
-    // Set once the query has answered its initialization, before anything else is asked of it.
-    const methods = query.calls.map((call) => call.method)
-    expect(methods.indexOf('setMcpServers')).toBeGreaterThan(
-      methods.indexOf('initializationResult'),
+    ]
+    const servers = libraryServers(
+      [
+        makeServer('github', {
+          type: 'http',
+          transport: 'streamable-http',
+          url: 'https://api.githubcopilot.com/mcp/',
+          headers: [],
+        }),
+        makeServer('docs', {
+          type: 'stdio',
+          command: 'npx',
+          args: ['-y', '@upstash/context7-mcp@4.6.0'],
+          env: [],
+        }),
+        makeServer(
+          'agent-tool',
+          {
+            type: 'stdio',
+            command: 'node',
+            args: ['agent-tool.js'],
+            env: [{ name: 'TOOL_KEY', input: true, secret: true, required: true }],
+          },
+          { mode: 'agent' },
+        ),
+        // Disabled library server must not shadow Claude Code's own configuration.
+        {
+          ...makeServer('custom-own', {
+            type: 'stdio',
+            command: 'custom-mcp',
+            args: [],
+            env: [],
+          }),
+          on: false,
+        },
+      ],
+      parseMarketKeys({ 'manual:agent-tool': { TOOL_KEY: 'agent-secret' } })!,
+      'claude-code',
+      init.capabilities,
+      {
+        platform: 'darwin',
+        own,
+        projectOwn,
+        router: { origin: 'http://127.0.0.1:4567', token: 'router-secret', allow: () => {} },
+      },
     )
+
+    const assertStartupOverride = (query: FakeQuery) => {
+      expect(query.options.mcpServers).toBeUndefined()
+      expect(query.calls.some((call) => call.method === 'setMcpServers')).toBe(false)
+      expect(Object.keys(query.mcpServers ?? {}).sort()).toEqual(['agent-tool', 'docs', 'gh'])
+      expect(query.mcpServers?.gh).toMatchObject({
+        type: 'http',
+        headers: { Authorization: 'Bearer router-secret' },
+      })
+      expect(query.mcpServers?.['agent-tool']).toEqual({
+        type: 'stdio',
+        command: 'node',
+        args: ['agent-tool.js'],
+        env: { TOOL_KEY: 'agent-secret' },
+      })
+      // Extra overlapping aliases are denied while non-overlapping `custom-own` is untouched.
+      expect(query.flagSettings?.deniedMcpServers).toEqual([
+        { serverName: 'gh-extra' },
+        { serverName: 'repo-agent-tool' },
+      ])
+      expect(JSON.stringify(query.options)).not.toContain('router-secret')
+      expect(JSON.stringify(query.options)).not.toContain('agent-secret')
+    }
+
+    const opened = await connection.newSession('/repo', { mcpServers: servers })
+    assertStartupOverride(sdk.last)
+    await connection.closeSession(opened.sessionId)
+    await connection.resumeSession(opened.sessionId, '/repo', { mcpServers: servers })
+    assertStartupOverride(sdk.last)
+    await connection.closeSession(opened.sessionId)
+    const forked = await connection.forkSession(opened.sessionId, '/repo', { mcpServers: servers })
+    assertStartupOverride(sdk.last)
+    await connection.closeSession(forked.sessionId)
+    await vi.waitFor(async () => expect(await readdir(settingsDir)).toEqual([]))
   })
 
   it("loads the plugin of the Marketplace's skills beside the user's own", async () => {
@@ -699,16 +834,15 @@ describe('the Claude Agent SDK driver', () => {
     await connection.newSession('/repo', {
       mcpServers: [{ type: 'stdio', name: 'playwright', command: 'npx', args: [], env: [] }],
     })
-    expect(sdk.last.options.mcpServers).toEqual({
+    expect(sdk.last.options.mcpServers).toBeUndefined()
+    expect(sdk.last.mcpServers).toEqual({
       playwright: { type: 'stdio', command: 'npx', args: [], env: {} },
     })
     expect(sdk.last.calls.some((call) => call.method === 'setMcpServers')).toBe(false)
   })
 
   it("reads a closed session's context once the query's MCP servers have connected", async () => {
-    const { sdk, connection } = await setup()
-    let connected!: () => void
-    sdk.connecting = new Promise((resolve) => (connected = resolve))
+    const { sdk, connection, settingsDir } = await setup()
     sdk.mcpStatuses = [
       [
         { name: 'kettu', status: 'connected' },
@@ -731,22 +865,26 @@ describe('the Claude Agent SDK driver', () => {
         { type: 'stdio', name: 'playwright', command: 'npx', args: [], env: [] },
       ],
     })
-    await vi.waitFor(() =>
-      expect(sdk.queries.at(-1)?.calls.map((call) => call.method)).toContain('setMcpServers'),
-    )
+    expect(await reading).toMatchObject({ used: 10_000 })
     const query = sdk.last
     expect(query.options.resume).toBe('closed')
-    const methods = (): string[] => query.calls.map((call) => call.method)
-    expect(methods()).not.toContain('mcpServerStatus')
-    expect(methods()).not.toContain('getContextUsage')
-    connected()
-    expect(await reading).toMatchObject({ used: 10_000 })
+    expect(query.mcpServers).toEqual({
+      kettu: {
+        type: 'http',
+        url: 'http://127.0.0.1:9/mcp',
+        headers: { Authorization: 'Bearer k' },
+      },
+      playwright: { type: 'stdio', command: 'npx', args: [], env: {} },
+    })
+    const methods = query.calls.map((call) => call.method)
+    expect(methods).not.toContain('setMcpServers')
     // Asked again while a server was still connecting, and read only once none was.
-    expect(methods().filter((method) => method === 'mcpServerStatus')).toHaveLength(2)
-    expect(methods().indexOf('getContextUsage')).toBeGreaterThan(
-      methods().lastIndexOf('mcpServerStatus'),
+    expect(methods.filter((method) => method === 'mcpServerStatus')).toHaveLength(2)
+    expect(methods.indexOf('getContextUsage')).toBeGreaterThan(
+      methods.lastIndexOf('mcpServerStatus'),
     )
     expect(query.inputs).toHaveLength(0)
+    await vi.waitFor(async () => expect(await readdir(settingsDir)).toEqual([]))
   })
 
   async function repoWithServers(): Promise<string> {
@@ -761,52 +899,62 @@ describe('the Claude Agent SDK driver', () => {
     return repo
   }
 
-  it("turns off the servers of the folder's .mcp.json that may not start", async () => {
+  it("never lets Claude Code start a server of the folder's .mcp.json itself", async () => {
     const { sdk, connection } = await setup()
     const repo = await repoWithServers()
-    // Without the user's answers, none of them starts.
     await connection.newSession(repo, {})
     expect(sdk.last.flagSettings).toEqual({ disabledMcpjsonServers: ['db', 'web'] })
-    const asked: DeclaredMcpServer[][] = []
-    const gate: ProjectMcpGate = {
-      hold: async (_cwd, servers) => {
-        asked.push([...servers])
-        return ['web']
-      },
-      held: async (_cwd, names) => [...names],
-    }
-    await connection.newSession(repo, { projectMcp: gate })
-    expect(asked).toEqual([
-      [
-        { name: 'db', target: 'db-mcp' },
-        { name: 'web', target: 'https://example.com/mcp' },
+    // The user allowed it, so Kettu runs it and hands it under its own name instead.
+    await connection.newSession(repo, {
+      mcpServers: [
+        {
+          type: 'http',
+          name: 'db',
+          url: 'http://127.0.0.1:4567/servers/db',
+          headers: [{ name: 'Authorization', value: 'Bearer tok' }],
+          secret: true,
+        },
       ],
-    ])
-    expect(sdk.last.flagSettings).toEqual({ disabledMcpjsonServers: ['web'] })
-    // Kettu's own hidden sessions ask nobody.
-    await connection.newSession(repo, { projectMcp: gate, hidden: 'options' })
+    })
+    expect(sdk.last.flagSettings).toEqual({ disabledMcpjsonServers: ['db', 'web'] })
+    expect(sdk.last.mcpServers).toHaveProperty('db')
+    await connection.newSession(repo, { hidden: 'options' })
     expect(sdk.last.flagSettings).toMatchObject({ disabledMcpjsonServers: ['db', 'web'] })
-    await connection.newSession('/repo', { projectMcp: gate })
+    await connection.newSession('/repo', {})
     expect(sdk.last.flagSettings).toBeUndefined()
-    expect(asked).toHaveLength(1)
   })
 
-  it('opens the query again before the next prompt once a server it held is allowed', async () => {
+  it("keeps the folder's servers off even when its own settings approve them", async () => {
     const { sdk, connection } = await setup()
     const repo = await repoWithServers()
-    let allowed = false
-    const gate: ProjectMcpGate = {
-      hold: async (_cwd, servers) => (allowed ? [] : servers.map((server) => server.name)),
-      held: async (_cwd, names) => (allowed ? [] : [...names]),
-    }
-    const { sessionId } = await connection.newSession(repo, { projectMcp: gate })
-    await connection.prompt(sessionId, [{ type: 'text', text: 'Hi' }])
-    expect(sdk.queries).toHaveLength(1)
-    allowed = true
-    await connection.prompt(sessionId, [{ type: 'text', text: 'Hi' }])
-    expect(sdk.queries).toHaveLength(2)
-    expect(sdk.last.options.resume).toBe(sessionId)
-    expect(sdk.last.flagSettings).toBeUndefined()
+    await mkdir(path.join(repo, '.claude'), { recursive: true })
+    await writeFile(
+      path.join(repo, '.claude', 'settings.local.json'),
+      JSON.stringify({ enableAllProjectMcpServers: true, enabledMcpjsonServers: ['db', 'web'] }),
+    )
+    await connection.newSession(repo, {})
+    expect(sdk.last.flagSettings).toMatchObject({ disabledMcpjsonServers: ['db', 'web'] })
+  })
+
+  it('suppresses a .mcp.json alias listed in replaces without denying Kettu servers', async () => {
+    const { sdk, connection } = await setup()
+    const repo = await repoWithServers()
+    await connection.newSession(repo, {
+      mcpServers: [
+        {
+          type: 'http',
+          name: 'library-db',
+          url: 'http://127.0.0.1:4567/servers/db',
+          headers: [{ name: 'Authorization', value: 'Bearer tok' }],
+          secret: true,
+          replaces: ['db', 'library-db'],
+        },
+      ],
+    })
+    expect(sdk.last.flagSettings).toEqual({
+      disabledMcpjsonServers: ['db', 'web'],
+      deniedMcpServers: [{ serverName: 'db' }],
+    })
   })
 
   const userHook = {
@@ -4784,6 +4932,51 @@ describe('prompt content', () => {
   })
 })
 
+describe('session titles', () => {
+  it('generates and stores a title when the session does not already have a fixed one', async () => {
+    const s = await setup()
+    s.sdk.generatedTitle = 'Debug port isolation'
+    s.sdk.script = (query) => {
+      query.running()
+      query.finish()
+    }
+    const target = new Target()
+    const { sessionId } = await s.connection.newSession('/repo')
+    s.connection.register(sessionId, target)
+    await s.connection.prompt(sessionId, [
+      { type: 'text', text: 'Investigate KETTU_USER_DATA and debug port isolation' },
+    ])
+    await vi.waitFor(() => expect(target.thread.session.title).toBe('Debug port isolation'))
+    expect(target.effects).toContainEqual({ kind: 'title', title: 'Debug port isolation' })
+    expect(s.sdk.last.calls.some((call) => call.method === 'generateSessionTitle')).toBe(true)
+    expect(s.sdk.last.calls.some((call) => call.method === 'renameSession')).toBe(true)
+  })
+
+  it('skips title generation when opened with a fixed title', async () => {
+    const s = await setup()
+    s.sdk.generatedTitle = 'Generated replacement title'
+    s.sdk.script = (query) => {
+      query.running()
+      query.finish()
+    }
+    const target = new Target()
+    target.thread = {
+      ...target.thread,
+      session: { ...target.thread.session, title: 'Caller-given title' },
+    }
+    const { sessionId } = await s.connection.newSession('/repo', { titled: true })
+    s.connection.register(sessionId, target)
+    await s.connection.prompt(sessionId, [
+      { type: 'text', text: 'Investigate KETTU_USER_DATA and debug port isolation' },
+    ])
+    await settle()
+    expect(target.thread.session.title).toBe('Caller-given title')
+    expect(target.effects.filter((effect) => effect.kind === 'title')).toEqual([])
+    expect(s.sdk.last.calls.some((call) => call.method === 'generateSessionTitle')).toBe(false)
+    expect(s.sdk.last.calls.some((call) => call.method === 'renameSession')).toBe(false)
+  })
+})
+
 describe('the connection', () => {
   it('ends every query when it closes', async () => {
     const s = await setup()
@@ -5434,7 +5627,7 @@ describe("Huli: a session's MCP panel", () => {
     await connection.toggleMcp(sessionId, 'kettu', false, ['kettu', 'playwright'])
     await connection.closeSession(sessionId)
     await connection.resumeSession(sessionId, '/repo', { mcpServers: [kettu, playwright] })
-    expect(Object.keys(sdk.last.options.mcpServers ?? {})).toEqual(['playwright'])
+    expect(Object.keys(sdk.last.mcpServers ?? {})).toEqual(['playwright'])
   })
 
   describe('signing in to a server', () => {
@@ -5559,5 +5752,19 @@ describe("Huli: a session's MCP panel", () => {
     expect(sdk.last.calls.filter((call) => call.method === 'reloadPlugins')).toHaveLength(before)
     sdk.last.finish()
     await turn
+  })
+
+  it('resolves defaultMode through SDK settings without spawning a query process', async () => {
+    const s = await setup({ CLAUDE_CONFIG_DIR: '/home/ada/.claude-work' })
+    expect(await s.connection.defaultMode?.('/repo')).toBe('default')
+    expect(s.sdk.queries).toEqual([])
+    expect(s.sdk.calls.find((call) => call.method === 'resolveSettings')?.args).toEqual([
+      { cwd: '/repo', settingSources: ['user', 'project', 'local'] },
+      '/home/ada/.claude-work',
+    ])
+
+    s.sdk.settings = { permissions: { defaultMode: 'acceptEdits' } }
+    expect(await s.connection.defaultMode?.('/repo')).toBe('acceptEdits')
+    expect(s.sdk.queries).toEqual([])
   })
 })

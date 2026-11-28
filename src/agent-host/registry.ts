@@ -204,6 +204,28 @@ export interface RegistryFetchOptions {
   url?: string
 }
 
+/** The body, refused once it grows past `maxBytes`, what a listing can be by default. */
+export async function readLimited(
+  response: Response,
+  maxBytes = MAX_BYTES,
+): Promise<string | null> {
+  if (!response.body) return null
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > maxBytes) {
+      await reader.cancel()
+      return null
+    }
+    chunks.push(value)
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks))
+}
+
 /** Reads the listing; rejects with a reason the user can read. */
 export async function fetchRegistry(options: RegistryFetchOptions): Promise<RegistryAgents> {
   const url = options.url ?? REGISTRY_URL

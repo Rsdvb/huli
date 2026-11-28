@@ -110,7 +110,10 @@ const isOption = (value: unknown): value is ConfigOption =>
   (typeof value.value === 'string' || typeof value.value === 'boolean')
 
 const isCommand = (value: unknown): value is SlashCommand =>
-  isRecord(value) && typeof value.name === 'string' && typeof value.description === 'string'
+  isRecord(value) &&
+  typeof value.name === 'string' &&
+  typeof value.description === 'string' &&
+  (value.kind === undefined || value.kind === 'command' || value.kind === 'skill')
 
 const isBreakdown = (value: unknown): value is ContextBreakdown =>
   isRecord(value) &&
@@ -292,7 +295,8 @@ export function settled(entry: ThreadEntry): ThreadEntry {
       return entry.outcome === null ? { ...entry, outcome: { kind: 'ended' } } : entry
     case 'theme_change':
     case 'routine_change':
-      // And a theme or Routine card, which changed nothing.
+    case 'mcp_change':
+      // And a theme, Routine or MCP card, which changed nothing.
       return entry.outcome === null ? { ...entry, outcome: { kind: 'ended' } } : entry
     case 'tool': {
       const open = entry.status === 'pending' || entry.status === 'in_progress'

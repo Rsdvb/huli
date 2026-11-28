@@ -215,6 +215,7 @@
     "notYet": "No plan usage reported yet.",
     "accounts_one": "{{count}} account",
     "accounts_other": "{{count}} accounts",
+    "perHost": "Per-host reading",
     "reading": "Reading the plan usage",
     "failed": "Couldn’t read",
     "neverRead": "Couldn’t read the plan usage.",
@@ -385,8 +386,8 @@
     "fromComputer": {
       "name": "Usage on this computer",
       "name_web": "Usage on {{host}}",
-      "description": "Also count Claude Code, Codex and opencode logs from outside Kettu. Token counts, models and times only, never content.",
-      "description_web": "Also count Claude Code, Codex and opencode logs on {{host}} from outside Kettu. Token counts, models and times only, never content.",
+      "description": "Also count Claude Code, Codex, opencode, Pi and Google Antigravity logs from outside Kettu. Token counts, models and times only, never content.",
+      "description_web": "Also count Claude Code, Codex, opencode, Pi and Google Antigravity logs on {{host}} from outside Kettu. Token counts, models and times only, never content.",
       "keywords": "logs history import tokens statistics"
     },
     "notFound": "No logs found",

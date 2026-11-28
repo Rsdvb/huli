@@ -1,14 +1,28 @@
-import { lazy, Suspense, useContext, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { File01Icon, Link01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { readTextThumb } from '@shared/attachments'
+import { githubReferenceFromLink } from '@shared/git'
 import type { PluginMentionRef } from '@shared/plugin-refs'
-import type { Attachment, ContentRef, ThreadEntry, UserContent } from '@shared/thread'
+import {
+  isSkillCommand,
+  type Attachment,
+  type ContentRef,
+  type ThreadEntry,
+  type UserContent,
+} from '@shared/thread'
 import { emitAppEvent } from '@renderer/app/events'
-import { basename, bytes } from '@renderer/lib/format'
+import { basename, bytes, fileUrlPath } from '@renderer/lib/format'
+import type { FilePreviewSource } from '@renderer/features/files/file-hover-cache'
+import { parseLineRangeText, shouldReadAsText } from '@renderer/features/files/file-hover-model'
+import { FileHoverPreview } from '@renderer/features/files/file-hover-preview'
+import { relativeToRoot } from '@renderer/features/files/file-location'
 import { ProjectPathContext } from '@renderer/features/files/file-refs'
+import { ReferenceHoverCard } from '@renderer/features/git/gh-reference'
+import { useProjectRepository } from '@renderer/features/git/gh-reference-data'
 import { host } from '@renderer/lib/host'
+import { hostPlatform } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { ensureFiles, openFile, useFilesStore } from '@renderer/stores/files'
 import { useBrowserStore } from '@renderer/stores/browser'
@@ -17,12 +31,16 @@ import { useTerminalsStore } from '@renderer/stores/terminals'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { revealSurface } from '@renderer/features/shell/open-surfaces'
 import { useThreadsStore } from '@renderer/stores/threads'
+import { artifactListShown, useArtifactsStore } from '@renderer/stores/artifacts'
 import { openViewer } from '@renderer/stores/viewer'
 import { AttachmentTile, type TileView } from '../attachments/attachment-tile'
 import { openAttachmentPath } from '../attachments/open-attachment'
 import { TextDialog, type TextDialogTarget } from '../attachments/text-dialog'
 import { replayThumb } from '../attachments/thumb'
 import { Clamp } from '../clamp'
+import { splitAttachedArtifactsPrompt } from '../composer/artifact-attachments'
+import { SentBrowserAnnotationChips } from '../composer/browser-annotation-chips'
+import { splitBrowserAnnotationsPrompt } from '../composer/browser-annotations'
 import { ChipView } from '../composer/chip-view'
 import {
   isSurfaceMention,
@@ -35,9 +53,12 @@ import {
 } from '../composer/chips'
 import { useLinkOpener } from '../composer/link-opener'
 import { projectOf } from '../composer/prompt-chips'
+import { ArtifactLink } from '../markdown/artifact-link'
 import { CarriedImage } from '../media/carried-image'
 import { CarriedMedia } from '../media/carried-media'
+import { SessionIdContext } from '../media/grants'
 import { attachmentKey } from '../media/viewer-items'
+import { SentText } from './sent-text'
 
 const SentMarkdown = lazy(() => import('./sent-markdown'))
 
@@ -49,17 +70,39 @@ const IMAGE = 'max-h-40 max-w-60 rounded-lg object-cover shadow-card'
 /**
  * The text, images and references of a prompt, as the user wrote them. In the thread, its images
  * open the viewer.
+ *
+ * User-typed messages render verbatim with Kettu chips and explicit fenced code blocks; set
+ * `markdown` only for agent-to-agent or Kettu-authored cards that intentionally carry Markdown.
  */
 export function UserContentView({
   content,
   sessionId,
   entryId,
+  markdown = false,
 }: {
   content: UserContent[]
   sessionId?: string
   entryId?: string
+  markdown?: boolean
 }) {
-  const text = textOf(content)
+  const { t } = useTranslation('composer')
+  const rawText = textOf(content)
+  const parsedArtifacts = splitAttachedArtifactsPrompt(rawText)
+  const afterArtifacts = parsedArtifacts ? parsedArtifacts.text : rawText
+  const parsedBrowser = splitBrowserAnnotationsPrompt(afterArtifacts)
+  const text = parsedBrowser ? parsedBrowser.text : afterArtifacts
+  const attachedArtifacts = parsedArtifacts?.artifacts ?? []
+  const browserAnnotations = parsedBrowser?.annotations ?? []
+  const hasAttachedArtifacts = attachedArtifacts.length > 0
+  const hiddenArtifacts = useArtifactsStore((s) => s.hidden)
+  useEffect(() => {
+    if (!hasAttachedArtifacts) return
+    artifactListShown(true)
+    return () => artifactListShown(false)
+  }, [hasAttachedArtifacts])
+  const visibleArtifacts = hasAttachedArtifacts
+    ? attachedArtifacts.filter((artifact) => !hiddenArtifacts.has(artifact.id))
+    : attachedArtifacts
   // A command of Kettu's is no name the session's agent lists, but its text starts with it.
   const ran = content.some((c) => c.type === 'text' && c.command)
   const command = ran ? (/^\/(\S+)/.exec(text)?.[1] ?? null) : null
@@ -74,9 +117,39 @@ export function UserContentView({
       {text && (
         <div className="flex flex-col gap-1">
           <Clamp maxHeight={COLLAPSED_HEIGHT} buttonClassName="-mx-1.5 -mb-0.5">
-            <ChipText text={text} command={command} sessionId={sessionId} entryId={entryId} />
+            <ChipText
+              text={text}
+              command={command}
+              sessionId={sessionId}
+              entryId={entryId}
+              markdown={markdown}
+            />
           </Clamp>
         </div>
+      )}
+      {visibleArtifacts.length > 0 && (
+        <SessionIdContext value={sessionId ?? null}>
+          <div
+            role="list"
+            aria-label={t('artifacts.sentLabel')}
+            className="flex flex-wrap items-center gap-1.5"
+          >
+            {visibleArtifacts.map((artifact) => (
+              <span
+                key={artifact.id}
+                role="listitem"
+                className="inline-flex max-w-64 items-center overflow-hidden rounded-md bg-background/60 px-2 py-0.5 text-xs text-secondary shadow-card [&_[data-artifact-ref]]:max-w-full [&_[data-artifact-ref]]:truncate"
+              >
+                <ArtifactLink location={{ artifactId: artifact.id, place: null }}>
+                  {artifact.title}
+                </ArtifactLink>
+              </span>
+            ))}
+          </div>
+        </SessionIdContext>
+      )}
+      {browserAnnotations.length > 0 && (
+        <SentBrowserAnnotationChips annotations={browserAnnotations} />
       )}
       {refs.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
@@ -263,14 +336,23 @@ function ChipText({
   command,
   sessionId,
   entryId,
+  markdown,
 }: {
   text: string
   /** The name of a command of Kettu's the text starts with. */
   command: string | null
   sessionId?: string
   entryId?: string
+  markdown: boolean
 }) {
   const projectPath = useContext(ProjectPathContext)
+  const repo = useProjectRepository()
+  const repoOwner = repo?.owner ?? null
+  const repoName = repo?.repo ?? null
+  const githubRepo = useMemo(
+    () => (repoOwner && repoName ? { owner: repoOwner, repo: repoName } : null),
+    [repoOwner, repoName],
+  )
   const entry = useSentEntry(sessionId, entryId)
   const attachments = useMemo(() => attachmentsOf(entry), [entry])
   const surfaces = useMemo(() => surfacesOf(entry), [entry])
@@ -281,14 +363,25 @@ function ChipText({
   )
   const context = useMemo(
     () => ({
-      commands: [...(commands?.map((c) => c.name) ?? []), ...(command === null ? [] : [command])],
+      commands: [
+        ...(commands?.filter((c) => !isSkillCommand(c)).map((c) => c.name) ?? []),
+        ...(command === null ? [] : [command]),
+      ],
+      skills: commands?.filter(isSkillCommand).map((c) => c.name) ?? [],
       resolve,
+      githubRepo,
     }),
-    [commands, command, resolve],
+    [commands, command, resolve, githubRepo],
   )
   const links = useLinkOpener(sessionId)
   const opener = (chip: Chip): ((from: HTMLElement) => void) | null => {
     if (chip.kind === 'command') return null
+    if (chip.kind === 'skill') {
+      return sessionId
+        ? () =>
+            emitAppEvent({ kind: 'command-into-composer', sessionId, name: chip.name, skill: true })
+        : null
+    }
     if (chip.kind === 'link') return () => links.open(chip.url)
     if (isSurfaceMention(chip.kind)) {
       const id = chip.surfaceId
@@ -344,7 +437,45 @@ function ChipText({
       )
     }
     const open = opener(chip)
+    if (chip.kind === 'file' || chip.kind === 'folder' || chip.kind === 'image') {
+      const attachment = attachments.find((a) => a.id === chip.attachmentKey)
+      return (
+        <SentFileChip
+          chip={chip}
+          raw={raw}
+          projectPath={projectPath}
+          attachment={attachment}
+          open={open}
+        />
+      )
+    }
     // A selection copies what was typed: the chip's look is left out of it, its text is not.
+    const githubRef = chip.kind === 'link' ? githubReferenceFromLink(chip.url) : null
+    if (githubRef && open) {
+      return (
+        <>
+          <ReferenceHoverCard
+            reference={githubRef}
+            sessionId={sessionId ?? null}
+            side="top"
+            sideOffset={6}
+            trigger={
+              <button
+                type="button"
+                aria-label={raw}
+                onClick={(event) => open(event.currentTarget)}
+                className="rounded-[7px] align-middle outline-none select-none focus-visible:focus-ring"
+              >
+                <ChipView chip={chip} surface />
+              </button>
+            }
+          />
+          <span aria-hidden className="sr-only">
+            {raw}
+          </span>
+        </>
+      )
+    }
     return (
       <>
         {open ? (
@@ -370,11 +501,110 @@ function ChipText({
   }
   return (
     <div data-selectable="">
-      <Suspense fallback={<div className="whitespace-pre-wrap">{text}</div>}>
-        <SentMarkdown text={text} context={context} renderChip={renderChip} />
-      </Suspense>
+      <SessionIdContext value={sessionId ?? null}>
+        {markdown ? (
+          <Suspense fallback={<div className="whitespace-pre-wrap">{text}</div>}>
+            <SentMarkdown text={text} context={context} renderChip={renderChip} />
+          </Suspense>
+        ) : (
+          <SentText text={text} context={context} renderChip={renderChip} />
+        )}
+      </SessionIdContext>
       {links.dialog}
     </div>
+  )
+}
+
+type SentMentionChip = Exclude<Chip, { kind: 'command' | 'skill' | 'link' }>
+
+/**
+ * A sent user message's file, folder, or image mention chip with desktop hover preview.
+ * Clicking retains the existing open behavior while touch devices render the plain chip only.
+ */
+function SentFileChip({
+  chip,
+  raw,
+  projectPath,
+  attachment,
+  open,
+}: {
+  chip: SentMentionChip
+  raw: string
+  projectPath: string | null
+  attachment: Attachment | undefined
+  open: ((from: HTMLElement) => void) | null
+}) {
+  const [hoverOpen, setHoverOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const range = useMemo(() => parseLineRangeText(chip.lines), [chip.lines])
+  const attachmentFsPath = attachment?.uri ? fileUrlPath(attachment.uri, hostPlatform()) : null
+  const attachmentRelative =
+    attachmentFsPath && projectPath ? relativeToRoot(attachmentFsPath, projectPath) : null
+  const projectRelative = chip.path ?? attachmentRelative
+  const displayPath = projectRelative ?? attachmentFsPath ?? chip.label
+  const previewKind = chip.missing
+    ? 'missing'
+    : chip.kind === 'folder'
+      ? 'folder'
+      : chip.kind === 'image'
+        ? 'image'
+        : 'file'
+  const source = useMemo<FilePreviewSource | null>(() => {
+    if (previewKind === 'folder' || previewKind === 'missing') return null
+    if (!projectPath || !projectRelative) return null
+    return {
+      kind: 'project',
+      projectPath,
+      path: projectRelative,
+      ...(shouldReadAsText(projectRelative, range) && { asText: true }),
+    }
+  }, [previewKind, projectPath, projectRelative, range])
+
+  const openFromCard = open
+    ? () => {
+        const from = triggerRef.current
+        if (from) open(from)
+        else if (projectPath && projectRelative) {
+          openFile(projectPath, projectRelative, range?.start ?? null, { preview: true })
+        }
+      }
+    : null
+
+  const trigger = open ? (
+    <button
+      ref={triggerRef}
+      type="button"
+      aria-label={raw}
+      onClick={(event) => {
+        setHoverOpen(false)
+        open(event.currentTarget)
+      }}
+      className="rounded-[7px] align-middle outline-none select-none focus-visible:focus-ring"
+    />
+  ) : (
+    <span aria-hidden className="inline-block align-middle select-none" />
+  )
+
+  return (
+    <>
+      <FileHoverPreview
+        source={source}
+        path={displayPath}
+        range={range}
+        kind={previewKind}
+        thumb={attachment?.thumb ?? chip.thumb ?? null}
+        size={attachment?.size ?? null}
+        onOpen={openFromCard}
+        open={hoverOpen}
+        onOpenChange={setHoverOpen}
+        trigger={trigger}
+      >
+        <ChipView chip={chip} surface />
+      </FileHoverPreview>
+      <span aria-hidden={open ? true : undefined} className="sr-only">
+        {raw}
+      </span>
+    </>
   )
 }
 

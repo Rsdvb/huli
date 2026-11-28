@@ -11,6 +11,11 @@ import { HostError, invalidParams, notFound } from './errors'
 import type { BytesPart } from './files'
 import { t } from './i18n'
 import { isAbsolutePath, isInside } from './paths'
+import {
+  DEFAULT_AGY_APP_DATA_DIR,
+  isSafeAgyAppDataDir,
+  resolveAgyAppDataDirSync,
+} from './acp/agy-store'
 
 // An agent's id of its session as one folder's name: no separator, and not `.` or `..`.
 const SESSION_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
@@ -21,13 +26,16 @@ export function agentFolder(
   agentSessionId: string,
   homeDir: string,
   platform: Platform,
+  appDataDir = DEFAULT_AGY_APP_DATA_DIR,
 ): string | null {
   if (!SESSION_SEGMENT.test(agentSessionId)) return null
   const paths = platform === 'win32' ? path.win32 : path.posix
   switch (harnessOf(agentId)) {
     // agy 1.5.9 keeps a session's plan, walkthrough and notes in its brain folder.
-    case 'antigravity':
-      return paths.join(homeDir, '.gemini', 'antigravity-cli', 'brain', agentSessionId)
+    case 'antigravity': {
+      const dir = isSafeAgyAppDataDir(appDataDir) ? appDataDir : DEFAULT_AGY_APP_DATA_DIR
+      return paths.join(homeDir, '.gemini', dir, 'brain', agentSessionId)
+    }
     default:
       return null
   }
@@ -57,11 +65,17 @@ export class AgentFiles {
     const session = this.deps.session(sessionId)
     if (!session) return null
     // An added agy agent's process takes its own folder for the home folder.
+    const baseHome = session.configDir ?? this.deps.homeDir
+    const appDataDir =
+      harnessOf(session.agentId) === 'antigravity'
+        ? (resolveAgyAppDataDirSync(session.agentSessionId, baseHome) ?? DEFAULT_AGY_APP_DATA_DIR)
+        : DEFAULT_AGY_APP_DATA_DIR
     return agentFolder(
       session.agentId,
       session.agentSessionId,
-      session.configDir ?? this.deps.homeDir,
+      baseHome,
       this.deps.platform,
+      appDataDir,
     )
   }
 

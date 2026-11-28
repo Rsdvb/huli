@@ -110,6 +110,11 @@ export type MapperEffect =
   | { kind: 'backgroundRunning'; running: boolean; listed: boolean }
   // How many jobs the agent scheduled to wake the session later, such as cron and /loop wakeups.
   | { kind: 'scheduled'; jobs: number }
+  // The agent finished its reply and is idle waiting for background work (sub-agents, background
+  // commands, or scheduled timers) while keeping its prompt open.
+  | { kind: 'waitingBackground'; waiting: boolean }
+  // The active turn entered or left an interruptible wait (such as clock.sleep or Sleep).
+  | { kind: 'interruptibleWait'; id: string; active: boolean }
   // The commands and monitors the agent has running or has ended since, replacing the last list.
   | { kind: 'tasks'; tasks: BackgroundTaskView[] }
   // Huli: the commands and subagents that hold up their tool call, replacing the last list.

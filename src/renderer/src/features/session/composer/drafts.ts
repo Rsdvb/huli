@@ -1,21 +1,47 @@
 import { useSyncExternalStore } from 'react'
 import { parseDiffNotes, type DiffNote } from '@shared/diff-notes'
 import { parsePageNotes, type PageNote } from '@shared/page-notes'
+import {
+  browserAnnotationKey,
+  isBrowserElementAnnotation,
+  MAX_BROWSER_ANNOTATIONS,
+  type BrowserElementAnnotation,
+} from '@shared/browser'
 import { PLUGIN_REF_LIMITS, type PluginMentionRef } from '@shared/plugin-refs'
-import { isAttachment, type Attachment } from '@shared/thread'
+import { isAgentId, isAttachment, type AgentId, type Attachment } from '@shared/thread'
 import { removeKey } from '@renderer/lib/storage'
 
-// Unsent composer text, attachments, passage comments and the items mentioned from plugins per
-// session, in localStorage under `draft:<sessionId>` as JSON `{ text, attachments, comments,
-// mentions, notes, pageNotes }`, written 300 ms after the last change. One stored as plain text,
-// before drafts had attachments, reads as text alone, and one stored before comments or mentions
-// as one without them. A draft that is too large or fails to save stays in memory. `notes` are
-// comments on diff lines waiting to go to the agent together, and `pageNotes` (Huli) those on
-// elements of a page in the session's browser, which go with them; clearing the draft's message
-// leaves them, deleting the session drops them.
+// Unsent composer text, attachments, attached artifact references, browser element references,
+// passage comments, delegated agent recipient, and the items mentioned from plugins per session,
+// in localStorage under `draft:<sessionId>` as JSON, written 300 ms after the last change.
+// One stored as plain text, before drafts had attachments, reads as text alone, and older drafts
+// default missing fields to empty/null. A draft that is too large or fails to save stays in memory.
+// `notes` are comments on diff lines waiting to go to the agent together, and `pageNotes` (Huli)
+// those on elements of a page in the session's browser, which go with them; clearing the draft's
+// message leaves them, deleting the session drops them.
 
 /** The New session screen's draft, kept like a session's until the session it starts exists. */
 export const NEW_SESSION_DRAFT = 'new'
+
+/** Selected target agent for manually delegating the composer's task into a child session. */
+export interface DelegateTarget {
+  agentId: AgentId
+  name: string
+  /** Another host that owns the agent; omitted for this computer. */
+  hostId?: string
+}
+
+/** The artifact kind badge shown on an attached artifact chip and reference block. */
+export type AttachedArtifactKind = 'document' | 'slides' | 'web' | 'canvas'
+
+/** A project artifact attached to a composer draft as a lightweight reference. */
+export interface AttachedArtifact {
+  id: string
+  title: string
+  kind: AttachedArtifactKind
+  /** Another host that holds the artifact; omitted for this computer. */
+  hostId?: string
+}
 
 /**
  * A draft's attachment as stored: the host's record of it, and what the tile shows about it;
@@ -48,6 +74,9 @@ interface Draft {
   pageNotes: PageNote[]
   comments: DraftComment[]
   mentions: PluginMentionRef[]
+  artifacts: AttachedArtifact[]
+  browserAnnotations: BrowserElementAnnotation[]
+  delegateTarget: DelegateTarget | null
 }
 
 const WRITE_DELAY_MS = 300
@@ -65,6 +94,9 @@ const EMPTY: Draft = {
   mentions: [],
   notes: [],
   pageNotes: [],
+  artifacts: [],
+  browserAnnotations: [],
+  delegateTarget: null,
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -107,6 +139,30 @@ function isMention(value: unknown): value is PluginMentionRef {
   )
 }
 
+const ARTIFACT_KINDS: ReadonlySet<string> = new Set(['document', 'slides', 'web', 'canvas'])
+
+function isAttachedArtifact(value: unknown): value is AttachedArtifact {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    value.id.length > 0 &&
+    typeof value.title === 'string' &&
+    typeof value.kind === 'string' &&
+    ARTIFACT_KINDS.has(value.kind) &&
+    (value.hostId === undefined || typeof value.hostId === 'string')
+  )
+}
+
+function isDelegateTarget(value: unknown): value is DelegateTarget {
+  return (
+    isRecord(value) &&
+    isAgentId(value.agentId) &&
+    typeof value.name === 'string' &&
+    value.name.trim().length > 0 &&
+    (value.hostId === undefined || typeof value.hostId === 'string')
+  )
+}
+
 /** A stored draft; one stored as plain text, or that is not a draft's JSON, is text alone. */
 export function parseDraft(raw: string): Draft {
   if (raw.startsWith('{')) {
@@ -117,6 +173,27 @@ export function parseDraft(raw: string): Draft {
         const mentions = Array.isArray(value.mentions)
           ? value.mentions.filter(isMention).slice(0, PLUGIN_REF_LIMITS.perMessage)
           : []
+        const seenArtifacts = new Set<string>()
+        const artifacts = Array.isArray(value.artifacts)
+          ? value.artifacts.filter((item): item is AttachedArtifact => {
+              if (!isAttachedArtifact(item) || seenArtifacts.has(item.id)) return false
+              seenArtifacts.add(item.id)
+              return true
+            })
+          : []
+        const seenAnnotations = new Set<string>()
+        const browserAnnotations = Array.isArray(value.browserAnnotations)
+          ? value.browserAnnotations
+              .filter((item): item is BrowserElementAnnotation => {
+                if (!isBrowserElementAnnotation(item)) return false
+                const dedupeKey = browserAnnotationKey(item)
+                if (seenAnnotations.has(dedupeKey)) return false
+                seenAnnotations.add(dedupeKey)
+                return true
+              })
+              .slice(0, MAX_BROWSER_ANNOTATIONS)
+          : []
+        const delegateTarget = isDelegateTarget(value.delegateTarget) ? value.delegateTarget : null
         return {
           text: value.text,
           attachments: value.attachments.filter(isSaved),
@@ -124,13 +201,26 @@ export function parseDraft(raw: string): Draft {
           mentions,
           notes: parseDiffNotes(value.notes),
           pageNotes: parsePageNotes(value.pageNotes),
+          artifacts,
+          browserAnnotations,
+          delegateTarget,
         }
       }
     } catch {
       // Text that only starts like JSON.
     }
   }
-  return { text: raw, attachments: [], comments: [], mentions: [], notes: [], pageNotes: [] }
+  return {
+    text: raw,
+    attachments: [],
+    comments: [],
+    mentions: [],
+    notes: [],
+    pageNotes: [],
+    artifacts: [],
+    browserAnnotations: [],
+    delegateTarget: null,
+  }
 }
 
 function read(sessionId: string): Draft {
@@ -160,9 +250,34 @@ export function readDraftMentions(sessionId: string): PluginMentionRef[] {
   return read(sessionId).mentions
 }
 
-/** Whether a draft holds what Send takes: text other than white space, or an attachment. */
-export function hasMessage(text: string, attachments: readonly unknown[]): boolean {
-  return text.trim().length > 0 || attachments.length > 0
+export function readDraftArtifacts(sessionId: string): AttachedArtifact[] {
+  return read(sessionId).artifacts
+}
+
+export function readDraftBrowserAnnotations(sessionId: string): BrowserElementAnnotation[] {
+  return read(sessionId).browserAnnotations
+}
+
+export function readDraftDelegateTarget(sessionId: string): DelegateTarget | null {
+  return read(sessionId).delegateTarget
+}
+
+/**
+ * Whether a draft holds what Send takes: text other than white space, an attachment, an artifact,
+ * or a browser element reference.
+ */
+export function hasMessage(
+  text: string,
+  attachments: readonly unknown[],
+  artifacts: readonly unknown[] = [],
+  browserAnnotations: readonly unknown[] = [],
+): boolean {
+  return (
+    text.trim().length > 0 ||
+    attachments.length > 0 ||
+    artifacts.length > 0 ||
+    browserAnnotations.length > 0
+  )
 }
 
 function write(sessionId: string, draft: Draft): void {
@@ -191,6 +306,24 @@ export function writeDraftMentions(sessionId: string, mentions: PluginMentionRef
   write(sessionId, { ...read(sessionId), mentions })
 }
 
+export function writeDraftArtifacts(sessionId: string, artifacts: AttachedArtifact[]): void {
+  write(sessionId, { ...read(sessionId), artifacts })
+}
+
+export function writeDraftBrowserAnnotations(
+  sessionId: string,
+  browserAnnotations: BrowserElementAnnotation[],
+): void {
+  write(sessionId, { ...read(sessionId), browserAnnotations })
+}
+
+export function writeDraftDelegateTarget(
+  sessionId: string,
+  delegateTarget: DelegateTarget | null,
+): void {
+  write(sessionId, { ...read(sessionId), delegateTarget })
+}
+
 /** Writes a pending draft now, for example when the composer unmounts. */
 export function flushDraft(sessionId: string): void {
   const timer = timers.get(sessionId)
@@ -203,7 +336,10 @@ export function flushDraft(sessionId: string): void {
     draft.attachments.length === 0 &&
     draft.comments.length === 0 &&
     draft.notes.length === 0 &&
-    draft.pageNotes.length === 0
+    draft.pageNotes.length === 0 &&
+    draft.artifacts.length === 0 &&
+    draft.browserAnnotations.length === 0 &&
+    draft.delegateTarget === null
   ) {
     removeKey(key(sessionId))
     memory.delete(sessionId)
@@ -236,7 +372,10 @@ export function draftIds(): string[] {
   return [...ids].sort()
 }
 
-/** The sessions whose draft, saved or in memory, holds text, an attachment or any comment. */
+/**
+ * The sessions whose draft, saved or in memory, holds text, an attachment, any comment, an
+ * artifact, or a browser element reference.
+ */
 export function draftedSessions(): string[] {
   return draftIds().filter((id) => {
     if (id === NEW_SESSION_DRAFT) return false
@@ -246,7 +385,9 @@ export function draftedSessions(): string[] {
       draft.attachments.length > 0 ||
       draft.comments.length > 0 ||
       draft.notes.length > 0 ||
-      draft.pageNotes.length > 0
+      draft.pageNotes.length > 0 ||
+      draft.artifacts.length > 0 ||
+      draft.browserAnnotations.length > 0
     )
   })
 }
@@ -262,7 +403,7 @@ export function clearDraft(sessionId: string): void {
     removeKey(key(sessionId))
     return
   }
-  memory.set(sessionId, { text: '', attachments: [], comments: [], mentions: [], notes, pageNotes })
+  memory.set(sessionId, { ...EMPTY, notes, pageNotes })
   flushDraft(sessionId)
 }
 

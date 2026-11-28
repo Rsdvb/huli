@@ -33,10 +33,10 @@ import { parseOwnRelayInput } from './own-relay'
 import type { DirectAddress } from '@shared/remote/protocol'
 import type { RemoteStatus } from '@shared/remote/status'
 import {
-  PAGE_SIZE_NAMES,
+  PANE_PAGE_SIZE_MODES,
   type BrowserBounds,
   type BrowserOriginDecision,
-  type PageSizeName,
+  type PanePageSizeMode,
 } from '@shared/browser'
 import { isAgentId } from '@shared/agents'
 import { isControlOutcome, type ControlAgent } from '@shared/control'
@@ -88,6 +88,7 @@ import { grantedPath, type MediaGrants } from './media'
 import { copyImage, onHostText, revealMedia, saveMediaAs } from './media-actions'
 import type { IslandBridge } from './island/bridge'
 import { notifyTest } from './notifications'
+import { openLocalFile } from './open-file'
 import type { QuitFlow } from './quit'
 import type { HostMedia } from './host-media'
 import type { HostSessions } from './host-sessions'
@@ -95,6 +96,7 @@ import type { HostPairingListener, RemoteHost } from './remote-host'
 import type { RemoteOffers } from './remote-offer'
 import { isRendererUrl, rendererPage } from './renderer'
 import { MoveFailed, type SessionMover } from './session-move'
+import type { TrayHostAgentsFeed } from './tray-host-agents'
 import type { TrayPanel } from './tray-panel'
 import type { SettingsStore } from './settings'
 import type { Sharing } from './sharing'
@@ -197,6 +199,7 @@ const PANEL_CHANNELS = new Set<string>([
   'tray:quit',
   'tray:hide',
   'tray:resize',
+  'tray:host-agents',
 ])
 
 // Huli: what the mini window's page may call: the reads it shares, its host port and its own calls.
@@ -764,6 +767,8 @@ export function registerIpcHandlers({
   handle('shell:show-item', 1, (_, target) => {
     shell.showItemInFolder(absolutePath(target))
   })
+  // Opens an existing local regular file in its default app after validating it is not a folder or executable.
+  handle('shell:open-file', 1, (_, target) => openLocalFile(target))
 
   const editors = new Editors({ file: join(app.getPath('userData'), 'editors.json') })
   handle('editors:list', 0, () => editors.list())
@@ -789,8 +794,12 @@ export function registerIpcHandlers({
   handle('update:get-status', 0, () => updater.getStatus())
   handle('update:check', 0, () => updater.check())
   handle('update:download', 0, () => updater.download())
-  handle('update:cancel', 0, () => updater.cancel())
-  handle('update:restart', 0, () => updater.restart())
+  handle('update:cancel', 0, () => {
+    updater.cancel()
+  })
+  handle('update:restart', 0, () => {
+    updater.restart()
+  })
   handle('update:running-work', 0, () => quit.runningWork())
   handle('update:restart-confirmed', 0, () => updater.restartConfirmed())
   handle('update:restart-when-idle', 0, () => updater.restartWhenIdle())
@@ -1132,6 +1141,10 @@ export function registerIpcHandlers({
     const address = browserUrl(url)
     if (browserViews.paneControl(page)) browserViews.navigate(page, address)
   })
+  // Opening a link from the thread selects a matching tab or opens a user tab without disturbing the agent's.
+  handle('browser:open-link', 2, (_, id, url) =>
+    browserViews.openLink(sessionId(id), browserUrl(url)),
+  )
   handle('browser:back', 1, (_, id) => {
     if (browserViews.paneControl(sessionId(id))) browserViews.back(sessionId(id))
   })
@@ -1144,11 +1157,21 @@ export function registerIpcHandlers({
   handle('browser:stop', 1, (_, id) => browserViews.stop(sessionId(id)))
   handle('browser:open-external', 1, (_, id) => browserViews.openExternal(sessionId(id)))
   handle('browser:page-size', 2, async (_, id, size) => {
-    if (!(PAGE_SIZE_NAMES as readonly unknown[]).includes(size)) {
-      throw new Error('A page size must be desktop, tablet or phone')
+    if (!(PANE_PAGE_SIZE_MODES as readonly unknown[]).includes(size)) {
+      throw new Error('A page size must be fit, desktop, tablet or phone')
     }
     const page = sessionId(id)
-    if (browserViews.paneControl(page)) await browserViews.setPageSize(page, size as PageSizeName)
+    if (browserViews.paneControl(page)) {
+      await browserViews.setPageSize(page, size as PanePageSizeMode)
+    }
+  })
+  handle('browser:set-annotate', 2, async (_, id, enabled) => {
+    if (typeof enabled !== 'boolean') {
+      throw new Error('"browser:set-annotate" takes whether annotation mode is enabled')
+    }
+    const page = sessionId(id)
+    if (enabled && !browserViews.paneControl(page)) return false
+    return browserViews.setAnnotate(page, enabled)
   })
   handle('browser:freeze', 1, (_, id) => browserViews.freeze(sessionId(id)))
   handle('browser:thaw', 1, (_, id) => browserViews.thaw(sessionId(id)))
@@ -1167,6 +1190,7 @@ export function registerIpcHandlers({
   handle('browser:hand-back', 1, (_, id) =>
     browserViews.controlRequest(sessionId(id), { type: 'hand-back' }),
   )
+  handle('browser:release-takeover', 1, (_, id) => browserViews.releaseTakeover(sessionId(id)))
   handle('browser:answer-ask', 2, (_, id, outcome) => {
     if (!isControlOutcome(outcome)) throw new Error('An answer to a step must be done or skipped')
     browserViews.controlRequest(sessionId(id), { type: 'answer', outcome })
@@ -1270,7 +1294,7 @@ export function registerCaptureIpc(capture: ScreenCapture): void {
 }
 
 /** The menu bar panel's calls, taken from the panel's own page alone. */
-export function registerTrayIpc(panel: TrayPanel): void {
+export function registerTrayIpc(panel: TrayPanel, hostAgents: TrayHostAgentsFeed): void {
   on('tray:open', (event, target) => {
     if (panel.owns(event.sender) && isTrayTarget(target)) panel.open(target)
   })
@@ -1282,6 +1306,12 @@ export function registerTrayIpc(panel: TrayPanel): void {
   })
   on('tray:resize', (event, height) => {
     if (panel.owns(event.sender)) panel.resize(height)
+  })
+  handle('tray:host-agents', 0, ({ event }) => {
+    if (!panel.owns(event.sender)) {
+      throw new Error('Rejected "tray:host-agents" call from untrusted sender')
+    }
+    return hostAgents.snapshot()
   })
 }
 

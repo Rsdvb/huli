@@ -2,7 +2,7 @@
 // web contents; the renderer draws the pane's frame and tab strip and tells main where the page
 // sits.
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readdir } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { app, BrowserWindow, session as electronSession, shell, WebContentsView } from 'electron'
@@ -17,7 +17,10 @@ import type {
 import {
   AGENT_VIEWPORT,
   BROWSER_PARTITION,
-  fitViewport,
+  canonicalBrowserUrl,
+  desktopViewportFor,
+  fitPageViewport,
+  isAnnotatableBrowserUrl,
   MAX_SESSION_TABS,
   ORIGIN_WAIT_MS,
   PAGE_SIZES,
@@ -25,6 +28,7 @@ import {
   SIZE_LINE_ROOM,
   type BrowserBounds,
   type BrowserDownloadRequest,
+  type BrowserElementAnnotatedEvent,
   type BrowserNotice,
   type BrowserOriginAnswer,
   type BrowserOriginDecision,
@@ -33,7 +37,7 @@ import {
   type BrowserState,
   type BrowserTab,
   type PageSize,
-  type PageSizeName,
+  type PanePageSizeMode,
   type UploadAnswer,
 } from '@shared/browser'
 import {
@@ -59,6 +63,14 @@ import { sendEvent } from '../events'
 import { createLogger } from '../log'
 import type { AllowedSites } from '@shared/ipc'
 import type { PickColor, PickEvent } from '@shared/page-notes'
+import {
+  ANNOTATE_BINDING,
+  ANNOTATE_WORLD,
+  buildAnnotateInstallScript,
+  buildAnnotateTeardownScript,
+  parseBindingMessage,
+  sanitizeAnnotatedPayload,
+} from './annotate'
 import { originOf, BrowserOrigins, type BrowserOriginStore } from './origins'
 import { PageOverlay, type OverlayParent } from './overlay'
 import { PagePicker } from './pick'
@@ -112,6 +124,9 @@ export interface AgentTabInfo {
   usable: boolean
 }
 
+/** The viewport mode chosen for a tab: native pane fill, responsive desktop, or a fixed device size. */
+type TabSizeChoice = { kind: 'fit' } | { kind: 'desktop' } | { kind: 'fixed'; size: PageSize }
+
 interface Tab {
   id: string
   sessionId: string
@@ -132,13 +147,15 @@ interface Tab {
   restartWait: (() => void) | null
   /** Whether its page's file choosers go to the agent's tools rather than a system dialog. */
   intercepting: boolean
-  /** An agent used it, so its page keeps a size of its own for good. */
+  /** An agent used it at least once. */
   used: boolean
+  /** The size mode the agent or the user picked for this tab. */
+  choice: TabSizeChoice
   /**
-   * The size the agent or the user picked for it; null for the desktop's, which only a tab an
-   * agent used keeps.
+   * The resolved desktop viewport frozen while an agent actively drives this tab, so resizing the
+   * panel mid-turn scales the view without reflowing the page or shifting click coordinates.
    */
-  size: PageSize | null
+  frozenDesktop: PageSize | null
   /**
    * What its page was last told: the size it keeps and the scale it draws at, and, Huli, whether
    * it was an emulated device's, whose touch and user agent the emulation sends; null for none.
@@ -148,6 +165,14 @@ interface Tab {
   sizing: Promise<void> | null
   /** Huli: what it emulates (browser_emulate), which its page gets again when made anew. */
   emulation: BrowserEmulation
+  /** Whether element annotation mode is active on this tab. */
+  annotating: boolean
+  /** Random token validating CDP binding messages from the active annotation overlay. */
+  annotateToken: string | null
+  /** Isolated world execution context id holding the active annotation overlay, if any. */
+  annotateContextId: number | null
+  /** Monotonic counter preventing stale async annotate enable calls from activating after disable. */
+  annotateOp: number
 }
 
 /** A still of a page that its overlay draws over it while its screenshots are taken. */
@@ -260,12 +285,18 @@ export interface BrowserViewsDeps {
   removed?(sessionId: string): void
   /** A session's browser closed its last tab: nothing drives it now. */
   ended?(sessionId: string): void
+  /** The agent's current tab closed while other tabs stay open: control of it ended. */
+  agentTabClosed?(sessionId: string): void
+  /** The user closed the browser side panel while holding takeover control. */
+  panelClosed?(sessionId: string): void
   /** A page opened a site, and later named its icons, which links in replies show. */
   siteOpened?(pageUrl: string, favicons?: string[]): void
   /** An upload waits for the user's answer on the overlay: the pane should show the page. */
   uploadAsked?(sessionId: string): void
   /** The pane's pick mode picked an element, or ended. */
   picked?(event: PickEvent): void
+  /** The user picked an element in a tab while annotation mode was active. */
+  annotated?(event: BrowserElementAnnotatedEvent): void
   /** How long a new origin waits for the user; set only by tests, which cannot wait 2 minutes. */
   originWaitMs?: number
   /** Huli: Settings' choice of which browser data each session's pages use. */
@@ -387,6 +418,8 @@ export class BrowserViews {
   private nextConsent = 1
   private readonly picker: PagePicker
   private cover: Cover | null = null
+  /** Last real pane bounds reported by any session, used as initial desktop layout hint before a new browser is framed. */
+  private lastBounds: BrowserBounds | null = null
 
   constructor(private readonly deps: BrowserViewsDeps) {
     this.picker = new PagePicker({
@@ -710,6 +743,7 @@ export class BrowserViews {
     for (const other of this.browsers.values()) {
       if (other !== browser && other.shown) {
         other.shown = false
+        this.disableBrowserAnnotate(other)
         this.present(other)
       }
     }
@@ -725,7 +759,24 @@ export class BrowserViews {
     if (!browser) return
     browser.shown = false
     browser.frozen = false
+    this.disableBrowserAnnotate(browser)
     this.present(browser)
+    this.syncOverlay()
+  }
+
+  /**
+   * The user closed the browser side panel while holding takeover control: hide the views and
+   * immediately release takeover so the agent and UI do not stay stuck waiting for hand-back.
+   */
+  releaseTakeover(sessionId: string): void {
+    const browser = this.browsers.get(sessionId)
+    if (browser) {
+      browser.shown = false
+      browser.frozen = false
+      this.disableBrowserAnnotate(browser)
+      this.present(browser)
+    }
+    this.deps.panelClosed?.(sessionId)
     this.syncOverlay()
   }
 
@@ -737,14 +788,15 @@ export class BrowserViews {
   close(sessionId: string): void {
     const browser = this.browsers.get(sessionId)
     if (!browser) return
+    this.disableBrowserAnnotate(browser, false)
     for (const tab of this.tabsOf(browser)) this.dropTab(tab)
     browser.strip.clear()
     // Huli: the next first page chooses its profile again, as Settings say then.
     browser.profile = null
     this.consents.get(sessionId)?.settle('deny')
     this.origins.close(sessionId)
-    this.emit(browser)
     this.deps.ended?.(sessionId)
+    this.emit(browser)
     this.syncOverlay()
   }
 
@@ -752,6 +804,7 @@ export class BrowserViews {
   newTab(sessionId: string): string | null {
     const browser = this.browser(sessionId)
     if (browser.strip.size >= MAX_SESSION_TABS) return null
+    this.disableBrowserAnnotate(browser)
     const tab = this.addTab(browser, { select: true, agent: false })
     this.present(browser)
     this.emit(browser)
@@ -763,6 +816,7 @@ export class BrowserViews {
   selectTab(sessionId: string, tabId: string): void {
     const browser = this.browsers.get(sessionId)
     if (!browser?.strip.select(tabId)) return
+    this.disableBrowserAnnotate(browser)
     this.present(browser)
     this.emit(browser)
     this.syncOverlay()
@@ -773,9 +827,17 @@ export class BrowserViews {
     const browser = this.browsers.get(sessionId)
     if (!browser?.strip.has(tabId)) return
     if (browser.strip.size === 1) return this.close(sessionId)
+    const wasAgent = browser.strip.agent === tabId
     const tab = this.tabs.get(tabId)
-    if (tab) this.dropTab(tab)
+    if (tab) {
+      void this.disableAnnotate(tab, false)
+      this.dropTab(tab)
+    }
     browser.strip.remove(tabId)
+    this.disableBrowserAnnotate(browser)
+    if (wasAgent && browser.strip.agent === null) {
+      this.deps.agentTabClosed?.(sessionId)
+    }
     this.present(browser)
     this.emit(browser)
     this.syncOverlay()
@@ -784,12 +846,24 @@ export class BrowserViews {
   setBounds(sessionId: string, bounds: BrowserBounds): void {
     const browser = this.browser(sessionId)
     const first = !browser.framed
+    const selectedBefore = this.selectedTab(browser)
+    const viewportBefore = selectedBefore ? this.viewportOf(selectedBefore) : null
     browser.bounds = bounds
     browser.framed = true
-    for (const tab of this.tabsOf(browser)) this.place(tab)
+    this.lastBounds = bounds
+    for (const tab of this.tabsOf(browser)) {
+      // Lock the first real pane frame for an agent turn that started before the pane mounted.
+      if (first) this.freezeDesktopIfNeeded(tab)
+      this.place(tab)
+    }
     if (first) {
       this.present(browser)
       this.syncOverlay()
+    }
+    const selectedAfter = this.selectedTab(browser)
+    const viewportAfter = selectedAfter ? this.viewportOf(selectedAfter) : null
+    if (first || !samePageSize(viewportBefore, viewportAfter)) {
+      this.emit(browser)
     }
   }
 
@@ -799,6 +873,57 @@ export class BrowserViews {
     const browser = this.browser(sessionId)
     const tab = this.selectedTab(browser) ?? this.addTab(browser, { select: true, agent: false })
     this.open(tab, url)
+  }
+
+  /**
+   * Opens a link from the session UI in the session's browser: selects an already-open tab on the
+   * same URL without reloading it, else reuses a blank selected user tab, else opens a new tab
+   * (falling back to navigating an existing tab when the session is at `MAX_SESSION_TABS`).
+   */
+  openLink(sessionId: string, url: string): void {
+    if (!isHttp(url)) throw new Error('A browser page opens an http or https address only')
+    const browser = this.browser(sessionId)
+    const target = canonicalBrowserUrl(url)
+    const selected = this.selectedTab(browser)
+    const match =
+      target !== null
+        ? selected && canonicalBrowserUrl(this.urlOf(selected)) === target
+          ? selected
+          : (this.tabsOf(browser).find((tab) => canonicalBrowserUrl(this.urlOf(tab)) === target) ??
+            null)
+        : null
+    if (match) {
+      if (browser.strip.select(match.id)) {
+        this.disableBrowserAnnotate(browser)
+        this.present(browser)
+        this.emit(browser)
+        this.syncOverlay()
+      }
+      return
+    }
+    if (this.isReusableBlankTab(browser, selected)) {
+      this.open(selected, url)
+      return
+    }
+    if (browser.strip.size >= MAX_SESSION_TABS) {
+      const fallback =
+        selected && !this.holdsInput(selected)
+          ? selected
+          : (this.tabsOf(browser).findLast((tab) => !this.holdsInput(tab)) ?? selected)
+      if (!fallback) return
+      if (browser.strip.select(fallback.id)) {
+        this.disableBrowserAnnotate(browser)
+        this.present(browser)
+      }
+      this.open(fallback, url)
+      this.syncOverlay()
+      return
+    }
+    this.disableBrowserAnnotate(browser)
+    const tab = this.addTab(browser, { select: true, agent: false })
+    this.present(browser)
+    this.open(tab, url)
+    this.syncOverlay()
   }
 
   /** The tab the agent's calls act on, which it keeps from then on; null when there is none. */
@@ -952,7 +1077,7 @@ export class BrowserViews {
    */
   async steady<T>(tabId: string, capture: () => Promise<T>): Promise<T> {
     const tab = this.tabs.get(tabId)
-    if (!tab || !this.viewportOf(tab)) return capture()
+    if (!tab || !tab.told) return capture()
     await this.coverPage(tab)
     try {
       return await capture()
@@ -1006,7 +1131,11 @@ export class BrowserViews {
     if (!browser || !tab || !browser.strip.has(tabId)) return
     const follow = this.following(browser)
     browser.strip.setAgent(tabId)
-    if (follow) browser.strip.select(tabId)
+    if (follow) {
+      this.disableBrowserAnnotate(browser)
+      browser.strip.select(tabId)
+    }
+    this.syncDesktopFreeze(browser)
     this.present(browser)
     this.emit(browser)
     this.syncOverlay()
@@ -1015,15 +1144,109 @@ export class BrowserViews {
   }
 
   /**
-   * The user picked a size for the selected tab's page. The desktop's lets a page an agent never
-   * used fill the pane again, and keeps one it used at the agent's size.
+   * The user picked a page size mode for the selected tab: native pane fill (`fit`), responsive
+   * desktop (`desktop`), or a fixed device preset (`tablet`, `phone`).
    */
-  async setPageSize(sessionId: string, name: PageSizeName): Promise<void> {
+  async setPageSize(sessionId: string, mode: PanePageSizeMode): Promise<void> {
     const tab = this.selected(sessionId)
     if (!tab) return
     await this.resize(tab, () => {
-      tab.size = name === 'desktop' ? null : PAGE_SIZES[name]
+      tab.frozenDesktop = null
+      tab.choice =
+        mode === 'fit'
+          ? { kind: 'fit' }
+          : mode === 'desktop'
+            ? { kind: 'desktop' }
+            : { kind: 'fixed', size: PAGE_SIZES[mode] }
     })
+  }
+
+  /**
+   * Enables or exits element annotation mode on the selected tab. Refuses to enable when no
+   * annotatable http(s) page is loaded, the page errored/crashed, or an agent actively owns input.
+   */
+  async setAnnotate(sessionId: string, enabled: boolean): Promise<boolean> {
+    const browser = this.browsers.get(sessionId)
+    const tab = browser ? this.selectedTab(browser) : null
+    if (!browser || !tab) return false
+    if (!enabled) {
+      await this.disableAnnotate(tab)
+      return false
+    }
+    if (!this.canAnnotate(tab)) {
+      if (tab.annotating) await this.disableAnnotate(tab)
+      return false
+    }
+    if (tab.annotating) return true
+    // Huli: the pane's pick mode and annotation mode never run on a page at once.
+    this.picker.stop(sessionId, true)
+    for (const other of this.tabsOf(browser)) {
+      if (other !== tab && (other.annotating || other.annotateToken !== null)) {
+        await this.disableAnnotate(other)
+      }
+    }
+    const contents = this.contentsOf(tab)
+    if (!contents || !contents.debugger.isAttached()) return false
+    const op = ++tab.annotateOp
+    const token = randomUUID()
+    tab.annotateToken = token
+    let contextId: number | null = null
+    try {
+      await contents.debugger.sendCommand('Runtime.enable')
+      const frameTree = (await contents.debugger.sendCommand('Page.getFrameTree')) as {
+        frameTree?: { frame?: { id?: string } }
+      }
+      const frameId = frameTree?.frameTree?.frame?.id
+      if (typeof frameId === 'string' && frameId.length > 0) {
+        const world = (await contents.debugger.sendCommand('Page.createIsolatedWorld', {
+          frameId,
+          worldName: ANNOTATE_WORLD,
+        })) as { executionContextId?: number }
+        if (typeof world?.executionContextId === 'number') {
+          contextId = world.executionContextId
+        }
+      }
+      await contents.debugger.sendCommand(
+        'Runtime.addBinding',
+        contextId !== null
+          ? { name: ANNOTATE_BINDING, executionContextName: ANNOTATE_WORLD }
+          : { name: ANNOTATE_BINDING },
+      )
+      await contents.debugger.sendCommand('Runtime.evaluate', {
+        expression: buildAnnotateInstallScript(token),
+        ...(contextId !== null ? { contextId } : {}),
+        returnByValue: true,
+      })
+      if (tab.annotateOp !== op || this.contentsOf(tab) !== contents || !this.canAnnotate(tab)) {
+        void contents.debugger
+          .sendCommand('Runtime.evaluate', {
+            expression: buildAnnotateTeardownScript(),
+            ...(contextId !== null ? { contextId } : {}),
+            returnByValue: true,
+          })
+          .catch(() => {})
+        if (tab.annotateOp === op) {
+          tab.annotating = false
+          tab.annotateToken = null
+          tab.annotateContextId = null
+          this.emitTab(tab)
+        }
+        return false
+      }
+      tab.annotating = true
+      tab.annotateContextId = contextId
+      this.emitTab(tab)
+      return true
+    } catch (error) {
+      log.warn(`Could not start page annotation: ${(error as Error).message}`)
+      if (tab.annotateOp === op) {
+        tab.annotating = false
+        tab.annotateToken = null
+        tab.annotateContextId = null
+        this.emitTab(tab)
+      }
+      return false
+    }
   }
 
   /** An agent's `browser_resize` on its tab, whose page keeps the size from then on. */
@@ -1032,7 +1255,13 @@ export class BrowserViews {
     if (!tab) throw new Error('The tab closed.')
     await this.resize(tab, () => {
       tab.used = true
-      tab.size = size.name === 'desktop' ? null : size
+      tab.frozenDesktop = null
+      if (size.name === 'desktop') {
+        tab.choice = { kind: 'desktop' }
+        this.freezeDesktopIfNeeded(tab)
+      } else {
+        tab.choice = { kind: 'fixed', size }
+      }
     })
     return this.viewportOf(tab) ?? AGENT_VIEWPORT
   }
@@ -1122,6 +1351,8 @@ export class BrowserViews {
       this.picker.stop(sessionId, false)
       return false
     }
+    const browser = this.browsers.get(sessionId)
+    if (browser) this.disableBrowserAnnotate(browser)
     return this.picker.start(sessionId, color)
   }
 
@@ -1234,10 +1465,15 @@ export class BrowserViews {
       restartWait: null,
       intercepting: false,
       used: how.agent,
-      size: null,
+      choice: how.agent ? { kind: 'desktop' } : { kind: 'fit' },
+      frozenDesktop: null,
       told: null,
       sizing: null,
       emulation: NO_EMULATION,
+      annotating: false,
+      annotateToken: null,
+      annotateContextId: null,
+      annotateOp: 0,
     }
     this.tabs.set(tab.id, tab)
     browser.strip.add(tab.id, how)
@@ -1405,6 +1641,7 @@ export class BrowserViews {
   }
 
   private reloadTab(tab: Tab): void {
+    void this.disableAnnotate(tab)
     tab.notice = null
     if (tab.view) tab.view.webContents.reload()
     else if (tab.lastUrl) this.open(tab, tab.lastUrl)
@@ -1413,6 +1650,7 @@ export class BrowserViews {
 
   /** Loads `url` in the tab, making its page when it has none. */
   private open(tab: Tab, url: string): void {
+    void this.disableAnnotate(tab)
     const view = tab.view ?? this.create(tab)
     tab.lastUrl = url
     tab.lastTitle = null
@@ -1536,16 +1774,59 @@ export class BrowserViews {
     if (at && this.overlayTab === tab.id) this.overlay.move(at)
   }
 
+  /** The pane frame used to lay out `tab`: its browser's real frame once reported, else the last known frame. */
+  private frameFor(tab: Tab): BrowserBounds {
+    const browser = this.browsers.get(tab.sessionId)
+    if (browser?.framed) return browser.bounds
+    return this.lastBounds ?? DEFAULT_BOUNDS
+  }
+
+  /** Whether `tab`'s desktop viewport should stay frozen against panel resizes right now. */
+  private shouldFreezeDesktop(tab: Tab): boolean {
+    if (tab.choice.kind !== 'desktop') return false
+    if (!this.agentDrives(tab.sessionId)) return false
+    return this.browsers.get(tab.sessionId)?.strip.agent === tab.id
+  }
+
+  /** Freezes `tab`'s resolved desktop dimensions once its browser has a real frame. */
+  private freezeDesktopIfNeeded(tab: Tab): boolean {
+    if (!this.shouldFreezeDesktop(tab) || tab.frozenDesktop !== null) return false
+    const browser = this.browsers.get(tab.sessionId)
+    if (!browser?.framed) return false
+    tab.frozenDesktop = desktopViewportFor(browser.bounds)
+    return true
+  }
+
+  /** Updates desktop viewport freeze/unfreeze for every tab in `browser` when agent control changes. */
+  private syncDesktopFreeze(browser: Browser): void {
+    for (const tab of this.tabsOf(browser)) {
+      if (this.shouldFreezeDesktop(tab)) {
+        if (this.freezeDesktopIfNeeded(tab)) this.size(tab)
+      } else if (tab.frozenDesktop !== null) {
+        tab.frozenDesktop = null
+        this.place(tab)
+      }
+    }
+  }
+
   /**
-   * The size the tab's page keeps; null while it fills the pane's frame. Huli: a device the tab
-   * emulates (browser_emulate) lays it out at the device's size, over the one picked for it.
+   * The logical viewport the tab's page uses; null when it fills the pane natively (`fit`). Huli: a
+   * device the tab emulates (browser_emulate) lays it out at the device's size, over the one picked
+   * for it.
    */
   private viewportOf(tab: Tab): PageSize | null {
     const device = tab.emulation.device
     if (device) {
       return { name: 'custom', width: device.width, height: device.height, mobile: device.mobile }
     }
-    return tab.size ?? (tab.used ? AGENT_VIEWPORT : null)
+    switch (tab.choice.kind) {
+      case 'fit':
+        return null
+      case 'fixed':
+        return tab.choice.size
+      case 'desktop':
+        return tab.frozenDesktop ?? desktopViewportFor(this.frameFor(tab))
+    }
   }
 
   /** Huli: what a page laid out at `size` is told beyond it, with the locale the tab emulates. */
@@ -1565,13 +1846,21 @@ export class BrowserViews {
     }
   }
 
-  /** The pane's frame for a page that fills it; a page of a fixed size fits inside it, scaled. */
-  private fitOf(tab: Tab): { bounds: BrowserBounds; scale: number } {
-    const frame = this.browsers.get(tab.sessionId)?.bounds ?? DEFAULT_BOUNDS
+  /** Fits `tab`'s viewport in its pane frame; desktop fills the full frame with no bottom caption strip. */
+  private fitOf(tab: Tab): { bounds: BrowserBounds; scale: number; showSizeLine: boolean } {
+    const frame = this.frameFor(tab)
     const viewport = this.viewportOf(tab)
-    if (!viewport) return { bounds: frame, scale: 1 }
-    // The pane's size line goes under the page, in the renderer's zoomed pixels.
-    return fitViewport(frame, viewport, Math.round(SIZE_LINE_ROOM * this.overlayZoom()))
+    // Fixed device presets keep room below for their size caption, in the renderer's zoomed pixels.
+    return fitPageViewport(frame, viewport, Math.round(SIZE_LINE_ROOM * this.overlayZoom()))
+  }
+
+  /** Whether `tab` needs CDP device metrics emulation for its current viewport and scale. */
+  private needsEmulation(tab: Tab, viewport: PageSize | null, scale: number): boolean {
+    if (!viewport) return false
+    // A desktop page in a wide pane fills natively at 1:1; only emulate when frozen mid-turn so
+    // shrinking the panel during an agent turn never reflows the page.
+    if (viewport.name === 'desktop' && scale === 1 && tab.frozenDesktop === null) return false
+    return true
   }
 
   private boundsOf(tab: Tab): BrowserBounds {
@@ -1580,55 +1869,66 @@ export class BrowserViews {
 
   /** The scale the tab's page was last told to draw at. */
   private drawnScale(tab: Tab): number {
-    return this.viewportOf(tab) && tab.told ? tab.told.scale : 1
+    return tab.told ? tab.told.scale : 1
   }
 
-  /** A tab an agent uses keeps a size of its own from then on, however the pane's frame changes. */
+  /**
+   * Readies a tab for agent use: on its first use a native-fill tab switches to responsive desktop
+   * width, and while an agent actively drives it its desktop dimensions stay frozen.
+   */
   private async fix(tab: Tab): Promise<void> {
     await this.resize(tab, () => {
+      const wasUsed = tab.used
       tab.used = true
+      if (!wasUsed && tab.choice.kind === 'fit') tab.choice = { kind: 'desktop' }
+      this.freezeDesktopIfNeeded(tab)
     })
   }
 
   /**
-   * Changes the size a tab's page keeps. A page given a size takes it before its view shrinks to
-   * fit, so it never lays out at the smaller box; one that fills the frame again grows with it.
+   * Changes the size a tab's page keeps. A page entering emulation takes its metrics before its
+   * view shrinks to fit, so it never lays out at the smaller box; one returning to native fill
+   * grows with the frame first and clears emulation cleanly.
    */
   private async resize(tab: Tab, change: () => void): Promise<void> {
     const before = this.viewportOf(tab)
+    const emulateBefore = this.needsEmulation(tab, before, this.fitOf(tab).scale)
     change()
     const after = this.viewportOf(tab)
-    if (samePageSize(before, after)) return
-    if (after) {
+    const emulateAfter = this.needsEmulation(tab, after, this.fitOf(tab).scale)
+    if (samePageSize(before, after) && emulateBefore === emulateAfter) return
+    if (after && emulateAfter) {
       this.size(tab, true)
       await tab.sizing
     }
     this.place(tab)
+    if (!emulateAfter && tab.sizing) await tab.sizing
     this.emitTab(tab)
   }
 
   /**
    * Tells a page how large to lay out and how small to draw in its view, when either changed or
-   * `again` asks, and a page that fills the frame again to lay out at its view. It goes through
-   * the page's debugger, whose overrides every later navigation of the page keeps. `afresh` clears
-   * them first, since Chromium does not send a size it was told already again.
+   * `again` asks, and clears emulation when a page fills the frame natively. It goes through the
+   * page's debugger, whose overrides every later navigation of the page keeps. `afresh` clears
+   * them first, since Chromium does not re-send a size it already holds.
    */
   private size(tab: Tab, again: boolean | 'afresh' = false): void {
     const contents = this.contentsOf(tab)
     if (!contents?.debugger.isAttached()) return
     const viewport = this.viewportOf(tab)
+    const { scale } = this.fitOf(tab)
+    const emulate = this.needsEmulation(tab, viewport, scale)
     const told = tab.told
     // Huli: an emulated device's touch and user agent are the emulation's (emulation.ts).
     const device = tab.emulation.device
     const emulated = device !== null
     const commands: [string, Record<string, unknown>][] = []
-    if (!viewport) {
+    if (!emulate || !viewport) {
       if (!told) return
       tab.told = null
       commands.push(['Emulation.clearDeviceMetricsOverride', {}])
       if (told.size.mobile && !told.emulated) commands.push(...this.deviceCommandsOf(tab, null))
     } else {
-      const { scale } = this.fitOf(tab)
       if (!again && told?.scale === scale && samePageSize(told.size, viewport)) return
       tab.told = { size: viewport, scale, emulated }
       if (again === 'afresh') commands.push(['Emulation.clearDeviceMetricsOverride', {}])
@@ -1713,6 +2013,10 @@ export class BrowserViews {
     tab.loading = false
     tab.asking = false
     tab.told = null
+    tab.annotating = false
+    tab.annotateToken = null
+    tab.annotateContextId = null
+    tab.annotateOp += 1
     if (!view) return
     const window = this.deps.window()
     if (window && !window.isDestroyed()) window.contentView.removeChildView(view)
@@ -1778,13 +2082,17 @@ export class BrowserViews {
   private closedItself(tab: Tab): void {
     const browser = this.browsers.get(tab.sessionId)
     if (!browser || !browser.strip.has(tab.id)) return
+    const wasAgent = browser.strip.agent === tab.id
     this.tabs.delete(tab.id)
     browser.strip.remove(tab.id)
     if (browser.strip.size === 0) {
       this.origins.close(tab.sessionId)
-      this.emit(browser)
       this.deps.ended?.(tab.sessionId)
+      this.emit(browser)
     } else {
+      if (wasAgent && browser.strip.agent === null) {
+        this.deps.agentTabClosed?.(tab.sessionId)
+      }
       this.present(browser)
       this.emit(browser)
     }
@@ -1815,10 +2123,12 @@ export class BrowserViews {
     })
     contents.on('did-start-navigation', (details) => {
       if (!details.isMainFrame) return
+      void this.disableAnnotate(tab, details.isSameDocument)
       tab.notice = null
       emit()
     })
     contents.on('did-navigate', (_event, url, code) => {
+      void this.disableAnnotate(tab, false)
       if (isAllowedNavigation(url)) tab.lastUrl = url
       this.picker.navigated(tab.id)
       // A page that failed to load commits too, with no response.
@@ -1830,6 +2140,7 @@ export class BrowserViews {
       if (isHttp(url)) this.deps.siteOpened?.(url, favicons)
     })
     contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+      if (isMainFrame) void this.disableAnnotate(tab, true)
       if (isMainFrame && isAllowedNavigation(url)) tab.lastUrl = url
       emit()
     })
@@ -1840,6 +2151,7 @@ export class BrowserViews {
     contents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
       // -3 is ERR_ABORTED, which a cancelled or replaced navigation reports.
       if (!isMainFrame || code === -3) return
+      void this.disableAnnotate(tab, false)
       log.warn(`A page failed to load: ${description} (${code})`)
       tab.notice = { kind: 'load-failed', description }
       tab.loading = false
@@ -1849,6 +2161,7 @@ export class BrowserViews {
     })
     // A crashed or hung page shows as it was; the pane says so, with Reload.
     const fail = (kind: 'crashed' | 'unresponsive', message: string): void => {
+      void this.disableAnnotate(tab, false)
       tab.notice = { kind }
       tab.loading = false
       emit()
@@ -1899,6 +2212,17 @@ export class BrowserViews {
       // The overlay takes the keyboard while the agent has the page; a key that still reaches the
       // page, before the overlay is up, is held back as well.
       const held = this.holdsInput(tab)
+      if (
+        !held &&
+        tab.annotating &&
+        input.type === 'keyDown' &&
+        !input.isAutoRepeat &&
+        input.key === 'Escape'
+      ) {
+        event.preventDefault()
+        void this.disableAnnotate(tab)
+        return
+      }
       if (!held && this.shortcut(tab, input)) {
         event.preventDefault()
         return
@@ -1909,7 +2233,10 @@ export class BrowserViews {
       }
       if (!held) return
       event.preventDefault()
-      if (input.type === 'keyDown' && !input.isAutoRepeat) this.held(tab, null)
+      if (input.type === 'keyDown' && !input.isAutoRepeat) {
+        if (input.key === 'Escape') this.dismissBubble(tab)
+        else this.held(tab, null)
+      }
     })
     contents.on('before-mouse-event', (event, mouse) => {
       if (!isHeldMouse(mouse.type) || !this.holdsInput(tab)) return
@@ -1933,6 +2260,10 @@ export class BrowserViews {
       tab.loading = false
       tab.asking = false
       tab.told = null
+      tab.annotating = false
+      tab.annotateToken = null
+      tab.annotateContextId = null
+      tab.annotateOp += 1
       this.endNavigation(tab, { ok: false, error: 'The page closed.' })
       this.deps.closed?.(tab.id)
       // Nothing of Kettu's closed it, so the page did: `window.close()`.
@@ -1970,6 +2301,13 @@ export class BrowserViews {
       return
     }
     debuggerSession.on('message', (_event, method, params) => {
+      if (method === 'Runtime.bindingCalled') {
+        const record = params as { name?: unknown; payload?: unknown }
+        if (record.name === ANNOTATE_BINDING) {
+          this.handleAnnotateBinding(tabId, record.payload)
+        }
+        return
+      }
       if (method !== 'Page.javascriptDialogOpening') return
       const type = (params as { type?: string }).type
       const accepted = type === 'alert'
@@ -1979,6 +2317,78 @@ export class BrowserViews {
       this.deps.dialogOpened?.(tabId, type ?? 'alert', accepted)
     })
     void debuggerSession.sendCommand('Page.enable').catch(() => {})
+  }
+
+  /** Whether `tab` can enter element annotation mode right now. */
+  private canAnnotate(tab: Tab): boolean {
+    const contents = this.contentsOf(tab)
+    if (!contents || contents.isCrashed() || !contents.debugger.isAttached()) return false
+    if (
+      tab.notice?.kind === 'load-failed' ||
+      tab.notice?.kind === 'crashed' ||
+      tab.notice?.kind === 'unresponsive'
+    ) {
+      return false
+    }
+    if (!isAnnotatableBrowserUrl(this.urlOf(tab))) return false
+    return !this.holdsInput(tab)
+  }
+
+  /** Exits annotation mode on `tab`, tearing down injected overlay DOM and listeners when live. */
+  private async disableAnnotate(tab: Tab, teardown = true): Promise<void> {
+    tab.annotateOp += 1
+    const wasActive = tab.annotating || tab.annotateToken !== null
+    const contextId = tab.annotateContextId
+    tab.annotating = false
+    tab.annotateToken = null
+    tab.annotateContextId = null
+    if (!wasActive) return
+    // Emit immediately so renderer toolbar state updates synchronously while CDP teardown runs.
+    this.emitTab(tab)
+    if (teardown) {
+      const contents = this.contentsOf(tab)
+      if (contents?.debugger.isAttached()) {
+        await contents.debugger
+          .sendCommand('Runtime.evaluate', {
+            expression: buildAnnotateTeardownScript(),
+            ...(contextId !== null ? { contextId } : {}),
+            returnByValue: true,
+          })
+          .catch(() => {})
+      }
+    }
+  }
+
+  /** Exits annotation mode on every tab of `browser`. */
+  private disableBrowserAnnotate(browser: Browser, teardown = true): void {
+    for (const tab of this.tabsOf(browser)) {
+      if (tab.annotating || tab.annotateToken !== null) {
+        void this.disableAnnotate(tab, teardown)
+      }
+    }
+  }
+
+  /** Processes a validated pick or exit message sent from the tab's isolated annotation world. */
+  private handleAnnotateBinding(tabId: string, payload: unknown): void {
+    const tab = this.tabs.get(tabId)
+    if (!tab || !tab.annotating) return
+    const message = parseBindingMessage(payload, tab.annotateToken)
+    if (!message) return
+    if (message.type === 'exit') {
+      void this.disableAnnotate(tab)
+      return
+    }
+    const annotation = sanitizeAnnotatedPayload(
+      message.element,
+      this.urlOf(tab),
+      tab.lastTitle,
+      tab.id,
+    )
+    if (!annotation) return
+    // Return keyboard focus to the host window so the session composer can immediately accept notes.
+    const window = this.deps.window()
+    if (window && !window.isDestroyed()) window.webContents.focus()
+    this.deps.annotated?.({ sessionId: tab.sessionId, tabId: tab.id, annotation })
   }
 
   /**
@@ -2045,6 +2455,11 @@ export class BrowserViews {
   /** A click or key of the user's was held back on the page itself: the overlay shows it. */
   private held(tab: Tab, at: ControlPoint | null): void {
     if (this.overlayTab === tab.id) this.overlay.send({ type: 'held', at })
+  }
+
+  /** Escape on the page itself dismisses any open held-input bubble on its overlay. */
+  private dismissBubble(tab: Tab): void {
+    if (this.overlayTab === tab.id) this.overlay.dismissBubble()
   }
 
   /** An app shortcut typed in the page or its overlay goes to the window; true when it was one. */
@@ -2189,9 +2604,16 @@ export class BrowserViews {
     }
   }
 
+  private isReusableBlankTab(browser: Browser, tab: Tab | null): tab is Tab {
+    if (!tab) return false
+    if (browser.strip.agent === tab.id || browser.strip.byOf(tab.id) === 'agent') return false
+    return this.urlOf(tab) === null && !tab.loading && !tab.asking && !tab.released
+  }
+
   private urlOf(tab: Tab): string | null {
     const contents = this.contentsOf(tab)
-    const url = contents?.getURL() || tab.lastUrl
+    const current = contents?.getURL()
+    const url = current && current !== 'about:blank' ? current : tab.lastUrl
     return url && url !== 'about:blank' ? url : null
   }
 
@@ -2234,17 +2656,26 @@ export class BrowserViews {
       emulation: selected && emulating(selected.emulation) ? selected.emulation : null,
       downloadRequest: browser.downloadAsk?.request ?? null,
       profile: (({ kind, label }) => ({ kind, label }))(this.profileOf(browser.sessionId)),
+      annotating: selected?.annotating ?? false,
     })
   }
 
-  /** Who uses a session's browser changed: its state goes out again, and the overlay follows. */
+  /** Who uses a session's browser changed: sync desktop freeze state, emit, and update overlay. */
   controlChanged(sessionId: string): void {
     // A question outlives no turn: once nothing uses the page, nobody waits for its answer.
     if ((this.deps.control?.(sessionId) ?? IDLE_CONTROL).kind === 'idle') {
       this.consents.get(sessionId)?.settle('deny')
     }
     const browser = this.browsers.get(sessionId)
-    if (browser) this.emit(browser)
+    if (browser) {
+      for (const tab of this.tabsOf(browser)) {
+        if ((tab.annotating || tab.annotateToken !== null) && this.holdsInput(tab)) {
+          void this.disableAnnotate(tab)
+        }
+      }
+      this.syncDesktopFreeze(browser)
+      this.emit(browser)
+    }
     this.picker.check(sessionId)
     this.syncOverlay()
   }

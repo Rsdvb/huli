@@ -3,6 +3,8 @@
 // is set.
 
 import type { AgentId } from './agents'
+import type { McpConfigSource } from './mcp-discovery'
+import type { McpProjects } from './mcp-insight'
 
 /** A header or environment variable: a fixed value, or one the user fills in when installing. */
 export type McpValue =
@@ -82,7 +84,48 @@ export interface MarketServer {
   version: string | null // the registry's or the listing's version; null when added by hand
   spec: McpSpec
   agents: 'all' | AgentId[] // the agents that get it; 'all' takes in agents added later
+  importedFrom?: McpConfigSource[]
+  importedWith?: McpConfigSource
   on: boolean
+  // How Kettu runs it; absent means each default of McpRun.
+  run?: McpRun
+  // Tools the router leaves out of its lists and refuses, for every agent, by name.
+  toolsOff?: string[]
+  // Which projects' sessions get it; absent means every project.
+  projects?: McpProjects
+}
+
+/**
+ * How Kettu runs a server for sessions. `mode` is where a command's process is shared: one per
+ * session (the default), one per folder, one for every session, or none, handing the server to
+ * each agent to run as it did before Kettu ran servers. A remote server only takes `startSeconds`;
+ * the rest are for commands.
+ */
+export interface McpRun {
+  mode?: McpRunMode
+  idleMinutes?: number // how long an unused process lives, 10 by default
+  startSeconds?: number // how long a process or server has to answer initialize, 30 by default
+}
+export type McpRunMode = 'session' | 'folder' | 'all' | 'agent'
+
+export const MCP_RUN_MODES: readonly McpRunMode[] = ['session', 'folder', 'all', 'agent']
+export const MCP_RUN_DEFAULTS = { mode: 'session', idleMinutes: 10, startSeconds: 30 } as const
+export const MCP_RUN_LIMITS = {
+  idleMinutes: { min: 1, max: 24 * 60 },
+  startSeconds: { min: 5, max: 600 },
+} as const
+
+/** A server's run settings with each default filled in. */
+export function runOf(
+  server: Pick<MarketServer, 'run'> & Partial<Pick<MarketServer, 'spec'>>,
+): Required<McpRun> {
+  return {
+    mode: server.run?.mode ?? MCP_RUN_DEFAULTS.mode,
+    idleMinutes: server.run?.idleMinutes ?? MCP_RUN_DEFAULTS.idleMinutes,
+    startSeconds:
+      server.run?.startSeconds ??
+      (server.spec?.type === 'http' ? 60 : MCP_RUN_DEFAULTS.startSeconds),
+  }
 }
 
 /** One server in the catalog, with the spec Kettu would install: its remote first, else a package. */

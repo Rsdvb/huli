@@ -33,6 +33,7 @@ import { useDark } from '@renderer/hooks/use-dark'
 import { i18n } from '@renderer/lib/i18n'
 import { getBuffer, putBuffer, setDirty, type Buffer, type OpenFile } from '@renderer/stores/files'
 import { editorTheme } from './code-theme'
+import { noteRange } from './code-note-mark'
 import { lineBreakOf, lineChange } from './editor-text'
 import { nameOf } from './paths'
 
@@ -69,12 +70,12 @@ const LANGUAGES = languages.map((description) =>
 
 // The search panel's rules match CodeMirror's own `.cm-panel.cm-search` so they win over it.
 const chrome = EditorView.theme({
-  '&': { height: '100%', fontSize: 'var(--text-code)' },
+  '&': { height: '100%', fontSize: 'var(--code-size)' },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': {
     fontFamily: 'var(--font-mono)',
     fontVariantLigatures: 'none',
-    lineHeight: 'var(--text-code--line-height)',
+    lineHeight: 'var(--code-line-height)',
     overscrollBehavior: 'contain',
   },
   '.cm-content': { padding: '8px 0' },
@@ -85,6 +86,11 @@ const chrome = EditorView.theme({
   // An image, so the mark shows over the active line's background: the cursor sits on it.
   '.cm-marked-line': {
     backgroundImage: 'linear-gradient(var(--marked-line), var(--marked-line))',
+  },
+  // Keeps the anchored passage visible while focus moves into the selection note popover.
+  '.cm-note-anchor': {
+    backgroundColor: 'var(--comment-mark)',
+    borderRadius: '2px',
   },
   '.cm-gutterElement.cm-marked-line': { color: 'var(--text-secondary)' },
   '.cm-panels': { backgroundColor: 'var(--background)', color: 'var(--foreground)' },
@@ -153,7 +159,7 @@ const chrome = EditorView.theme({
     boxShadow: 'var(--menu-ring), var(--elevation-md)',
     overflow: 'hidden',
   },
-  '.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--font-mono)', fontSize: '12px' },
+  '.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--font-mono)', fontSize: 'var(--code-size)' },
   '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
     backgroundColor: 'var(--accent)',
     color: 'var(--accent-foreground)',
@@ -276,6 +282,7 @@ function createBuffer(
     loadLanguage(LanguageDescription.matchFilename(LANGUAGES, nameOf(path))),
     readOnly.of(EditorState.readOnly.of(!content.editable)),
     marked,
+    noteRange,
     chrome,
     EditorView.updateListener.of((update) => {
       buffer.state = update.state

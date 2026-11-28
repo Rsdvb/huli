@@ -9,7 +9,7 @@
     "account": "账号",
     "advanced": "高级",
     "about": "关于",
-    "archived": "已归档会话",
+    "archived": "已归档",
     "recycle-bin": "回收站",
     "artifacts": "产物",
     "sharing": "分享",
@@ -163,6 +163,11 @@
       "name": "在大纲中总结消息",
       "description": "打开大纲时，由小模型撰写大纲。",
       "keywords": "大纲 标题 总结 模型 额度 outline titles summary"
+    },
+    "promptCacheDropNotice": {
+      "name": "Prompt Cache 命中下降提醒",
+      "description": "回合结束后，若实测提示词缓存命中率明显下降，则显示提醒。",
+      "keywords": "提示词 缓存 命中 下降 提醒 警告 费用 prompt cache hit miss drop notice"
     },
     "cloud": {
       "name": "使用 Kettu 云服务",
@@ -319,6 +324,21 @@
       "light": "浅色",
       "dark": "深色"
     },
+    "appIcon": {
+      "name": "应用图标",
+      "description": "显示在程序坞和 Kettu 应用内。",
+      "descriptionWindows": "显示在任务栏、窗口和 Kettu 应用内。",
+      "descriptionLinux": "显示在任务栏、窗口和 Kettu 应用内。",
+      "keywords": "应用图标 图标 程序坞 任务栏 窗口 标志 app icon dock taskbar kettu 墨黑 素纸 扁平橙 叠纸黑 叠纸白",
+      "options": {
+        "kettu": "Kettu",
+        "ink": "墨黑",
+        "paper": "素纸",
+        "orange-flat": "扁平橙",
+        "ink-sheets": "叠纸黑",
+        "paper-sheets": "叠纸白"
+      }
+    },
     "textSize": {
       "name": "文字大小",
       "description": "输入框：14、15 或 16 px，对话比它小 1 px。",
@@ -328,6 +348,23 @@
       "large": "大",
       "previewLabel": "预览",
       "preview": "回复和你发送的消息在这个字号下就是这样。行内代码，比如 <code>settings.json</code>，是这样显示的。"
+    },
+    "codeSize": {
+      "name": "代码字号",
+      "description": "代码块、行内代码、编辑器和差异对比的字号。小与大相对默认增减 1 px。",
+      "keywords": "代码字号 代码大小 字体 字号 等宽 代码块 行内代码 编辑器 差异 diff code font size monospace",
+      "small": "小",
+      "default": "默认",
+      "large": "大",
+      "previewLabel": "预览",
+      "preview": "const size = settings.appearance.codeSize // 代码字号\nreturn formatCode(size, \"settings.json\")"
+    },
+    "conversationWidth": {
+      "name": "会话宽度",
+      "description": "对话正文和输入框的默认宽度。仍可拖动两侧边缘调整，双击把手可重置为当前档位。",
+      "keywords": "会话宽度 宽度 宽版 标准 宽屏 满屏 大屏 4K width wide standard",
+      "standard": "标准",
+      "wide": "宽版"
     },
     "effortControl": {
       "name": "思考强度",
@@ -349,6 +386,11 @@
       "description": "收起侧边栏后，鼠标移到它的按钮上，侧边栏会浮在页面上方显示，鼠标移开后收回。",
       "keywords": "侧边栏 收起 展开 悬停 悬浮 sidebar hover"
     },
+    "closeSidePanelWithLastTab": {
+      "name": "关闭最后一个标签页时收起侧边栏",
+      "description": "关掉侧边栏最后一个标签页时直接收起侧边栏，不再停留在面板列表。",
+      "keywords": "侧边栏 侧边面板 右侧 面板 关闭 收起 折叠 最后一个 标签页 面板列表 side panel sidebar close collapse last tab"
+    },
     "sidebarPages": {
       "overview": "总览",
       "artifacts": "产物",
@@ -364,7 +406,9 @@
     },
     "groups": {
       "theme": "主题",
+      "appIcon": "应用图标",
       "scale": "缩放与文字",
+      "conversation": "会话",
       "sidebar": "侧边栏",
       "motion": "动态效果",
       "fonts": "字体",
@@ -379,19 +423,42 @@
       "reset": "重置"
     },
     "fonts": {
-      "keywords": "字体 font 界面 回复 代码 等宽",
+      "keywords": "字体 font 界面 回复 代码 等宽 英文 拉丁",
+      "cjkKeywords": "字体 中文字体 中文 汉字 cjk font 界面 回复 代码 苹方 微软雅黑 思源 宋体 楷体",
       "default": "主题的字体",
+      "cjkDefault": "系统中文字体",
+      "primaryLabel": "主字体",
+      "cjkLabel": "中文字体（可选）",
+      "cjkSample": "汉字",
+      "reset": "重置",
+      "resetPrimary": "重置{{role}}",
+      "resetCjk": "重置{{role}}",
+      "previewLabel": "预览",
+      "preview": {
+        "uiLabel": "界面",
+        "ui": "Settings 2026 · 界面按钮与标签 128px",
+        "proseLabel": "回复",
+        "prose": "The quick fox 2026 — 回复正文与 English 123 混排效果。",
+        "codeLabel": "代码",
+        "code": "const font = \"Kettu\"; // 代码注释 0123 !== => {}"
+      },
       "ui": {
         "name": "界面字体",
-        "description": "菜单、按钮、侧边栏和设置用的字体。所选字体缺少的字形由主题的字体补上。"
+        "description": "菜单、按钮、侧边栏和设置用的字体。中文字体留空时按系统中文字体回退。",
+        "cjkName": "界面中文字体",
+        "cjkDescription": "菜单、按钮、侧边栏和设置用的可选中文字体，排在主字体之后；留空时按系统中文字体回退。"
       },
       "prose": {
         "name": "回复字体",
-        "description": "对话里的回复和你发送的消息用的字体。所选字体缺少的字形由主题的字体补上。"
+        "description": "对话里的回复和你发送的消息用的字体。中文字体留空时按系统中文字体回退。",
+        "cjkName": "回复中文字体",
+        "cjkDescription": "对话里的回复和你发送的消息用的可选中文字体，排在主字体之后；留空时按系统中文字体回退。"
       },
       "code": {
         "name": "代码字体",
-        "description": "代码块、行内代码、差异和编辑器用的字体，终端没选自己的字体时也用它。这里只列等宽字体。"
+        "description": "代码块、行内代码、差异和编辑器用的字体，终端没选自己的字体时也用它。主字体只列等宽字体。",
+        "cjkName": "代码中文字体",
+        "cjkDescription": "代码块、行内代码、差异和编辑器用的可选中文字体，排在主代码字体之后；留空时按系统中文字体回退。"
       }
     }
   },
@@ -1882,6 +1949,55 @@
       "models_other": "{{count}} 个模型",
       "unread": "{{name}} 启动过一次后显示。",
       "hint": "{{name}} 自己登录每个厂商：点添加厂商会在终端里打开 {{name}}，在里面用 /login 登录订阅或设好 API key。Kettu 看不到这些凭据。"
+    },
+    "capabilities": {
+      "title": "接入能力",
+      "summary": "{{supported}} 项支持 · {{partial}} 项部分支持 · {{unavailable}} 项不可用",
+      "status": {
+        "supported": "支持",
+        "partial": "部分支持",
+        "unavailable": "不可用"
+      },
+      "reason": {
+        "upstream": "上游限制",
+        "kettu": "Kettu 尚未接入"
+      },
+      "items": {
+        "steering": "运行中插入消息",
+        "rewind": "从此处编辑回退",
+        "fileRewind": "编辑回退时恢复文件",
+        "fork": "会话分叉",
+        "imageInput": "图片输入",
+        "mcp": "MCP 服务器",
+        "contextBreakdown": "上下文构成拆解",
+        "usageHistory": "用量与费用统计",
+        "planLimits": "套餐限额与账号",
+        "sideChat": "侧边提问",
+        "workflowsAndRoutines": "工作流与定时任务"
+      },
+      "notes": {
+        "acpNoForkAtMessage": "仅支持整会话分叉；ACP 协议不支持指定消息分叉点",
+        "acpNoRewind": "ACP 协议未提供会话回退接口",
+        "acpStdioAlwaysHttpDepends": "始终支持 stdio；HTTP MCP 取决于适配器声明",
+        "acpStdioOnlyNoHttp": "仅支持 stdio；适配器未声明 HTTP MCP",
+        "agyNoSilentDelete": "Antigravity 关闭已提问会话后仍会保留在历史记录中",
+        "clineModelRequestsOnly": "支持单会话模型请求记录；用量页历史统计尚未接入",
+        "clineSdkOnly": "仅在 Cline SDK 模式下可用（ACP 回退或已压缩会话不支持）",
+        "codexEstimatesOnly": "仅估算 Skills 与 MCP 定义占用，无完整分类构成",
+        "codexPaginatedThreadsOnly": "仅支持分页线程，旧版 rollout 线程无法回退",
+        "deepseekBalanceOnly": "支持读取登录方式与余额；按量计费无周期限额",
+        "dependsOnAcpAdapter": "取决于 ACP 适配器启动时声明的能力",
+        "limitsAdministratorManaged": "套餐用量由管理员统一管理",
+        "limitsHarnessDoesNotOffer": "上游未提供套餐用量读取接口",
+        "limitsModelProviderManaged": "套餐用量由各模型服务商自行管理",
+        "limitsNotYetSupported": "Kettu 尚未接入该智能体的套餐用量读取",
+        "limitsVendorDisallows": "厂商不允许第三方应用读取套餐用量",
+        "noSilentSessionDelete": "上游不支持静默删除临时侧边会话",
+        "piExtensionRequired": "通过 Kettu 的 Pi 扩展接入（需 Pi 1.0 及以上）",
+        "piNoPermissionPrompts": "Pi 不发起工具权限询问，无法强制执行作用域边界",
+        "routinesOnlyNoWorkflows": "已支持定时任务权限模式，工作流步骤尚未开放",
+        "sideChatHiddenCopyOnly": "通过隐藏会话携带对话摘要副本回答"
+      }
     }
   },
   "about": {
@@ -1923,7 +2039,10 @@
       "noneDetail_web": "{{host}} 上的 Kettu 按安装它的方式更新。",
       "readyDetail": "重启后完成更新。你的会话会回来。",
       "readyWaiting_other": "{{count}} 个会话完成后会自己重启。",
-      "readyWaitingSoon": "马上会自己重启。"
+      "readyWaitingSoon": "马上会自己重启。",
+      "awaitingConfirmation": "正在等待确认更新时机…",
+      "awaitingHostConfirmation": "正在等待主机完成系统确认…",
+      "restarting": "正在重启以安装更新…"
     },
     "automatic": {
       "name": "自动更新",
@@ -1972,12 +2091,12 @@
     "advanced": "网络代理、诊断信息，以及 Kettu 保存在这台电脑上的数据。",
     "advanced_web": "网络代理、诊断信息，以及 Kettu 保存在 {{host}} 上的数据。",
     "about": "Kettu 的版本、更新和联系方式。",
-    "archived": "从侧边栏移走但仍保留。恢复后回到原来的位置。",
+    "archived": "从侧边栏移走但仍保留。恢复项目或会话即可放回原处。",
     "recycle-bin": "删除的东西先放在这里，可以恢复，也可以彻底删除。",
     "artifacts": "页面要读取项目文件或向你的智能体提问时会先问你。只保存自己数据的页面不会问。",
     "sharing": "把产物发布为链接，发布到 Kettu 或你自己的 Cloudflare 账号；发布到 Kettu 的可以选择谁能打开。",
-    "remote": "在 iPhone、iPad 或另一台电脑上的 Kettu 里使用这台电脑的会话。",
-    "remote_web": "在 iPhone、iPad 或另一台电脑上的 Kettu 里使用 {{host}} 的会话。",
+    "remote": "在 iPhone、iPad、Android 手机或另一台电脑上的 Kettu 里使用这台电脑的会话。",
+    "remote_web": "在 iPhone、iPad、Android 手机或另一台电脑上的 Kettu 里使用 {{host}} 的会话。",
     "browser": "登录状态、智能体给出的链接在哪里打开，以及它们可以使用的网站。",
     "browserWeb": "智能体回复中的链接会在新标签页中打开。",
     "harnesses": "智能体跑在上面的程序：Claude Code、Codex 等。Kettu 先用你电脑上装好的，没有时再替你装一份。",
@@ -2126,9 +2245,20 @@
     "noMatchQueryProjectAgent": "{{project}} 中使用 {{agent}} 的会话里没有与“{{query}}”匹配的。",
     "noMatchProjectAgent": "{{project}} 中没有使用 {{agent}} 的已归档会话。",
     "noMatchGeneric": "试试清除或调整筛选条件。",
-    "emptyTitle": "没有已归档的会话",
-    "emptyHint": "可以在侧边栏中从会话的菜单里归档。",
-    "keywords": "归档 恢复 archive"
+    "emptyTitle": "还没有已归档内容",
+    "emptyHint": "可以在侧边栏中从项目或会话的菜单里归档。",
+    "projectsHeading": "已归档项目",
+    "sessionsHeading": "已归档会话",
+    "restoreProject": "恢复",
+    "removeProject": "移除项目…",
+    "projectRestored": "已将 {{name}} 恢复到侧边栏",
+    "projectNoSessions": "没有历史会话",
+    "projectSessionArchived": "已归档",
+    "expandProject": "展开 {{name}} 的历史会话",
+    "collapseProject": "收起 {{name}} 的历史会话",
+    "projectArchivedAt": "{{when}}归档",
+    "projectMissing": "未找到",
+    "keywords": "归档 恢复 项目 archive"
   },
   "artifacts": {
     "group": "页面权限",
@@ -2622,7 +2752,7 @@
     }
   },
   "remote": {
-    "keywords": "远程 访问 手机 平板 设备 配对 二维码 扫码 连接 remote device pair qr",
+    "keywords": "远程 访问 手机 平板 安卓 设备 配对 二维码 扫码 连接 remote device pair qr iphone ipad android",
     "switch": "远程访问",
     "status": {
       "on": "已打开",
@@ -2658,7 +2788,7 @@
     "devices": {
       "group": "设备",
       "emptyTitle": "还没有设备",
-      "emptyHint": "用 iPhone 或 iPad 上的 Kettu 扫码，或者在另一台电脑的 Kettu 里打开 设置 › 电脑 › 添加电脑…，粘贴链接。",
+      "emptyHint": "用 iPhone、iPad 或 Android 手机上的 Kettu 扫码，或者在另一台电脑的 Kettu 里打开 设置 › 电脑 › 添加电脑…，粘贴链接。",
       "add": "添加设备…",
       "addOff": "打开远程访问后才能添加设备。",
       "online": "在线",
@@ -2713,6 +2843,7 @@
     },
     "kinds": {
       "ios": "iOS 应用",
+      "android": "Android 应用",
       "desktop": "桌面应用",
       "web": "网页版"
     },
@@ -2731,7 +2862,7 @@
     },
     "pair": {
       "title": "添加设备",
-      "scan": "用 iPhone 或 iPad 上的 Kettu 扫这个码。",
+      "scan": "用 iPhone、iPad 或 Android 手机上的 Kettu 扫这个码。",
       "otherComputer": "在另一台电脑上，打开 设置 › 电脑 › 添加电脑 并粘贴链接。",
       "target": "打开方式",
       "targets": {
@@ -2933,7 +3064,7 @@
       "note": {
         "switch": "Kettu 先检查中继和密钥，过了才切换。现在在线的设备马上跟过去；不在线的设备下次在同一网络连到这台电脑时跟过去，或在设备上粘贴新的配对链接更新。",
         "own": "一次只用一个中继。你的 Kettu 账号照旧把这台电脑的通知发到 iPhone。",
-        "pinned": "电脑和 iPhone 上的 Kettu 应用连得上它。浏览器没法按指纹认证书，要用有域名的中继。",
+        "pinned": "电脑、iPhone、iPad 和 Android 手机上的 Kettu 应用连得上它。浏览器没法按指纹认证书，要用有域名的中继。",
         "local": "本地模式下 Kettu 不向自己的服务发送任何东西。中继是你自己的，所以照用。",
         "switch_web": "Kettu 先检查中继和密钥，过了才切换。现在在线的设备马上跟过去；不在线的设备下次在同一网络连到 {{host}} 时跟过去，或在设备上粘贴新的配对链接更新。",
         "own_web": "一次只用一个中继。你的 Kettu 账号照旧把 {{host}} 的通知发到 iPhone。"

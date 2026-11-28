@@ -72,3 +72,35 @@ export function useSwitchPicks(onSelect: Select) {
   }
   return { valueOf, pick }
 }
+
+/**
+ * Optimistic picks for select options shown inside the model menu, each choice shown at once
+ * until the agent's value lands or `SETTLE_MS` passes.
+ */
+export function useSelectPicks(onSelect: Select) {
+  const [pending, setPending] = useState<Record<string, string>>({})
+  const valueOf = (option: ConfigOption): string => {
+    const actual = String(option.value)
+    const picked = pending[option.id]
+    if (picked === undefined) return actual
+    // Ignore an optimistic value if switching models replaced the option with incompatible choices.
+    if (option.choices && !option.choices.some((c) => c.value === picked)) return actual
+    return picked
+  }
+  const settle = (id: string, value: string) =>
+    setPending((p) => {
+      if (p[id] !== value) return p
+      const rest = { ...p }
+      delete rest[id]
+      return rest
+    })
+  const pick = (option: ConfigOption, value: string) => {
+    if (value === valueOf(option)) return
+    setPending((p) => ({ ...p, [option.id]: value }))
+    void onSelect(option.id, value).then((ok) => {
+      if (ok) setTimeout(() => settle(option.id, value), SETTLE_MS)
+      else settle(option.id, value)
+    })
+  }
+  return { valueOf, pick }
+}

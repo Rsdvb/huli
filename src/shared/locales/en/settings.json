@@ -9,7 +9,7 @@
     "account": "Account",
     "advanced": "Advanced",
     "about": "About",
-    "archived": "Archived sessions",
+    "archived": "Archived",
     "recycle-bin": "Recycle bin",
     "artifacts": "Artifacts",
     "sharing": "Sharing",
@@ -165,6 +165,11 @@
       "name": "Summarize messages in the outline",
       "description": "A small model writes the outline when you open it.",
       "keywords": "outline titles summary model credits"
+    },
+    "promptCacheDropNotice": {
+      "name": "Prompt cache drop notice",
+      "description": "Show a notice after a turn when measured prompt cache hits drop sharply.",
+      "keywords": "prompt cache hit miss drop notice warning tokens cost"
     },
     "cloud": {
       "name": "Use Kettu cloud",
@@ -323,6 +328,21 @@
       "light": "Light",
       "dark": "Dark"
     },
+    "appIcon": {
+      "name": "App icon",
+      "description": "Shown in the Dock and inside Kettu.",
+      "descriptionWindows": "Shown on the taskbar, window and inside Kettu.",
+      "descriptionLinux": "Shown on the taskbar, window and inside Kettu.",
+      "keywords": "app icon dock taskbar window logo kettu ink paper orange flat sheets",
+      "options": {
+        "kettu": "Kettu",
+        "ink": "Ink",
+        "paper": "Paper",
+        "orange-flat": "Orange Flat",
+        "ink-sheets": "Ink Sheets",
+        "paper-sheets": "Paper Sheets"
+      }
+    },
     "textSize": {
       "name": "Text size",
       "description": "The composer: 14, 15 or 16 px. The thread is a pixel smaller.",
@@ -332,6 +352,23 @@
       "large": "Large",
       "previewLabel": "Preview",
       "preview": "This is how replies and your messages read at this size. Inline code, like <code>settings.json</code>, looks like this."
+    },
+    "codeSize": {
+      "name": "Code size",
+      "description": "Code blocks, inline code, the editor and diffs. Small and Large adjust by 1 px.",
+      "keywords": "code font size monospace editor diff block inline",
+      "small": "Small",
+      "default": "Default",
+      "large": "Large",
+      "previewLabel": "Preview",
+      "preview": "const size = settings.appearance.codeSize\nreturn formatCode(size, \"settings.json\")"
+    },
+    "conversationWidth": {
+      "name": "Conversation width",
+      "description": "Default width for the thread and composer. Drag the side edges to adjust, or double-click a handle to reset to this preset.",
+      "keywords": "width wide standard column thread measure layout 4k",
+      "standard": "Standard",
+      "wide": "Wide"
     },
     "effortControl": {
       "name": "Effort",
@@ -353,6 +390,11 @@
       "description": "With the sidebar collapsed, pointing at its button shows it over the page until the pointer leaves.",
       "keywords": "sidebar collapse expand peek reveal hover"
     },
+    "closeSidePanelWithLastTab": {
+      "name": "Close the side panel with its last tab",
+      "description": "Closing the last tab in the side panel collapses it instead of showing the panel list.",
+      "keywords": "side panel sidebar close collapse last tab tabs surfaces pane"
+    },
     "sidebarPages": {
       "overview": "Overview",
       "artifacts": "Artifacts",
@@ -368,7 +410,9 @@
     },
     "groups": {
       "theme": "Theme",
+      "appIcon": "App icon",
       "scale": "Zoom and text",
+      "conversation": "Conversation",
       "sidebar": "Sidebar",
       "motion": "Motion",
       "fonts": "Fonts",
@@ -383,19 +427,42 @@
       "reset": "Reset"
     },
     "fonts": {
-      "keywords": "font family typeface installed",
+      "keywords": "font family typeface installed latin english",
+      "cjkKeywords": "font family typeface chinese cjk han pingfang yahei noto",
       "default": "Theme’s font",
+      "cjkDefault": "System Chinese",
+      "primaryLabel": "Primary",
+      "cjkLabel": "Chinese (optional)",
+      "cjkSample": "汉字",
+      "reset": "Reset",
+      "resetPrimary": "Reset {{role}}",
+      "resetCjk": "Reset {{role}}",
+      "previewLabel": "Preview",
+      "preview": {
+        "uiLabel": "Interface",
+        "ui": "Settings 2026 · 界面按钮与标签 128px",
+        "proseLabel": "Reply",
+        "prose": "The quick fox 2026 — 回复正文与 English 123 混排效果。",
+        "codeLabel": "Code",
+        "code": "const font = \"Kettu\"; // 代码注释 0123 !== => {}"
+      },
       "ui": {
         "name": "Interface font",
-        "description": "Menus, buttons, the sidebar and Settings. The theme’s font fills in what it lacks."
+        "description": "Menus, buttons, the sidebar and Settings. Leave Chinese blank to fall back to the system Chinese font.",
+        "cjkName": "Interface Chinese font",
+        "cjkDescription": "Optional Chinese font for menus, buttons, the sidebar and Settings. Follows the primary font; leave blank for the system Chinese font."
       },
       "prose": {
         "name": "Reply font",
-        "description": "Replies and your messages in the thread. The theme’s font fills in what it lacks."
+        "description": "Replies and your messages in the thread. Leave Chinese blank to fall back to the system Chinese font.",
+        "cjkName": "Reply Chinese font",
+        "cjkDescription": "Optional Chinese font for replies and your messages in the thread. Follows the primary font; leave blank for the system Chinese font."
       },
       "code": {
         "name": "Code font",
-        "description": "Code blocks, inline code, diffs and the editor, and the terminal unless it has a font of its own. Only monospace fonts are listed."
+        "description": "Code blocks, inline code, diffs, the editor, and the terminal unless it has a font of its own. Primary lists monospace fonts only.",
+        "cjkName": "Code Chinese font",
+        "cjkDescription": "Optional Chinese font for code blocks, inline code, diffs and the editor. Follows the primary code font; leave blank for the system Chinese font."
       }
     }
   },
@@ -1906,6 +1973,55 @@
       "models_other": "{{count}} models",
       "unread": "Shows once {{name}} has started.",
       "hint": "{{name}} signs in to each provider itself: Add provider opens {{name}} in a terminal, where /login signs in to a subscription or an API key is set. Kettu never sees the credentials."
+    },
+    "capabilities": {
+      "title": "Integration capabilities",
+      "summary": "{{supported}} supported · {{partial}} partial · {{unavailable}} unavailable",
+      "status": {
+        "supported": "Supported",
+        "partial": "Partial",
+        "unavailable": "Unavailable"
+      },
+      "reason": {
+        "upstream": "Upstream limit",
+        "kettu": "Not yet in Kettu"
+      },
+      "items": {
+        "steering": "Mid-turn steering",
+        "rewind": "Edit from here",
+        "fileRewind": "File rewind on edit",
+        "fork": "Session forking",
+        "imageInput": "Image input",
+        "mcp": "MCP servers",
+        "contextBreakdown": "Context breakdown",
+        "usageHistory": "Usage & cost tracking",
+        "planLimits": "Plan limits & account",
+        "sideChat": "Side chat",
+        "workflowsAndRoutines": "Workflows & routines"
+      },
+      "notes": {
+        "acpNoForkAtMessage": "Full-session fork only; ACP does not carry a message fork point",
+        "acpNoRewind": "ACP does not provide a session rewind method",
+        "acpStdioAlwaysHttpDepends": "Stdio always works; HTTP MCP depends on the ACP adapter",
+        "acpStdioOnlyNoHttp": "Stdio only; adapter does not advertise HTTP MCP",
+        "agyNoSilentDelete": "Antigravity keeps prompted sessions in history after closing",
+        "clineModelRequestsOnly": "Session model requests are tracked; Usage page history is not wired yet",
+        "clineSdkOnly": "Available in Cline SDK mode only (not on ACP fallback or compacted sessions)",
+        "codexEstimatesOnly": "Skills and MCP definition estimates only; no full category breakdown",
+        "codexPaginatedThreadsOnly": "Paginated threads only; legacy rollout threads cannot revert",
+        "deepseekBalanceOnly": "Reads account route and balance; billed by use with no plan limit windows",
+        "dependsOnAcpAdapter": "Depends on what the ACP adapter advertises at startup",
+        "limitsAdministratorManaged": "Managed by an administrator",
+        "limitsHarnessDoesNotOffer": "The harness does not expose plan usage",
+        "limitsModelProviderManaged": "Managed by each model provider",
+        "limitsNotYetSupported": "Plan usage reader is not integrated in Kettu yet",
+        "limitsVendorDisallows": "Vendor does not allow third-party apps to read plan usage",
+        "noSilentSessionDelete": "Harness cannot delete temporary side-chat sessions silently",
+        "piExtensionRequired": "Wired through Kettu's Pi extension (requires Pi 1.0+)",
+        "piNoPermissionPrompts": "Pi does not prompt for tool permissions to enforce scopes",
+        "routinesOnlyNoWorkflows": "Routine permission modes are mapped; workflow steps are not enabled yet",
+        "sideChatHiddenCopyOnly": "Answers in a hidden session with a copied conversation summary"
+      }
     }
   },
   "about": {
@@ -1948,7 +2064,10 @@
       "readyDetail": "Restart to finish. Your sessions come back.",
       "readyWaiting_one": "Restarts by itself once {{count}} working session finishes.",
       "readyWaiting_other": "Restarts by itself once {{count}} working sessions finish.",
-      "readyWaitingSoon": "Restarts by itself in a moment."
+      "readyWaitingSoon": "Restarts by itself in a moment.",
+      "awaitingConfirmation": "Waiting for confirmation before restarting…",
+      "awaitingHostConfirmation": "Waiting for system confirmation on the host…",
+      "restarting": "Restarting to install the update…"
     },
     "automatic": {
       "name": "Automatic updates",
@@ -1997,12 +2116,12 @@
     "advanced": "Network proxy, diagnostics and the data Kettu keeps on this computer.",
     "advanced_web": "Network proxy, diagnostics and the data Kettu keeps on {{host}}.",
     "about": "Kettu’s version, updates and how to reach us.",
-    "archived": "Off the sidebar but kept. Restore one to put it back where it was.",
+    "archived": "Off the sidebar but kept. Restore a project or session to put it back where it was.",
     "recycle-bin": "What you delete waits here first. Restore it, or delete it for good.",
     "artifacts": "Pages ask before they read project files or ask your agent. Pages that only keep their own data don’t ask.",
     "sharing": "Publish artifacts to links, on Kettu or through your own Cloudflare account; choose who can open a page on Kettu.",
-    "remote": "Use this computer’s sessions from Kettu on an iPhone, an iPad or another computer.",
-    "remote_web": "Use {{host}}’s sessions from Kettu on an iPhone, an iPad or another computer.",
+    "remote": "Use this computer’s sessions from Kettu on an iPhone, an iPad, an Android phone or another computer.",
+    "remote_web": "Use {{host}}’s sessions from Kettu on an iPhone, an iPad, an Android phone or another computer.",
     "browser": "Sign-ins, how links from agents open, and the sites they may use.",
     "browserWeb": "Links in agents’ replies open in a new tab.",
     "harnesses": "The programs agents run on: Claude Code, Codex and the rest. Kettu uses what is already on your computer, and installs a copy only when there is none.",
@@ -2169,9 +2288,20 @@
     "noMatchQueryProjectAgent": "Nothing in {{project}} with {{agent}} matches “{{query}}”.",
     "noMatchProjectAgent": "No archived sessions in {{project}} with {{agent}}.",
     "noMatchGeneric": "Try clearing or changing your filters.",
-    "emptyTitle": "No archived sessions",
-    "emptyHint": "Archive one from its menu in the sidebar.",
-    "keywords": "archive restore"
+    "emptyTitle": "Nothing archived",
+    "emptyHint": "Archive a project or session from its menu in the sidebar.",
+    "projectsHeading": "Archived projects",
+    "sessionsHeading": "Archived sessions",
+    "restoreProject": "Restore",
+    "removeProject": "Remove project…",
+    "projectRestored": "Restored {{name}} to the sidebar",
+    "projectNoSessions": "No saved sessions",
+    "projectSessionArchived": "Archived",
+    "expandProject": "Show sessions in {{name}}",
+    "collapseProject": "Hide sessions in {{name}}",
+    "projectArchivedAt": "Archived {{when}}",
+    "projectMissing": "Missing",
+    "keywords": "archive restore project"
   },
   "artifacts": {
     "group": "Page permissions",
@@ -2672,7 +2802,7 @@
     }
   },
   "remote": {
-    "keywords": "remote access phone iphone ipad tablet device devices pair pairing qr code scan connect",
+    "keywords": "remote access phone iphone ipad android tablet device devices pair pairing qr code scan connect",
     "switch": "Remote access",
     "status": {
       "on": "On",
@@ -2709,7 +2839,7 @@
     "devices": {
       "group": "Devices",
       "emptyTitle": "No devices yet",
-      "emptyHint": "Scan the code with Kettu on an iPhone or iPad, or paste the link in Settings › Hosts › Add host… in Kettu on another computer.",
+      "emptyHint": "Scan the code with Kettu on an iPhone, an iPad or an Android phone, or paste the link in Settings › Hosts › Add host… in Kettu on another computer.",
       "add": "Add device…",
       "addOff": "Turn on remote access to add a device.",
       "online": "Online",
@@ -2768,6 +2898,7 @@
     },
     "kinds": {
       "ios": "iOS app",
+      "android": "Android app",
       "desktop": "Desktop app",
       "web": "Web"
     },
@@ -2788,7 +2919,7 @@
     },
     "pair": {
       "title": "Add device",
-      "scan": "Scan this code with Kettu on an iPhone or iPad.",
+      "scan": "Scan this code with Kettu on an iPhone, an iPad or an Android phone.",
       "otherComputer": "On another computer, open Settings › Hosts › Add host and paste the link.",
       "target": "Open with",
       "targets": {
@@ -2990,7 +3121,7 @@
       "note": {
         "switch": "Kettu checks the relay and the key before it switches. Devices online now move over at once; offline devices follow the next time they connect on the same network, or when you paste a new pairing link on the device.",
         "own": "Only one relay at a time. Your Kettu account still sends this computer’s notifications to your iPhone.",
-        "pinned": "The Kettu apps on computers and iPhones reach it. Browsers can’t check a pinned certificate, so they need a relay with a domain.",
+        "pinned": "The Kettu apps on computers, iPhones, iPads and Android phones reach it. Browsers can’t check a pinned certificate, so they need a relay with a domain.",
         "local": "In Local mode Kettu sends nothing to its own services. Your relay is yours, so it stays.",
         "switch_web": "Kettu checks the relay and the key before it switches. Devices online now move over at once; offline devices follow the next time they connect to {{host}} on the same network, or when you paste a new pairing link on the device.",
         "own_web": "Only one relay at a time. Your Kettu account still sends {{host}}’s notifications to your iPhone."

@@ -75,6 +75,22 @@
       "completed": "已完成",
       "notPlanned": "不计划"
     },
+    "stack": "PR 栈",
+    "stackIcon": "PR 栈{{state}}",
+    "stackTitle": "Stack #{{number}}",
+    "stackState": {
+      "open": "打开",
+      "closed": "已关闭"
+    },
+    "stackPrCount_one": "{{count}} 个 PR",
+    "stackPrCount_other": "{{count}} 个 PR",
+    "stackSummary_one": "{{count}} 个 PR → {{base}}",
+    "stackSummary_other": "{{count}} 个 PR → {{base}}",
+    "stackEmpty": "该栈中暂无 PR。",
+    "stackUnavailable": "当前无法读取该栈链详情，可在 GitHub 上打开查看。",
+    "stackLoadFailed": "暂时无法加载栈链详情。",
+    "stackInstallGh": "安装 <cli>GitHub CLI</cli> 后即可查看此栈链中的 PR。",
+    "stackSignInGh": "登录 GitHub CLI 后即可查看此栈链中的 PR：",
     "closedBy": "关闭它的是",
     "files_one": "{{count}} 个文件",
     "files_other": "{{count}} 个文件",
@@ -132,7 +148,23 @@
       "discardBlocked": "先完成正在进行的操作",
       "discardTicked": "放弃已勾选文件的更改",
       "openInFiles": "打开文件",
-      "discardFile": "放弃更改"
+      "openDiffTab": "在标签页打开完整差异",
+      "openFullDiff": "打开完整差异",
+      "expandDiff": "展开 {{name}} 的差异",
+      "collapseDiff": "收起 {{name}} 的差异",
+      "inlineDiffRegion": "{{name}} 的行内差异",
+      "expandInline": "展开行内差异",
+      "collapseInline": "收起行内差异",
+      "retry": "重试",
+      "discardFile": "放弃更改",
+      "binary": "二进制文件，无法行内预览。",
+      "tooLarge": "改动过大，无法行内预览。",
+      "same": "没有可显示的文本差异。",
+      "renamedOnly": "已从 {{oldPath}} 重命名，内容无变化。",
+      "emptyAdded": "已新增空文件。",
+      "emptyDeleted": "已删除空文件。",
+      "truncated": "仅展示前 {{shown}} / {{total}} 行差异。",
+      "truncatedGeneric": "差异预览已截断。"
     },
     "box": {
       "tickFiles": "勾选要提交的文件",
@@ -173,7 +205,8 @@
       "regenerateTitle": "根据分支重新写标题",
       "aiWrite": "AI 写",
       "aiWriteTitle": "根据分支的改动和这个会话的对话写描述"
-    }
+    },
+    "branchGraph": "分支图"
   },
   "timeline": {
     "files_other": "{{count}} 个文件",
@@ -607,5 +640,26 @@
     "loose": "{{branch}} 有冲突，请解决。",
     "looseIn": "{{branch}} 在这些文件里有冲突：{{files}}，请解决。",
     "rebase": "{{branch}} 和 {{upstream}} 各自有了新提交，请把 {{branch}} 变基到 {{upstream}}，并解决冲突。"
+  },
+  "graph": {
+    "title": "分支图",
+    "listLabel": "提交历史分支图",
+    "refresh": "刷新分支图",
+    "readOnly": "只读",
+    "loadedCount_one": "{{count}} 个提交",
+    "loadedCount_other": "{{count}} 个提交",
+    "loadedMoreCount": "{{count}}+ 个提交",
+    "loadMore": "加载更多提交",
+    "loadingMore": "正在加载更多提交…",
+    "loadFailed": "无法加载分支图。",
+    "emptyTitle": "还没有提交",
+    "emptyText": "仓库产生提交后，提交历史、分叉和合并会显示在这里。",
+    "noChangedFiles": "这个提交没有文件改动。",
+    "parent": "父提交",
+    "parents": "父提交",
+    "rootCommit": "初始提交",
+    "jumpToParent": "跳转到父提交 {{oid}}",
+    "closeDetails": "关闭提交详情",
+    "moreRefs": "+{{count}}"
   }
 }

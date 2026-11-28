@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  appendToolOutput,
   applyPatches,
   digestPreview,
   hasToolDigest,
@@ -118,6 +119,40 @@ describe('tool digests', () => {
     expect(digestEntry(waiting)).toBe(waiting)
   })
 
+  it("keeps a running call's text output whole, so appended output adds to it", () => {
+    const running = appendToolOutput(tool({ status: 'in_progress' }), numbered(200)) as ToolEntry
+    expect(digestEntry(running)).toBe(running)
+    const lean = leanEntry(running)
+    expect(lean).toBe(running)
+    const thread = threadFromSnapshot({
+      session: { id: 's' } as never,
+      entries: [lean as ThreadEntry],
+      seq: 0,
+    })
+    const next = applyPatches(thread, [{ op: 'entry.appendOutput', id: 't1', text: 'more\n' }])
+    expect(next.byId.t1).toMatchObject({
+      content: [{ type: 'markdown', markdown: '```\n' + numbered(200) + 'more\n```' }],
+    })
+    expect(digestEntry({ ...running, status: 'completed' })).toMatchObject({
+      content: [{ type: 'digest', of: 'markdown' }],
+    })
+  })
+
+  it('keeps inline card tool calls (plans, questions, elicitations, workflows) whole', () => {
+    const plan = tool({
+      planVersion: 1,
+      rawInput: 'x'.repeat(DIGEST_INPUT_BYTES * 2),
+      content: [{ type: 'markdown', markdown: 'x'.repeat(DIGEST_OUTPUT_BYTES * 2) }],
+    })
+    const workflow = tool({
+      title: 'kettu:suggest_workflow',
+      rawInput: 'x'.repeat(DIGEST_INPUT_BYTES * 2),
+      content: [{ type: 'markdown', markdown: 'x'.repeat(DIGEST_OUTPUT_BYTES * 2) }],
+    })
+    expect(digestEntry(plan)).toBe(plan)
+    expect(digestEntry(workflow)).toBe(workflow)
+  })
+
   it('digests every entry of a page and keeps the rest of it', () => {
     const long = tool({ rawInput: 'x'.repeat(DIGEST_INPUT_BYTES + 1) })
     const page = { entries: [long], older: 3 }
@@ -125,6 +160,53 @@ describe('tool digests', () => {
     expect(digested.older).toBe(3)
     expect(digested.entries[0]).toHaveProperty('rawInputDigest')
     expect(page.entries[0]).toBe(long)
+  })
+
+  it('keeps workflow suggestion and create_workflow entries whole across all harness title formats', () => {
+    const longOutput = `The user sees your suggestion in card wfs-abcdefghij23.\n${'x'.repeat(DIGEST_OUTPUT_BYTES * 2)}`
+    const longInput = JSON.stringify({ workflow_id: 'w1', task: 't'.repeat(DIGEST_INPUT_BYTES) })
+    for (const title of [
+      'mcp__kettu__suggest_workflow',
+      'kettu: suggest_workflow',
+      'kettu：suggest_workflow',
+      'kettu.suggest_workflow',
+      'mcp_kettu_suggest_workflow',
+      'kettu.list_workflows, kettu.suggest_workflow',
+      'mcp__kettu__create_workflow',
+    ]) {
+      const entry = tool({
+        title,
+        rawInput: longInput,
+        content: [{ type: 'markdown', markdown: longOutput }],
+      })
+      expect(digestEntry(entry), title).toBe(entry)
+    }
+  })
+
+  it('keeps report_step and pick_step_agents entries completely whole for remote cards', () => {
+    const longOutput = `Report accepted. Facts:\n${'f'.repeat(DIGEST_OUTPUT_BYTES * 2)}`
+    const longInput = JSON.stringify({
+      outcome: 'Done',
+      note: 'n'.repeat(DIGEST_INPUT_BYTES * 2),
+    })
+    for (const title of ['mcp__kettu__report_step', 'kettu: pick_step_agents']) {
+      const entry = tool({
+        title,
+        rawInput: longInput,
+        content: [{ type: 'markdown', markdown: longOutput }],
+      })
+      expect(digestEntry(entry), title).toBe(entry)
+    }
+  })
+
+  it('still digests third-party MCP tools that share a workflow tool name', () => {
+    const entry = tool({
+      title: 'mcp__other__suggest_workflow',
+      content: [{ type: 'markdown', markdown: 'x'.repeat(DIGEST_OUTPUT_BYTES + 10) }],
+    })
+    expect(digestEntry(entry)).toMatchObject({
+      content: [{ type: 'digest', of: 'markdown' }],
+    })
   })
 })
 

@@ -47,10 +47,13 @@
     "quoteLine": "Quote line {{line}} in conversation",
     "quoteLines": "Quote lines {{start}}–{{end}} in conversation",
     "quoteSelection": "Quote the selection in conversation",
+    "addNote": "Add note",
+    "quoteShort": "Quote",
     "openFailed": "Couldn't open this file",
     "missing": "This file is no longer on disk.",
     "readFailed": "Couldn't read this file again: {{message}}",
     "closeTab": "Close tab",
+    "openWithDefault": "Open with default app",
     "showIn": "Show in {{name}}",
     "binaryTitle": "Binary file",
     "binaryDescription": "{{size}}, not shown.",
@@ -88,9 +91,47 @@
   "tabs": {
     "agentFile": "{{agent}}'s file, read-only"
   },
+  "note": {
+    "title": "Add note for selection",
+    "selection": "Selection",
+    "excerptLabel": "Selected text",
+    "placeholder": "Write a note for the agent…",
+    "send": "Send",
+    "sending": "Sending…",
+    "toComposer": "To composer",
+    "toComposerTitle": "Insert this selection and note into the composer",
+    "queuedHint": "Session is busy — this note will be queued.",
+    "queuedToast": "Note added to the session queue",
+    "failed": "Couldn't send note: {{error}}",
+    "disabled": {
+      "noSession": "Open an active session to send this note.",
+      "subagent": "Sub-agent sessions can't receive direct notes.",
+      "starting": "Wait for the session to finish starting.",
+      "heldOutside": "This session is open in an external terminal.",
+      "unavailable": "This session can't receive messages right now."
+    }
+  },
   "link": {
     "open": "Open {{target}}",
     "openInPanel": "Open in Side Panel"
+  },
+  "hoverPreview": {
+    "openInFiles": "Open in Files",
+    "openFullFile": "Open full file",
+    "lineBadge": "L{{lines}}",
+    "empty": "Empty file.",
+    "truncatedRange": "Showing lines {{start}}\u2013{{end}} of {{total, number}}",
+    "truncatedClipped": "Long lines clipped to fit preview",
+    "folderTitle": "Folder",
+    "folderDescription": "Folder reference. Click to open in the file manager.",
+    "externalFileDescription": "File outside this project. Click to open.",
+    "imageDimensions": "{{width}} \u00d7 {{height}}",
+    "mediaAudioTitle": "Audio file",
+    "mediaVideoTitle": "Video file",
+    "mediaDocumentTitle": "Document",
+    "mediaDescription": "{{size}}. Click to preview in the Files pane.",
+    "loadFailed": "Couldn't load preview",
+    "retry": "Retry"
   },
   "htmlPreview": {
     "preview": "Preview",

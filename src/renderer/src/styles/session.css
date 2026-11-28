@@ -2,9 +2,15 @@
 
 /* The session view: the thread's column, which the composer under it keeps to. */
 .ks-session {
-  /* The text size's width. A width the user dragged the column to, stores/thread-width.ts gives
-     the boxes that read this directly, as their rules here would: keep the two in step. */
-  --thread-column: calc(48 * var(--prose-size) + 8px);
+  /* The default width for the chosen Appearance preset, scaled with the prose size. */
+  --thread-column-preset: calc(48 * var(--prose-size) + 8px);
+  /* The width the user dragged the column to, else the chosen preset's. Huli: a dragged width,
+     stores/thread-width.ts gives the boxes that read this directly, as their rules here would:
+     keep the two in step. */
+  --thread-column: var(--thread-column-set, var(--thread-column-preset));
+}
+:root[data-conversation-width='wide'] .ks-session {
+  --thread-column-preset: calc(72 * var(--prose-size) + 8px);
 }
 /* The thread sets its prose, tables and code on its own size; the column keeps the composer's. */
 .ks-thread {
@@ -137,7 +143,7 @@
     background: var(--bg-code-inline);
     color: var(--code-inline);
     font-family: var(--font-mono);
-    font-size: 0.8667em;
+    font-size: calc(0.8667em + var(--code-size-offset));
     font-variant-ligatures: none;
   }
 }
@@ -151,6 +157,53 @@
   font-size: inherit;
   line-height: inherit;
   color: inherit;
+}
+.ks-user-text {
+  min-width: 0;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+/* An explicit fenced code block inside a user message bubble: a crisp card with a copy action,
+   resetting the bubble's anywhere-wrapping so code lines scroll cleanly. */
+.ks-user-code {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-code);
+  background: var(--thread-card);
+  box-shadow: var(--thread-card-shadow);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-style: normal;
+  line-height: normal;
+  overflow-wrap: normal;
+  user-select: text;
+}
+.ks-user-code__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 4px 0 12px;
+  box-shadow: inset 0 calc(var(--hairline) * -1) 0 var(--border-default);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.ks-user-code__pre {
+  margin: 0;
+  overflow-x: auto;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: calc(var(--prose-size) - 2.5px + var(--code-size-offset));
+  font-variant-ligatures: none;
+  line-height: 1.65;
+  white-space: pre;
+  overflow-wrap: normal;
+  scrollbar-width: thin;
 }
 /* A message another session's agent sent: a quoted card on the agent's side, not the user's bubble.
    Its time and Copy sit under it at the left. */
@@ -267,8 +320,7 @@
   opacity: 0;
 }
 /* A turn cancelled before any reply: Edit stays in view after its end, in the primary blue. */
-.ks-user__edit,
-.ks-still__open {
+.ks-user__edit {
   height: 24px;
   margin-left: -4px;
   padding: 0 8px;
@@ -277,12 +329,10 @@
   color: var(--primary-foreground);
   transition: background-color 140ms ease;
 }
-.ks-user__edit:hover,
-.ks-still__open:hover {
+.ks-user__edit:hover {
   background: var(--primary-from);
 }
-.ks-user__edit:focus-visible,
-.ks-still__open:focus-visible {
+.ks-user__edit:focus-visible {
   outline: 2px solid var(--focus-ring-color);
   outline-offset: 1px;
 }
@@ -443,26 +493,258 @@
   }
 }
 
-/* A reply's copy, fork and time show while the pointer is on its turn, as under a message you
-   sent; they keep their room, so nothing moves. */
+/* A reply's actions, timestamp and turn duration stay quiet at rest and fade in together on hover
+   or focus without shifting layout. */
 .ks-reply-foot {
   display: flex;
   align-items: center;
   min-width: 0;
+  min-height: 28px;
   margin-left: -6px;
   font-size: 12px;
   color: var(--thread-faint);
+}
+.ks-reply-foot__actions {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
   opacity: 0;
   transition: opacity 140ms ease;
 }
-.ks-reply-foot[data-shown],
-.ks-reply-foot:focus-within {
+.ks-reply-foot[data-shown] .ks-reply-foot__actions,
+.ks-reply-foot:focus-within .ks-reply-foot__actions {
   opacity: 1;
+}
+.ks-reply-foot__tail {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+}
+.ks-reply-foot__meta {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ks-reply-foot__sep {
+  flex: none;
+  white-space: pre;
+}
+.ks-reply-foot__cost {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 20px;
+  padding: 0 5px;
+  margin: 0 -5px;
+  border-radius: 5px;
+  color: var(--thread-faint);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+.ks-reply-foot__cost:hover,
+.ks-reply-foot__cost[data-open] {
+  background: var(--thread-hover);
+  color: var(--thread-ink);
+}
+.ks-reply-foot__cost:focus-visible {
+  outline: 2px solid var(--focus-ring-color);
+  outline-offset: 1px;
+}
+.ks-turn-usage {
+  display: flex;
+  flex-direction: column;
+}
+.ks-turn-usage__head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 10px;
+  border-bottom: var(--hairline) solid var(--border-subtle);
+}
+.ks-turn-usage__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.ks-turn-usage__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--thread-ink);
+}
+.ks-turn-usage__count {
+  font-size: 11px;
+  color: var(--thread-muted);
+}
+.ks-turn-usage__total-cost {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--thread-ink);
+  white-space: nowrap;
+}
+.ks-turn-usage__unpriced {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--thread-muted);
+  white-space: nowrap;
+}
+.ks-turn-usage__summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.ks-turn-usage__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--bg-subtle);
+}
+.ks-turn-usage__stat-label {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--thread-muted);
+}
+.ks-turn-usage__stat-value {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--thread-ink);
+}
+.ks-turn-usage__models {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 10px 12px;
+}
+.ks-turn-usage__model {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ks-turn-usage__model + .ks-turn-usage__model {
+  padding-top: 8px;
+  border-top: var(--hairline) solid var(--border-subtle);
+}
+.ks-turn-usage__model-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.ks-turn-usage__model-name {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--thread-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ks-turn-usage__model-unknown {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--thread-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ks-turn-usage__model-cost {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--thread-ink);
+  white-space: nowrap;
+}
+.ks-turn-usage__model-unpriced {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--thread-muted);
+  white-space: nowrap;
+}
+.ks-turn-usage__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+}
+.ks-turn-usage__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 17px;
+}
+.ks-turn-usage__row dt {
+  color: var(--thread-muted);
+}
+.ks-turn-usage__row dd {
+  margin: 0;
+  color: var(--thread-ink);
+  font-weight: 500;
+  text-align: right;
+}
+.ks-turn-usage__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px 10px;
+  border-top: var(--hairline) solid var(--border-subtle);
+  background: var(--bg-subtle);
+}
+.ks-turn-usage__note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--thread-muted);
+}
+.ks-turn-usage__note > svg {
+  flex: none;
+  margin-top: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ks-reply-foot__actions,
+  .ks-reply-foot__cost {
+    transition: none;
+  }
+}
+:root[data-reduce-motion='always'] .ks-reply-foot__actions,
+:root[data-reduce-motion='always'] .ks-reply-foot__cost {
+  transition: none;
 }
 .ks-reply-foot .ui-mac {
   flex: 1;
 }
 .ks-reply-foot .ui-mac__after {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--thread-faint);
 }
 .ks-reply-foot .ui-mac__tip {
@@ -503,6 +785,42 @@
 .ks-status__away {
   flex: none;
   color: var(--thread-faint);
+}
+.ks-status__label {
+  position: relative;
+}
+/* Matches AIAnswer's writing shimmer so active turn status shares the same motion language. */
+.ks-status__label--shimmer::after {
+  content: attr(data-text);
+  content: attr(data-text) / '';
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: transparent;
+  background: linear-gradient(90deg, transparent 38%, var(--thread-shimmer) 50%, transparent 62%)
+    100% 0 / 300% 100% no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: ks-status-sweep 1.6s linear infinite;
+  pointer-events: none;
+}
+@keyframes ks-status-sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ks-status__label--shimmer::after {
+    display: none;
+  }
+}
+:root[data-reduce-motion='always'] .ks-status__label--shimmer::after {
+  display: none;
 }
 @keyframes ks-fade-in {
   from {
@@ -820,9 +1138,9 @@
   overflow-x: auto;
   color: var(--ui-tcc-text);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--code-size);
   font-variant-ligatures: none;
-  line-height: 20px;
+  line-height: var(--code-line-height);
   white-space: pre;
   scrollbar-width: thin;
 }
@@ -931,8 +1249,8 @@
   }
   & [data-streamdown='code-block-body'] {
     padding: 0;
-    font-size: 12px;
-    line-height: 20px;
+    font-size: var(--code-size);
+    line-height: var(--code-line-height);
   }
   & [data-streamdown='code-block-body'] code > span {
     padding: 0 0 0 calc(14px + max(18px, var(--code-digits, 2) * 1ch));
@@ -1035,8 +1353,8 @@
 }
 
 /* Opening a step or a run: the fold opens in 320 ms while what it holds rises out of a soft blur
-   one after another, as the thread's entrance does (thread-entrance.ts). Closing fades the
-   details first, then folds them. The opening classes are set only when someone opens it. */
+   one after another. Closing fades the details first, then folds them. The opening classes are set
+   only when someone opens it. */
 .ks-thread :is(.ui-tcc, .ui-tcc-group) > .ui-tcc__body {
   transition:
     grid-template-rows 260ms var(--ease-out-quint) 40ms,
@@ -1551,6 +1869,13 @@
   max-width: none;
   text-align: right;
 }
+/* A command line, an address or a reference on an MCP server's card, which may run long. */
+.ks-routine-rows .ks-mcp-rows__mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
 .ks-routine-rows__block {
   display: flex;
   flex-direction: column;
@@ -1974,6 +2299,19 @@
 .ks-suggest .ui-apc__preview {
   max-height: none;
   overflow: visible;
+}
+.ks-suggest--editing .ui-apc__btn--ghost {
+  background: var(--thread-hover);
+  color: var(--thread-ink);
+}
+.ks-suggest__editing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--thread-line);
+  padding-top: 10px;
+  font-size: 12.5px;
+  color: var(--thread-muted);
 }
 .ks-plan__preview {
   display: flex;
@@ -2427,8 +2765,446 @@
   color: var(--shell-muted);
 }
 .ks-title,
-.ks-crumb:hover {
+.ks-crumb:hover,
+.ks-crumb[data-popup-open] {
   color: var(--shell-ink);
+}
+.ks-family-trigger[data-popup-open] {
+  background: var(--shell-hover);
+}
+.ks-family-trigger__count {
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--shell-chip);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--shell-muted);
+}
+.ks-family-chip {
+  flex: 0 1 auto;
+}
+.ks-family {
+  display: flex;
+  flex-direction: column;
+}
+.ks-family__head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 10px;
+  border-bottom: 0.5px solid var(--border-subtle);
+}
+.ks-family__title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ks-family__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--shell-ink);
+}
+.ks-family__count {
+  font-size: 11px;
+  color: var(--shell-muted);
+}
+.ks-family__activity {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--shell-muted);
+  white-space: nowrap;
+}
+.ks-family__activity--waiting {
+  color: var(--attention);
+}
+.ks-family__activity--error {
+  color: var(--danger);
+}
+.ks-family__rollup {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.ks-family__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-subtle);
+}
+.ks-family__metric-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.ks-family__metric-label {
+  font-size: 11px;
+  color: var(--shell-muted);
+}
+.ks-family__metric-value {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--shell-ink);
+}
+.ks-family__metric-sub {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--shell-muted);
+}
+.ks-family__loading {
+  display: inline-flex;
+  align-items: center;
+  color: var(--shell-muted);
+}
+.ks-family__unavailable {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--shell-muted);
+}
+.ks-family__tag {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bg-selected);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--shell-muted);
+  white-space: nowrap;
+}
+.ks-family__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--shell-muted);
+}
+.ks-family__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 6px;
+}
+.ks-family__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--shell-ink);
+  text-align: left;
+  transition: background-color 120ms ease;
+}
+.ks-family__row:hover {
+  background: var(--bg-hover);
+}
+.ks-family__row[data-current] {
+  background: var(--bg-selected);
+}
+.ks-family__row:focus-visible {
+  outline: 1.5px solid var(--focus);
+  outline-offset: -1px;
+}
+.ks-family__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  color: var(--shell-muted);
+}
+.ks-family__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.ks-family__row-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.ks-family__row-title {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--shell-ink);
+}
+.ks-family__badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.ks-family__badge--root {
+  background: var(--bg-hover);
+  color: var(--shell-muted);
+}
+.ks-family__badge--current {
+  background: var(--bg-subtle);
+  color: var(--shell-ink);
+}
+.ks-family__row-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--shell-muted);
+}
+.ks-family__usage {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  min-width: 68px;
+  line-height: 15px;
+}
+.ks-family__usage-primary {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--shell-ink);
+}
+.ks-family__usage-secondary {
+  font-size: 10.5px;
+  color: var(--shell-muted);
+}
+.ks-family__usage-missing {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--shell-muted);
+}
+.ks-family__status-slot {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.ks-family__idle-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+/* Native session branch navigator (Pi). */
+.ks-branch-chip {
+  flex: 0 1 auto;
+}
+.ks-branch-chip[data-locked] {
+  color: var(--shell-faint);
+}
+.ks-branch {
+  display: flex;
+  flex-direction: column;
+}
+.ks-branch__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 0.5px solid var(--border-subtle);
+}
+.ks-branch__title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--shell-muted);
+}
+.ks-branch__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--shell-ink);
+}
+.ks-branch__count {
+  font-size: 11px;
+  color: var(--shell-muted);
+}
+.ks-branch__switching {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--shell-muted);
+}
+.ks-branch__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--shell-muted);
+}
+.ks-branch__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--danger);
+}
+.ks-branch__state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px 14px;
+  font-size: 12px;
+  color: var(--shell-muted);
+}
+.ks-branch__state--error {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.ks-branch__empty {
+  padding: 18px 14px;
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--shell-muted);
+}
+.ks-branch__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+}
+.ks-branch__row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--shell-ink);
+  text-align: left;
+  transition: background-color 120ms ease;
+}
+.ks-branch__row:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.ks-branch__row[data-current] {
+  background: var(--bg-selected);
+}
+.ks-branch__row--disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.ks-branch__row:focus-visible {
+  outline: 1.5px solid var(--focus);
+  outline-offset: -1px;
+}
+.ks-branch__node-slot {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 17px;
+}
+.ks-branch__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+.ks-branch__dot--current {
+  background: var(--accent);
+}
+.ks-branch__dot--path {
+  background: var(--shell-ink);
+}
+.ks-branch__dot--other {
+  border: 1.5px solid var(--border-strong);
+  background: transparent;
+}
+.ks-branch__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ks-branch__row-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.ks-branch__label {
+  flex: none;
+  max-width: 96px;
+  overflow: hidden;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--shell-ink);
+}
+.ks-branch__row-title {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--shell-ink);
+}
+.ks-branch__badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.ks-branch__badge--current {
+  background: var(--bg-subtle);
+  color: var(--shell-ink);
+}
+.ks-branch__row-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--shell-muted);
 }
 .ks-title[data-unfocused] {
   color: var(--shell-text);
@@ -2845,6 +3621,17 @@
   display: inline-flex;
   gap: 4px;
 }
+.ks-changes__undone {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--info-tint);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--thread-muted);
+}
 .ks-changes__actions {
   display: flex;
   gap: 6px;
@@ -2854,7 +3641,7 @@
   display: none;
 }
 /* In a narrow column the actions keep only their icons, so the head stays on one line. */
-@container (inline-size < 440px) {
+@container (inline-size < 480px) {
   .ks-changes__actions .ks-btn {
     width: 26px;
     padding: 0;
@@ -3008,6 +3795,113 @@
 }
 .ks-changes__more:hover {
   color: var(--thread-ink);
+}
+
+/* Turn undo preview dialog. */
+.ks-undo__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 62vh;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.ks-undo__banner {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.ks-undo__banner--danger {
+  background: var(--danger-tint);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 var(--hairline) var(--danger-border);
+}
+.ks-undo__banner--warn {
+  background: var(--tone-amber-fill);
+  color: var(--tone-amber);
+  box-shadow: inset 0 0 0 var(--hairline) var(--tone-amber-edge);
+}
+.ks-undo__banner--info {
+  background: var(--info-tint);
+  color: var(--thread-muted);
+  box-shadow: inset 0 0 0 var(--hairline) var(--border-subtle);
+}
+.ks-undo__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ks-undo__file {
+  border-radius: 10px;
+  background: var(--bg-subtle);
+  box-shadow: inset 0 0 0 var(--hairline) var(--border-subtle);
+  overflow: hidden;
+}
+.ks-undo__file--blocked {
+  box-shadow: inset 0 0 0 var(--hairline) var(--danger-border);
+}
+.ks-undo__file-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  color: var(--thread-ink);
+  text-align: left;
+}
+.ks-undo__file-head:hover {
+  background: var(--bg-hover);
+}
+.ks-undo__chevron {
+  color: var(--thread-muted);
+  transition: transform var(--duration-fast);
+}
+.ks-undo__file-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+.ks-undo__file-reason {
+  font-size: 12.5px;
+  color: var(--danger);
+}
+.ks-undo__file-hint {
+  font-size: 12px;
+  color: var(--thread-muted);
+}
+.ks-undo__badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.ks-undo__badge--revert {
+  background: var(--info-tint);
+  color: var(--thread-muted);
+}
+.ks-undo__badge--delete {
+  background: var(--danger-tint);
+  color: var(--danger);
+}
+.ks-undo__badge--restore {
+  background: var(--success-tint);
+  color: var(--success);
+}
+.ks-undo__badge--conflict {
+  background: var(--danger-tint);
+  color: var(--danger);
+  box-shadow: inset 0 0 0 var(--hairline) var(--danger-border);
 }
 
 /* A subagent's card, on Tool Call Card's measures; it opens the subagent's session. */
@@ -3499,4 +4393,70 @@
 }
 .kettu-rewound__back:disabled {
   opacity: 0.5;
+}
+
+/* Live native extension status chips and text widgets (Pi `setStatus` / `setWidget`). */
+.ks-ext-widgets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-height: 168px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.ks-ext-widget {
+  min-width: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-subtle) 58%, var(--card));
+  box-shadow: inset 0 0 0 var(--hairline) var(--border-default);
+}
+.ks-ext-widget__body {
+  max-height: 112px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 7px 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-code-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+}
+.ks-ext-widget__line {
+  min-height: 1em;
+}
+.ks-ext-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  max-height: 56px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 2px;
+  scrollbar-width: thin;
+}
+.ks-ext-status__pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+  box-shadow: inset 0 0 0 var(--hairline) var(--border-subtle);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  color: var(--text-secondary);
+}
+.ks-ext-status__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

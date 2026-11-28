@@ -80,6 +80,7 @@ function systemLocale(): Locale {
   return isLocale(value) ? value : 'en'
 }
 const onUpdateChanged = subscribe('update:changed')
+const onConfirmQuitResolved = subscribe('app:confirm-quit-resolved')
 const onDebugChanged = subscribe('debug:changed')
 const onRecordingChanged = subscribe('report:recording-changed')
 const onShortcut = subscribe('app:shortcut')
@@ -103,6 +104,7 @@ const onBrowserPick = subscribe('browser:pick')
 const onSavedStates = subscribe('browser:saved-states')
 const onHostForwards = subscribe('hosts:forwards')
 const onBrowserOpened = subscribe('browser:opened')
+const onBrowserAnnotated = subscribe('browser:annotated')
 const onDeviceOpened = subscribe('devices:opened')
 const onSiteIcon = subscribe('browser:site-icon')
 const onSignInsChanged = subscribe('sign-ins:changed')
@@ -137,6 +139,7 @@ const api: KettuApi = {
         quitListeners.delete(listener)
       }
     },
+    onConfirmQuitResolved,
     onCommand: (listener) => {
       commandListeners.add(listener)
       const held = heldCommands
@@ -323,6 +326,7 @@ const api: KettuApi = {
   shell: {
     showDataFolder: () => invoke('shell:show-data-folder'),
     showItem: (path) => invoke('shell:show-item', path),
+    openFile: (path) => invoke('shell:open-file', path),
   },
   editors: {
     list: () => invoke('editors:list'),
@@ -358,12 +362,14 @@ const api: KettuApi = {
     revokeTab: (id, tab) => invoke('browser:revoke-tab', id, tab),
     setBounds: (id, bounds) => invoke('browser:bounds', id, bounds),
     navigate: (id, url) => invoke('browser:navigate', id, url),
+    openLink: (id, url) => invoke('browser:open-link', id, url),
     back: (id) => invoke('browser:back', id),
     forward: (id) => invoke('browser:forward', id),
     reload: (id) => invoke('browser:reload', id),
     stop: (id) => invoke('browser:stop', id),
     openExternal: (id) => invoke('browser:open-external', id),
     setPageSize: (id, size) => invoke('browser:page-size', id, size),
+    setAnnotate: (id, enabled) => invoke('browser:set-annotate', id, enabled),
     freeze: (id) => invoke('browser:freeze', id),
     thaw: (id) => invoke('browser:thaw', id),
     capture: (id) => invoke('browser:capture', id),
@@ -371,6 +377,7 @@ const api: KettuApi = {
     onPick: onBrowserPick,
     takeOver: (id) => invoke('browser:take-over', id),
     handBack: (id) => invoke('browser:hand-back', id),
+    releaseTakeover: (id) => invoke('browser:release-takeover', id),
     answerAsk: (id, outcome) => invoke('browser:answer-ask', id, outcome),
     answerOrigin: (id, requestId, decision) =>
       invoke('browser:answer-origin', id, requestId, decision),
@@ -394,6 +401,7 @@ const api: KettuApi = {
     setSessions: (ids) => send('browser:sessions', ids),
     onState: onBrowserState,
     onOpened: onBrowserOpened,
+    onAnnotated: onBrowserAnnotated,
   },
   signIns: {
     sources: () => invoke('sign-ins:sources'),

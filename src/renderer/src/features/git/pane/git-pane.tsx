@@ -4,10 +4,13 @@ import { useTranslation } from 'react-i18next'
 import { emitAppEvent } from '@renderer/app/events'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
+import { LinkSessionContext } from '@renderer/features/session/open-link'
 import { useSessionView } from '@renderer/features/session/use-thread'
 import { PaneBody, PaneContext, PaneEmpty, PaneIcon } from '@renderer/features/shell/panel-button'
+import { hostOfPath } from '@renderer/lib/host-paths'
 import { cn } from '@renderer/lib/utils'
 import {
+  ghStateOf,
   refreshGitProject,
   setGitPaneTab,
   useGitStore,
@@ -42,7 +45,7 @@ export default function GitPane({
   const { t } = useTranslation('git')
   const status = useGitStore((s) => s.status[projectPath])
   const pr = useGitStore((s) => s.currentPr[projectPath] ?? null)
-  const gh = useGitStore((s) => s.tools?.gh.state ?? null)
+  const gh = useGitStore((s) => ghStateOf(s, hostOfPath(projectPath)))
   const tab = useGitStore((s) => s.paneTab[panel] ?? 'changes')
   const sessionId = panelSession(panel)
   const running = useSessionView(sessionId ?? '')?.status === 'running'
@@ -72,67 +75,75 @@ export default function GitPane({
   ) : null
 
   return (
-    <PaneBody data-git-pane={projectPath}>
-      {repos}
-      {body || !status ? (
-        <div className="kp-body">{body}</div>
-      ) : (
-        <Tabs
-          value={tab}
-          onValueChange={(next) => setGitPaneTab(panel, next as GitPaneTab)}
-          className="min-h-0 flex-1 gap-0"
-        >
-          <PaneContext tools={<PaneTools status={status} />}>
-            <TabsList variant="line" className="h-full justify-start px-0 pt-0 pb-1.25">
-              <TabsTrigger value="changes" className="flex-none">
-                {t('pane.tab.changes')}
-                {tickable > 0 && <span className="text-tertiary tabular">{tickable}</span>}
-              </TabsTrigger>
-              <TabsTrigger value="commits" className="flex-none">
-                {t('pane.tab.commits')}
-              </TabsTrigger>
-              <TabsTrigger value="pr" className="flex-none">
-                {t('pane.tab.pr')}
-                {pr && (
-                  <span className={cn(PILL, 'h-4 px-1.25 tabular', BADGE[pr.state])}>
-                    #{pr.number}
-                  </span>
-                )}
-              </TabsTrigger>
-            </TabsList>
-          </PaneContext>
-          <div className="flex min-h-0 flex-1 flex-col px-2.5 pt-2 pb-2.5">
-            <PaneTop status={status} />
-            {status.stale && (
-              <div className="pb-2">
-                <Note icon={Alert02Icon} tone="warn">
-                  {t('pane.stale')}
-                </Note>
-              </div>
-            )}
-            <SyncStrip status={status} pr={pr} gh={gh} files={files} onHandOff={handOff} />
-            <TabsContent value="changes" className={PAGE}>
-              <ChangesPage panel={panel} status={status} changes={changes} textarea={textarea} />
-            </TabsContent>
-            <TabsContent value="commits" className={PAGE}>
-              <CommitsPage status={status} />
-            </TabsContent>
-            <TabsContent value="pr" className={PAGE}>
-              <PullRequestPage status={status} pr={pr} gh={gh} panel={panel} onHandOff={handOff} />
-            </TabsContent>
-            {tab === 'changes' && tickable > 0 && (
-              <CommitBox
-                status={status}
-                files={files}
-                panel={panel}
-                textarea={textarea}
-                agentRunning={running}
-              />
-            )}
-          </div>
-        </Tabs>
-      )}
-    </PaneBody>
+    <LinkSessionContext value={sessionId}>
+      <PaneBody data-git-pane={projectPath}>
+        {repos}
+        {body || !status ? (
+          <div className="kp-body">{body}</div>
+        ) : (
+          <Tabs
+            value={tab}
+            onValueChange={(next) => setGitPaneTab(panel, next as GitPaneTab)}
+            className="min-h-0 flex-1 gap-0"
+          >
+            <PaneContext tools={<PaneTools status={status} />}>
+              <TabsList variant="line" className="h-full justify-start px-0 pt-0 pb-1.25">
+                <TabsTrigger value="changes" className="flex-none">
+                  {t('pane.tab.changes')}
+                  {tickable > 0 && <span className="text-tertiary tabular">{tickable}</span>}
+                </TabsTrigger>
+                <TabsTrigger value="commits" className="flex-none">
+                  {t('pane.tab.commits')}
+                </TabsTrigger>
+                <TabsTrigger value="pr" className="flex-none">
+                  {t('pane.tab.pr')}
+                  {pr && (
+                    <span className={cn(PILL, 'h-4 px-1.25 tabular', BADGE[pr.state])}>
+                      #{pr.number}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+            </PaneContext>
+            <div className="flex min-h-0 flex-1 flex-col px-2.5 pt-2 pb-2.5">
+              <PaneTop status={status} panel={panel} />
+              {status.stale && (
+                <div className="pb-2">
+                  <Note icon={Alert02Icon} tone="warn">
+                    {t('pane.stale')}
+                  </Note>
+                </div>
+              )}
+              <SyncStrip status={status} pr={pr} gh={gh} files={files} onHandOff={handOff} />
+              <TabsContent value="changes" className={PAGE}>
+                <ChangesPage panel={panel} status={status} changes={changes} textarea={textarea} />
+              </TabsContent>
+              <TabsContent value="commits" className={PAGE}>
+                <CommitsPage status={status} />
+              </TabsContent>
+              <TabsContent value="pr" className={PAGE}>
+                <PullRequestPage
+                  status={status}
+                  pr={pr}
+                  gh={gh}
+                  panel={panel}
+                  onHandOff={handOff}
+                />
+              </TabsContent>
+              {tab === 'changes' && tickable > 0 && (
+                <CommitBox
+                  status={status}
+                  files={files}
+                  panel={panel}
+                  textarea={textarea}
+                  agentRunning={running}
+                />
+              )}
+            </div>
+          </Tabs>
+        )}
+      </PaneBody>
+    </LinkSessionContext>
   )
 }
 

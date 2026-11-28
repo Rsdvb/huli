@@ -21,24 +21,28 @@ import type { ToolEntry } from '@shared/thread'
 import { emitAppEvent } from '@renderer/app/events'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { ApprovalCard } from '@renderer/components/affect/approval-card'
+import { Button } from '@renderer/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@renderer/components/ui/dialog'
+import { Spinner } from '@renderer/components/ui/spinner'
 import { ConnectButton } from '@renderer/features/marketplace/connect'
 import { useConnection } from '@renderer/features/marketplace/hooks'
 import { InstallButton } from '@renderer/features/marketplace/listing'
 import { Glyph } from '@renderer/features/shell/glyph'
+import { usePane } from '@renderer/features/split/pane-context'
 import { chartShown, chartToTask, holdChart } from '@renderer/features/tasks/chart-morph'
 import { WorkflowChart } from '@renderer/features/tasks/workflow-chart'
 import { count, runningFor } from '@renderer/lib/format'
-import { errorMessage, hostAt } from '@renderer/lib/host'
+import { errorMessage, hostAt, sessionHost } from '@renderer/lib/host'
 import { cn } from '@renderer/lib/utils'
 import { HostScopeContext, hostScope, LOCAL_SCOPE, useHostScope } from '@renderer/stores/host-scope'
-import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
+import { isAway, useOtherHost } from '@renderer/stores/hosts'
+import { hostOfSession, sessionArchived, useSessionsStore } from '@renderer/stores/sessions'
 import { useSuggestion, useSuggestionsStore } from '@renderer/stores/workflow-suggestions'
 import { openTask, openWorkflowMarketplace } from '../new-session/open-task'
 import { listOf, localStepName, WORKFLOW_ICON } from '../new-session/workflow-picks'
 import { useSessionView } from '../use-thread'
 import { revealWaiting } from './helpers'
-import { cardIdOf } from './workflow-tools'
+import { canEditSuggestion, cardIdOf, suggestionFallbackName } from './workflow-tools'
 
 /**
  * The host's card for a suggestion or a workflow to keep, in the session's host's scope, so the
@@ -53,10 +57,50 @@ export function SuggestionCard({
   entry: ToolEntry
   agent: string
 }) {
+  const { t } = useTranslation(['session', 'common'])
   const projectPath = useSessionsStore((s) => s.byId[sessionId]?.projectPath)
-  const hostId = projectPath ? hostOfSession({ projectPath }) : null
-  const card = useSuggestion(cardIdOf(entry), sessionId, hostId)
-  if (!card) return null
+  const hostId = projectPath ? hostOfSession({ projectPath }) : sessionHost(sessionId)
+  const cardId = cardIdOf(entry)
+  const { card, status, error, retry } = useSuggestion(cardId, sessionId, hostId)
+  if (!card) {
+    const fallbackName = suggestionFallbackName(entry)
+    return (
+      <div
+        role={status === 'error' ? 'alert' : 'status'}
+        className={cn(
+          'flex min-w-0 flex-col gap-1.5 rounded-card bg-card py-2.5 pr-3.5 pl-4 text-ui',
+          status === 'error'
+            ? 'shadow-[inset_3px_0_0_var(--color-danger),var(--card-ring)]'
+            : 'shadow-card',
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-1.75">
+          <Glyph icon={WORKFLOW_ICON} size={14} className="shrink-0 text-icon" />
+          <span className="min-w-0 truncate font-medium text-primary">
+            {status === 'loading'
+              ? t('workflow.card.reading')
+              : status === 'error'
+                ? t('workflow.card.loadFailed')
+                : fallbackName
+                  ? t('workflow.card.unavailableNamed', { name: fallbackName })
+                  : t('workflow.card.unavailable')}
+          </span>
+          <span className="ml-auto flex shrink-0 items-center">
+            {status === 'loading' ? (
+              <Spinner className="size-3.5 text-muted-foreground" />
+            ) : (
+              cardId && (
+                <Button size="xs" variant="outline" onClick={retry}>
+                  {t('common:actions.retry')}
+                </Button>
+              )
+            )}
+          </span>
+        </div>
+        {status === 'error' && error && <p className="text-meta text-secondary">{error}</p>}
+      </div>
+    )
+  }
   return (
     <HostScopeContext.Provider value={hostId === null ? LOCAL_SCOPE : hostScope(hostId)}>
       <Card card={card} agent={agent} />
@@ -122,7 +166,13 @@ function Pending({ card, agent }: { card: WorkflowSuggestion; agent: string }) {
   const { t, i18n } = useTranslation('session')
   const root = useRef<HTMLDivElement>(null)
   const scope = useHostScope()
+  const paneId = usePane()?.paneId ?? null
+  const summary = useSessionsStore((s) => s.byId[card.sessionId])
+  const archived = useSessionsStore((s) => sessionArchived(s.byId, card.sessionId))
+  const otherHost = useOtherHost(scope.hostId)
+  const away = !!(otherHost && isAway(otherHost.connection))
   const config = useSessionView(card.sessionId)?.config
+  const editing = useSuggestionsStore((s) => s.editing[card.sessionId]?.cardId === card.id)
   const [error, setError] = useState<string | null>(null)
   const [file, setFile] = useState(false)
   const [blocked, setBlocked] = useState<string[]>([])
@@ -131,7 +181,19 @@ function Pending({ card, agent }: { card: WorkflowSuggestion; agent: string }) {
   const starting = answer.kind === 'starting'
   const failed = answer.kind === 'failed'
   const waiting = answer.kind === 'waiting'
+  const editable = canEditSuggestion({
+    waiting,
+    away,
+    archived,
+    origin: summary?.origin,
+    worktreeState: summary?.worktree?.state,
+  })
   const name = nameOf(card.workflow, i18n.language)
+
+  const edit = () => {
+    useSuggestionsStore.getState().startEditing(card.sessionId, card.id)
+    emitAppEvent({ kind: 'focus-composer', sessionId: card.sessionId, paneId })
+  }
 
   useEffect(() => revealWaiting(root.current), [])
   // Sign-in states are read once a tool needs one.
@@ -192,7 +254,7 @@ function Pending({ card, agent }: { card: WorkflowSuggestion; agent: string }) {
   return (
     <div ref={root} className="min-w-0">
       <ApprovalCard
-        className="ks-suggest"
+        className={cn('ks-suggest', editing && waiting && 'ks-suggest--editing')}
         title={save ? t('workflow.card.saveTitle', { name }) : t('workflow.card.title')}
         description={<Summary card={card} />}
         icon={<Icon icon={WORKFLOW_ICON} size={15} />}
@@ -208,7 +270,7 @@ function Pending({ card, agent }: { card: WorkflowSuggestion; agent: string }) {
         }
         denyLabel={save ? t('workflow.card.notNow') : t('workflow.card.doItHere')}
         editLabel={t('workflow.card.edit')}
-        onEdit={waiting ? () => emitAppEvent({ kind: 'focus-composer' }) : undefined}
+        onEdit={editable ? edit : undefined}
         allowAlways={false}
         shortcuts
         status="pending"
@@ -234,6 +296,21 @@ function Pending({ card, agent }: { card: WorkflowSuggestion; agent: string }) {
                   save ? undefined : () => void answerWith('another').catch(() => undefined)
                 }
               />
+            )}
+            {waiting && editing && (
+              <div role="status" aria-live="polite" className="ks-suggest__editing">
+                <Glyph icon={WORKFLOW_ICON} size={13} className="shrink-0 text-link" />
+                <span className="min-w-0 flex-1">{t('workflow.card.editingHint', { agent })}</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    useSuggestionsStore.getState().stopEditing(card.sessionId, card.id)
+                  }
+                  className="shrink-0 text-link hover:underline"
+                >
+                  {t('workflow.card.cancelEdit')}
+                </button>
+              </div>
             )}
           </div>
         }
@@ -289,9 +366,9 @@ function Chart({ card, agent }: { card: WorkflowSuggestion; agent: string }) {
 
 function Fact({ icon, children }: { icon: typeof Clock01Icon; children: ReactNode }) {
   return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
+    <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
       <Glyph icon={icon} size={13} className="shrink-0 text-tertiary" />
-      <span className="truncate">{children}</span>
+      <span className="min-w-0 truncate">{children}</span>
     </span>
   )
 }
@@ -405,7 +482,7 @@ function ToolRow({ tool, onReady }: { tool: SuggestedTool; onReady: (ready: bool
     end = <span className="text-tertiary">{t('workflow.card.tool.atStart')}</span>
   }
   return (
-    <div className="flex min-h-8 min-w-0 items-center gap-2.5 text-ui">
+    <div className="flex min-h-8 min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-ui">
       <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-card text-secondary shadow-outline">
         <Glyph icon={tool.kind === 'mcp' ? PlugSocketIcon : BookOpen01Icon} size={14} />
       </span>
@@ -505,12 +582,12 @@ function Details({
   const where =
     card.facts.worktree === false ? t('workflow.card.may.folder') : t('workflow.card.may.worktree')
   return (
-    <div className="flex flex-col gap-2 border-t border-(--thread-line) pt-3 text-meta">
+    <div className="flex min-w-0 flex-col gap-2 border-t border-(--thread-line) pt-3 text-meta">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-fit min-w-0 items-center gap-1.5 text-tertiary hover:text-secondary"
+        className="flex w-fit max-w-full min-w-0 items-center gap-1.5 text-tertiary hover:text-secondary"
       >
         <Glyph
           icon={ArrowRight01Icon}
@@ -521,8 +598,10 @@ function Details({
           )}
         />
         <span className="shrink-0">{t('workflow.card.details')}</span>
-        <span aria-hidden>·</span>
-        <span className="truncate font-medium text-primary">{summary}</span>
+        <span aria-hidden className="shrink-0">
+          ·
+        </span>
+        <span className="min-w-0 truncate font-medium text-primary">{summary}</span>
       </button>
       {open && (
         <div className="flex flex-col gap-2 pl-4.5">

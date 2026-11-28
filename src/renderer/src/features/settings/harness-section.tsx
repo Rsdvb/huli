@@ -364,6 +364,13 @@ function HarnessState({ status }: { status: AgentStatus }) {
       </SetButton>
     )
   }
+  if (status.cli?.newerVersion) {
+    return (
+      <Pill tone="attention">
+        {t('harnesses.versionOut', { version: status.cli.newerVersion })}
+      </Pill>
+    )
+  }
   // A harness that fails to start is no picture of health, whatever its version.
   return showsCurrent(status) && status.state !== 'failed' ? (
     <StateDot label={t('agents.update.upToDate')} />
@@ -459,9 +466,13 @@ export function HarnessGroupActions() {
   const harnesses = useAgentsStore(useShallow((s) => harnessStatuses(s.order, s.byId)))
   const refresh = useRefresh({ busy: check.running })
   const now = useNow()
-  const checkable = harnesses.some((h) => h.package || h.updateCheckedAt !== null || h.cli)
+  const checkable = harnesses.some(
+    (h) =>
+      !programUnchecked(h) &&
+      (!!h.package || !!h.release?.registry || h.updateCheckedAt !== null || !!h.cli),
+  )
   const lastAt = Math.max(0, ...harnesses.map((h) => h.updateCheckedAt ?? 0)) || null
-  const pending = harnesses.filter((h) => h.update || h.cli?.update).length
+  const pending = harnesses.filter((h) => h.update || h.cli?.update || h.cli?.newerVersion).length
   const meta: ReactNode =
     refresh.phase === 'turning' ? null : check.error ? (
       <span className="k-error" title={check.error}>
@@ -771,7 +782,8 @@ function VersionGroup({ status }: { status: AgentStatus }) {
     !programUnchecked(status) &&
     (!!status.package || !!status.cli || !!status.release?.registry || checkedAt !== null)
   const updating = status.task?.kind === 'update' && status.task.state === 'running'
-  const next = status.cli?.update?.version ?? status.update?.cliVersion ?? null
+  const next =
+    status.cli?.update?.version ?? status.cli?.newerVersion ?? status.update?.cliVersion ?? null
   // A stale check does not make a missing program current, so it gets no green dot.
   const current = !next && !status.update && showsCurrent(status)
   const stated = !!next || !!status.update || current

@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import type { SessionSummary } from '@shared/agent-host'
+import { isActivelyRunning, type SessionSummary } from '@shared/agent-host'
 import { expiryOf, knownExpiry, type CachePhase, type KnownExpiry } from '@shared/prompt-cache'
 import { useCachePhase } from '@renderer/features/prompt-cache/cache-phase'
 import { agentsOn, useAgentsStore } from '@renderer/stores/agents'
@@ -18,10 +18,7 @@ export function useSessionCache(summary: SessionSummary): SessionCache {
   const kind = useAgentsStore(
     (s) => agentsOn(s, hostId).byId[summary.agentId]?.account?.kind ?? null,
   )
-  const quiet =
-    summary.origin === 'subagent' ||
-    summary.status === 'running' ||
-    summary.status === 'awaiting_permission'
+  const quiet = summary.origin === 'subagent' || isActivelyRunning(summary)
   const cache = quiet
     ? null
     : knownExpiry(

@@ -7,6 +7,7 @@ import {
   Download04Icon,
   GitBranchIcon,
   GitCommitIcon,
+  GitForkIcon,
   LinkSquare02Icon,
   MagicWand01Icon,
   MoreHorizontalIcon,
@@ -22,6 +23,7 @@ import {
 } from '@renderer/components/ui/dropdown-menu'
 import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
+import { sessionLinkProps, useLinkSessionId } from '@renderer/features/session/open-link'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { hostPath } from '@renderer/lib/host-paths'
 import { useNow } from '@renderer/lib/use-now'
@@ -34,10 +36,11 @@ import { continueCommand } from '../next-step'
 import { branchName, fetchedText, isLinkedWorktree } from '../popover-keys'
 import { pushNow, runStep } from '../steps'
 import { planSync, PUSHING, stepOf } from '../sync'
+import { openBranchGraph } from './open-pane'
 import { ActionBtn, Note } from './pane-ui'
 
-/** The branch, its worktree and an operation stopped midway. */
-export function PaneTop({ status }: { status: GitStatus }) {
+/** The branch, its worktree, an operation stopped midway, and the Branch graph entry. */
+export function PaneTop({ status, panel }: { status: GitStatus; panel: string }) {
   const { t } = useTranslation('git')
   const [switching, setSwitching] = useState(false)
   const anchor = useRef<HTMLButtonElement>(null)
@@ -75,6 +78,16 @@ export function PaneTop({ status }: { status: GitStatus }) {
           {operation.step && ` ${operation.step[0]}/${operation.step[1]}`}
         </span>
       )}
+      <Button
+        variant="outline"
+        size="xs"
+        data-git-branch-graph=""
+        onClick={() => openBranchGraph(panel)}
+        className="ml-auto h-7 shrink-0 gap-1.5 rounded-lg px-2 text-control font-medium text-secondary hover:text-primary"
+      >
+        <Glyph icon={GitForkIcon} size={13} className="text-tertiary" />
+        <span>{t('pane.branchGraph')}</span>
+      </Button>
       <BranchSwitcher
         status={status}
         open={switching}
@@ -88,6 +101,7 @@ export function PaneTop({ status }: { status: GitStatus }) {
 /** Fetch and More, at the end of the Git tab's context bar. */
 export function PaneTools({ status }: { status: GitStatus }) {
   const { t } = useTranslation('git')
+  const sessionId = useLinkSessionId()
   const failed = useGitStore((s) => s.failed[status.projectPath] ?? null)
   const name = branchName(status)
   const github = status.remote?.github
@@ -123,9 +137,10 @@ export function PaneTools({ status }: { status: GitStatus }) {
             <DropdownMenuItem
               render={
                 <a
-                  href={`https://github.com/${github.owner}/${github.repo}`}
-                  target="_blank"
-                  rel="noreferrer"
+                  {...sessionLinkProps(
+                    `https://github.com/${github.owner}/${github.repo}`,
+                    sessionId,
+                  )}
                 />
               }
             >

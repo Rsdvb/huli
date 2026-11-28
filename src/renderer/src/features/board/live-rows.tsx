@@ -1,5 +1,11 @@
 import { useId, useState } from 'react'
-import { ComputerTerminal01Icon, StopIcon, ViewIcon } from '@hugeicons/core-free-icons'
+import {
+  Clock01Icon,
+  ComputerTerminal01Icon,
+  StopIcon,
+  Timer02Icon,
+  ViewIcon,
+} from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { SessionSummary } from '@shared/agent-host'
 import type { TaskProcess } from '@shared/task-processes'
@@ -17,7 +23,7 @@ import { openSession } from '@renderer/stores/view'
 import { askedStep, currentStep, lastLine, subagentWaiting } from './board-model'
 import { TaskStats } from './process-parts'
 import { useToBackground } from './use-to-background'
-import { Clock, Fold } from './row-parts'
+import { Clock, Countdown, Fold } from './row-parts'
 import { TaskDetail } from './task-detail'
 import { useStopTask } from './use-stop-task'
 import { useTaskOutput } from './use-task-output'
@@ -54,6 +60,8 @@ export function AgentLive({
   const title = sessionTitle(child)
   const open = () => openSession(child.id, child.projectPath)
   const one = compact && !waiting
+  // A sub-agent that ran before keeps no start for this run unless turnStartedAt is reported.
+  const startedAt = child.turnStartedAt ?? (digest?.durationMs == null ? child.createdAt : null)
   return (
     <div className="kb-item" data-wait={waiting || undefined}>
       <div className="kb-live" data-one={one || undefined}>
@@ -73,10 +81,9 @@ export function AgentLive({
             {t('actions.review')}
           </Button>
         ) : (
-          // A sub-agent that ran before keeps no start for this run, so it shows no time.
-          digest?.durationMs == null && (
+          startedAt !== null && (
             <span className="kb-live__end">
-              <Clock since={child.createdAt} />
+              <Clock since={startedAt} />
             </span>
           )
         )}
@@ -142,16 +149,28 @@ export function TaskLive({
   return <TaskRow sessionId={sessionId} task={task} compact={compact} stats={stats} block={block} />
 }
 
+function taskIcon(task: BackgroundTaskView) {
+  if (task.schedule?.mode === 'timer') return Timer02Icon
+  if (task.schedule?.mode === 'cron') return Clock01Icon
+  if (task.kind === 'monitor') return ViewIcon
+  return ComputerTerminal01Icon
+}
+
 function CallLive({ task, compact }: { task: BackgroundTaskView; compact: boolean }) {
+  const schedule = task.schedule
   return (
     <div className="kb-item">
       <div className="kb-live" data-kind="task" data-one={compact || undefined}>
         <span className="kb-mark">
-          <PaneIcon icon={ComputerTerminal01Icon} size={14} />
+          <PaneIcon icon={taskIcon(task)} size={14} />
         </span>
         <span className="kb-live__name">{task.title}</span>
         <span className="kb-live__end">
-          <Clock since={task.startedAt} />
+          {schedule?.mode === 'timer' && schedule.fireAt !== undefined ? (
+            <Countdown until={schedule.fireAt} />
+          ) : (
+            <Clock since={task.startedAt} />
+          )}
         </span>
         {!compact && (
           <span className="kb-live__what kb-live__what--mono">{task.command ?? task.title}</span>

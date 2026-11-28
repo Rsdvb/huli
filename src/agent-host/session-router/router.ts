@@ -62,6 +62,8 @@ class Child {
   exited = false
   /** Whether the router took its exit into account, so a later event is ignored. */
   gone = false
+  /** Resolves once the child's stderr pipe has finished draining to `process.stderr`. */
+  stderrDone: Promise<void> = Promise.resolve()
   readonly outgoing = new Map<JsonRpcId, Deferred>()
   readonly proc: ChildProcess
 
@@ -95,6 +97,8 @@ function quoteCmd(arg: string): string {
 const FOLDER_PER_SESSION = '--folder-per-session'
 /** The router's flag naming the flag a session's child may start with. */
 const SESSION_FLAG = '--session-flag='
+/** The router's flag naming a value flag (`--flag <value>`) a session's child may start with. */
+const SESSION_ARG = '--session-arg='
 // Where `initialize`'s answer names the session flag the program lists, and where `session/new`,
 // `session/load` and `session/resume` ask for it, as `SESSION_FLAG_META` in the host's connection.
 const SESSION_FLAG_META = 'sh.kettu/session-flag'
@@ -104,9 +108,14 @@ const DIR_FLAG = '--dir-flag='
 // request names its further folders, as `DIR_FLAG_META` and `DIRS_META` in the host's connection.
 const DIR_FLAG_META = 'sh.kettu/dir-flag'
 const DIRS_META = 'sh.kettu/dirs'
+// Where `initialize`'s answer lists supported value flags, and where `session/new`, `session/load`
+// and `session/resume` pass per-session flag values (e.g. `{ '--app-data-dir': 'antigravity' }`).
+const SESSION_ARGS_META = 'sh.kettu/session-args'
 // Where `session/load` and `session/resume` name the session whose process runs the one they open,
 // as `PARENT_SESSION_META` in the host's agy sub-agents.
 const PARENT_SESSION_META = 'sh.kettu/parent-session'
+// Safe single-segment value for per-session value flags (no path traversal or shell metacharacters).
+const SAFE_SESSION_ARG_VALUE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 
 /**
  * Takes the router's asks out of a request: the request to pass on, whether it asked for the
@@ -134,6 +143,27 @@ function takeFlag(params: unknown): { params: unknown; flagged: boolean; dirs: s
     ? named.filter((dir): dir is string => typeof dir === 'string' && path.isAbsolute(dir))
     : []
   return { params: forward, flagged: asked === true, dirs }
+}
+
+/** Takes per-session value flags out of a request so internal metadata never reaches the adapter. */
+function takeSessionArgs(params: unknown): {
+  params: unknown
+  args: Record<string, unknown> | null
+  invalid: boolean
+} {
+  if (typeof params !== 'object' || params === null) return { params, args: null, invalid: false }
+  const meta = (params as { _meta?: unknown })._meta
+  if (typeof meta !== 'object' || meta === null || !(SESSION_ARGS_META in meta)) {
+    return { params, args: null, invalid: false }
+  }
+  const { [SESSION_ARGS_META]: asked, ...rest } = meta as Record<string, unknown>
+  const forward: Record<string, unknown> = { ...(params as Record<string, unknown>) }
+  if (Object.keys(rest).length > 0) forward._meta = rest
+  else delete forward._meta
+  if (typeof asked !== 'object' || asked === null || Array.isArray(asked)) {
+    return { params: forward, args: null, invalid: true }
+  }
+  return { params: forward, args: asked as Record<string, unknown>, invalid: false }
 }
 
 /** Takes the parent session out of a request: the request to pass on, and the parent, or null. */
@@ -195,15 +225,31 @@ function withClose(result: unknown): unknown {
   return response
 }
 
-/** Names the session flag in `initialize`'s answer, for a host that may ask for it. */
-function withFlag(result: unknown, flag: string | null, key = SESSION_FLAG_META): unknown {
-  if (flag === null || typeof result !== 'object' || result === null) return result
+/** Names supported session flags, value flags and Kite's folder flag in `initialize`'s answer. */
+function withFlag(
+  result: unknown,
+  flag: string | null,
+  sessionArgs: readonly string[],
+  dirFlag: string | null = null,
+): unknown {
+  if (
+    (flag === null && sessionArgs.length === 0 && dirFlag === null) ||
+    typeof result !== 'object' ||
+    result === null
+  ) {
+    return result
+  }
   const response = result as Record<string, unknown>
   const meta =
     typeof response._meta === 'object' && response._meta !== null
       ? (response._meta as Record<string, unknown>)
       : {}
-  response._meta = { ...meta, [key]: flag }
+  response._meta = {
+    ...meta,
+    ...(flag !== null ? { [SESSION_FLAG_META]: flag } : {}),
+    ...(sessionArgs.length > 0 ? { [SESSION_ARGS_META]: [...sessionArgs] } : {}),
+    ...(dirFlag !== null ? { [DIR_FLAG_META]: dirFlag } : {}),
+  }
   return response
 }
 
@@ -235,7 +281,10 @@ export class SessionRouter {
   private readonly sessionFlag: string | null
   /** Huli: the flag that adds a folder to a session's child, once the program's help lists it. */
   private readonly dirFlag: string | null
-  private help: Promise<string | null> | null = null
+  /** Value flags (`--flag <value>`) a session's child may start with, once help lists them. */
+  private readonly sessionArgs: readonly string[]
+  private readonly sessionArgSet: ReadonlySet<string>
+  private helpOutput: Promise<string | null> | null = null
   private readonly children = new Set<Child>()
   /** Each live session's child, by the session id it opened. */
   private readonly sessions = new Map<string, Child>()
@@ -256,6 +305,7 @@ export class SessionRouter {
       folderPerSession?: boolean
       sessionFlag?: string | null
       dirFlag?: string | null
+      sessionArgs?: readonly string[]
     } = {},
   ) {
     this.childCommand = command
@@ -263,6 +313,8 @@ export class SessionRouter {
     this.folderPerSession = options.folderPerSession ?? false
     this.sessionFlag = options.sessionFlag ?? null
     this.dirFlag = options.dirFlag ?? null
+    this.sessionArgs = options.sessionArgs ?? []
+    this.sessionArgSet = new Set(this.sessionArgs)
   }
 
   start(): void {
@@ -291,19 +343,24 @@ export class SessionRouter {
       if (method === 'initialize') {
         this.initializeParams = params
         this.control ??= this.spawnChild()
-        const [answer, listed, dirsListed] = await Promise.all([
+        const [answer, help] = await Promise.all([
           this.request(this.control, method, params),
-          this.flagListed(),
-          this.listsOwn(this.dirFlag),
+          this.readHelp(),
         ])
         if (answer.error) return this.sendError(id, answer.error)
+        const listedFlag =
+          help !== null && this.sessionFlag !== null && listsFlag(help, this.sessionFlag)
+            ? this.sessionFlag
+            : null
+        const listedArgs =
+          help !== null ? this.sessionArgs.filter((flag) => listsFlag(help, flag)) : []
+        const listedDirFlag =
+          help !== null && this.dirFlag !== null && listsFlag(help, this.dirFlag)
+            ? this.dirFlag
+            : null
         return this.sendResult(
           id,
-          withFlag(
-            withFlag(withClose(answer.result), listed ? this.sessionFlag : null),
-            dirsListed ? this.dirFlag : null,
-            DIR_FLAG_META,
-          ),
+          withFlag(withClose(answer.result), listedFlag, listedArgs, listedDirFlag),
         )
       }
       if (method === 'session/new') return await this.newSession(id, params)
@@ -368,11 +425,14 @@ export class SessionRouter {
     let child: Child | null = null
     try {
       const flag = takeFlag(params)
-      child = await this.startSessionChild(params, [
+      const sessionArgs = takeSessionArgs(flag.params)
+      const extra = [
         ...(await this.flagFor(flag.flagged)),
         ...(await this.dirsFor(flag.dirs)),
-      ])
-      const answer = await this.request(child, 'session/new', flag.params)
+        ...(await this.argsFor(sessionArgs)),
+      ]
+      child = await this.startSessionChild(params, extra)
+      const answer = await this.request(child, 'session/new', sessionArgs.params)
       if (answer.error) {
         this.endChild(child)
         return this.sendError(id, answer.error)
@@ -407,13 +467,19 @@ export class SessionRouter {
     }
     const parented = takeParent(params)
     if (parented.parent !== null) {
-      return this.loadGuest(id, method, sessionId, parented.parent, parented.params)
+      const clean = takeSessionArgs(takeFlag(parented.params).params).params
+      return this.loadGuest(id, method, sessionId, parented.parent, clean)
     }
     let child: Child | null = null
     try {
       const flag = takeFlag(params)
+      const sessionArgs = takeSessionArgs(flag.params)
       // Refused before the session's process ends, so a refusal leaves the session as it was.
-      const extra = [...(await this.flagFor(flag.flagged)), ...(await this.dirsFor(flag.dirs))]
+      const extra = [
+        ...(await this.flagFor(flag.flagged)),
+        ...(await this.dirsFor(flag.dirs)),
+        ...(await this.argsFor(sessionArgs)),
+      ]
       this.guests.delete(sessionId)
       const existing = this.sessions.get(sessionId)
       if (existing) {
@@ -422,7 +488,7 @@ export class SessionRouter {
         await this.endChildAndWait(existing, REPLACE_KILL_MS)
       }
       child = await this.startSessionChild(params, extra)
-      const answer = await this.request(child, method, flag.params)
+      const answer = await this.request(child, method, sessionArgs.params)
       if (answer.error) {
         this.endChild(child)
         return this.sendError(id, answer.error)
@@ -501,7 +567,8 @@ export class SessionRouter {
   /** The session flag, as the words a child that asked for it adds; it throws when not listed. */
   private async flagFor(flagged: boolean): Promise<string[]> {
     if (!flagged) return []
-    if (this.sessionFlag === null || !(await this.flagListed())) {
+    const help = await this.readHelp()
+    if (this.sessionFlag === null || help === null || !listsFlag(help, this.sessionFlag)) {
       throw new RouterError('The agent has no session flag to start with', {
         reason: 'no_session_flag',
       })
@@ -521,11 +588,6 @@ export class SessionRouter {
       .flatMap((dir) => [flag, dir])
   }
 
-  /** Whether the program's `--help` lists the session flag. */
-  private flagListed(): Promise<boolean> {
-    return this.listsOwn(this.sessionFlag)
-  }
-
   /** Whether the program's `--help` lists `flag`; false for none. */
   private async listsOwn(flag: string | null): Promise<boolean> {
     if (flag === null) return false
@@ -533,12 +595,55 @@ export class SessionRouter {
     return help !== null && listsFlag(help, flag)
   }
 
+  /** Validated per-session value flags as CLI arguments; throws on unknown or unsafe entries. */
+  private async argsFor(request: {
+    args: Record<string, unknown> | null
+    invalid: boolean
+  }): Promise<string[]> {
+    if (request.invalid) {
+      throw new RouterError('Invalid per-session arguments', { reason: 'invalid_session_arg' })
+    }
+    if (!request.args) return []
+    const entries = Object.entries(request.args)
+    if (entries.length === 0) return []
+    const help = await this.readHelp()
+    const out: string[] = []
+    for (const [flag, value] of entries) {
+      if (!this.sessionArgSet.has(flag)) {
+        throw new RouterError(`The agent does not allow session argument ${flag}`, {
+          reason: 'invalid_session_arg',
+        })
+      }
+      if (
+        typeof value !== 'string' ||
+        value === '.' ||
+        value === '..' ||
+        !SAFE_SESSION_ARG_VALUE.test(value)
+      ) {
+        throw new RouterError(`Unsafe value for session argument ${flag}`, {
+          reason: 'invalid_session_arg',
+        })
+      }
+      if (help === null || !listsFlag(help, flag)) {
+        throw new RouterError(`The agent does not support session argument ${flag}`, {
+          reason: 'no_session_arg',
+        })
+      }
+      out.push(flag, value)
+    }
+    return out
+  }
+
   /**
-   * The program's `--help`, read once; null when it could not run. A run that failed, timed out
-   * or was killed is not kept, so a busy computer's slow start does not keep a flag off for good.
+   * The program's `--help`, read once when a session flag, value flag or folder flag is configured;
+   * null when it could not run. A run that failed, timed out or was killed is not kept, so a busy
+   * computer's slow start does not keep a flag off for good.
    */
   private readHelp(): Promise<string | null> {
-    if (this.help) return this.help
+    if (this.sessionFlag === null && this.sessionArgs.length === 0 && this.dirFlag === null) {
+      return Promise.resolve(null)
+    }
+    if (this.helpOutput) return this.helpOutput
     let keep = true
     const reading = new Promise<string | null>((resolve) => {
       const { command, args } = this.spawnWords(this.childCommand, [...this.childArgs, '--help'])
@@ -568,16 +673,16 @@ export class SessionRouter {
       }, HELP_MS)
       proc.on('error', () => {
         clearTimeout(timer)
-        if (this.help === reading) this.help = null
+        if (this.helpOutput === reading) this.helpOutput = null
         resolve(null)
       })
       proc.on('close', (code) => {
         clearTimeout(timer)
-        if ((timedOut || code === null) && this.help === reading) this.help = null
+        if ((timedOut || code === null) && this.helpOutput === reading) this.helpOutput = null
         resolve(help)
       })
     })
-    if (keep) this.help = reading
+    if (keep) this.helpOutput = reading
     return reading
   }
 
@@ -639,12 +744,16 @@ export class SessionRouter {
     if (proc.stderr) {
       const errors = createInterface({ input: proc.stderr })
       errors.on('line', (line) => process.stderr.write(`${line}\n`))
+      child.stderrDone = new Promise<void>((resolve) => {
+        errors.once('close', resolve)
+        proc.stderr?.once('error', resolve)
+      })
     }
     proc.stdin?.on('error', () => {})
-    proc.on('exit', () => this.childGone(child))
+    proc.on('exit', (code, signal) => this.childGone(child, code, signal))
     proc.on('error', (error) => {
       process.stderr.write(`session-router: ${error.message}\n`)
-      this.childGone(child)
+      this.childGone(child, null, null)
     })
     return child
   }
@@ -759,9 +868,14 @@ export class SessionRouter {
 
   /**
    * A child exited. An ending one is the router's own doing; any other means the adapter crashed,
-   * so the router ends the rest and exits with code 1, which the host takes as a crash.
+   * so the router ends the rest and exits with the child's non-zero code (or 1), which the host
+   * takes as a crash.
    */
-  private childGone(child: Child): void {
+  private childGone(
+    child: Child,
+    code: number | null = null,
+    signal: NodeJS.Signals | null = null,
+  ): void {
     if (child.gone) return
     child.gone = true
     child.exited = true
@@ -780,7 +894,15 @@ export class SessionRouter {
       other.ending = true
       this.killChild(other)
     }
-    this.finish(1)
+    const exitCode = code !== null && code > 0 && code <= 255 ? code : 1
+    // Briefly wait for the crashed child's stderr pipe to flush so the host sees its last lines.
+    void Promise.race([
+      child.stderrDone,
+      new Promise<void>((resolve) => setTimeout(resolve, 50).unref?.()),
+    ]).finally(() => {
+      if (signal) process.stderr.write(`session-router: process stopped by ${signal}\n`)
+      this.finish(exitCode)
+    })
   }
 
   /** Its own input ended: every child goes, and the router exits once they have or after the limit. */
@@ -816,22 +938,33 @@ function parse(line: string): RpcMessage | null {
 }
 
 // The host starts this file as
-// `<node> <router> [--folder-per-session] [--session-flag=<flag>] [--dir-flag=<flag>] <command>
-// <args>`; it is never imported.
+// `<node> <router> [--folder-per-session] [--session-flag=<flag>] [--session-arg=<flag>...]
+// [--dir-flag=<flag>] <command> <args>`; it is never imported.
 const words = process.argv.slice(2)
 let folderPerSession = false
 let sessionFlag: string | null = null
 let dirFlag: string | null = null
+const sessionArgs: string[] = []
+let emptySessionArg = false
 for (;;) {
   if (words[0] === FOLDER_PER_SESSION) folderPerSession = true
   else if (words[0]?.startsWith(SESSION_FLAG)) sessionFlag = words[0].slice(SESSION_FLAG.length)
   else if (words[0]?.startsWith(DIR_FLAG)) dirFlag = words[0].slice(DIR_FLAG.length)
-  else break
+  else if (words[0]?.startsWith(SESSION_ARG)) {
+    const arg = words[0].slice(SESSION_ARG.length)
+    if (arg === '') emptySessionArg = true
+    else sessionArgs.push(arg)
+  } else break
   words.shift()
 }
 const command = words[0]
-if (!command || sessionFlag === '' || dirFlag === '') {
+if (!command || sessionFlag === '' || dirFlag === '' || emptySessionArg) {
   process.stderr.write(`session-router: ${command ? 'an empty flag' : 'no agent command line'}\n`)
   process.exit(1)
 }
-new SessionRouter(command, words.slice(1), { folderPerSession, sessionFlag, dirFlag }).start()
+new SessionRouter(command, words.slice(1), {
+  folderPerSession,
+  sessionFlag,
+  dirFlag,
+  sessionArgs,
+}).start()

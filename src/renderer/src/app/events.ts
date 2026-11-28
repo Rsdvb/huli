@@ -1,16 +1,17 @@
 // In-app events between parts of the interface that do not share a store.
 
 export type AppEvent =
-  | { kind: 'focus-composer' }
+  | { kind: 'focus-composer'; sessionId?: string | null; paneId?: string | null }
   | { kind: 'focus-browser-address'; sessionId: string } // Mod+L typed in a session's browser page
   | { kind: 'ask-selection' } // Mod+L with text selected in the terminal
   | { kind: 'new-terminal' }
   | { kind: 'close-side-tab' } // Mod+W with the side panel used last
+  | { kind: 'close-bottom-terminal-tab' } // Mod+W with the bottom terminal dock used last
   | { kind: 'new-browser-tab' } // Mod+T with the browser used last
   | { kind: 'insert-into-composer'; sessionId: string | null; text: string }
   // A mention, such as a terminal's, put after the text of the composer of `draft`.
   | { kind: 'mention-into-composer'; draft: string; mention: string }
-  | { kind: 'command-into-composer'; sessionId: string; name: string } // a sent command, clicked
+  | { kind: 'command-into-composer'; sessionId: string; name: string; skill?: boolean } // a sent command or skill, clicked
   // Sends what the session's composer holds, comments included, in the pane `paneId` or any.
   | { kind: 'send-composer'; sessionId: string; paneId: string | null }
   // Scrolls the thread to the passage a comment in the composer is on.

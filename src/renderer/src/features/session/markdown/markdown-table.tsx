@@ -71,16 +71,25 @@ function useOverflow(ref: React.RefObject<HTMLElement | null>): Overflow {
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    let frame = 0
     const measure = () => {
       const max = el.scrollWidth - el.clientWidth
       const next = { left: el.scrollLeft > 1, right: el.scrollLeft < max - 1 }
       setOverflow((o) => (o.left === next.left && o.right === next.right ? o : next))
     }
+    const onScroll = () => {
+      if (frame !== 0) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        measure()
+      })
+    }
     const unwatch = watchOverflow(el, measure)
-    el.addEventListener('scroll', measure, { passive: true })
+    el.addEventListener('scroll', onScroll, { passive: true })
     return () => {
+      if (frame !== 0) cancelAnimationFrame(frame)
       unwatch()
-      el.removeEventListener('scroll', measure)
+      el.removeEventListener('scroll', onScroll)
     }
   }, [ref])
   return overflow
@@ -104,13 +113,19 @@ export function MarkdownTable({ node, children, className }: ComponentProps<'tab
   useLayoutEffect(() => {
     const el = table.current
     if (!el) return
+    const numericSet = new Set(numeric)
+    const proseSet = new Set(prose)
     for (const row of el.rows) {
-      for (const [i, cell] of [...row.cells].entries()) {
-        cell.toggleAttribute('data-numeric', numeric.includes(i))
-        cell.toggleAttribute('data-prose', prose.includes(i))
+      const cells = row.cells
+      for (let i = 0; i < cells.length; i++) {
+        const cell = cells[i]!
+        const isNum = numericSet.has(i)
+        if (cell.hasAttribute('data-numeric') !== isNum) cell.toggleAttribute('data-numeric', isNum)
+        const isProse = proseSet.has(i)
+        if (cell.hasAttribute('data-prose') !== isProse) cell.toggleAttribute('data-prose', isProse)
       }
     }
-  })
+  }, [numeric, prose, children])
 
   const data = () => (table.current ? extractTableDataFromElement(table.current) : null)
   return (

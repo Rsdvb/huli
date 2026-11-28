@@ -30,7 +30,7 @@ import { Marker, MarkerContent, MarkerIcon } from '@renderer/components/ui/marke
 import { Spinner } from '@renderer/components/ui/spinner'
 import { AIAnswer, type AnswerSource } from '@renderer/components/affect/ai-answer'
 import { dayTime } from '@renderer/features/routines/model'
-import { PANEL, stopReasonText } from './helpers'
+import { PANEL } from './helpers'
 import { RefusalEnd } from './refusal-end'
 import { useEntry as useFeatureEntry } from '@renderer/lib/features'
 import { errorMessage, host } from '@renderer/lib/host'
@@ -38,7 +38,6 @@ import { cn } from '@renderer/lib/utils'
 import { useRoutinesStore } from '@renderer/stores/routines'
 import { sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
 import { useThreadsStore } from '@renderer/stores/threads'
-import { Clamp } from '../clamp'
 import { ConfirmedLink } from '../link-confirm'
 import { Markdown } from '../markdown'
 import { ReplyContext } from '../markdown/live'
@@ -49,9 +48,11 @@ import { TurnDots } from '../turn-dots'
 import { writingId } from '../turn-phase'
 import { useEntry, useEntryAnimation } from '../use-thread'
 import { askMcpPanel } from '../mcp/mcp-panel'
+import { ConfigWarningEntry } from './config-warning'
 import { CutTurnEnd } from './cut-turn'
 import { FailedTurnActions, LimitContinueLine } from './failed-turn'
 import { OutOfCreditEnd } from './out-of-credit'
+import { UpdateResumeBlockedNotice } from './update-resume-notice'
 import { splitLinks } from './text-links'
 import { AttachedNote } from './attached-note'
 import { UserActions } from './message-actions'
@@ -59,7 +60,9 @@ import { ReplyRunChip } from './reply-run-chip'
 import { SentCommandNote } from './sent-command'
 import { FromSessionCard, KettuCard, ReportLine } from './session-origin'
 import { DigestCard } from '@renderer/features/manager/digest-card'
+import { turnEndTagText } from './turn-end'
 import { TurnEndTag } from './turn-end-tag'
+import { ThoughtSummaryView } from './thought-translation'
 import { RefChip, SentAttachments, UserContentView } from './user-content'
 import { useSessionAwaySince } from '../use-away-since'
 
@@ -111,11 +114,11 @@ export const UserEntry = memo(function UserEntry({
         (entry.from ? (
           // A prompt another session's agent sent is not the user's bubble.
           <FromSessionCard from={entry.from}>
-            <UserContentView content={rest} sessionId={sessionId} entryId={entryId} />
+            <UserContentView content={rest} sessionId={sessionId} entryId={entryId} markdown />
           </FromSessionCard>
         ) : entry.kettu ? (
           <KettuCard>
-            <UserContentView content={rest} sessionId={sessionId} entryId={entryId} />
+            <UserContentView content={rest} sessionId={sessionId} entryId={entryId} markdown />
           </KettuCard>
         ) : (
           <div className="ks-user__bubble" data-run-notice={runNotice ? '' : undefined}>
@@ -203,6 +206,7 @@ export const AgentEntry = memo(function AgentEntry({ sessionId, entryId }: Entry
   const [wrote, setWrote] = useState(writing)
   if (writing && !wrote) setWrote(true)
   if (!entry) return null
+  const writingLabel = t('thread.phase.writing', { count: 1 })
   return (
     <div
       className={cn('ks-answer min-w-0', animation)}
@@ -216,7 +220,9 @@ export const AgentEntry = memo(function AgentEntry({ sessionId, entryId }: Entry
         streaming={streaming}
         glideHeight={false}
         mark={wrote && <TurnDots phase="writing" still={!streaming} />}
-        labels={{ writing: t('thread.phase.writing', { count: 1 }) }}
+        // Keep the localized writing text while the label fades out so AIAnswer never flashes its
+        // English "Answer" fallback, and leave settled replies loaded from history unlabeled.
+        labels={{ writing: writingLabel, answer: wrote ? writingLabel : '' }}
       >
         <SessionIdContext value={sessionId}>
           <EntryIdContext value={entryId}>
@@ -261,21 +267,15 @@ export const ThoughtEntry = memo(function ThoughtEntry({ sessionId, entryId }: E
   const animation = useEntryAnimation(sessionId, entryId)
   if (!entry) return null
   return (
-    <div className={cn('text-muted-foreground', animation)} data-selectable="">
-      <SessionIdContext value={sessionId}>
-        <EntryIdContext value={entryId}>
-          {/* Four of its lines at the default text size. */}
-          <Clamp maxHeight={90} buttonClassName="-mx-1.5">
-            <Markdown
-              markdown={entry.markdown}
-              step={textStep(entry)}
-              streaming={entry.streaming}
-              className="markdown-muted markdown-thought"
-            />
-          </Clamp>
-        </EntryIdContext>
-      </SessionIdContext>
-    </div>
+    <ThoughtSummaryView
+      sessionId={sessionId}
+      entryId={entryId}
+      markdown={entry.markdown}
+      step={textStep(entry)}
+      streaming={entry.streaming}
+      maxHeight={90}
+      className={animation}
+    />
   )
 })
 
@@ -308,7 +308,7 @@ export const SessionMessageEntry = memo(function SessionMessageEntry({
           : t('sessionMessage.fromParent')}
       </figcaption>
       <blockquote>
-        <UserContentView content={entry.content} sessionId={sessionId} entryId={entryId} />
+        <UserContentView content={entry.content} sessionId={sessionId} entryId={entryId} markdown />
       </blockquote>
     </figure>
   )
@@ -316,7 +316,11 @@ export const SessionMessageEntry = memo(function SessionMessageEntry({
 
 const NOTICE_ICON = { info: InformationCircleIcon, warning: Alert02Icon, error: AlertCircleIcon }
 
-export const NoticeEntry = memo(function NoticeEntry({ sessionId, entryId }: EntryProps) {
+export const NoticeEntry = memo(function NoticeEntry({
+  sessionId,
+  entryId,
+  projectPath,
+}: EntryProps & { projectPath?: string }) {
   const entry = useEntry(sessionId, entryId, 'notice')
   const animation = useEntryAnimation(sessionId, entryId)
   // Huli: while the session waits for the sign-in, its card under the thread says so and offers it.
@@ -332,6 +336,7 @@ export const NoticeEntry = memo(function NoticeEntry({ sessionId, entryId }: Ent
         sessionId={sessionId}
         entryId={entryId}
         title={entry.title}
+        description={entry.description}
         className={animation}
       />
     )
@@ -341,11 +346,40 @@ export const NoticeEntry = memo(function NoticeEntry({ sessionId, entryId }: Ent
       <OutOfCreditEnd title={entry.title} description={entry.description} className={animation} />
     )
   }
+  if (entry.cause === 'update_resume_blocked') {
+    return (
+      <UpdateResumeBlockedNotice
+        sessionId={sessionId}
+        entryId={entryId}
+        title={entry.title}
+        description={entry.description}
+        className={animation}
+      />
+    )
+  }
+  if (entry.configWarning) {
+    return (
+      <ConfigWarningEntry
+        sessionId={sessionId}
+        projectPath={projectPath}
+        title={entry.title}
+        description={entry.description}
+        detail={entry.configWarning}
+        className={animation}
+      />
+    )
+  }
   const glyph = NOTICE_ICON[entry.severity]
   return (
     <Alert
       variant={
-        entry.severity === 'error' ? 'error' : entry.severity === 'warning' ? 'warning' : 'default'
+        entry.severity === 'error'
+          ? 'error'
+          : entry.severity === 'warning'
+            ? 'warning'
+            : entry.cause === 'update_resumed'
+              ? 'info'
+              : 'default'
       }
       className={cn('ks-notice', animation)}
     >
@@ -512,9 +546,11 @@ export const TurnEndEntry = memo(function TurnEndEntry({ sessionId, entryId }: E
       />
     )
   }
+  const text = turnEndTagText(entry.stopReason, entry.durationMs)
+  if (text === null) return null
   return (
     <Marker className={cn('text-xs tabular', animation)}>
-      <MarkerContent>{stopReasonText(entry.stopReason, entry.durationMs)}</MarkerContent>
+      <MarkerContent>{text}</MarkerContent>
     </Marker>
   )
 })

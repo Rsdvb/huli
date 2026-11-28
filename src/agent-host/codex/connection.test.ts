@@ -3,8 +3,10 @@
 // limits and sign-in.
 
 import os from 'node:os'
+import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentAccount } from '@shared/agent-host'
+import type { MarketServer } from '@shared/marketplace'
 import {
   applyPatches,
   threadEntries,
@@ -22,6 +24,7 @@ import {
   type PermissionRequest,
   type SessionTarget,
 } from '../connection'
+import { libraryServers, parseMarketKeys, type OwnServer } from '../marketplace/servers'
 import { TextRing } from '../ring'
 import { newTurnScope, type MapperEffect } from '../session-updates'
 import {
@@ -311,7 +314,45 @@ describe('context estimates', () => {
 })
 
 describe('sessions', () => {
-  it('starts a thread with the default mode, trusting the folder and passing Kettu’s MCP server', async () => {
+  it('trusts the folder only once its own settings may load, and turns its servers off', async () => {
+    const { server, connection } = await connect()
+    const kettuDb = {
+      type: 'http' as const,
+      name: 'db-kettu',
+      url: 'http://127.0.0.1:9/servers/db',
+      headers: [],
+      replaces: ['db'],
+    }
+    await connection.newSession('/project', { projectServers: ['db', 'shell'] })
+    await connection.newSession('/project', {
+      projectTrusted: true,
+      projectServers: ['db', 'shell'],
+      mcpServers: [kettuDb],
+    })
+    await connection.resumeSession('thread-7', '/project', { projectTrusted: true })
+    const [held, trusted] = server.sent('thread/start')
+    expect(held).toMatchObject({
+      config: {
+        projects: { '/project': { trust_level: 'untrusted' } },
+        mcp_servers: { db: { enabled: false }, shell: { enabled: false } },
+      },
+    })
+    expect(trusted).toMatchObject({
+      config: {
+        projects: { '/project': { trust_level: 'trusted' } },
+        mcp_servers: {
+          'db-kettu': { url: 'http://127.0.0.1:9/servers/db' },
+          db: { enabled: false },
+          shell: { enabled: false },
+        },
+      },
+    })
+    expect(server.sent('thread/resume')[0]).toMatchObject({
+      config: { projects: { '/project': { trust_level: 'trusted' } } },
+    })
+  })
+
+  it('starts a thread with the default mode, the folder untrusted and Kettu’s MCP server', async () => {
     const { server, connection } = await connect()
     const opened = await connection.newSession('/project', {
       mcpServers: [
@@ -332,7 +373,13 @@ describe('sessions', () => {
       approvalsReviewer: 'auto_review',
       sandbox: 'workspace-write',
       config: {
-        projects: { '/project': { trust_level: 'trusted' } },
+        // The folder and its resolved root, which on Windows takes the current drive.
+        projects: Object.fromEntries(
+          [...new Set(['/project', path.resolve('/project')])].map((folder) => [
+            folder,
+            { trust_level: 'untrusted' },
+          ]),
+        ),
         features: { default_mode_request_user_input: true },
         suppress_unstable_features_warning: true,
         thread_unload_delay_secs: 0,
@@ -436,7 +483,7 @@ describe('sessions', () => {
     await connection.forkSession(opened.sessionId, '/project', { mcpServers: [kettu], memory })
     for (const method of ['thread/start', 'thread/resume', 'thread/fork']) {
       expect(server.sent(method)[0]).toMatchObject({
-        config: { projects: { '/project': { trust_level: 'trusted' } }, ...memoryOff },
+        config: { projects: { '/project': { trust_level: 'untrusted' } }, ...memoryOff },
         developerInstructions: 'Plan first.\n\nMemory index.',
       })
     }
@@ -714,6 +761,61 @@ describe('sessions', () => {
     expect(sent).not.toHaveProperty('developerInstructions')
   })
 
+  it("turns off the agent's own copy of a library server and hands Kettu's under a free name", async () => {
+    const { server, connection, init } = await connect()
+    const library = (name: string, spec: MarketServer['spec']): MarketServer => ({
+      id: `manual:${name}`,
+      name,
+      title: name,
+      source: 'manual',
+      version: null,
+      spec,
+      agents: 'all',
+      on: true,
+    })
+    const stdio = (...args: string[]) => ({ type: 'stdio' as const, command: 'node', args })
+    const own: OwnServer[] = [
+      { name: 'probe', endpoint: stdio('probe.js', 'own') },
+      { name: 'remote', endpoint: { type: 'http', url: 'https://own.example.com/mcp' } },
+      { name: 'remote-kettu', endpoint: { type: 'http', url: 'https://else.example.com/mcp' } },
+      { name: 'mydocs', endpoint: stdio('docs.js') },
+    ]
+    const servers = libraryServers(
+      [
+        library('probe', { ...stdio('probe.js', 'kettu'), env: [] }),
+        library('remote', {
+          type: 'http',
+          transport: 'streamable-http',
+          url: 'https://kettu.example.com/mcp',
+          headers: [],
+        }),
+        library('docs', { ...stdio('docs.js'), env: [] }),
+      ],
+      parseMarketKeys({})!,
+      'codex',
+      init.capabilities,
+      {
+        platform: 'darwin',
+        own,
+        router: { origin: 'http://127.0.0.1:4567', token: 'session-token', allow: () => {} },
+      },
+    )
+    await connection.newSession('/project', { mcpServers: servers })
+    const sent = server.sent('thread/start')[0] as {
+      config: { mcp_servers: Record<string, Record<string, unknown>> }
+    }
+    const entries = sent.config.mcp_servers
+    for (const name of ['probe', 'remote', 'mydocs'])
+      expect(entries[name]).toEqual({ enabled: false })
+    expect(entries).not.toHaveProperty('remote-kettu')
+    const live = Object.entries(entries).filter(([, entry]) => entry.enabled !== false)
+    expect(live.map(([name]) => name).sort()).toEqual(['docs', 'probe-kettu', 'remote-kettu-2'])
+    for (const [name, entry] of live) {
+      expect(own.map((item) => item.name)).not.toContain(name)
+      expect(entry.url).toMatch(/^http:\/\/127\.0\.0\.1:4567\//)
+    }
+  })
+
   it('needs a sign-in before a session opens on an install that has none', async () => {
     const { server, connection } = await connect()
     server.on('account/read', () => ({ account: null, requiresOpenaiAuth: true }))
@@ -793,77 +895,6 @@ describe('sessions', () => {
     await prompt
   })
 
-  it('offers every speed tier Codex lists for a model and sends the one chosen', async () => {
-    const { server, connection } = await connect()
-    const fast = { id: 'priority', name: 'Fast', description: '2x speed, increased usage' }
-    const ultra = { id: 'ultrafast', name: 'Ultrafast', description: 'The fastest responses.' }
-    server.on('model/list', () => ({
-      data: [
-        {
-          id: 'gpt-6.2-sol',
-          displayName: 'gpt-6.2-sol',
-          description: 'The newest model',
-          supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }],
-          defaultReasoningEffort: 'medium',
-          additionalSpeedTiers: ['fast', 'ultrafast'],
-          serviceTiers: [fast, ultra],
-          isDefault: true,
-        },
-        {
-          id: 'gpt-6.1-sol',
-          displayName: 'gpt-6.1-sol',
-          description: 'The older model',
-          supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }],
-          defaultReasoningEffort: 'medium',
-          additionalSpeedTiers: ['fast'],
-          serviceTiers: [fast],
-          isDefault: false,
-        },
-      ],
-      nextCursor: null,
-    }))
-    server.on('thread/start', () => threadResponse('thread-1', { model: 'gpt-6.2-sol' }))
-    const opened = await connection.newSession('/project')
-    const speed = opened.config.find((o) => o.id === 'fast-mode')
-    expect(speed).toMatchObject({ type: 'select', value: 'default' })
-    expect(speed?.choices?.map((c) => [c.value, c.name])).toEqual([
-      ['default', 'Standard'],
-      ['priority', 'Fast'],
-      ['ultrafast', 'Ultrafast'],
-    ])
-    await expect(connection.setConfigOption('thread-1', 'fast-mode', 'warp')).rejects.toMatchObject(
-      { code: -32602 },
-    )
-    const chosen = await connection.setConfigOption('thread-1', 'fast-mode', 'ultrafast')
-    expect(chosen.find((o) => o.id === 'fast-mode')?.value).toBe('ultrafast')
-
-    const { target } = threadTarget()
-    connection.register('thread-1', target)
-    const sendTurn = async (n: number) => {
-      const prompt = connection.prompt('thread-1', [{ type: 'text', text: 'hi' }])
-      await until(() => server.sent('turn/start').length === n)
-      server.notify('turn/completed', {
-        threadId: 'thread-1',
-        turn: turn(`turn-${n}`, 'completed'),
-      })
-      await prompt
-      return server.sent('turn/start')[n - 1] as { serviceTier: string }
-    }
-    expect((await sendTurn(1)).serviceTier).toBe('ultrafast')
-
-    // A model without Ultrafast shows the one tier it has as a switch and runs on it.
-    const older = await connection.setConfigOption('thread-1', 'model', 'gpt-6.1-sol')
-    expect(older.find((o) => o.id === 'fast-mode')).toMatchObject({
-      type: 'boolean',
-      value: true,
-      description: '2x speed, increased usage',
-    })
-    expect((await sendTurn(2)).serviceTier).toBe('priority')
-
-    await connection.setConfigOption('thread-1', 'fast-mode', false)
-    expect((await sendTurn(3)).serviceTier).toBe('default')
-  })
-
   it('refuses a value Codex does not have', async () => {
     const { connection } = await connect()
     await connection.newSession('/project')
@@ -904,6 +935,50 @@ describe('sessions', () => {
     })
     expect(server.sent('thread/list')[0]).toEqual({
       cwd: '/project',
+      cursor: null,
+      sourceKinds: ['cli', 'vscode', 'exec', 'appServer', 'unknown'],
+    })
+  })
+
+  it('lists threads across all folders when cwd is null and preserves each original cwd', async () => {
+    const { server, connection, init } = await connect()
+    expect(init.capabilities.listAllSessions).toBe(true)
+    server.on('thread/list', () => ({
+      data: [
+        {
+          ...threadResponse('moved-1').thread,
+          cwd: '/old/moved-repo',
+          name: 'Legacy work',
+          updatedAt: 1_800_000_000,
+        },
+        {
+          ...threadResponse('wt-1').thread,
+          cwd: '/worktrees/feat-auth',
+          preview: 'Worktree session',
+          updatedAt: 1_800_000_060,
+        },
+      ],
+      nextCursor: null,
+    }))
+    expect(await connection.listSessions(null, null)).toEqual({
+      sessions: [
+        {
+          sessionId: 'moved-1',
+          title: 'Legacy work',
+          updatedAt: '2027-01-15T08:00:00.000Z',
+          cwd: '/old/moved-repo',
+        },
+        {
+          sessionId: 'wt-1',
+          title: 'Worktree session',
+          updatedAt: '2027-01-15T08:01:00.000Z',
+          cwd: '/worktrees/feat-auth',
+        },
+      ],
+      nextCursor: null,
+    })
+    expect(server.sent('thread/list')[0]).toEqual({
+      cwd: null,
       cursor: null,
       sourceKinds: ['cli', 'vscode', 'exec', 'appServer', 'unknown'],
     })
@@ -2106,6 +2181,66 @@ describe('a replay', () => {
       excludeTurns: true,
     })
   })
+
+  it('replays legacy rollouts via thread/read when resuming a moved thread into a target project', async () => {
+    const { server, connection } = await connect()
+    server.on('thread/resume', (params) => {
+      const { threadId, cwd } = params as { threadId: string; cwd: string }
+      const base = threadResponse(threadId)
+      return {
+        ...base,
+        cwd,
+        thread: { ...base.thread, cwd, historyMode: 'legacy' },
+      }
+    })
+    server.on('thread/items/list', () => {
+      throw new FakeRpcError(-32601, 'thread/items/list is not supported yet')
+    })
+    server.on('thread/read', () => ({
+      thread: {
+        ...threadResponse('thread-moved').thread,
+        cwd: '/new/target-project',
+        historyMode: 'legacy',
+        turns: [
+          {
+            id: 'turn-1',
+            status: 'completed',
+            error: null,
+            items: [
+              {
+                type: 'userMessage',
+                id: 'u1',
+                content: [{ type: 'text', text: 'Inspect moved repo', text_elements: [] }],
+              },
+              {
+                type: 'agentMessage',
+                id: 'a1',
+                text: 'History preserved.',
+                phase: 'final_answer',
+              },
+            ],
+          },
+        ],
+      },
+    }))
+
+    const t = threadTarget()
+    t.state.replaying = true
+    connection.register('thread-moved', t.target)
+    await connection.loadSession('thread-moved', '/new/target-project')
+
+    expect(server.sent('thread/resume')[0]).toMatchObject({
+      threadId: 'thread-moved',
+      cwd: '/new/target-project',
+    })
+    expect(server.sent('thread/read')[0]).toEqual({
+      threadId: 'thread-moved',
+      includeTurns: true,
+    })
+    const [user, agent] = t.entries()
+    expect(user).toMatchObject({ kind: 'user', id: 'm:u1' })
+    expect(agent).toMatchObject({ kind: 'agent', markdown: 'History preserved.', streaming: false })
+  })
 })
 
 describe('hidden sessions', () => {
@@ -2296,20 +2431,10 @@ describe('warnings about Codex itself', () => {
   it('shows each once in every session, those from before it opened too', async () => {
     const { server, connection } = await connect()
     await connection.newSession('/project')
-    server.notify('configWarning', {
-      summary: 'Unknown key "modle"',
-      details: 'Did you mean "model"?',
-      path: '/home/ada/.codex/config.toml',
-      range: null,
-    })
+    server.notify('deprecationNotice', { summary: 'Old flag', details: 'Use the new one' })
     const t = threadTarget()
     connection.register('thread-1', t.target)
-    server.notify('configWarning', {
-      summary: 'Unknown key "modle"',
-      details: 'Did you mean "model"?',
-      path: '/home/ada/.codex/config.toml',
-      range: null,
-    })
+    server.notify('deprecationNotice', { summary: 'Old flag', details: 'Use the new one' })
     server.notify('windows/worldWritableWarning', {
       samplePaths: ['C:/Shared'],
       extraCount: 2,
@@ -2324,14 +2449,7 @@ describe('warnings about Codex itself', () => {
     })
     await until(() => t.entries().length >= 3)
     expect(t.entries()).toMatchObject([
-      {
-        kind: 'notice',
-        severity: 'warning',
-        title: 'Codex config: Unknown key "modle"',
-        description: ['Did you mean "model"?', '/home/ada/.codex/config.toml'].join(
-          String.fromCharCode(10),
-        ),
-      },
+      { kind: 'notice', severity: 'info', title: 'Old flag', description: 'Use the new one' },
       { kind: 'notice', title: 'Folders anyone on this computer can write to' },
       {
         kind: 'notice',
@@ -3154,5 +3272,533 @@ describe('fast mode', () => {
     const reply = t.entries().at(-1)
     expect(reply).toMatchObject({ kind: 'agent' })
     expect(reply?.kind === 'agent' && reply.markdown).toContain('gpt-5.6-luna')
+  })
+})
+
+describe('speed tiers (Fast and Ultrafast)', () => {
+  const ULTRA_MODEL = {
+    id: 'gpt-6.3-ultra',
+    displayName: 'gpt-6.3-ultra',
+    description: 'Model advertising both Fast and Ultrafast service tiers',
+    supportedReasoningEfforts: [
+      { reasoningEffort: 'low', description: 'Quick' },
+      { reasoningEffort: 'medium', description: 'Balanced' },
+      { reasoningEffort: 'high', description: 'Deep' },
+    ],
+    defaultReasoningEffort: 'medium',
+    serviceTiers: [
+      { id: 'priority', name: 'Fast', description: '2x speed, increased usage' },
+      { id: 'ultrafast', name: 'Ultrafast', description: 'Fastest available responses' },
+    ],
+    isDefault: true,
+  }
+
+  const MULTI_MODELS = [ULTRA_MODEL, ...FAKE_MODELS]
+
+  it('switches Standard -> Fast -> Ultrafast -> Standard via service-tier option and sends exact serviceTier', async () => {
+    const { server, connection } = await connect()
+    server.on('model/list', () => ({ data: MULTI_MODELS, nextCursor: null }))
+    server.on('thread/start', () =>
+      threadResponse('thread-ultra-1', { model: ULTRA_MODEL.id, serviceTier: 'default' }),
+    )
+
+    const opened = await connection.newSession('/project')
+    expect(opened.config.find((o) => o.id === 'fast-mode')).toBeUndefined()
+    const initialSpeed = opened.config.find((o) => o.id === 'service-tier')
+    expect(initialSpeed).toMatchObject({
+      id: 'service-tier',
+      category: 'model_config',
+      type: 'select',
+      value: 'default',
+    })
+    expect(initialSpeed?.choices?.map((c) => c.value)).toEqual(['default', 'priority', 'ultrafast'])
+
+    // Standard -> Fast
+    const fastConfig = await connection.setConfigOption(
+      opened.sessionId,
+      'service-tier',
+      'priority',
+    )
+    expect(fastConfig.find((o) => o.id === 'service-tier')?.value).toBe('priority')
+    const turnFast = connection.prompt(opened.sessionId, [{ type: 'text', text: 'fast turn' }])
+    await until(() => server.sent('turn/start').length === 1)
+    expect(server.sent('turn/start')[0]).toMatchObject({ serviceTier: 'priority' })
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: turn('turn-1', 'completed'),
+    })
+    await turnFast
+
+    // Fast -> Ultrafast
+    const ultraConfig = await connection.setConfigOption(
+      opened.sessionId,
+      'service-tier',
+      'ultrafast',
+    )
+    expect(ultraConfig.find((o) => o.id === 'service-tier')?.value).toBe('ultrafast')
+    const turnUltra = connection.prompt(opened.sessionId, [{ type: 'text', text: 'ultra turn' }])
+    await until(() => server.sent('turn/start').length === 2)
+    expect(server.sent('turn/start')[1]).toMatchObject({ serviceTier: 'ultrafast' })
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: turn('turn-2', 'completed'),
+    })
+    await turnUltra
+
+    // Command turns (e.g. /compact) carry ultrafast in thread/settings/update
+    const compact = connection.prompt(opened.sessionId, [{ type: 'text', text: '/compact' }])
+    await until(() => server.sent('thread/settings/update').length === 1)
+    expect(server.sent('thread/settings/update')[0]).toMatchObject({ serviceTier: 'ultrafast' })
+    server.notify('turn/started', { threadId: opened.sessionId, turn: turn('turn-compact') })
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: turn('turn-compact', 'completed'),
+    })
+    await compact
+
+    // Ultrafast -> Standard
+    const standardConfig = await connection.setConfigOption(
+      opened.sessionId,
+      'service-tier',
+      'default',
+    )
+    expect(standardConfig.find((o) => o.id === 'service-tier')?.value).toBe('default')
+    const turnStd = connection.prompt(opened.sessionId, [{ type: 'text', text: 'std turn' }])
+    await until(() => server.sent('turn/start').length === 3)
+    expect(server.sent('turn/start')[2]).toMatchObject({ serviceTier: 'default' })
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: turn('turn-3', 'completed'),
+    })
+    await turnStd
+  })
+
+  it('supports /ultrafast alongside /fast and switches cleanly between them', async () => {
+    const { server, connection } = await connect()
+    server.on('model/list', () => ({ data: MULTI_MODELS, nextCursor: null }))
+    server.on('thread/start', () =>
+      threadResponse('thread-ultra-cmd', { model: ULTRA_MODEL.id, serviceTier: 'default' }),
+    )
+
+    const opened = await connection.newSession('/project')
+    const t = threadTarget()
+    t.target.apply({
+      patches: [{ op: 'session.update', changes: { config: opened.config } }],
+      effects: [],
+    })
+    connection.register(opened.sessionId, t.target)
+    await until(() => t.thread().session.commands.some((c) => c.name === 'ultrafast'))
+    expect(t.thread().session.commands.find((c) => c.name === 'ultrafast')).toMatchObject({
+      name: 'ultrafast',
+      inputHint: expect.any(String),
+    })
+
+    // Standard -> /ultrafast -> Ultrafast
+    const onUltra = await connection.prompt(opened.sessionId, [
+      { type: 'text', text: '/ultrafast' },
+    ])
+    expect(onUltra.stopReason).toBe('end_turn')
+    expect(server.sent('turn/start')).toEqual([])
+    expect(t.thread().session.config.find((o) => o.id === 'service-tier')?.value).toBe('ultrafast')
+
+    // Next turn uses ultrafast; steering /ultrafast off queues as command
+    const p1 = connection.prompt(opened.sessionId, [{ type: 'text', text: 'go ultra' }])
+    await until(() => server.sent('turn/start').length === 1)
+    expect(server.sent('turn/start')[0]).toMatchObject({ serviceTier: 'ultrafast' })
+    server.notify('turn/started', { threadId: opened.sessionId, turn: turn('turn-1') })
+    await tick()
+    expect(
+      await connection.steer(opened.sessionId, [{ type: 'text', text: '/ultrafast off' }]),
+    ).toBe('promptRequired')
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: turn('turn-1', 'completed'),
+    })
+    await p1
+
+    // Ultrafast -> /fast switches from Ultrafast to Fast
+    await connection.prompt(opened.sessionId, [{ type: 'text', text: '/fast' }])
+    expect(t.thread().session.config.find((o) => o.id === 'service-tier')?.value).toBe('priority')
+
+    // Fast -> /ultrafast switches from Fast to Ultrafast
+    await connection.prompt(opened.sessionId, [{ type: 'text', text: '/ultrafast' }])
+    expect(t.thread().session.config.find((o) => o.id === 'service-tier')?.value).toBe('ultrafast')
+
+    // /ultrafast status & invalid argument keep state
+    await connection.prompt(opened.sessionId, [{ type: 'text', text: '/ultrafast status' }])
+    expect(t.thread().session.config.find((o) => o.id === 'service-tier')?.value).toBe('ultrafast')
+    await connection.prompt(opened.sessionId, [{ type: 'text', text: '/ultrafast bogus' }])
+    expect(t.thread().session.config.find((o) => o.id === 'service-tier')?.value).toBe('ultrafast')
+
+    // /ultrafast toggles back to Standard
+    await connection.prompt(opened.sessionId, [{ type: 'text', text: '/ultrafast' }])
+    expect(t.thread().session.config.find((o) => o.id === 'service-tier')?.value).toBe('default')
+
+    // /ultrafast on & /ultrafast off explicitly
+    await connection.prompt(opened.sessionId, [{ type: 'text', text: '/ultrafast on' }])
+    expect(t.thread().session.config.find((o) => o.id === 'service-tier')?.value).toBe('ultrafast')
+    await connection.prompt(opened.sessionId, [{ type: 'text', text: '/ultrafast off' }])
+    expect(t.thread().session.config.find((o) => o.id === 'service-tier')?.value).toBe('default')
+  })
+
+  it('replies cleanly for /ultrafast on a model that only supports Fast or no speed tiers', async () => {
+    const { server, connection } = await connect()
+    const opened = await connection.newSession('/project')
+    const t = threadTarget()
+    t.target.apply({
+      patches: [{ op: 'session.update', changes: { config: opened.config } }],
+      effects: [],
+    })
+    connection.register(opened.sessionId, t.target)
+
+    const result = await connection.prompt(opened.sessionId, [{ type: 'text', text: '/ultrafast' }])
+    expect(result.stopReason).toBe('end_turn')
+    expect(server.sent('turn/start')).toEqual([])
+    expect(t.thread().session.config.find((o) => o.id === 'fast-mode')?.value).toBe(false)
+    const reply = t.entries().at(-1)
+    expect(reply).toMatchObject({ kind: 'agent' })
+    expect(reply?.kind === 'agent' && reply.markdown).toContain('gpt-6.1-sol')
+
+    // Also verify manual /ultrafast on a model with no speed tiers at all.
+    await connection.setConfigOption(opened.sessionId, 'model', 'gpt-5.6-luna')
+    const noSpeedResult = await connection.prompt(opened.sessionId, [
+      { type: 'text', text: '/ultrafast on' },
+    ])
+    expect(noSpeedResult.stopReason).toBe('end_turn')
+    expect(server.sent('turn/start')).toEqual([])
+    const lunaReply = t.entries().at(-1)
+    expect(lunaReply).toMatchObject({ kind: 'agent' })
+    expect(lunaReply?.kind === 'agent' && lunaReply.markdown).toContain('gpt-5.6-luna')
+  })
+
+  it('aligns /fast and /ultrafast command visibility with active model serviceTiers on open, resume, and model switch', async () => {
+    const { server, connection } = await connect()
+    server.skills = [
+      {
+        name: 'build',
+        description: 'Run build',
+        path: '/project/.codex/skills/build/SKILL.md',
+        enabled: true,
+      },
+    ]
+    server.on('model/list', () => ({ data: MULTI_MODELS, nextCursor: null }))
+
+    // 1. Model with no speed tiers -> neither /fast nor /ultrafast in emitted commands.
+    server.on('thread/start', () =>
+      threadResponse('thread-cmd-none', { model: 'gpt-5.6-luna', reasoningEffort: 'low' }),
+    )
+    const openedNone = await connection.newSession('/project')
+    const noneTarget = threadTarget()
+    connection.register(openedNone.sessionId, noneTarget.target)
+    await until(() => noneTarget.thread().session.commands.some((c) => c.name === 'compact'))
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).not.toContain('fast')
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).not.toContain('ultrafast')
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).toContain('$build')
+
+    // 2. Switch to Fast-only model -> /fast appears, /ultrafast stays absent, skills preserved.
+    await connection.setConfigOption(openedNone.sessionId, 'model', 'gpt-6.1-sol')
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).toContain('fast')
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).not.toContain('ultrafast')
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).toContain('$build')
+
+    // 3. Switch to Fast + Ultrafast model -> both /fast and /ultrafast appear.
+    await connection.setConfigOption(openedNone.sessionId, 'model', ULTRA_MODEL.id)
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).toContain('fast')
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).toContain('ultrafast')
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).toContain('$build')
+
+    // 4. Switch back to no-speed model -> both /fast and /ultrafast are removed.
+    await connection.setConfigOption(openedNone.sessionId, 'model', 'gpt-5.6-luna')
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).not.toContain('fast')
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).not.toContain('ultrafast')
+    expect(noneTarget.thread().session.commands.map((c) => c.name)).toContain('$build')
+
+    // 5. Resume a session on a Fast-only model -> /fast present, /ultrafast absent.
+    server.on('thread/resume', (params) =>
+      threadResponse(params.threadId as string, { model: 'gpt-6.1-sol', serviceTier: 'default' }),
+    )
+    await connection.resumeSession('thread-cmd-resume', '/project')
+    const resumeTarget = threadTarget()
+    connection.register('thread-cmd-resume', resumeTarget.target)
+    await until(() => resumeTarget.thread().session.commands.some((c) => c.name === 'compact'))
+    expect(resumeTarget.thread().session.commands.map((c) => c.name)).toContain('fast')
+    expect(resumeTarget.thread().session.commands.map((c) => c.name)).not.toContain('ultrafast')
+  })
+
+  it('refreshes active session commands when model/list updates advertised serviceTiers', async () => {
+    const { server, connection } = await connect()
+    const dynamicModel = {
+      ...ULTRA_MODEL,
+      serviceTiers: [{ id: 'priority', name: 'Fast', description: '2x speed' }],
+    }
+    server.on('model/list', () => ({ data: [dynamicModel], nextCursor: null }))
+    server.on('thread/start', () =>
+      threadResponse('thread-cmd-refresh', { model: dynamicModel.id, serviceTier: 'default' }),
+    )
+
+    const opened = await connection.newSession('/project')
+    const t = threadTarget()
+    connection.register(opened.sessionId, t.target)
+    await until(() => t.thread().session.commands.some((c) => c.name === 'fast'))
+    expect(t.thread().session.commands.map((c) => c.name)).not.toContain('ultrafast')
+
+    // Catalog later advertises ultrafast for the same model; refreshing options updates commands.
+    server.on('model/list', () => ({ data: [ULTRA_MODEL], nextCursor: null }))
+    server.on('thread/start', () =>
+      threadResponse('thread-hidden-options', { model: ULTRA_MODEL.id, serviceTier: 'default' }),
+    )
+    await connection.newSession('/project', { hidden: 'options' })
+    expect(t.thread().session.commands.map((c) => c.name)).toContain('fast')
+    expect(t.thread().session.commands.map((c) => c.name)).toContain('ultrafast')
+  })
+
+  it('emits commands for the newly selected model even when model changes while skills/list is in flight', async () => {
+    const { server, connection } = await connect()
+    server.on('model/list', () => ({ data: MULTI_MODELS, nextCursor: null }))
+    server.on('thread/start', () =>
+      threadResponse('thread-cmd-race', { model: 'gpt-6.1-sol', serviceTier: 'default' }),
+    )
+    let releaseSkills: (() => void) | null = null
+    let skillsCalls = 0
+    server.on('skills/list', async () => {
+      skillsCalls++
+      if (skillsCalls === 2) {
+        await new Promise<void>((resolve) => {
+          releaseSkills = resolve
+        })
+      }
+      return {
+        data: [
+          {
+            cwd: '/project',
+            skills: [
+              {
+                name: 'deploy',
+                description: 'Deploy app',
+                path: '/project/.codex/skills/deploy/SKILL.md',
+                enabled: true,
+              },
+            ],
+            errors: [],
+          },
+        ],
+      }
+    })
+
+    const opened = await connection.newSession('/project')
+    const t = threadTarget()
+    connection.register(opened.sessionId, t.target)
+    await until(() => releaseSkills !== null)
+
+    // Switch to Ultrafast model before the register's skills/list call resolves.
+    await connection.setConfigOption(opened.sessionId, 'model', ULTRA_MODEL.id)
+    releaseSkills!()
+    await until(() => t.thread().session.commands.some((c) => c.name === 'ultrafast'))
+    expect(t.thread().session.commands.map((c) => c.name)).toContain('fast')
+    expect(t.thread().session.commands.map((c) => c.name)).toContain('ultrafast')
+    expect(t.thread().session.commands.map((c) => c.name)).toContain('$deploy')
+  })
+
+  it('reads initial and resumed ultrafast serviceTier including legacy additionalSpeedTiers', async () => {
+    const { server, connection } = await connect()
+    const legacyUltra = {
+      id: 'gpt-legacy-ultra',
+      displayName: 'gpt-legacy-ultra',
+      description: 'Legacy speed tiers',
+      supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: 'Balanced' }],
+      defaultReasoningEffort: 'medium',
+      additionalSpeedTiers: ['fast', 'ultrafast'],
+      isDefault: false,
+    }
+    server.on('model/list', () => ({ data: [ULTRA_MODEL, legacyUltra], nextCursor: null }))
+    server.on('thread/start', () =>
+      threadResponse('thread-init-ultra', { model: ULTRA_MODEL.id, serviceTier: 'ultrafast' }),
+    )
+    const opened = await connection.newSession('/project')
+    expect(opened.config.find((o) => o.id === 'service-tier')?.value).toBe('ultrafast')
+    const p1 = connection.prompt(opened.sessionId, [{ type: 'text', text: 'first' }])
+    await until(() => server.sent('turn/start').length === 1)
+    expect(server.sent('turn/start')[0]).toMatchObject({ serviceTier: 'ultrafast' })
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: turn('turn-1', 'completed'),
+    })
+    await p1
+
+    server.on('thread/resume', (params) =>
+      threadResponse(params.threadId as string, {
+        model: legacyUltra.id,
+        serviceTier: 'ultra_fast',
+      }),
+    )
+    const resumed = await connection.resumeSession('thread-resume-ultra', '/project')
+    expect(resumed.config.find((o) => o.id === 'service-tier')?.value).toBe('ultrafast')
+    const p2 = connection.prompt('thread-resume-ultra', [{ type: 'text', text: 'resumed' }])
+    await until(() => server.sent('turn/start').length === 2)
+    expect(server.sent('turn/start')[1]).toMatchObject({ serviceTier: 'ultrafast' })
+    server.notify('turn/completed', {
+      threadId: 'thread-resume-ultra',
+      turn: turn('turn-2', 'completed'),
+    })
+    await p2
+  })
+
+  it('omits unsupported ultrafast tier when switching models and restores it when switching back', async () => {
+    const { server, connection } = await connect()
+    server.on('model/list', () => ({ data: MULTI_MODELS, nextCursor: null }))
+    server.on('thread/start', () =>
+      threadResponse('thread-switch-ultra', { model: ULTRA_MODEL.id, serviceTier: 'default' }),
+    )
+
+    const opened = await connection.newSession('/project')
+    await connection.setConfigOption(opened.sessionId, 'service-tier', 'ultrafast')
+
+    // Switch to Fast-only model: ultrafast is unsupported, so fast-mode shows false and turn omits serviceTier.
+    const onFastOnly = await connection.setConfigOption(opened.sessionId, 'model', 'gpt-6.1-sol')
+    expect(onFastOnly.find((o) => o.id === 'service-tier')).toBeUndefined()
+    expect(onFastOnly.find((o) => o.id === 'fast-mode')?.value).toBe(false)
+    const p1 = connection.prompt(opened.sessionId, [{ type: 'text', text: 'on sol' }])
+    await until(() => server.sent('turn/start').length === 1)
+    expect(server.sent('turn/start')[0]).not.toHaveProperty('serviceTier')
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: turn('turn-1', 'completed'),
+    })
+    await p1
+
+    // Switch to model with no speed tiers at all.
+    const onNone = await connection.setConfigOption(opened.sessionId, 'model', 'gpt-5.6-luna')
+    expect(onNone.find((o) => o.id === 'service-tier')).toBeUndefined()
+    expect(onNone.find((o) => o.id === 'fast-mode')).toBeUndefined()
+    const p2 = connection.prompt(opened.sessionId, [{ type: 'text', text: 'on luna' }])
+    await until(() => server.sent('turn/start').length === 2)
+    expect(server.sent('turn/start')[1]).not.toHaveProperty('serviceTier')
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: turn('turn-2', 'completed'),
+    })
+    await p2
+
+    // Switch back to Ultrafast-capable model: ultrafast is restored.
+    const back = await connection.setConfigOption(opened.sessionId, 'model', ULTRA_MODEL.id)
+    expect(back.find((o) => o.id === 'service-tier')?.value).toBe('ultrafast')
+    const p3 = connection.prompt(opened.sessionId, [{ type: 'text', text: 'back on ultra' }])
+    await until(() => server.sent('turn/start').length === 3)
+    expect(server.sent('turn/start')[2]).toMatchObject({ serviceTier: 'ultrafast' })
+    server.notify('turn/completed', {
+      threadId: opened.sessionId,
+      turn: turn('turn-3', 'completed'),
+    })
+    await p3
+  })
+
+  it('stays backward-compatible with legacy fast-mode preference on multi-tier models', async () => {
+    const { server, connection } = await connect()
+    server.on('model/list', () => ({ data: MULTI_MODELS, nextCursor: null }))
+    server.on('thread/start', () =>
+      threadResponse('thread-compat', { model: ULTRA_MODEL.id, serviceTier: 'default' }),
+    )
+
+    const opened = await connection.newSession('/project')
+    const afterOn = await connection.setConfigOption(opened.sessionId, 'fast-mode', true)
+    expect(afterOn.find((o) => o.id === 'service-tier')?.value).toBe('priority')
+
+    const afterOff = await connection.setConfigOption(opened.sessionId, 'fast-mode', 'off')
+    expect(afterOff.find((o) => o.id === 'service-tier')?.value).toBe('default')
+  })
+
+  it('enriches per-thread warnings with matching process-level configWarning metadata and codexHome layer', async () => {
+    const { server, connection } = await connect()
+    const summary = '`[features].multi_agent` is deprecated. It still controls the V1 fallback.'
+    server.notify('configWarning', {
+      summary,
+      details: 'Migrate to [agents] settings.',
+      path: '/home/.codex/config.toml',
+      range: { start: { line: 5, column: 1 }, end: { line: 5, column: 18 } },
+    })
+    await until(() => true)
+
+    const opened = await connection.newSession('/project')
+    const target = threadTarget()
+    connection.register(opened.sessionId, target.target)
+    // Codex repeats the same warning on the thread as a `warning` notification; it should dedupe
+    // and retain the structured path/range metadata from `configWarning`.
+    server.notify('warning', { threadId: opened.sessionId, message: summary })
+    await until(() => target.entries().some((entry) => entry.kind === 'notice'))
+
+    const notices = target.entries().filter((entry) => entry.kind === 'notice')
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toMatchObject({
+      kind: 'notice',
+      severity: 'warning',
+      title: 'Codex configuration warning',
+      description: `${summary}\nMigrate to [agents] settings.`,
+      configWarning: {
+        agent: 'codex',
+        impact: 'deprecated',
+        sources: [{ layer: 'user', path: '/home/.codex/config.toml', line: 5, column: 1 }],
+        details: 'Migrate to [agents] settings.',
+        docsUrl: 'https://developers.openai.com/codex/config-reference',
+      },
+    })
+  })
+
+  it('surfaces startup parse configWarning notifications with path and range on new user sessions', async () => {
+    const { server, connection } = await connect()
+    server.notify('configWarning', {
+      summary: 'Invalid configuration; using defaults.',
+      details: '/home/.codex/config.toml:1:22: unclosed array, expected `]`',
+      path: '/home/.codex/config.toml',
+      range: { start: { line: 1, column: 22 }, end: { line: 1, column: 22 } },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    const opened = await connection.newSession('/project')
+    const target = threadTarget()
+    connection.register(opened.sessionId, target.target)
+
+    const notices = target.entries().filter((entry) => entry.kind === 'notice')
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toMatchObject({
+      kind: 'notice',
+      severity: 'warning',
+      title: 'Codex configuration warning',
+      configWarning: {
+        agent: 'codex',
+        impact: 'invalid',
+        sources: [{ layer: 'user', path: '/home/.codex/config.toml', line: 1, column: 22 }],
+      },
+    })
+  })
+
+  it('routes thread-scoped configWarning notifications directly without duplicating ignored settings', async () => {
+    const { server, connection } = await connect()
+    const opened = await connection.newSession('/project')
+    const target = threadTarget()
+    connection.register(opened.sessionId, target.target)
+
+    const summary =
+      'Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n' +
+      '  user (/home/.codex/config.toml): `disable_response_storage` is ignored.'
+    server.notify('configWarning', {
+      threadId: opened.sessionId,
+      summary,
+      details: null,
+    })
+    await until(() => target.entries().some((entry) => entry.kind === 'notice'))
+
+    const notices = target.entries().filter((entry) => entry.kind === 'notice')
+    expect(notices).toHaveLength(1)
+    expect(notices[0]).toMatchObject({
+      kind: 'notice',
+      severity: 'warning',
+      title: 'Codex configuration warning',
+      description: summary,
+      configWarning: {
+        agent: 'codex',
+        impact: 'ignored',
+        sources: [{ layer: 'user', path: '/home/.codex/config.toml' }],
+      },
+    })
   })
 })

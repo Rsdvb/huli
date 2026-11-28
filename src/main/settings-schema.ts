@@ -1,12 +1,16 @@
+import type { McpConfigSource } from '@shared/mcp-discovery'
 // Pure validation and merging of settings.json and of the renderer's patches.
 
 import { isStartMode, START_MODE_CHARS, takesClaudeSettings, takesStartMode } from '@shared/agents'
 import {
   AGENT_NAME_CHARS,
+  APP_ICONS,
   BACKUP_KEEP_MAX,
   BACKUP_KEEP_MIN,
   applyListEdit,
+  CODE_SIZES,
   CONFIG_VARIABLES,
+  CONVERSATION_WIDTHS,
   DEFAULT_SETTINGS,
   AGENT_COLORS,
   isBackupKeep,
@@ -19,6 +23,7 @@ import {
   OUTPUT_STYLE_CHARS,
   isClaudeTestEntrypointLabel,
   nextAgentColor,
+  normalizeAppIcon,
   isFontFamilyName,
   isLinkSite,
   isSidebarPage,
@@ -41,7 +46,7 @@ import {
   type SettingsFile,
   type SettingsPatch,
   type TerminalSettings,
-  USER_FONT_ROLES,
+  USER_FONT_KEYS,
   ZOOM_LEVELS,
 } from '@shared/settings'
 import { ELEVATED_MODES, isComputerApp, isStopShortcut } from '@shared/computer-use'
@@ -63,11 +68,16 @@ import { managerSettingsProblem, readManagerSettings, type ManagerSettings } fro
 import {
   catalogSkillId,
   MARKET_NAME,
+  MCP_RUN_LIMITS,
+  MCP_RUN_MODES,
   type MarketServer,
   type MarketSkill,
+  type McpRun,
+  type McpRunMode,
   type McpSpec,
   type McpValue,
 } from '@shared/marketplace'
+import { MAX_MCP_PROJECTS, MAX_TOOLS_OFF, type McpProjects } from '@shared/mcp-insight'
 import { PLUGIN_NAME, pluginItem } from '@shared/plugins'
 import { addressKey, isPort, MAX_OWN_ADDRESSES, parseDirectAddress } from '@shared/remote/address'
 import type { DirectAddress } from '@shared/remote/protocol'
@@ -171,6 +181,11 @@ const isHostName: Check = (value, path) =>
 
 const isThemeId: Check = (value, path) =>
   typeof value === 'string' && THEME_ID.test(value) ? null : `"${path}" must be a theme id`
+
+const isAppIconChoice: Check = (value, path) =>
+  normalizeAppIcon(value) !== null
+    ? null
+    : `"${path}" must be one of ${APP_ICONS.map((v) => JSON.stringify(v)).join(', ')}`
 
 const isStopShortcutValue: Check = (value, path) =>
   isStopShortcut(value)
@@ -292,7 +307,7 @@ const isUserFonts: Check = (value, path) => {
     return `"${path}" must be an object`
   }
   for (const [role, family] of Object.entries(value)) {
-    if (!(USER_FONT_ROLES as readonly string[]).includes(role)) {
+    if (!(USER_FONT_KEYS as readonly string[]).includes(role)) {
       return `"${path}" names an unknown text "${role}"`
     }
     const problem = checkFontFamily(family, `${path}.${role}`)
@@ -359,6 +374,7 @@ const SECTION_FIELDS = {
   },
   thread: {
     outlineSummaries: isBoolean,
+    promptCacheDropNotice: isBoolean,
     confirmLinks: isBoolean,
     openLinksIn: oneOf('browser', 'session', 'ask'),
     alwaysOpenIn: isLinkSites,
@@ -368,10 +384,14 @@ const SECTION_FIELDS = {
   appearance: {
     theme: oneOf('system', 'light', 'dark'),
     colorTheme: isThemeId,
+    appIcon: isAppIconChoice,
     textSize: oneOf('small', 'default', 'large'),
+    codeSize: oneOf(...CODE_SIZES),
+    conversationWidth: oneOf(...CONVERSATION_WIDTHS),
     reduceMotion: oneOf('system', 'always'),
     zoom: oneOf(...ZOOM_LEVELS),
     sidebarHover: isBoolean,
+    closeSidePanelWithLastTab: isBoolean,
     sidebarOrder: isSidebarOrder,
     sidebarHidden: isSidebarPages,
     fonts: isUserFonts,
@@ -542,6 +562,8 @@ export const MAX_MARKET_SERVERS = 200
 const MAX_MARKET_ID = 200
 const MAX_MARKET_TITLE = 200
 const MAX_MARKET_VERSION = 100
+// The protocol caps a tool's name at 128 characters.
+const MAX_TOOL_NAME = 128
 const MAX_SPEC_TEXT = 4096
 const MAX_SPEC_ARGS = 200
 const MAX_SPEC_VALUES = 64
@@ -778,10 +800,44 @@ function parseMcpSpec(raw: unknown, path: string, strict: boolean): McpSpec | st
   return `"${path}.type" must be one of "http", "stdio"`
 }
 
+function parseMcpOrigin(value: unknown, path: string, strict: boolean): McpConfigSource | string {
+  if (!isRecord(value) || !isText(value.path, 4096)) return `"${path}" must name a source file`
+  const extra = extraKey(value, ['path', 'agentId', 'app', 'project', 'entryName'], path, strict)
+  if (extra) return extra
+  if (value.agentId !== undefined && !isAgentId(value.agentId))
+    return `"${path}.agentId" is invalid`
+  if (value.app !== undefined && !isText(value.app, 100)) return `"${path}.app" is invalid`
+  if (value.project !== undefined && !isText(value.project, 4096))
+    return `"${path}.project" is invalid`
+  if (value.entryName !== undefined && !isText(value.entryName, 256))
+    return `"${path}.entryName" is invalid`
+  return {
+    path: value.path as string,
+    ...(value.agentId === undefined ? {} : { agentId: value.agentId as AgentId }),
+    ...(value.app === undefined ? {} : { app: value.app as string }),
+    ...(value.project === undefined ? {} : { project: value.project as string }),
+    ...(value.entryName === undefined ? {} : { entryName: value.entryName as string }),
+  }
+}
+
 /** A server of the Marketplace as a patch or the file gives it, or why it is not one. */
 function parseMarketServer(raw: unknown, path: string, strict: boolean): MarketServer | string {
   if (!isRecord(raw)) return `"${path}" must be an object`
-  const allowed = ['id', 'name', 'title', 'source', 'version', 'spec', 'agents', 'on']
+  const allowed = [
+    'id',
+    'name',
+    'title',
+    'source',
+    'version',
+    'spec',
+    'agents',
+    'on',
+    'importedFrom',
+    'importedWith',
+    'run',
+    'toolsOff',
+    'projects',
+  ]
   const extra = extraKey(raw, allowed, path, strict)
   if (extra) return extra
   const { id, name, title, source, version, agents, on } = raw
@@ -820,16 +876,107 @@ function parseMarketServer(raw: unknown, path: string, strict: boolean): MarketS
   if (typeof served === 'string') return served
   const onProblem = isBoolean(on, `${path}.on`)
   if (onProblem) return onProblem
+  const run = raw.run === undefined ? undefined : parseMcpRun(raw.run, `${path}.run`, strict)
+  if (typeof run === 'string') return run
+  let importedFrom: McpConfigSource[] | undefined
+  if (raw.importedFrom !== undefined) {
+    if (!Array.isArray(raw.importedFrom) || raw.importedFrom.length > 1000) {
+      return `"${path}.importedFrom" must be a list of configuration files`
+    }
+    importedFrom = []
+    for (const [index, item] of raw.importedFrom.entries()) {
+      const origin = parseMcpOrigin(item, `${path}.importedFrom[${index}]`, strict)
+      if (typeof origin === 'string') return origin
+      importedFrom.push(origin)
+    }
+  }
+  const importedWith =
+    raw.importedWith === undefined
+      ? undefined
+      : parseMcpOrigin(raw.importedWith, `${path}.importedWith`, strict)
+  if (typeof importedWith === 'string') return importedWith
+  const toolsOff =
+    raw.toolsOff === undefined ? undefined : parseToolsOff(raw.toolsOff, `${path}.toolsOff`)
+  if (typeof toolsOff === 'string') return toolsOff
+  const projects =
+    raw.projects === undefined
+      ? undefined
+      : parseMcpProjects(raw.projects, `${path}.projects`, strict)
+  if (typeof projects === 'string') return projects
   return {
     id,
     name,
     title,
     source: source as MarketServer['source'],
+    ...(importedFrom === undefined ? {} : { importedFrom }),
+    ...(importedWith === undefined ? {} : { importedWith }),
     version: version as string | null,
     spec,
     agents: served.agents,
     on: on as boolean,
+    ...(run && Object.keys(run).length > 0 ? { run } : {}),
+    ...(toolsOff && toolsOff.length > 0 ? { toolsOff } : {}),
+    ...(projects ? { projects } : {}),
   }
+}
+
+/** The names of a server's tools turned off, each once. */
+function parseToolsOff(raw: unknown, path: string): string[] | string {
+  if (!Array.isArray(raw) || raw.length > MAX_TOOLS_OFF) {
+    return `"${path}" must be a list of at most ${MAX_TOOLS_OFF} tool names`
+  }
+  for (const name of raw) {
+    if (!isText(name, MAX_TOOL_NAME)) {
+      return `"${path}" must hold tool names of 1 to ${MAX_TOOL_NAME} characters`
+    }
+  }
+  return [...new Set(raw as string[])]
+}
+
+/** Which projects a server goes to, by their absolute paths. */
+function parseMcpProjects(raw: unknown, path: string, strict: boolean): McpProjects | string {
+  if (!isRecord(raw)) return `"${path}" must be an object`
+  const extra = extraKey(raw, ['mode', 'paths'], path, strict)
+  if (extra) return extra
+  const problem = oneOf('only', 'except')(raw.mode, `${path}.mode`)
+  if (problem) return problem
+  const { paths } = raw
+  if (!Array.isArray(paths) || paths.length > MAX_MCP_PROJECTS) {
+    return `"${path}.paths" must be a list of at most ${MAX_MCP_PROJECTS} folders`
+  }
+  for (const item of paths) {
+    if (
+      typeof item !== 'string' ||
+      item.length > MAX_PATH_LENGTH ||
+      !isAbsolutePath(item, process.platform)
+    ) {
+      return `"${path}.paths" must hold absolute folder paths`
+    }
+  }
+  return { mode: raw.mode as McpProjects['mode'], paths: [...new Set(paths as string[])] }
+}
+
+/** How a server runs, or why it is not that; a file drops what it does not know. */
+function parseMcpRun(raw: unknown, path: string, strict: boolean): McpRun | string {
+  if (!isRecord(raw)) return `"${path}" must be an object`
+  const extra = extraKey(raw, ['mode', 'idleMinutes', 'startSeconds'], path, strict)
+  if (extra) return extra
+  const run: McpRun = {}
+  if (raw.mode !== undefined) {
+    const problem = oneOf(...MCP_RUN_MODES)(raw.mode, `${path}.mode`)
+    if (problem) return problem
+    run.mode = raw.mode as McpRunMode
+  }
+  for (const key of ['idleMinutes', 'startSeconds'] as const) {
+    const value = raw[key]
+    if (value === undefined) continue
+    const { min, max } = MCP_RUN_LIMITS[key]
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+      return `"${path}.${key}" must be a whole number from ${min} to ${max}`
+    }
+    run[key] = value
+  }
+  return run
 }
 
 /** The agents a server or skill goes to: all, or a list, whose unknown ids a file loses. */
@@ -1480,6 +1627,8 @@ export function mergeSettings(
     const changes = patch[section]
     if (changes) Object.assign(next[section], changes)
   }
+  const normalizedAppIcon = normalizeAppIcon(next.appearance.appIcon)
+  if (normalizedAppIcon) next.appearance.appIcon = normalizedAppIcon
   if (patch.proxy) next.proxy = normalizeProxy(patch.proxy)
   if (patch.mcp) next.mcp = { kettu: { off: [...patch.mcp.kettu.off] } }
   if (patch.marketplace?.mcp) {
@@ -1829,6 +1978,8 @@ export function parseSettingsFile(raw: unknown): LoadedSettings {
   ) {
     settings.notifications.planLimits = notifications.limits
   }
+  const normalizedAppIcon = normalizeAppIcon(settings.appearance.appIcon)
+  if (normalizedAppIcon) settings.appearance.appIcon = normalizedAppIcon
   if (raw.agents !== undefined) {
     if (!isRecord(raw.agents)) problems.push('"agents" must be an object')
     else {

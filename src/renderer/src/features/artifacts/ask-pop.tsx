@@ -7,7 +7,7 @@ import { errorMessage } from '@renderer/lib/host'
 import { formatShortcut } from '@renderer/lib/platform'
 import type { AskChip, AskMessage } from './ask-subject'
 import { ToolPop } from './comment-pop'
-import { sendKey } from './pop-place'
+import { sendKey, type LiveAnchor } from './pop-place'
 import { sendToSession, useTargetName, type SendTargets } from './send-targets'
 import { ToMenu } from './send-to'
 
@@ -19,8 +19,14 @@ type Box = { left: number; top: number; right: number; bottom: number }
  */
 export function AskPop({
   at,
+  liveAnchor = null,
+  onReturnToAnchor = null,
+  offscreenNote,
+  backLabel,
+  selectionCount,
   chips,
   onRemoveChip,
+  onAttachToComposer = null,
   targets,
   target,
   onTarget,
@@ -31,8 +37,16 @@ export function AskPop({
 }: {
   /** What it is beside; null for the middle of the content area. */
   at: Box | null
+  liveAnchor?: LiveAnchor | null
+  onReturnToAnchor?: (() => void) | null
+  offscreenNote?: string
+  backLabel?: string
+  /** When set, shows a compact selection summary header with a Clear action for marquee groups. */
+  selectionCount?: number
   chips: AskChip[]
   onRemoveChip: ((key: string) => void) | null
+  /** Attaches the current selection (plus any draft text) into the target session composer. */
+  onAttachToComposer?: ((draftText: string) => void) | null
   targets: SendTargets
   target: string
   onTarget: (target: string) => void
@@ -46,9 +60,11 @@ export function AskPop({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
   const name = useTargetName()
   const MAX = 4
-  const shown = chips.length > MAX ? chips.slice(0, MAX - 1) : chips
+  const shown = !expanded && chips.length > MAX ? chips.slice(0, MAX - 1) : chips
+  const hiddenCount = chips.length - shown.length
 
   const send = () => {
     if (!text.trim() || busy) return
@@ -71,7 +87,17 @@ export function AskPop({
   }
 
   return (
-    <ToolPop at={at} width={340} label={t('ask.label')} onClose={onClose} className="k-vt-ask">
+    <ToolPop
+      at={at}
+      liveAnchor={liveAnchor}
+      onReturnToAnchor={onReturnToAnchor}
+      offscreenNote={offscreenNote}
+      backLabel={backLabel}
+      width={onAttachToComposer ? 380 : 340}
+      label={t('ask.label')}
+      onClose={onClose}
+      className="k-vt-ask"
+    >
       {() =>
         sent ? (
           <span role="status" className="k-vt-ask__done">
@@ -85,7 +111,22 @@ export function AskPop({
           </span>
         ) : (
           <>
-            <span className="k-vt-chips">
+            {selectionCount !== undefined && (
+              <span className="k-vt-ask__head">
+                <span className="k-vt-ask__count">
+                  {t('ask.selectedCount', { count: selectionCount })}
+                </span>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="k-vt-ask__clear"
+                  aria-label={t('ask.clear')}
+                >
+                  {t('ask.clear')}
+                </button>
+              </span>
+            )}
+            <span className="k-vt-chips" data-expanded={expanded || undefined}>
               {shown.map((chip) => (
                 <span key={chip.key} className="k-vt-chip" title={chip.label}>
                   <span className="k-vt-chip__name">{chip.label}</span>
@@ -101,17 +142,31 @@ export function AskPop({
                   )}
                 </span>
               ))}
-              {shown.length < chips.length && (
-                <span
-                  className="k-vt-chip k-vt-chip--more"
-                  title={chips
-                    .slice(shown.length)
-                    .map((chip) => chip.label)
-                    .join(', ')}
-                >
-                  +{chips.length - shown.length}
-                </span>
-              )}
+              {hiddenCount > 0 &&
+                (onRemoveChip ? (
+                  <button
+                    type="button"
+                    className="k-vt-chip k-vt-chip--more k-vt-chip--more-btn"
+                    aria-label={t('ask.showAll', { count: chips.length })}
+                    title={chips
+                      .slice(shown.length)
+                      .map((chip) => chip.label)
+                      .join(', ')}
+                    onClick={() => setExpanded(true)}
+                  >
+                    +{hiddenCount}
+                  </button>
+                ) : (
+                  <span
+                    className="k-vt-chip k-vt-chip--more"
+                    title={chips
+                      .slice(shown.length)
+                      .map((chip) => chip.label)
+                      .join(', ')}
+                  >
+                    +{hiddenCount}
+                  </span>
+                ))}
             </span>
             <textarea
               autoFocus
@@ -135,6 +190,17 @@ export function AskPop({
             )}
             <span className="k-vt-ask__foot">
               <ToMenu targets={targets} target={target} onPick={onTarget} compact />
+              {onAttachToComposer && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  title={t('ask.toComposerTitle', { session: name(targets, target) })}
+                  onClick={() => onAttachToComposer(text)}
+                >
+                  {t('ask.toComposer')}
+                </Button>
+              )}
               <Button size="sm" disabled={!text.trim()} loading={busy} onClick={send}>
                 {error ? t('viewer.retry') : t('comments.send')}
                 <kbd className="k-vt-kbd">{formatShortcut('Mod+Enter')}</kbd>

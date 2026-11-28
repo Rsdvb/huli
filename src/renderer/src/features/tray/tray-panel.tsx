@@ -39,6 +39,7 @@ import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
 import { useSettingsStore } from '@renderer/stores/settings'
 import {
+  agentsWithNewestLimits,
   answer,
   review,
   trayApi,
@@ -597,9 +598,10 @@ function MenuRow({
 function Limits() {
   const { t } = useTranslation(['tray', 'composer'])
   const agents = useTrayPanelStore((s) => s.agents)
+  const hostAgents = useTrayPanelStore((s) => s.hostAgents)
   const view = useLimitView()
   const now = useNow()
-  const rows = limitRows(agents, now)
+  const rows = limitRows(agentsWithNewestLimits(agents, hostAgents), now)
   if (rows.length === 0) return <div className="h-1.5" />
   return (
     <>

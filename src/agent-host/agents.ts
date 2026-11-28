@@ -149,8 +149,10 @@ import {
   decideUpdate,
   fetchBrewLatest,
   fetchLatest,
+  fetchProgramLatest,
   type LatestFound,
   type LatestOptions,
+  type ProgramLatestOptions,
 } from './agent-updates'
 import {
   installArchive,
@@ -170,9 +172,15 @@ import {
 } from './api-key'
 import { DshAccounts, type DshReadReason } from './dsh/account'
 import { clearApiKey as clearDshKey, writeApiKey as writeDshKey } from './dsh/credentials'
-import { readClaudeSettings, writeClaudeSetting, type ListedModel } from './claude/user-settings'
+import {
+  readClaudeDefaultMode,
+  readClaudeSettings,
+  writeClaudeSetting,
+  type ListedModel,
+} from './claude/user-settings'
 import { readOutputStyles } from './claude/output-styles'
 import { readCodexSettings, writeCodexSetting } from './codex/settings'
+import { defaultMode as harnessDefaultMode, isRanked } from './started-mode'
 import { readCodebuddySite, shellOverrides, writeCodebuddySite } from './codebuddy/user-settings'
 import {
   readAutoCompact,
@@ -194,6 +202,7 @@ import {
   type ArchiveEntry,
   type GlobalInstall,
   type InstallPlan,
+  type ProgramVersionCheck,
 } from './binary-install'
 import {
   carriesAgents,
@@ -266,6 +275,7 @@ import {
 } from './harness-versions'
 import { HostedRun, type HostedRunHooks } from './hosted-run'
 import { t } from './i18n'
+import type { Fetch } from './proxy-fetch'
 import {
   installOffer,
   installsOnStart,
@@ -280,9 +290,15 @@ import {
   type CliVersion,
 } from './installed-cli'
 import { routeFor } from './node-proxy/download'
-import { httpTransport, ownProxyVariables, type Transport } from './node-runtime/transport'
+import {
+  HttpStatusError,
+  httpTransport,
+  ownProxyVariables,
+  TooLargeError,
+  type Transport,
+} from './node-runtime/transport'
 import { OpenCodeClient } from './opencode/client'
-import type { OpenCodeConnection } from './opencode/connection'
+import type { OpenCodeFolders } from './opencode/folders'
 import type { OpenCodeSessions } from './model-requests/opencode'
 import type { ProviderUsage } from './opencode/provider-usage'
 import { claudeJsonPath, readClaudeProfile } from './plan-tier'
@@ -341,7 +357,11 @@ export interface AgentLauncher {
   launch(def: AgentDefinition, spec: LaunchSpec, env: Env, output: LaunchOutput): LaunchedAgent
 }
 
-/** Spawns real processes, in the home directory; each session's folder travels as `cwd`. */
+/**
+ * Spawns real processes, in the home directory; each session's folder travels as `cwd`. Codebuddy
+ * Code and Cursor read a folder's own settings, hooks and MCP servers from their process's folder,
+ * so it must never be a session's.
+ */
 export function processLauncher(platform: Platform, timings?: StopTimings): AgentLauncher {
   return {
     launch: (_def, spec, env, output) =>
@@ -457,6 +477,8 @@ export interface AgentSessionHooks {
   liveSessions(agentId: AgentId): number
   agentExited(agentId: AgentId, info: ExitInfo): void
   signedIn(agentId: AgentId): void
+  /** The agent's sign-in or account changed: release idle live sessions and defer busy ones. */
+  accountChanged(agentId: AgentId): Promise<void> | void
   /** Whether New session knows the agent's config options already. */
   optionsKnown(agentId: AgentId): boolean
   /** The config options of a hidden session in `folder`, at the agent's own values. */
@@ -500,6 +522,8 @@ export interface AgentManagerDeps extends DriverOverrides {
   installArchive?(options: ArchiveInstallOptions): Promise<InstalledArchive>
   /** Asks npm for an adapter's newest version and the CLI it carries. */
   fetchLatest?(options: LatestOptions): Promise<LatestFound>
+  /** Reads a vendor's official HTTP release version endpoint for standalone/script installs. */
+  fetchProgramLatest?(options: ProgramLatestOptions): Promise<string>
   /** Reads the ACP Registry's listing, whose versions the harnesses Kettu installs follow. */
   fetchRegistry?(options: RegistryFetchOptions): Promise<RegistryAgents>
   /** Reads the body of Kettu's harness compatibility manifest from its download service. */
@@ -705,6 +729,12 @@ class Slot {
   /** The removal of the hidden session that read the options, once its `session/new` answered. */
   optionsRemoval: Promise<void> | null = null
   progress = new TextRing(8 * 1024)
+  /** Stderr written during the agent's current or most recent run, reset on each launch. */
+  runStderr = new TextRing(16 * 1024)
+  /** Snapshot of the last unexpected agent exit, cleared on the next launch. */
+  lastExit: { at: number; info: ExitInfo } | null = null
+  /** Snapshot of the last unexpected hosted child exit (for per-session hosted drivers). */
+  lastChildExit: { at: number; info: ExitInfo } | null = null
   /** Stops the sign-in in progress; the agent is not stopped for being idle while it runs. */
   signInAbort: AbortController | null = null
   /** Huli: the read of its sign-in methods and state that `readSignIn` runs, while it runs. */
@@ -914,6 +944,95 @@ function sameSignIn(before: AgentAccount | null, after: AgentAccount): boolean {
   )
 }
 
+interface AccountSnapshot {
+  signIn: AgentStatus['signIn']
+  kind: AgentAccount['kind'] | null
+  email: string | null
+  label: string | null
+  signInMethod: string | null
+  providersKey: string | null
+}
+
+function providersIdentity(slot: Slot): string | null {
+  if (slot.def.id !== 'opencode' || slot.providersReadAt === 0) return null
+  return JSON.stringify(
+    slot.providers.map((provider) => ({
+      id: provider.id,
+      accounts: provider.accounts.map((account) => ({
+        id: account.id,
+        label: account.label,
+        method: account.method,
+        needsAuth: account.needsAuth,
+        active: account.active ?? false,
+      })),
+    })),
+  )
+}
+
+function accountSnapshot(slot: Slot): AccountSnapshot {
+  return {
+    signIn: slot.signIn,
+    kind: slot.account?.kind ?? null,
+    email: slot.account?.email ?? null,
+    label: slot.account?.label ?? null,
+    signInMethod: slot.signInMethod,
+    providersKey: providersIdentity(slot),
+  }
+}
+
+/**
+ * Whether two snapshots represent a real sign-in or account switch rather than an initial
+ * discovery or metadata enrichment (such as filling in an email, tier, or expiry).
+ */
+function accountIdentityChanged(before: AccountSnapshot, after: AccountSnapshot): boolean {
+  if (before.signIn !== after.signIn) {
+    if (
+      (before.signIn === 'signed-in' && after.signIn === 'required') ||
+      (before.signIn === 'required' && after.signIn === 'signed-in') ||
+      (before.signIn === 'unknown' && after.signIn === 'required')
+    ) {
+      return true
+    }
+  }
+  if (
+    before.signInMethod !== null &&
+    after.signInMethod !== null &&
+    before.signInMethod !== after.signInMethod
+  ) {
+    return true
+  }
+  if (
+    before.providersKey !== null &&
+    after.providersKey !== null &&
+    before.providersKey !== after.providersKey
+  ) {
+    return true
+  }
+  const beforeKind = before.kind === 'none' ? null : before.kind
+  const afterKind = after.kind === 'none' ? null : after.kind
+  if (beforeKind !== null && afterKind === null) return true
+  if (beforeKind !== null && afterKind !== null && beforeKind !== afterKind) return true
+  if (beforeKind !== null && afterKind !== null && beforeKind === afterKind) {
+    if (before.email !== null && after.email !== null && before.email !== after.email) return true
+    if (beforeKind === 'external' && before.label && after.label && before.label !== after.label) {
+      return true
+    }
+    if (
+      beforeKind === 'account' &&
+      before.email === null &&
+      after.email === null &&
+      before.label &&
+      after.label &&
+      before.label !== OAUTH_ACCOUNT_LABEL &&
+      after.label !== OAUTH_ACCOUNT_LABEL &&
+      before.label !== after.label
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
 /**
  * The agent's models go through a gateway, which has no plan: a sign-in it keeps, such as Codex's
  * ChatGPT one under a provider of the user's own, still answers for a plan that holds nothing back.
@@ -1062,6 +1181,22 @@ export class AgentManager {
   private readonly dshAccounts: DshAccounts
   private readonly cliVersions: CliVersions
   private readonly downloads: Transport
+  /**
+   * Huli: a fetch over Kite's own transport, for the vendors' release endpoints, which upstream
+   * reads with a proxied fetch: an answer that is not 2xx keeps its status, a body too large is empty.
+   */
+  private readonly downloadsFetch: Fetch = async (input, init) => {
+    const signal = init?.signal ?? AbortSignal.timeout(30_000)
+    try {
+      return new Response(
+        await this.downloads.text(String(input), { signal, maxBytes: 256 * 1024 }),
+      )
+    } catch (error) {
+      if (error instanceof HttpStatusError) return new Response(null, { status: error.status })
+      if (error instanceof TooLargeError) return new Response('')
+      throw error
+    }
+  }
   /** The update command for each harness's user program, and what it was worked out for. */
   private readonly cliCommands = new Map<Harness, string>()
   private readonly cliCommandKeys = new Map<Harness, string>()
@@ -1073,6 +1208,7 @@ export class AgentManager {
     liveSessions: () => 0,
     agentExited: () => {},
     signedIn: () => {},
+    accountChanged: () => {},
     optionsKnown: () => true,
     optionsSeen: () => {},
     configChanged: () => {},
@@ -1699,7 +1835,9 @@ export class AgentManager {
 
   /** The environment the agent's process starts in. */
   private startEnv(slot: Slot): Env {
-    const base = this.deps.env.agentEnv(slot.id)
+    // Tells the bridge of an entry Kettu wrote into the agent's own file that this is one of
+    // Kettu's sessions, which hands the server itself.
+    const base = { ...this.deps.env.agentEnv(slot.id), KETTU_MCP_SESSION: '1' }
     const launchEnv = this.deps.launchEnv?.(slot.id, base) ?? base
     return slot.added && slot.def.addedEnv ? { ...launchEnv, ...slot.def.addedEnv } : launchEnv
   }
@@ -1727,12 +1865,16 @@ export class AgentManager {
     slot.state = 'starting'
     slot.detail = null
     slot.progress.clear()
+    slot.runStderr.clear()
+    slot.lastExit = null
+    slot.lastChildExit = null
     slot.intentionalStop = false
     slot.launchSpec = spec
     slot.launchConfig = this.configIn(slot, env)
     this.emit(slot)
     diagnostics.event(agentId, 'start', formatCommand(spec.display, this.deps.platform))
-    const { launched, connection } = this.connect(slot, spec, env)
+    const folderConfigOff = await this.folderConfigOff(slot, env)
+    const { launched, connection } = this.connect(slot, spec, env, folderConfigOff)
     void launched.exited.then((info) => this.onExit(slot, launched, connection, info))
 
     const abort = new AbortController()
@@ -1865,10 +2007,20 @@ export class AgentManager {
    * Starts the agent through its protocol's driver: over the stdio of the process the launcher
    * spawns, or as a run in the host whose processes are recorded and stopped as the agent's own.
    */
+  /** What turns the folder's own config off for an `acp-folders` agent, its files written first. */
+  private async folderConfigOff(slot: Slot, env: Env): Promise<Record<string, string> | null> {
+    const off = slot.def.folderConfigOff
+    if (!off) return null
+    if (typeof off !== 'function') return { ...off }
+    const dir = path.join(this.deps.adaptersDir, EXTENSIONS_FOLDER, slot.def.id)
+    return off(dir, env, this.deps.platform)
+  }
+
   private connect(
     slot: Slot,
     spec: LaunchSpec,
     env: Env,
+    folderConfigOff: Record<string, string> | null = null,
   ): { launched: AgentRun; connection: AgentConnection } {
     const driver = this.driver(slot)
     const home = this.ownHome(slot)
@@ -1901,6 +2053,7 @@ export class AgentManager {
         ...context,
         spec,
         env,
+        platform: this.deps.platform,
         spawn: run.spawn,
         currentCli: this.currentCli(slot, spec),
         claudeTestEntrypoint: () => this.deps.settings().claudeTestEntrypoint,
@@ -1911,6 +2064,7 @@ export class AgentManager {
         nodeRuntime: this.deps.nodeRuntime,
         clineHostPath: this.deps.clineHostPath ?? null,
         ...(this.deps.claudeSettingsDir ? { claudeSettingsDir: this.deps.claudeSettingsDir } : {}),
+        ...(folderConfigOff ? { folderConfigOff } : {}),
       })
     } catch (error) {
       slot.launched = null
@@ -1933,7 +2087,13 @@ export class AgentManager {
         }
         this.emitProcesses()
       },
-      exited: (child) => {
+      exited: (child, info) => {
+        if (
+          !slot.intentionalStop &&
+          (info.code !== 0 || info.signal !== null || info.error !== undefined)
+        ) {
+          slot.lastChildExit = { at: Date.now(), info }
+        }
         void this.reapTree(slot, child)
         this.givenUp.delete(child)
         this.emitProcesses()
@@ -1992,6 +2152,7 @@ export class AgentManager {
       return
     }
     // Nothing restarts it: its sessions go back to closed, and the next one used starts it.
+    slot.lastExit = { at: Date.now(), info }
     this.hooks.agentExited(agentId, info)
     if (this.recordFailure(slot)) {
       slot.state = 'failed'
@@ -2800,7 +2961,7 @@ export class AgentManager {
   ): { command: string; installed: InstalledCli } | null {
     const { launch, installs, cli } = h.def
     if (launch.kind !== 'binary' || this.release(h)) return null
-    const checked = !!installs?.npm || this.programSource(h)?.kind === 'brew'
+    const checked = !!installs?.npm || !!installs?.versionCheck || this.programSource(h) !== null
     if (cli ? h.detection?.cli : !checked) return null
     const mine = this.userProgram(h)
     if (!mine) return null
@@ -2822,7 +2983,7 @@ export class AgentManager {
   private cliUpdateVersion(h: Harness): string | null {
     const mine = this.userProgram(h)
     const problem = h.detection?.cli?.problem
-    const latest = this.programSource(h) ? h.cliLatest : null
+    const latest = this.canCheckProgram(h) ? h.cliLatest : null
     // A newest version the manifest says does not work is not offered, nor one the harness would
     // not run, such as one an earlier check read before it kept to the range.
     if (latest && !usable(this.programRule(h), latest)) return null
@@ -2905,7 +3066,7 @@ export class AgentManager {
   private checksUpdates(h: Harness): boolean {
     const { launch, installs } = h.def
     if (launch.kind === 'package' || launch.kind === 'uvx') return true
-    if (installs?.npm || installs?.brew || installs?.brewCask) return true
+    if (installs?.npm || installs?.brew || installs?.brewCask || installs?.versionCheck) return true
     return this.targeted(h) && (h.detection === null || !!this.release(h))
   }
 
@@ -3013,28 +3174,36 @@ export class AgentManager {
    * versions. The others Kettu installs follow their target.
    */
   private checkable(): Harness[] {
-    const npm = this.deps.env.nodeProbe().npmPath
     return [...this.harnesses.values()].filter((h) => {
       const detection = h.detection
       const own = h.def.launch.kind === 'package' && !this.targeted(h)
       if (own && detection?.state === 'available' && detection.adapter?.npm) return true
-      const source = this.programSource(h)
-      return source?.kind === 'brew' || (source?.kind === 'npm' && !!npm)
+      return this.canCheckProgram(h)
     })
+  }
+
+  /** Whether this host has both a version source and the local tool needed to check `h`'s program. */
+  private canCheckProgram(h: Harness): boolean {
+    const source = this.programSource(h)
+    if (!source) return false
+    if (source.kind === 'npm') return !!this.deps.env.nodeProbe().npmPath
+    return true
   }
 
   /**
    * Where the user's own program's newer versions are read, by how it was installed: Homebrew for
-   * a formula or cask; npm for a global install of npm, pnpm, bun or yarn, and for any other
-   * program its vendor also publishes on npm, as an install script's is, at the vendor's dist-tag
-   * when its install names one. Null for one whose install route tells none, such as WinGet's,
-   * which gets new versions after npm does.
+   * a formula or cask; the vendor's official HTTP release endpoint for standalone/script installs
+   * that publish one; npm for a global install of npm, pnpm, bun or yarn, and for any other
+   * program its vendor also publishes on npm, at the vendor's dist-tag when its install names one.
+   * Null for one whose install route tells none, such as WinGet's, which gets new versions after
+   * npm does.
    */
   private programSource(
     h: Harness,
   ):
     | { kind: 'npm'; package: string; tag?: string }
     | { kind: 'brew'; name: string; cask: boolean }
+    | { kind: 'http'; check: ProgramVersionCheck; urls: readonly string[] }
     | null {
     if (!this.userProgram(h)) return null
     const installs = h.def.installs
@@ -3044,13 +3213,22 @@ export class AgentManager {
     }
     // WinGet gets new versions after npm does, so npm's would offer an upgrade it cannot make.
     if (h.cliMethod === 'winget') return null
+    const httpUrls = installs?.versionCheck?.urls(this.deps.platform, process.arch) ?? []
+    const httpSource =
+      installs?.versionCheck && httpUrls.length > 0
+        ? ({ kind: 'http', check: installs.versionCheck, urls: httpUrls } as const)
+        : null
+    if (h.cliMethod === 'script' && httpSource) return httpSource
     const npmPackage = h.cliGlobal ? this.programPackage(h) : (installs?.npm ?? null)
-    if (!npmPackage) return null
-    return {
-      kind: 'npm',
-      package: npmPackage,
-      ...(installs?.npm === npmPackage && installs.npmTag ? { tag: installs.npmTag } : {}),
+    const hasNpm = !!this.deps.env.nodeProbe().npmPath
+    if (npmPackage && (h.cliGlobal || hasNpm || !httpSource)) {
+      return {
+        kind: 'npm',
+        package: npmPackage,
+        ...(installs?.npm === npmPackage && installs.npmTag ? { tag: installs.npmTag } : {}),
+      }
     }
+    return httpSource
   }
 
   private checkDue(h: Harness): number {
@@ -3380,7 +3558,9 @@ export class AgentManager {
           })
         : null
     const ownPackage = launch.kind === 'package' && !this.targeted(h) && !!npm
-    if (!ownPackage && !(source?.kind === 'npm' && npm) && !brew) return null
+    if (!ownPackage && !(source?.kind === 'npm' && npm) && !brew && source?.kind !== 'http') {
+      return null
+    }
     const shared = {
       env,
       platform,
@@ -3410,6 +3590,16 @@ export class AgentManager {
           ...(this.deps.runProgram ? { run: this.deps.runProgram } : {}),
         })
       }
+      if (source?.kind === 'http') {
+        return (this.deps.fetchProgramLatest ?? fetchProgramLatest)({
+          name: h.def.name,
+          urls: source.urls,
+          parse: source.check.parse,
+          timeoutMs: this.timings.updateViewMs,
+          signal,
+          fetch: this.downloadsFetch,
+        })
+      }
       return null
     }
     try {
@@ -3437,7 +3627,9 @@ export class AgentManager {
         latest
           ? `${latest.adapterVersion}${latest.cliVersion ? `, CLI ${latest.cliVersion}` : ''}`
           : '',
-        cli && source ? `${source.kind === 'brew' ? source.name : source.package} ${cli}` : '',
+        cli && source
+          ? `${source.kind === 'brew' ? source.name : source.kind === 'npm' ? source.package : h.def.id} ${cli}`
+          : '',
       ]
       this.deps.diagnostics.event(h.def.id, 'update check', found.filter(Boolean).join('; '))
       this.emit(this.home(h))
@@ -4572,7 +4764,8 @@ export class AgentManager {
   private connectionHooks(slot: Slot): ConnectionHooks {
     const { diagnostics, acpMessages } = this.deps
     const agentId = slot.id
-    const acp = protocolFor(slot.def, this.deps, slot.protocol) === 'acp'
+    const protocol = protocolFor(slot.def, this.deps, slot.protocol)
+    const acp = protocol === 'acp' || protocol === 'acp-folders'
     return {
       traffic: (direction, message) => {
         diagnostics.traffic(agentId, direction, message)
@@ -4604,6 +4797,7 @@ export class AgentManager {
         })
       },
       authState: (state) => {
+        const before = accountSnapshot(slot)
         const wasRequired = slot.signIn === 'required'
         if (state === 'authenticated') slot.signIn = 'signed-in'
         else if (state === 'not_required') slot.signIn = 'signed-in'
@@ -4612,6 +4806,9 @@ export class AgentManager {
           slot.account = null
         }
         this.emit(slot)
+        if (accountIdentityChanged(before, accountSnapshot(slot))) {
+          void this.hooks.accountChanged(slot.id)
+        }
         // Huli: the sessions that waited for the sign-in go on, as after any other sign-in.
         if (wasRequired && slot.signIn === 'signed-in') this.hooks.signedIn(slot.id)
       },
@@ -4626,6 +4823,7 @@ export class AgentManager {
   }
 
   private setAccount(slot: Slot, account: AgentAccount): void {
+    const beforeSnapshot = accountSnapshot(slot)
     const wasRequired = slot.signIn === 'required'
     const before = slot.account
     // Grok's sign-in names no plan: the one its billing gave the same account stays.
@@ -4651,6 +4849,9 @@ export class AgentManager {
     if (named.kind === 'none' || (before && otherAccount(before, named))) forgetReadings(slot)
     slot.signIn = named.kind === 'none' ? 'required' : 'signed-in'
     this.emit(slot)
+    if (accountIdentityChanged(beforeSnapshot, accountSnapshot(slot))) {
+      void this.hooks.accountChanged(slot.id)
+    }
     if (wasRequired && slot.signIn === 'signed-in') this.hooks.signedIn(slot.id)
     if (slot.def.id === 'claude-code' && account.kind === 'account') {
       void this.readTier(slot, slot.account)
@@ -4939,7 +5140,12 @@ export class AgentManager {
   /** Whether the agent tells what fills a session's context: from its connection, or its report. */
   hasContext(agentId: AgentId): boolean {
     const slot = this.slots.get(agentId)
-    return !!slot && (hasContextReport(slot.def.id) || this.driver(slot).reads?.context === true)
+    return (
+      !!slot &&
+      (hasContextReport(slot.def.id) ||
+        this.driver(slot).reads?.context === true ||
+        slot.def.readsContext === true)
+    )
   }
 
   /** The limits from the connection when it reads them, else from the agent's report. */
@@ -5396,6 +5602,7 @@ export class AgentManager {
 
   /** The agent says it is signed out: its account and the plan it read are gone. */
   private signedOut(slot: Slot): void {
+    const before = accountSnapshot(slot)
     slot.signIn = 'required'
     slot.account = null
     slot.limits.clear()
@@ -5403,6 +5610,9 @@ export class AgentManager {
     slot.resets = null
     slot.resetsError = null
     this.emit(slot)
+    if (accountIdentityChanged(before, accountSnapshot(slot))) {
+      void this.hooks.accountChanged(slot.id)
+    }
   }
 
   private applyVendorUsage(slot: Slot, usage: VendorUsage, now: number): void {
@@ -5640,6 +5850,16 @@ export class AgentManager {
     })
   }
 
+  mcpDiscoveryAgents(): { id: AgentId; harness: HarnessId; folder: string | null }[] {
+    return [...this.slots.values()]
+      .filter((slot) => this.has(slot.id))
+      .map((slot) => ({
+        id: slot.id,
+        harness: slot.def.id,
+        folder: this.chosenFolder(slot),
+      }))
+  }
+
   /** The places, one per agent with an `mcpConfig`, where each keeps MCP servers of its own. */
   async mcpPlaces(): Promise<McpStatus['places']> {
     const { platform } = this.deps
@@ -5714,20 +5934,67 @@ export class AgentManager {
    * Brings an agent's account and plan limits up to date for Settings › Agents, starting an agent
    * that reports them. Never installs: an agent that would need an install first is left alone.
    */
-  async refreshAccount(agentId: AgentId, options?: { force?: boolean }): Promise<void> {
+  async refreshAccount(
+    agentId: AgentId,
+    options?: { force?: boolean; afterSignIn?: boolean },
+  ): Promise<void> {
     const slot = this.registeredSlot(agentId)
     if (this.isDisabled(agentId)) return
-    if (slot.def.id === 'opencode') return this.refreshProviders(slot, options?.force === true)
+    const before = accountSnapshot(slot)
+    const afterSignIn = options?.afterSignIn === true
+    let failed: unknown
+    let hasError = false
+    try {
+      await this.runRefreshAccount(slot, options?.force === true, afterSignIn)
+    } catch (error) {
+      failed = error
+      hasError = true
+    }
+    if (afterSignIn || accountIdentityChanged(before, accountSnapshot(slot))) {
+      await this.hooks.accountChanged(slot.id)
+    }
+    if (hasError) throw failed
+  }
+
+  private async runRefreshAccount(slot: Slot, force: boolean, afterSignIn: boolean): Promise<void> {
+    const agentId = slot.id
+    if (slot.def.id === 'opencode') return this.refreshProviders(slot, force)
     if (slot.def.id === 'deepseek') {
       // Its home's files tell a DeepSeek sign-in or key; a route set up in dsh's own pages to
       // another provider only dsh itself tells, in a hidden session.
-      await this.refreshBalance(slot, options?.force === true ? 'forced' : 'due')
-      if (options?.force === true && slot.signIn === 'required') await this.checkSignIn(slot)
+      await this.refreshBalance(slot, force ? 'forced' : 'due')
+      if (force && slot.signIn === 'required') await this.checkSignIn(slot)
       return
     }
-    const force = options?.force === true
+    const wasRequired = slot.signIn === 'required'
+    if (slot.runtime?.init.capabilities.authStatus && slot.runtime.connection.readAuthStatus) {
+      try {
+        await slot.runtime.connection.readAuthStatus()
+      } catch (error) {
+        this.deps.diagnostics.log(
+          'warn',
+          `${slot.name}: auth/status failed: ${(error as Error).message}`,
+        )
+      }
+    }
     if (!slot.def.reportsAccount) {
-      if (force && slot.signIn === 'required') await this.checkSignIn(slot)
+      if (slot.def.id === 'antigravity') {
+        await this.readSignInMethod(slot)
+        if (force && wasRequired && slot.signIn === 'required') {
+          await this.checkSignIn(slot)
+          await this.readSignInMethod(slot)
+        } else if (afterSignIn && antigravityLimitsRead(slot.signInMethod) === 'read') {
+          slot.limitsReadAt = 0
+          this.refreshLimits(agentId, { force: true }).catch((error: unknown) => {
+            this.deps.diagnostics.log(
+              'warn',
+              `${slot.name}: the plan limits read failed: ${agentError(error).message}`,
+            )
+          })
+        }
+        return
+      }
+      if (force && wasRequired && slot.signIn === 'required') await this.checkSignIn(slot)
       else if (slot.def.id === 'pi' && slot.modelProviders === null)
         await this.readModelProviders(slot)
       return
@@ -5801,7 +6068,10 @@ export class AgentManager {
       }
       throw agentError(error)
     }
-    if (slot.signIn === 'signed-in') this.hooks.signedIn(slot.id)
+    if (slot.signIn === 'signed-in') {
+      await this.hooks.accountChanged(slot.id)
+      this.hooks.signedIn(slot.id)
+    }
     return true
   }
 
@@ -5960,15 +6230,26 @@ export class AgentManager {
     if (!slot || harnessOf(agentId) !== 'opencode') return null
     const connection = slot.stopping ? null : slot.runtime?.connection
     // Only the server's connection keeps them; OpenCode's ACP fallback reads none.
-    const server = connection && 'stored' in connection ? (connection as OpenCodeConnection) : null
+    const server = connection && 'stored' in connection ? (connection as OpenCodeFolders) : null
     return server && !server.isClosed ? server.stored : this.openCodeClient(slot)
   }
 
+  private openCodeProgram(slot: Slot): { command: string; env?: Env } {
+    const detection = slot.h.detection
+    if (detection?.state === 'available') {
+      const running = slot.state === 'ready' || slot.state === 'starting' ? slot.launchSpec : null
+      const spec = running ?? detection.spec
+      if (spec) return { command: spec.command, env: spec.env }
+      if (detection.cli?.path) return { command: detection.cli.path }
+    }
+    return { command: this.display(slot).command }
+  }
+
   private openCodeClient(slot: Slot): OpenCodeClient {
-    const display = this.display(slot)
+    const { command, env } = this.openCodeProgram(slot)
     return new OpenCodeClient({
-      program: display.command,
-      env: this.deps.env.agentEnv(slot.id),
+      program: command,
+      env: { ...this.deps.env.agentEnv(slot.id), ...env },
       platform: this.deps.platform,
       ...(this.deps.runProgram ? { runProgram: this.deps.runProgram } : {}),
     })
@@ -5987,6 +6268,7 @@ export class AgentManager {
   }
 
   private async readProviders(slot: Slot): Promise<void> {
+    const before = accountSnapshot(slot)
     try {
       const display = this.display(slot)
       const providers = (await this.openCodeClient(slot).providers()).map((provider) => {
@@ -6034,6 +6316,9 @@ export class AgentManager {
       const wasRequired = slot.signIn === 'required'
       // Free and local models work without a connected account.
       slot.signIn = connected.length > 0 ? 'signed-in' : 'unknown'
+      if (accountIdentityChanged(before, accountSnapshot(slot))) {
+        await this.hooks.accountChanged(slot.id)
+      }
       if (wasRequired && connected.length > 0) this.hooks.signedIn(slot.id)
     } catch {
       slot.providersError = t('agent.providersFailed')
@@ -6190,6 +6475,7 @@ export class AgentManager {
         slot.signIn = 'signed-in'
         slot.accountRefused = false
         this.emit(slot)
+        await this.hooks.accountChanged(slot.id)
         this.hooks.signedIn(slot.id)
         void this.readSignInMethod(slot)
         // The plan and limits shown were read under the method agy refused.
@@ -6312,6 +6598,7 @@ export class AgentManager {
     slot.signIn = 'signed-in'
     slot.accountRefused = false
     this.emit(slot)
+    await this.hooks.accountChanged(agentId)
     this.hooks.signedIn(agentId)
     void this.readSignInMethod(slot)
   }
@@ -6342,6 +6629,7 @@ export class AgentManager {
     // Huli: `codex logout` removes the auth.json that held the key Kettu handed it.
     if (slot.def.id === 'codex') slot.apiKey = false
     this.emit(slot)
+    await this.hooks.accountChanged(agentId)
     void this.readSignInMethod(slot)
     // A key Kettu wrote into Claude Code's settings still signs it in after its own sign-out.
     if (slot.def.id === 'claude-code' && slot.apiKey) this.signInChanged(slot)
@@ -6861,6 +7149,48 @@ export class AgentManager {
 
   // Claude Code's common settings.
 
+  /**
+   * Whether `agentId` can offer Full access on this host right now. Claude Code disables
+   * `bypassPermissions` when running as root; Antigravity depends on the initialized session
+   * router flag.
+   */
+  offersFullAccess(agentId: AgentId): boolean {
+    const harness = harnessOf(agentId)
+    if (!isRanked(harness)) return false
+    if (harness === 'claude-code') return process.getuid?.() !== 0
+    if (harness === 'antigravity') {
+      const live = this.slots.get(agentId)?.runtime?.connection
+      if (live?.offersFullAccess) return live.offersFullAccess()
+    }
+    return true
+  }
+
+  /**
+   * The permission mode a new session of `agentId` opens with in `cwd` when Settings > Agents sets
+   * none, or null for an unranked harness. For Claude Code this prefers the live connection's SDK
+   * resolution (matching `ClaudeConnection.open`) and falls back to reading its settings files.
+   */
+  async defaultMode(agentId: AgentId, cwd: string | null): Promise<string | null> {
+    const harness = harnessOf(agentId)
+    if (!isRanked(harness)) return null
+    if (harness !== 'claude-code') return harnessDefaultMode(harness)
+    const slot = this.slots.get(agentId)
+    if (!slot) return harnessDefaultMode(harness)
+    const live = slot.runtime?.connection
+    if (live?.defaultMode && cwd !== null) {
+      try {
+        return await live.defaultMode(cwd)
+      } catch {
+        // Fall through to reading settings from disk.
+      }
+    }
+    try {
+      return await readClaudeDefaultMode(this.settingsFile(slot), cwd)
+    } catch {
+      return harnessDefaultMode(harness)
+    }
+  }
+
   /** A Claude Code agent's auto-compact windows and prompt cache duration, from its settings file. */
   async claudeSettings(agentId: AgentId, listed: readonly ListedModel[]): Promise<ClaudeSettings> {
     const slot = this.claudeSlot(agentId)
@@ -7077,7 +7407,7 @@ export class AgentManager {
     if (failure) throw new HostError('agent_error', failure)
   }
 
-  /** The account and limits belong to the old credentials; an idle process goes with them. */
+  /** The account and limits belong to the old credentials; idle sessions and process go with them. */
   private async credentialsChanged(slot: Slot): Promise<void> {
     slot.account = null
     forgetReadings(slot)
@@ -7085,6 +7415,7 @@ export class AgentManager {
     slot.signIn = 'unknown'
     const reads = this.readsSignInAgain(slot)
     if (reads) slot.readingSignIn = true
+    await this.hooks.accountChanged(slot.id)
     if (slot.runtime && this.hooks.liveSessions(slot.id) === 0) await this.stopProcess(slot)
     this.emit(slot)
     if (reads) this.signInChanged(slot)
@@ -7498,7 +7829,8 @@ export class AgentManager {
             installed: detection?.cli ?? own?.installed ?? null,
             method: h.cliMethod,
             update: cliVersion && cliCommand ? { version: cliVersion, command: cliCommand } : null,
-            checkable: this.programSource(h) !== null,
+            checkable: this.canCheckProgram(h),
+            newerVersion: cliVersion,
           }
         : null,
       configDir: config
@@ -7512,6 +7844,10 @@ export class AgentManager {
       capabilities: {
         loadSession: capabilities?.loadSession ?? false,
         listSessions: capabilities?.listSessions ?? false,
+        ...(capabilities?.listAllSessions ||
+        (capabilities?.listSessions && slot.def.protocol === 'codex-app-server')
+          ? { listAllSessions: true }
+          : {}),
         resumeSession: capabilities?.resumeSession ?? false,
         closeSession: capabilities?.closeSession ?? false,
         deleteSession: capabilities?.deleteSession ?? false,
@@ -7521,9 +7857,10 @@ export class AgentManager {
         steering: capabilities?.steering ?? false,
         ...(capabilities?.rewind ? { rewind: true } : {}),
         ...(capabilities?.rewindFiles ? { rewindFiles: true } : {}),
+        ...(capabilities?.branches || slot.def.protocol === 'pi-rpc' ? { branches: true } : {}),
         reports: this.hasLimits(slot.id) && !consoleSignIn,
         context: this.hasContext(slot.id),
-        liveContext: this.driver(slot).reads?.context === true,
+        liveContext: this.driver(slot).reads?.context === true || slot.def.readsContext === true,
         ...(this.driver(slot).reads?.contextEstimates || slot.def.contextEstimates
           ? { contextEstimates: true }
           : {}),
@@ -7543,16 +7880,22 @@ export class AgentManager {
   }
 
   /**
-   * When the harness's versions were last checked: npm's check, or for one with a target, the
-   * last read of the Registry's listing or the manifest; null for a harness whose own installer
-   * updates it.
+   * When the harness's versions were last checked: npm/Homebrew/HTTP check, or for one running
+   * Kettu's own install with a target, the last read of the Registry's listing or the manifest;
+   * null for a harness whose own installer updates it without a checkable source.
    */
   private checkedAt(h: Harness): number | null {
     if (!this.checksUpdates(h)) return null
+    const ownsInstall =
+      h.detection === null ||
+      !!this.release(h) ||
+      (h.def.launch.kind === 'package' && !this.replacesInstall(h))
     const reads = [this.listingReadAt, this.manifestReadAt].filter((at) => at !== null)
-    const read = this.targeted(h) && reads.length > 0 ? Math.max(...reads) : null
-    if (read === null || h.checkedAt === null) return read ?? h.checkedAt
-    return Math.max(read, h.checkedAt)
+    const read = ownsInstall && this.targeted(h) && reads.length > 0 ? Math.max(...reads) : null
+    const programChecked =
+      this.userProgram(h) !== null && !this.canCheckProgram(h) && !ownsInstall ? null : h.checkedAt
+    if (read === null || programChecked === null) return read ?? programChecked
+    return Math.max(read, programChecked)
   }
 
   /** How Kettu's own install follows its target, for its page; null for the other harnesses. */
@@ -7643,8 +7986,20 @@ export class AgentManager {
     return locations.find((location) => location.id === 'folder')?.candidates[0] ?? null
   }
 
+  /** Recent exit status and stderr from this agent's current or just-ended run. */
+  exitContext(agentId: AgentId): { info: ExitInfo | null; stderr: string } {
+    const slot = this.slots.get(agentId)
+    if (!slot) return { info: null, stderr: '' }
+    const stderr = slot.runStderr.toString()
+    if (slot.lastExit) return { info: slot.lastExit.info, stderr }
+    const child =
+      slot.lastChildExit && Date.now() - slot.lastChildExit.at < 10_000 ? slot.lastChildExit : null
+    return { info: child?.info ?? null, stderr }
+  }
+
   private onStderr(slot: Slot, text: string): void {
     this.deps.diagnostics.stderr(slot.id, text)
+    slot.runStderr.push(text)
     if (slot.state === 'starting') this.onProgress(slot, text)
   }
 

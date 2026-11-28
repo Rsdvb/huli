@@ -118,6 +118,83 @@ describe('find_settings', () => {
     expect(text(zh)).toContain('颜色模式 (Color mode)')
   })
 
+  it('finds and toggles closeSidePanelWithLastTab in English and Chinese', async () => {
+    const { tools, file } = harness({ fullAccess: true })
+    const en = await tools.call(CALLER, FIND_SETTINGS, { query: 'last tab' })
+    expect(text(en)).toContain('appearance.close-side-panel-with-last-tab')
+    expect(text(en)).toContain('value: Off')
+
+    setLocale('zh-CN')
+    const zh = await tools.call(CALLER, FIND_SETTINGS, { query: '收起侧边栏' })
+    expect(text(zh)).toContain('appearance.close-side-panel-with-last-tab')
+    expect(text(zh)).toContain('关闭最后一个标签页时收起侧边栏')
+
+    const toggled = await change(tools, [
+      { id: 'appearance.close-side-panel-with-last-tab', value: true },
+    ])
+    expect(toggled.isError).toBeUndefined()
+    expect(file().appearance.closeSidePanelWithLastTab).toBe(true)
+  })
+
+  it('finds and updates appearance.code-size in English and Chinese without changing textSize', async () => {
+    const { tools, file } = harness({ fullAccess: true })
+    const en = await tools.call(CALLER, FIND_SETTINGS, { query: 'code font size' })
+    expect(text(en)).toContain('appearance.code-size')
+    expect(text(en)).toContain('value: Default')
+
+    setLocale('zh-CN')
+    const zh = await tools.call(CALLER, FIND_SETTINGS, { query: '代码字号' })
+    expect(text(zh)).toContain('appearance.code-size')
+    expect(text(zh)).toContain('代码字号 (Code size)')
+
+    const updated = await change(tools, [{ id: 'appearance.code-size', value: 'large' }])
+    expect(updated.isError).toBeUndefined()
+    expect(file().appearance.codeSize).toBe('large')
+    expect(file().appearance.textSize).toBe('default')
+  })
+
+  it('finds and updates appearance.conversation-width in English and Chinese', async () => {
+    const { tools, file } = harness({ fullAccess: true })
+    const en = await tools.call(CALLER, FIND_SETTINGS, { query: 'conversation width' })
+    expect(text(en)).toContain('appearance.conversation-width')
+    expect(text(en)).toContain('value: Standard')
+
+    setLocale('zh-CN')
+    const zh = await tools.call(CALLER, FIND_SETTINGS, { query: '会话宽度' })
+    expect(text(zh)).toContain('appearance.conversation-width')
+    expect(text(zh)).toContain('会话宽度 (Conversation width)')
+
+    const updated = await change(tools, [{ id: 'appearance.conversation-width', value: 'wide' }])
+    expect(updated.isError).toBeUndefined()
+    expect(file().appearance.conversationWidth).toBe('wide')
+  })
+
+  it('finds and updates optional Chinese fonts independently of primary fonts in English and Chinese', async () => {
+    const { tools, file } = harness({ fullAccess: true })
+    const en = await tools.call(CALLER, FIND_SETTINGS, { query: 'chinese font' })
+    expect(text(en)).toContain('appearance.font-ui-cjk')
+    expect(text(en)).toContain('appearance.font-prose-cjk')
+    expect(text(en)).toContain('appearance.font-code-cjk')
+
+    setLocale('zh-CN')
+    const zh = await tools.call(CALLER, FIND_SETTINGS, { query: '中文字体' })
+    expect(text(zh)).toContain('appearance.font-ui-cjk')
+    expect(text(zh)).toContain('界面中文字体 (Interface Chinese font)')
+    expect(text(zh)).toContain('appearance.font-prose-cjk')
+    expect(text(zh)).toContain('appearance.font-code-cjk')
+
+    const setBoth = await change(tools, [
+      { id: 'appearance.font-code', value: 'Fira Code' },
+      { id: 'appearance.font-code-cjk', value: 'LXGW WenKai' },
+    ])
+    expect(setBoth.isError).toBeUndefined()
+    expect(file().appearance.fonts).toEqual({ code: 'Fira Code', codeCjk: 'LXGW WenKai' })
+
+    const clearCjk = await change(tools, [{ id: 'appearance.font-code-cjk', value: '' }])
+    expect(clearCjk.isError).toBeUndefined()
+    expect(file().appearance.fonts).toEqual({ code: 'Fira Code' })
+  })
+
   it('fills the placeholders of a row’s words', async () => {
     const { tools } = harness()
     const found = text(await tools.call(CALLER, FIND_SETTINGS, { query: 'zoom' }))

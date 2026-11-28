@@ -1,3 +1,13 @@
+import type { McpCheck, McpDiscovery, McpDiscoveryRow, McpImportChoice } from './mcp-discovery'
+import type {
+  McpTerminalBackup,
+  McpTerminalChoice,
+  McpTerminalDrift,
+  McpTerminalOffPlan,
+  McpTerminalPlan,
+  McpTerminalRow,
+  McpTerminalTarget,
+} from './mcp-terminal'
 // The contract between the renderer and the agent host, over the agent host port.
 
 import type { CodebuddyShellOverride, CodebuddySite, PromptCacheTtl } from './agents'
@@ -53,6 +63,8 @@ import type {
 import type { ArtifactContentFile, BackgroundWork } from './host-control'
 import type { HostLoad, HostLoadWatch } from './host-load'
 import type { IdleReleaseState } from './idle-release'
+import type { ProjectIcon } from './project-icon'
+export type { ProjectIcon, ProjectIconColor, ProjectIconName } from './project-icon'
 import type {
   AgentHistoryPage,
   HistoryCopyOutcome,
@@ -113,6 +125,16 @@ import type {
 import type { InstalledKettuPlugin, PluginPlan, PluginResource, PluginSource } from './plugins'
 import type { CatalogPluginRef, MarketPluginCatalog, PluginLink } from './plugin-catalog'
 import type { MediaAuthorization, MediaOpenResult } from './media'
+import type {
+  McpCallQuery,
+  McpCallRecord,
+  McpInstanceInfo,
+  McpServerInsight,
+  McpServerLog,
+  McpToolChanges,
+  McpToolDiff,
+  SessionMcpServer,
+} from './mcp-insight'
 import type { ModelRequestRaw, ModelRequestsOverview, ModelRequestsPage } from './model-requests'
 import type {
   MemoryDecision,
@@ -124,6 +146,7 @@ import type {
   MemoryScope,
 } from './memory'
 import type {
+  BranchGraphPage,
   BranchList,
   ChangedFile,
   CommitDetails,
@@ -134,8 +157,11 @@ import type {
   IssueLookup,
   LogCommit,
   PullRequest,
+  PullRequestStackLookup,
   PullRequestState,
   ProjectWorktreeSettings,
+  ReferenceLookup,
+  RepositoryReferenceSearchResult,
   RepositoryVisibility,
   SessionWorktree,
   WorktreeInspection,
@@ -174,7 +200,9 @@ import type {
 import type { AgentColor } from './settings'
 import type { CatalogSection } from './settings-catalog'
 import type { TurnPhase, TurnWork } from './turn-phase'
+import type { TurnUndoFileDigest, TurnUndoPreview, TurnUndoResult } from './turn-undo'
 import type {
+  ApprovedWorkflow,
   SessionTaskRef,
   WorkflowAddSource,
   WireWorkflowEntry,
@@ -219,6 +247,7 @@ import type {
   MarketPublishAsk,
   SessionSnapshot,
   SessionStatus,
+  SessionUsage,
   SlashCommand,
   CommandOrigin,
   StopReason,
@@ -239,6 +268,9 @@ export interface SessionStats {
 
 /** Huli: the most sessions one `sessions.stats` names. */
 export const MAX_STATS_SESSIONS = 100
+
+/** Maximum characters of a displayed thinking summary accepted for translation. */
+export const THOUGHT_TRANSLATE_MAX_CHARS = 60_000
 
 export interface AttachmentBytes {
   mimeType: string
@@ -370,6 +402,44 @@ export interface AgentProviderAction {
   key?: string
 }
 
+/** One compressed segment of an agent's native conversation tree inside a single session (Pi). */
+export interface SessionBranchNode {
+  /** Native entry id at the end of this branch segment (target for switching). */
+  id: string
+  /** Parent segment id in the displayed tree, or null for a top-level segment. */
+  parentId: string | null
+  /** Native bookmark label attached to this segment, if any. */
+  label: string | null
+  /** Concise prompt or reply snippet identifying this branch segment. */
+  preview: string
+  /** Entry role that produced `preview`, used as a fallback label when `preview` is empty. */
+  previewRole: 'user' | 'assistant' | 'summary' | 'system'
+  /** Latest activity timestamp in epoch ms, or null if absent. */
+  timestamp: number | null
+  /** Number of user prompts inside this branch segment. */
+  turnCount: number
+  /** Tree depth for indentation (0 for top-level branches). */
+  depth: number
+  /** True when this segment ends at a leaf with no child branches. */
+  isLeaf: boolean
+  /** True when the session's active native leaf sits at or inside this segment. */
+  isCurrent: boolean
+  /** True when this segment lies on the active root-to-leaf path. */
+  onActivePath: boolean
+}
+
+/** Native branches inside a single session, returned by `sessions.branches` and `sessions.switchBranch`. */
+export interface SessionBranchesResult {
+  /** Current active native leaf entry id, or null when empty or at root. */
+  activeLeafId: string | null
+  /** Number of leaf branches in the native session tree. */
+  branchCount: number
+  /** True when the session tree has more than one branch (forked or multi-root). */
+  hasBranches: boolean
+  /** Pre-order list of branch segments ready to render. */
+  nodes: SessionBranchNode[]
+}
+
 /** A user message in the message outline: its first line and the title a model wrote, if any. */
 export interface OutlineEntry {
   pos: number
@@ -466,6 +536,9 @@ export interface AgentCli {
   update: { version: string; command: string } | null
   // Whether its newer versions can be read, by how it was installed; absent on older hosts.
   checkable?: boolean
+  // A newer version found by the last check, even when Kettu cannot run an update command for how
+  // the program was installed; null when current or unchecked, absent on older hosts.
+  newerVersion?: string | null
 }
 
 export interface InstalledCli {
@@ -765,6 +838,7 @@ export interface AgentStatus {
   capabilities: {
     loadSession: boolean
     listSessions: boolean
+    listAllSessions?: boolean // lists sessions across every folder, for moved/worktree imports
     resumeSession: boolean
     closeSession: boolean
     deleteSession: boolean
@@ -774,6 +848,7 @@ export interface AgentStatus {
     steering: boolean // `_session/steering` into a running turn
     rewind?: boolean // cuts a session's conversation before a turn, for an edit from a message
     rewindFiles?: boolean // that cut also takes back the files the agent changed since
+    branches?: boolean // browses and switches native conversation branches inside one session
     reports: boolean // plan limits from its own report (`/usage`, `/status`)
     context: boolean // what fills the context from its own report (`/context`)
     liveContext: boolean // what fills the context from its connection through a running turn
@@ -972,6 +1047,7 @@ export type McpToolGroup =
   | 'secrets'
   | 'theme'
   | 'routines'
+  | 'mcp'
   | 'plugins'
 
 export interface McpToolSummary {
@@ -1080,9 +1156,19 @@ export interface NodeRuntimeInfo {
 export interface Project {
   path: string
   name: string
+  /** True when `name` is a user-defined display name rather than the folder basename. */
+  customName?: true
+  /** Custom sidebar icon (built-in icon with optional color, or emoji). Absent for the default folder. */
+  icon?: ProjectIcon
+  /**
+   * The project's folders, its own and the further ones (Huli's `folders`), whose directories do
+   * not currently exist on disk (absent when none).
+   */
+  missingFolders?: string[]
   missing: boolean // the folder no longer exists
   lastOpenedAt: number
   pinnedAt?: number | null // absent on hosts that do not support project pins
+  archivedAt?: number | null // absent on hosts that do not support project archiving
   // Its place in the host's order: null until the user moves a project there, absent on hosts
   // that cannot reorder projects. `projects.list` already gives them in this order.
   order?: number | null
@@ -1224,6 +1310,8 @@ export interface SessionSummary {
   id: string
   agentId: AgentId
   projectPath: string
+  /** Primary path of the owning project when `projectPath` is one of its additional source folders. */
+  projectOwner?: string
   scratch: boolean // started with No project: projectPath is its own scratch folder
   title: string | null
   status: SessionStatus
@@ -1318,7 +1406,9 @@ export interface SessionSummary {
 
 /**
  * What a session's agent still runs between turns, by its own reports: the background tasks the
- * session board lists and the subagents at work. Agents that list no tasks count subagents alone.
+ * session board lists and the subagents at work. Agents that list no tasks count subagents alone,
+ * or mark `unnamed` when waiting on background work without listed commands or sub-agents (such
+ * as scheduled timers).
  */
 export interface StillRunning {
   /** Background tasks at work other than workflows: commands, monitors and the like. */
@@ -1328,8 +1418,33 @@ export interface StillRunning {
   workflows?: number
   /** Huli: their agents that work or wait for their turn, set with `workflows`. */
   workflowAgents?: number
+  /** Running monitors (e.g. timeout-watched commands). Optional for older hosts. */
+  monitors?: number
+  /** Running scheduled timers or recurring crons. Optional for older hosts. */
+  scheduled?: number
   /** The agent starts a turn of its own to report once that work ends. */
   reportsBack: boolean
+  /** Background work without a listed command or sub-agent (e.g. a timer or internal task). */
+  unnamed?: boolean
+}
+
+/**
+ * Whether a session is idle-waiting on background work while its underlying prompt stays open
+ * (e.g. Antigravity holding `session/prompt` open for sub-agents, background commands, or timers).
+ */
+export function isWaitingBackground(summary: Pick<SessionSummary, 'status' | 'phase'>): boolean {
+  return summary.status === 'running' && summary.phase === 'waiting_background'
+}
+
+/**
+ * Whether a session is actively running a turn (as opposed to idle or only waiting on background
+ * work).
+ */
+export function isActivelyRunning(summary: Pick<SessionSummary, 'status' | 'phase'>): boolean {
+  return (
+    summary.status === 'awaiting_permission' ||
+    (summary.status === 'running' && summary.phase !== 'waiting_background')
+  )
 }
 
 /**
@@ -1374,6 +1489,12 @@ export interface RunningWork extends BackgroundWork {
   waiting: number
 }
 
+/** Live or stored usage of one session, for rolling up a session family. */
+export interface SessionUsageItem {
+  sessionId: string
+  usage: SessionUsage | null
+}
+
 /** An agent that can answer side questions for a session whose own agent cannot. */
 export interface SideChatAgent {
   agentId: AgentId
@@ -1384,6 +1505,41 @@ export interface SideChatAgent {
 export interface LightAgent {
   agentId: AgentId
   name: string
+}
+
+/** Availability status of a delegation target agent on this host, matching `list_agents`. */
+export type DelegateAgentStatus = 'ready' | 'needs_sign_in' | 'installing' | 'failed'
+
+/** Why a session cannot manually delegate tasks to another agent. */
+export type DelegateUnavailableReason =
+  'not_user_session' | 'nested_session' | 'archived' | 'project_archived'
+
+/** A permission mode a delegated child session can start in under #2727 rules. */
+export interface DelegateModeOption {
+  id: string
+  name: string
+  description: string
+}
+
+/** An agent on the session's host that the user can manually delegate a task to. */
+export interface DelegateTargetAgent {
+  id: AgentId
+  name: string
+  harnessId: HarnessId
+  harnessName: string
+  isCurrent: boolean
+  status: DelegateAgentStatus
+  /** Permission modes allowed by #2727 for this parent session; empty for unranked harnesses. */
+  modes: DelegateModeOption[]
+  /** Default mode the delegated child inherits under #2727; null for unranked harnesses. */
+  inheritedMode: { id: string; name: string } | null
+}
+
+/** Available delegation targets and eligibility for a parent session on this host. */
+export interface DelegateAgentsResult {
+  canDelegate: boolean
+  reason?: DelegateUnavailableReason
+  agents: DelegateTargetAgent[]
 }
 
 /**
@@ -1485,6 +1641,10 @@ export interface ImportableSession {
   title: string | null
   updatedAt: string | null
   imported: boolean // already in the session index
+  /** Original working directory the agent recorded for this session, when known. */
+  cwd?: string | null
+  /** Kettu project path this session is already imported under, when already in Kettu. */
+  importedProjectPath?: string | null
   /** Its prompt cache as its last request left it, for a Claude Code session used in the last hour. */
   cache?: PromptCache | null
   /** A Claude Code process outside Kettu, such as a terminal, still has it open. */
@@ -1527,6 +1687,8 @@ export interface DiagnosticsBundle {
   agents: AgentDiagnostics[]
   sessions: SessionSummary[]
   log: { at: number; level: 'info' | 'warn' | 'error'; message: string }[]
+  /** The last stderr of each MCP server instance, keys masked; absent from older hosts. */
+  mcpLogs?: (McpServerLog & { server: string })[]
 }
 
 /** Every request the agent host accepts, keyed by method name. */
@@ -1655,13 +1817,16 @@ export interface HostContract {
     params: { agentId: AgentId; change: CodexSettingChange }
     result: void
   }
-  'agents.refreshAccount': { params: { agentId: AgentId; force?: boolean }; result: void }
+  'agents.refreshAccount': {
+    params: { agentId: AgentId; force?: boolean; afterSignIn?: boolean }
+    result: void
+  }
   // Huli: what the agent signs in with and whether it is signed in, starting it when this run has
   // not; with `watch`, a signed-out agent is checked again every few seconds for a few minutes,
   // for a sign-in that waits on a browser or a terminal. Older hosts lack it.
   'agents.readSignIn': { params: { agentId: AgentId; watch?: boolean }; result: void }
   'agents.listSessions': {
-    params: { agentId: AgentId; projectPath: string; cursor?: string }
+    params: { agentId: AgentId; projectPath: string; cursor?: string; allFolders?: boolean }
     result: { sessions: ImportableSession[]; nextCursor: string | null }
   }
   'agents.options': { params: void; result: AgentOptions[] }
@@ -1708,6 +1873,31 @@ export interface HostContract {
   'market.search': { params: { query: string }; result: MarketSearch }
   // Which inputs of the servers Kettu keeps have a value; never the values.
   'market.keys': { params: void; result: MarketKeyState }
+  'market.discoverMcp': { params: void; result: McpDiscovery }
+  'market.dismissMcpNotice': { params: { id: string }; result: void }
+  'market.importMcp': { params: { choices: McpImportChoice[] }; result: string[] }
+  'market.mcpTerminal': { params: void; result: McpTerminalRow[] }
+  'market.mcpTerminalPlan': { params: { target: McpTerminalTarget }; result: McpTerminalPlan }
+  'market.mcpTerminalOn': { params: { target: McpTerminalTarget; planId: string }; result: void }
+  'market.mcpTerminalOffPlan': { params: { target: McpTerminalTarget }; result: McpTerminalOffPlan }
+  'market.mcpTerminalOff': { params: { target: McpTerminalTarget }; result: void }
+  'market.mcpTerminalDrift': { params: { target: McpTerminalTarget }; result: McpTerminalDrift[] }
+  'market.mcpTerminalResolve': {
+    params: { target: McpTerminalTarget; choices: Record<string, McpTerminalChoice> }
+    result: void
+  }
+  'market.mcpTerminalBackups': {
+    params: { target: McpTerminalTarget }
+    result: McpTerminalBackup[]
+  }
+  'market.mcpTerminalRestore': {
+    params: { target: McpTerminalTarget; backupId: string }
+    result: void
+  }
+  'market.previewMcp': { params: { text: string }; result: McpDiscoveryRow[] }
+  'market.addMcp': { params: { choices: McpImportChoice[] }; result: string[] }
+  'market.checkMcp': { params: { serverId: string }; result: void }
+  'market.mcpChecks': { params: void; result: Record<string, McpCheck> }
   // Signs in to a server Kettu keeps that uses OAuth; it must already be in the settings. The window
   // opens the browser page or shows the code; `market.connectionChanged` tells how it ended.
   'market.connect': { params: { serverId: string }; result: ConnectStart }
@@ -1721,6 +1911,30 @@ export interface HostContract {
   // Clears a server's tokens and keeps the server; every agent loses it at once.
   'market.disconnect': { params: { serverId: string }; result: void }
   'market.connections': { params: void; result: MarketConnections }
+  // Each library server's state, tools and per-agent context as the router knows them, or one's.
+  'market.mcpInsight': { params: { serverId?: string }; result: McpServerInsight[] }
+  // The processes and connections a server has now.
+  'market.mcpInstances': { params: { serverId: string }; result: McpInstanceInfo[] }
+  // A server's recent calls, newest first: metadata only.
+  'market.mcpCalls': { params: McpCallQuery; result: { calls: McpCallRecord[] } }
+  // The last stderr of each instance of a command server, its keys masked.
+  'market.mcpLogs': { params: { serverId: string }; result: McpServerLog[] }
+  // Stops one instance; the next request of its sessions starts it again.
+  'market.mcpStop': { params: { serverId: string; instance: string }; result: void }
+  // Any window's or device's answer to a card an agent's MCP tool shows: do it or not; the first
+  // counts.
+  'market.answerMcpChange': {
+    params: { sessionId: string; entryId: string; decision: 'confirm' | 'decline' }
+    result: void
+  }
+  // Undo on the line of an agent's switches: puts back what they did, unless one changed since.
+  'market.undoMcpChange': { params: { sessionId: string; entryId: string }; result: void }
+  // How each library server's tools differ from those the user accepted, for those that do.
+  'market.mcpToolChanges': { params: void; result: McpToolChanges[] }
+  // One server's changed tools as accepted and as listed now.
+  'market.mcpToolDiff': { params: { serverId: string }; result: McpToolDiff[] }
+  // Accepts these tools as the server lists them now; agents then list its tools again.
+  'market.acceptMcpTools': { params: { serverId: string; names: string[] }; result: void }
   // The plugins each Claude Code and Codex agent has of its own, which Kettu only lists.
   'market.ownPlugins': { params: { refresh?: boolean }; result: AgentOwnPlugins }
   // The skills catalog and each agent's own skills.
@@ -1842,7 +2056,13 @@ export interface HostContract {
   }
   'projects.list': { params: void; result: Project[] }
   'projects.add': { params: { path: string }; result: Project }
+  'projects.update': {
+    params: { path: string; name?: string | null; folders?: string[]; icon?: ProjectIcon | null }
+    result: Project
+  }
   'projects.remove': { params: { path: string }; result: void }
+  'projects.archive': { params: { path: string }; result: Project }
+  'projects.unarchive': { params: { path: string }; result: Project }
   'projects.touch': { params: { path: string }; result: void }
   // A null path pins the No project group.
   'projects.pin': { params: { path: string | null; pinned: boolean }; result: void }
@@ -2042,7 +2262,15 @@ export interface HostContract {
   'workflows.list': { params: void; result: WireWorkflowEntry[] }
   'workflows.read': {
     params: { workflowId: string }
-    result: { entry: WireWorkflowEntry; text: string | null }
+    result: {
+      entry: WireWorkflowEntry
+      text: string | null
+      /**
+       * What was approved before the file changed; null while unapproved or unchanged. Absent from
+       * an older host.
+       */
+      approved?: ApprovedWorkflow | null
+    }
   }
   // Unapproved until `workflows.approve` names the hash the user was shown.
   'workflows.add': { params: WorkflowAddSource; result: WireWorkflowEntry }
@@ -2236,6 +2464,17 @@ export interface HostContract {
   'sessions.outputs': { params: { sessionId: string }; result: SessionOutputs }
   // Summarizes the messages without a title; empty while a summary of the session runs.
   'sessions.outlineTitles': { params: { sessionId: string }; result: { titles: OutlineTitle[] } }
+  // Translates a displayed thinking summary into `language` (a BCP 47 tag) using the lightweight
+  // task model without mutating the stored thread entry.
+  'sessions.translateThought': {
+    params: {
+      sessionId: string
+      entryId: string
+      text: string
+      language: string
+    }
+    result: { translation: string; agent: string }
+  }
   'sessions.watch': { params: { sessionId: string }; result: void }
   'sessions.unwatch': { params: { sessionId: string }; result: void }
   // The sessions a port shows in front, none for a page; a turn that ends out of view is unread.
@@ -2247,6 +2486,8 @@ export interface HostContract {
   'sessions.cancel': { params: { sessionId: string }; result: void }
   // What ending these sessions and their sub-sessions would stop, for the ones with any.
   'sessions.runningWork': { params: { sessionIds: string[] }; result: { sessions: RunningWork[] } }
+  // Live or stored usage for these sessions, for rolling up a session family's tokens and cost.
+  'sessions.usages': { params: { sessionIds: string[] }; result: { sessions: SessionUsageItem[] } }
   // The memory state, the rule idle Claude Code sessions follow and any version in fallback.
   'sessions.idleRelease': { params: void; result: IdleReleaseState }
   // The host's load now, then `host.load` every LOAD_READ_MS to this port until the watch's lease
@@ -2323,6 +2564,16 @@ export interface HostContract {
   }
   // Brings back the turns an edit set aside, with the draft the composer held before it.
   'sessions.putBack': { params: { sessionId: string }; result: { draft: UserContent[] } }
+  // Previews undoing the file changes of one turn without writing to disk.
+  'sessions.previewUndoTurn': {
+    params: { sessionId: string; toolIds: string[] }
+    result: TurnUndoPreview
+  }
+  // Re-verifies current disk files against `expectedDigests` and applies the turn undo all-or-nothing.
+  'sessions.undoTurn': {
+    params: { sessionId: string; toolIds: string[]; expectedDigests: TurnUndoFileDigest[] }
+    result: TurnUndoResult
+  }
   // `entryId`: a reply's agent message, to fork the session up to its turn; see the session model.
   // A fork of a session in a worktree gets its own, from the source's branch, unless `same`.
   'sessions.fork': {
@@ -2352,6 +2603,16 @@ export interface HostContract {
   'sessions.undoRewindFiles': {
     params: { sessionId: string; backup: string }
     result: { restored: number; failed: number }
+  }
+  // Reads the native conversation branch tree inside a single session (Pi).
+  'sessions.branches': {
+    params: { sessionId: string }
+    result: SessionBranchesResult
+  }
+  // Switches the session's active native branch to `branchId`, syncing history and next-turn context.
+  'sessions.switchBranch': {
+    params: { sessionId: string; branchId: string }
+    result: SessionBranchesResult
   }
   // What removing the session's worktree would lose, and the other sessions still in it.
   'worktrees.inspect': {
@@ -2405,6 +2666,24 @@ export interface HostContract {
       summarize?: boolean
     }
     result: void
+  }
+  // Lists agents on this host that the user can manually delegate a task to from `sessionId`,
+  // along with each target's #2727 effective permission mode and ceiling.
+  'sessions.delegateAgents': {
+    params: { sessionId: string }
+    result: DelegateAgentsResult
+  }
+  // Spawns a delegated child session directly for `agentId` under `sessionId` in the same host
+  // and project, enforcing #2727 permission inheritance and reporting completion or failure back.
+  'sessions.delegate': {
+    params: {
+      sessionId: string
+      agentId: AgentId
+      content: UserContent[]
+      mode?: string
+      title?: string
+    }
+    result: SessionSummary
   }
   'sessions.context': { params: { sessionId: string }; result: ContextBreakdown | null }
   'sessions.contextEstimates': { params: { sessionId: string }; result: ContextEstimates | null }
@@ -2497,6 +2776,18 @@ export interface HostContract {
   }
   // Lists the models the agent offers now in a session that listed them when it attached.
   'sessions.refreshModels': { params: { sessionId: string }; result: void }
+  /**
+   * Use now: the agent lets go of the session between turns, so its next attach has the
+   * library's MCP servers as they are.
+   */
+  'sessions.applyMcp': { params: { sessionId: string }; result: void }
+  // The library servers the session's agent was handed, with their state.
+  'sessions.mcpServers': { params: { sessionId: string }; result: SessionMcpServer[] }
+  // Reconnects one, or turns it off or on for this session alone.
+  'sessions.mcpServer': {
+    params: { sessionId: string; serverId: string; action: 'reconnect' | 'off' | 'on' }
+    result: void
+  }
   // title null: back to the agent's title.
   'sessions.rename': { params: { sessionId: string; title: string | null }; result: void }
   'sessions.close': { params: { sessionId: string }; result: void }
@@ -2624,6 +2915,11 @@ export interface HostContract {
     result: FileDiff
   }
   'git.branches': { params: { projectPath: string }; result: BranchList }
+  // Read-only paginated commit graph across branches, tags, and HEAD, in topological order.
+  'git.graph': {
+    params: { projectPath: string; limit?: number; skip?: number }
+    result: BranchGraphPage
+  }
   // Switches to a local branch, or creates it from HEAD and switches to it.
   'git.switchBranch': {
     params: { projectPath: string; branch: string; create: boolean }
@@ -2641,6 +2937,13 @@ export interface HostContract {
   'git.pullRequest': { params: { url: string }; result: PullRequest }
   // A github.com issue URL, which may turn out to be a pull request.
   'git.issue': { params: { url: string }; result: IssueLookup }
+  // A github.com pull request stack URL; degrades cleanly when unsupported or unreadable.
+  'git.stack': { params: { url: string; fresh?: boolean }; result: PullRequestStackLookup }
+  // Lists recent issues/PRs for a GitHub repository, or searches them by number or title.
+  'git.searchReferences': {
+    params: { owner: string; repo: string; query: string }
+    result: RepositoryReferenceSearchResult
+  }
   'git.watchReferences': { params: { urls: string[] }; result: void }
   // A chip's author; null when GitHub's avatar host has no picture for the login.
   'git.avatarUrl': { params: { login: string }; result: string | null }
@@ -2805,6 +3108,8 @@ export interface HostContract {
   }
   // Every artifact, newest first, or those in Recently deleted, the latest deletion first.
   'artifacts.list': { params: { deleted?: boolean }; result: ArtifactSummary[] }
+  // Opaque ids of artifacts owned by another Kettu account and hidden from the current account.
+  'artifacts.hidden': { params: void; result: string[] }
   // The latest version without `version`.
   'artifacts.read': { params: { id: string; version?: number }; result: ArtifactContent }
   // The bytes of one file of a version, as an export takes them.
@@ -2859,6 +3164,11 @@ export interface HostContract {
   'artifacts.resolve': {
     params: { id: string; threadId: string; resolved: boolean }
     result: CommentThread
+  }
+  // Permanently deletes one comment thread and all comments in it.
+  'artifacts.deleteComment': {
+    params: { id: string; threadId: string }
+    result: void
   }
   // Pins the user's thread, whose element is gone, to another place of the latest version.
   'artifacts.repin': {
@@ -3287,11 +3597,37 @@ export const HOST_METHODS = [
   'market.catalog',
   'market.search',
   'market.keys',
+  'market.discoverMcp',
+  'market.dismissMcpNotice',
+  'market.importMcp',
+  'market.mcpTerminal',
+  'market.mcpTerminalPlan',
+  'market.mcpTerminalOn',
+  'market.mcpTerminalOffPlan',
+  'market.mcpTerminalOff',
+  'market.mcpTerminalDrift',
+  'market.mcpTerminalResolve',
+  'market.mcpTerminalBackups',
+  'market.mcpTerminalRestore',
+  'market.previewMcp',
+  'market.addMcp',
+  'market.checkMcp',
+  'market.mcpChecks',
   'market.connect',
   'market.detectSignIn',
   'market.cancelConnect',
   'market.disconnect',
   'market.connections',
+  'market.mcpInsight',
+  'market.mcpInstances',
+  'market.mcpCalls',
+  'market.mcpLogs',
+  'market.mcpStop',
+  'market.answerMcpChange',
+  'market.undoMcpChange',
+  'market.mcpToolChanges',
+  'market.mcpToolDiff',
+  'market.acceptMcpTools',
   'market.ownPlugins',
   'market.skills',
   'market.skillRepository',
@@ -3328,7 +3664,10 @@ export const HOST_METHODS = [
   'market.publishFolder',
   'projects.list',
   'projects.add',
+  'projects.update',
   'projects.remove',
+  'projects.archive',
+  'projects.unarchive',
   'projects.touch',
   'projects.pin',
   'projects.setAutoApprove',
@@ -3369,6 +3708,7 @@ export const HOST_METHODS = [
   'sessions.find',
   'sessions.outputs',
   'sessions.outlineTitles',
+  'sessions.translateThought',
   'sessions.watch',
   'sessions.unwatch',
   'sessions.show',
@@ -3376,6 +3716,7 @@ export const HOST_METHODS = [
   'sessions.attachEarly',
   'sessions.cancel',
   'sessions.runningWork',
+  'sessions.usages',
   'sessions.idleRelease',
   'host.load.watch',
   'host.load.unwatch',
@@ -3398,12 +3739,16 @@ export const HOST_METHODS = [
   'sessions.cancelContinue',
   'sessions.rewind',
   'sessions.putBack',
+  'sessions.previewUndoTurn',
+  'sessions.undoTurn',
   'sessions.fork',
   'sessions.handoff',
   'sessions.revert',
   'sessions.rewindPreview',
   'sessions.restoreFiles',
   'sessions.undoRewindFiles',
+  'sessions.branches',
+  'sessions.switchBranch',
   'worktrees.inspect',
   'worktrees.remove',
   'worktrees.retrySetup',
@@ -3415,6 +3760,8 @@ export const HOST_METHODS = [
   'groups.keep',
   'groups.discard',
   'sessions.switchAgent',
+  'sessions.delegateAgents',
+  'sessions.delegate',
   'sessions.context',
   'sessions.contextEstimates',
   'sessions.queue',
@@ -3443,6 +3790,9 @@ export const HOST_METHODS = [
   'sessions.blob',
   'sessions.setConfigOption',
   'sessions.refreshModels',
+  'sessions.applyMcp',
+  'sessions.mcpServers',
+  'sessions.mcpServer',
   'sessions.rename',
   'sessions.close',
   'sessions.terminalCommand',
@@ -3540,12 +3890,15 @@ export const HOST_METHODS = [
   'git.incoming',
   'git.fileDiff',
   'git.branches',
+  'git.graph',
   'git.switchBranch',
   'git.publishBranch',
   'git.commitChanges',
   'git.discardChanges',
   'git.pullRequest',
   'git.issue',
+  'git.stack',
+  'git.searchReferences',
   'git.watchReferences',
   'git.avatarUrl',
   'git.currentPullRequest',
@@ -3588,6 +3941,7 @@ export const HOST_METHODS = [
   'storage.usage',
   'storage.clearImages',
   'artifacts.list',
+  'artifacts.hidden',
   'artifacts.read',
   'artifacts.file',
   'artifacts.content',
@@ -3603,6 +3957,7 @@ export const HOST_METHODS = [
   'artifacts.comment',
   'artifacts.reply',
   'artifacts.resolve',
+  'artifacts.deleteComment',
   'artifacts.markSent',
   'artifacts.repin',
   'artifacts.editElement',
@@ -3738,12 +4093,15 @@ export type HostEvent =
   | { type: 'environment.changed'; info: EnvironmentInfo }
   | { type: 'git.changed'; status: GitStatus }
   | { type: 'git.pr'; projectPath: string; pr: PullRequest | null }
-  | { type: 'git.reference'; url: string; found: IssueLookup } // to the ports watching `url`
+  | { type: 'git.reference'; url: string; found: ReferenceLookup } // to the ports watching `url`
   | { type: 'git.tools'; tools: GitTools }
   // To the ports watching the project's files, by the path each named it: list and read them again.
   | { type: 'files.changed'; projectPath: string }
   | { type: 'star.changed'; state: GitHubStarState }
   | { type: 'usage.changed' } // the figures changed; a page showing them reads again
+  | { type: 'market.discoveryChanged' }
+  | { type: 'market.mcpCheckChanged'; serverId: string; check: McpCheck }
+  | { type: 'market.mcpToolsChanged'; serverId: string; changes: McpToolChanges | null }
   | { type: 'market.keysChanged' } // the Marketplace's keys changed; a page showing them reads again
   // The account, what it published or the drafts changed; Marketplace › Published reads again.
   | { type: 'market.publishedChanged' }

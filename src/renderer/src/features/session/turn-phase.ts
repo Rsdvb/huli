@@ -4,11 +4,11 @@ import {
   awaitsAnswer,
   turnDoing as sharedDoing,
   type TurnDoing as SharedDoing,
-  writingId as sharedWritingId,
+  writingEntryId,
   type TurnPhase,
 } from '@shared/turn-phase'
 
-export { awaitsAnswer, turnPhase, type TurnPhase } from '@shared/turn-phase'
+export { awaitsAnswer, turnPhase, writingEntryId, type TurnPhase } from '@shared/turn-phase'
 
 /** The phase as the desktop says it, where a wait on questions alone reads as `question`. */
 export type TurnPhaseName = TurnPhase['phase']
@@ -85,11 +85,14 @@ export function endedOnRejection(state: ThreadState | null | undefined): boolean
 const writingIds = new WeakMap<ThreadState, string | null>()
 const lastUserIds = new WeakMap<ThreadState, string | null>()
 
-/** The shared `writingId`, cached per state object, as every reply reads it on each change. */
+/**
+ * The message the agent is still writing, cached per thread state object; shares the same quiet
+ * entry and boundary rules as `turnPhase`. Huli: the phone keeps the shared `writingId`.
+ */
 export function writingId(state: ThreadState | null | undefined): string | null {
   if (!state) return null
   if (writingIds.has(state)) return writingIds.get(state)!
-  const found = sharedWritingId(state)
+  const found = writingEntryId(state)
   writingIds.set(state, found)
   return found
 }

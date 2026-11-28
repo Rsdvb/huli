@@ -45,8 +45,11 @@ export interface Attention {
   /** Every kind but `routine-paused` and `plan-limit`, which name their agent instead. */
   sessionId?: string
   agentId?: string
-  /** A `plan-limit`'s window. */
+  /** A `plan-limit`'s window, and whether it crossed 90% used or ran out. */
   window?: string
+  limitLevel?: 'warning' | 'reached'
+  /** The files a turn that ended changed. */
+  changedFiles?: number
   title: string
   body: string
   /** The request that waits, which the waiting list names until it is answered or withdrawn. */
@@ -55,6 +58,8 @@ export interface Attention {
   actions?: PushActions
   /** The ask's only question, when a notification may answer it. */
   question?: PushQuestion
+  /** The request's kind for the notification: a command, an edit, a review or a question. */
+  actionKind?: 'execute' | 'edit' | 'review' | 'question'
   /** The session was in front of a window or a device when this happened. */
   inFront: boolean
   /** The devices that had it in front then. */
@@ -259,16 +264,45 @@ function pushEvent(attention: Attention): PushEvent {
       return {
         kind: 'permission',
         sessionId: attention.sessionId!,
+        ...(attention.agentId ? { agentId: attention.agentId } : {}),
         ...(attention.requestId ? { requestId: attention.requestId } : {}),
         ...(attention.actions ? { actions: attention.actions } : {}),
         ...(attention.question ? { question: attention.question } : {}),
+        ...(attention.actionKind ? { actionKind: attention.actionKind } : {}),
+      }
+    case 'turn-ended':
+      return {
+        kind: 'turn-ended',
+        sessionId: attention.sessionId!,
+        ...(attention.agentId ? { agentId: attention.agentId } : {}),
+        ...(attention.changedFiles ? { changedFiles: attention.changedFiles } : {}),
+      }
+    case 'error':
+      return {
+        kind: 'error',
+        sessionId: attention.sessionId!,
+        ...(attention.agentId ? { agentId: attention.agentId } : {}),
+      }
+    case 'routine-ended':
+      return {
+        kind: 'routine-ended',
+        sessionId: attention.sessionId!,
+        ...(attention.agentId ? { agentId: attention.agentId } : {}),
       }
     case 'routine-paused':
       return { kind: 'routine-paused', agentId: attention.agentId! }
     case 'plan-limit':
-      return { kind: 'plan-limit', agentId: attention.agentId!, window: attention.window! }
-    default:
+      return {
+        kind: 'plan-limit',
+        agentId: attention.agentId!,
+        window: attention.window!,
+        ...(attention.limitLevel ? { limitLevel: attention.limitLevel } : {}),
+      }
+    case 'limit-resumed':
+    case 'stalled':
       return { kind: attention.kind, sessionId: attention.sessionId! }
+    case 'note':
+      return { kind: 'note', sessionId: attention.sessionId! }
   }
 }
 

@@ -28,12 +28,12 @@ import type { AgentId } from '@shared/thread'
 import {
   Dropdown,
   FilterButton,
-  FolderClosedMark,
   Icon,
   SearchField,
   SectionHead,
   Tabs,
 } from '@renderer/components/affect/app-shell'
+import { ProjectMark } from '@renderer/features/shell/project-icon'
 import { Button } from '@renderer/components/affect/button'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import {
@@ -74,7 +74,7 @@ import {
   useArtifactsStore,
   type ImportFailure,
 } from '@renderer/stores/artifacts'
-import { useProjectsStore } from '@renderer/stores/projects'
+import { findProjectForPath, useProjectsStore } from '@renderer/stores/projects'
 import { localSharing } from '@renderer/stores/sharing'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { openArtifact, setArtifactsView, useViewStore } from '@renderer/stores/view'
@@ -321,7 +321,7 @@ export default function ArtifactsPage({ deleted }: { deleted: boolean }) {
   const projectName = (artifact: ArtifactSummary): string =>
     artifact.scratch
       ? t('page.noProject')
-      : (projects.find((p) => p.path === artifact.project)?.name ?? basename(artifact.project))
+      : (findProjectForPath(projects, artifact.project)?.name ?? basename(artifact.project))
   const sessionName = (id: string): string => {
     if (id === NO_SESSION) return t('page.imported')
     const info = sessions.get(id)
@@ -456,9 +456,7 @@ export default function ArtifactsPage({ deleted }: { deleted: boolean }) {
                 key={g.key}
                 group={g}
                 info={g.of.kind === 'session' ? sessions.get(g.of.sessionId) : undefined}
-                projectName={(path) =>
-                  projects.find((p) => p.path === path)?.name ?? basename(path)
-                }
+                projectName={(path) => findProjectForPath(projects, path)?.name ?? basename(path)}
                 folded={folded.has(g.key)}
                 onFold={() =>
                   setFolded((was) => {
@@ -650,7 +648,7 @@ function GroupView({
   let label: string
   let where: string | null = null
   if (of.kind === 'project') {
-    mark = <FolderClosedMark />
+    mark = <ProjectMark icon={of.icon} />
     label = of.name
   } else if (of.kind === 'no-project') {
     mark = <Icon icon={NO_PROJECT_ICON} size={16} />
@@ -979,7 +977,7 @@ function ImportMenu({
                       key={project.path}
                       onClick={() => void importArtifact(project.path, kind)}
                     >
-                      <FolderClosedMark />
+                      <ProjectMark icon={project.icon} />
                       <span className="truncate">{project.name}</span>
                     </DropdownMenuItem>
                   ))}

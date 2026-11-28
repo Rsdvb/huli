@@ -394,7 +394,7 @@ export type ThreadItem = ItemTimes &
     | { type: 'contextCompaction'; id: string }
     | { type: 'hookPrompt'; id: string; fragments?: { hookRunId: string; text: string }[] }
     | { type: 'functionCallOutput'; id: string }
-    | { type: 'sleep'; id: string }
+    | { type: 'sleep'; id: string; durationMs?: number }
   )
 
 export interface TokenUsageBreakdown {
@@ -425,6 +425,12 @@ export interface ReasoningEffortOption {
   description: string
 }
 
+export interface ModelServiceTier {
+  id: string
+  name: string
+  description?: string
+}
+
 export interface Model {
   id: string
   displayName: string
@@ -434,9 +440,11 @@ export interface Model {
   upgrade?: string | null
   supportedReasoningEfforts: ReasoningEffortOption[]
   defaultReasoningEffort: ReasoningEffort
-  /** Deprecated for `serviceTiers`; still names `fast`. */
+  /** Deprecated for `serviceTiers`; still names `fast` or `ultrafast`. */
   additionalSpeedTiers?: string[]
-  serviceTiers?: { id: string; name: string; description?: string }[]
+  serviceTiers?: ModelServiceTier[]
+  /** Catalog default service tier id for this model, when one is configured. */
+  defaultServiceTier?: string | null
   isDefault: boolean
 }
 
@@ -581,6 +589,36 @@ export interface McpServerStartupNotification {
   status: 'starting' | 'ready' | 'failed' | 'cancelled'
   error: string | null
   failureReason?: 'reauthenticationRequired' | null
+}
+
+export interface TextPosition {
+  /** 1-based line number. */
+  line: number
+  /** 1-based column number (in Unicode scalar values). */
+  column: number
+}
+
+export interface TextRange {
+  start: TextPosition
+  end: TextPosition
+}
+
+export interface WarningNotification {
+  message: string
+  threadId?: string | null
+}
+
+export interface DeprecationNoticeNotification {
+  summary: string
+  details?: string | null
+}
+
+export interface ConfigWarningNotification {
+  summary: string
+  details?: string | null
+  path?: string | null
+  range?: TextRange | null
+  threadId?: string | null
 }
 
 export type ReviewTarget =

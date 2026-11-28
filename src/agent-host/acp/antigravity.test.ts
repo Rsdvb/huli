@@ -978,13 +978,24 @@ describe("agy's ACP mode", () => {
  * `session/resume` starts the session's process again, at agy's own model and in Default, as agy
  * 1.5.9 does. `turn` holds a prompt open until the test lets it end.
  */
-function flaggedAgy(version: string, flag: string | null, refusesFlag = false) {
+function flaggedAgy(
+  version: string,
+  flag: string | null,
+  refusesFlag = false,
+  defaults: { model?: string; thought_level?: string; mode?: string } = {},
+) {
   const sent: { method: string; params: Record<string, unknown> }[] = []
   let turn: Promise<void> = Promise.resolve()
   let during: ((client: AgentContext, sessionId: string) => Promise<void>) | null = null
   let resuming: ((client: AgentContext, sessionId: string) => Promise<void>) | null = null
+  let settingConfig: ((configId: string, value: string) => Promise<void> | void) | null = null
   let stopReason: 'end_turn' | 'cancelled' = 'end_turn'
-  const values = { model: 'gemini', thought_level: 'high', mode: 'default' }
+  const baseValues = {
+    model: defaults.model ?? 'gemini',
+    thought_level: defaults.thought_level ?? 'high',
+    mode: defaults.mode ?? 'default',
+  }
+  const values = { ...baseValues }
   const options = () => [
     {
       id: 'model',
@@ -1005,6 +1016,7 @@ function flaggedAgy(version: string, flag: string | null, refusesFlag = false) {
       currentValue: values.thought_level,
       options: [
         { value: 'low', name: 'Low' },
+        { value: 'medium', name: 'Medium' },
         { value: 'high', name: 'High' },
       ],
     },
@@ -1032,13 +1044,14 @@ function flaggedAgy(version: string, flag: string | null, refusesFlag = false) {
       if (refusesFlag && meta?.['sh.kettu/session-flag']) {
         throw new RequestError(-32603, 'agy exited')
       }
-      Object.assign(values, { model: 'gemini', thought_level: 'high', mode: 'default' })
+      Object.assign(values, baseValues)
       await resuming?.(ctx.client, ctx.params.sessionId)
       return { configOptions: options() }
     })
-    .onRequest(methods.agent.session.setConfigOption, (ctx) => {
+    .onRequest(methods.agent.session.setConfigOption, async (ctx) => {
       const { configId, value } = ctx.params as { configId: keyof typeof values; value: string }
       sent.push({ method: `set ${configId}=${value}`, params: ctx.params as never })
+      await settingConfig?.(configId, value)
       values[configId] = value
       return { configOptions: options() }
     })
@@ -1067,6 +1080,9 @@ function flaggedAgy(version: string, flag: string | null, refusesFlag = false) {
   const onResume = (run: (client: AgentContext, sessionId: string) => Promise<void>) => {
     resuming = run
   }
+  const onSetConfig = (run: ((configId: string, value: string) => Promise<void> | void) | null) => {
+    settingConfig = run
+  }
   const setStopReason = (reason: 'end_turn' | 'cancelled') => {
     stopReason = reason
   }
@@ -1076,6 +1092,7 @@ function flaggedAgy(version: string, flag: string | null, refusesFlag = false) {
     hold,
     send,
     onResume,
+    onSetConfig,
     setStopReason,
     methods: () => sent.map((item) => item.method),
   }
@@ -1380,6 +1397,142 @@ describe("agy's full access", () => {
     const mode = target.context().thread.session.config.find((option) => option.id === 'mode')!
     expect(mode.value).toBe(FULL)
     expect(mode.choices!.at(-1)!.value).toBe(FULL)
+    connection.close()
+  })
+
+  it('serializes thought_level and full access switch so restart restores the new thought_level instead of stale medium', async () => {
+    // Reproduces the concurrent prepare flush race: session starts at medium, user sets
+    // thought_level=high and immediately switches mode=dangerously-skip-permissions before the
+    // first setConfigOption finishes.
+    const agy = flaggedAgy('1.5.18', '--dangerously-skip-permissions', false, {
+      model: 'gemini',
+      thought_level: 'medium',
+      mode: 'default',
+    })
+    const { connection, sent } = agy
+    await connection.initialize('1.0.0')
+    const { sessionId } = await connection.newSession('/repo', { mcpServers: MCP })
+    sent.length = 0
+
+    let releaseThought: (() => void) | null = null
+    let heldOnce = false
+    agy.onSetConfig(async (configId, value) => {
+      if (configId === 'thought_level' && value === 'high' && !heldOnce) {
+        heldOnce = true
+        await new Promise<void>((resolve) => {
+          releaseThought = resolve
+        })
+      }
+    })
+
+    const settingThought = connection.setConfigOption(sessionId, 'thought_level', 'high')
+    const switchingFull = connection.setConfigOption(sessionId, 'mode', FULL)
+
+    await vi.waitFor(() => expect(releaseThought).not.toBeNull())
+    // session/resume must not start until thought_level=high has answered and updated access.config.
+    expect(agy.methods()).toEqual(['set thought_level=high'])
+
+    releaseThought!()
+    const [afterThought, afterFull] = await Promise.all([settingThought, switchingFull])
+
+    expect(valueOf(afterThought, 'thought_level')).toBe('high')
+    // After resuming at defaults (medium), agy restores thought_level=high rather than stale medium.
+    expect(agy.methods()).toEqual(['set thought_level=high', 'resume', 'set thought_level=high'])
+    expect(valueOf(afterFull, 'thought_level')).toBe('high')
+    expect(valueOf(afterFull, 'mode')).toBe(FULL)
+    connection.close()
+  })
+
+  it('does not block queued full access switch when a prior setConfigOption fails', async () => {
+    const agy = flaggedAgy('1.5.18', '--dangerously-skip-permissions', false, {
+      model: 'gemini',
+      thought_level: 'medium',
+      mode: 'default',
+    })
+    const { connection, sent } = agy
+    await connection.initialize('1.0.0')
+    const { sessionId } = await connection.newSession('/repo')
+    sent.length = 0
+
+    let releaseFailure: (() => void) | null = null
+    agy.onSetConfig(async (configId, value) => {
+      if (configId === 'thought_level' && value === 'high') {
+        await new Promise<void>((resolve) => {
+          releaseFailure = resolve
+        })
+        throw new RequestError(-32603, 'invalid thought level')
+      }
+    })
+
+    const failed = connection.setConfigOption(sessionId, 'thought_level', 'high')
+    const switchingFull = connection.setConfigOption(sessionId, 'mode', FULL)
+
+    await vi.waitFor(() => expect(releaseFailure).not.toBeNull())
+    expect(agy.methods()).toEqual(['set thought_level=high'])
+
+    releaseFailure!()
+    await expect(failed).rejects.toThrow(/invalid thought level/)
+    const afterFull = await switchingFull
+
+    expect(agy.methods()).toEqual(['set thought_level=high', 'resume'])
+    expect(valueOf(afterFull, 'thought_level')).toBe('medium')
+    expect(valueOf(afterFull, 'mode')).toBe(FULL)
+    connection.close()
+  })
+
+  it('waits for an in-flight setConfigOption before running a pending full access switch at turn end', async () => {
+    const agy = flaggedAgy('1.5.18', '--dangerously-skip-permissions', false, {
+      model: 'gemini',
+      thought_level: 'medium',
+      mode: 'default',
+    })
+    const { connection, sent } = agy
+    await connection.initialize('1.0.0')
+    const { sessionId, config } = await connection.newSession('/repo')
+    const { target } = threadTarget()
+    target.apply({ patches: [{ op: 'session.update', changes: { config } }], effects: [] })
+    connection.register(sessionId, target)
+    sent.length = 0
+
+    const releaseTurn = agy.hold()
+    const turn = connection.prompt(sessionId, [{ type: 'text', text: 'work' }])
+    await vi.waitFor(() => expect(agy.methods()).toEqual(['prompt']))
+
+    // Queue full access while the turn is running.
+    await connection.setConfigOption(sessionId, 'mode', FULL)
+
+    let releaseThought: (() => void) | null = null
+    let heldOnce = false
+    agy.onSetConfig(async (configId, value) => {
+      if (configId === 'thought_level' && value === 'high' && !heldOnce) {
+        heldOnce = true
+        await new Promise<void>((resolve) => {
+          releaseThought = resolve
+        })
+      }
+    })
+
+    // Start thought_level=high and finish the turn concurrently so switchPending races requestConfig.
+    const settingThought = connection.setConfigOption(sessionId, 'thought_level', 'high')
+    await vi.waitFor(() => expect(releaseThought).not.toBeNull())
+    releaseTurn()
+
+    // While thought_level=high is still in flight, switchPending must wait instead of resuming early.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(agy.methods()).toEqual(['prompt', 'set thought_level=high'])
+
+    releaseThought!()
+    await Promise.all([settingThought, turn])
+
+    expect(agy.methods()).toEqual([
+      'prompt',
+      'set thought_level=high',
+      'resume',
+      'set thought_level=high',
+    ])
+    const finalConfig = target.context().thread.session.config
+    expect(valueOf(finalConfig, 'thought_level')).toBe('high')
+    expect(valueOf(finalConfig, 'mode')).toBe(FULL)
     connection.close()
   })
 })
@@ -2105,4 +2258,727 @@ describe('agy 托管 Auto 模式、本会话总是允许与插件预检', () => 
       connection.close()
     },
   )
+})
+
+describe("agy's waiting-on-background detection", () => {
+  function waitingAgy(
+    version = '1.5.18',
+    waitOptions: {
+      tailReader?:
+        | (() => Promise<{
+            stepIndex: number
+            type: string
+            status: string
+            hasToolCalls: boolean
+          } | null>)
+        | null
+      settleMs?: number
+      fallbackMs?: number
+      retryDelaysMs?: readonly number[]
+    } = {},
+  ) {
+    const prompts: string[] = []
+    let client: AgentContext | null = null
+    let running: ((reason: 'end_turn' | 'cancelled') => void) | null = null
+    const app = agent({ name: 'agy-bg-wait' })
+      .onRequest(methods.agent.initialize, () => ({
+        protocolVersion: 1,
+        agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {}, close: {} } },
+        agentInfo: { name: 'Antigravity ACP Server', version },
+        authMethods: [],
+      }))
+      .onRequest(methods.agent.session.new, () => ({ sessionId: 's-bg' }))
+      .onRequest(methods.agent.session.prompt, async (ctx) => {
+        const [block] = ctx.params.prompt
+        prompts.push(block?.type === 'text' ? block.text : '')
+        client = ctx.client
+        running?.('end_turn')
+        const stopReason = await new Promise<'end_turn' | 'cancelled'>((resolve) => {
+          running = resolve
+        })
+        return { stopReason }
+      })
+      .onNotification(methods.agent.session.cancel, () => {
+        running?.('cancelled')
+        running = null
+      })
+
+    const connection = AcpConnection.connect(inProcessTransport(app), {
+      traffic: () => {},
+      account: () => {},
+      ignored: () => {},
+      log: () => {},
+      agentId: 'antigravity',
+      name: 'Google Antigravity',
+      agyTailReader:
+        waitOptions.tailReader !== undefined ? waitOptions.tailReader : async () => null,
+      agyWaitSettleMs: waitOptions.settleMs ?? 15,
+      agyWaitFallbackMs: waitOptions.fallbackMs ?? 2_000,
+      agyWaitRetryDelaysMs: waitOptions.retryDelaysMs,
+    })
+
+    return {
+      connection,
+      prompts,
+      notify: (payload: Record<string, unknown>) =>
+        client!.notify(methods.client.session.update, update('s-bg', payload)),
+      askPermission: (toolCall: Record<string, unknown>) =>
+        client!.request(methods.client.session.requestPermission, {
+          sessionId: 's-bg',
+          toolCall,
+          options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+        } as never),
+      end: () => {
+        running?.('end_turn')
+        running = null
+      },
+    }
+  }
+
+  it('signals waitingBackground once a reply settles while background work holds session/prompt open, and starts a fresh entry on wakeup', async () => {
+    const agy = waitingAgy('1.5.18')
+    await agy.connection.initialize('1.0.0')
+    const { sessionId } = await agy.connection.newSession('/repo')
+    const base = threadTarget()
+    const waitingChanges: boolean[] = []
+    const target: SessionTarget = {
+      ...base.target,
+      apply: (output) => {
+        base.target.apply(output)
+        for (const effect of output.effects) {
+          if (effect.kind === 'waitingBackground') {
+            waitingChanges.push(effect.waiting)
+            // Mirror Sessions.setWaitingBackground settling streaming entries.
+            if (effect.waiting) {
+              const settled = base
+                .entries()
+                .filter((entry) => entry.kind === 'agent' && entry.streaming)
+                .map((entry) => ({
+                  op: 'entry.update' as const,
+                  id: entry.id,
+                  changes: { streaming: false },
+                }))
+              if (settled.length > 0) base.target.apply({ patches: settled, effects: [] })
+            }
+          }
+        }
+      },
+    }
+    agy.connection.register(sessionId, target)
+
+    const turn = agy.connection.prompt(sessionId, text('run background work'))
+    await vi.waitFor(() => expect(agy.prompts).toEqual(['run background work']))
+
+    await agy.notify({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Started in the background.' },
+    })
+    await agy.notify({ sessionUpdate: 'usage_update', used: 1000, size: 100_000 })
+
+    await vi.waitFor(() => expect(waitingChanges).toEqual([true]))
+
+    // A later background wakeup clears waitingBackground and opens a separate agent entry.
+    await agy.notify({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Background task finished.' },
+    })
+    await vi.waitFor(() => expect(waitingChanges).toEqual([true, false]))
+
+    agy.end()
+    await turn
+
+    const replies = base
+      .entries()
+      .filter((entry): entry is Extract<ThreadEntry, { kind: 'agent' }> => entry.kind === 'agent')
+    expect(replies.map((entry) => entry.markdown)).toEqual([
+      'Started in the background.',
+      'Background task finished.',
+    ])
+    agy.connection.close()
+  })
+
+  it('does not trigger waitingBackground during hidden tool steps or open permission cards, and clears immediately on steer', async () => {
+    const agy = waitingAgy('1.5.18')
+    await agy.connection.initialize('1.0.0')
+    const { sessionId } = await agy.connection.newSession('/repo')
+    const base = threadTarget()
+    const waitingChanges: boolean[] = []
+    let releaseCard!: () => void
+    const target: SessionTarget = {
+      ...base.target,
+      apply: (output) => {
+        base.target.apply(output)
+        for (const effect of output.effects) {
+          if (effect.kind === 'waitingBackground') waitingChanges.push(effect.waiting)
+        }
+      },
+      requestPermission: async (request) => {
+        base.target.apply(request.output)
+        await new Promise<void>((resolve) => {
+          releaseCard = resolve
+        })
+        return { optionId: 'allow' }
+      },
+    }
+    agy.connection.register(sessionId, target)
+
+    const turn = agy.connection.prompt(sessionId, text('start'))
+    await vi.waitFor(() => expect(agy.prompts).toEqual(['start']))
+
+    // Hidden internal tool call in the same step must count as a tool step and not enter waiting.
+    await agy.notify({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Thinking…' },
+    })
+    await agy.notify({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'hidden-1',
+      name: 'mcp_kettu_suggest_next_message',
+      kind: 'other',
+      status: 'pending',
+      title: 'suggest_next_message',
+      rawInput: { message: 'continue' },
+    })
+    await agy.notify({ sessionUpdate: 'usage_update', used: 1200, size: 100_000 })
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(waitingChanges).toEqual([])
+
+    // An open permission card also suppresses waitingBackground.
+    await agy.notify({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Need permission.' },
+    })
+    const card = agy.askPermission({
+      toolCallId: 'perm-1',
+      name: 'run_command',
+      kind: 'execute',
+      status: 'pending',
+      title: 'Run shell',
+      rawInput: { CommandLine: 'echo hi' },
+    })
+    await vi.waitFor(() => expect(releaseCard).toBeDefined())
+    await agy.notify({ sessionUpdate: 'usage_update', used: 1400, size: 100_000 })
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(waitingChanges).toEqual([])
+    releaseCard()
+    await card
+
+    // Now finish with a plain reply (no tools) -> enters waitingBackground, then steer clears it.
+    await agy.notify({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Waiting on timer.' },
+    })
+    await agy.notify({ sessionUpdate: 'usage_update', used: 1600, size: 100_000 })
+    await vi.waitFor(() => expect(waitingChanges).toEqual([true]))
+
+    await expect(agy.connection.steer(sessionId, text('follow up'))).resolves.toBe('injected')
+    expect(waitingChanges).toEqual([true, false])
+
+    agy.end()
+    await turn
+    agy.connection.close()
+  })
+
+  it('does not enable background-wait detection before agy 1.5.15', async () => {
+    const agy = waitingAgy('1.5.14')
+    await agy.connection.initialize('1.0.0')
+    const { sessionId } = await agy.connection.newSession('/repo')
+    const base = threadTarget()
+    const waitingChanges: boolean[] = []
+    agy.connection.register(sessionId, {
+      ...base.target,
+      apply: (output) => {
+        base.target.apply(output)
+        for (const effect of output.effects) {
+          if (effect.kind === 'waitingBackground') waitingChanges.push(effect.waiting)
+        }
+      },
+    })
+
+    const turn = agy.connection.prompt(sessionId, text('start'))
+    await vi.waitFor(() => expect(agy.prompts).toEqual(['start']))
+    await agy.notify({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Done.' },
+    })
+    await agy.notify({ sessionUpdate: 'usage_update', used: 900, size: 100_000 })
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(waitingChanges).toEqual([])
+    agy.end()
+    await turn
+    agy.connection.close()
+  })
+
+  it('handles real agy 1.5.18 usage_update-before-tool_call order and delayed transcript flush', async () => {
+    let tail: {
+      stepIndex: number
+      type: string
+      status: string
+      hasToolCalls: boolean
+    } | null = {
+      stepIndex: 0,
+      type: 'USER_INPUT',
+      status: 'DONE',
+      hasToolCalls: false,
+    }
+    const agy = waitingAgy('1.5.18', {
+      tailReader: async () => tail,
+      settleMs: 30,
+      retryDelaysMs: [25, 25, 50],
+    })
+    await agy.connection.initialize('1.0.0')
+    const { sessionId } = await agy.connection.newSession('/repo')
+    const base = threadTarget()
+    const waitingChanges: boolean[] = []
+    const target: SessionTarget = {
+      ...base.target,
+      apply: (output) => {
+        base.target.apply(output)
+        for (const effect of output.effects) {
+          if (effect.kind === 'waitingBackground') {
+            waitingChanges.push(effect.waiting)
+            if (effect.waiting) {
+              const settled = base
+                .entries()
+                .filter((entry) => entry.kind === 'agent' && entry.streaming)
+                .map((entry) => ({
+                  op: 'entry.update' as const,
+                  id: entry.id,
+                  changes: { streaming: false },
+                }))
+              if (settled.length > 0) base.target.apply({ patches: settled, effects: [] })
+            }
+          }
+        }
+      },
+    }
+    agy.connection.register(sessionId, target)
+
+    const turn = agy.connection.prompt(sessionId, text('run background build'))
+    await vi.waitFor(() => expect(agy.prompts).toEqual(['run background build']))
+
+    // Initial pre-step usage_update { used: 0 } must not trigger waiting.
+    await agy.notify({ sessionUpdate: 'usage_update', used: 0, size: 1_048_576 })
+
+    // Step 1: thought -> usage_update -> tool_call -> tool_call_update(in_progress).
+    await agy.notify({
+      sessionUpdate: 'agent_thought_chunk',
+      content: { type: 'text', text: 'Starting command in background.' },
+    })
+    tail = { stepIndex: 1, type: 'PLANNER_RESPONSE', status: 'DONE', hasToolCalls: true }
+    await agy.notify({ sessionUpdate: 'usage_update', used: 10_780, size: 1_048_576 })
+    await agy.notify({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'cmd-1',
+      name: 'run_command',
+      kind: 'execute',
+      status: 'in_progress',
+      title: 'Run build',
+      rawInput: { CommandLine: 'npm run build', WaitMsBeforeAsync: 500, toolSummary: 'Build' },
+    })
+    await agy.notify({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'cmd-1',
+      status: 'in_progress',
+    })
+    tail = { stepIndex: 2, type: 'GENERIC', status: 'RUNNING', hasToolCalls: false }
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(waitingChanges).toEqual([])
+
+    // Step 2: plain reply with usage_update while transcript.jsonl still ends at step 2 GENERIC.
+    await agy.notify({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'READY' },
+    })
+    await agy.notify({ sessionUpdate: 'usage_update', used: 11_029, size: 1_048_576 })
+
+    // Initial settle check sees GENERIC RUNNING, then step 3 flushes during retry window.
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(waitingChanges).toEqual([])
+    tail = { stepIndex: 3, type: 'PLANNER_RESPONSE', status: 'DONE', hasToolCalls: false }
+
+    await vi.waitFor(() => expect(waitingChanges).toEqual([true]))
+
+    // Subsequent wakeup clears waitingBackground and opens a fresh agent reply.
+    await agy.notify({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Build finished.' },
+    })
+    await vi.waitFor(() => expect(waitingChanges).toEqual([true, false]))
+
+    agy.end()
+    await turn
+    const replies = base
+      .entries()
+      .filter((entry): entry is Extract<ThreadEntry, { kind: 'agent' }> => entry.kind === 'agent')
+    expect(replies.map((entry) => entry.markdown)).toEqual(['READY', 'Build finished.'])
+    agy.connection.close()
+  })
+
+  it('handles hidden suggest_next_message after usage_update followed by the final reply', async () => {
+    const agy = waitingAgy('1.5.18', { settleMs: 30 })
+    await agy.connection.initialize('1.0.0')
+    const { sessionId } = await agy.connection.newSession('/repo')
+    const base = threadTarget()
+    const waitingChanges: boolean[] = []
+    agy.connection.register(sessionId, {
+      ...base.target,
+      apply: (output) => {
+        base.target.apply(output)
+        for (const effect of output.effects) {
+          if (effect.kind === 'waitingBackground') waitingChanges.push(effect.waiting)
+        }
+      },
+    })
+
+    const turn = agy.connection.prompt(sessionId, text('watch task'))
+    await vi.waitFor(() => expect(agy.prompts).toEqual(['watch task']))
+
+    // Step 1: usage_update arrives before hidden suggest_next_message tool_call.
+    await agy.notify({ sessionUpdate: 'usage_update', used: 1_200, size: 1_048_576 })
+    await agy.notify({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'hidden-1',
+      name: 'mcp_kettu_suggest_next_message',
+      kind: 'other',
+      status: 'in_progress',
+      title: 'suggest_next_message',
+      rawInput: { message: 'Check status' },
+    })
+    await agy.notify({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'hidden-1',
+      status: 'completed',
+    })
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(waitingChanges).toEqual([])
+
+    // Step 2: final plain reply enters waitingBackground cleanly.
+    await agy.notify({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Watching in background.' },
+    })
+    await agy.notify({ sessionUpdate: 'usage_update', used: 1_400, size: 1_048_576 })
+    await vi.waitFor(() => expect(waitingChanges).toEqual([true]))
+
+    agy.end()
+    await turn
+    agy.connection.close()
+  })
+
+  it('maps agy update_steps tool calls into session plan updates without stacking tool rows', async () => {
+    const agy = waitingAgy('1.5.18')
+    await agy.connection.initialize('1.0.0')
+    const { sessionId } = await agy.connection.newSession('/repo')
+    const base = threadTarget()
+    agy.connection.register(sessionId, base.target)
+
+    const turn = agy.connection.prompt(sessionId, text('run multi-step fix'))
+    await vi.waitFor(() => expect(agy.prompts).toEqual(['run multi-step fix']))
+
+    // First update_steps call creates a single plan entry and suppresses the raw tool row.
+    await agy.notify({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'steps-1',
+      name: 'update_steps',
+      kind: 'other',
+      status: 'in_progress',
+      title: 'Run update_steps',
+      rawInput: {
+        steps: [
+          { title: 'Inspect codebase', status: 'done' },
+          { title: 'Implement fix', status: 'in_progress' },
+          { title: 'Optional check', status: 'skipped' },
+          { title: 'Run verification', status: 'pending' },
+        ],
+      },
+    })
+    // Follow-up completion update without rawInput must stay suppressed and keep the plan intact.
+    await agy.notify({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'steps-1',
+      status: 'completed',
+    })
+
+    const plansAfterFirst = base
+      .entries()
+      .filter((entry): entry is Extract<ThreadEntry, { kind: 'plan' }> => entry.kind === 'plan')
+    expect(plansAfterFirst).toHaveLength(1)
+    expect(plansAfterFirst[0]!.items).toEqual([
+      { content: 'Inspect codebase', priority: 'medium', status: 'completed' },
+      { content: 'Implement fix', priority: 'medium', status: 'in_progress' },
+      { content: 'Optional check', priority: 'medium', status: 'completed' },
+      { content: 'Run verification', priority: 'medium', status: 'pending' },
+    ])
+    expect(base.entries().some((entry) => entry.kind === 'tool')).toBe(false)
+
+    // Subsequent update_steps call updates the same plan entry in place (and maps failed -> pending).
+    await agy.notify({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'steps-2',
+      name: 'update_steps',
+      kind: 'other',
+      status: 'completed',
+      title: 'Run update_steps',
+      rawInput: {
+        steps: [
+          { title: 'Inspect codebase', status: 'done' },
+          { title: 'Implement fix', status: 'done' },
+          { title: 'Run verification', status: 'failed' },
+        ],
+      },
+    })
+    // Malformed or empty update_steps input is safely ignored without clobbering the current plan.
+    await agy.notify({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'steps-bad',
+      name: 'update_steps',
+      kind: 'other',
+      status: 'completed',
+      title: 'Run update_steps',
+      rawInput: { steps: [] },
+    })
+
+    const plansAfterSecond = base
+      .entries()
+      .filter((entry): entry is Extract<ThreadEntry, { kind: 'plan' }> => entry.kind === 'plan')
+    expect(plansAfterSecond).toHaveLength(1)
+    expect(plansAfterSecond[0]!.id).toBe(plansAfterFirst[0]!.id)
+    expect(plansAfterSecond[0]!.items).toEqual([
+      { content: 'Inspect codebase', priority: 'medium', status: 'completed' },
+      { content: 'Implement fix', priority: 'medium', status: 'completed' },
+      { content: 'Run verification', priority: 'medium', status: 'pending' },
+    ])
+    expect(base.entries().some((entry) => entry.kind === 'tool')).toBe(false)
+
+    agy.end()
+    await turn
+    agy.connection.close()
+  })
+
+  it('surfaces agy schedule and NotificationTimeoutSeconds monitors via tasks and scheduled effects, and clears on manage_task kill', async () => {
+    const agy = waitingAgy('1.5.18', { settleMs: 25 })
+    await agy.connection.initialize('1.0.0')
+    const { sessionId } = await agy.connection.newSession('/repo')
+    const base = threadTarget()
+    const scheduledCounts: number[] = []
+    let latestTasks: unknown[] = []
+    agy.connection.register(sessionId, {
+      ...base.target,
+      apply: (output) => {
+        base.target.apply(output)
+        for (const effect of output.effects) {
+          if (effect.kind === 'scheduled') scheduledCounts.push(effect.jobs)
+          if (effect.kind === 'tasks') latestTasks = effect.tasks
+        }
+      },
+    })
+
+    const turn = agy.connection.prompt(sessionId, text('monitor and schedule'))
+    await vi.waitFor(() => expect(agy.prompts).toEqual(['monitor and schedule']))
+
+    // Start a NotificationTimeoutSeconds command and a daemon cron schedule.
+    await agy.notify({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'mon-1',
+      name: 'run_command',
+      kind: 'execute',
+      status: 'in_progress',
+      title: 'pnpm test',
+      rawInput: {
+        CommandLine: 'pnpm test',
+        toolSummary: 'Run test suite',
+        NotificationTimeoutSeconds: 90,
+      },
+    })
+    await agy.notify({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'cron-1',
+      name: 'schedule',
+      kind: 'other',
+      status: 'in_progress',
+      title: 'Run schedule',
+      rawInput: {
+        CronExpression: '*/15 * * * *',
+        IsDaemon: true,
+        Prompt: 'Check deployment health',
+      },
+      content: [
+        {
+          type: 'content',
+          content: {
+            type: 'text',
+            text: 'Tool is running as a background task with task id: s-bg/task-88',
+          },
+        },
+      ],
+    })
+    await agy.notify({ sessionUpdate: 'usage_update', used: 1_200, size: 1_048_576 })
+
+    // Plain reply settles into waitingBackground -> both monitor & cron surface on the board.
+    await agy.notify({
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'Monitoring tests and polling every 15 minutes.' },
+    })
+    await agy.notify({ sessionUpdate: 'usage_update', used: 1_400, size: 1_048_576 })
+
+    await vi.waitFor(() => expect(latestTasks).toHaveLength(2))
+    expect(scheduledCounts.at(-1)).toBe(1)
+    expect(latestTasks).toMatchObject([
+      {
+        id: 'mon-1',
+        kind: 'monitor',
+        title: 'Run test suite',
+        status: 'running',
+        schedule: { mode: 'timeout', durationSeconds: 90 },
+      },
+      {
+        id: 'cron-1',
+        kind: 'monitor',
+        title: 'Check deployment health',
+        status: 'running',
+        schedule: { mode: 'cron', cron: '*/15 * * * *', daemon: true },
+      },
+    ])
+
+    // Killing the cron via manage_task clears the scheduled count and marks the task stopped.
+    await agy.notify({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'kill-1',
+      name: 'manage_task',
+      kind: 'other',
+      status: 'in_progress',
+      title: 'Run manage_task',
+      rawInput: { Action: 'kill', TaskId: 's-bg/task-88' },
+    })
+    await agy.notify({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'kill-1',
+      status: 'completed',
+      content: [
+        { type: 'content', content: { type: 'text', text: 'Task "s-bg/task-88" cancelled.' } },
+      ],
+    })
+    await vi.waitFor(() => expect(scheduledCounts.at(-1)).toBe(0))
+    expect(latestTasks).toMatchObject([
+      { id: 'mon-1', status: 'running' },
+      { id: 'cron-1', status: 'stopped' },
+    ])
+
+    agy.end()
+    await turn
+    agy.connection.close()
+  })
+})
+
+describe('agy per-session app_data_dir routing', () => {
+  function routedAgy(options: {
+    advertiseAppDataDir?: boolean
+    advertiseFullAccess?: boolean
+    resolveDir: (sessionId: string) => Promise<string | null>
+  }) {
+    const requests: { method: string; sessionId?: string; meta: unknown }[] = []
+    let next = 0
+    const app = agent({ name: 'agy-routed' })
+      .onRequest(methods.agent.initialize, () => ({
+        protocolVersion: 1,
+        agentCapabilities: {
+          loadSession: true,
+          sessionCapabilities: { resume: {}, close: {}, load: {}, list: {} },
+        },
+        agentInfo: { name: 'Antigravity ACP Server', version: '1.5.18' },
+        _meta: {
+          ...(options.advertiseFullAccess !== false
+            ? { 'sh.kettu/session-flag': '--dangerously-skip-permissions' }
+            : {}),
+          ...(options.advertiseAppDataDir !== false
+            ? { 'sh.kettu/session-args': ['--app-data-dir'] }
+            : {}),
+        },
+      }))
+      .onRequest(methods.agent.session.new, (ctx) => {
+        const sessionId = `new-${++next}`
+        requests.push({ method: 'new', sessionId, meta: ctx.params._meta })
+        return { sessionId, configOptions: [agyModes('default')] }
+      })
+      .onRequest(methods.agent.session.load, (ctx) => {
+        requests.push({ method: 'load', sessionId: ctx.params.sessionId, meta: ctx.params._meta })
+        return { configOptions: [agyModes('default')] }
+      })
+      .onRequest(methods.agent.session.resume, (ctx) => {
+        requests.push({ method: 'resume', sessionId: ctx.params.sessionId, meta: ctx.params._meta })
+        return { configOptions: [agyModes('default')] }
+      })
+      .onRequest(methods.agent.session.setConfigOption, (ctx) => ({
+        configOptions: [agyModes(String(ctx.params.value))],
+      }))
+    const connection = AcpConnection.connect(inProcessTransport(app), {
+      traffic: () => {},
+      account: () => {},
+      ignored: () => {},
+      log: () => {},
+      agentId: 'antigravity',
+      name: 'Google Antigravity',
+      agyAppDataDir: options.resolveDir,
+    })
+    return { connection, requests }
+  }
+
+  it('passes --app-data-dir antigravity on load, resume, and full-access restart for IDE sessions, never for CLI or new sessions', async () => {
+    const { connection, requests } = routedAgy({
+      resolveDir: async (id) => (id.startsWith('ide-') ? 'antigravity' : 'antigravity-cli'),
+    })
+    await connection.initialize('1.0.0')
+
+    // New sessions always stay on the default CLI store.
+    await connection.newSession('/repo')
+    expect(requests.at(-1)).toMatchObject({ method: 'new', meta: undefined })
+
+    // CLI session omits --app-data-dir.
+    await connection.loadSession('cli-1', '/repo')
+    expect(requests.at(-1)).toMatchObject({ method: 'load', sessionId: 'cli-1', meta: undefined })
+
+    // IDE session passes --app-data-dir antigravity on loadSession.
+    await connection.loadSession('ide-1', '/repo')
+    expect(requests.at(-1)).toMatchObject({
+      method: 'load',
+      sessionId: 'ide-1',
+      meta: { 'sh.kettu/session-args': { '--app-data-dir': 'antigravity' } },
+    })
+
+    // Switching the IDE session to full access restarts via session/resume and preserves --app-data-dir.
+    await connection.setConfigOption('ide-1', 'mode', 'dangerously-skip-permissions')
+    expect(requests.at(-1)).toMatchObject({
+      method: 'resume',
+      sessionId: 'ide-1',
+      meta: {
+        'sh.kettu/session-flag': true,
+        'sh.kettu/session-args': { '--app-data-dir': 'antigravity' },
+      },
+    })
+
+    // Explicit resumeSession with fullAccess also carries both flags for an IDE session.
+    await connection.resumeSession('ide-2', '/repo', { fullAccess: true })
+    expect(requests.at(-1)).toMatchObject({
+      method: 'resume',
+      sessionId: 'ide-2',
+      meta: {
+        'sh.kettu/session-flag': true,
+        'sh.kettu/session-args': { '--app-data-dir': 'antigravity' },
+      },
+    })
+
+    connection.close()
+  })
+
+  it('omits router session-args metadata when the router does not advertise --app-data-dir', async () => {
+    const { connection, requests } = routedAgy({
+      advertiseAppDataDir: false,
+      resolveDir: async () => 'antigravity',
+    })
+    await connection.initialize('1.0.0')
+    await connection.loadSession('ide-1', '/repo')
+    expect(requests.at(-1)).toMatchObject({ method: 'load', sessionId: 'ide-1', meta: undefined })
+    connection.close()
+  })
 })

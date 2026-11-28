@@ -292,6 +292,7 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
       captureRect: async () => null,
       respondQuit: async () => {},
       onConfirmQuit: never,
+      onConfirmQuitResolved: never,
       setUnsaved: () => {},
       closeWindow: () => {},
       onCommand: (listener) => {
@@ -477,8 +478,11 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
     dialogs: {
       // Beside the project opened last, as projects tend to share a folder.
       openProject: async () => {
-        const { useProjectsStore } = await import('@renderer/stores/projects')
-        return askPath('project', useProjectsStore.getState().projects[0]?.path ?? null)
+        const { activeProjects, useProjectsStore } = await import('@renderer/stores/projects')
+        return askPath(
+          'project',
+          activeProjects(useProjectsStore.getState().projects)[0]?.path ?? null,
+        )
       },
       chooseAgentFolder: () => askPath('agentFolder', null),
       chooseHistoryFolder: () => askPath('agentFolder', null),
@@ -520,6 +524,7 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
     shell: {
       showDataFolder: async () => copyPath((await hostInfo()).userDataPath),
       showItem: (path) => copyPath(path),
+      openFile: () => unsupported('open files in another app'),
     },
     // The host's files open in apps on the host, which a browser cannot start.
     editors: {
@@ -584,7 +589,7 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
       runningWork: () => Promise.resolve({ sessions: [], terminals: [] }),
       restartConfirmed: () => done(admin('updates.restart')),
       restartWhenIdle: () => unsupported('restart the computer once its sessions finish'),
-      cancelRestartWhenIdle: () => Promise.resolve(),
+      cancelRestartWhenIdle: () => done(admin('updates.cancel')),
       dismiss: () => done(admin('updates.dismiss')),
       onChanged: (listener) => adminEvent('updates.changed', (event) => listener(event.status)),
     },
@@ -611,12 +616,14 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
       revokeTab: () => unsupported('show the browser'),
       setBounds: async () => {},
       navigate: () => unsupported('show the browser'),
+      openLink: () => unsupported('show the browser'),
       back: () => unsupported('show the browser'),
       forward: () => unsupported('show the browser'),
       reload: () => unsupported('show the browser'),
       stop: () => unsupported('show the browser'),
       openExternal: () => unsupported('show the browser'),
       setPageSize: () => unsupported('show the browser'),
+      setAnnotate: async () => false,
       freeze: async () => null,
       capture: async () => null,
       pick: async () => false,
@@ -624,6 +631,7 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
       thaw: async () => {},
       takeOver: () => unsupported('show the browser'),
       handBack: () => unsupported('show the browser'),
+      releaseTakeover: async () => {},
       answerAsk: () => unsupported('show the browser'),
       answerOrigin: () => unsupported('show the browser'),
       allowedSites: async () => [],
@@ -644,6 +652,7 @@ export function webApi(link: HostLink, settings: WebSettings, context: WebHostCo
       setSessions: () => {},
       onState: never,
       onOpened: never,
+      onAnnotated: never,
     },
     // Kettu's browser runs in the desktop app, so there is nothing to bring sign-ins into.
     signIns: {

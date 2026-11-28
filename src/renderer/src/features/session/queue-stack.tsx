@@ -6,11 +6,18 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react'
-import { ArrowUp01Icon, Cancel01Icon, PencilEdit02Icon } from '@hugeicons/core-free-icons'
+import {
+  ArrowUp01Icon,
+  ArrowUpRight01Icon,
+  Cancel01Icon,
+  PencilEdit02Icon,
+} from '@hugeicons/core-free-icons'
 import { Trans, useTranslation } from 'react-i18next'
 import {
   reportedTurns,
   type Attachment,
+  type FromSession,
+  type FromSessionEnded,
   type QueuedPrompt,
   type ReportedTurn,
   type SessionView,
@@ -18,11 +25,13 @@ import {
 import { emitAppEvent } from '@renderer/app/events'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { errorMessage, host } from '@renderer/lib/host'
+import { useClock } from '@renderer/lib/use-now'
 import { agentsOn, useAgentsStore } from '@renderer/stores/agents'
 import { hostOfSession } from '@renderer/stores/sessions'
 import { restoreAttachments } from './composer/attachments'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { reportState } from './entries/helpers'
+import { openSessionReport, sessionReportDisplay, useSender } from './entries/session-report'
 
 function promptText(item: QueuedPrompt): string {
   return item.content
@@ -284,12 +293,17 @@ export function QueueStack({
     >
       {queue.map((item, i) => {
         const p = place(i)
+        const reportEnded = item.from?.ended
         // A report is drawn from its fields, as in the thread, not from the sentence the agent gets,
         // and a message of comments from its summary, not from the quotes it sends.
         const turns = reportedTurns(item.from)
         const report = turns.length > 0
-        const text = report ? (
+        // Huli: reports merged into one message are told by their count and titles.
+        const manyReports = turns.length > 1
+        const text = manyReports ? (
           <ReportText turns={turns} />
+        ) : reportEnded ? (
+          ''
         ) : item.comments ? (
           t('queue.comments', { count: item.comments.count, text: item.comments.text })
         ) : (
@@ -324,22 +338,26 @@ export function QueueStack({
             <span className="kettu-queue__n" aria-hidden>
               {i + 1}
             </span>
-            {report && <span className="kettu-queue__tag">{t('sessionReport.tag')}</span>}
-            <span className="kettu-queue__text">
-              {text || (attachments === 0 && t('queue.attachment'))}
-              {attachments > 0 && (
-                <span className="kettu-queue__dim">
-                  {text && ' · '}
-                  {t('queue.attachments', { count: attachments })}
-                </span>
-              )}
-            </span>
+            {manyReports && <span className="kettu-queue__tag">{t('sessionReport.tag')}</span>}
+            {reportEnded && item.from && !manyReports ? (
+              <QueueReportRow from={item.from} ended={reportEnded} />
+            ) : (
+              <span className="kettu-queue__text">
+                {text || (attachments === 0 && t('queue.attachment'))}
+                {attachments > 0 && (
+                  <span className="kettu-queue__dim">
+                    {text && ' · '}
+                    {t('queue.attachments', { count: attachments })}
+                  </span>
+                )}
+              </span>
+            )}
             {item.device && (
               <span className="kettu-queue__from">
                 {t('queue.from', { device: item.device.name })}
               </span>
             )}
-            {item.from && !report && (
+            {item.from && !reportEnded && (
               <span className="kettu-queue__from">
                 {t('queue.fromSession', { title: item.from.title })}
               </span>
@@ -407,6 +425,59 @@ function ReportText({ turns }: { turns: readonly ReportedTurn[] }) {
       values={{ title: first.title }}
       components={{ title: <span /> }}
     />
+  )
+}
+
+const queueDayStart = (now: number): number => new Date(now).setHours(0, 0, 0, 0)
+
+/**
+ * Draws a queued child-session completion report with the same sentence, round label, completion
+ * time, and direct-jump link as `ReportLine` in the thread history.
+ */
+export function QueueReportRow({ from, ended }: { from: FromSession; ended: FromSessionEnded }) {
+  useTranslation('session')
+  const sender = useSender(from.sessionId)
+  const today = useClock(queueDayStart)
+  const title = sender?.title ?? from.title
+  const display = sessionReportDisplay(ended, title, today)
+  return (
+    <span className="kettu-queue__report">
+      <span className="kettu-queue__report-sentence">{display.sentence}</span>
+      {sender ? (
+        <button
+          type="button"
+          className="kettu-queue__report-link"
+          aria-label={display.openLabel}
+          title={display.openLabel}
+          onClick={(event) => {
+            event.stopPropagation()
+            openSessionReport(sender, ended)
+          }}
+        >
+          <span className="truncate">{title}</span>
+          {display.roundLabel && (
+            <span className="kettu-queue__report-round">· {display.roundLabel}</span>
+          )}
+          <Glyph icon={ArrowUpRight01Icon} size={12} className="kettu-queue__report-arrow" />
+        </button>
+      ) : (
+        <span className="kettu-queue__report-static">
+          <span className="truncate">{title}</span>
+          {display.roundLabel && (
+            <span className="kettu-queue__report-round">· {display.roundLabel}</span>
+          )}
+        </span>
+      )}
+      {display.time && (
+        <time
+          dateTime={display.time.iso}
+          title={display.time.title}
+          className="kettu-queue__report-time"
+        >
+          {display.time.label}
+        </time>
+      )}
+    </span>
   )
 }
 

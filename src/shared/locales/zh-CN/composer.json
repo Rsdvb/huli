@@ -13,12 +13,15 @@
       "limitReachedContinue": "{{limit}}限额已用完 · {{time}} 自动继续",
       "limitExtraUsage": "{{limit}}限额已用完 · 正在用额外用量",
       "ask": "回复…",
+      "editWorkflow": "告诉 {{agent}} 要怎么改这个工作流…",
       "taskRunning": "接着聊，不影响需求",
       "denied": "说说改用什么做法",
       "runningQueue": "排队一条消息 · Esc 停止",
       "runningTouch": "排队一条消息",
       "runningSteer": "立即发送一条消息 · Esc 停止",
       "runningSteerTouch": "立即发送一条消息",
+      "waitingBackground": "回复… · Esc 停止",
+      "waitingBackgroundTouch": "回复…",
       "pickAgent": "选一个智能体接着做…"
     },
     "stop": "停止",
@@ -70,7 +73,10 @@
     "readingModels": "正在读取模型…",
     "noModels": "没有可用的模型",
     "noModelMatch": "没有匹配的模型",
-    "chooseModel": "选择模型"
+    "chooseModel": "选择模型",
+    "voiceInput": "语音输入",
+    "discardRecording": "放弃录音",
+    "useRecording": "使用录音"
   },
   "switchAgent": {
     "menu": "换智能体…",
@@ -94,6 +100,12 @@
     "confirmTerminal": "这个会话还开在终端里。在这里继续后，别同时在那边发消息。",
     "confirmOther": "这个会话还在另一个 Claude Code 里开着。在这里继续后，别同时在那边发消息。",
     "confirm": "在这里继续"
+  },
+  "workflowEdit": {
+    "title": "正在修改工作流「{{name}}」",
+    "hint": "告诉 {{agent}} 要怎么改，它会更新工作流卡片。",
+    "saveHint": "告诉 {{agent}} 要怎么改，再存为你的工作流。",
+    "cancel": "取消"
   },
   "shell": {
     "note": "作为 shell 命令在会话的文件夹里运行；Codex 会把输出加进对话",
@@ -244,7 +256,8 @@
       "loading": "正在读取技能和 MCP 定义",
       "readFailed": "暂时无法读取技能和 MCP 定义。",
       "disconnected": "会话连接后可查看定义的 token 估算。",
-      "note": "这是 Codex 可加载内容的大小，不是上面上下文的组成部分。"
+      "agentFallback": "该智能体",
+      "note": "这是 {{agent}} 可加载内容的大小，不是上面上下文的组成部分。"
     },
     "limits": {
       "plan": "套餐",
@@ -291,7 +304,17 @@
       "uncachedInput": "未缓存输入",
       "dynamicNote": "该模型的缓存生命周期由服务端动态管理，没有固定倒计时。",
       "lastRequest": "上次请求 {{time}}",
-      "dynamicLifetime": "动态时长"
+      "dynamicLifetime": "动态时长",
+      "dropNotice": {
+        "title": "提示词缓存命中下降",
+        "change": "{{before}}% → {{after}}%（{{total}} 输入中仅缓存命中 {{cached}}）。",
+        "extraCost": "按 API 价约多花 {{cost}}",
+        "reasons": {
+          "model_changed": "切换了模型",
+          "compacted": "已压缩上下文",
+          "expired": "回合中缓存过期"
+        }
+      }
     },
     "speed": {
       "title": "输出速度",
@@ -329,6 +352,35 @@
       "running": "进行中"
     },
     "everyRequest": "每次请求",
+    "mcp": {
+      "title": "MCP 服务器",
+      "changed_one": "{{names}} 在这个会话开始以后加了或改了。",
+      "changed_other": "{{names}} 在这个会话开始以后加了或改了。",
+      "useNow": "现在用上",
+      "afterTurn": "这一轮结束后可用",
+      "applyFailed": "没能现在用上：{{error}}",
+      "manage": "管理",
+      "state": {
+        "running": "已连接",
+        "idle": "空闲",
+        "starting": "启动中…",
+        "signIn": "需要登录",
+        "byAgent": "由智能体运行"
+      },
+      "tools_one": "{{count}} 个工具",
+      "tools_other": "{{count}} 个工具",
+      "perTurn": "每轮约 {{tokens}} token",
+      "offHere": "这个会话里关了",
+      "turnOn": "打开",
+      "signIn": "登录",
+      "more": "{{name}} 的更多操作",
+      "reconnect": "重连",
+      "turnOff": "在这个会话里关掉",
+      "openPage": "打开服务器页",
+      "project": "这个项目的",
+      "review": "查看",
+      "actionFailed": "{{name}}：{{error}}"
+    },
     "traffic": {
       "title": "流量",
       "about": "约 {{value}}",
@@ -365,6 +417,7 @@
     "add": "添加文件、照片或文件夹",
     "addFiles": "添加文件或照片…",
     "addFolder": "添加文件夹…",
+    "attachArtifact": "添加产物…",
     "screenshot": "截取浏览器画面",
     "noPage": "未打开网页",
     "openBrowser": "先打开浏览器",
@@ -403,7 +456,11 @@
     "loading": "正在列出命令…",
     "chooseProject": "选择一个项目后才能列出命令",
     "yours": "你的",
-    "kettu": "Kettu"
+    "kettu": "Kettu",
+    "skill": "技能",
+    "activeSkills_other": "{{count}} 个技能",
+    "activeCommandAndSkills_other": "命令 · {{count}} 个技能",
+    "moreSkills": "还有 {{count}} 个"
   },
   "mentions": {
     "used": "本会话用过",
@@ -429,6 +486,17 @@
       "invalid": "插件返回了 Kettu 无法使用的内容",
       "request_failed": "没能完成搜索"
     }
+  },
+  "githubRefs": {
+    "heading": "Issue 与 PR",
+    "loading": "正在加载 Issue 和 PR…",
+    "searching": "正在搜索 Issue 和 PR…",
+    "empty": "此仓库还没有 Issue 或 PR",
+    "noMatch": "没有匹配的 Issue 或 PR",
+    "ghMissing": "安装 GitHub CLI（gh）后即可搜索 Issue 和 PR",
+    "ghSignedOut": "运行 gh auth login 登录 GitHub CLI 后即可搜索 Issue 和 PR",
+    "failed": "暂时无法搜索 GitHub Issue 和 PR",
+    "keysClose": "Esc 关闭"
   },
   "chips": {
     "pastedLink": "已粘贴为链接",
@@ -458,5 +526,57 @@
     "remove": "移除第 {{number}} 条评论",
     "edit": "修改第 {{number}} 条评论",
     "show": "在对话里显示第 {{number}} 段"
+  },
+  "artifacts": {
+    "pickerTitle": "添加产物",
+    "searchPlaceholder": "搜索产物…",
+    "loading": "正在加载产物…",
+    "emptyProject": "这个项目里还没有产物",
+    "empty": "还没有产物",
+    "allAttached": "所有产物都已添加",
+    "noMatch": "没有匹配的产物",
+    "allProjects": "全部项目",
+    "noProject": "不属于项目",
+    "attachedLabel": "已添加的产物",
+    "remove": "移除 {{title}}",
+    "open": "打开 {{title}}",
+    "sentLabel": "引用的产物"
+  },
+  "browserAnnotations": {
+    "label": "引用的页面元素",
+    "sentLabel": "引用的页面元素",
+    "inspect": "查看 {{label}}",
+    "remove": "移除 {{label}}",
+    "locator": "定位选择器",
+    "accessibleName": "无障碍名称",
+    "visibleText": "可见内容",
+    "attributes": "元素属性",
+    "limit": "一条消息最多引用 {{count}} 个页面元素",
+    "noActiveSession": "当前没有可接收页面元素引用的活跃会话",
+    "sessionStarting": "请等待会话启动完成后再添加页面元素引用",
+    "sessionHeldOutside": "该会话正在外部终端中运行，暂时无法添加到输入框"
+  },
+  "delegation": {
+    "menuItem": "委派给 Agent…",
+    "noAgents": "暂无可用的 Agent",
+    "pickerTitle": "委派给 Agent",
+    "pickerHint": "在当前项目中直接启动子会话",
+    "searchPlaceholder": "搜索可用的 Agent…",
+    "clearSearch": "清空搜索",
+    "loading": "正在加载可用 Agent…",
+    "empty": "当前没有可委派的 Agent",
+    "noMatch": "没有匹配的 Agent",
+    "loadFailed": "无法加载可用的 Agent",
+    "current": "当前",
+    "statusSignIn": "需要登录",
+    "statusInstalling": "安装中…",
+    "statusFailed": "暂不可用",
+    "recipientLabel": "委派接收人",
+    "to": "委派给：{{agent}}",
+    "changeRecipient": "更换接收人（{{agent}}）",
+    "removeRecipient": "清除接收人 {{agent}}",
+    "chipHint": "将直接启动子会话，结果回到当前会话",
+    "placeholder": "输入交给 {{agent}} 的任务（将直接启动子会话，结果回到当前会话）…",
+    "sendLabel": "委派给 {{agent}}"
   }
 }

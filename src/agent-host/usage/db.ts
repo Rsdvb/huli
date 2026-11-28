@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from 'node:sqlite'
-import type { AgentId } from '@shared/thread'
+import type { AgentId, TurnUsage } from '@shared/thread'
 import {
   partsTotal,
   SESSION_RANKS,
@@ -17,9 +17,11 @@ import {
 } from '@shared/usage'
 import { transaction } from '../sqlite'
 import { PRICES, type FileCursor, type UsageRow } from './model'
+import { buildTurnUsage, parseTurnEntryId } from './record'
 import { keepsNewer } from './rows'
 
-export const SCHEMA_VERSION = 4
+// Huli: Kite's version 4 is the image columns, so Kettu's 4 (the reported cost) is 5 here.
+export const SCHEMA_VERSION = 5
 
 /** Every time zone's offset is a multiple of 15 minutes, so a local day is a range of these. */
 export const QUARTER_MS = 900_000
@@ -41,7 +43,8 @@ const SCHEMA = `
     cache_write_1h INTEGER NOT NULL,
     turn        INTEGER NOT NULL,
     images      INTEGER NOT NULL DEFAULT 0,
-    image_bytes INTEGER NOT NULL DEFAULT 0
+    image_bytes INTEGER NOT NULL DEFAULT 0,
+    cost        REAL
   ) STRICT, WITHOUT ROWID;
   CREATE INDEX usage_by_agent ON usage (source, agent_id);
   CREATE TABLE buckets (
@@ -50,6 +53,7 @@ const SCHEMA = `
     agent_id    TEXT NOT NULL,
     model       TEXT NOT NULL,
     project     TEXT NOT NULL,
+    reported    INTEGER NOT NULL DEFAULT 0,
     rows        INTEGER NOT NULL,
     input       INTEGER NOT NULL,
     output      INTEGER NOT NULL,
@@ -60,7 +64,8 @@ const SCHEMA = `
     turns       INTEGER NOT NULL,
     images      INTEGER NOT NULL DEFAULT 0,
     image_bytes INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (quarter, source, agent_id, model, project)
+    cost        REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (quarter, source, agent_id, model, project, reported)
   ) STRICT, WITHOUT ROWID;
   CREATE TABLE cursors (
     id        TEXT PRIMARY KEY,
@@ -75,8 +80,8 @@ const SCHEMA = `
   CREATE INDEX cursors_by_agent ON cursors (agent_id);
 `
 
-/** Kettu's buckets summed again from its rows. */
-const KETTU_BUCKETS = `
+/** Kettu's buckets summed again from its rows on the pre-v4 schema (used by upgrades 1 and 2). */
+const KETTU_BUCKETS_V3 = `
   DELETE FROM buckets WHERE source = 'kettu';
   INSERT INTO buckets (quarter, source, agent_id, model, project, rows, input, output, reasoning,
     cache_read, cache_write, cache_write_1h, turns)
@@ -102,7 +107,7 @@ const UPGRADE_1 = `
     SELECT MIN(key) FROM usage WHERE source = 'kettu'
     GROUP BY substr(key, 1, length(key) - length(model))
   );
-  ${KETTU_BUCKETS}
+  ${KETTU_BUCKETS_V3}
 `
 
 /**
@@ -119,13 +124,48 @@ const UPGRADE_2 = `
     AND substr(agent_id, 1, instr(agent_id || '~', '~') - 1)
       IN (${CACHE_IN_INPUT.map((harness) => `'${harness}'`).join(', ')})
     AND cache_read + cache_write > 0 AND input >= cache_read + cache_write;
-  ${KETTU_BUCKETS}
+  ${KETTU_BUCKETS_V3}
+`
+
+// Version 4 stored no log-reported USD cost; every existing row and bucket continues to be priced
+// from the model price list (reported = 0, cost = 0). Huli: Kettu's version 3 to 4, Kite's 4 to 5;
+// the rebuilt buckets keep Kite's image columns, which `addImageColumns` added before.
+const UPGRADE_4 = `
+  ALTER TABLE usage ADD COLUMN cost REAL;
+  CREATE TABLE buckets_v5 (
+    quarter     INTEGER NOT NULL,
+    source      TEXT NOT NULL,
+    agent_id    TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    project     TEXT NOT NULL,
+    reported    INTEGER NOT NULL DEFAULT 0,
+    rows        INTEGER NOT NULL,
+    input       INTEGER NOT NULL,
+    output      INTEGER NOT NULL,
+    reasoning   INTEGER NOT NULL,
+    cache_read  INTEGER NOT NULL,
+    cache_write INTEGER NOT NULL,
+    cache_write_1h INTEGER NOT NULL,
+    turns       INTEGER NOT NULL,
+    images      INTEGER NOT NULL DEFAULT 0,
+    image_bytes INTEGER NOT NULL DEFAULT 0,
+    cost        REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (quarter, source, agent_id, model, project, reported)
+  ) STRICT, WITHOUT ROWID;
+  INSERT INTO buckets_v5 (quarter, source, agent_id, model, project, reported, rows, input, output,
+    reasoning, cache_read, cache_write, cache_write_1h, turns, images, image_bytes, cost)
+  SELECT quarter, source, agent_id, model, project, 0, rows, input, output,
+    reasoning, cache_read, cache_write, cache_write_1h, turns, images, image_bytes, 0
+  FROM buckets;
+  DROP TABLE buckets;
+  ALTER TABLE buckets_v5 RENAME TO buckets;
 `
 
 /**
  * Huli: version 4 counts the images the requests uploaded again and their bytes, for the traffic
  * estimate (`shared/traffic.ts`). The rows before it carry none. Added only where missing, since a
- * file of an earlier version was made with the columns when a test or a downgrade set it back.
+ * file of an earlier version was made with the columns when a test or a downgrade set it back, and
+ * a file of Kettu's version 4 has the reported cost but no images.
  */
 function addImageColumns(db: DatabaseSync): void {
   for (const table of ['usage', 'buckets']) {
@@ -258,14 +298,15 @@ const SUMS = `
   SUM(b.cache_write) AS cache_write,
   SUM(b.images) AS images,
   SUM(b.image_bytes) AS image_bytes,
-  SUM(CASE WHEN ${PRICED} THEN
-    b.input * ${INPUT_PRICE}
-    + (b.output + b.reasoning) * ${OUTPUT_PRICE}
-    + b.cache_read * ${READ_PRICE}
-    + (b.cache_write - b.cache_write_1h) * ${WRITE_PRICE}
-    + b.cache_write_1h * ${HOUR_PRICE}
+  SUM(CASE WHEN b.reported = 1 THEN b.cost
+    WHEN ${PRICED} THEN
+      b.input * ${INPUT_PRICE}
+      + (b.output + b.reasoning) * ${OUTPUT_PRICE}
+      + b.cache_read * ${READ_PRICE}
+      + (b.cache_write - b.cache_write_1h) * ${WRITE_PRICE}
+      + b.cache_write_1h * ${HOUR_PRICE}
     ELSE NULL END) AS cost,
-  SUM(CASE WHEN ${PRICED} THEN 0
+  SUM(CASE WHEN b.reported = 1 OR ${PRICED} THEN 0
     ELSE b.input + b.output + b.reasoning + b.cache_read + b.cache_write END) AS unpriced_tokens,
   SUM(CASE WHEN ${PRICED} THEN b.cache_read * (${INPUT_PRICE} - ${READ_PRICE}) ELSE 0 END)
     AS cache_saved`
@@ -280,18 +321,18 @@ function prepareAll(db: DatabaseSync) {
     row: sql('SELECT * FROM usage WHERE key = ?'),
     insertRow: sql(`
       INSERT INTO usage (key, source, agent_id, session_id, project, model, at, input, output,
-        reasoning, cache_read, cache_write, cache_write_1h, turn, images, image_bytes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+        reasoning, cache_read, cache_write, cache_write_1h, turn, images, image_bytes, cost)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     updateRow: sql(`
       UPDATE usage SET session_id = ?, project = ?, model = ?, at = ?, input = ?, output = ?,
         reasoning = ?, cache_read = ?, cache_write = ?, cache_write_1h = ?, turn = ?, images = ?,
-        image_bytes = ?
+        image_bytes = ?, cost = ?
       WHERE key = ?`),
     addBucket: sql(`
-      INSERT INTO buckets (quarter, source, agent_id, model, project, rows, input, output,
-        reasoning, cache_read, cache_write, cache_write_1h, turns, images, image_bytes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (quarter, source, agent_id, model, project) DO UPDATE SET
+      INSERT INTO buckets (quarter, source, agent_id, model, project, reported, rows, input, output,
+        reasoning, cache_read, cache_write, cache_write_1h, turns, images, image_bytes, cost)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (quarter, source, agent_id, model, project, reported) DO UPDATE SET
         rows = rows + excluded.rows,
         input = input + excluded.input,
         output = output + excluded.output,
@@ -301,10 +342,12 @@ function prepareAll(db: DatabaseSync) {
         cache_write_1h = cache_write_1h + excluded.cache_write_1h,
         turns = turns + excluded.turns,
         images = images + excluded.images,
-        image_bytes = image_bytes + excluded.image_bytes`),
+        image_bytes = image_bytes + excluded.image_bytes,
+        cost = cost + excluded.cost`),
     dropEmptyBucket: sql(
       `DELETE FROM buckets
-      WHERE quarter = ? AND source = ? AND agent_id = ? AND model = ? AND project = ? AND rows <= 0`,
+      WHERE quarter = ? AND source = ? AND agent_id = ? AND model = ? AND project = ? AND reported = ?
+        AND rows <= 0`,
     ),
     putCursor: sql(`
       INSERT INTO cursors (id, agent_id, size, mtime_ns, offset, tail, state, seen_at)
@@ -346,13 +389,17 @@ function prepareAll(db: DatabaseSync) {
       FROM (
         SELECT agent_id, source, session_id, project, at, model, 1 AS rows, turn AS turns, input,
           output, COALESCE(reasoning, 0) AS reasoning, cache_read, cache_write, cache_write_1h,
-          images, image_bytes
+          images, image_bytes, cost IS NOT NULL AS reported, COALESCE(cost, 0) AS cost
         FROM usage WHERE at >= ? AND at < ? AND session_id IS NOT NULL AND session_id != ''
       ) AS b ${PRICE_JOIN}
       GROUP BY b.agent_id, b.source, b.session_id`),
     stats: sql(`
       SELECT agent_id, source, SUM(rows) AS rows, MIN(quarter) AS first, MAX(quarter) AS last
       FROM buckets GROUP BY agent_id, source`),
+    sessionKettuRows: sql(`
+      SELECT key, model, input, output, reasoning, cache_read, cache_write, cache_write_1h, cost
+      FROM usage
+      WHERE key >= ? AND key < ? AND source = 'kettu'`),
     deleteRows: sql('DELETE FROM usage WHERE source = ? AND agent_id = ?'),
     deleteBuckets: sql('DELETE FROM buckets WHERE source = ? AND agent_id = ?'),
     deleteCursors: sql('DELETE FROM cursors WHERE agent_id = ?'),
@@ -431,10 +478,19 @@ export class UsageDb {
 
   /** Brings an older file to `SCHEMA_VERSION` in one transaction. */
   private upgrade(db: DatabaseSync, from: number): void {
+    const hasColumn = (table: string, column: string): boolean =>
+      db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .some((info) => info.name === column)
     transaction(db, () => {
       if (from === 1) db.exec(UPGRADE_1)
       if (from <= 2) db.exec(UPGRADE_2)
-      if (from <= 3) addImageColumns(db)
+      // Huli: Kite's version 4 is the image columns, so Kettu's version 3 to 4 (the reported cost)
+      // is Kite's 4 to 5. The image columns go first, as the rebuilt buckets keep them; each adds
+      // only what is missing.
+      if (from <= 4) addImageColumns(db)
+      if (from <= 4 && !hasColumn('usage', 'cost')) db.exec(UPGRADE_4)
       db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
     })
   }
@@ -479,12 +535,15 @@ export class UsageDb {
     const quarter = quarterOf(row.at)
     // A key column cannot be null; '' stands for no project.
     const project = row.project ?? ''
+    const cost = rowCost(row.cost)
+    const reported = cost === null ? 0 : 1
     sql.addBucket.run(
       quarter,
       row.source,
       row.agentId,
       row.model,
       project,
+      reported,
       sign,
       sign * row.input,
       sign * row.output,
@@ -495,8 +554,11 @@ export class UsageDb {
       sign * row.turn,
       sign * (row.images ?? 0),
       sign * (row.imageBytes ?? 0),
+      sign * (cost ?? 0),
     )
-    if (sign < 0) sql.dropEmptyBucket.run(quarter, row.source, row.agentId, row.model, project)
+    if (sign < 0) {
+      sql.dropEmptyBucket.run(quarter, row.source, row.agentId, row.model, project, reported)
+    }
   }
 
   /**
@@ -508,6 +570,7 @@ export class UsageDb {
       let changed = 0
       this.transaction(db, () => {
         for (const row of rows) {
+          const cost = rowCost(row.cost)
           const stored = sql.row.get(row.key)
           if (!stored) {
             sql.insertRow.run(
@@ -527,13 +590,15 @@ export class UsageDb {
               row.turn,
               row.images ?? 0,
               row.imageBytes ?? 0,
+              cost,
             )
-            this.bucket(sql, row, 1)
+            this.bucket(sql, { ...row, cost }, 1)
             changed++
             continue
           }
           const previous = fromRow(stored)
-          if (!keepsNewer(previous, row)) continue
+          const nextRow = { ...row, cost }
+          if (!keepsNewer(previous, nextRow)) continue
           sql.updateRow.run(
             row.sessionId,
             row.project,
@@ -548,10 +613,11 @@ export class UsageDb {
             row.turn,
             row.images ?? 0,
             row.imageBytes ?? 0,
+            cost,
             row.key,
           )
           this.bucket(sql, previous, -1)
-          this.bucket(sql, { ...row, source: previous.source, agentId: previous.agentId }, 1)
+          this.bucket(sql, { ...nextRow, source: previous.source, agentId: previous.agentId }, 1)
           changed++
         }
         if (cursor) {
@@ -710,6 +776,56 @@ export class UsageDb {
     )
   }
 
+  /**
+   * Returns per-turn usage breakdowns recorded by Kettu for one session, keyed by `turnEntryId`.
+   * Uses a primary-key prefix range scan (`ob:<sessionId>:`) for fast hydration of legacy threads.
+   */
+  sessionTurnUsage(sessionId: string): Record<string, TurnUsage> {
+    if (!sessionId) return {}
+    return this.guard((sql) => {
+      const from = `ob:${sessionId}:`
+      const to = `ob:${sessionId};`
+      const byTurn = new Map<
+        string,
+        Pick<
+          UsageRow,
+          | 'model'
+          | 'input'
+          | 'output'
+          | 'reasoning'
+          | 'cacheRead'
+          | 'cacheWrite'
+          | 'cacheWrite1h'
+          | 'cost'
+        >[]
+      >()
+      for (const row of sql.sessionKettuRows.all(from, to)) {
+        const key = String(row.key)
+        const model = String(row.model)
+        const turnEntryId = parseTurnEntryId(key, sessionId, model)
+        if (!turnEntryId) continue
+        const list = byTurn.get(turnEntryId) ?? []
+        list.push({
+          model,
+          input: num(row.input),
+          output: num(row.output),
+          reasoning: row.reasoning === null ? null : num(row.reasoning),
+          cacheRead: num(row.cache_read),
+          cacheWrite: num(row.cache_write),
+          cacheWrite1h: num(row.cache_write_1h),
+          cost: row.cost === null || row.cost === undefined ? null : num(row.cost),
+        })
+        byTurn.set(turnEntryId, list)
+      }
+      const result: Record<string, TurnUsage> = {}
+      for (const [turnEntryId, rows] of byTurn) {
+        const built = buildTurnUsage(rows)
+        if (built) result[turnEntryId] = built
+      }
+      return result
+    }, {})
+  }
+
   /** Forgets an agent's imported rows and cursors, so the next scan reads its logs afresh. */
   removeLogs(agentId: AgentId): void {
     this.guard((sql, db) => {
@@ -794,6 +910,10 @@ function addParts(sum: TokenParts, add: TokenParts): void {
   if (add.cost !== null) sum.cost = (sum.cost ?? 0) + add.cost
 }
 
+function rowCost(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
 function fromRow(row: Row): UsageRow {
   return {
     key: String(row.key),
@@ -812,5 +932,6 @@ function fromRow(row: Row): UsageRow {
     turn: num(row.turn),
     images: num(row.images),
     imageBytes: num(row.image_bytes),
+    cost: row.cost === null || row.cost === undefined ? null : num(row.cost),
   }
 }

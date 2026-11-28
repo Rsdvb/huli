@@ -9,6 +9,7 @@ import { hostOfPath } from '@renderer/lib/host-paths'
 import { readJson, writeJson } from '@renderer/lib/storage'
 import { insideAny, isWithin, movedPath } from '@renderer/features/files/paths'
 import { useGitStore } from './git'
+import { useProjectsStore } from './projects'
 import {
   changeDocs,
   closeDoc,
@@ -16,6 +17,7 @@ import {
   docRoot,
   keepDoc,
   openDoc,
+  paneProjectPath,
   panelOf,
   shownDoc,
   useViewStore,
@@ -483,13 +485,15 @@ function heldElsewhere(projectPath: string, key: string, except: string): boolea
  */
 function panelIn(projectPath: string): { panel: string; project: string; root?: string } | null {
   const state = useViewStore.getState()
+  const projects = useProjectsStore.getState().projects
   const view = focusedPane(state.layout).view
-  const panel = panelOf(view)
+  const panel = panelOf(view, state.projectPath, projects)
   if (!panel) return null
-  if (view.projectPath === projectPath) return { panel, project: projectPath }
-  if (view.projectPath === null) return null
+  const path = paneProjectPath(view, state.projectPath, projects)
+  if (path === projectPath) return { panel, project: projectPath }
+  if (path === null) return null
   const further = state.filesRoot[panel] === projectPath || state.gitRoot[panel] === projectPath
-  return further ? { panel, project: view.projectPath, root: projectPath } : null
+  return further ? { panel, project: path, root: projectPath } : null
 }
 
 const filesOf = (projectPath: string): OpenFile[] =>

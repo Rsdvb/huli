@@ -220,6 +220,9 @@
     "notFolder": "“{{path}}”不是这台电脑上的文件夹",
     "noPublish": "这台电脑不支持发布",
     "noUpdates": "这台电脑不能在设置里更新",
+    "updateNotAllowed": "这台设备已没有更新此主机的权限",
+    "updateConfirmationStale": "这条更新确认请求已失效或已处理",
+    "updateConfirmationWrongCaller": "只有发起本次更新的设备才能选择更新时机",
     "noPreviews": "这台电脑不生成预览图",
     "noRender": "这台电脑不渲染页面",
     "noPrint": "这台电脑不支持打印",
@@ -273,6 +276,12 @@
     "notApp": "“{{path}}”不是可以打开的应用",
     "notFileOrFolder": "“{{path}}”不是文件或文件夹",
     "openFailed": "没能用 {{editor}} 打开：{{reason}}"
+  },
+  "shell": {
+    "notFound": "无法打开“{{name}}”：文件已不存在",
+    "notFile": "无法打开“{{name}}”：只能用默认应用打开普通文件",
+    "executable": "无法打开“{{name}}”：不能直接打开可执行文件或脚本",
+    "openFailed": "无法打开“{{name}}”：{{reason}}"
   },
   "updates": {
     "notYaml": "{{name}} 不是有效的 YAML：{{reason}}",

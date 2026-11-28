@@ -3,14 +3,26 @@
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { applyPatches, threadEntries, threadFromSnapshot, type ThreadState } from '@shared/thread'
+import {
+  applyPatches,
+  threadEntries,
+  threadFromSnapshot,
+  type Patch,
+  type ThreadState,
+} from '@shared/thread'
 import { newTurnScope, type MapperContext, type MapperEffect } from '../session-updates'
 import { fenced } from '../session-updates'
 import { commandFacts, deniedEvent, diffHunks, stripShellPrefix, ThreadMapper } from './mapper'
 
 function run(
   notifications: [string, unknown, number?][],
-  options: { replaying?: boolean; title?: string; appeals?: boolean } = {},
+  options: {
+    replaying?: boolean
+    title?: string
+    appeals?: boolean
+    codexHome?: string
+    cwd?: string
+  } = {},
 ) {
   let thread: ThreadState = threadFromSnapshot({
     session: {
@@ -38,9 +50,16 @@ function run(
     entries: [],
     seq: 0,
   })
-  const mapper = new ThreadMapper({ appeals: options.appeals ?? false })
+  const mapper = new ThreadMapper(
+    {
+      ...(options.codexHome ? { codexHome: options.codexHome } : {}),
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+    },
+    { appeals: options.appeals ?? false },
+  )
   const scope = newTurnScope()
   const effects: MapperEffect[] = []
+  const patches: Patch[] = []
   let n = 0
   let now = 1_000
   const unknown: string[] = []
@@ -58,12 +77,13 @@ function run(
     const out = mapper.notification(method, params, ctx)
     if (!out) unknown.push(method)
     else {
+      patches.push(...out.patches)
       thread = applyPatches(thread, out.patches)
       effects.push(...out.effects)
     }
     now += 100
   }
-  return { thread, entries: threadEntries(thread), effects, unknown }
+  return { thread, entries: threadEntries(thread), effects, unknown, patches }
 }
 
 const at = { threadId: 'thread-1', turnId: 'turn-1' }
@@ -274,6 +294,32 @@ describe('commands', () => {
     const { entries } = run([completed(item)])
     expect(entries[0]).toMatchObject({ status: 'failed', exitCode: 1 })
     expect(entries[0]).not.toHaveProperty('denied')
+  })
+
+  it('emits incremental entry.appendOutput patches for streaming command output deltas', () => {
+    const item = {
+      type: 'commandExecution',
+      id: 'cmd1',
+      command: 'npm test',
+      cwd: '/p',
+      status: 'inProgress',
+      commandActions: [{ type: 'unknown', command: 'npm test' }],
+      aggregatedOutput: null,
+      exitCode: null,
+    }
+    const { entries, patches } = run([
+      started(item),
+      ['item/commandExecution/outputDelta', { ...at, itemId: 'cmd1', delta: 'first\r\n' }],
+      ['item/commandExecution/outputDelta', { ...at, itemId: 'cmd1', delta: 'second\n' }],
+    ])
+    expect(patches.filter((p) => p.op === 'entry.appendOutput')).toEqual([
+      { op: 'entry.appendOutput', id: 't:cmd1', text: 'first\n' },
+      { op: 'entry.appendOutput', id: 't:cmd1', text: 'second\n' },
+    ])
+    expect(entries[0]).toMatchObject({
+      kind: 'tool',
+      content: [{ type: 'markdown', markdown: '```\nfirst\nsecond\n```' }],
+    })
   })
 })
 
@@ -1120,5 +1166,180 @@ describe('other items', () => {
     expect(run([completed(user)], { replaying: true }).entries).toEqual([
       { kind: 'user', id: 'm:u', content: [{ type: 'text', text: 'hi' }] },
     ])
+  })
+
+  it('tracks interruptibleWait effects for native sleep, clock MCP sleep, and dynamic clock.sleep', () => {
+    const nativeSleep = { type: 'sleep', id: 'sl-1', durationMs: 60_000 }
+    const mcpSleep = {
+      type: 'mcpToolCall',
+      id: 'mcp-sleep',
+      server: 'clock',
+      tool: 'sleep',
+      status: 'inProgress',
+      arguments: { durationMs: 60_000 },
+      result: null,
+      error: null,
+    }
+    const dynamicSleep = {
+      type: 'dynamicToolCall',
+      id: 'dyn-sleep',
+      tool: 'clock.sleep',
+      arguments: { seconds: 30 },
+      status: 'inProgress',
+      contentItems: null,
+    }
+    const nonSleepMcp = {
+      type: 'mcpToolCall',
+      id: 'mcp-other',
+      server: 'kettu',
+      tool: 'report_step',
+      status: 'inProgress',
+      arguments: {},
+      result: null,
+      error: null,
+    }
+
+    const live = run([
+      started(nativeSleep),
+      completed(nativeSleep),
+      started(mcpSleep),
+      completed({ ...mcpSleep, status: 'completed' }),
+      started(dynamicSleep),
+      completed({ ...dynamicSleep, status: 'completed' }),
+      started(nonSleepMcp),
+      completed({ ...nonSleepMcp, status: 'completed' }),
+    ])
+    expect(live.effects.filter((e) => e.kind === 'ignored')).toEqual([])
+    expect(live.effects.filter((e) => e.kind === 'interruptibleWait')).toEqual([
+      { kind: 'interruptibleWait', id: 'sleep:sl-1', active: true },
+      { kind: 'interruptibleWait', id: 'sleep:sl-1', active: false },
+      { kind: 'interruptibleWait', id: 't:mcp-sleep', active: true },
+      { kind: 'interruptibleWait', id: 't:mcp-sleep', active: false },
+      { kind: 'interruptibleWait', id: 't:dyn-sleep', active: true },
+      { kind: 'interruptibleWait', id: 't:dyn-sleep', active: false },
+    ])
+
+    // Replayed sleep items do not emit live interruptibleWait effects.
+    const replayed = run(
+      [completed(nativeSleep), completed({ ...mcpSleep, status: 'completed' })],
+      {
+        replaying: true,
+      },
+    )
+    expect(replayed.effects.filter((e) => e.kind === 'interruptibleWait')).toEqual([])
+  })
+
+  it('maps configWarning with path, range, details, and inferred config layer', () => {
+    const { entries } = run(
+      [
+        [
+          'configWarning',
+          {
+            summary: 'Invalid configuration; using defaults.',
+            details: '/Users/dev/.codex/config.toml:1:22: unclosed array, expected `]`',
+            path: '/Users/dev/.codex/config.toml',
+            range: { start: { line: 1, column: 22 }, end: { line: 1, column: 22 } },
+          },
+        ],
+        [
+          'configWarning',
+          {
+            summary: '`[features].multi_agent` is deprecated. It still controls the V1 fallback.',
+            details: null,
+            path: '/Users/dev/project/.codex/config.toml',
+            range: { start: { line: 4, column: 1 }, end: { line: 4, column: 18 } },
+          },
+        ],
+      ],
+      { codexHome: '/Users/dev/.codex', cwd: '/Users/dev/project' },
+    )
+
+    expect(entries).toHaveLength(2)
+    expect(entries[0]).toMatchObject({
+      kind: 'notice',
+      severity: 'warning',
+      title: 'Codex configuration warning',
+      description:
+        'Invalid configuration; using defaults.\n/Users/dev/.codex/config.toml:1:22: unclosed array, expected `]`',
+      configWarning: {
+        agent: 'codex',
+        impact: 'invalid',
+        sources: [{ layer: 'user', path: '/Users/dev/.codex/config.toml', line: 1, column: 22 }],
+        details: '/Users/dev/.codex/config.toml:1:22: unclosed array, expected `]`',
+        docsUrl: 'https://developers.openai.com/codex/config-reference',
+      },
+    })
+    expect(entries[1]).toMatchObject({
+      kind: 'notice',
+      severity: 'warning',
+      title: 'Codex configuration warning',
+      description: '`[features].multi_agent` is deprecated. It still controls the V1 fallback.',
+      configWarning: {
+        agent: 'codex',
+        impact: 'deprecated',
+        sources: [
+          { layer: 'project', path: '/Users/dev/project/.codex/config.toml', line: 4, column: 1 },
+        ],
+        docsUrl: 'https://developers.openai.com/codex/config-reference',
+      },
+    })
+  })
+
+  it('distinguishes deprecated vs ignored config warnings, extracts structured layer paths, and avoids guessing missing paths', () => {
+    const deprecatedMsg =
+      '`[features].multi_agent` is deprecated. It still controls the V1 fallback. ' +
+      '`[agents].enabled = false` disables subagent tools.'
+    const ignoredMsg =
+      'Codex is ignoring 2 unrecognized configuration settings. Check for typos or deprecated settings.\n' +
+      '  project (/Users/dev/repo/.codex/config.toml): `unknown_project_key` is ignored.\n' +
+      '  user (/Users/dev/.codex/config.toml): `disable_response_storage` is ignored.'
+
+    const { entries } = run([
+      ['warning', { threadId: 'thread-1', message: deprecatedMsg }],
+      ['warning', { threadId: 'thread-1', message: ignoredMsg }],
+      // Duplicate of the same warning in one thread should be ignored.
+      ['configWarning', { summary: deprecatedMsg, details: null }],
+      // Regular non-config runtime warning keeps plain notice rendering.
+      ['warning', { threadId: 'thread-1', message: 'Approaching rate limit.' }],
+    ])
+
+    expect(entries).toHaveLength(3)
+    expect(entries[0]).toMatchObject({
+      kind: 'notice',
+      severity: 'warning',
+      title: 'Codex configuration warning',
+      description: deprecatedMsg,
+      configWarning: {
+        agent: 'codex',
+        impact: 'deprecated',
+        docsUrl: 'https://developers.openai.com/codex/config-reference',
+      },
+    })
+    expect(
+      entries[0]?.kind === 'notice' ? entries[0].configWarning?.sources : undefined,
+    ).toBeUndefined()
+
+    expect(entries[1]).toMatchObject({
+      kind: 'notice',
+      severity: 'warning',
+      title: 'Codex configuration warning',
+      description: ignoredMsg,
+      configWarning: {
+        agent: 'codex',
+        impact: 'ignored',
+        sources: [
+          { layer: 'project', path: '/Users/dev/repo/.codex/config.toml' },
+          { layer: 'user', path: '/Users/dev/.codex/config.toml' },
+        ],
+        docsUrl: 'https://developers.openai.com/codex/config-reference',
+      },
+    })
+
+    expect(entries[2]).toEqual({
+      kind: 'notice',
+      id: 'e:3',
+      severity: 'warning',
+      title: 'Approaching rate limit.',
+    })
   })
 })

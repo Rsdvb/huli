@@ -4,6 +4,7 @@ import {
   ArrowMoveDownRightIcon,
   Clock01Icon,
   Cancel01Icon,
+  CancelCircleIcon,
   CommandLineIcon,
   EyeIcon,
   FolderRemoveIcon,
@@ -79,6 +80,7 @@ import { OpenInEditorMenu } from '@renderer/features/files/open-in-editor-menu'
 import { isLocalProject } from '@renderer/features/files/operations'
 import { PrIcon } from '@renderer/features/git/pr-icon'
 import { modelName } from '@renderer/features/session/conversation-markdown'
+import { sessionLinkProps } from '@renderer/features/session/open-link'
 import { Glyph, MenuGlyph } from '@renderer/features/shell/glyph'
 import { basename, tokens } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
@@ -88,7 +90,7 @@ import { fileManagerName, formatShortcut, isMac, isWeb } from '@renderer/lib/pla
 import { shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 import { cn } from '@renderer/lib/utils'
 import { agentsOn, isInstalled, usableAgents, useAgentsStore } from '@renderer/stores/agents'
-import { useGitStore } from '@renderer/stores/git'
+import { pullRequestOf, useGitStore } from '@renderer/stores/git'
 import { useTerminalAllowed } from '@renderer/stores/hosts'
 import { clearSelection } from '@renderer/stores/session-selection'
 import {
@@ -155,11 +157,16 @@ import { askExport, canExport, exportAs } from '@renderer/features/session/expor
 import { askMove, canMove } from '@renderer/features/session/move/move'
 import { askMcpPanel } from '@renderer/features/session/mcp/mcp-panel'
 import {
+  refreshSessionTerminals,
+  requestCloseAllTerminals,
+} from '@renderer/features/terminal/close-all-terminals-model'
+import {
   askRemoveWorktree,
   canRemoveWorktree,
   hasLiveWorktree,
   offerWorktreeRemoval,
 } from '@renderer/features/worktrees/remove-worktree-model'
+import { terminalsOf, useTerminalsStore } from '@renderer/stores/terminals'
 
 /** An accelerator as the menu shows it: macOS's symbols, or the key names elsewhere. */
 function shortcutLabel(shortcut: string): string {
@@ -287,12 +294,17 @@ export function SessionMenuItems({
     return !!agent?.terminal?.resumes && !agent.disabled && !!summary.acpSessionId
   })
   const { id } = summary
+  const terminalCount = useTerminalsStore((s) => (terminal ? terminalsOf(s.byId, id).length : 0))
   const subSessions = useListedSubSessions([id])
   const currentPr = useGitStore((s) => s.currentPr[sessionFolder(summary)] ?? null)
   const prTarget = prFlowTarget(summary, currentPr)
   const showFinished = useViewStore((s) => s.showFinishedSubagents)
   const listed = subagents ? listedSubagents(subagents, showFinished) : []
   const menuOptions = useMenuOptions(summary.id)
+
+  useEffect(() => {
+    if (terminal) void refreshSessionTerminals(summary.projectPath)
+  }, [terminal, summary.projectPath])
 
   const item = (name: SessionMenuItem) => {
     // Huli: the terminal's item carries the terminal's keys as the user bound them.
@@ -561,7 +573,7 @@ export function SessionMenuItems({
             <DropdownMenuItem
               key={name}
               {...props}
-              render={<a href={pr.url} target="_blank" rel="noreferrer" />}
+              render={<a {...sessionLinkProps(pr.url, id)} />}
             >
               <PrIcon state={pr.state} />
               {t('row.openPullRequest', { number: pr.number })}
@@ -578,15 +590,12 @@ export function SessionMenuItems({
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-80">
                 {prs.map((pr) => (
-                  <DropdownMenuItem
-                    key={pr.url}
-                    render={<a href={pr.url} target="_blank" rel="noreferrer" />}
-                  >
+                  <DropdownMenuItem key={pr.url} render={<a {...sessionLinkProps(pr.url, id)} />}>
                     <PrIcon state={pr.state} />
                     <span className="shrink-0 text-tertiary tabular-nums">
                       {pr.repo}#{pr.number}
                     </span>
-                    <PrTitle url={pr.url} />
+                    <PrTitle url={pr.url} hostId={hostId} />
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuSubContent>
@@ -621,6 +630,20 @@ export function SessionMenuItems({
           <DropdownMenuItem key={name} {...props} onClick={() => void resumeInTerminal(summary)}>
             <MenuGlyph icon={CommandLineIcon} />
             {t('row.resumeInTerminal')}
+          </DropdownMenuItem>
+        )
+      case 'closeTerminals':
+        return (
+          <DropdownMenuItem
+            key={name}
+            {...props}
+            onClick={() => void requestCloseAllTerminals(id, { notify: true })}
+          >
+            <MenuGlyph icon={CancelCircleIcon} />
+            <span className="min-w-0 flex-1 truncate">{t('row.closeTerminals')}</span>
+            <span className="shrink-0 pl-4 text-hint text-tertiary tabular-nums">
+              {terminalCount}
+            </span>
           </DropdownMenuItem>
         )
       case 'copyResume':
@@ -784,6 +807,7 @@ export function SessionMenuItems({
     place,
     local,
     terminal,
+    hasTerminals: terminalCount > 0,
     resume,
     terminalResume: terminal && !running,
     rename: onRename !== undefined,
@@ -1491,7 +1515,7 @@ function DeleteSessionDialogInner({
 }
 
 /** A pull request's title in the menu, once its details have loaded somewhere. */
-function PrTitle({ url }: { url: string }) {
-  const title = useGitStore((s) => s.pullRequests[url]?.title ?? '')
+function PrTitle({ url, hostId }: { url: string; hostId: string | null }) {
+  const title = useGitStore((s) => pullRequestOf(s, hostId, url)?.title ?? '')
   return <span className="min-w-0 flex-1 truncate">{title}</span>
 }

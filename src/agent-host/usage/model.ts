@@ -38,6 +38,8 @@ export interface UsageRow {
    */
   images?: number
   imageBytes?: number
+  /** Confirmed USD cost reported by the agent's own log; null or omitted to estimate from PRICES. */
+  cost?: number | null
 }
 
 /** How far a log file, or a reader's database, has been read. */
@@ -121,8 +123,67 @@ export interface PriceList {
 
 export const PRICES: PriceList = prices
 
-/** A model's price: its own name, then without a trailing date a stored row may still carry. */
+const TRAILING_VARIANT = /-(?:extra-high|minimal|low|medium|high|xhigh|max|thinking|tiered|[a-z])$/
+
+/**
+ * Finds the public API pricing for a normalized model name: tries exact match, strips trailing
+ * date, strips reasoning effort / thinking / routing suffixes, and finally falls back to `-preview`.
+ * Returns null for any model not listed in `PRICES`.
+ */
 export function priceFor(model: string): ModelPrice | null {
+  if (!model) return null
+  const exact = PRICES.models[model]
+  if (exact) return exact
+
   const dated = model.replace(/-\d{8}$/, '')
-  return PRICES.models[model] ?? (dated === model ? null : (PRICES.models[dated] ?? null))
+  if (dated !== model && PRICES.models[dated]) return PRICES.models[dated]!
+
+  // Strip trailing reasoning effort, thinking, or internal routing suffixes (e.g. -high, -n).
+  let base = dated
+  for (let i = 0; i < 3; i++) {
+    const next = base.replace(TRAILING_VARIANT, '')
+    if (next === base) break
+    base = next
+    if (PRICES.models[base]) return PRICES.models[base]!
+  }
+
+  if (PRICES.models[`${base}-preview`]) return PRICES.models[`${base}-preview`]!
+  return null
+}
+
+/**
+ * Estimates a single usage row's USD cost using reported log cost when present, otherwise API list
+ * prices from `PRICES`. Returns null when the model is unpriced (never fabricates $0.00).
+ */
+export function estimateRowCost(
+  row: Pick<
+    UsageRow,
+    | 'model'
+    | 'input'
+    | 'output'
+    | 'reasoning'
+    | 'cacheRead'
+    | 'cacheWrite'
+    | 'cacheWrite1h'
+    | 'cost'
+  >,
+): { costUsd: number | null; fromPriceList: boolean } {
+  if (typeof row.cost === 'number' && Number.isFinite(row.cost) && row.cost >= 0) {
+    return { costUsd: row.cost, fromPriceList: false }
+  }
+  const price = priceFor(row.model)
+  if (!price) return { costUsd: null, fromPriceList: false }
+  const reasoning = row.reasoning ?? 0
+  const write1h = Math.min(Math.max(0, row.cacheWrite1h), Math.max(0, row.cacheWrite))
+  const write5m = Math.max(0, row.cacheWrite - write1h)
+  const hourPrice = price.cacheWrite1h ?? price.cacheWrite
+  const cost =
+    row.input * price.input +
+    (row.output + reasoning) * price.output +
+    row.cacheRead * price.cacheRead +
+    write5m * price.cacheWrite +
+    write1h * hourPrice
+  return Number.isFinite(cost) && cost >= 0
+    ? { costUsd: cost, fromPriceList: true }
+    : { costUsd: null, fromPriceList: false }
 }

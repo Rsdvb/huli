@@ -4,14 +4,28 @@
 // title is cut, so a step costs about what its folded row shows. Inputs keep the digests' limit:
 // cards such as a workflow suggestion's draw what a shorter input says.
 
+import { workflowToolOfTitle } from '@shared/mcp-call'
 import type {
   DigestedThreadEntry,
   DigestedToolEntry,
   ThreadEntry,
   ToolContent,
   ToolContentDigest,
+  ToolEntry,
   ToolInputDigest,
 } from '@shared/thread'
+
+// Inline card calls (permissions, plans, questions, elicitations, and Kettu's workflow cards)
+// read their own rawInput and content inline instead of unfolding a ToolBody.
+function isInlineCardTool(entry: ToolEntry): boolean {
+  return (
+    entry.permission !== null ||
+    entry.planVersion !== undefined ||
+    entry.question !== undefined ||
+    entry.elicitation !== undefined ||
+    workflowToolOfTitle(entry.title) !== null
+  )
+}
 
 /** An input this long or shorter, in UTF-8 bytes, stays whole: nearly every command. */
 export const DIGEST_INPUT_BYTES = 2 * 1024
@@ -42,7 +56,7 @@ export function leanEntries<T extends { entries: ThreadEntry[] }>(
   return { ...page, entries: page.entries.map(leanEntry) }
 }
 
-/** A tool call that waits for an answer stays whole, since its card shows what it asks about. */
+/** A tool call rendered as an inline card or waiting for an answer stays whole. */
 export function digestEntry(entry: ThreadEntry): DigestedThreadEntry {
   return digested(entry, false)
 }
@@ -56,9 +70,13 @@ export function leanEntry(entry: ThreadEntry): DigestedThreadEntry {
 }
 
 function digested(entry: ThreadEntry, lean: boolean): DigestedThreadEntry {
-  if (entry.kind !== 'tool' || entry.permission !== null) return entry
+  if (entry.kind !== 'tool' || isInlineCardTool(entry)) return entry
+  // Huli: a running call's text output stays whole, so the `entry.appendOutput` patches of a reader
+  // that took `TOOL_OUTPUT_APPEND_FEATURE` add to the text itself rather than after a digest.
+  const running = entry.status === 'pending' || entry.status === 'in_progress'
   let content: (ToolContent | ToolContentDigest)[] | null = null
   entry.content.forEach((item, index) => {
+    if (running && item.type === 'markdown') return
     const digest = digestContent(item, lean)
     if (digest) (content ??= [...entry.content])[index] = digest
   })

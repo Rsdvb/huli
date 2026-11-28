@@ -3,7 +3,9 @@
 
 import path from 'node:path'
 import {
+  cutToolOutput,
   MAX_APPEAL_CHARS,
+  trimToolOutputDelta,
   type ContentRef,
   type EntryChanges,
   type PlanItem,
@@ -17,6 +19,7 @@ import {
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
 import { replayedBlock } from '../acp/mapper'
 import { currentLocale, hasMessage, t } from '../i18n'
+import { isSleepMcpTool, isSleepToolName } from '../interruptible-wait'
 import { planMarkdown, planRevision } from '../plan-revision'
 import { isRowlessCall, isRowWhenFailed } from '../plan-tool'
 import { ANSWERS_OPTION } from '../question-answers'
@@ -45,8 +48,16 @@ import {
   type AsyncQuestionItem,
   type QuestionReply,
 } from './async-questions'
+import {
+  buildCodexConfigWarningNotice,
+  configWarningDedupeKey,
+  isCodexConfigWarningMessage,
+  parseConfigWarningNotification,
+  type CodexConfigWarningContext,
+} from './config-warning'
 import type {
   CommandAction,
+  ConfigWarningNotification,
   FileUpdateChange,
   ThreadItem,
   ThreadTokenUsage,
@@ -61,9 +72,6 @@ function output(): MapperOutput {
   return { patches: [], effects: [] }
 }
 
-/** Output a command printed, as one fenced block, its start cut once it grows past this. */
-const OUTPUT_LIMIT = 64 * 1024
-
 /** `/bin/zsh -lc 'ls -la'` as `ls -la`, the command Codex runs inside its shell. */
 export function stripShellPrefix(command: string): string {
   const inner = command.replace(/^(?:\/bin\/)?(?:bash|zsh|sh)\s+(?:-[lc]+\s+)?/, '')
@@ -72,9 +80,7 @@ export function stripShellPrefix(command: string): string {
     : inner
 }
 
-function cut(text: string): string {
-  return text.length > OUTPUT_LIMIT ? `…\n${text.slice(text.length - OUTPUT_LIMIT)}` : text
-}
+const cut = cutToolOutput
 
 function toolStatus(status: string | null | undefined): ToolEntry['status'] {
   switch (status) {
@@ -552,18 +558,16 @@ interface ReasoningParts {
 
 /** One Codex thread's mapper: what Kettu shows of its items, live and replayed. */
 export class ThreadMapper {
-  /**
-   * Huli: `appeals`: this Codex takes back a denial its auto-review made, so a denied call offers
-   * the user to allow it still.
-   */
-  constructor(private readonly options: { appeals?: boolean } = {}) {}
-
   /** What each running command printed so far. */
   private readonly outputs = new Map<string, string>()
   /** The thoughts each reasoning item made so far, one per part, by the item's id. */
   private readonly reasoningParts = new Map<string, ReasoningParts>()
   /** Thoughts with a summary, whose raw reasoning is not shown beside it. */
   private readonly summarized = new Set<string>()
+  /** Deduplication keys for config warnings already emitted in this thread. */
+  private readonly seenConfigWarnings = new Set<string>()
+  /** Context used to label known config file layers (e.g. `codexHome` vs thread `cwd`). */
+  private configContext: CodexConfigWarningContext
   /** When the thread last sent the model something: a message, a tool's result, a request's end. */
   private sentAt: number | null = null
   /** When the request running now first showed output, if it has. */
@@ -572,6 +576,42 @@ export class ThreadMapper {
   private goal: { id: string; status: string } | null = null
   /** Huli: the stream Codex reconnects now, and the notice that says so. */
   private retry: { id: string; attempts: number } | null = null
+
+  /**
+   * Huli: `appeals`: this Codex takes back a denial its auto-review made, so a denied call offers
+   * the user to allow it still.
+   */
+  constructor(
+    configContext: CodexConfigWarningContext = {},
+    private readonly options: { appeals?: boolean } = {},
+  ) {
+    this.configContext = { ...configContext }
+  }
+
+  /** Updates the `codexHome` and `cwd` metadata used when formatting config warnings. */
+  setConfigContext(configContext: CodexConfigWarningContext): void {
+    this.configContext = { ...this.configContext, ...configContext }
+  }
+
+  private addConfigWarning(
+    ctx: MapperContext,
+    out: MapperOutput,
+    warning: ConfigWarningNotification,
+  ): void {
+    const key = configWarningDedupeKey(warning)
+    const summaryKey = warning.summary.trim()
+    if (
+      this.seenConfigWarnings.has(key) ||
+      (summaryKey && this.seenConfigWarnings.has(summaryKey))
+    ) {
+      return
+    }
+    const notice = buildCodexConfigWarningNotice(warning, ctx.nextId(), this.configContext)
+    if (!notice) return
+    this.seenConfigWarnings.add(key)
+    if (summaryKey) this.seenConfigWarnings.add(summaryKey)
+    addEntry(ctx, out, notice)
+  }
 
   /** Maps one notification; null for one this mapper does not take. */
   notification(method: string, params: unknown, ctx: MapperContext): MapperOutput | null {
@@ -710,14 +750,25 @@ export class ThreadMapper {
           ...(typeof p.message === 'string' && p.message !== '' ? { description: p.message } : {}),
         })
         break
-      case 'warning':
-        addEntry(ctx, out, {
-          kind: 'notice',
-          id: ctx.nextId(),
-          severity: 'warning',
-          title: String(p.message ?? ''),
-        })
+      case 'configWarning': {
+        const warning = parseConfigWarningNotification(p)
+        if (warning) this.addConfigWarning(ctx, out, warning)
         break
+      }
+      case 'warning': {
+        const message = String(p.message ?? '')
+        if (isCodexConfigWarningMessage(message)) {
+          this.addConfigWarning(ctx, out, { summary: message })
+        } else {
+          addEntry(ctx, out, {
+            kind: 'notice',
+            id: ctx.nextId(),
+            severity: 'warning',
+            title: message,
+          })
+        }
+        break
+      }
       default:
         return null
     }
@@ -945,6 +996,9 @@ export class ThreadMapper {
           ...(raw !== undefined ? { rawInput: raw } : {}),
           ...(own ? { structured: own } : {}),
         })
+        if (!ctx.replaying && isSleepMcpTool(item.server, item.tool)) {
+          out.effects.push({ kind: 'interruptibleWait', id: `t:${item.id}`, active: !done })
+        }
         break
       }
       case 'dynamicToolCall': {
@@ -959,6 +1013,9 @@ export class ThreadMapper {
           ...(done ? { content: dynamicContent(item) } : {}),
           ...(raw !== undefined ? { rawInput: raw } : {}),
         })
+        if (!ctx.replaying && isSleepToolName(item.tool)) {
+          out.effects.push({ kind: 'interruptibleWait', id: `t:${item.id}`, active: !done })
+        }
         break
       }
       case 'collabAgentToolCall': {
@@ -1031,6 +1088,11 @@ export class ThreadMapper {
         })
         break
       }
+      case 'sleep':
+        if (!ctx.replaying) {
+          out.effects.push({ kind: 'interruptibleWait', id: `sleep:${item.id}`, active: !done })
+        }
+        break
       case 'enteredReviewMode':
       case 'exitedReviewMode': {
         // Huli: where a review starts and ends; its findings follow as an agent message.
@@ -1324,14 +1386,16 @@ export class ThreadMapper {
 
   private appendOutput(ctx: MapperContext, out: MapperOutput, itemId: string, delta: string): void {
     if (!delta) return
-    const printed = cut((this.outputs.get(itemId) ?? '') + toLf(delta))
+    const normalized = toLf(delta)
+    const printed = cut((this.outputs.get(itemId) ?? '') + normalized)
     this.outputs.set(itemId, printed)
     const entry = ctx.thread.byId[`t:${itemId}`]
     if (entry?.kind !== 'tool' || entry.toolKind === 'read') return
+    // 仅下发本次增量片段，由新客户端本地维护 64 KiB 围栏尾窗，避免每块重发整段输出。
     out.patches.push({
-      op: 'entry.update',
+      op: 'entry.appendOutput',
       id: entry.id,
-      changes: { content: [{ type: 'markdown', markdown: fenced(printed) }] },
+      text: trimToolOutputDelta(normalized),
     })
   }
 

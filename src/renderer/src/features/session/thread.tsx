@@ -7,6 +7,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -22,9 +25,8 @@ import {
 import { Button } from '@renderer/components/ui/button'
 import { Spinner } from '@renderer/components/ui/spinner'
 import { cn } from '@renderer/lib/utils'
-import { useSessionsStore } from '@renderer/stores/sessions'
+import { REVEAL_TTL_MS, useRevealStore } from '@renderer/stores/reveal'
 import { loadOlder, loadThrough, useThreadsStore } from '@renderer/stores/threads'
-import { returnedTo } from '@renderer/stores/view'
 import { Entry } from './entries/entry'
 import { ReplyFooter } from './entries/message-actions'
 import { RunGroup } from './entries/run-group'
@@ -37,11 +39,19 @@ import { hoverReply } from './reply-hover'
 import { ReplyMarks } from './reply-marks'
 import { ReplyToSelection } from './reply-selection'
 import { SubSessionStart } from './subagent/sub-session-start'
-import { itemAtTop, leaveThread, readingPosition, type ReadingPosition } from './reading-position'
+import {
+  attachReturnAnchor,
+  distanceFromEnd,
+  itemAtTop,
+  leaveThread,
+  readingPosition,
+  SCROLL_INTENT_KEYS,
+  STICK_TO_BOTTOM_THRESHOLD,
+  type ReadingPosition,
+} from './reading-position'
 import { RecapLine } from './recap/recap-line'
 import { useSidewaysWheel } from './sideways-wheel'
 import { playEntrance } from './thread-entrance'
-import { StillRunningLine } from './still-running-line'
 import { TurnStatus } from './turn-status'
 import { HiddenSteps } from './hidden-steps'
 import { zenItems, zenSignatureOf } from './zen-items'
@@ -55,25 +65,234 @@ import {
   withoutHidden,
   type Item,
 } from './thread-items'
+import {
+  computeIdleWindow,
+  DESKTOP_WINDOW_CONFIG,
+  expandWindowForScroll,
+  findVisibleIndexRange,
+  WEB_WINDOW_CONFIG,
+} from './thread-window'
 
 // A thread renders near its viewport, so opening one costs its first screen however long it is.
 // It opens on its latest page with its newest items rendered. Whenever less than a viewport of
 // rendered items lies above the view, a batch of older ones renders in a transition, which
 // MessageScroller keeps in place as they are prepended; once every loaded item is rendered, the
-// page before them loads. Rendered items stay while the thread is read: when a long thread grows
-// past WINDOW_THRESHOLD rendered items, items far outside the viewport unmount their subtrees while
-// keeping their measured height, so DOM and heap usage stay bounded without shifting scroll
-// position. Huli: once it rests at its end, all but the newest go again (TrimAtEnd).
-const FIRST_ITEMS = 24
+// page before them loads. When a long thread grows past the client's virtualization threshold,
+// far off-screen items unmount once scrolling settles (never mid-scroll) while keeping their
+// measured height so DOM and heap usage stay bounded without shifting scroll position. Huli: once
+// it rests at its end, all but the newest go again (TrimAtEnd).
+const FIRST_ITEMS = 12
 const MORE_ITEMS = 16
 /** Rendered items past which a thread resting at its end lets the older ones go. */
 const KEEP_ITEMS = 3 * FIRST_ITEMS
 /** How long a thread rests at its end before it does. */
 const TRIM_AFTER_MS = 3000
-const WINDOW_THRESHOLD = 48
-const OVERSCAN_SCREENS = 2
-const PIN_TAIL = 10
-const WINDOW_HYSTERESIS = 4
+
+const isWebClient = (): boolean =>
+  typeof window !== 'undefined' &&
+  (window as { kettu?: { client?: string } }).kettu?.client === 'web'
+
+const MAX_STYLE_CACHE = 4096
+const estimateStyleCache = new Map<number, CSSProperties>()
+const placeholderStyleCache = new Map<number, CSSProperties>()
+
+function estimateStyleFor(height: number): CSSProperties {
+  const px = Math.max(1, Math.round(height))
+  let style = estimateStyleCache.get(px)
+  if (!style) {
+    if (estimateStyleCache.size >= MAX_STYLE_CACHE) estimateStyleCache.clear()
+    style = { containIntrinsicSize: `auto ${px}px` }
+    estimateStyleCache.set(px, style)
+  }
+  return style
+}
+
+function placeholderStyleFor(height: number): CSSProperties {
+  const px = Math.max(1, Math.round(height))
+  let style = placeholderStyleCache.get(px)
+  if (!style) {
+    if (placeholderStyleCache.size >= MAX_STYLE_CACHE) placeholderStyleCache.clear()
+    style = { height: px, containIntrinsicSize: `auto ${px}px` }
+    placeholderStyleCache.set(px, style)
+  }
+  return style
+}
+
+function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
+  return true
+}
+
+function sameItem(a: Item, b: Item): boolean {
+  if (a === b) return true
+  if (a.type !== b.type || a.key !== b.key) return false
+  switch (a.type) {
+    case 'entry': {
+      const o = b as Extract<Item, { type: 'entry' }>
+      return (
+        a.id === o.id && a.endId === o.endId && a.turnStart === o.turnStart && a.char === o.char
+      )
+    }
+    case 'run': {
+      const o = b as Extract<Item, { type: 'run' }>
+      return a.signature === o.signature && sameStringArray(a.ids, o.ids)
+    }
+    case 'group': {
+      const o = b as Extract<Item, { type: 'group' }>
+      return sameStringArray(a.ids, o.ids)
+    }
+    case 'reply': {
+      const o = b as Extract<Item, { type: 'reply' }>
+      return (
+        a.endId === o.endId &&
+        a.latest === o.latest &&
+        sameStringArray(a.agentIds, o.agentIds) &&
+        sameStringArray(a.toolIds, o.toolIds)
+      )
+    }
+    case 'status': {
+      const o = b as Extract<Item, { type: 'status' }>
+      return a.afterSent === o.afterSent
+    }
+    case 'hidden': {
+      const o = b as Extract<Item, { type: 'hidden' }>
+      return a.turn === o.turn && a.count === o.count
+    }
+  }
+}
+
+interface ThreadItemProps {
+  item: Item
+  sessionId: string
+  projectPath: string
+  agentName: string
+  spacingClass: string
+  replyKey: string | null
+  estimate: number
+  gapPlaceholder: boolean
+  virtualizedHeight: number | null
+  isTail: boolean
+  isLatestRun: boolean
+  /** Huli: opens a turn whose steps the 简洁视图 hides. */
+  openTurn: (turn: string) => void
+}
+
+function sameThreadItem(a: ThreadItemProps, b: ThreadItemProps): boolean {
+  return (
+    a.sessionId === b.sessionId &&
+    a.projectPath === b.projectPath &&
+    a.agentName === b.agentName &&
+    a.spacingClass === b.spacingClass &&
+    a.replyKey === b.replyKey &&
+    a.estimate === b.estimate &&
+    a.gapPlaceholder === b.gapPlaceholder &&
+    a.virtualizedHeight === b.virtualizedHeight &&
+    a.isTail === b.isTail &&
+    a.isLatestRun === b.isLatestRun &&
+    a.openTurn === b.openTurn &&
+    sameItem(a.item, b.item)
+  )
+}
+
+const ThreadItem = memo(function ThreadItem({
+  item,
+  sessionId,
+  projectPath,
+  agentName,
+  spacingClass,
+  replyKey,
+  estimate,
+  gapPlaceholder,
+  virtualizedHeight,
+  isTail,
+  isLatestRun,
+  openTurn,
+}: ThreadItemProps) {
+  if (gapPlaceholder) {
+    return (
+      <MessageScrollerItem
+        messageId={item.key}
+        style={placeholderStyleFor(estimate)}
+        className={spacingClass || undefined}
+      />
+    )
+  }
+  if (virtualizedHeight !== null) {
+    return (
+      <MessageScrollerItem
+        messageId={item.key}
+        style={placeholderStyleFor(virtualizedHeight)}
+        className={spacingClass || undefined}
+      />
+    )
+  }
+  return (
+    <MessageScrollerItem
+      messageId={item.key}
+      data-reply-key={replyKey ?? undefined}
+      style={estimateStyleFor(estimate)}
+      className={cn(
+        // content-visibility's paint containment clips at the item's edge, but fold
+        // lines and tool rows reach 6 px past the column and their focus ring 4 px more.
+        '[overflow-clip-margin:10px]',
+        // An open Popover marks its enclosing item with `data-popover-open` so menus escape
+        // paint containment without per-item `:has(.ui-as-popover)` subtree invalidation.
+        'data-[popover-open]:[content-visibility:visible]',
+        spacingClass,
+        // A reply's action tooltips float outside its row, which paint containment
+        // would clip; they show only while it is pointed at or focused.
+        item.type === 'reply' &&
+          'hover:[content-visibility:visible] focus-within:[content-visibility:visible]',
+        // The growing tail would flip between skipped and rendered on every chunk,
+        // recalculating its whole subtree each time. With the status last, the entry
+        // before it grows the same way.
+        isTail && '[content-visibility:visible]',
+      )}
+    >
+      {item.type === 'status' ? (
+        <TurnStatus sessionId={sessionId} afterSent={item.afterSent} />
+      ) : item.type === 'hidden' ? (
+        <HiddenSteps count={item.count} onShow={() => openTurn(item.turn)} />
+      ) : item.type === 'reply' ? (
+        <ReplyFooter
+          replyKey={item.key}
+          sessionId={sessionId}
+          projectPath={projectPath}
+          agentIds={item.agentIds}
+          toolIds={item.toolIds}
+          endId={item.endId}
+          latest={item.latest}
+        />
+      ) : item.type === 'run' ? (
+        <RunGroup
+          sessionId={sessionId}
+          entryIds={item.ids}
+          signature={item.signature}
+          projectPath={projectPath}
+          agentName={agentName}
+          latest={isLatestRun}
+        />
+      ) : item.type === 'group' ? (
+        <ToolGroup
+          sessionId={sessionId}
+          entryIds={item.ids}
+          projectPath={projectPath}
+          agentName={agentName}
+        />
+      ) : (
+        <Entry
+          sessionId={sessionId}
+          entryId={item.id}
+          endId={item.endId}
+          projectPath={projectPath}
+          agentName={agentName}
+        />
+      )}
+    </MessageScrollerItem>
+  )
+}, sameThreadItem)
 
 /** The entry an item starts with; a reply's footer and the turn's status start with none. */
 function firstEntryOf(item: Item | undefined): string | null {
@@ -92,13 +311,18 @@ function entryFrom(items: readonly Item[], index: number): string | null {
 }
 
 /**
- * Where a thread returning to the item at `index` starts rendering: where it did when it was left,
- * so the items above stay rendered and none is prepended as it settles, else at that item.
+ * Where a thread returning to the item at `index` starts rendering: at most `FIRST_ITEMS` items
+ * above `index` (clamped by where it started when left), so there is enough rendered height above
+ * the target while it settles without synchronously mounting hundreds of off-screen older items.
  */
 function returnStart(items: readonly Item[], position: ReadingPosition, index: number): number {
   const left =
     position.from === null ? -1 : items.findIndex((i) => firstEntryOf(i) === position.from)
-  if (left >= 0 && left <= index) return left
+  const floor = Math.max(0, index - FIRST_ITEMS)
+  if (left >= 0 && left <= index) {
+    const start = Math.max(left, floor)
+    for (let i = start; i <= index; i++) if (firstEntryOf(items[i]) !== null) return i
+  }
   for (let i = index; i > 0; i--) if (firstEntryOf(items[i]) !== null) return i
   return 0
 }
@@ -156,6 +380,25 @@ function windowEnd(
   return end
 }
 
+/** Placeholder gap between the restored viewport window and the pinned tail of a long thread. */
+function computeReturnGap(
+  items: readonly Item[],
+  at: number,
+  byId: Parameters<typeof estimateOf>[1],
+): { start: string; end: string } | null {
+  const tailAnchor = items.length - FIRST_ITEMS
+  if (at < 0 || tailAnchor <= at + FIRST_ITEMS) return null
+  const start = windowEnd(items, at, tailAnchor, byId)
+  return start < tailAnchor ? { start: items[start]!.key, end: items[tailAnchor]!.key } : null
+}
+
+function hasPendingReveal(sessionId: string): boolean {
+  const target = useRevealStore.getState().target
+  return (
+    target !== null && target.sessionId === sessionId && Date.now() - target.at <= REVEAL_TTL_MS
+  )
+}
+
 /** What a jump in the outline needs of the thread. */
 export interface ThreadJumps {
   /** Resolves once the item `key` is rendered. */
@@ -172,75 +415,73 @@ export interface ThreadJumps {
  * its end. No message is a scroll anchor: MessageScroller pads the end with a spacer so an anchor
  * can sit at the top, and after a short reply that padding stayed as room to scroll into.
  */
-function ScrollOnSend({ sent }: { sent: string | null }) {
+function ScrollOnSend({ sent, onSend }: { sent: string | null; onSend: () => void }) {
   const { scrollToEnd } = useMessageScroller()
   const seen = useRef(sent)
   useEffect(() => {
     if (sent === seen.current) return
     seen.current = sent
-    if (sent) scrollToEnd({ behavior: 'auto' })
-  }, [sent, scrollToEnd])
+    if (sent) {
+      onSend()
+      scrollToEnd({ behavior: 'auto' })
+    }
+  }, [sent, onSend, scrollToEnd])
   return null
 }
 
-/** Frames a returning thread may take to settle its item in place as the items near it render. */
-const SETTLE_FRAMES = 10
-
 /**
- * Puts a thread reached by Back or Forward where it was read: the item it was read at, at the same
- * height, or without the item, at its end. It starts a frame after the scroller's own first scroll
- * and corrects as the items near the item render at their real height, unseen, since the thread
- * stays hidden until it is done.
+ * Restores a returning thread to the item it was read at synchronously before the first paint,
+ * then holds that item in place against asynchronous height changes or snapshot refreshes until
+ * layout quiets down or the reader takes over. Falls back to the end when the item is gone.
  */
 function ReturnTo({
   item,
   offset,
   viewport,
   content,
+  isSettling,
+  onPositioned,
+  onFallbackEnd,
   onDone,
 }: {
   item: string | null
   offset: number
   viewport: RefObject<HTMLDivElement | null>
   content: RefObject<HTMLDivElement | null>
+  isSettling: () => boolean
+  onPositioned: () => void
+  onFallbackEnd: () => void
   onDone: () => void
 }) {
   const { scrollToEnd } = useMessageScroller()
-  useEffect(() => {
+  useLayoutEffect(() => {
     const view = viewport.current
     const column = content.current
     if (!view || !column) return
-    const element =
-      item === null
-        ? null
-        : column.querySelector<HTMLElement>(`:scope > [data-message-id="${CSS.escape(item)}"]`)
-    // Skipped while it lies above the view, a long item would keep its estimated height there.
-    element?.style.setProperty('content-visibility', 'visible')
-    // Whether the item was off its place, so the thread moved.
-    const place = (): boolean => {
-      if (!element) {
-        if (item === null) scrollToEnd({ behavior: 'auto' })
-        return false
-      }
-      const off = element.getBoundingClientRect().top - view.getBoundingClientRect().top - offset
-      if (Math.abs(off) <= 1) return false
-      view.scrollTo({ top: view.scrollTop + off, behavior: 'instant' })
-      return true
-    }
-    let frames = 0
-    const settle = (): void => {
-      if (place() && ++frames < SETTLE_FRAMES) {
-        frame = requestAnimationFrame(settle)
-        return
-      }
-      onDone()
-    }
-    let frame = requestAnimationFrame(settle)
-    return () => {
-      cancelAnimationFrame(frame)
-      element?.style.removeProperty('content-visibility')
-    }
-  }, [item, offset, viewport, content, scrollToEnd, onDone])
+    return attachReturnAnchor({
+      viewport: view,
+      content: column,
+      itemKey: item,
+      offset,
+      isSettling,
+      onPositioned,
+      onFallbackEnd: () => {
+        onFallbackEnd()
+        scrollToEnd({ behavior: 'auto' })
+      },
+      onDone,
+    })
+  }, [
+    item,
+    offset,
+    viewport,
+    content,
+    isSettling,
+    onPositioned,
+    onFallbackEnd,
+    onDone,
+    scrollToEnd,
+  ])
   return null
 }
 
@@ -343,7 +584,6 @@ const NO_TURNS: ReadonlySet<string> = new Set()
  */
 function spacing(item: Item, previous: Item): string {
   if (item.type === 'status') return ''
-  if (item.type === 'still') return 'pt-1.5'
   if (item.type === 'entry' && item.turnStart) return 'pt-[22px]'
   if (item.type === 'reply') return 'pt-1.5'
   if (isSent(previous) || (item.type === 'entry' && item.char === 's')) return 'pt-[22px]'
@@ -373,11 +613,7 @@ export const Thread = memo(function Thread({
     () => withoutHidden(allOrder ?? [], allSignature),
     [allOrder, allSignature],
   )
-  const still = useSessionsStore((s) => !!s.byId[sessionId]?.stillRunning)
-  const built = useMemo(
-    () => buildItems(order, signature, working, still),
-    [order, signature, working, still],
-  )
+  const built = useMemo(() => buildItems(order, signature, working), [order, signature, working])
   // Huli: the 简洁视图, a view of the built items; Find shows every step while it is open.
   const [findOpen, setFindOpen] = useState(false)
   const chosenView = useToolCallView(sessionId)
@@ -402,11 +638,15 @@ export const Thread = memo(function Thread({
   useEffect(() => () => hoverReply(null), [sessionId])
   const sent = lastSent(order, signature)
   const [held, setHeld] = useState(false)
-  // Reached by Back or Forward, it returns to where it was read instead of opening at its end.
+  // Reopening a session restores its saved reading position unless Search asked to reveal a message.
   const [returning] = useState(() =>
-    returnedTo({ kind: 'session', sessionId, projectPath }) ? readingPosition(sessionId) : null,
+    hasPendingReveal(sessionId) ? null : readingPosition(sessionId),
   )
   const [returnTo, setReturnTo] = useState(returning)
+  const [returnPositioned, setReturnPositioned] = useState(() => returning === null)
+  const [followBottom, setFollowBottom] = useState(() => returning === null)
+  const detachedRef = useRef(returning !== null)
+  const userScrolledRef = useRef(false)
   const returnAt = useMemo(() => (returnTo ? itemOf(items, returnTo) : -1), [items, returnTo])
   const { shownFrom, showFrom } = useShownFrom(
     items,
@@ -415,10 +655,15 @@ export const Thread = memo(function Thread({
   )
   const revealing = useRef<{ key: string; resolve: () => void } | null>(null)
   const [, setRevealTick] = useState(0)
-  // A jump far back renders a window's worth from its target; the items it passes over, from
-  // `start` up to `end`, hold their estimated height and render a window's worth at a time in
-  // transitions, nearest the target first.
-  const [gap, setGap] = useState<{ start: string; end: string } | null>(null)
+  // A jump far back (or returning mid-thread) renders a window's worth from its target; the items
+  // past that window, from `start` up to `end`, hold their estimated height and render a window's
+  // worth at a time in transitions, nearest the target first.
+  const [gap, setGap] = useState<{ start: string; end: string } | null>(() => {
+    if (!returning) return null
+    const at = itemOf(items, returning)
+    const byId = useThreadsStore.getState().replicas[sessionId]?.state?.byId
+    return computeReturnGap(items, at, byId)
+  })
   const revealFrom = useCallback(
     (index: number) => {
       const byId = useThreadsStore.getState().replicas[sessionId]?.state?.byId
@@ -448,17 +693,31 @@ export const Thread = memo(function Thread({
   const gapStart = gap ? items.findIndex((item) => item.key === gap.start) : -1
   const gapEnd = gap ? items.findIndex((item) => item.key === gap.end) : -1
   const gapOpen = gapStart >= 0 && gapStart < gapEnd
+  const gapOpenRef = useRef(false)
+  const returnToRef = useRef(returnTo)
+  const followBottomRef = useRef(followBottom)
+  useLayoutEffect(() => {
+    gapOpenRef.current = gapOpen
+    returnToRef.current = returnTo
+    followBottomRef.current = followBottom
+  }, [gapOpen, returnTo, followBottom])
   useEffect(() => {
-    if (!gap || !gapOpen) return
+    if (!gap || !gapOpen || !returnPositioned) return
     const byId = useThreadsStore.getState().replicas[sessionId]?.state?.byId
     const next = windowEnd(items, gapStart, gapEnd, byId)
     startTransition(() => setGap(next < gapEnd ? { start: items[next]!.key, end: gap.end } : null))
-  }, [sessionId, gap, gapOpen, gapStart, gapEnd, items])
+  }, [sessionId, gap, gapOpen, gapStart, gapEnd, items, returnPositioned])
   const [pinnedKey, setPinnedKey] = useState<string | null>(null)
   const jumps = useMemo<ThreadJumps>(
     () => ({
       reveal: (key) =>
         new Promise((resolve) => {
+          detachedRef.current = true
+          followBottomRef.current = false
+          returnToRef.current = null
+          setFollowBottom(false)
+          setReturnTo(null)
+          setReturnPositioned(true)
           setPinnedKey(key)
           revealing.current = { key, resolve }
           setRevealTick((tick) => tick + 1)
@@ -484,22 +743,49 @@ export const Thread = memo(function Thread({
       live = false
     }
   }, [needsPages, sessionId, loadTo])
+  const prepareReturnWindow = useCallback(
+    (position: ReadingPosition, at: number) => {
+      const byId = useThreadsStore.getState().replicas[sessionId]?.state?.byId
+      setGap(computeReturnGap(items, at, byId))
+      showFrom(returnStart(items, position, at))
+    },
+    [sessionId, items, showFrom],
+  )
   useEffect(() => {
     if (returnTo && returnAt >= 0 && returnAt < shownFrom) {
-      showFrom(returnStart(items, returnTo, returnAt))
+      startTransition(() => prepareReturnWindow(returnTo, returnAt))
     }
-  }, [returnTo, returnAt, shownFrom, showFrom, items])
+  }, [returnTo, returnAt, shownFrom, prepareReturnWindow])
   const returnShown = returnTo !== null && returnAt >= shownFrom
   const returnLost = returnTo !== null && returnAt < 0 && !needsPages
-  // Hidden until it shows where it was read, so it never flashes its start, its end or a jump.
   const returnPending = returnTo !== null
-  const returned = useCallback(() => setReturnTo(null), [])
+  const isGapSettling = useCallback(() => gapOpenRef.current, [])
+  const markReturnPositioned = useCallback(() => setReturnPositioned(true), [])
+  const finishReturn = useCallback(() => {
+    returnToRef.current = null
+    setReturnTo(null)
+  }, [])
+  const resumeFollowBottom = useCallback(() => {
+    detachedRef.current = false
+    userScrolledRef.current = false
+    returnToRef.current = null
+    followBottomRef.current = true
+    setReturnTo(null)
+    setReturnPositioned(true)
+    setFollowBottom(true)
+  }, [])
   const viewport = useRef<HTMLDivElement | null>(null)
   const content = useRef<HTMLDivElement | null>(null)
   const selected = useSelectedText(viewport)
   useSidewaysWheel(viewport)
-  // Measured outer height per item key, used to keep exact scroll height when off-screen items
-  // unmount their React subtrees in long threads.
+  const windowConfig = isWebClient() ? WEB_WINDOW_CONFIG : DESKTOP_WINDOW_CONFIG
+  const keyToIndex = useMemo(() => {
+    const map = new Map<string, number>()
+    for (let i = shownFrom; i < items.length; i++) map.set(items[i]!.key, i)
+    return map
+  }, [items, shownFrom])
+  // Measured outer height per item key, recorded right before an off-screen item is evicted so
+  // placeholders preserve exact scroll height without scanning the whole column during scrolling.
   const measuredHeights = useRef(new Map<string, number>())
   const [windowState, setWindowState] = useState<{
     start: number
@@ -511,15 +797,37 @@ export const Thread = memo(function Thread({
     windowStateRef.current = windowState
   }, [windowState])
   const windowFrame = useRef(0)
-  const lastWindowScrollTop = useRef(-Infinity)
-  const lastWindowCount = useRef(0)
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const idleHandle = useRef<number | null>(null)
 
-  const syncWindowNow = useCallback(() => {
-    windowFrame.current = 0
+  const measureBeforeEvict = useCallback(
+    (column: HTMLElement, keepStart: number, keepEnd: number) => {
+      const tailFrom = items.length - windowConfig.pinTail
+      const toMeasure = new Set<string>()
+      for (let i = shownFrom; i < tailFrom; i++) {
+        if (i >= keepStart && i <= keepEnd) continue
+        const key = items[i]!.key
+        if (key === pinnedKey) continue
+        toMeasure.add(key)
+      }
+      if (toMeasure.size === 0) return
+      for (let child = column.firstElementChild; child; child = child.nextElementSibling) {
+        if (!(child instanceof HTMLElement) || child.childElementCount === 0) continue
+        const key = child.dataset.messageId
+        if (!key || !toMeasure.has(key)) continue
+        const height = child.offsetHeight
+        if (height > 0) measuredHeights.current.set(key, height)
+      }
+    },
+    [items, shownFrom, pinnedKey, windowConfig.pinTail],
+  )
+
+  const evictWindowIdle = useCallback(() => {
+    idleTimer.current = null
+    idleHandle.current = null
     const renderedCount = items.length - shownFrom
-    if (renderedCount <= WINDOW_THRESHOLD) {
+    if (renderedCount <= windowConfig.windowThreshold) {
       if (windowStateRef.current !== null) setWindowState(null)
-      lastWindowCount.current = renderedCount
       return
     }
     if (selected || returnPending || held || gapOpen || revealing.current !== null) return
@@ -527,72 +835,100 @@ export const Thread = memo(function Thread({
     const column = content.current
     if (!view || !column || view.clientHeight <= 0) return
 
-    const scrollTop = view.scrollTop
-    const clientHeight = view.clientHeight
-    // Skip re-scanning the thread while following small streaming appends near the same scroll offset.
-    if (
-      windowStateRef.current !== null &&
-      Math.abs(scrollTop - lastWindowScrollTop.current) < clientHeight * 0.4 &&
-      Math.abs(renderedCount - lastWindowCount.current) < 8
-    ) {
+    const visible = findVisibleIndexRange(view, column, keyToIndex, shownFrom, items.length, {
+      allowHitTest: true,
+    })
+    if (!visible) return
+
+    const next = computeIdleWindow(
+      windowStateRef.current,
+      visible,
+      shownFrom,
+      items.length,
+      windowConfig,
+    )
+    if (!next) return
+
+    if (next.start <= shownFrom && next.end >= items.length - 1 - windowConfig.pinTail) {
+      if (windowStateRef.current !== null) startTransition(() => setWindowState(null))
       return
     }
 
-    const overscan = clientHeight * OVERSCAN_SCREENS
-    const topBound = scrollTop - overscan
-    const bottomBound = scrollTop + clientHeight + overscan
-
-    const keyToIndex = new Map<string, number>()
-    for (let i = shownFrom; i < items.length; i++) keyToIndex.set(items[i]!.key, i)
-
-    let winStart = -1
-    let winEnd = -1
-    let cursorY: number | null = null
-    for (let child = column.firstElementChild; child; child = child.nextElementSibling) {
-      if (!(child instanceof HTMLElement)) continue
-      const key = child.dataset.messageId
-      if (!key) continue
-      const idx = keyToIndex.get(key)
-      if (idx === undefined) continue
-      let top: number
-      let height: number
-      // Virtualized placeholders already have their exact cached height; avoid reading offsetHeight
-      // on them so Blink never forces layout across off-screen content-visibility subtrees.
-      if (child.childElementCount === 0) {
-        const cached = measuredHeights.current.get(key)
-        if (cached !== undefined && cursorY !== null) {
-          top = cursorY
-          height = cached
-        } else {
-          top = child.offsetTop
-          height = cached ?? child.offsetHeight
-        }
-      } else {
-        top = cursorY ?? child.offsetTop
-        height = child.offsetHeight
-        if (height > 0) measuredHeights.current.set(key, height)
-      }
-      const bottom = top + height
-      cursorY = bottom
-      if (bottom >= topBound && top <= bottomBound) {
-        if (winStart === -1) winStart = idx
-        winEnd = idx
-      }
-    }
-    lastWindowScrollTop.current = scrollTop
-    lastWindowCount.current = renderedCount
-    if (winStart === -1 || winEnd === -1) return
-    const prev = windowStateRef.current
-    if (
-      prev !== null &&
-      Math.abs(prev.start - winStart) < WINDOW_HYSTERESIS &&
-      Math.abs(prev.end - winEnd) < WINDOW_HYSTERESIS
-    ) {
-      return
-    }
+    measureBeforeEvict(column, next.start, next.end)
     const heights = new Map(measuredHeights.current)
-    startTransition(() => setWindowState({ start: winStart, end: winEnd, heights }))
-  }, [items, shownFrom, selected, returnPending, held, gapOpen])
+    startTransition(() => setWindowState({ start: next.start, end: next.end, heights }))
+  }, [
+    items.length,
+    shownFrom,
+    selected,
+    returnPending,
+    held,
+    gapOpen,
+    keyToIndex,
+    windowConfig,
+    measureBeforeEvict,
+  ])
+
+  const scheduleIdleEvict = useCallback(() => {
+    if (idleTimer.current !== null) {
+      clearTimeout(idleTimer.current)
+      idleTimer.current = null
+    }
+    if (idleHandle.current !== null && typeof cancelIdleCallback === 'function') {
+      cancelIdleCallback(idleHandle.current)
+      idleHandle.current = null
+    }
+    if (items.length - shownFrom <= windowConfig.windowThreshold) return
+    idleTimer.current = setTimeout(() => {
+      idleTimer.current = null
+      if (typeof requestIdleCallback === 'function') {
+        idleHandle.current = requestIdleCallback(() => evictWindowIdle(), { timeout: 250 })
+      } else {
+        evictWindowIdle()
+      }
+    }, windowConfig.idleEvictMs)
+  }, [items.length, shownFrom, windowConfig, evictWindowIdle])
+
+  const syncWindowActive = useCallback(() => {
+    windowFrame.current = 0
+    const renderedCount = items.length - shownFrom
+    if (renderedCount <= windowConfig.windowThreshold) {
+      if (windowStateRef.current !== null) setWindowState(null)
+      return
+    }
+    if (selected || returnPending || held || gapOpen || revealing.current !== null) return
+    const view = viewport.current
+    const column = content.current
+    if (!view || !column || view.clientHeight <= 0) return
+
+    const prev = windowStateRef.current
+    if (prev !== null) {
+      const visible = findVisibleIndexRange(view, column, keyToIndex, shownFrom, items.length)
+      if (visible) {
+        const next = expandWindowForScroll(prev, visible, shownFrom, items.length, windowConfig)
+        if (next) {
+          // Only measure when the hard safety cap actually trims the far side during a massive scrub.
+          if (next.start > prev.start || next.end < prev.end) {
+            measureBeforeEvict(column, next.start, next.end)
+          }
+          const heights = new Map(measuredHeights.current)
+          startTransition(() => setWindowState({ start: next.start, end: next.end, heights }))
+        }
+      }
+    }
+    scheduleIdleEvict()
+  }, [
+    items.length,
+    shownFrom,
+    selected,
+    returnPending,
+    held,
+    gapOpen,
+    keyToIndex,
+    windowConfig,
+    measureBeforeEvict,
+    scheduleIdleEvict,
+  ])
 
   const checkNearStart = useCallback(() => {
     const el = viewport.current
@@ -604,10 +940,51 @@ export const Thread = memo(function Thread({
   const scheduleScrollSync = useCallback(() => {
     if (windowFrame.current !== 0) return
     windowFrame.current = requestAnimationFrame(() => {
-      syncWindowNow()
+      syncWindowActive()
       checkNearStart()
     })
-  }, [syncWindowNow, checkNearStart])
+  }, [syncWindowActive, checkNearStart])
+
+  const markUserScroll = useCallback(() => {
+    userScrolledRef.current = true
+  }, [])
+
+  const onViewportPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button === 0 && event.target === event.currentTarget) {
+      userScrolledRef.current = true
+    }
+  }, [])
+
+  const onViewportKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (SCROLL_INTENT_KEYS.has(event.key)) userScrolledRef.current = true
+  }, [])
+
+  const onViewportScroll = useCallback(() => {
+    const view = viewport.current
+    const column = content.current
+    if (view && column) {
+      const distance = distanceFromEnd(view, column)
+      if (distance !== null) {
+        if (distance <= STICK_TO_BOTTOM_THRESHOLD) {
+          if (
+            !returnToRef.current &&
+            !gapOpenRef.current &&
+            (followBottomRef.current || userScrolledRef.current)
+          ) {
+            detachedRef.current = false
+            userScrolledRef.current = false
+            if (!followBottomRef.current) {
+              followBottomRef.current = true
+              setFollowBottom(true)
+            }
+          }
+        } else if (userScrolledRef.current) {
+          detachedRef.current = true
+        }
+      }
+    }
+    scheduleScrollSync()
+  }, [scheduleScrollSync])
 
   useEffect(() => {
     scheduleScrollSync()
@@ -619,6 +996,14 @@ export const Thread = memo(function Thread({
         cancelAnimationFrame(windowFrame.current)
         windowFrame.current = 0
       }
+      if (idleTimer.current !== null) {
+        clearTimeout(idleTimer.current)
+        idleTimer.current = null
+      }
+      if (idleHandle.current !== null && typeof cancelIdleCallback === 'function') {
+        cancelIdleCallback(idleHandle.current)
+        idleHandle.current = null
+      }
     },
     [],
   )
@@ -627,14 +1012,14 @@ export const Thread = memo(function Thread({
   // From the first paint of its items, so the thread never shows before it enters.
   const entrance = useRef<(() => void) | null>(null)
   useLayoutEffect(() => {
-    if (entrance.current || items.length === 0 || returnPending) return
+    if (entrance.current || items.length === 0 || !returnPositioned) return
     if (!viewport.current || !content.current) return
     entrance.current = playEntrance(viewport.current, content.current)
-  }, [items.length, returnPending])
-  // Where it was read when it is left, for Back to return there.
-  const latest = useRef({ items, shownFrom, returnPending })
+  }, [items.length, returnPositioned])
+  // Where it was read when it is left, so returning to the session restores that position.
+  const latest = useRef({ items, shownFrom, returnPositioned })
   useLayoutEffect(() => {
-    latest.current = { items, shownFrom, returnPending }
+    latest.current = { items, shownFrom, returnPositioned }
   })
   // Read when the recap's jump is pressed, so the line never redraws as the items change.
   const itemsNow = useCallback(() => latest.current.items, [])
@@ -642,8 +1027,11 @@ export const Thread = memo(function Thread({
     const view = viewport.current
     const column = content.current
     return () => {
-      if (!view || !column || latest.current.returnPending) return
-      const top = itemAtTop(view, column)
+      if (!view || !column || !latest.current.returnPositioned) return
+      const top = itemAtTop(view, column, {
+        edgeThreshold: STICK_TO_BOTTOM_THRESHOLD,
+        detached: detachedRef.current,
+      })
       const { items, shownFrom } = latest.current
       const item = top && items.find((each) => each.key === top.item)
       const from = entryFrom(items, shownFrom)
@@ -660,18 +1048,32 @@ export const Thread = memo(function Thread({
     [],
   )
 
+  const onContentPointerOver = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const target = event.target
+    const item =
+      target instanceof Element
+        ? target.closest<HTMLElement>('[data-slot="message-scroller-item"]')
+        : null
+    hoverReply(item?.dataset.replyKey || null)
+  }, [])
+
+  const onContentPointerLeave = useCallback(() => hoverReply(null), [])
+
   // Read, not watched: an estimate matters only until its item first lays out.
   const byId = useThreadsStore.getState().replicas[sessionId]?.state?.byId
+  const renderedCount = items.length - shownFrom
+  const canVirtualize = windowState !== null && renderedCount > windowConfig.windowThreshold
+  const tailCutoff = items.length - windowConfig.pinTail
 
   return (
-    // While it returns it follows no end, which the estimated heights of items not yet laid out
-    // would make it seem to reach.
+    // Restored threads keep autoScroll off until the reader scrolls back to the bottom, jumps to
+    // latest, or sends a message, so async layout changes or snapshots never yank them to the end.
     <MessageScrollerProvider
-      autoScroll={!returnPending && !selected}
+      autoScroll={followBottom && returnPositioned && !returnPending && !selected}
       defaultScrollPosition={returning ? 'start' : 'end'}
-      scrollEdgeThreshold={40}
+      scrollEdgeThreshold={STICK_TO_BOTTOM_THRESHOLD}
     >
-      <ScrollOnSend sent={sent} />
+      <ScrollOnSend sent={sent} onSend={resumeFollowBottom} />
       <TrimAtEnd excess={trimmable} trim={trim} />
       <RecapLine
         key={sessionId}
@@ -682,123 +1084,64 @@ export const Thread = memo(function Thread({
         content={content}
         jumps={jumps}
       />
-      <MessageScroller className="ks-thread min-h-0 flex-1 scroll-fade-top-overlay">
+      <MessageScroller className="ks-thread min-h-0 flex-1 scroll-fade-y-overlay">
         <MessageScrollerViewport
           ref={viewport}
-          onScroll={scheduleScrollSync}
+          onScroll={onViewportScroll}
+          onWheel={markUserScroll}
+          onTouchMove={markUserScroll}
+          onPointerDown={onViewportPointerDown}
+          onKeyDown={onViewportKeyDown}
           aria-label={t('thread.label')}
           // Transparent rather than invisible: visibility is inherited, so showing the thread again
           // restyled every element in it, and ran each button's transition.
           className={cn(
-            'outline-none [scroll-timeline:--scroll-fade-top_y]',
-            returnPending && 'opacity-0',
+            'outline-none [scroll-timeline:--scroll-fade-y_y]',
+            !returnPositioned && 'opacity-0',
           )}
         >
           <MessageScrollerContent
             ref={content}
             className="ks-thread__column relative mx-auto w-full gap-0 px-8 pt-8 pb-4"
-            onPointerLeave={() => hoverReply(null)}
+            onPointerOver={onContentPointerOver}
+            onPointerLeave={onContentPointerLeave}
           >
             {shownFrom === 0 && !hasOlder && <SubSessionStart sessionId={sessionId} />}
             {shownFrom === 0 && hasOlder && <OlderFailed sessionId={sessionId} />}
             {items.slice(shownFrom).map((item, shownIndex) => {
               const index = shownFrom + shownIndex
               const estimate = estimateOf(item, byId)
-              if (gapOpen && index >= gapStart && index < gapEnd) {
-                return (
-                  <MessageScrollerItem
-                    key={item.key}
-                    messageId={item.key}
-                    style={{ height: estimate, containIntrinsicSize: `auto ${estimate}px` }}
-                    className={cn(index > 0 && spacing(item, items[index - 1]!))}
-                  />
-                )
-              }
-              const measured = windowState?.heights.get(item.key)
-              const virtualized =
-                windowState !== null &&
+              const spacingClass = index > 0 ? spacing(item, items[index - 1]!) : ''
+              const gapPlaceholder = gapOpen && index >= gapStart && index < gapEnd
+              const measured = canVirtualize ? windowState.heights.get(item.key) : undefined
+              const virtualizedHeight =
+                !gapPlaceholder &&
+                canVirtualize &&
                 measured !== undefined &&
-                items.length - shownFrom > WINDOW_THRESHOLD &&
-                index < items.length - PIN_TAIL &&
+                index < tailCutoff &&
                 item.key !== pinnedKey &&
                 (index < windowState.start || index > windowState.end)
-              if (virtualized) {
-                return (
-                  <MessageScrollerItem
-                    key={item.key}
-                    messageId={item.key}
-                    style={{ height: measured, containIntrinsicSize: `auto ${measured}px` }}
-                    className={cn(index > 0 && spacing(item, items[index - 1]!))}
-                  />
-                )
-              }
+                  ? measured
+                  : null
+              const isTail =
+                index === items.length - 1 || (statusLast && index === items.length - 2)
+              const isLatestRun = statusLast && index === items.length - 2
               return (
-                <MessageScrollerItem
+                <ThreadItem
                   key={item.key}
-                  messageId={item.key}
-                  onPointerEnter={() => hoverReply(replies[index] ?? null)}
-                  style={{ containIntrinsicSize: `auto ${estimate}px` }}
-                  className={cn(
-                    // content-visibility's paint containment clips at the item's edge, but fold
-                    // lines and tool rows reach 6 px past the column and their focus ring 4 px more.
-                    '[overflow-clip-margin:10px]',
-                    // A menu or panel open in it, as an artifact card's, reaches past its edge.
-                    'has-[.ui-as-popover]:[content-visibility:visible]',
-                    index > 0 && spacing(item, items[index - 1]!),
-                    // A reply's action tooltips float outside its row, which paint containment
-                    // would clip; they show only while it is pointed at or focused.
-                    item.type === 'reply' &&
-                      'hover:[content-visibility:visible] focus-within:[content-visibility:visible]',
-                    // The growing tail would flip between skipped and rendered on every chunk,
-                    // recalculating its whole subtree each time. With the status last, the entry
-                    // before it grows the same way.
-                    (index === items.length - 1 || (statusLast && index === items.length - 2)) &&
-                      '[content-visibility:visible]',
-                  )}
-                >
-                  {item.type === 'status' ? (
-                    <TurnStatus sessionId={sessionId} afterSent={item.afterSent} />
-                  ) : item.type === 'hidden' ? (
-                    <HiddenSteps count={item.count} onShow={() => openTurn(item.turn)} />
-                  ) : item.type === 'still' ? (
-                    <StillRunningLine sessionId={sessionId} />
-                  ) : item.type === 'reply' ? (
-                    <ReplyFooter
-                      replyKey={item.key}
-                      sessionId={sessionId}
-                      projectPath={projectPath}
-                      agentIds={item.agentIds}
-                      toolIds={item.toolIds}
-                      endId={item.endId}
-                      latest={item.latest}
-                      still={item.still ?? false}
-                    />
-                  ) : item.type === 'run' ? (
-                    <RunGroup
-                      sessionId={sessionId}
-                      entryIds={item.ids}
-                      signature={item.signature}
-                      projectPath={projectPath}
-                      agentName={agentName}
-                      latest={statusLast && index === items.length - 2}
-                    />
-                  ) : item.type === 'group' ? (
-                    <ToolGroup
-                      sessionId={sessionId}
-                      entryIds={item.ids}
-                      projectPath={projectPath}
-                      agentName={agentName}
-                    />
-                  ) : (
-                    <Entry
-                      sessionId={sessionId}
-                      entryId={item.id}
-                      endId={item.endId}
-                      projectPath={projectPath}
-                      agentName={agentName}
-                    />
-                  )}
-                </MessageScrollerItem>
+                  item={item}
+                  sessionId={sessionId}
+                  projectPath={projectPath}
+                  agentName={agentName}
+                  spacingClass={spacingClass}
+                  replyKey={replies[index] ?? null}
+                  estimate={estimate}
+                  gapPlaceholder={gapPlaceholder}
+                  virtualizedHeight={virtualizedHeight}
+                  isTail={isTail}
+                  isLatestRun={isLatestRun}
+                  openTurn={openTurn}
+                />
               )
             })}
             <ReplyMarks sessionId={sessionId} viewport={viewport} content={content} jumps={jumps} />
@@ -812,7 +1155,7 @@ export const Thread = memo(function Thread({
           viewport={viewport}
           commenting={commenting}
         />
-        <JumpToLatest sessionId={sessionId} working={working} />
+        <JumpToLatest sessionId={sessionId} working={working} onJump={resumeFollowBottom} />
         <OlderLoading sessionId={sessionId} />
         <MessageOutline sessionId={sessionId} viewport={viewport} content={content} jumps={jumps} />
         <RevealTarget sessionId={sessionId} viewport={viewport} content={content} jumps={jumps} />
@@ -831,7 +1174,10 @@ export const Thread = memo(function Thread({
           offset={returnTo.offset}
           viewport={viewport}
           content={content}
-          onDone={returned}
+          isSettling={isGapSettling}
+          onPositioned={markReturnPositioned}
+          onFallbackEnd={resumeFollowBottom}
+          onDone={finishReturn}
         />
       )}
     </MessageScrollerProvider>

@@ -46,10 +46,13 @@
     "quoteLine": "在对话中引用第 {{line}} 行",
     "quoteLines": "在对话中引用第 {{start}}–{{end}} 行",
     "quoteSelection": "在对话中引用选中的内容",
+    "addNote": "写备注",
+    "quoteShort": "引用",
     "openFailed": "无法打开此文件",
     "missing": "这个文件已不在磁盘上。",
     "readFailed": "无法再次读取这个文件：{{message}}",
     "closeTab": "关闭标签页",
+    "openWithDefault": "使用默认应用打开",
     "showIn": "在{{name}}中显示",
     "binaryTitle": "二进制文件",
     "binaryDescription": "{{size}}，不显示预览。",
@@ -87,9 +90,47 @@
   "tabs": {
     "agentFile": "{{agent}} 的文件，只读"
   },
+  "note": {
+    "title": "为选区写备注",
+    "selection": "选区",
+    "excerptLabel": "选中的文字",
+    "placeholder": "给智能体写备注…",
+    "send": "发送",
+    "sending": "发送中…",
+    "toComposer": "带入输入框",
+    "toComposerTitle": "将选区与备注一起带入对话输入框",
+    "queuedHint": "会话正在运行，发送后将加入队列。",
+    "queuedToast": "备注已加入发送队列",
+    "failed": "未能发送备注：{{error}}",
+    "disabled": {
+      "noSession": "先打开一个活跃会话，即可发送备注。",
+      "subagent": "子智能体会话不能直接接收备注。",
+      "starting": "请等待会话启动完成后再发送。",
+      "heldOutside": "此会话正由外部终端占用，暂时无法发送。",
+      "unavailable": "当前会话暂时无法接收消息。"
+    }
+  },
   "link": {
     "open": "打开 {{target}}",
     "openInPanel": "在侧边栏打开"
+  },
+  "hoverPreview": {
+    "openInFiles": "在文件面板打开",
+    "openFullFile": "打开完整文件",
+    "lineBadge": "第 {{lines}} 行",
+    "empty": "空文件。",
+    "truncatedRange": "仅显示第 {{start}}\u2013{{end}} 行（共 {{total, number}} 行）",
+    "truncatedClipped": "过长行已截断以便预览",
+    "folderTitle": "文件夹",
+    "folderDescription": "文件夹引用，点击打开查看。",
+    "externalFileDescription": "该项目外的文件，点击打开。",
+    "imageDimensions": "{{width}} \u00d7 {{height}}",
+    "mediaAudioTitle": "音频文件",
+    "mediaVideoTitle": "视频文件",
+    "mediaDocumentTitle": "文档文件",
+    "mediaDescription": "{{size}}，点击在文件面板中预览。",
+    "loadFailed": "无法加载预览",
+    "retry": "重试"
   },
   "htmlPreview": {
     "preview": "预览",

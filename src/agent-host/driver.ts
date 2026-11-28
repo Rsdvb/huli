@@ -5,6 +5,7 @@
 
 import type { ChildProcess } from 'node:child_process'
 import type { NodeRuntime } from '@shared/host-control'
+import type { Platform } from '@shared/platform'
 import type { ClaudeRunSettings } from '@shared/settings'
 import type { ConfigOption } from '@shared/thread'
 import type { AgentDefinition, LaunchSpec } from './catalog'
@@ -116,6 +117,8 @@ export interface HostedContext extends DriverContext {
   claudeRun?(): ClaudeRunSettings | null
   /** Whether the user's sessions offer Claude Code's predicted next prompt, as the settings say now. */
   claudePromptSuggestions?(): boolean
+  /** Host OS platform for path canonicalization; defaults to `process.platform`. */
+  platform?: Platform
   /**
    * The user's CLI to start a process with: `started` while it is still there, else the one
    * detection finds again. Rejects with why none can run. A test may leave it out.
@@ -131,6 +134,8 @@ export interface HostedContext extends DriverContext {
   clineHostPath?: string | null
   /** Where Claude Code's flag settings are written for its processes; a test may leave it out. */
   claudeSettingsDir?: string
+  /** The environment that turns a folder's own config off, for an `acp-folders` agent. */
+  folderConfigOff?: Readonly<Record<string, string>>
 }
 
 export interface HostedDriver extends StoredConfig {

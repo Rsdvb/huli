@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import {
   ArrowDown01Icon,
   ArrowRight01Icon,
   ArrowShrink02Icon,
   Database02Icon,
+  MoreHorizontalIcon,
   RefreshIcon,
   Timer02Icon,
 } from '@hugeicons/core-free-icons'
@@ -16,6 +17,11 @@ import {
   type ContextEstimates,
   type ContextReport,
 } from '@shared/context'
+import { changedCount, type McpRunState, type SessionMcpServer } from '@shared/mcp-insight'
+import {
+  McpToolChangesDialog,
+  McpToolChangesTag,
+} from '@renderer/features/marketplace/mcp-tool-changes'
 import type { LastRequest } from '@shared/model-requests'
 import {
   cacheHitOf,
@@ -35,15 +41,26 @@ import {
 } from '@renderer/components/ui/collapsible'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import {
-  ContextWindow,
-  type ContextPart as ContextWindowPart,
-} from '@renderer/components/affect/context-window'
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@renderer/components/ui/dropdown-menu'
 import { Popover, PopoverContent, PopoverTrigger } from '@renderer/components/ui/popover'
+import { Spinner } from '@renderer/components/ui/spinner'
+import { toast } from '@renderer/components/ui/toast'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { useCacheLeft, useCachePhase } from '@renderer/features/prompt-cache/cache-phase'
 import { joinPlanTier } from '@renderer/features/account/model'
-import { breakdownView, shownUsage } from '@renderer/features/session/composer/context-bar'
+import {
+  barSegments,
+  breakdownView,
+  contextSummary,
+  formatPartShare,
+  showContextEstimates,
+  shownUsage,
+} from '@renderer/features/session/composer/context-bar'
 import { PANEL } from '@renderer/features/session/entries/helpers'
 import {
   inlineReset,
@@ -55,6 +72,7 @@ import { useLimitView } from '@renderer/hooks/use-limit-view'
 import {
   clockTime,
   countdown,
+  exactCount,
   fullTime,
   limitLabel,
   limitShort,
@@ -74,14 +92,22 @@ import {
 } from '@renderer/lib/plan-limit'
 import { useClock, useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
-import { loadContext, refreshLimits, useUsageStore } from '@renderer/stores/usage'
-import { toggleSidePane } from '@renderer/stores/view'
 import { useSettingsStore } from '@renderer/stores/settings'
+import { useThreadsStore } from '@renderer/stores/threads'
+import { loadContext, refreshLimits, useUsageStore } from '@renderer/stores/usage'
+import { openMarketplace, toggleSidePane } from '@renderer/stores/view'
+import { itemKey } from '@renderer/features/marketplace/model'
+import { ItemTile } from '@renderer/features/marketplace/tiles'
 import { REQUESTS_ICON } from '@renderer/features/requests/icon'
 import { readsModelRequests } from '@renderer/features/requests/support'
 import { useSessionView } from '@renderer/features/session/use-thread'
 import { Glyph } from '@renderer/features/shell/glyph'
-import { groupPlanLimits, type PlanLimitGroup, type PlanLimitItem } from './plan-limit-groups'
+import {
+  groupPlanLimits,
+  planWaveTier,
+  type PlanLimitGroup,
+  type PlanLimitItem,
+} from './plan-limit-groups'
 import { compactContext } from './traffic-actions'
 
 const MINUTE = 60_000
@@ -363,12 +389,13 @@ const trayLevel = (limit: PlanLimit): 'muted' | 'high' | 'full' =>
 
 /**
  * How much of the context is used, as a ring and its percentage, and the model's fullest plan
- * limit before them, on the composer's tray. It opens affectUI's Context Window over what fills the
- * context, then the session's tokens and the plan's limits.
+ * limit before them, on the composer's tray. It opens a compact context usage card with a progress
+ * bar and optional breakdown, followed by the session's tokens and the plan's limits.
  */
 export function ContextButton({
   sessionId,
   agentId,
+  agentName,
   idle,
   closed,
   reports,
@@ -386,6 +413,8 @@ export function ContextButton({
 }: {
   sessionId: string
   agentId: AgentId
+  /** 当前智能体的展示名称，用于上下文估算说明文案。 */
+  agentName?: string
   /** No turn runs. */
   idle: boolean
   /** The session is not attached to its agent, so nothing refreshes its context. */
@@ -416,6 +445,8 @@ export function ContextButton({
   const { t } = useTranslation('composer')
   const [open, setOpen] = useState(false)
   const [compactError, setCompactError] = useState<string | null>(null)
+  // The review dialog lives outside the popover, which would otherwise stack over it.
+  const [reviewing, setReviewing] = useState<SessionMcpServer | null>(null)
   const limit = trayLimit(holding)
   // An account of another kind has no plan; an unknown one shows the limits the agent reports, and
   // so does one through other providers, such as OpenCode's, whose windows are theirs.
@@ -439,6 +470,11 @@ export function ContextButton({
   const share = shown && shown.size > 0 ? shown.used / shown.size : 0
   const tone = contextTone(share)
   const percent = Math.round(share * 100)
+  // The same view as ContextPart's, so an exact breakdown or one being read shows no estimates.
+  const view = shown
+    ? breakdownView(read, `${shown.used}/${shown.size}`, { reports, idle, live })
+    : null
+  const showEstimates = Boolean(shown && view && showContextEstimates(estimates, view))
   const onOpenChange = (next: boolean) => {
     setOpen(next)
     if (!next) return
@@ -455,112 +491,369 @@ export function ContextButton({
     }
   }
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger
-        render={
+    <>
+      <Popover open={open} onOpenChange={onOpenChange}>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              aria-label={
+                usage
+                  ? t(read?.error ? 'usage.contextPercentStale' : 'usage.contextPercent', {
+                      percent,
+                    })
+                  : t('usage.title')
+              }
+              title={read?.error ? t('usage.breakdown.refreshFailed') : undefined}
+              className="ui-as-tray-link kettu-tray-link--meter"
+            />
+          }
+        >
+          {limit && <TrayLimit key={`${limit.window}-${limit.usedPercent}`} limit={limit} />}
+          {usage && (
+            <>
+              <MeterRing share={share} level={METER[tone]} />
+              <span className="tabular kettu-tray-meter__percent">
+                {read?.error && '≈'}
+                <Trans
+                  t={t}
+                  i18nKey="usage.contextShort"
+                  values={{ percent }}
+                  components={{ word: <span className="kettu-tray-meter__word" /> }}
+                />
+              </span>
+            </>
+          )}
+        </PopoverTrigger>
+        {/* A long list scrolls above the tray rather than flipping the card beside it. */}
+        <PopoverContent
+          side="top"
+          align="end"
+          sideOffset={8}
+          collisionAvoidance={{ fallbackAxisSide: 'none' }}
+          className="kettu-pop max-h-(--available-height) w-80 overflow-y-auto"
+        >
+          <div className="kettu-ctx">
+            {shown && (
+              <ContextPart
+                sessionId={sessionId}
+                agentId={agentId}
+                usage={shown}
+                idle={idle}
+                reports={reports}
+                live={live}
+                report={read}
+                managed={pushed !== undefined && direct}
+                model={model}
+                subagent={subagent}
+              />
+            )}
+            {showEstimates && (
+              <ContextEstimatePart
+                key={`${sessionId}/${agentId}`}
+                sessionId={sessionId}
+                closed={closed}
+                agentName={agentName}
+              />
+            )}
+            <UsageLines sessionId={sessionId} usage={shown} />
+            {compact && (
+              <button
+                type="button"
+                className="kettu-ctx__link"
+                onClick={() => {
+                  // The thread shows the compaction as it runs, from the agent's own entries.
+                  compactContext(sessionId, compact).then(
+                    () => setOpen(false),
+                    (error: unknown) => setCompactError(errorMessage(error)),
+                  )
+                }}
+              >
+                <span className="kettu-ctx__link-name">
+                  <Glyph icon={ArrowShrink02Icon} size={14} />
+                  {t('usage.compact')}
+                </span>
+                <span className="kettu-ctx__link-hint">{t('usage.compactHint')}</span>
+              </button>
+            )}
+            {compactError && (
+              <p className="kettu-ctx__note kettu-ctx__note--alert" role="alert">
+                {t('usage.compactFailed', { error: compactError })}
+              </p>
+            )}
+            <McpServersPart
+              sessionId={sessionId}
+              idle={idle}
+              onLeave={() => setOpen(false)}
+              review={(server) => {
+                setOpen(false)
+                setReviewing(server)
+              }}
+            />
+            {readsModelRequests(agentId) && (
+              <button
+                type="button"
+                className="kettu-ctx__link"
+                onClick={() => {
+                  setOpen(false)
+                  toggleSidePane(sessionId, 'requests', true)
+                }}
+              >
+                <span className="kettu-ctx__link-name">
+                  <Glyph icon={REQUESTS_ICON} size={14} />
+                  {t('usage.everyRequest')}
+                </span>
+                <Glyph icon={ArrowRight01Icon} size={13} />
+              </button>
+            )}
+            {subscribed && <PlanLimits limits={limits} holding={holding} account={account} />}
+          </div>
+        </PopoverContent>
+      </Popover>
+      {reviewing && (
+        <McpToolChangesDialog
+          server={{ id: reviewing.serverId, title: reviewing.title }}
+          changes={reviewing.changes ?? null}
+          open
+          onOpenChange={(next) => {
+            if (!next) setReviewing(null)
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+const NO_NAMES: string[] = []
+
+/**
+ * The library servers the session's agent was handed, each with its state, tools and what it
+ * takes per turn, then what changed in the library since its agent attached, with Use now.
+ */
+function McpServersPart({
+  sessionId,
+  idle,
+  onLeave,
+  review,
+}: {
+  sessionId: string
+  idle: boolean
+  onLeave: () => void
+  review: (server: SessionMcpServer) => void
+}) {
+  const { t } = useTranslation('composer')
+  const changed = useThreadsStore(
+    (s) => s.replicas[sessionId]?.state?.session.mcpChanged ?? NO_NAMES,
+  )
+  const [servers, setServers] = useState<SessionMcpServer[] | null>(null)
+  const [applying, setApplying] = useState(false)
+  const read = useCallback(() => {
+    host('sessions.mcpServers', { sessionId })
+      .then(setServers)
+      .catch(() => setServers([]))
+  }, [sessionId])
+  useEffect(read, [read])
+  const act = (server: SessionMcpServer, action: 'reconnect' | 'off' | 'on') => {
+    host('sessions.mcpServer', { sessionId, serverId: server.serverId, action })
+      .catch((error: unknown) =>
+        toast(
+          t('usage.mcp.actionFailed', { name: server.title, error: errorMessage(error) }),
+          undefined,
+          { tone: 'warning' },
+        ),
+      )
+      .finally(read)
+  }
+  const page = (server: SessionMcpServer | null) => {
+    onLeave()
+    const hostId = sessionHost(sessionId)
+    openMarketplace(
+      server
+        ? { item: itemKey({ kind: 'mcp', id: server.serverId }), hostId }
+        : { tab: 'mcp', hostId },
+    )
+  }
+  if (changed.length === 0 && (servers === null || servers.length === 0)) return null
+  const use = () => {
+    setApplying(true)
+    host('sessions.applyMcp', { sessionId })
+      .catch((error: unknown) =>
+        toast(t('usage.mcp.applyFailed', { error: errorMessage(error) }), undefined, {
+          tone: 'warning',
+        }),
+      )
+      .finally(() => setApplying(false))
+  }
+  return (
+    <section className="kettu-ctx__mcp">
+      <div className="kettu-ctx__mcp-head">
+        <span className="kettu-ctx__title">
+          {t('usage.mcp.title')}
+          {servers && servers.length > 0 && (
+            <span className="kettu-ctx__mcp-count">{servers.length}</span>
+          )}
+        </span>
+        <button type="button" className="kettu-ctx__mcp-manage" onClick={() => page(null)}>
+          {t('usage.mcp.manage')}
+        </button>
+      </div>
+      {servers && servers.length > 0 && (
+        <ul className="kettu-ctx__mcp-list">
+          {servers.map((server) => (
+            <McpServerRow
+              key={server.serverId}
+              server={server}
+              act={(action) => act(server, action)}
+              open={() => page(server)}
+              review={() => review(server)}
+            />
+          ))}
+        </ul>
+      )}
+      {changed.length > 0 && (
+        <div className="kettu-ctx__mcp-notice" role="status">
+          <span>
+            {t('usage.mcp.changed', { names: changed.join(', '), count: changed.length })}
+          </span>
           <button
             type="button"
-            aria-label={
-              usage
-                ? t(read?.error ? 'usage.contextPercentStale' : 'usage.contextPercent', { percent })
-                : t('usage.title')
-            }
-            title={read?.error ? t('usage.breakdown.refreshFailed') : undefined}
-            className="ui-as-tray-link kettu-tray-link--meter"
-          />
-        }
-      >
-        {limit && <TrayLimit key={`${limit.window}-${limit.usedPercent}`} limit={limit} />}
-        {usage && (
-          <>
-            <MeterRing share={share} level={METER[tone]} />
-            <span className="tabular kettu-tray-meter__percent">
-              {read?.error && '≈'}
-              <Trans
-                t={t}
-                i18nKey="usage.contextShort"
-                values={{ percent }}
-                components={{ word: <span className="kettu-tray-meter__word" /> }}
-              />
-            </span>
-          </>
-        )}
-      </PopoverTrigger>
-      {/* A long list scrolls above the tray rather than flipping the card beside it. */}
-      <PopoverContent
-        side="top"
-        align="end"
-        sideOffset={8}
-        collisionAvoidance={{ fallbackAxisSide: 'none' }}
-        className="kettu-pop max-h-(--available-height) w-80 overflow-y-auto"
-      >
-        <div className="kettu-ctx">
-          {shown && (
-            <ContextPart
-              sessionId={sessionId}
-              agentId={agentId}
-              usage={shown}
-              idle={idle}
-              reports={reports}
-              live={live}
-              report={read}
-              managed={pushed !== undefined && direct}
-              model={model}
-              subagent={subagent}
-            />
-          )}
-          {shown && estimates && (
-            <ContextEstimatePart
-              key={`${sessionId}/${agentId}`}
-              sessionId={sessionId}
-              closed={closed}
-            />
-          )}
-          <UsageLines sessionId={sessionId} usage={shown} />
-          {compact && (
-            <button
-              type="button"
-              className="kettu-ctx__link"
-              onClick={() => {
-                // The thread shows the compaction as it runs, from the agent's own entries.
-                compactContext(sessionId, compact).then(
-                  () => setOpen(false),
-                  (error: unknown) => setCompactError(errorMessage(error)),
-                )
-              }}
-            >
-              <span className="kettu-ctx__link-name">
-                <Glyph icon={ArrowShrink02Icon} size={14} />
-                {t('usage.compact')}
-              </span>
-              <span className="kettu-ctx__link-hint">{t('usage.compactHint')}</span>
-            </button>
-          )}
-          {compactError && (
-            <p className="kettu-ctx__note kettu-ctx__note--alert" role="alert">
-              {t('usage.compactFailed', { error: compactError })}
-            </p>
-          )}
-          {readsModelRequests(agentId) && (
-            <button
-              type="button"
-              className="kettu-ctx__link"
-              onClick={() => {
-                setOpen(false)
-                toggleSidePane(sessionId, 'requests', true)
-              }}
-            >
-              <span className="kettu-ctx__link-name">
-                <Glyph icon={REQUESTS_ICON} size={14} />
-                {t('usage.everyRequest')}
-              </span>
-              <Glyph icon={ArrowRight01Icon} size={13} />
-            </button>
-          )}
-          {subscribed && <PlanLimits limits={limits} holding={holding} account={account} />}
+            className="kettu-ctx__mcp-use"
+            disabled={applying || !idle}
+            title={idle ? undefined : t('usage.mcp.afterTurn')}
+            onClick={use}
+          >
+            {applying && <Spinner className="size-3" />}
+            {t('usage.mcp.useNow')}
+          </button>
         </div>
-      </PopoverContent>
-    </Popover>
+      )}
+    </section>
+  )
+}
+
+/** A server's state in a few words, the reason itself for one that failed. */
+function mcpStateText(
+  state: McpRunState,
+  t: ReturnType<typeof useTranslation<'composer'>>['t'],
+): string {
+  switch (state.state) {
+    case 'running':
+      return t('usage.mcp.state.running')
+    case 'idle':
+      return t('usage.mcp.state.idle')
+    case 'starting':
+      return t('usage.mcp.state.starting')
+    case 'needs-sign-in':
+      return t('usage.mcp.state.signIn')
+    case 'by-agent':
+      return t('usage.mcp.state.byAgent')
+    case 'error':
+      return state.reason
+  }
+}
+
+function McpServerRow({
+  server,
+  act,
+  open,
+  review,
+}: {
+  server: SessionMcpServer
+  act: (action: 'reconnect' | 'off' | 'on') => void
+  open: () => void
+  review: () => void
+}) {
+  const { t } = useTranslation('composer')
+  const { state } = server
+  // A server of the folder has no server page, so its held changes are reviewed from here.
+  const held =
+    server.project && server.changes?.guard === 'hold' && changedCount(server.changes) > 0
+      ? server.changes
+      : null
+  const facts = server.off
+    ? t('usage.mcp.offHere')
+    : [
+        mcpStateText(state, t),
+        server.tools !== null ? t('usage.mcp.tools', { count: server.tools }) : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+  const tone = server.off
+    ? 'off'
+    : state.state === 'error'
+      ? 'error'
+      : state.state === 'needs-sign-in'
+        ? 'warn'
+        : state.state === 'running'
+          ? 'on'
+          : 'idle'
+  return (
+    <li className="kettu-ctx__mcp-row" data-off={server.off ? '' : undefined}>
+      <ItemTile
+        size="small"
+        subject={{ kind: 'mcp', id: server.serverId, brand: null, site: server.site }}
+      />
+      <span className="kettu-ctx__mcp-name">
+        <span className="kettu-ctx__mcp-title" title={server.title}>
+          {server.name}
+          {server.project && (
+            <span className="kettu-ctx__mcp-project">{t('usage.mcp.project')}</span>
+          )}
+        </span>
+        {held ? (
+          <span className="kettu-ctx__mcp-held" title={facts}>
+            <McpToolChangesTag changes={held} />
+          </span>
+        ) : (
+          <span className="kettu-ctx__mcp-facts" data-tone={tone} title={facts}>
+            {facts}
+          </span>
+        )}
+      </span>
+      {!server.off && server.tokens !== null && (
+        <span className="kettu-ctx__mcp-tokens">
+          {t('usage.mcp.perTurn', { tokens: tokens(server.tokens) })}
+        </span>
+      )}
+      {server.off ? (
+        <button type="button" className="kettu-ctx__mcp-act" onClick={() => act('on')}>
+          {t('usage.mcp.turnOn')}
+        </button>
+      ) : held ? (
+        <button type="button" className="kettu-ctx__mcp-act" onClick={review}>
+          {t('usage.mcp.review')}
+        </button>
+      ) : state.state === 'needs-sign-in' && !server.project ? (
+        <button type="button" className="kettu-ctx__mcp-act" onClick={open}>
+          {t('usage.mcp.signIn')}
+        </button>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                className="kettu-ctx__mcp-more"
+                aria-label={t('usage.mcp.more', { name: server.name })}
+              />
+            }
+          >
+            <Glyph icon={MoreHorizontalIcon} size={14} />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem disabled={!server.routed} onClick={() => act('reconnect')}>
+              {t('usage.mcp.reconnect')}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!server.routed} onClick={() => act('off')}>
+              {t('usage.mcp.turnOff')}
+            </DropdownMenuItem>
+            {!server.project && (
+              <DropdownMenuItem onClick={open}>{t('usage.mcp.openPage')}</DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </li>
   )
 }
 
@@ -688,6 +981,9 @@ function ContextPart({
   subagent?: boolean
 }) {
   const { t } = useTranslation('composer')
+  const uid = useId()
+  const [hot, setHot] = useState<string | null>(null)
+  const [opened, setOpened] = useState<string | null>(null)
   const key = `${usage.used}/${usage.size}`
   const view = breakdownView(report, key, { reports, idle, live })
   // Managed reports are refreshed by the host, independently of this popover's lifetime.
@@ -701,65 +997,202 @@ function ContextPart({
   const busy = view.kind === 'rows' && view.dimmed
   const retry = () => loadContext(sessionId, key, true)
   const listOf = (name: string) => lists.find((l) => l.name.toLowerCase() === name.toLowerCase())
-  const parts: ContextWindowPart[] = rows
-    ? rows
-        .filter((row) => row.part.kind !== 'free')
-        .map((row) => {
-          const list = listOf(row.name)
-          const paths = MEMORY_FILES.test(row.name)
-          // A skill's source is the agent's own key, such as `syncedSkills`; a plugin's skill
-          // already names its plugin.
-          const bare = SKILLS.test(row.name)
-          return {
-            id: row.name,
-            label: partName(t, row.name),
-            tokens: row.tokens,
-            locked: true,
-            ...(row.part.kind === 'buffer'
-              ? { color: 'var(--composer-faint)', reserved: true }
-              : {}),
-            ...(list
-              ? {
-                  items: list.items.map((item, index) => ({
-                    id: String(index),
-                    label: paths
-                      ? middlePath(item.name)
-                      : item.detail && !bare
-                        ? `${item.name} · ${item.detail}`
-                        : item.name,
-                    tokens: parseTokens(item.tokens),
-                    ...(paths ? { title: item.name } : {}),
-                  })),
-                }
-              : {}),
-          }
-        })
-    : [{ id: 'used', label: t('usage.context.used'), tokens: usage.used, locked: true }]
+  const summary = contextSummary(usage, rows)
+  const tone = contextTone(summary.share)
+  const segments = barSegments(rows, summary.used, summary.cap)
+  const breakdownRows = rows ? rows.filter((row) => row.part.kind !== 'free') : null
+  const hotRow = breakdownRows?.find((row) => row.name === hot) ?? null
   const unlisted = lists.filter(
     (l) => !rows?.some((r) => r.name.toLowerCase() === l.name.toLowerCase()),
   )
+  const statusTone = hotRow ? 'hot' : summary.level !== 'ok' ? summary.level : undefined
+  const statusText = hotRow
+    ? `${partName(t, hotRow.name)} · ${formatPartShare(hotRow.tokens, summary.cap)}`
+    : summary.level === 'full'
+      ? summary.over > 0
+        ? t('usage.window.over', { n: tokens(summary.over) })
+        : t('usage.window.full')
+      : summary.level === 'warn'
+        ? t('usage.window.left', { n: tokens(summary.free) })
+        : t('usage.window.free', { n: tokens(summary.free) })
   return (
     <>
-      <div aria-busy={busy} className="kettu-ctx__window" data-busy={busy || undefined}>
-        <ContextWindow
-          parts={parts}
-          limit={usage.size}
-          title={t('usage.context.title')}
-          model={model ?? undefined}
-          modelIcon={model ? <AgentMark agent={agentId} size={12} /> : undefined}
-          readOnly
-          steadyHead
-          labels={{
-            free: (n) => t('usage.window.free', { n }),
-            left: (n) => t('usage.window.left', { n }),
-            over: (n) => t('usage.window.over', { n }),
-            full: t('usage.window.full'),
-            of: (n) => t('usage.window.of', { n }),
-            share: (percent) => t('usage.window.share', { percent }),
-            used: (used, cap, percent) => t('usage.window.used', { used, cap, percent }),
-            nothing: t('usage.window.nothing'),
-          }}
-        />
+      <div
+        aria-busy={busy}
+        className="kettu-ctx__main"
+        data-level={METER[tone]}
+        data-busy={busy || undefined}
+        onPointerLeave={() => setHot(null)}
+      >
+        <div className="kettu-ctx__head">
+          <span className="kettu-ctx__title">{t('usage.context.title')}</span>
+          {model && (
+            <span className="kettu-ctx__model" title={model}>
+              <span className="kettu-ctx__model-icon">
+                <AgentMark agent={agentId} size={12} />
+              </span>
+              <span>{model}</span>
+            </span>
+          )}
+        </div>
+
+        <div
+          className="kettu-ctx__bar"
+          role="meter"
+          aria-valuemin={0}
+          aria-valuemax={summary.cap}
+          aria-valuenow={Math.min(summary.used, summary.cap)}
+          aria-label={t('usage.window.used', {
+            used: tokens(summary.used),
+            cap: tokens(summary.cap),
+            percent: summary.percent,
+          })}
+          data-hot={hotRow ? '' : undefined}
+        >
+          {segments.map((segment) => (
+            <span
+              key={segment.key}
+              className="kettu-ctx__seg"
+              data-kind={segment.part.kind}
+              data-color={segment.part.kind === 'source' ? segment.part.color : undefined}
+              data-on={hot === segment.key ? '' : undefined}
+              data-tiny={segment.widthPercent > 0 && segment.widthPercent < 1.5 ? '' : undefined}
+              style={{ width: `${segment.widthPercent}%` }}
+              onPointerEnter={(e) => {
+                if (e.pointerType === 'mouse' && breakdownRows) setHot(segment.key)
+              }}
+            />
+          ))}
+        </div>
+
+        <div className="kettu-ctx__metrics tabular">
+          <span
+            className="kettu-ctx__stat"
+            title={t('usage.context.tokens', {
+              tokens: `${exactCount(summary.used)} / ${exactCount(summary.cap)}`,
+            })}
+          >
+            <strong className="kettu-ctx__percent">{summary.percent}%</strong>
+            <span className="kettu-ctx__sep" aria-hidden>
+              ·
+            </span>
+            <span className="kettu-ctx__counts">
+              {tokens(summary.used)} / {tokens(summary.cap)}
+            </span>
+          </span>
+          <span className="kettu-ctx__free" data-tone={statusTone} title={statusText}>
+            {statusText}
+          </span>
+        </div>
+
+        {breakdownRows && breakdownRows.length > 0 && (
+          <ul className="kettu-ctx__parts">
+            {breakdownRows.map((row) => {
+              const list = listOf(row.name)
+              const canOpen = Boolean(list)
+              const isOpen = opened === row.name
+              const isHot = hot === row.name
+              const paths = MEMORY_FILES.test(row.name)
+              // A skill's source is the agent's own key, such as `syncedSkills`; a plugin's skill
+              // already names its plugin.
+              const bare = SKILLS.test(row.name)
+              const rowContent = (
+                <>
+                  <span
+                    className="kettu-ctx__swatch"
+                    data-kind={row.part.kind}
+                    data-color={row.part.kind === 'source' ? row.part.color : undefined}
+                    aria-hidden
+                  />
+                  <span className="kettu-ctx__part-label" title={row.name}>
+                    <span className="truncate" dir="auto">
+                      {partName(t, row.name)}
+                    </span>
+                    {canOpen && (
+                      <Glyph
+                        icon={ArrowDown01Icon}
+                        size={11}
+                        className={cn('kettu-ctx__part-chevron', isOpen && 'rotate-180')}
+                      />
+                    )}
+                  </span>
+                  <span className="kettu-ctx__part-share tabular">
+                    {formatPartShare(row.tokens, summary.cap)}
+                  </span>
+                  <span
+                    className="kettu-ctx__part-value tabular"
+                    title={t('usage.context.tokens', { tokens: exactCount(row.tokens) })}
+                  >
+                    {tokens(row.tokens)}
+                  </span>
+                </>
+              )
+              return (
+                <li
+                  key={row.name}
+                  className="kettu-ctx__part"
+                  data-on={isHot ? '' : undefined}
+                  data-dim={hotRow && !isHot ? '' : undefined}
+                  onPointerEnter={(e) => {
+                    if (e.pointerType === 'mouse') setHot(row.name)
+                  }}
+                >
+                  {canOpen ? (
+                    <button
+                      type="button"
+                      className="kettu-ctx__part-row"
+                      aria-expanded={isOpen}
+                      aria-controls={`${uid}-${row.name}`}
+                      onClick={() => setOpened(isOpen ? null : row.name)}
+                      onFocus={() => setHot(row.name)}
+                      onBlur={() => setHot(null)}
+                    >
+                      {rowContent}
+                    </button>
+                  ) : (
+                    <div className="kettu-ctx__part-row">{rowContent}</div>
+                  )}
+                  {list && isOpen && (
+                    <ul id={`${uid}-${row.name}`} className="kettu-ctx__part-items tabular">
+                      {list.items.length === 0 ? (
+                        <li className="kettu-ctx__part-empty">{t('usage.window.nothing')}</li>
+                      ) : (
+                        list.items.map((item, index) => {
+                          const itemLabel = paths
+                            ? middlePath(item.name)
+                            : item.detail && !bare
+                              ? `${item.name} · ${item.detail}`
+                              : item.name
+                          const parsed = parseTokens(item.tokens)
+                          return (
+                            <li key={index}>
+                              <span
+                                className="truncate"
+                                title={paths ? item.name : itemLabel}
+                                dir="auto"
+                              >
+                                {itemLabel}
+                              </span>
+                              <span
+                                title={
+                                  parsed > 0
+                                    ? t('usage.context.tokens', { tokens: exactCount(parsed) })
+                                    : undefined
+                                }
+                              >
+                                {parsed > 0 ? tokens(parsed) : item.tokens}
+                              </span>
+                            </li>
+                          )
+                        })
+                      )}
+                    </ul>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
       </div>
       {/* A refresh in progress adds no line: the card opens upward, so a passing line jolts it. */}
       {view.kind === 'rows' && view.stale && (report?.error || (!live && !idle)) && (
@@ -982,7 +1415,115 @@ function itemLabel(item: PlanLimitItem): string {
 }
 
 /**
- * 分组双轨卡片列表：按模型组/服务商聚合，组名独占顶行彻底避免折行，组内窗口左右双列并排对照。
+ * 单张一体化零接缝柔波液面 SVG：
+ * 整片液面与前后双波在单张 SVG 内连续绘制，避免任何 DPI 或界面缩放下出现拼接竖缝。
+ */
+function PlanWaveFill({ percent, wide }: { percent: number; wide: boolean }) {
+  const uid = useId()
+  if (percent <= 0) return null
+
+  const width = wide ? 280 : 150
+  const height = 60
+
+  // 满槽（>=99%）：整块平顺液面 + 顶部极细玻璃微高光
+  if (percent >= 99) {
+    return (
+      <svg
+        className="kettu-limit__wave"
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        aria-hidden
+      >
+        <defs>
+          <linearGradient id={uid} x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop
+              offset="0%"
+              style={{ stopColor: 'var(--wave-color)', stopOpacity: 'var(--plan-wave-a)' }}
+            />
+            <stop
+              offset="100%"
+              style={{ stopColor: 'var(--wave-color)', stopOpacity: 'var(--wave-fill-b)' }}
+            />
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width={width} height={height} fill={`url(#${uid})`} />
+        <line x1="0" y1="0.75" x2={width} y2="0.75" className="kettu-limit__wave-hi" />
+      </svg>
+    )
+  }
+
+  // 极低非零值保留至少 12px 视觉波幅，避免警示液面消失或压成直线
+  const rawX = (percent / 100) * width
+  const x = Math.max(12, Math.min(width - 4, rawX))
+  const amp = percent <= 10 ? 2.1 : 3.2
+  const backOffset = percent <= 10 ? 2.4 : 3.6
+
+  const frontPath = [
+    'M -2 -10',
+    `L ${(x + 0.2).toFixed(1)} -10`,
+    `C ${(x - amp).toFixed(1)} 6, ${(x + amp).toFixed(1)} 22, ${(x - amp * 0.4).toFixed(1)} 36`,
+    `C ${(x - amp * 1.1).toFixed(1)} 48, ${(x + amp * 0.9).toFixed(1)} 58, ${x.toFixed(1)} 70`,
+    'L -2 70 Z',
+  ].join(' ')
+
+  const frontEdge = [
+    `M ${(x + 0.2).toFixed(1)} -10`,
+    `C ${(x - amp).toFixed(1)} 6, ${(x + amp).toFixed(1)} 22, ${(x - amp * 0.4).toFixed(1)} 36`,
+    `C ${(x - amp * 1.1).toFixed(1)} 48, ${(x + amp * 0.9).toFixed(1)} 58, ${x.toFixed(1)} 70`,
+  ].join(' ')
+
+  const bx = Math.min(width - 1, x + backOffset)
+  const backPath = [
+    'M -2 -10',
+    `L ${(bx - 0.5).toFixed(1)} -10`,
+    `C ${(bx + amp).toFixed(1)} 8, ${(bx - amp * 0.9).toFixed(1)} 24, ${(bx + amp * 0.5).toFixed(1)} 40`,
+    `C ${(bx + amp).toFixed(1)} 52, ${(bx - amp * 0.6).toFixed(1)} 62, ${bx.toFixed(1)} 70`,
+    'L -2 70 Z',
+  ].join(' ')
+
+  const frontGradId = `${uid}-f`
+  const backGradId = `${uid}-b`
+
+  return (
+    <svg
+      className="kettu-limit__wave"
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      aria-hidden
+    >
+      <defs>
+        <linearGradient id={frontGradId} x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop
+            offset="0%"
+            style={{ stopColor: 'var(--wave-color)', stopOpacity: 'var(--plan-wave-a)' }}
+          />
+          <stop
+            offset="100%"
+            style={{ stopColor: 'var(--wave-color)', stopOpacity: 'var(--wave-fill-b)' }}
+          />
+        </linearGradient>
+        <linearGradient id={backGradId} x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" style={{ stopColor: 'var(--wave-alt)', stopOpacity: 0 }} />
+          <stop offset="72%" style={{ stopColor: 'var(--wave-alt)', stopOpacity: 0.03 }} />
+          <stop
+            offset="100%"
+            style={{ stopColor: 'var(--wave-alt)', stopOpacity: 'var(--plan-wave-back)' }}
+          />
+        </linearGradient>
+      </defs>
+      <g className="kettu-limit__wave-back">
+        <path d={backPath} fill={`url(#${backGradId})`} />
+      </g>
+      <g className="kettu-limit__wave-front">
+        <path d={frontPath} fill={`url(#${frontGradId})`} />
+        <path d={frontEdge} className="kettu-limit__wave-edge" />
+      </g>
+    </svg>
+  )
+}
+
+/**
+ * 套餐限额分组柔波液面槽：按模型组/服务商聚合，组内窗口以独立柔波液面胶囊双列对照展示。
  * 同时供上下文弹窗（PlanLimits）与侧边栏账号悬浮卡（PlanPart）复用。
  */
 function PlanLimitGroups({
@@ -1018,6 +1559,28 @@ function PlanLimitGroups({
         const heading = headingOf(group)
         const modelsTip = group.models.length > 0 ? group.models.join(' · ') : null
         const single = group.items.length === 1
+        // 组内预先计算各条目的重置时间与附加额度，使同组胶囊保持统一高度；全组均无元信息时走紧凑布局
+        const prepared = group.items.map((item) => {
+          const { limit } = item
+          const reset = limit.resetsAt ? planResetShort(limit.resetsAt, now) : null
+          const unit =
+            limit.amount?.unit === 'credits'
+              ? t('usage:limits.units.credits')
+              : limit.amount?.unit === 'requests'
+                ? t('usage:limits.units.premiumRequests')
+                : limit.amount?.unit
+          const amountText = limit.amount
+            ? planAmount(
+                limit.amount.used,
+                limit.amount.total,
+                limit.amount.unit,
+                unit ?? limit.amount.unit,
+              )
+            : null
+          return { item, reset, amountText }
+        })
+        const groupHasMeta = prepared.some(({ reset, amountText }) => Boolean(reset || amountText))
+
         return (
           <div
             key={group.id}
@@ -1028,7 +1591,8 @@ function PlanLimitGroups({
             {heading && (
               <div className="kettu-plan-group__head">
                 <span className="kettu-plan-group__name" title={heading}>
-                  {heading}
+                  {group.current && <span className="kettu-plan-group__dot" aria-hidden />}
+                  <span>{heading}</span>
                 </span>
                 {group.current ? (
                   modelsTip ? (
@@ -1054,33 +1618,40 @@ function PlanLimitGroups({
               </div>
             )}
             <div className="kettu-plan-group__grid" data-single={single ? '' : undefined}>
-              {group.items.map((item) => {
+              {prepared.map(({ item, reset, amountText }, index) => {
                 const { limit } = item
                 const shown = shownPercent(Math.round(limit.usedPercent ?? 0), view)
                 // Huli: where an even pace would have the window by now, a tick on the bar.
                 const pace = paceMark(limit, view, now)
                 const fill = limit.usedPercent === null ? 0 : Math.min(100, Math.max(0, shown))
-                const reset = limit.resetsAt ? planResetShort(limit.resetsAt, now) : null
-                const unit =
-                  limit.amount?.unit === 'credits'
-                    ? t('usage:limits.units.credits')
-                    : limit.amount?.unit === 'requests'
-                      ? t('usage:limits.units.premiumRequests')
-                      : limit.amount?.unit
-                const amountText = limit.amount
-                  ? planAmount(
-                      limit.amount.used,
-                      limit.amount.total,
-                      limit.amount.unit,
-                      unit ?? limit.amount.unit,
-                    )
-                  : null
+                const tier = planWaveTier(limit)
+                const isFullWidth =
+                  single || (index === prepared.length - 1 && prepared.length % 2 === 1)
                 return (
                   <div
                     key={limit.window}
                     className="kettu-limit"
-                    data-level={METER[usageTone(limit)]}
+                    role="meter"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={fill}
+                    aria-label={t(view === 'left' ? 'usage.limits.left' : 'usage.limits.used', {
+                      limit: limitLabel(limit),
+                    })}
+                    data-tier={tier}
+                    data-compact={!groupHasMeta ? '' : undefined}
+                    data-zero={fill === 0 ? '' : undefined}
+                    data-full={fill >= 99 ? '' : undefined}
+                    title={
+                      pace === null
+                        ? undefined
+                        : t(view === 'left' ? 'usage.limits.paceLeft' : 'usage.limits.paceUsed', {
+                            percent: pace,
+                          })
+                    }
                   >
+                    <PlanWaveFill percent={fill} wide={isFullWidth} />
+                    {pace !== null && <i className="kettu-pace" style={{ left: `${pace}%` }} />}
                     <div className="kettu-limit__row">
                       <span className="kettu-limit__label" title={limitLabel(limit)}>
                         {itemLabel(item)}
@@ -1089,45 +1660,23 @@ function PlanLimitGroups({
                         {limit.usedPercent === null ? '—' : `${shown}%`}
                       </span>
                     </div>
-                    <div
-                      className="kettu-limit__bar"
-                      data-paced={pace === null ? undefined : ''}
-                      title={
-                        pace === null
-                          ? undefined
-                          : t(view === 'left' ? 'usage.limits.paceLeft' : 'usage.limits.paceUsed', {
-                              percent: pace,
-                            })
-                      }
-                      role="meter"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={fill}
-                      aria-label={t(view === 'left' ? 'usage.limits.left' : 'usage.limits.used', {
-                        limit: limitLabel(limit),
-                      })}
-                    >
-                      <span
-                        data-tiny={fill > 0 && fill <= 3 ? '' : undefined}
-                        style={{ width: `${fill}%` }}
-                      />
-                      {pace !== null && <i className="kettu-pace" style={{ left: `${pace}%` }} />}
-                    </div>
-                    {(reset || amountText) && (
+                    {groupHasMeta && (
                       <div className="kettu-limit__meta">
-                        {reset && limit.resetsAt && (
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={<span className="kettu-limit__reset tabular" />}
-                            >
-                              <Glyph icon={RefreshIcon} size={10} />
-                              <span>{reset}</span>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {t('usage.limits.resets', { time: fullTime(limit.resetsAt) })}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
+                        <span className="kettu-limit__reset tabular">
+                          {reset && limit.resetsAt ? (
+                            <Tooltip>
+                              <TooltipTrigger render={<span className="kettu-limit__reset" />}>
+                                <Glyph icon={RefreshIcon} size={10} />
+                                <span>{reset}</span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {t('usage.limits.resets', { time: fullTime(limit.resetsAt) })}
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            '\u00a0'
+                          )}
+                        </span>
                         {amountText && (
                           <span className="kettu-limit__amount tabular" title={amountText}>
                             {amountText}
@@ -1199,8 +1748,8 @@ function BreakdownRows({ label }: { label: string }) {
   return (
     <div aria-label={label} className="kettu-ctx__pad flex flex-col">
       {[4 / 5, 3 / 5, 2 / 3].map((width) => (
-        <div key={width} className="flex h-6 items-center">
-          <Skeleton className="h-3" style={{ width: `${width * 100}%` }} />
+        <div key={width} className="flex h-5 items-center">
+          <Skeleton className="h-2.5" style={{ width: `${width * 100}%` }} />
         </div>
       ))}
     </div>
@@ -1268,7 +1817,15 @@ type EstimateReading = { estimates: ContextEstimates | null } | { error: string 
  * What the agent can load, sized by estimate: a section of its own under the measured context,
  * since these sizes are of everything available and no part of the total above.
  */
-function ContextEstimatePart({ sessionId, closed }: { sessionId: string; closed: boolean }) {
+function ContextEstimatePart({
+  sessionId,
+  closed,
+  agentName,
+}: {
+  sessionId: string
+  closed: boolean
+  agentName?: string
+}) {
   const { t } = useTranslation('composer')
   const [reading, setReading] = useState<EstimateReading | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -1327,7 +1884,9 @@ function ContextEstimatePart({ sessionId, closed }: { sessionId: string; closed:
             name={t('usage.estimates.mcpServers')}
             items={estimates?.mcpServers ?? null}
           />
-          <p className="kettu-ctx__defs-note">{t('usage.estimates.note')}</p>
+          <p className="kettu-ctx__defs-note">
+            {t('usage.estimates.note', { agent: agentName || t('usage.estimates.agentFallback') })}
+          </p>
         </>
       )}
     </section>
@@ -1385,17 +1944,23 @@ function EstimateList({
   )
 }
 
-/** 侧边栏账号悬浮卡中的套餐与限额详情，复用统一的分组双轨卡片布局 */
+/** 侧边栏账号悬浮卡中的套餐与限额详情，复用统一的 L1 柔波液面槽布局 */
 export function PlanPart({
   limits,
   account,
+  showHeader = true,
 }: {
   limits: PlanLimit[]
   account: AgentAccount | null
+  /** 悬浮卡已将套餐芯片合并至顶行时传 false，避免重复展示“Plan limits · Left”副标题 */
+  showHeader?: boolean
 }) {
   const { t } = useTranslation(['composer', 'common'])
   const view = useLimitView()
   const plan = account?.label ? joinPlanTier(account.label, account.tier) : null
+  if (!showHeader) {
+    return <PlanLimitGroups limits={limits} />
+  }
   return (
     <div className="flex flex-col gap-2 text-hint">
       <div className="flex items-center justify-between gap-2">

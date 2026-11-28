@@ -201,6 +201,7 @@
     "notReported_other": "{{name}} 不提供套餐用量。",
     "notYet": "还没有报告套餐用量。",
     "accounts_other": "{{count}} 个账号",
+    "perHost": "按电脑分别读取",
     "reading": "正在读取套餐用量",
     "failed": "读取失败",
     "neverRead": "读不到套餐用量。",
@@ -359,8 +360,8 @@
     "fromComputer": {
       "name": "统计本机用量",
       "name_web": "统计 {{host}} 上的用量",
-      "description": "同时统计 Claude Code、Codex 和 opencode 在 Kettu 之外的日志。只读 token 数、模型和时间，不读内容。",
-      "description_web": "同时统计 Claude Code、Codex 和 opencode 在 {{host}} 上、Kettu 之外的日志。只读 token 数、模型和时间，不读内容。",
+      "description": "同时统计 Claude Code、Codex、opencode、Pi 和 Google Antigravity 在 Kettu 之外的日志。只读 token 数、模型和时间，不读内容。",
+      "description_web": "同时统计 Claude Code、Codex、opencode、Pi 和 Google Antigravity 在 {{host}} 上、Kettu 之外的日志。只读 token 数、模型和时间，不读内容。",
       "keywords": "日志 历史 导入 token 统计"
     },
     "notFound": "没有找到日志",

@@ -1,9 +1,11 @@
 import {
+  ArrowMoveDownRightIcon,
   AtIcon,
   Attachment01Icon,
   BubbleChatQuestionIcon,
   Camera01Icon,
   CommandLineIcon,
+  DashboardSquare02Icon,
   FolderAddIcon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
@@ -27,11 +29,17 @@ export function useAddMenu({
   box,
   agentName,
   commands,
+  onDelegate,
+  delegateDisabled,
   onSideChat,
 }: {
   box: PromptBoxState
   agentName: string
   commands: readonly SlashCommand[]
+  /** Opens the delegation agent picker; absent where this session cannot delegate. */
+  onDelegate?: () => void
+  /** Why delegation cannot be used right now (e.g. no agents available). */
+  delegateDisabled?: string
   /** Opens the session's side chat; absent where there is none. */
   onSideChat?: () => void
 }): { sections: ComposerAddSection[]; onAttach: (id: string) => void; disabled?: string } {
@@ -79,6 +87,11 @@ export function useAddMenu({
               },
             ]
           : []),
+        {
+          id: 'artifact',
+          label: t('attachments.attachArtifact'),
+          icon: <Glyph icon={DashboardSquare02Icon} />,
+        },
         // The session's own browser tab, which New session and the web client have none of.
         ...(!isWeb && sessionId
           ? [
@@ -113,16 +126,31 @@ export function useAddMenu({
           : []),
       ],
     },
-    ...(onSideChat
+    ...(onDelegate || onSideChat
       ? [
           {
             rows: [
-              {
-                id: 'side-chat',
-                label: t('attachments.sideChat'),
-                icon: <Glyph icon={BubbleChatQuestionIcon} />,
-                shortcut: formatShortcut(shortcutKeysOf('sideChat')),
-              },
+              ...(onDelegate
+                ? [
+                    {
+                      id: 'delegate',
+                      label: t('delegation.menuItem'),
+                      icon: <Glyph icon={ArrowMoveDownRightIcon} />,
+                      description: delegateDisabled,
+                      disabled: !!delegateDisabled,
+                    },
+                  ]
+                : []),
+              ...(onSideChat
+                ? [
+                    {
+                      id: 'side-chat',
+                      label: t('attachments.sideChat'),
+                      icon: <Glyph icon={BubbleChatQuestionIcon} />,
+                      shortcut: formatShortcut(shortcutKeysOf('sideChat')),
+                    },
+                  ]
+                : []),
             ],
           },
         ]
@@ -137,9 +165,11 @@ export function useAddMenu({
   }
   const onAttach = (id: string) => {
     if (id === 'files' || id === 'folder') box.pick(id)
+    else if (id === 'artifact') box.openArtifactPicker()
     else if (id === 'screenshot') box.screenshot()
     else if (id === 'mention') startWord('@')
     else if (id === 'commands') startWord('/')
+    else if (id === 'delegate') onDelegate?.()
     else if (id === 'side-chat') onSideChat?.()
     // The menu hands the focus back to its button; the text takes it after that.
     if (id === 'mention' || id === 'commands') requestAnimationFrame(() => box.focus())

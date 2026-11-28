@@ -5,6 +5,7 @@ import {
   Comment01Icon,
   File01Icon,
   GitPullRequestIcon,
+  Layers01Icon,
   RadioButtonIcon,
   RotateClockwiseIcon,
   UnavailableIcon,
@@ -18,6 +19,10 @@ import {
   type IssueState,
   type PullRequest,
   type PullRequestAuthor,
+  type PullRequestStack,
+  type PullRequestStackState,
+  type PullRequestState,
+  type StackUnavailableReason,
 } from '@shared/git'
 import { Avatar, AvatarFallback, AvatarImage } from '@renderer/components/ui/avatar'
 import { Badge } from '@renderer/components/ui/badge'
@@ -25,12 +30,21 @@ import { Button } from '@renderer/components/ui/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@renderer/components/ui/hover-card'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { Spinner } from '@renderer/components/ui/spinner'
+import {
+  LinkSessionContext,
+  sessionLinkProps,
+  useLinkSessionId,
+} from '@renderer/features/session/open-link'
 import { longAgo } from '@renderer/lib/format'
 import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
 import {
+  avatarOf,
+  ghStateOf,
+  hostGitOf,
   isReferenceSettled,
   loadAvatar,
+  loadGitTools,
   loadReference,
   retryReference,
   useGitStore,
@@ -38,7 +52,9 @@ import {
 } from '@renderer/stores/git'
 import { CopyButton } from './copy-button'
 import {
+  referenceTitleOf,
   shortReference,
+  useGitHostId,
   useProjectRepository,
   useReferenceData,
   type ReferenceData,
@@ -64,6 +80,43 @@ const ISSUE_STATE_KEY = {
   not_planned: 'ref.issueState.notPlanned',
 } as const
 
+const STACK_STATE_KEY = {
+  open: 'ref.stackState.open',
+  closed: 'ref.stackState.closed',
+} as const
+
+const STACK_COLOR = {
+  open: 'text-success',
+  closed: 'text-icon',
+} as const
+
+/** The state's icon in its color for a compact repository issue or pull request summary. */
+export function RepositoryReferenceIcon({
+  item,
+  size = 14,
+  className,
+}: {
+  item: { kind: 'issue'; state: IssueState } | { kind: 'pull'; state: PullRequestState }
+  size?: IconSize
+  className?: string
+}) {
+  const { t } = useTranslation('git')
+  if (item.kind === 'pull') {
+    return <PrIcon state={item.state} size={size} className={className} />
+  }
+  const { Icon, color } = ISSUE[item.state]
+  return (
+    <HugeiconsIcon
+      icon={Icon}
+      size={size}
+      strokeWidth={STROKE}
+      role="img"
+      aria-label={t('ref.issueIcon', { state: t(ISSUE_STATE_KEY[item.state]) })}
+      className={cn('shrink-0', ICON_SIZE[size], color, className)}
+    />
+  )
+}
+
 /** The state's icon in its color; gray, of the reference's kind, until gh has answered. */
 export function ReferenceIcon({
   kind,
@@ -79,6 +132,25 @@ export function ReferenceIcon({
   const { t } = useTranslation('git')
   if (data?.kind === 'pull')
     return <PrIcon state={data.pr.state} size={size} className={className} />
+  if (kind === 'stack' || data?.kind === 'stack') {
+    const state: PullRequestStackState | null = data?.kind === 'stack' ? data.stack.state : null
+    const label = state ? t('ref.stackIcon', { state: t(STACK_STATE_KEY[state]) }) : t('ref.stack')
+    return (
+      <HugeiconsIcon
+        icon={Layers01Icon}
+        size={size}
+        strokeWidth={STROKE}
+        role="img"
+        aria-label={label}
+        className={cn(
+          'shrink-0',
+          ICON_SIZE[size],
+          state ? STACK_COLOR[state] : 'text-icon',
+          className,
+        )}
+      />
+    )
+  }
   const state: IssueState | null = data?.kind === 'issue' ? data.issue.state : null
   const icon = state ? ISSUE[state].Icon : kind === 'pull' ? GitPullRequestIcon : RadioButtonIcon
   const label = state
@@ -101,11 +173,6 @@ export function ReferenceIcon({
   )
 }
 
-function titleOf(data: ReferenceData | null): string | null {
-  if (!data) return null
-  return data.kind === 'pull' ? data.pr.title : data.issue.title
-}
-
 function clip(title: string): string {
   const chars = [...title]
   return chars.length > TITLE_CHARS ? chars.slice(0, TITLE_CHARS - 1).join('') + '…' : title
@@ -115,11 +182,11 @@ function clip(title: string): string {
  * Loads a reference's details the first time it scrolls into view, and has the host keep an open
  * one current for as long as it stays in view.
  */
-function useReferenceOnScreen(ref: GitHubReference) {
+function useReferenceOnScreen(ref: GitHubReference, hostId: string | null) {
   const target = useRef<HTMLSpanElement>(null)
   const [seen, setSeen] = useState(false)
   const [inView, setInView] = useState(false)
-  const settled = useGitStore((s) => isReferenceSettled(s, ref))
+  const settled = useGitStore((s) => isReferenceSettled(s, ref, hostId))
   useEffect(() => {
     const el = target.current
     if (!el) return
@@ -133,10 +200,13 @@ function useReferenceOnScreen(ref: GitHubReference) {
     return () => observer.disconnect()
   }, [])
   useEffect(() => {
-    if (seen) loadReference(ref)
-  }, [seen, ref])
+    if (seen) loadReference(ref, false, hostId)
+  }, [seen, ref, hostId])
   const { url } = ref
-  useEffect(() => (inView && !settled ? watchReference(url) : undefined), [inView, settled, url])
+  useEffect(
+    () => (inView && !settled ? watchReference(url, hostId) : undefined),
+    [inView, settled, url, hostId],
+  )
   return target
 }
 
@@ -147,16 +217,20 @@ function useReferenceOnScreen(ref: GitHubReference) {
 export function ReferenceText({
   reference,
   bare,
+  hostId: explicitHostId,
   children,
 }: {
   reference: GitHubReference
   bare: boolean
+  hostId?: string | null
   children: ReactNode
 }) {
-  const target = useReferenceOnScreen(reference)
-  const { data } = useReferenceData(reference)
+  const { t } = useTranslation('git')
+  const hostId = useGitHostId(explicitHostId)
+  const target = useReferenceOnScreen(reference, hostId)
+  const { data } = useReferenceData(reference, hostId)
   const repo = useProjectRepository()
-  const title = bare ? titleOf(data) : null
+  const title = bare ? referenceTitleOf(data, t) : null
   return (
     <>
       <span ref={target} className="whitespace-nowrap">
@@ -173,11 +247,11 @@ export function ReferenceText({
   )
 }
 
-function Author({ author }: { author: PullRequestAuthor }) {
+function Author({ author, hostId }: { author: PullRequestAuthor; hostId: string | null }) {
   const { t } = useTranslation('git')
-  const picture = useGitStore((s) => s.avatars[author.login])
+  const picture = useGitStore((s) => avatarOf(s, hostId, author.login))
   const { name, login, initial } = authorLabel(author)
-  useEffect(() => loadAvatar(author.login), [author.login])
+  useEffect(() => loadAvatar(author.login, hostId), [author.login, hostId])
   return (
     <div className="flex min-w-0 items-center gap-2">
       <Avatar aria-hidden className="size-5 after:border-subtle">
@@ -241,7 +315,9 @@ function Head({
         </Pill>
       )}
       <span className="min-w-0 truncate text-xs text-tertiary">
-        {reference.owner}/{reference.repo} #{reference.number}
+        {reference.kind === 'stack'
+          ? `${reference.owner}/${reference.repo} · Stack #${reference.number}`
+          : `${reference.owner}/${reference.repo} #${reference.number}`}
       </span>
       {when && (
         <span className="ml-auto shrink-0 text-xs whitespace-nowrap text-tertiary tabular">
@@ -252,12 +328,19 @@ function Head({
   )
 }
 
-export function Title({ url, title }: { url: string; title: string }) {
+export function Title({
+  url,
+  title,
+  sessionId,
+}: {
+  url: string
+  title: string
+  sessionId?: string | null
+}) {
+  const resolvedSessionId = useLinkSessionId(sessionId)
   return (
     <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
+      {...sessionLinkProps(url, resolvedSessionId)}
       title={title}
       className="line-clamp-3 rounded-sm font-heading text-subheading leading-snug font-medium text-primary no-underline underline-offset-2 focus-ring hover:underline"
     >
@@ -274,7 +357,15 @@ export function Stat({ children }: { children: ReactNode }) {
   )
 }
 
-function PullRequestDetails({ reference, pr }: { reference: GitHubReference; pr: PullRequest }) {
+function PullRequestDetails({
+  reference,
+  pr,
+  hostId,
+}: {
+  reference: GitHubReference
+  pr: PullRequest
+  hostId: string | null
+}) {
   const { t } = useTranslation('git')
   const now = useNow()
   const live = pr.state === 'open' || pr.state === 'draft'
@@ -332,7 +423,9 @@ function PullRequestDetails({ reference, pr }: { reference: GitHubReference; pr:
         </div>
       )}
       <div className="flex min-w-0 items-center gap-3">
-        <div className="min-w-0 flex-1">{pr.author && <Author author={pr.author} />}</div>
+        <div className="min-w-0 flex-1">
+          {pr.author && <Author author={pr.author} hostId={hostId} />}
+        </div>
         {pr.additions + pr.deletions > 0 && (
           <Stat>
             <span className="text-(--thread-add)">+{pr.additions.toLocaleString()}</span>
@@ -350,8 +443,17 @@ function PullRequestDetails({ reference, pr }: { reference: GitHubReference; pr:
   )
 }
 
-function IssueDetails({ reference, issue }: { reference: GitHubReference; issue: Issue }) {
+function IssueDetails({
+  reference,
+  issue,
+  hostId,
+}: {
+  reference: GitHubReference
+  issue: Issue
+  hostId: string | null
+}) {
   const { t } = useTranslation('git')
+  const sessionId = useLinkSessionId()
   const now = useNow()
   const repo = useProjectRepository()
   const at = issue.state === 'open' ? issue.createdAt : issue.closedAt
@@ -382,9 +484,7 @@ function IssueDetails({ reference, issue }: { reference: GitHubReference; issue:
         <div className="flex items-center gap-1 text-xs text-secondary">
           {t('ref.closedBy')}
           <a
-            href={closedBy.url}
-            target="_blank"
-            rel="noreferrer"
+            {...sessionLinkProps(closedBy.url, sessionId)}
             className="inline-flex items-center gap-1 rounded-sm font-medium text-primary no-underline focus-ring hover:underline"
           >
             <PrIcon state={issue.closedBy.state} size={12} />
@@ -413,12 +513,167 @@ function IssueDetails({ reference, issue }: { reference: GitHubReference; issue:
         </div>
       )}
       <div className="flex min-w-0 items-center gap-3">
-        <div className="min-w-0 flex-1">{issue.author && <Author author={issue.author} />}</div>
+        <div className="min-w-0 flex-1">
+          {issue.author && <Author author={issue.author} hostId={hostId} />}
+        </div>
         <Stat>
           <HugeiconsIcon icon={Comment01Icon} strokeWidth={STROKE} aria-hidden className="size-3" />
           {t('ref.comments', { count: issue.comments })}
         </Stat>
       </div>
+    </>
+  )
+}
+
+function StackDetails({
+  reference,
+  stack,
+}: {
+  reference: GitHubReference
+  stack: PullRequestStack
+}) {
+  const { t } = useTranslation('git')
+  const sessionId = useLinkSessionId()
+  const now = useNow()
+  const at = stack.createdAt ?? stack.updatedAt
+  const when = at ? longAgo(at, now) : null
+  const tone = stack.state === 'open' ? 'open' : 'gray'
+  const heading = stack.title ?? t('ref.stackTitle', { number: stack.number })
+  return (
+    <>
+      <Head
+        reference={reference}
+        data={{ kind: 'stack', stack }}
+        when={when}
+        pill={
+          <Pill tone={tone}>
+            <ReferenceIcon
+              kind="stack"
+              data={{ kind: 'stack', stack }}
+              size={13}
+              className="text-current"
+            />
+            {t(STACK_STATE_KEY[stack.state])}
+          </Pill>
+        }
+      />
+      <Title url={stack.url} title={heading} />
+      {(stack.base || stack.pullRequests.length > 0) && (
+        <div className="-mt-1.5 flex items-center gap-2 text-xs text-tertiary">
+          {stack.base && (
+            <span className="min-w-0 truncate">
+              → <span className="font-mono text-meta">{stack.base}</span>
+            </span>
+          )}
+          {stack.pullRequests.length > 0 && (
+            <span className="ml-auto shrink-0 tabular">
+              {t('ref.stackPrCount', { count: stack.pullRequests.length })}
+            </span>
+          )}
+        </div>
+      )}
+      {stack.pullRequests.length > 0 ? (
+        <div className="-mx-1.5 flex max-h-52 flex-col gap-0.5 overflow-y-auto border-t border-subtle pt-2">
+          {stack.pullRequests.map((item) => {
+            const label = item.title ?? item.head ?? prStateText(item.state)
+            return (
+              <a
+                key={item.number}
+                {...sessionLinkProps(item.url, sessionId)}
+                title={item.title && item.head ? `${item.title} (${item.head})` : label}
+                className="flex min-w-0 items-center gap-1.75 rounded-md px-1.5 py-1 text-xs text-secondary no-underline outline-none focus-ring hover:bg-hover hover:text-primary"
+              >
+                <PrIcon state={item.state} size={13} />
+                <span className="shrink-0 font-medium text-primary tabular">#{item.number}</span>
+                <span
+                  className={cn(
+                    'min-w-0 truncate',
+                    !item.title && item.head ? 'font-mono text-meta' : undefined,
+                  )}
+                >
+                  {label}
+                </span>
+              </a>
+            )
+          })}
+        </div>
+      ) : (
+        <p className="text-xs text-tertiary">{t('ref.stackEmpty')}</p>
+      )}
+    </>
+  )
+}
+
+function StackUnavailable({
+  reference,
+  reason,
+  hostId,
+}: {
+  reference: GitHubReference
+  reason: StackUnavailableReason
+  hostId: string | null
+}) {
+  const { t } = useTranslation('git')
+  const [retrying, setRetrying] = useState(false)
+  const heading = t('ref.stackTitle', { number: reference.number })
+  return (
+    <>
+      <Head reference={reference} data={null} pill={null} when={null} />
+      <Title url={reference.url} title={heading} />
+      {reason === 'gh-missing' ? (
+        <p className="text-small text-secondary">
+          <Trans
+            t={t}
+            i18nKey="ref.stackInstallGh"
+            components={{
+              cli: (
+                <a
+                  href="https://cli.github.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline decoration-border-strong underline-offset-2 hover:text-primary hover:decoration-current"
+                />
+              ),
+            }}
+          />
+        </p>
+      ) : reason === 'gh-signed-out' ? (
+        <div className="flex flex-col items-start gap-2 text-small text-secondary">
+          <p>{t('ref.stackSignInGh')}</p>
+          <span className="inline-flex items-center gap-1">
+            <code className="rounded-sm bg-code-inline px-1.5 py-0.5 font-mono text-meta text-code-inline">
+              gh auth login
+            </code>
+            <CopyButton text="gh auth login" label={t('prPart.copyCommand')} />
+          </span>
+        </div>
+      ) : reason === 'not-found' || reason === 'forbidden' ? (
+        <p className="text-small text-secondary">{t('ref.stackUnavailable')}</p>
+      ) : (
+        <div className="flex flex-col items-start gap-2">
+          <p className="text-small text-secondary">{t('ref.stackLoadFailed')}</p>
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={retrying}
+            onClick={() => {
+              setRetrying(true)
+              void retryReference(reference, hostId).finally(() => setRetrying(false))
+            }}
+          >
+            {retrying ? (
+              <Spinner data-icon="inline-start" />
+            ) : (
+              <HugeiconsIcon
+                icon={RotateClockwiseIcon}
+                strokeWidth={STROKE}
+                data-icon="inline-start"
+              />
+            )}
+            {t('prCard.retry')}
+          </Button>
+        </div>
+      )}
     </>
   )
 }
@@ -445,9 +700,17 @@ function Loading() {
   )
 }
 
-function Missing({ reference, error }: { reference: GitHubReference; error: string | null }) {
+function Missing({
+  reference,
+  error,
+  hostId,
+}: {
+  reference: GitHubReference
+  error: string | null
+  hostId: string | null
+}) {
   const { t } = useTranslation('git')
-  const gh = useGitStore((s) => s.tools?.gh.state ?? null)
+  const gh = useGitStore((s) => ghStateOf(s, hostId))
   const [retrying, setRetrying] = useState(false)
   return (
     <>
@@ -489,7 +752,7 @@ function Missing({ reference, error }: { reference: GitHubReference; error: stri
             disabled={retrying}
             onClick={() => {
               setRetrying(true)
-              void retryReference(reference).finally(() => setRetrying(false))
+              void retryReference(reference, hostId).finally(() => setRetrying(false))
             }}
           >
             {retrying ? (
@@ -510,17 +773,54 @@ function Missing({ reference, error }: { reference: GitHubReference; error: stri
 }
 
 /** A reference's card: what it is, its state and its author, or why that is not known. */
-export function ReferenceCard({ reference }: { reference: GitHubReference }) {
-  const { data, error } = useReferenceData(reference)
-  const gh = useGitStore((s) => s.tools?.gh.state ?? null)
+export function ReferenceCard({
+  reference,
+  hostId: explicitHostId,
+  sessionId,
+}: {
+  reference: GitHubReference
+  hostId?: string | null
+  sessionId?: string | null
+}) {
+  const hostId = useGitHostId(explicitHostId)
+  const { data, error, stackUnavailable } = useReferenceData(reference, hostId)
+  const gh = useGitStore((s) => ghStateOf(s, hostId))
   // Shown again a while later, a live one is read again behind what it shows.
-  useEffect(() => loadReference(reference, true), [reference])
-  if (data?.kind === 'pull') return <PullRequestDetails reference={reference} pr={data.pr} />
-  if (data?.kind === 'issue') return <IssueDetails reference={reference} issue={data.issue} />
-  if (error !== null || gh === 'not-installed' || gh === 'signed-out') {
-    return <Missing reference={reference} error={error} />
-  }
-  return <Loading />
+  useEffect(() => {
+    loadReference(reference, true, hostId)
+    const state = hostGitOf(useGitStore.getState(), hostId)
+    if (!state.tools && !state.toolsError) void loadGitTools(hostId)
+  }, [reference, hostId])
+  const stackReason: StackUnavailableReason | null =
+    reference.kind !== 'stack'
+      ? null
+      : (stackUnavailable ??
+        (gh === 'not-installed'
+          ? 'gh-missing'
+          : gh === 'signed-out'
+            ? 'gh-signed-out'
+            : error !== null
+              ? 'unavailable'
+              : null))
+  const content =
+    data?.kind === 'pull' ? (
+      <PullRequestDetails reference={reference} pr={data.pr} hostId={hostId} />
+    ) : data?.kind === 'issue' ? (
+      <IssueDetails reference={reference} issue={data.issue} hostId={hostId} />
+    ) : data?.kind === 'stack' ? (
+      <StackDetails reference={reference} stack={data.stack} />
+    ) : stackReason !== null ? (
+      <StackUnavailable reference={reference} reason={stackReason} hostId={hostId} />
+    ) : error !== null || gh === 'not-installed' || gh === 'signed-out' ? (
+      <Missing reference={reference} error={error} hostId={hostId} />
+    ) : (
+      <Loading />
+    )
+  return sessionId !== undefined ? (
+    <LinkSessionContext value={sessionId}>{content}</LinkSessionContext>
+  ) : (
+    content
+  )
 }
 
 export const REFERENCE_CARD_CLASS = 'flex w-[340px] flex-col gap-2.5 px-3.5 pt-3.5 pb-3.25'
@@ -528,6 +828,8 @@ export const REFERENCE_CARD_CLASS = 'flex w-[340px] flex-col gap-2.5 px-3.5 pt-3
 /** A trigger of the app's own, such as a sidebar badge, that shows a reference's card on hover. */
 export function ReferenceHoverCard({
   reference,
+  hostId,
+  sessionId,
   trigger,
   side = 'bottom',
   align = 'start',
@@ -536,6 +838,8 @@ export function ReferenceHoverCard({
   onOpenChange,
 }: {
   reference: GitHubReference
+  hostId?: string | null
+  sessionId?: string | null
   trigger: React.ReactElement
   side?: 'bottom' | 'right' | 'top'
   align?: 'start' | 'center'
@@ -554,7 +858,7 @@ export function ReferenceHoverCard({
         anchor={anchor}
         className={REFERENCE_CARD_CLASS}
       >
-        <ReferenceCard reference={reference} />
+        <ReferenceCard reference={reference} hostId={hostId} sessionId={sessionId} />
       </HoverCardContent>
     </HoverCard>
   )

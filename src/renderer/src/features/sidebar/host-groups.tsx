@@ -17,6 +17,12 @@ import { cn } from '@renderer/lib/utils'
 import { useHostsStore, useOtherHost, type OtherHost } from '@renderer/stores/hosts'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import {
+  findProjectForPath,
+  isProjectArchived,
+  isSessionInArchivedProject,
+  useProjectsStore,
+} from '@renderer/stores/projects'
+import {
   byActivity,
   hostGroup,
   hostOfSession,
@@ -51,6 +57,7 @@ export function NeedsYouGroup({
   away: readonly string[]
 }) {
   const { t } = useTranslation('sidebar')
+  const projects = useProjectsStore((s) => s.projects)
   // The sessions that need you and their parents, so a sub-session's request lists its root.
   const summaries = useSessionsStore(useShallow((s) => needsYouSummaries(s.byId)))
   const fold = useEntry('sidebar.runGroup')
@@ -58,7 +65,11 @@ export function NeedsYouGroup({
     hosts.includes(host) && !(host !== null && away.includes(host))
   const tasks = useTasksStore(
     useShallow((s) =>
-      needingTasks(s.summaries).filter((task) => shown(hostOfPath(task.projectPath))),
+      needingTasks(s.summaries).filter((task) => {
+        if (!shown(hostOfPath(task.projectPath))) return false
+        const owner = findProjectForPath(projects, task.projectPath)
+        return !(owner && isProjectArchived(owner))
+      }),
     ),
   )
   const rows = useMemo(
@@ -66,13 +77,17 @@ export function NeedsYouGroup({
       sidebarRows(
         needsYouTree(Object.fromEntries(summaries.map((x) => [x.id, x]))).filter((node) => {
           const host = hostOfSession(node.summary)
-          return hosts.includes(host) && !(host !== null && away.includes(host))
+          return (
+            hosts.includes(host) &&
+            !(host !== null && away.includes(host)) &&
+            !isSessionInArchivedProject(node.summary, projects)
+          )
         }),
         tasks,
         byActivity,
         fold,
       ),
-    [summaries, hosts, away, tasks, fold],
+    [summaries, hosts, away, tasks, projects, fold],
   )
   // Huli: the sessions with requests waiting, for 全部允许 once two or more of them wait.
   const waiting = useMemo(

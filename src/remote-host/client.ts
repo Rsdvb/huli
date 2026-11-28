@@ -90,6 +90,7 @@ import {
   RESUME_MS,
   RESUME_VERSION,
   STANDBY_FEATURE,
+  TOOL_OUTPUT_APPEND_FEATURE,
   parseAddresses,
   parseClosing,
   parseHostRenamed,
@@ -216,6 +217,8 @@ export interface ClientRegions {
   listed?(): string[]
   /** The name the signed list gives the region at `url`, or null. */
   regionName?(url: string): string | null
+  /** 返回签名清单中指定 `url` 区域的多语言名称映射，未配置时返回 null。 */
+  regionNames?(url: string): Record<string, string> | null
 }
 
 /** The Kettu relay, as this computer reaches hosts through it. */
@@ -292,6 +295,8 @@ export interface HostClientOptions {
   regionsChanged?(hostId: string): void
   /** How often the network interfaces are read for a change; null reads them never. */
   networkCheckMs?: number | null
+  /** Local ports owned by Kettu itself that browser forwards must never bind directly. */
+  isForwardPortReserved?(port: number): boolean
 }
 
 type SessionEnd = { welcomed: boolean; reason: ClosingReason | null }
@@ -563,6 +568,9 @@ class HostLink {
       sendBytes: (stream, data) =>
         this.session?.open ? this.session.channel.sendBytes(stream, data) : null,
       nextStream: () => this.nextStream(),
+      ...(client.options.isForwardPortReserved
+        ? { isPortReserved: client.options.isForwardPortReserved }
+        : {}),
       log: client.options.log,
     })
     this.requests = new LinkRequests({
@@ -722,9 +730,13 @@ class HostLink {
   }
 
   /** A port on this computer that reaches `forward` on the host; null without its session. */
-  forward(sessionId: string, forward: BrowserForward, samePort = false): Promise<number | null> {
+  forward(
+    sessionId: string,
+    forward: BrowserForward,
+    reservedPorts?: readonly number[],
+  ): Promise<number | null> {
     if (!this.port) return Promise.resolve(null)
-    return this.forwards.listen(sessionId, forward, samePort)
+    return this.forwards.listen(sessionId, forward, reservedPorts)
   }
 
   /** The user stopped one forward. */
@@ -1484,7 +1496,14 @@ class HostLink {
       return { state: 'online', relay: via.relay, own: true, ...allowed }
     }
     const region = this.client.options.relay?.regions?.regionName?.(via.relay) ?? null
-    return { state: 'online', relay: via.relay, ...(region ? { region } : {}), ...allowed }
+    const regionNames = this.client.options.relay?.regions?.regionNames?.(via.relay) ?? null
+    return {
+      state: 'online',
+      relay: via.relay,
+      ...(region ? { region } : {}),
+      ...(regionNames ? { regionNames } : {}),
+      ...allowed,
+    }
   }
 }
 
@@ -2528,6 +2547,7 @@ export class HostClient {
       features: [
         BROWSER_FEATURE,
         IMAGE_REFS_FEATURE,
+        TOOL_OUTPUT_APPEND_FEATURE,
         ...(this.options.relay?.regions ? [REGIONS_CHANNEL_FEATURE] : []),
       ],
     }
@@ -2782,9 +2802,9 @@ export class HostClient {
     id: string,
     sessionId: string,
     forward: BrowserForward,
-    samePort = false,
+    reservedPorts?: readonly number[],
   ): Promise<number | null> {
-    return this.links.get(id)?.forward(sessionId, forward, samePort) ?? Promise.resolve(null)
+    return this.links.get(id)?.forward(sessionId, forward, reservedPorts) ?? Promise.resolve(null)
   }
 
   stopForward(id: string, sessionId: string, forward: BrowserForward): void {

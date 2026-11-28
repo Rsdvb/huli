@@ -19,6 +19,7 @@ import { useThreadsStore } from '@renderer/stores/threads'
 import { ArtifactRow } from './artifact-row'
 import {
   backgroundOrder,
+  boardChildren,
   boardSubagents,
   subagentFailed,
   summaryParts,
@@ -78,13 +79,7 @@ export default function BoardPane({ sessionId }: { sessionId: string }) {
         processes.refresh()
       })
   }
-  const children = useSessionsStore(
-    useShallow((s) =>
-      Object.values(s.byId).filter(
-        (child) => child.parentId === sessionId && child.origin === 'subagent',
-      ),
-    ),
-  )
+  const children = useSessionsStore(useShallow((s) => boardChildren(s.byId, sessionId)))
   const written = useThreadsStore((s) => {
     const state = s.replicas[sessionId]?.state
     return state ? threadArtifacts(state) : NO_ARTIFACTS
@@ -271,31 +266,33 @@ export default function BoardPane({ sessionId }: { sessionId: string }) {
 
   return (
     <PaneBody className="kb-pane" aria-label={t('title')}>
-      <div className="kb-head">
-        <span className="kb-head__sum" aria-live="polite">
-          {parts.running === null && parts.needs === null ? (
-            t('summary.idle')
-          ) : (
-            <>
-              {parts.running}
-              {parts.running !== null && parts.needs !== null && ' · '}
-              {parts.needs !== null && <b className="kb-head__needs">{parts.needs}</b>}
-            </>
+      {!empty && (
+        <div className="kb-head">
+          <span className="kb-head__sum" aria-live="polite">
+            {parts.running === null && parts.needs === null ? (
+              t('summary.idle')
+            ) : (
+              <>
+                {parts.running}
+                {parts.running !== null && parts.needs !== null && ' · '}
+                {parts.needs !== null && <b className="kb-head__needs">{parts.needs}</b>}
+              </>
+            )}
+          </span>
+          {(tasks.length > 0 || held.length > 0) && (
+            <button
+              type="button"
+              className="kp-tool kb-head__refresh"
+              aria-label={t('actions.refresh')}
+              title={t('actions.refresh')}
+              disabled={processes.reading}
+              onClick={processes.refresh}
+            >
+              <RefreshIcon phase={processes.reading ? 'turning' : 'idle'} className="size-[15px]" />
+            </button>
           )}
-        </span>
-        {(tasks.length > 0 || held.length > 0) && (
-          <button
-            type="button"
-            className="kp-tool kb-head__refresh"
-            aria-label={t('actions.refresh')}
-            title={t('actions.refresh')}
-            disabled={processes.reading}
-            onClick={processes.refresh}
-          >
-            <RefreshIcon phase={processes.reading ? 'turning' : 'idle'} className="size-[15px]" />
-          </button>
-        )}
-      </div>
+        </div>
+      )}
       <div className="kb-body">{body}</div>
     </PaneBody>
   )

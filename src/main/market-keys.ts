@@ -1,3 +1,4 @@
+import type { McpInstallEntry } from '@shared/mcp-discovery'
 // `market-keys.json`: what the user filled in for the inputs of the servers the Marketplace
 // installed, API tokens among them, and each OAuth server's sign-in, by server id. Kept apart from
 // the settings, encrypted by the system in the desktop app, and in a file only the user can read
@@ -7,7 +8,7 @@
 // the agent host is sent; a client sees them through the agents' statuses, without their keys.
 // So do the values the user saved from an agent's secret card, by project path and name.
 
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isAgentId, type AgentId } from '@shared/agents'
@@ -50,6 +51,8 @@ export interface MarketKeysPush {
   webhookSecrets?: Record<string, string>
   /** The secrets the plugins declare, by plugin id then key; only that plugin's script reads one. */
   pluginSecrets: Record<string, Record<string, string>>
+  /** The key that seals the backups of agents' MCP files, once one was asked for. */
+  backupKey?: string
 }
 
 /** Huli: an agent's profiles with their keys, and the one its new sessions start with. */
@@ -110,6 +113,7 @@ interface Contents {
   /** Huli: each webhook routine's secret, by routine id. */
   webhooks: Map<string, string>
   pluginSecrets: Keys
+  backupKey: string | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -219,6 +223,7 @@ function parseContents(raw: unknown, version: 1 | 2 | 3): Contents | null {
         projects: new Map(),
         webhooks: new Map(),
         pluginSecrets: new Map(),
+        backupKey: null,
       }
     )
   }
@@ -232,6 +237,9 @@ function parseContents(raw: unknown, version: 1 | 2 | 3): Contents | null {
   // Added within version 3: a file without it holds none.
   const pluginSecrets =
     raw.pluginSecrets === undefined ? new Map() : parseValues(raw.pluginSecrets, MAX_SECRET_PLUGINS)
+  // Added within version 3 as well: 32 bytes in base64.
+  const backupKey = raw.backupKey === undefined ? null : raw.backupKey
+  if (backupKey !== null && !isBackupKey(backupKey)) return null
   return (
     keys &&
     oauth &&
@@ -239,7 +247,16 @@ function parseContents(raw: unknown, version: 1 | 2 | 3): Contents | null {
     profiles &&
     projects &&
     webhooks &&
-    pluginSecrets && { keys, oauth, agentEnv, profiles, projects, webhooks, pluginSecrets }
+    pluginSecrets && {
+      keys,
+      oauth,
+      agentEnv,
+      profiles,
+      projects,
+      webhooks,
+      pluginSecrets,
+      backupKey,
+    }
   )
 }
 
@@ -283,6 +300,12 @@ function parseProfiles(raw: unknown): Map<string, StoredProfiles> | null {
   return profiles
 }
 
+function isBackupKey(value: unknown): value is string {
+  return (
+    typeof value === 'string' && Buffer.from(value, 'base64').length === 32 && value.length === 44
+  )
+}
+
 function contentsObject({
   keys,
   oauth,
@@ -291,6 +314,7 @@ function contentsObject({
   projects,
   webhooks,
   pluginSecrets,
+  backupKey,
 }: Contents): MarketKeysPush {
   return {
     values: toObject(keys),
@@ -300,6 +324,7 @@ function contentsObject({
     ...(projects.size > 0 ? { projectSecrets: toObject(projects) } : {}),
     ...(webhooks.size > 0 ? { webhookSecrets: Object.fromEntries(webhooks) } : {}),
     pluginSecrets: toObject(pluginSecrets),
+    ...(backupKey ? { backupKey } : {}),
   }
 }
 
@@ -356,7 +381,7 @@ function toObject(keys: Keys): MarketKeyValues {
  * of a server that is gone or no longer signs in with OAuth.
  */
 function pruned(
-  { keys, oauth, agentEnv, profiles, projects, webhooks, pluginSecrets }: Contents,
+  { keys, oauth, agentEnv, profiles, projects, webhooks, pluginSecrets, backupKey }: Contents,
   servers: readonly MarketServer[],
 ): Contents {
   const next: Contents = {
@@ -367,6 +392,7 @@ function pruned(
     projects,
     webhooks,
     pluginSecrets,
+    backupKey,
   }
   for (const server of servers) {
     const inputs = keys.get(server.id)
@@ -485,6 +511,27 @@ export interface MarketKeysOptions {
   log: Logger
 }
 
+function changedInputs(
+  server: MarketServer,
+  before: ReadonlyMap<string, string> | undefined,
+  values: readonly [string, string | null][],
+): Map<string, string> {
+  const declared = inputsOf(server.spec)
+  const inputs = new Map(before)
+  for (const [name, value] of values) {
+    const header = declared.get(name)
+    if (header === undefined) throw invalid(`"${server.name}" has no input "${name}"`)
+    if (value === null) {
+      inputs.delete(name)
+      continue
+    }
+    const problem = valueProblem(value, header)
+    if (problem) throw invalid(valueProblemText(problem, name))
+    inputs.set(name, value)
+  }
+  return inputs
+}
+
 /** Owns `market-keys.json`. Every change runs in turn, so none is lost to another. */
 export class MarketKeys {
   private queue: Promise<unknown> = Promise.resolve()
@@ -507,6 +554,7 @@ export class MarketKeys {
       projects: new Map(),
       webhooks: new Map(),
       pluginSecrets: new Map(),
+      backupKey: null,
     }
     let readOnly: ReadOnly | null = null
     let resave = false
@@ -813,25 +861,44 @@ export class MarketKeys {
       if (this.readOnly) throw new MarketKeysError('unavailable', readOnlyText(this.readOnly))
       const server = this.options.servers().find((each) => each.id === patch.serverId)
       if (!server) throw invalid(t('marketKeys.noServer'))
-      const declared = inputsOf(server.spec)
-      const inputs = new Map(this.contents.keys.get(server.id))
-      for (const [name, value] of patch.values) {
-        const header = declared.get(name)
-        if (header === undefined) throw invalid(`"${server.name}" has no input "${name}"`)
-        if (value === null) {
-          inputs.delete(name)
-          continue
-        }
-        const problem = valueProblem(value, header)
-        if (problem) throw invalid(valueProblemText(problem, name))
-        inputs.set(name, value)
-      }
+      const inputs = changedInputs(server, this.contents.keys.get(server.id), patch.values)
       const keys: Keys = new Map(this.contents.keys)
       if (inputs.size > 0) keys.set(server.id, inputs)
       else keys.delete(server.id)
       const next = { ...this.contents, keys }
       await this.commit(pruned(next, this.options.servers()), true)
       return this.state()
+    })
+  }
+
+  /**
+   * Write keys before publishing the library records. After a crash, startup pruning removes
+   * keys for records that were never published.
+   */
+  async install(entries: readonly McpInstallEntry[], publish: () => void): Promise<void> {
+    await this.run(async () => {
+      const keys: Keys = new Map(this.contents.keys)
+      let addedKeys = false
+      for (const { server, secrets } of entries) {
+        if (Object.keys(secrets).length === 0) continue
+        if (this.readOnly) throw new MarketKeysError('unavailable', readOnlyText(this.readOnly))
+        const patch = parsePatch({ serverId: server.id, values: secrets })
+        const inputs = changedInputs(server, undefined, patch.values)
+        keys.set(server.id, inputs)
+        addedKeys = true
+      }
+      const next = { ...this.contents, keys }
+      if (addedKeys) await this.save(next)
+      try {
+        publish()
+      } catch (error) {
+        if (addedKeys) await this.save(this.contents)
+        throw error
+      }
+      if (addedKeys) {
+        this.contents = next
+        this.options.changed(this.contentsForHost())
+      }
     })
   }
 
@@ -876,6 +943,18 @@ export class MarketKeys {
     })
   }
 
+  /**
+   * Makes the key that seals the backups of agents' MCP files, if there is none; kept like every
+   * key here, and never cleared, since the backups it sealed would be lost with it.
+   */
+  async ensureBackupKey(): Promise<void> {
+    await this.run(async () => {
+      if (this.contents.backupKey) return
+      if (this.readOnly) throw new MarketKeysError('unavailable', readOnlyText(this.readOnly))
+      await this.commit({ ...this.contents, backupKey: randomBytes(32).toString('base64') }, true)
+    })
+  }
+
   /** Drops the keys of servers and inputs the settings no longer have, as after an uninstall. */
   prune(): void {
     void this.run(async () => {
@@ -911,7 +990,8 @@ export class MarketKeys {
       contents.profiles.size === 0 &&
       contents.projects.size === 0 &&
       contents.webhooks.size === 0 &&
-      contents.pluginSecrets.size === 0
+      contents.pluginSecrets.size === 0 &&
+      contents.backupKey === null
     ) {
       await rm(file, { force: true })
       return

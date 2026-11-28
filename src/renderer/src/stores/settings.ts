@@ -1,49 +1,59 @@
-import { create } from 'zustand'
+import { userFontStack } from '@shared/font-stack'
 import {
   DEFAULT_SETTINGS,
   isFontFamilyName,
   USER_FONT_ROLES,
+  type CodeSize,
+  type ConversationWidth,
   type SettingsFile,
-  type SettingsPatch,
+  type UserFonts,
 } from '@shared/settings'
 import { showColorMode } from '@renderer/lib/color-mode'
 import { applyLanguage } from '@renderer/lib/i18n'
+import { useSettingsStore, type SettingsStore } from './settings-store'
+import { setThreadWidth } from './thread-width'
 
-export interface SettingsStore {
-  settings: SettingsFile
-  loaded: boolean
-  update(patch: SettingsPatch): Promise<void>
+export { useSettingsStore, type SettingsStore }
+
+const darkQuery =
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-color-scheme: dark)')
+    : null
+
+/** Applies the user's primary and optional Chinese fonts onto `:root`. */
+export function applyUserFonts(root: HTMLElement, fonts: UserFonts): void {
+  for (const role of USER_FONT_ROLES) {
+    const stack = userFontStack(role, fonts)
+    if (stack) root.style.setProperty(`--user-${role}-face`, stack)
+    else root.style.removeProperty(`--user-${role}-face`)
+    const primary = fonts[role]
+    if (primary && isFontFamilyName(primary)) root.setAttribute(`data-user-font-${role}`, '')
+    else root.removeAttribute(`data-user-font-${role}`)
+  }
 }
 
-export const useSettingsStore = create<SettingsStore>()(() => ({
-  settings: DEFAULT_SETTINGS,
-  loaded: false,
-  async update(patch) {
-    const settings = await window.kettu.settings.update(patch)
-    useSettingsStore.setState({ settings })
-  },
-}))
+/** Applies the selected code font size preset onto `:root`. */
+export function applyCodeSize(root: HTMLElement, size: CodeSize): void {
+  root.dataset.codeSize = size
+}
 
-const darkQuery = window.matchMedia('(prefers-color-scheme: dark)')
+/** Applies the selected conversation width preset onto `:root`. */
+export function applyConversationWidth(root: HTMLElement, width: ConversationWidth): void {
+  root.dataset.conversationWidth = width
+}
 
-function applyAppearance(settings: SettingsFile, fade = false): void {
+export function applyAppearance(settings: SettingsFile, fade = false): void {
   const root = document.documentElement
-  const { theme, textSize, reduceMotion, zoom, fonts } = settings.appearance
-  const dark = theme === 'dark' || (theme === 'system' && darkQuery.matches)
+  const { theme, textSize, codeSize, conversationWidth, reduceMotion, zoom, fonts } =
+    settings.appearance
+  const dark = theme === 'dark' || (theme === 'system' && (darkQuery?.matches ?? false))
   showColorMode(dark ? 'dark' : 'light', fade)
   root.dataset.textSize = textSize
+  applyCodeSize(root, codeSize)
+  applyConversationWidth(root, conversationWidth)
   root.dataset.reduceMotion = reduceMotion
   root.style.setProperty('--zoom', String(zoom))
-  for (const role of USER_FONT_ROLES) {
-    const family = fonts[role]
-    if (family && isFontFamilyName(family)) {
-      root.style.setProperty(`--user-${role}-face`, `"${family}", var(--theme-${role}-face)`)
-      root.setAttribute(`data-user-font-${role}`, '')
-    } else {
-      root.style.removeProperty(`--user-${role}-face`)
-      root.removeAttribute(`data-user-font-${role}`)
-    }
-  }
+  applyUserFonts(root, fonts)
 }
 
 /**
@@ -52,7 +62,7 @@ function applyAppearance(settings: SettingsFile, fade = false): void {
  */
 export async function initSettings(): Promise<void> {
   applyAppearance(DEFAULT_SETTINGS)
-  darkQuery.addEventListener('change', () => {
+  darkQuery?.addEventListener('change', () => {
     const { settings, loaded } = useSettingsStore.getState()
     applyAppearance(settings, loaded)
   })
@@ -60,6 +70,13 @@ export async function initSettings(): Promise<void> {
     // The settings read at launch replace the defaults at once; later changes fade.
     if (state.settings.appearance !== previous.settings.appearance) {
       applyAppearance(state.settings, previous.loaded)
+    }
+    // Switching the preset after launch clears any prior drag override so it takes effect at once.
+    if (
+      previous.loaded &&
+      state.settings.appearance.conversationWidth !== previous.settings.appearance.conversationWidth
+    ) {
+      setThreadWidth(null)
     }
     if (state.settings.general.language !== previous.settings.general.language) {
       applyLanguage(state.settings.general.language)
@@ -76,6 +93,8 @@ export async function initSettings(): Promise<void> {
 export function prefersReducedMotion(): boolean {
   return (
     useSettingsStore.getState().settings.appearance.reduceMotion === 'always' ||
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    (typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches)
   )
 }

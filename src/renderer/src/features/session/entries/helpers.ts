@@ -25,6 +25,9 @@ import { useTerminalsStore } from '@renderer/stores/terminals'
 import { nameHints } from '../project-names'
 import { agyLabel, type AgentSessionName } from './agy-tools'
 import { mcpLabel, type CallNames } from './mcp-tools'
+import { stopReasonText } from './turn-end'
+
+export { stopReasonText }
 
 /**
  * Brings a card that waits for the user into view while its thread follows the end. A reader
@@ -484,20 +487,7 @@ export function thoughtTitle(markdown: string): string | null {
   return title === '' ? null : title
 }
 
-export function stopReasonText(stopReason: StopReason, durationMs: number): string {
-  switch (stopReason) {
-    case 'end_turn':
-      return i18n.t('session:stopReason.endTurn', { duration: duration(durationMs) })
-    case 'cancelled':
-      return i18n.t('session:stopReason.cancelled')
-    case 'max_tokens':
-      return i18n.t('session:stopReason.maxTokens')
-    case 'max_turn_requests':
-      return i18n.t('session:stopReason.maxTurnRequests')
-    case 'refusal':
-      return i18n.t('session:stopReason.refusal')
-  }
-}
+export { reportSentence } from './session-report'
 
 /** Huli: how a turn the session asked another one for ended, as a report's words key it. */
 export type ReportState = 'finished' | 'stopped' | 'failed' | 'limit' | 'refusal'

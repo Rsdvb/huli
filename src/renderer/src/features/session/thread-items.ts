@@ -19,11 +19,11 @@ const entryChars = new WeakMap<ThreadEntry, string>()
 // p compaction, n plan, which the thread leaves out for the top bar, v a message Kettu sent as a
 // card's answer, which the thread leaves out as the card shows it, x a finished write to an
 // artifact, which the thread leaves out as its artifact's card stands for it, d a notice the user
-// dismissed, which the thread leaves out, e turn end, m an agent's write to project memory, which
-// folds as work, q a request that waits behind an older one (Huli: the older one's card counts it
-// until its turn comes), which the thread leaves out, o anything else, which a new site's request,
-// an agent's question and a proposed write to global memory are: of their own, never folded into
-// a run.
+// dismissed, which the thread leaves out, e normal turn end, E abnormal turn end (cancelled, token
+// limit, refusal), m an agent's write to project memory, which folds as work, q a request that
+// waits behind an older one (Huli: the older one's card counts it until its turn comes), which the
+// thread leaves out, o anything else, which a new site's request, an agent's question and a
+// proposed write to global memory are: of their own, never folded into a run.
 export function signatureOf(state: ThreadState | null | undefined): string {
   if (!state) return ''
   const cached = stateSignatures.get(state)
@@ -73,7 +73,7 @@ function charOf(entry: ThreadEntry | undefined): string {
   if (!entry) return 'o'
   if (entry.kind === 'user') return entry.approval ? 'v' : entry.steered ? 's' : 'u'
   if (entry.kind === 'agent') return 'a'
-  if (entry.kind === 'turn_end') return 'e'
+  if (entry.kind === 'turn_end') return entry.stopReason === 'end_turn' ? 'e' : 'E'
   if (entry.kind === 'thought') return 'h'
   if (entry.kind === 'plan') return 'n'
   if (entry.kind === 'notice' && entry.dismissed) return 'd'
@@ -152,31 +152,22 @@ export type Item =
       endId: string | null
       latest: boolean
       toolIds: string[]
-      /** It closes the thread, and what runs on after its turn shows under its end. */
-      still?: boolean
     }
   // The running turn's status, where the reply will start: right after a message you sent.
   | { key: string; type: 'status'; afterSent: boolean }
   // Huli: the 简洁视图's line for a turn's hidden steps, which opens the turn (zen-items.ts).
   | { key: string; type: 'hidden'; turn: string; count: number }
-  // What runs on after the last turn ended, when no reply closes the thread to show it.
-  | { key: string; type: 'still' }
 
 /**
  * The thread's items. Work folds as it happens, so a running turn already reads as it will once it
  * ends: the same rows with the same keys, and a turn ending only adds its reply footer. With
- * `live`, a turn is running and gets its reply footer only when it ends; with `still` and none
- * running, what runs on after the last turn closes the thread.
+ * `live`, a turn is running and gets its reply footer only when it ends.
  */
-export function buildItems(
-  order: string[],
-  signature: string,
-  live = false,
-  still = false,
-): Item[] {
+export function buildItems(order: string[], signature: string, live = false): Item[] {
   const items: Item[] = []
-  const { replacing, after } = replyFooters(order, signature, live)
+  const { replacing, after, skipped } = replyFooters(order, signature, live)
   for (let i = 0; i < order.length; i++) {
+    if (skipped.has(i)) continue
     const footer = replacing.get(i)
     if (footer) {
       items.push(footer)
@@ -201,7 +192,7 @@ export function buildItems(
     // Compactions in a row read as one divider: the latest stands for them all.
     if (signature[i] === 'p' && signature[i + 1] === 'p') continue
     const id = order[i]!
-    const endId = signature[i] === 'u' && signature[i + 1] === 'e' ? order[i + 1] : undefined
+    const endId = signature[i] === 'u' && isTurnEnd(signature[i + 1]) ? order[i + 1] : undefined
     items.push({
       key: id,
       type: 'entry',
@@ -216,8 +207,6 @@ export function buildItems(
   }
   const last = items.at(-1)
   if (live) items.push({ key: 'status', type: 'status', afterSent: sentItem(last) })
-  else if (still && last?.type === 'reply') items[items.length - 1] = { ...last, still: true }
-  else if (still && last) items.push({ key: 'still', type: 'still' })
   return items
 }
 
@@ -225,19 +214,22 @@ export function buildItems(
 const isTool = (char: string | undefined): boolean =>
   char === 'g' || char === 't' || char === 'w' || char === 'r'
 
+/** A turn-end marker's character in the signature: normal (`e`) or abnormal (`E`). */
+const isTurnEnd = (char: string | undefined): boolean => char === 'e' || char === 'E'
+
 /**
  * The turns: [start, end) indexes into the signature. Each starts at a user message, or after a
  * turn's end where the agent goes on with no message, as when its background command ended.
  */
 function turnsOf(signature: string): [number, number][] {
   const starts = [0]
-  let ended = -1
+  let ended = isTurnEnd(signature[0]) ? 0 : -1
   for (let i = 1; i < signature.length; i++) {
     const char = signature[i]
     if (char === 'u') {
       starts.push(i)
       ended = -1
-    } else if (char === 'e') {
+    } else if (isTurnEnd(char)) {
       ended = i
     } else if (ended !== -1 && (char === 'a' || isWork(char))) {
       starts.push(ended + 1)
@@ -351,20 +343,11 @@ const agentHeights = new WeakMap<ThreadEntry, number>()
  */
 export function estimateOf(item: Item, byId: Record<string, ThreadEntry> | undefined): number {
   if (item.type === 'run') return 28
-  if (
-    item.type === 'group' ||
-    item.type === 'status' ||
-    item.type === 'hidden' ||
-    item.type === 'still'
-  ) {
-    return 24
-  }
+  if (item.type === 'group' || item.type === 'status' || item.type === 'hidden') return 24
   if (item.type === 'reply') {
     const files = byId ? changedFiles(item.toolIds, byId) : 0
     const end = item.endId ? byId?.[item.endId] : undefined
-    const ending =
-      (end?.kind === 'turn_end' && end.stopReason !== 'end_turn' ? ENDING_PX : 0) +
-      (item.still ? ENDING_PX : 0)
+    const ending = end?.kind === 'turn_end' && end.stopReason !== 'end_turn' ? ENDING_PX : 0
     if (files === 0) return FOOTER_PX + ending
     const rows = Math.min(files, SHOWN_CHANGES) + (files > SHOWN_CHANGES ? 1 : 0)
     return FOOTER_PX + ending + CHANGES_HEAD_PX + rows * CHANGE_ROW_PX
@@ -432,9 +415,10 @@ function replyFooters(
   order: string[],
   signature: string,
   live: boolean,
-): { replacing: Map<number, Item>; after: Map<number, Item> } {
+): { replacing: Map<number, Item>; after: Map<number, Item>; skipped: Set<number> } {
   const replacing = new Map<number, Item>()
   const after = new Map<number, Item>()
+  const skipped = new Set<number>()
   for (const [start, end] of turnsOf(signature)) {
     const latest = end === signature.length
     const messageIds: string[] = []
@@ -444,11 +428,16 @@ function replyFooters(
     let lastWork = -1
     for (let i = start; i < end; i++) if (isWork(signature[i])) lastWork = i
     for (let i = start; i < end; i++) {
-      if (signature[i] === 'a') {
+      const char = signature[i]
+      if (char === 'a') {
         messageIds.push(order[i]!)
         if (i > lastWork) answerIds.push(order[i]!)
-      } else if (signature[i] === 'e') endAt = i
-      else if (isTool(signature[i])) toolIds.push(order[i]!)
+      } else if (isTurnEnd(char)) {
+        // Keep the turn's first ending for its real duration; suppress trailing redundant normal
+        // endings while leaving abnormal stop markers (cancelled, token limit, refusal) visible.
+        if (endAt === -1) endAt = i
+        else if (char === 'e') skipped.add(i)
+      } else if (isTool(char)) toolIds.push(order[i]!)
     }
     if (messageIds.length === 0 || (latest && live && endAt === -1)) continue
     const footer: Item = {
@@ -462,7 +451,7 @@ function replyFooters(
     if (endAt === -1) after.set(end - 1, footer)
     else replacing.set(endAt, footer)
   }
-  return { replacing, after }
+  return { replacing, after, skipped }
 }
 
 /** A run's steps, with consecutive completed lookups grouped. */

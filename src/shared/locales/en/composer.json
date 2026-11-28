@@ -13,12 +13,15 @@
       "limitReachedContinue": "{{limit}} limit reached · continues {{time}}",
       "limitExtraUsage": "{{limit}} limit reached · using extra usage",
       "ask": "Reply…",
+      "editWorkflow": "Tell {{agent}} what to change in this workflow…",
       "taskRunning": "Keep chatting; this doesn’t change the task",
       "denied": "Say what to do differently",
       "runningQueue": "Queue a message · Esc stops",
       "runningTouch": "Queue a message",
       "runningSteer": "Send into this turn · Esc stops",
       "runningSteerTouch": "Send into this turn",
+      "waitingBackground": "Reply… · Esc stops",
+      "waitingBackgroundTouch": "Reply…",
       "pickAgent": "Pick an agent to carry on with…"
     },
     "stop": "Stop",
@@ -70,7 +73,10 @@
     "readingModels": "Reading models…",
     "noModels": "No models available",
     "noModelMatch": "No models match",
-    "chooseModel": "Choose a model"
+    "chooseModel": "Choose a model",
+    "voiceInput": "Voice input",
+    "discardRecording": "Discard recording",
+    "useRecording": "Use recording"
   },
   "switchAgent": {
     "menu": "Switch agent…",
@@ -94,6 +100,12 @@
     "confirmTerminal": "This session is still open in a terminal. Once you carry on here, don't send messages there at the same time.",
     "confirmOther": "This session is still open in another Claude Code. Once you carry on here, don't send messages there at the same time.",
     "confirm": "Carry on here"
+  },
+  "workflowEdit": {
+    "title": "Editing workflow “{{name}}”",
+    "hint": "Tell {{agent}} what to change — it will update the workflow card.",
+    "saveHint": "Tell {{agent}} what to change before saving this workflow.",
+    "cancel": "Cancel"
   },
   "shell": {
     "note": "Runs as a shell command in the session's folder; Codex adds its output to the conversation",
@@ -249,7 +261,8 @@
       "loading": "Reading skill and MCP definitions",
       "readFailed": "Couldn't read skill and MCP definitions.",
       "disconnected": "Definition estimates are available while the session is connected.",
-      "note": "Sizes of what Codex can load, not parts of the context above."
+      "agentFallback": "the agent",
+      "note": "Sizes of what {{agent}} can load, not parts of the context above."
     },
     "limits": {
       "plan": "Plan",
@@ -301,7 +314,17 @@
       "uncachedInput": "Uncached input",
       "dynamicNote": "This model’s cache lifetime is managed dynamically by the server, with no fixed countdown.",
       "lastRequest": "Last request {{time}}",
-      "dynamicLifetime": "Dynamic lifetime"
+      "dynamicLifetime": "Dynamic lifetime",
+      "dropNotice": {
+        "title": "Prompt cache hit dropped",
+        "change": "{{before}}% → {{after}}% ({{cached}} of {{total}} input tokens cached).",
+        "extraCost": "~{{cost}} extra at API prices",
+        "reasons": {
+          "model_changed": "Model changed",
+          "compacted": "Context compacted",
+          "expired": "Cache expired mid-turn"
+        }
+      }
     },
     "speed": {
       "title": "Output speed",
@@ -342,6 +365,35 @@
       "running": "running"
     },
     "everyRequest": "Every request",
+    "mcp": {
+      "title": "MCP servers",
+      "changed_one": "{{names}} was added or changed since this session started.",
+      "changed_other": "{{names}} were added or changed since this session started.",
+      "useNow": "Use now",
+      "afterTurn": "Available once the turn ends",
+      "applyFailed": "Could not use the servers now: {{error}}",
+      "manage": "Manage",
+      "state": {
+        "running": "Connected",
+        "idle": "Idle",
+        "starting": "Starting…",
+        "signIn": "Needs sign-in",
+        "byAgent": "Run by the agent"
+      },
+      "tools_one": "{{count}} tool",
+      "tools_other": "{{count}} tools",
+      "perTurn": "~{{tokens}} tokens / turn",
+      "offHere": "Off for this session",
+      "turnOn": "Turn on",
+      "signIn": "Sign in",
+      "more": "More for {{name}}",
+      "reconnect": "Reconnect",
+      "turnOff": "Turn off for this session",
+      "openPage": "Open server page",
+      "project": "This project’s",
+      "review": "Review",
+      "actionFailed": "{{name}}: {{error}}"
+    },
     "traffic": {
       "title": "Traffic",
       "about": "~{{value}}",
@@ -380,6 +432,7 @@
     "add": "Add files, photos or a folder",
     "addFiles": "Add files or photos…",
     "addFolder": "Add a folder…",
+    "attachArtifact": "Attach artifact…",
     "screenshot": "Screenshot of the browser",
     "noPage": "No page open",
     "openBrowser": "Open the browser first",
@@ -419,7 +472,13 @@
     "loading": "Listing commands…",
     "chooseProject": "Choose a project to list its commands",
     "yours": "Yours",
-    "kettu": "Kettu"
+    "kettu": "Kettu",
+    "skill": "Skill",
+    "activeSkills_one": "{{count}} skill",
+    "activeSkills_other": "{{count}} skills",
+    "activeCommandAndSkills_one": "Command · {{count}} skill",
+    "activeCommandAndSkills_other": "Command · {{count}} skills",
+    "moreSkills": "+{{count}} more"
   },
   "mentions": {
     "used": "Used in this session",
@@ -447,6 +506,17 @@
       "invalid": "The plugin sent something Kettu can’t use",
       "request_failed": "Couldn’t search"
     }
+  },
+  "githubRefs": {
+    "heading": "Issues & PRs",
+    "loading": "Loading issues and pull requests…",
+    "searching": "Searching issues and pull requests…",
+    "empty": "No issues or pull requests in this repository",
+    "noMatch": "No matching issues or pull requests",
+    "ghMissing": "Install the GitHub CLI (gh) to search issues and pull requests",
+    "ghSignedOut": "Sign in to the GitHub CLI with gh auth login to search issues and pull requests",
+    "failed": "Couldn’t search GitHub issues and pull requests",
+    "keysClose": "Esc to close"
   },
   "chips": {
     "pastedLink": "Pasted as a link",
@@ -477,5 +547,57 @@
     "remove": "Remove comment {{number}}",
     "edit": "Edit comment {{number}}",
     "show": "Show passage {{number}} in the thread"
+  },
+  "artifacts": {
+    "pickerTitle": "Attach artifact",
+    "searchPlaceholder": "Search artifacts…",
+    "loading": "Loading artifacts…",
+    "emptyProject": "No artifacts in this project yet",
+    "empty": "No artifacts yet",
+    "allAttached": "All artifacts are already attached",
+    "noMatch": "No matching artifacts",
+    "allProjects": "All projects",
+    "noProject": "No project",
+    "attachedLabel": "Attached artifacts",
+    "remove": "Remove {{title}}",
+    "open": "Open {{title}}",
+    "sentLabel": "Referenced artifacts"
+  },
+  "browserAnnotations": {
+    "label": "Referenced page elements",
+    "sentLabel": "Referenced page elements",
+    "inspect": "Inspect {{label}}",
+    "remove": "Remove {{label}}",
+    "locator": "Selector",
+    "accessibleName": "Accessible name",
+    "visibleText": "Visible text",
+    "attributes": "Attributes",
+    "limit": "A message can reference {{count}} page elements at most",
+    "noActiveSession": "No active session is available to receive this element reference",
+    "sessionStarting": "Wait for the session to finish starting before referencing page elements",
+    "sessionHeldOutside": "This session is open in an external terminal and cannot accept composer references right now"
+  },
+  "delegation": {
+    "menuItem": "Delegate to agent…",
+    "noAgents": "No agents available",
+    "pickerTitle": "Delegate to agent",
+    "pickerHint": "Starts a child session in this project",
+    "searchPlaceholder": "Search agents…",
+    "clearSearch": "Clear search",
+    "loading": "Loading agents…",
+    "empty": "No agents available to delegate to",
+    "noMatch": "No matching agents",
+    "loadFailed": "Couldn’t load available agents",
+    "current": "Current",
+    "statusSignIn": "Needs sign-in",
+    "statusInstalling": "Installing…",
+    "statusFailed": "Unavailable",
+    "recipientLabel": "Delegated agent recipient",
+    "to": "To: {{agent}}",
+    "changeRecipient": "Change recipient ({{agent}})",
+    "removeRecipient": "Remove recipient {{agent}}",
+    "chipHint": "Starts a child session; result returns here",
+    "placeholder": "Describe a task for {{agent}} (starts a child session; result returns here)…",
+    "sendLabel": "Delegate to {{agent}}"
   }
 }

@@ -18,7 +18,6 @@ import { limitsForModel } from '@shared/plan-limits'
 import { planQuota } from '@shared/plan-quota'
 import { startGroup, startNewSession } from '@renderer/app/actions'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
-import { FolderMark } from '@renderer/components/affect/assistant-home'
 import { ChatComposer } from '@renderer/components/affect/chat-composer'
 import { Button } from '@renderer/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
@@ -38,12 +37,13 @@ import { useModeControl } from '@renderer/features/session/composer/mode-control
 import { isSelect } from '@renderer/features/session/composer/options'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { NO_PROJECT_ICON } from '@renderer/features/shell/no-project-icon'
+import { ProjectMark } from '@renderer/features/shell/project-icon'
 import { ModelMenu, ModelMenuLoading } from '@renderer/features/session/composer/model-menu'
 import { SendButton } from '@renderer/features/session/composer/send-button'
 import type { SelectOption } from '@renderer/features/session/composer/levels'
 import { tightestLimit } from '@shared/session-groups'
 import { useHostLabel } from '@renderer/features/sidebar/host-label'
-import { ClosePaneButton } from '@renderer/features/shell/header-tools'
+import { ClosePaneButton, HeaderTools } from '@renderer/features/shell/header-tools'
 import { NoDrag, TopBar } from '@renderer/features/shell/top-bar'
 import { usePane } from '@renderer/features/split/pane-context'
 import { useEntry } from '@renderer/lib/features'
@@ -74,7 +74,12 @@ import {
 } from '@renderer/stores/agents'
 import { useGitStore } from '@renderer/stores/git'
 import { shownHosts, useOtherHosts } from '@renderer/stores/hosts'
-import { useProjectsStore } from '@renderer/stores/projects'
+import {
+  activeProjects,
+  findProjectForSession,
+  isFolderMissing,
+  useProjectsStore,
+} from '@renderer/stores/projects'
 import { hostOfSession, sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { useKettuRoles } from '@renderer/stores/kettu-roles'
@@ -84,6 +89,7 @@ import { branchHold, useWorktreeChoice, worktreeRequest } from '@renderer/stores
 import { refreshLimits } from '@renderer/stores/usage'
 import {
   chooseNewSessionHost,
+  chooseNewSessionProject,
   choosePaneAgent,
   newSessionPanel,
   openAgentSettings,
@@ -94,11 +100,21 @@ import {
 } from '@renderer/stores/view'
 import { DropOverlay } from './attachments/drop-overlay'
 import { useFileDrop } from './attachments/use-file-drop'
+import {
+  formatAttachedArtifactsPrompt,
+  keepHostArtifactAttachments,
+} from './composer/artifact-attachments'
 import { attachmentContent, attachmentsBlock } from './composer/attachments'
 import { mentionResolver, NO_SURFACES, pluginRefs, surfaceRefs } from './composer/chips'
 import { draftMentions } from './composer/plugin-mentions'
 import { mentionSurfacesOf } from './composer/mention-surfaces'
-import { hasMessage, NEW_SESSION_DRAFT, readDraft, readDraftAttachments } from './composer/drafts'
+import {
+  hasMessage,
+  NEW_SESSION_DRAFT,
+  readDraft,
+  readDraftArtifacts,
+  readDraftAttachments,
+} from './composer/drafts'
 import { useAddMenu } from './composer/add-menu'
 import { StartStyles, TrayStyles } from './composer/affect-styles'
 import { PromptBox, type SlashNote } from './composer/prompt-box'
@@ -112,6 +128,7 @@ import { ProfileChip } from './composer/profile-chip'
 import { SandboxChip } from './composer/sandbox-chip'
 import { HostMenu } from './new-session/host-menu'
 import { ProjectMenu } from './new-session/project-menu'
+import { SourceFolderMenu } from './new-session/source-folder-menu'
 import {
   enterNewSession,
   leaveNewSession,
@@ -171,6 +188,7 @@ import { isPhoneWindow } from '@renderer/features/shell/narrow'
 export function NewSessionView({
   paneId,
   project,
+  folder = null,
   noProject = false,
   hostId: chosenHost = null,
   parentId = null,
@@ -178,6 +196,8 @@ export function NewSessionView({
   /** The pane that shows it; New session's own controls change that pane's view. */
   paneId: string | null
   project: Project | null
+  /** Chosen source folder within `project` when the project has multiple source folders. */
+  folder?: string | null
   noProject?: boolean
   /** The host chosen before a project, null for this computer; a project decides it once chosen. */
   hostId?: string | null
@@ -188,7 +208,11 @@ export function NewSessionView({
   const chosenId = useViewStore((s) => (paneId ? paneAgent(s.layout, paneId) : null))
   const parent = useSessionsStore((s) => (parentId ? s.byId[parentId] : undefined))
   // The agents listed are those of the host the session will be on.
-  const startPath = parent?.projectPath ?? (noProject ? null : (project?.path ?? null))
+  const startPath = parent?.projectPath ?? (noProject ? null : (folder ?? project?.path ?? null))
+  const folderMissing =
+    !parent && !noProject && !!project && !!startPath && isFolderMissing(project, startPath)
+  // Side panel tools require an existing project folder (or the parent session's folder).
+  const toolsPath = startPath && (parent || !folderMissing) ? startPath : null
   const hostId = startPath === null ? (noProject ? null : chosenHost) : hostOfPath(startPath)
   const installed = useAgentsStore((s) => {
     // This computer's agents are read after launch; until then the chosen agent stands.
@@ -199,7 +223,11 @@ export function NewSessionView({
   const agentId = installed ? chosenId : null
   // From the kept draft, so a draft left on an earlier visit hides Pick up from the start.
   const [holdsMessage, setHoldsMessage] = useState(() =>
-    hasMessage(readDraft(NEW_SESSION_DRAFT), readDraftAttachments(NEW_SESSION_DRAFT)),
+    hasMessage(
+      readDraft(NEW_SESSION_DRAFT),
+      readDraftAttachments(NEW_SESSION_DRAFT),
+      readDraftArtifacts(NEW_SESSION_DRAFT),
+    ),
   )
 
   const drop = useFileDrop(NEW_SESSION_DRAFT, false)
@@ -226,9 +254,13 @@ export function NewSessionView({
           </NoDrag>
         )}
         <span className="flex-1" />
-        <NoDrag className="kp-bar-tools">
-          <ClosePaneButton />
-        </NoDrag>
+        {toolsPath ? (
+          <HeaderTools projectPath={toolsPath} panel={newSessionPanel(toolsPath)} />
+        ) : (
+          <NoDrag className="kp-bar-tools">
+            <ClosePaneButton />
+          </NoDrag>
+        )}
       </TopBar>
       <ColumnScroller className="flex flex-col pb-(--top-bar)">
         <section className="ui-as-start" data-phase="start">
@@ -239,6 +271,7 @@ export function NewSessionView({
             agentId={agentId}
             hostId={hostId}
             project={project}
+            folder={folder}
             noProject={noProject}
             parent={parent}
             onInput={setHoldsMessage}
@@ -292,6 +325,7 @@ function DraftComposer({
   agentId,
   hostId,
   project,
+  folder,
   noProject,
   parent,
   onInput,
@@ -302,6 +336,7 @@ function DraftComposer({
   /** The other host the session will be on, null for this computer. */
   hostId: string | null
   project: Project | null
+  folder: string | null
   noProject: boolean
   parent: SessionSummary | undefined
   /** Told on each change whether the draft holds what Send takes. */
@@ -384,42 +419,46 @@ ${parent?.projectPath ?? project?.path ?? ''}`
   const name = agentId ? agentName(agentId, hostId) : null
   // A sub-session of a session started with No project shares its parent's scratch folder.
   const inScratch = noProject || !!parent?.scratch
-  const projectPath = parent?.projectPath ?? (noProject ? null : (project?.path ?? null))
+  const projectPath = parent?.projectPath ?? (noProject ? null : (folder ?? project?.path ?? null))
+  const folderMissing =
+    !inScratch && !!project && !!projectPath && isFolderMissing(project, projectPath)
   const box = usePromptBox({
     draft: NEW_SESSION_DRAFT,
     sessionId: null,
     projectPath,
+    noProject: inScratch,
     hostId,
     disabled: false,
     onActivity: noteActivity,
   })
-  const { attachments, editor } = box
-  const ready = inScratch || (!!project && !project.missing)
+  const { attachments, artifacts, editor } = box
+  useEffect(() => {
+    keepHostArtifactAttachments(NEW_SESSION_DRAFT, hostId)
+  }, [hostId])
+  const ready = inScratch || (!!project && !folderMissing)
   // Read as values, so typing renders New session only when one of them changes.
   const heldBy = useBoxText(box, (text) => attachmentsBlock(attachments, text)?.message ?? null)
   const held = heldBy === null ? null : attachmentsBlock(attachments, box.source.text)
-  const holdsMessage = useBoxText(box, (text) => hasMessage(text, attachments))
+  const holdsMessage = useBoxText(box, (text) => hasMessage(text, attachments, artifacts))
   // A sub-session works in its parent's worktree, so only a top-level session in a repository
   // with a commit chooses one.
   // Huli: a project with further folders makes no worktree, which would set apart one of them.
   const severalFolders = !!project?.folders?.length
-  const gitStatus = useWorktreeStatus(
-    !parent && !inScratch && project && !severalFolders ? project.path : '',
-  )
+  const workingPath = !parent && !inScratch && project ? (projectPath ?? project.path) : null
+  const gitStatus = useWorktreeStatus(workingPath && !severalFolders ? workingPath : '')
   const branchHeld = useWorktreeChoice((s) =>
-    gitStatus && project && s.where[project.path] === 'worktree'
-      ? branchHold(s, project.path)
+    gitStatus && workingPath && s.where[workingPath] === 'worktree'
+      ? branchHold(s, workingPath)
       : null,
   )
   const templateError = useWorktreeChoice((s) =>
-    project ? (s.templateError[project.path] ?? null) : null,
+    workingPath ? (s.templateError[workingPath] ?? null) : null,
   )
   // A task runs in a project of its own host, never as a sub-session or with No project.
-  const taskProject = !parent && !inScratch && project && !project.missing ? project : null
+  const taskProject = !parent && !inScratch && project && !folderMissing ? project : null
+  const taskPath = taskProject ? (workingPath ?? taskProject.path) : null
   const workflows = useHostWorkflows(hostId)
-  const chosenWorkflow = useWorkflowChoice((s) =>
-    taskProject ? (s.chosen[taskProject.path] ?? null) : null,
-  )
+  const chosenWorkflow = useWorkflowChoice((s) => (taskPath ? (s.chosen[taskPath] ?? null) : null))
   // A workflow no longer usable, or not read yet, leaves Chat chosen.
   const workflow = chosenWorkflow
     ? workflows.entries.find(
@@ -568,16 +607,16 @@ ${parent?.projectPath ?? project?.path ?? ''}`
 
   // With a workflow the message starts a task, its first step on the tray's agent and options.
   const startTask = async (entry: WireWorkflowEntry, options: Record<string, string | boolean>) => {
-    if (!agentId || !taskProject) return
+    if (!agentId || !taskPath) return
     const taken = box.take()
     const base = gitStatus ? currentBase(gitStatus) : null
     const { pace } = useWorkflowChoice.getState()
     try {
       const view = await useTasksStore.getState().start(
         {
-          projectPath: taskProject.path,
+          projectPath: taskPath,
           workflowId: entry.id,
-          text: taken.prompt,
+          text: formatAttachedArtifactsPrompt(taken.prompt, taken.artifacts),
           pace,
           agentId,
           options,
@@ -637,37 +676,44 @@ ${parent?.projectPath ?? project?.path ?? ''}`
       }
       const optionsState = useAgentOptionsStore.getState()
       const entry = optionsOn(optionsState, hostId)[agentId]
-      // Without a prepared session, the values New session showed go with the create.
-      const options = entry
-        ? startValues(entry, picksOf(optionsState, hostId, agentId), { startMode: true })
-        : null
+      const prepared = preparedFor(optionsState, hostId, agentId)
+      const preparedList = prepared?.summary?.prepared?.config
+      const picks = picksOf(optionsState, hostId, agentId)
+      // Include the prepared session's effective values under any unsettled picks so sessions that
+      // cannot adopt it (such as new worktrees or roles) keep one-off choices like permission mode.
+      const options =
+        entry || preparedList
+          ? startValues(entry, picks, { startMode: true, prepared: preparedList })
+          : null
       if (workflow) {
         // A step session works in the mode Kettu gives steps, so the tray's mode stays behind.
+        const sourceConfig = preparedList ?? entry?.config
         const kept = Object.entries(options ?? {}).filter(
-          ([id]) => entry?.config.find((o) => o.id === id)?.category !== 'mode',
+          ([id]) => sourceConfig?.find((o) => o.id === id)?.category !== 'mode',
         )
         await startTask(workflow, Object.fromEntries(kept))
         return
       }
-      const preparedId = preparedFor(optionsState, hostId, agentId)?.summary?.id ?? null
-      const text = editor.current?.text() ?? box.source.text
+      const preparedId = prepared?.summary?.id ?? null
+      const rawText = editor.current?.text() ?? box.source.text
+      const text = formatAttachedArtifactsPrompt(rawText, artifacts)
       const surfaces = projectPath ? mentionSurfacesOf(newSessionPanel(projectPath)) : NO_SURFACES
       const content: UserContent[] = [
         ...(text.trim() ? [{ type: 'text' as const, text }] : []),
         ...attachmentContent(attachments),
-        ...surfaceRefs(text, mentionResolver([], null, surfaces)).map((ref) => ({
+        ...surfaceRefs(rawText, mentionResolver([], null, surfaces)).map((ref) => ({
           type: 'ref' as const,
           ref,
         })),
         ...pluginRefs(
-          text,
+          rawText,
           mentionResolver([], null, NO_SURFACES, draftMentions(NEW_SESSION_DRAFT)),
         ).map((ref) => ({ type: 'ref' as const, ref: { kind: 'plugin' as const, ...ref } })),
       ]
       // A worktree chosen before the project's status is read is still a worktree.
       const worktree =
-        project && !inScratch
-          ? worktreeRequest(project.path, gitStatus ? currentBase(gitStatus) : null)
+        workingPath && !inScratch
+          ? worktreeRequest(workingPath, gitStatus ? currentBase(gitStatus) : null)
           : null
       void startNewSession(
         agentId,
@@ -695,7 +741,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
         ? t('newSession.signInFirst', { agent: name })
         : !inScratch && !project
           ? t('newSession.chooseProjectFirst')
-          : project?.missing && !inScratch
+          : folderMissing
             ? t('newSession.missingLine')
             : firstOff
               ? t('newSession.workflow.stepAgents')
@@ -710,7 +756,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                       : (held?.message ?? null)
   const blockedEnter = useBlockedEnter({
     // A missing folder is said under the box already.
-    reason: project?.missing && !inScratch ? null : blocked,
+    reason: folderMissing ? null : blocked,
     waiting: blocked !== null && blocked === held?.message && held.adding,
     source: box.source,
     attachments,
@@ -745,7 +791,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
   // The host's most recent project comes with it, as the first project does when none is chosen.
   const projects = useProjectsStore((s) => s.projects)
   const chooseHost = (next: string | null) => {
-    const first = projects.find((p) => hostOfPath(p.path) === next && !p.missing)
+    const first = activeProjects(projects).find((p) => hostOfPath(p.path) === next && !p.missing)
     chooseNewSessionHost(next, first?.path ?? null)
     requestAnimationFrame(() => editor.current?.focus())
   }
@@ -772,7 +818,11 @@ ${parent?.projectPath ?? project?.path ?? ''}`
     !several &&
     !!agentId &&
     !!config?.some(
-      (o) => o.type === 'boolean' || o.category === 'model' || o.category === 'thought_level',
+      (o) =>
+        o.type === 'boolean' ||
+        o.category === 'model' ||
+        o.category === 'model_config' ||
+        o.category === 'thought_level',
     )
 
   return (
@@ -887,6 +937,9 @@ ${parent?.projectPath ?? project?.path ?? ''}`
             addMenu: tc('attachments.add'),
             approvalMenu: tc('controls.permissionMode'),
             selected: (label) => tc('controls.selected', { label }),
+            voiceInput: tc('controls.voiceInput'),
+            discardRecording: tc('controls.discardRecording'),
+            useRecording: tc('controls.useRecording'),
           }}
           foot={
             <div className="ui-as-composer__tray kettu-tray">
@@ -895,7 +948,10 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                 {parent ? (
                   <>
                     <HostChip hostId={hostId} />
-                    <ParentProject project={project} scratch={parent.scratch} />
+                    <ParentProject
+                      project={project ?? findProjectForSession(projects, parent) ?? null}
+                      scratch={parent.scratch}
+                    />
                   </>
                 ) : (
                   <>
@@ -907,6 +963,16 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                       chip
                       host={hostId}
                     />
+                    {!noProject && (
+                      <SourceFolderMenu
+                        project={project}
+                        folder={projectPath}
+                        onChoose={(nextFolder) => {
+                          chooseNewSessionProject(nextFolder)
+                          requestAnimationFrame(() => editor.current?.focus())
+                        }}
+                      />
+                    )}
                   </>
                 )}
                 {!several && (
@@ -938,14 +1004,14 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                       onChange={(choice) => setSandboxPick({ key: sandboxKey, choice })}
                     />
                   )}
-                {taskProject && (
+                {taskProject && taskPath && (
                   <WorkflowMenu
                     hostId={hostId}
                     workflowId={workflow?.id ?? null}
                     firstAgentId={agentId}
                     onChoose={(id) => {
                       setBestOfN(taskProject.path, false, null)
-                      chooseWorkflow(taskProject.path, id)
+                      chooseWorkflow(taskPath, id)
                       requestAnimationFrame(() => editor.current?.focus())
                     }}
                     bestOfN={
@@ -954,7 +1020,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                             chosen: several,
                             runs: runCount,
                             onChoose: () => {
-                              chooseWorkflow(taskProject.path, null)
+                              chooseWorkflow(taskPath, null)
                               setBestOfN(taskProject.path, true, agentId)
                               requestAnimationFrame(() => editor.current?.focus())
                             },
@@ -967,12 +1033,12 @@ ${parent?.projectPath ?? project?.path ?? ''}`
                   <TaskWorktreeTag base={currentBase(gitStatus)} several />
                 ) : workflow && gitStatus ? (
                   <TaskWorktreeTag base={currentBase(gitStatus)} />
-                ) : gitStatus && project ? (
-                  <WorktreeMenu projectPath={project.path} status={gitStatus} />
+                ) : gitStatus && workingPath ? (
+                  <WorktreeMenu projectPath={workingPath} status={gitStatus} />
                 ) : parent?.worktree ? (
                   <WorktreeTrayTag worktree={parent.worktree} />
                 ) : (
-                  !inScratch && project && <BranchLabel projectPath={project.path} />
+                  !inScratch && workingPath && <BranchLabel projectPath={workingPath} />
                 )}
                 {!parent && !workflow && !several && managerOn && (
                   <ManagerChip
@@ -994,7 +1060,7 @@ ${parent?.projectPath ?? project?.path ?? ''}`
         />
       </div>
       <div className="kettu-start__notes">
-        {(projectError || (project?.missing && !inScratch)) && (
+        {(projectError || folderMissing) && (
           <p className="kettu-start__error" title={projectError ?? undefined}>
             {projectError ?? t('newSession.missingLine')}
           </p>
@@ -1009,8 +1075,8 @@ ${parent?.projectPath ?? project?.path ?? ''}`
           <TaskWorktreeNote base={currentBase(gitStatus)} several />
         ) : workflow && gitStatus ? (
           <TaskWorktreeNote base={currentBase(gitStatus)} />
-        ) : gitStatus && project ? (
-          <WorktreeNote projectPath={project.path} status={gitStatus} />
+        ) : gitStatus && workingPath ? (
+          <WorktreeNote projectPath={workingPath} status={gitStatus} />
         ) : (
           severalFolders &&
           !parent &&
@@ -1261,7 +1327,11 @@ function ParentProject({ project, scratch }: { project: Project | null; scratch:
   return (
     <Tooltip>
       <TooltipTrigger render={<span className="ui-as-tray-link" data-static="" />}>
-        {scratch ? <Glyph icon={NO_PROJECT_ICON} size={14} /> : <FolderMark />}
+        {scratch ? (
+          <Glyph icon={NO_PROJECT_ICON} size={14} />
+        ) : (
+          <ProjectMark icon={project?.icon} open />
+        )}
         <span className="kettu-tray-link__text">
           {scratch ? t('newSession.noProject') : project?.name}
         </span>
@@ -1319,11 +1389,17 @@ function PickUp({ hidden }: { hidden: boolean }) {
   const byId = useSessionsStore((s) => s.byId)
   const others = useOtherHosts()
   const hostFilter = useViewStore((s) => s.hostFilter)
-  const sessions = useMemo(
-    () => pickupSessions(byId, others.length > 0 ? shownHosts(others, hostFilter) : null),
-    [byId, others, hostFilter],
-  )
   const projects = useProjectsStore((s) => s.projects)
+  const sessions = useMemo(
+    () =>
+      pickupSessions(
+        byId,
+        others.length > 0 ? shownHosts(others, hostFilter) : null,
+        undefined,
+        projects,
+      ),
+    [byId, others, hostFilter, projects],
+  )
   const now = useNow()
   if (sessions.length === 0) return null
   return (
@@ -1354,8 +1430,7 @@ function PickUp({ hidden }: { hidden: boolean }) {
           <span className="kettu-pickup__project">
             {session.scratch
               ? t('newSession.noProject')
-              : (projects.find((p) => p.path === session.projectPath)?.name ??
-                basename(session.projectPath))}
+              : (findProjectForSession(projects, session)?.name ?? basename(session.projectPath))}
           </span>
         </button>
       ))}

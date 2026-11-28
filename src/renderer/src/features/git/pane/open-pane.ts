@@ -2,7 +2,14 @@ import { focusedPane } from '@renderer/features/split/layout'
 import { setGitPaneTab, type GitPaneTab } from '@renderer/stores/git'
 import { useGitStore } from '@renderer/stores/git'
 import { useProjectsStore } from '@renderer/stores/projects'
-import { chooseGitRoot, panelOf, toggleSidePane, useViewStore } from '@renderer/stores/view'
+import {
+  chooseGitRoot,
+  openSingleTab,
+  paneProjectPath,
+  panelOf,
+  toggleSidePane,
+  useViewStore,
+} from '@renderer/stores/view'
 
 export interface OpenGitPane {
   tab: GitPaneTab
@@ -17,16 +24,20 @@ export interface OpenGitPane {
 
 /** Shows the Git pane on a page, in the session's side panel or, without one, the focused pane's. */
 export function openGitPane(projectPath: string, request: OpenGitPane): void {
-  const view = focusedPane(useViewStore.getState().layout).view
+  const state = useViewStore.getState()
+  const projects = useProjectsStore.getState().projects
+  const view = focusedPane(state.layout).view
+  const shown = paneProjectPath(view, state.projectPath, projects)
   // Huli: or on a further folder of the project it works in, as the Files pane shows one.
   const further = () =>
-    useProjectsStore
-      .getState()
-      .projects.some(
-        (p) => p.path === view.projectPath && !!p.folders?.some((f) => f.path === projectPath),
-      )
+    projects.some(
+      (p) =>
+        (p.path === shown || p.path === view.projectPath) &&
+        !!p.folders?.some((f) => f.path === projectPath),
+    )
   const panel =
-    request.panel ?? (view.projectPath === projectPath || further() ? panelOf(view) : null)
+    request.panel ??
+    (shown === projectPath || further() ? panelOf(view, state.projectPath, projects) : null)
   if (!panel) return
   if (request.commit) {
     useGitStore.setState((s) => ({ commitAsk: { ...s.commitAsk, [projectPath]: request.commit! } }))
@@ -36,4 +47,9 @@ export function openGitPane(projectPath: string, request: OpenGitPane): void {
   chooseGitRoot(panel, projectPath)
   setGitPaneTab(panel, request.tab)
   toggleSidePane(panel, 'git', true)
+}
+
+/** Opens or focuses the dedicated read-only Branch Graph tab in `panel`. */
+export function openBranchGraph(panel: string): void {
+  openSingleTab(panel, 'gitGraph', { fromPanel: true })
 }

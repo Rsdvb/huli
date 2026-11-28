@@ -6,8 +6,11 @@
 
 import type { TurnPhaseName } from './turn-phase'
 
-/** The phases with a pattern of their own: the waits show the attention mark instead. */
-export type RunningPhase = Exclude<TurnPhaseName, 'approval'>
+/**
+ * The phases with a pattern of their own: the waits show the attention mark instead. A wait on
+ * background work alone thinks.
+ */
+export type RunningPhase = Exclude<TurnPhaseName, 'approval'> | 'waiting_background'
 
 /** A loop's opacity stops, from 0 to 1 of the loop; the timing function eases between stops. */
 export const KEYFRAMES = {
@@ -132,6 +135,7 @@ export const BY_PHASE: Record<RunningPhase, TurnDotPatternName> = {
   edit: 'edit',
   writing: 'write',
   compacting: 'compact',
+  waiting_background: 'think',
   working: 'chase',
 }
 

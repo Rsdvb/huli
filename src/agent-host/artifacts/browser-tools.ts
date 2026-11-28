@@ -14,6 +14,9 @@ import {
   BROWSER_TAB_ACTIONS,
   BROWSER_WAIT_STATES,
   BROWSER_TOOL_NAMES,
+  isBrowserForwardPort,
+  loopbackForward,
+  MAX_COMPANION_FORWARDS,
   MAX_PAGE_SIDE,
   MAX_SESSION_TABS,
   MAX_SNAPSHOT_DEPTH,
@@ -221,7 +224,14 @@ export const BROWSER_TOOLS: Tool[] = [
       'are the user’s to open. After you change a web page, open it here to check it before you ' +
       'finish, without being asked: the user watches this browser.',
     inputSchema: object(
-      { url: { type: 'string', maxLength: 8_192, description: 'An absolute http(s) address.' } },
+      {
+        url: { type: 'string', maxLength: 8_192, description: 'An absolute http(s) address.' },
+        forward_ports: {
+          type: 'array',
+          items: { type: 'integer' },
+          description: 'Extra local ports the page calls (e.g. API).',
+        },
+      },
       ['url'],
     ),
     outputSchema: output(PAGE),
@@ -648,12 +658,13 @@ export const BROWSER_TOOLS: Tool[] = [
     name: 'browser_resize',
     title: 'Resize page',
     description:
-      `Sets the size your page lays out at: desktop ${sizeText('desktop')}, the one it starts ` +
-      `with, tablet ${sizeText('tablet')} or phone ${sizeText('phone')}, or a width and height ` +
-      'of your own. Tablet and phone lay it out as a touch device with a mobile user agent. The ' +
-      'size stays with the tab, whatever room the user’s panel has. To emulate a device, its ' +
-      'pixel ratio or the rest, use browser_emulate, whose device or viewport takes the place of ' +
-      'this size while it is set. Returns the page with a snapshot.',
+      'Sets the size your page lays out at: desktop (at least 1280 px wide, filling the panel’s ' +
+      `height, the one it starts with), tablet ${sizeText('tablet')} or phone ${sizeText('phone')}, ` +
+      'or a width and height of your own. Tablet and phone lay it out as a touch device with a ' +
+      'mobile user agent. The size stays with the tab, and desktop stays fixed during your turn ' +
+      'so panel resizes never reflow it. To emulate a device, its pixel ratio or the rest, use ' +
+      'browser_emulate, whose device or viewport takes the place of this size while it is set. ' +
+      'Returns the page with a snapshot.',
     inputSchema: object({
       size: { type: 'string', enum: [...PAGE_SIZE_NAMES] },
       width: {
@@ -1009,7 +1020,7 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
   }
   const o = (value ?? {}) as Args
   const allowed: Record<string, string[]> = {
-    browser_navigate: ['url'],
+    browser_navigate: ['url', 'forward_ports'],
     browser_navigate_back: [],
     browser_reload: [],
     browser_snapshot: ['ref', 'depth'],
@@ -1077,6 +1088,22 @@ function checked(name: BrowserToolName, value: unknown): BrowserCall {
       const url = text('url', true, 8_192)!
       if (url.trim() === '') throw invalid('url must not be empty.')
       args.url = url
+      if (o.forward_ports !== undefined) {
+        if (
+          !Array.isArray(o.forward_ports) ||
+          o.forward_ports.length === 0 ||
+          o.forward_ports.length > MAX_COMPANION_FORWARDS
+        ) {
+          throw invalid(`forward_ports must list 1 to ${MAX_COMPANION_FORWARDS} TCP ports.`)
+        }
+        if (!o.forward_ports.every(isBrowserForwardPort)) {
+          throw invalid('forward_ports must contain whole port numbers from 1 to 65535.')
+        }
+        if (loopbackForward(url) === null) {
+          throw invalid('forward_ports can only be used when opening a local dev server URL.')
+        }
+        args.forward_ports = [...new Set(o.forward_ports)]
+      }
       break
     }
     case 'browser_snapshot': {

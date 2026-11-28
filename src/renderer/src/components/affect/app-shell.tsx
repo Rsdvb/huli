@@ -62,6 +62,7 @@ import {
 import { FilterMenu, type FilterGroup, type FilterValue } from "./filter-menu";
 import { SetupGuide, type SetupGroup } from "./setup-guide";
 import { CommandMenu, defaultGroups, type CommandGroup } from "./command-menu";
+import { applyPopoverLayout } from "../../lib/affect-popover";
 
 /*
  * App Shell – the frame every affectUI screen sits in, in a single file.
@@ -242,6 +243,8 @@ export type AppShellProps = {
   onSidebarWidthChange?: (width: number) => void;
   /** Called by the search field and ⌘K in place of opening the built-in search */
   onSearch?: () => void;
+  /** Compact actions rendered in the sidebar head, replacing the full-width search field when provided */
+  sidebarActions?: ReactNode;
   /** With chrome="mac": your own controls after the traffic lights, in place of the toggle, Back and Forward */
   corner?: ReactNode;
   /** With chrome="mac": false leaves the traffic lights' room empty, for a window that draws its own */
@@ -307,6 +310,7 @@ export function AppShell({
   peek,
   onSidebarWidthChange,
   onSearch,
+  sidebarActions,
   corner,
   lights = true,
   labels,
@@ -523,7 +527,7 @@ export function AppShell({
   const [language, setLanguage] = useState("English");
   const [appearance, setAppearance] = useState("System");
   const userTrigger = ({ open, toggle }: { open: boolean; toggle: () => void }) => (
-    <button type="button" className="ui-as-user" aria-haspopup="menu" aria-expanded={open} title={rail ? userName || "Account" : undefined} onClick={toggle}>
+    <button type="button" className="ui-as-user" aria-haspopup="menu" aria-expanded={open} title={rail ? userName || labels?.account || "Account" : undefined} onClick={toggle}>
       {user.mark ?? (showAvatar ? (
         <img src={user.avatar} alt="" width={21} height={21} onError={() => setAvatarFailed(user.avatar ?? null)} />
       ) : (
@@ -538,7 +542,7 @@ export function AppShell({
         </span>
       ) : (
         <span className="ui-as-user__name" title={userName || undefined}>
-          {userName || "Account"}
+          {userName || labels?.account || "Account"}
         </span>
       )}
       {!userAction && <Icon icon={ArrowDown01Icon} size={13} />}
@@ -720,13 +724,16 @@ export function AppShell({
       <aside ref={sideRef} className="ui-as-side" inert={sideHidden || overlay === "panel"}>
         {chrome === "mac" ? (
           <>
-            <header className="ui-as-side__head" data-chrome="mac" />
+            <header className="ui-as-side__head" data-chrome="mac" data-has-actions={sidebarActions ? "" : undefined}>
+              {sidebarActions}
+            </header>
             {backLink && <div className="ui-as-side__ws">{backLink}</div>}
           </>
         ) : (
-          <header className="ui-as-side__head">
+          <header className="ui-as-side__head" data-has-actions={sidebarActions ? "" : undefined}>
             {(backLink || workspacePlacement === "head") && workspaceMenu}
             <span className="ui-as-side__tools">
+              {sidebarActions}
               <button className="ui-as-icon-btn" type="button" aria-label={narrow ? "Close sidebar" : rail ? "Expand sidebar" : "Collapse sidebar"} title={rail ? "Expand sidebar" : undefined} onClick={() => (narrow ? setDrawer(false) : setCollapsed((c) => !c))}>
                 <Icon icon={SidebarLeftIcon} size={16} />
               </button>
@@ -734,12 +741,14 @@ export function AppShell({
           </header>
         )}
 
-        {/* Search, like the affectUI library's: a field with its shortcut */}
-        <button ref={searchBtn} className="ui-as-side__search" type="button" title={rail ? `${labels?.search ?? "Search…"} ${labels?.searchKey ?? "⌘K"}` : undefined} aria-keyshortcuts={labels?.searchKey === "Ctrl+K" ? "Control+K" : "Meta+K"} aria-haspopup="dialog" aria-expanded={onSearch ? undefined : search} onClick={() => setSearch(true)}>
-          <Icon icon={Search01Icon} size={15} />
-          <span>{labels?.search ?? "Search…"}</span>
-          <kbd>{labels?.searchKey ?? "⌘K"}</kbd>
-        </button>
+        {/* Search, like the affectUI library's: a field with its shortcut; omitted when sidebarActions supplies a compact trigger */}
+        {!sidebarActions && (
+          <button ref={searchBtn} className="ui-as-side__search" type="button" title={rail ? `${labels?.search ?? "Search…"} ${labels?.searchKey ?? "⌘K"}` : undefined} aria-keyshortcuts={labels?.searchKey === "Ctrl+K" ? "Control+K" : "Meta+K"} aria-haspopup="dialog" aria-expanded={onSearch ? undefined : search} onClick={() => setSearch(true)}>
+            <Icon icon={Search01Icon} size={15} />
+            <span>{labels?.search ?? "Search…"}</span>
+            <kbd>{labels?.searchKey ?? "⌘K"}</kbd>
+          </button>
+        )}
 
         <nav className="ui-as-side__nav" aria-label={labels?.menu ?? "Main menu"}>
           <div className="ui-as-side__group">
@@ -1248,18 +1257,9 @@ export function SearchField({
   );
 }
 
-/** The nearest ancestor that cuts off what sticks out (a scroll area), or the screen itself */
-function clipBox(el: HTMLElement) {
-  for (let node = el.parentElement; node; node = node.parentElement) {
-    const style = getComputedStyle(node);
-    if (/(auto|scroll|hidden|clip)/.test(style.overflow + style.overflowY + style.overflowX) || node.classList.contains("ui-as")) return node.getBoundingClientRect();
-  }
-  return new DOMRect(0, 0, window.innerWidth, window.innerHeight);
-}
-
 /**
- * Small floating panel attached to its trigger. Opens on the preferred side and flips to the other side
- * (or edge) when it would stick out of the screen or its scroll area – it is always fully reachable.
+ * Small floating panel attached to its trigger. Opens on the preferred side, flips to the side
+ * with more room when constrained, and clamps its height so long menus scroll inside the box.
  * Closes on a click outside or Escape; fades and scales in from the side it is attached to.
  */
 export function Popover({
@@ -1280,30 +1280,69 @@ export function Popover({
   const ref = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState({ side, align });
 
-  // Measure before paint: flip up when there is no room below, flip sideways at the right or left edge
+  // Mark enclosing virtualized thread items while a popover is open so paint containment lifts
+  // without relying on a per-item `:has(.ui-as-popover)` selector across heavy thread subtrees.
   useLayoutEffect(() => {
     const el = ref.current;
     if (!open || !el) return;
-    let next = { side, align };
-    el.dataset.side = side;
-    el.dataset.align = align;
-    const box = clipBox(el);
-    const r = el.getBoundingClientRect();
-    if (side === "bottom" && r.bottom > box.bottom - 6) next = { ...next, side: "top" };
-    if (side === "top" && r.top < box.top + 6) next = { ...next, side: "bottom" };
-    if (align === "start" && r.right > box.right - 6) next = { ...next, align: "end" };
-    if (align === "end" && r.left < box.left + 6) next = { ...next, align: "start" };
-    // Still sticking out on a narrow screen (neither edge fits): slide it sideways until it is inside
-    el.dataset.side = next.side;
-    el.dataset.align = next.align;
-    el.style.translate = "";
-    const r2 = el.getBoundingClientRect();
-    const scale = r2.width / el.offsetWidth || 1;
-    let dx = 0;
-    if (r2.right > box.right - 6) dx = box.right - 6 - r2.right;
-    if (r2.left + dx < box.left + 6) dx = box.left + 6 - r2.left;
-    if (dx) el.style.translate = `${dx / scale}px 0`;
-    setPlace(next);
+    const item = el.closest<HTMLElement>('[data-slot="message-scroller-item"]');
+    if (!item) return;
+    const count = Number(item.dataset.popoverOpenCount ?? "0") + 1;
+    item.dataset.popoverOpenCount = String(count);
+    item.setAttribute("data-popover-open", "");
+    return () => {
+      const next = Number(item.dataset.popoverOpenCount ?? "1") - 1;
+      if (next <= 0) {
+        delete item.dataset.popoverOpenCount;
+        item.removeAttribute("data-popover-open");
+      } else {
+        item.dataset.popoverOpenCount = String(next);
+      }
+    };
+  }, [open]);
+
+  // Measure before paint and re-clamp when the viewport resizes, an ancestor scrolls, or content changes
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!open || !el) return;
+
+    const update = () => {
+      const layout = applyPopoverLayout(el, side, align);
+      if (!layout) return;
+      setPlace((prev) =>
+        prev.side === layout.side && prev.align === layout.align ? prev : { side: layout.side, align: layout.align },
+      );
+    };
+
+    update();
+
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        update();
+      });
+    };
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      // Ignore scroll events from inside the popover (e.g. scrolling `.ui-as-menu__list`)
+      if (target instanceof Node && el.contains(target)) return;
+      if (target === window || target === document || (target instanceof Node && target.contains(el))) {
+        schedule();
+      }
+    };
+    window.addEventListener("resize", schedule);
+    window.addEventListener("scroll", onScroll, true);
+    const mo = typeof MutationObserver !== "undefined" ? new MutationObserver(schedule) : null;
+    mo?.observe(el, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-open", "hidden"] });
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", onScroll, true);
+      mo?.disconnect();
+    };
   }, [open, side, align]);
 
   // A menu takes the focus on its first item (or the checked one); its trigger gets it back when Escape closes it
@@ -1358,7 +1397,7 @@ export function Popover({
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div ref={ref} className={["ui-as-popover", className].filter(Boolean).join(" ")} data-align={place.align} data-side={place.side} role="dialog">
+    <div ref={ref} data-overlay-layer="" className={["ui-as-popover", className].filter(Boolean).join(" ")} data-align={place.align} data-side={place.side} role="dialog">
       {children}
     </div>
   );
@@ -1392,10 +1431,24 @@ export type MenuItem = {
 const menuItems = (menu: Element | null) =>
   menu ? [...menu.querySelectorAll<HTMLElement>(':scope > [role^="menuitem"]:not(:disabled), :scope > .ui-as-menu__sub > [role^="menuitem"]')] : [];
 
-/** Focuses a menu's checked item, or its first one */
+/** Focuses a menu's checked item, or its first one, revealing it inside the menu list without scrolling ancestors */
 function focusMenu(menu: HTMLElement | null) {
   const items = menuItems(menu);
-  (items.find((i) => i.getAttribute("aria-checked") === "true") ?? items[0])?.focus({ preventScroll: true });
+  const target = items.find((i) => i.getAttribute("aria-checked") === "true") ?? items[0];
+  if (!target) return;
+  target.focus({ preventScroll: true });
+  if (menu && menu.scrollHeight > menu.clientHeight) {
+    const itemTop =
+      target.offsetParent === menu
+        ? target.offsetTop
+        : target.getBoundingClientRect().top - menu.getBoundingClientRect().top + menu.scrollTop;
+    const itemBottom = itemTop + target.offsetHeight;
+    if (itemTop < menu.scrollTop) {
+      menu.scrollTop = itemTop;
+    } else if (itemBottom > menu.scrollTop + menu.clientHeight) {
+      menu.scrollTop = itemBottom - menu.clientHeight;
+    }
+  }
 }
 
 /**
@@ -3289,6 +3342,8 @@ a.ui-as-side__item { text-decoration: none; cursor: pointer; }
   z-index: 30;
   top: calc(100% + 6px);
   left: 0;
+  box-sizing: border-box;
+  max-height: var(--as-popover-max-h, none);
   transform-origin: top left;
   animation: ui-as-popover 220ms var(--ease);
 }
@@ -3296,20 +3351,44 @@ a.ui-as-side__item { text-decoration: none; cursor: pointer; }
 .ui-as-popover[data-side="top"] { top: auto; bottom: calc(100% + 6px); transform-origin: bottom left; animation-name: ui-as-popover-up; }
 .ui-as-popover[data-side="top"][data-align="end"] { transform-origin: bottom right; }
 .ui-as-popover[data-side="right"] { top: auto; bottom: 0; left: calc(100% + 12px); transform-origin: bottom left; }
+.ui-as-popover[data-overflow]:not(:has(> .ui-as-menu__list, .ui-pmc)) { overflow-y: auto; overscroll-behavior: contain; }
+/* ProfileMenu scrolls its own card when constrained so its flyout side submenu (.ui-pmc__side) stays unclipped */
+.ui-as-popover[data-overflow] .ui-pmc__card { max-height: var(--as-popover-max-h); overflow-y: auto; overscroll-behavior: contain; }
+.ui-as-popover[data-overflow] .ui-pmc__items { max-height: none; overflow: visible; }
 @keyframes ui-as-popover-up { from { opacity: 0; transform: scale(0.96) translateY(4px); } to { opacity: 1; transform: none; } }
 /* The Filter Menu at its own size – 13px rows like every other menu, no shrinking */
 .ui-as-popover--filter .ui-fmc { width: 300px; }
 .ui-as-popover--filter .ui-fmc__title { font-size: 13px; line-height: 20px; }
 
 .ui-as-menu {
+  display: flex;
+  flex-direction: column;
   min-width: 168px;
   padding: 4px;
   border-radius: 12px;
   background: var(--card);
   box-shadow: 0 0 0 0.5px var(--line-strong), 0 12px 32px -8px rgba(0, 0, 0, 0.16);
 }
+.ui-as-menu > :not(.ui-as-menu__list) { flex: none; }
 .ui-as-menu__title { display: block; padding: 6px 10px 4px; font-size: 12px; font-weight: 500; color: var(--faint); }
-.ui-as-menu__list { display: grid; gap: 1px; }
+.ui-as-menu__list {
+  position: relative;
+  display: grid;
+  align-content: start;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 1px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Unconstrained menus with side-opening submenus keep overflow visible so subpanels are not clipped */
+.ui-as-popover:not([data-overflow]) .ui-as-menu__list:has(> .ui-as-menu__sub) { overflow: visible; }
+/* If a menu with submenus overflows vertically, expand subpanels inline so every item stays reachable */
+.ui-as-popover[data-overflow] .ui-as-menu__subpanel { position: static; display: none; min-width: 0 !important; margin: 2px 0 4px; padding: 0 0 0 14px; border-radius: 0; background: none; box-shadow: none; }
+.ui-as-popover[data-overflow] .ui-as-menu__subpanel::before { display: none; }
+.ui-as-popover[data-overflow] .ui-as-menu__sub:is(:focus-within, [data-open]) > .ui-as-menu__subpanel { display: block; }
+.ui-as-popover[data-overflow] .ui-as-menu__sub:is(:focus-within, [data-open]) > .ui-as-menu__item > svg:last-child { transform: rotate(90deg); }
 .ui-as-menu__item {
   display: flex;
   align-items: center;
@@ -3408,13 +3487,19 @@ a.ui-as-side__item { text-decoration: none; cursor: pointer; }
 /* Keyboard focus on a menu item shows like the pointer's hover */
 .ui-as-menu__item:focus-visible { background: var(--hover); color: var(--ink); }
 
-/* Touch screens: no hover – the row tools stay in view (just ⋯; pinning is in its menu), and targets grow to a finger's size */
-@media (hover: none) {
+/* Touch screens and phone-width viewports: no hover – the row tools stay in view (pinning moves into ⋯),
+   folder arrows remain visible, and each row reserves room for its visible buttons */
+@media (hover: none), (pointer: coarse), (max-width: 719px) {
   .ui-as-chat-row__tools, .ui-as-chat-folder-row .ui-as-chat-row__tools { opacity: 1; }
+  .ui-as-chat-folder__arrow { opacity: 1; }
   .ui-as-chat-row__pin { display: none; }
   .ui-as-chat-row .ui-as-chat-row__link, .ui-as-chat-folder-row > .ui-as-chat-folder { padding-right: 34px; }
   .ui-as-chat-row:is(:hover, :has(:focus-visible), [data-menu]) .ui-as-chat-row__link,
   .ui-as-chat-folder-row:is(:hover, :has(:focus-visible), [data-menu]) > .ui-as-chat-folder { padding-right: 34px; }
+  .ui-as-chat-row:has(> .ui-as-chat-row__tools > :not(.ui-as-chat-row__pin) ~ :not(.ui-as-chat-row__pin)) .ui-as-chat-row__link,
+  .ui-as-chat-folder-row:has(> .ui-as-chat-row__tools > :not(.ui-as-chat-row__pin) ~ :not(.ui-as-chat-row__pin)) > .ui-as-chat-folder { padding-right: 60px; }
+  .ui-as-chat-row:not(:has(> .ui-as-chat-row__tools > :not(.ui-as-chat-row__pin))) .ui-as-chat-row__link,
+  .ui-as-chat-folder-row:not(:has(> .ui-as-chat-row__tools > :not(.ui-as-chat-row__pin))) > .ui-as-chat-folder { padding-right: 6px; }
   .ui-as-chat-row__tool { color: var(--faint); }
 }
 @media (pointer: coarse) {

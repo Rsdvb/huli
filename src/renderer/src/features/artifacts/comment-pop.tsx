@@ -1,17 +1,38 @@
 import { useRef, useState } from 'react'
 import {
+  ArrowDown01Icon,
+  ArrowLeft01Icon,
+  ArrowRight01Icon,
+  ArrowUp01Icon,
   ArrowUp02Icon,
   Cancel01Icon,
   Comment01Icon,
+  Delete02Icon,
   Location01Icon,
+  PlusSignIcon,
   Tick02Icon,
 } from '@hugeicons/core-free-icons'
 import { motion, useReducedMotionConfig } from 'motion/react'
 import { useTranslation } from 'react-i18next'
-import { COMMENT_CHARS, type CommentAnchor, type CommentThread } from '@shared/artifact-comments'
+import {
+  COMMENT_CHARS,
+  isPending,
+  type CommentAnchor,
+  type CommentThread,
+} from '@shared/artifact-comments'
 import type { VersionSummary } from '@shared/artifacts'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { Button } from '@renderer/components/affect/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@renderer/components/ui/alert-dialog'
 import { longAgo } from '@renderer/lib/format'
 import { errorMessage, host } from '@renderer/lib/host'
 import { formatShortcut } from '@renderer/lib/platform'
@@ -19,15 +40,27 @@ import { useNow } from '@renderer/lib/use-now'
 import { anchorLabel } from './anchors'
 import { StateTag, Writer } from './comments-card'
 import { threadState } from './comment-threads'
-import { sendKey, usePopPlace } from './pop-place'
+import { sendKey, usePopPlace, type LiveAnchor, type OffscreenEdge } from './pop-place'
 
 const POP_W = 320
 
 type Box = { left: number; top: number; right: number; bottom: number }
 
+const OFFSCREEN_ICON: Record<OffscreenEdge, typeof ArrowUp01Icon> = {
+  top: ArrowUp01Icon,
+  bottom: ArrowDown01Icon,
+  left: ArrowLeft01Icon,
+  right: ArrowRight01Icon,
+}
+
 /** A popover in the content area, beside `at`, rising in as the cards do. */
 export function ToolPop({
   at,
+  clip = null,
+  liveAnchor = null,
+  onReturnToAnchor = null,
+  offscreenNote,
+  backLabel,
   inline = false,
   width = POP_W,
   label,
@@ -37,6 +70,16 @@ export function ToolPop({
 }: {
   /** What it is beside; null for the middle of the content area. */
   at: Box | null
+  /** Optional visible viewport clip in window coordinates. */
+  clip?: Box | null
+  /** Live anchor tracker for dynamic repositioning during iframe/host scrolling. */
+  liveAnchor?: LiveAnchor | null
+  /** Scrolls the anchored element back into view when the popover docks at a viewport edge. */
+  onReturnToAnchor?: (() => void) | null
+  /** Custom status line shown when the tracked anchor scrolls out of view. */
+  offscreenNote?: string
+  /** Custom action label for scrolling back to the tracked anchor. */
+  backLabel?: string
   /** Laid out by what holds it, as under a document's block, instead of placed beside `at`. */
   inline?: boolean
   width?: number
@@ -45,8 +88,9 @@ export function ToolPop({
   className?: string
   children: () => React.ReactNode
 }) {
+  const { t } = useTranslation('artifacts')
   const ref = useRef<HTMLDivElement>(null)
-  usePopPlace(ref, at, width, !inline)
+  const offscreen = usePopPlace(ref, at, width, !inline, { clip, live: liveAnchor })
   const reduce = useReducedMotionConfig()
   return (
     <motion.div
@@ -55,6 +99,7 @@ export function ToolPop({
       aria-label={label}
       className={`k-vt-pop ${className ?? ''}`}
       data-inline={inline || undefined}
+      data-offscreen={offscreen ?? undefined}
       style={inline ? undefined : { width }}
       initial={reduce ? false : { y: 6, filter: 'blur(6px)' }}
       animate={{ y: 0, filter: 'blur(0px)', transition: { duration: reduce ? 0 : 0.24 } }}
@@ -66,6 +111,18 @@ export function ToolPop({
         onClose()
       }}
     >
+      {!inline && offscreen && onReturnToAnchor && (
+        <div className="k-vt-pop__dock" data-edge={offscreen}>
+          <span className="k-vt-pop__dock-note">
+            <Icon icon={OFFSCREEN_ICON[offscreen]} size={13} />
+            <span>{offscreenNote ?? t('comments.anchorOffscreen')}</span>
+          </span>
+          <button type="button" className="k-vt-pop__dock-back" onClick={onReturnToAnchor}>
+            <Icon icon={Location01Icon} size={13} />
+            <span>{backLabel ?? t('comments.backToAnchor')}</span>
+          </button>
+        </div>
+      )}
       {children()}
     </motion.div>
   )
@@ -78,6 +135,8 @@ export function ToolPop({
 export function CommentDraft({
   anchor,
   at,
+  liveAnchor = null,
+  onReturnToAnchor = null,
   inline = false,
   waiting = null,
   onCancel,
@@ -86,6 +145,8 @@ export function CommentDraft({
   anchor: CommentAnchor
   /** What it is beside; null for the middle of the content area. */
   at: Box | null
+  liveAnchor?: LiveAnchor | null
+  onReturnToAnchor?: (() => void) | null
   inline?: boolean
   /** Said while the computer is away: the comment is saved once it is back. */
   waiting?: string | null
@@ -111,6 +172,8 @@ export function CommentDraft({
   return (
     <ToolPop
       at={at}
+      liveAnchor={liveAnchor}
+      onReturnToAnchor={onReturnToAnchor}
       inline={inline}
       label={t('comments.new')}
       onClose={onCancel}
@@ -168,9 +231,15 @@ export function ThreadPop({
   n,
   versions,
   at,
+  liveAnchor = null,
+  onReturnToAnchor = null,
   inline = false,
+  canResolve = true,
   onClose,
   onRepin,
+  onReopened,
+  onDelete = null,
+  onNewThread = null,
 }: {
   artifactId: string
   thread: CommentThread
@@ -178,10 +247,20 @@ export function ThreadPop({
   versions: readonly VersionSummary[] | null
   /** What it is beside; null for the middle of the content area. */
   at: Box | null
+  liveAnchor?: LiveAnchor | null
+  onReturnToAnchor?: (() => void) | null
   inline?: boolean
+  /** Whether the artifact allows changing comment state; false in Recently deleted. */
+  canResolve?: boolean
   onClose: () => void
   /** Starts pinning it again with the next click; null where the host cannot. */
   onRepin: (() => void) | null
+  /** Called after a resolved thread is reopened from inside the popover. */
+  onReopened?: () => void
+  /** Requests deleting this thread with confirmation; null when unavailable. */
+  onDelete?: (() => void) | null
+  /** Starts a separate new comment thread on the same element; null when unavailable. */
+  onNewThread?: (() => void) | null
 }) {
   const { t } = useTranslation('artifacts')
   const [reply, setReply] = useState('')
@@ -203,12 +282,17 @@ export function ThreadPop({
   }
   const resolve = () =>
     void host('artifacts.resolve', { id: artifactId, threadId: thread.id, resolved: !resolved })
-      .then(() => !resolved && onClose())
+      .then(() => {
+        if (!resolved) onClose()
+        else onReopened?.()
+      })
       .catch((reason: unknown) => setError(errorMessage(reason)))
 
   return (
     <ToolPop
       at={at}
+      liveAnchor={liveAnchor}
+      onReturnToAnchor={onReturnToAnchor}
       inline={inline}
       label={t('comments.threadLabel', { n })}
       onClose={onClose}
@@ -218,14 +302,27 @@ export function ThreadPop({
         <>
           <span className="k-vt-thread__head">
             <b title={anchorLabel(thread.anchor)}>{anchorLabel(thread.anchor)}</b>
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Icon icon={Tick02Icon} size={14} />}
-              onClick={resolve}
-            >
-              {resolved ? t('comments.reopen') : t('comments.resolve')}
-            </Button>
+            {canResolve && (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Icon icon={Tick02Icon} size={14} />}
+                onClick={resolve}
+              >
+                {resolved ? t('comments.reopen') : t('comments.resolve')}
+              </Button>
+            )}
+            {onDelete && (
+              <button
+                type="button"
+                aria-label={t('comments.delete')}
+                title={t('comments.delete')}
+                onClick={onDelete}
+                className="k-vt-icon k-vt-icon--danger"
+              >
+                <Icon icon={Delete02Icon} size={14} />
+              </button>
+            )}
             <button
               type="button"
               aria-label={t('comments.close')}
@@ -242,7 +339,7 @@ export function ThreadPop({
                 key={i}
                 comment={comment}
                 unsent={
-                  state.kind === 'notSent' &&
+                  isPending(thread) &&
                   i === thread.comments.length - 1 &&
                   comment.author.session === null
                 }
@@ -274,7 +371,7 @@ export function ThreadPop({
               {error}
             </p>
           )}
-          {!resolved && (
+          {!resolved && canResolve && (
             <span className="k-vt-reply">
               <textarea
                 value={reply}
@@ -308,9 +405,71 @@ export function ThreadPop({
               </button>
             </span>
           )}
+          {onNewThread && (
+            <div className="k-vt-thread__foot">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Icon icon={PlusSignIcon} size={14} />}
+                onClick={onNewThread}
+              >
+                {t('comments.newThread')}
+              </Button>
+            </div>
+          )}
         </>
       )}
     </ToolPop>
+  )
+}
+
+/** Explicit confirmation dialog before permanently deleting a comment thread. */
+export function DeleteCommentDialog({
+  thread,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  thread: CommentThread | null
+  busy: boolean
+  error: string | null
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const { t } = useTranslation('artifacts')
+  const count = thread?.comments.length ?? 0
+  return (
+    <AlertDialog
+      open={thread !== null}
+      onOpenChange={(open) => {
+        if (!open && !busy) onCancel()
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {count > 1 ? t('comments.deleteTitleReplies') : t('comments.deleteTitle')}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {count > 1
+              ? t('comments.deleteDescriptionReplies', { count })
+              : t('comments.deleteDescription')}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {error && (
+          <p role="alert" className="k-av-error">
+            {t('comments.deleteFailed', { error })}
+          </p>
+        )}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>{t('comments.cancel')}</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" disabled={busy} onClick={onConfirm}>
+            {busy ? t('comments.deleting') : t('comments.deleteConfirm')}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 

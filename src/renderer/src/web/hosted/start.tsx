@@ -19,7 +19,7 @@ import {
   type PairingPayload,
 } from '@shared/remote/pairing'
 import type { RelayProblem } from '@shared/remote/hosts'
-import { isOwnRelay } from '@shared/remote/relay'
+import { isOwnRelay, type HostRelay } from '@shared/remote/relay'
 import type { Hello } from '@shared/remote/protocol'
 import { useWebHostStore } from '@renderer/stores/web-host'
 import { deviceName, type BrowserDevice } from '../device-name'
@@ -34,6 +34,7 @@ import { AccountComputersPairing, type AccountPairingOptions } from './account-p
 import { accountUrl, regionListKeys, relayUrl } from './config'
 import { HOSTED_FEATURES, HostedRelay } from './relay-regions'
 import { clearBrowser } from './clear'
+import { shouldShowHostedPairing } from './discovery'
 import { handPushToOthers } from './push-hosts'
 import {
   currentHost,
@@ -176,8 +177,10 @@ export async function startHosted(base: HostedBase): Promise<void> {
     loadHosts(accountId).catch((): AccountHosts => ({ hosts: [], current: null })),
   ])
   const host = currentHost(hosts)
-  if (payload || !host || !device) return showPairing(base, account, device, hosts, payload)
-  return showApp(base, account, device, hosts, host, null)
+  if (shouldShowHostedPairing(location.pathname, host !== null, device !== null)) {
+    return showPairing(base, account, device, hosts, payload)
+  }
+  return showApp(base, account, device!, hosts, host!, null)
 }
 
 async function showSignIn(
@@ -231,6 +234,36 @@ async function showPairing(
   const accountId = account.accountId!
   const name = deviceName(base.browser)
   const page = createRoot(base.root)
+  let generatedKey: KeyPair | null = null
+  const deviceKey = async (): Promise<KeyPair> => {
+    if (device?.key) return device.key
+    generatedKey ??= await generateKeyPair()
+    return generatedKey
+  }
+  const finishPairing = async (
+    key: KeyPair,
+    hostKey: Uint8Array,
+    fallbackRelay: HostRelay,
+    paired: Paired,
+  ): Promise<true> => {
+    const added: HostedHost = {
+      hostKey,
+      relay: paired.welcome.relay ?? fallbackRelay,
+      name: paired.welcome.host.name,
+      deviceName: paired.welcome.device.name,
+      ...(paired.welcome.account !== undefined ? { account: paired.welcome.account } : {}),
+    }
+    const next = withHost(hosts, added)
+    const kept: WebDevice = { key, host: null }
+    await saveDevice(kept)
+    await saveHosts(accountId, next)
+    void keepStorage()
+    // The code is spent; the address alone opens the app from now on.
+    history.replaceState(null, '', '/')
+    page.unmount()
+    await showApp(base, account, kept, next, added, paired)
+    return true
+  }
   const onPair = async (
     code: PairingPayload,
     progress: (state: PairProgress) => void,
@@ -244,7 +277,7 @@ async function showPairing(
       progress({ state: 'failed', reason: 'own_relay' })
       return false
     }
-    const key = device?.key ?? (await generateKeyPair())
+    const key = await deviceKey()
     const paired = await pair(
       {
         dial: relayDial(
@@ -263,26 +296,10 @@ async function showPairing(
       progress,
     )
     if (!paired) return false
-    const added: HostedHost = {
-      hostKey: code.hostKey,
-      relay: paired.welcome.relay ?? code.relay,
-      name: paired.welcome.host.name,
-      deviceName: paired.welcome.device.name,
-    }
-    const next = withHost(hosts, added)
-    const kept: WebDevice = { key, host: null }
-    await saveDevice(kept)
-    await saveHosts(accountId, next)
-    void keepStorage()
-    // The code is spent; the address alone opens the app from now on.
-    history.replaceState(null, '', '/')
-    page.unmount()
-    await showApp(base, account, kept, next, added, paired)
-    return true
+    return finishPairing(key, code.hostKey, code.relay, paired)
   }
-  // Huli: the account's computers, paired with through the relay and a compared code.
-  let accountKey: KeyPair | null = device?.key ?? null
-  const keyForAccount = async (): Promise<KeyPair> => (accountKey ??= await generateKeyPair())
+  // Huli: the account's computers, paired with through the relay and a compared code. Kettu's
+  // discovery through the relays' host lists is left out: Huli Cloud lists them from its devices.
   const accountPairing: AccountPairingOptions = {
     list: async () => {
       const listed = await accountDevices(account)
@@ -294,7 +311,7 @@ async function showPairing(
     pair: (computer, progress) => {
       let started: AccountPairing | null = null
       let cancelled = false
-      const result = keyForAccount().then((key) => {
+      const result = deviceKey().then((key) => {
         if (cancelled || !computer.key) return null
         started = pairWithAccountHost(
           {
@@ -325,21 +342,12 @@ async function showPairing(
       }
     },
     added: async (computer, paired) => {
-      const key = await keyForAccount()
-      const added: HostedHost = {
-        hostKey: decodeRelayBytes(computer.key!)!,
-        relay: paired.welcome.relay ?? { id: computer.id, urls: [relayUrl] },
-        name: paired.welcome.host.name,
-        deviceName: paired.welcome.device.name,
-      }
-      const next = withHost(hosts, added)
-      const kept: WebDevice = { key, host: null }
-      await saveDevice(kept)
-      await saveHosts(accountId, next)
-      void keepStorage()
-      history.replaceState(null, '', '/')
-      page.unmount()
-      await showApp(base, account, kept, next, added, paired)
+      await finishPairing(
+        await deviceKey(),
+        decodeRelayBytes(computer.key!)!,
+        { id: computer.id, urls: [relayUrl] },
+        paired,
+      )
     },
   }
   const shown = device ? currentHost(hosts) : null

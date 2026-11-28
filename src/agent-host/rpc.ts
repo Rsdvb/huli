@@ -81,6 +81,7 @@ const LIVE_METHODS: ReadonlySet<string> = new Set<HostMethod>([
   'permissions.respondAll',
   'settings.answerChange',
   'routines.answerChange',
+  'market.answerMcpChange',
   'sessions.answerReport',
   'sessions.answerMemory',
   'sessions.answerProjectMcp',
@@ -91,6 +92,7 @@ const LIVE_METHODS: ReadonlySet<string> = new Set<HostMethod>([
   'surfaces.answerAccess',
   'computer.answerApp',
   'computer.declineSetup',
+  'workflows.suggestions',
 ])
 
 /** Reads that tell the host something of the port, which each request must reach. */

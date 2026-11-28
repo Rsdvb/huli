@@ -22,7 +22,10 @@
 /** About eight steps a second; the chase's ring of eight dots takes one step each. */
 export const TICK_MS = 120
 
-const reducedQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+// Read on first use, so loading the module (as the dots' tests do outside a browser) touches nothing.
+let reducedMotion: MediaQueryList | null = null
+const reducedQuery = (): MediaQueryList =>
+  (reducedMotion ??= window.matchMedia('(prefers-reduced-motion: reduce)'))
 
 /** The loops by the element whose place on screen decides whether they step. */
 const loops = new Map<Element, Set<Animation>>()
@@ -38,7 +41,7 @@ let resting = false
 const isAway = (): boolean => document.visibilityState !== 'visible' || !document.hasFocus()
 
 const isReduced = (): boolean =>
-  document.documentElement.dataset.reduceMotion === 'always' || reducedQuery.matches
+  document.documentElement.dataset.reduceMotion === 'always' || reducedQuery().matches
 
 /** The current step's time on the document timeline, which every loop shows. */
 const stepTime = (): number => Math.floor(performance.now() / TICK_MS) * TICK_MS
@@ -218,7 +221,7 @@ export function followWindowFront(): void {
     'transitionend',
   ])
     document.addEventListener(type, stir, { capture: true, passive: true })
-  reducedQuery.addEventListener('change', sync)
+  reducedQuery().addEventListener('change', sync)
   new MutationObserver(sync).observe(document.documentElement, {
     attributes: true,
     attributeFilter: ['data-reduce-motion'],

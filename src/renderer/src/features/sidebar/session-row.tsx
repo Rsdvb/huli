@@ -98,6 +98,8 @@ interface SessionRowProps {
   tabStopId: string | null
   /** The row ends with its host's name, as in a list across the hosts. */
   showHost?: boolean
+  /** Secondary context line under the title (such as project and host in the Activity view). */
+  context?: string
   /** In a project's folder, so the row lines up with the folder's name. */
   indent?: boolean
   /** A sub-session's place under its parent, which the tree line follows. */
@@ -117,6 +119,7 @@ const holdsStop = (node: SessionNode, id: string | null): boolean =>
 const sameRow = (a: SessionRowProps, b: SessionRowProps): boolean =>
   a.node === b.node &&
   a.showHost === b.showHost &&
+  a.context === b.context &&
   a.indent === b.indent &&
   a.branch === b.branch &&
   a.quickAllow === b.quickAllow &&
@@ -127,6 +130,7 @@ export const SessionRow = memo(function SessionRow({
   node,
   tabStopId,
   showHost = false,
+  context,
   indent = false,
   branch,
   quickAllow = false,
@@ -266,6 +270,82 @@ export const SessionRow = memo(function SessionRow({
     </span>
   )
 
+  const rowBody = (
+    <RowBody>
+      {mark}
+      <span className="ui-as-side__text" dir="auto">
+        {/* Huli: a manager's worker leads with its roster name; a manager says it is one. */}
+        {summary.worker && <span className="text-(--faint)">{summary.worker.name} · </span>}
+        {title}
+      </span>
+      {summary.manager && (
+        <span
+          aria-label={t('row.manager')}
+          title={t('row.manager')}
+          className="shrink-0 text-[11px] font-normal text-(--faint)"
+        >
+          {t('row.managerBadge')}
+        </span>
+      )}
+      {summary.worktree && (
+        <WorktreeRowMark worktree={summary.worktree} onOpen={() => setCardOpen(false)} />
+      )}
+      {summary.issue && issueBadge && (
+        <IssueBadge issue={summary.issue} onEnter={() => setCardOpen(false)} />
+      )}
+      <PrBadge summary={summary} onOpen={() => setCardOpen(false)} />
+      {summary.board && boardMark && onBoard(summary) && (
+        <BoardRowMark status={summary.board.status} onEnter={() => setCardOpen(false)} />
+      )}
+      {/* Huli: 静音通知. */}
+      {summary.muted && (
+        <span
+          role="img"
+          aria-label={t('row.muted')}
+          title={t('row.muted')}
+          className="grid shrink-0 place-items-center text-(--faint)"
+        >
+          <Glyph icon={NotificationOff03Icon} size={12} />
+        </span>
+      )}
+      {hasChildren && !expanded && (
+        <span
+          aria-label={t('row.subSessions', { count: children.length })}
+          className="shrink-0 text-[12px] font-normal text-(--faint) tabular-nums"
+        >
+          {children.length}
+        </span>
+      )}
+      {gone && <span className="sr-only">{gone}</span>}
+      {node.subagents.length > 0 && !away && (
+        <SubagentBadge
+          parent={summary}
+          subagents={node.subagents}
+          onOpen={() => setCardOpen(false)}
+        />
+      )}
+      <RowEnd>
+        {/* Huli: when a snoozed session comes back (会话整理). */}
+        {summary.snooze && (
+          <span
+            title={t(summary.snooze.reset ? 'tidy.backAtReset' : 'tidy.backAt', {
+              time: backTime(summary.snooze.until),
+            })}
+            className="shrink-0 text-[12px] font-normal text-(--faint) tabular-nums"
+          >
+            {backTime(summary.snooze.until)}
+          </span>
+        )}
+        {showHost && hostName && (
+          <span className="max-w-24 truncate text-[12px] font-normal text-(--faint)">
+            {hostName}
+          </span>
+        )}
+        {!away && <SessionIndicator status={status} expiring={expiring} waitingApart={waiting} />}
+      </RowEnd>
+    </RowBody>
+  )
+
   const button = (
     <button
       ref={drag.ref}
@@ -274,6 +354,7 @@ export const SessionRow = memo(function SessionRow({
       // The other panes' rows take the current row's fill.
       className={cn(
         'ui-as-side__item ui-as-chat-row__link data-multi-selected:bg-(--row-picked)!',
+        context && 'kettu-activity-row__link',
         inSplit && 'kettu-row-in-view',
         away && 'text-(--faint)!',
       )}
@@ -329,80 +410,25 @@ export const SessionRow = memo(function SessionRow({
       }}
       style={{ paddingLeft: pad }}
     >
-      {caret}
-      <RowBody>
-        {mark}
-        <span className="ui-as-side__text" dir="auto">
-          {/* Huli: a manager's worker leads with its roster name; a manager says it is one. */}
-          {summary.worker && <span className="text-(--faint)">{summary.worker.name} · </span>}
-          {title}
+      {context ? (
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex min-w-0 items-center gap-2">
+            {caret}
+            {rowBody}
+          </span>
+          <span
+            className="kettu-activity-row__context truncate pl-6 text-[11.5px] leading-4 text-(--faint)"
+            title={context}
+          >
+            {context}
+          </span>
         </span>
-        {summary.manager && (
-          <span
-            aria-label={t('row.manager')}
-            title={t('row.manager')}
-            className="shrink-0 text-[11px] font-normal text-(--faint)"
-          >
-            {t('row.managerBadge')}
-          </span>
-        )}
-        {summary.worktree && (
-          <WorktreeRowMark worktree={summary.worktree} onOpen={() => setCardOpen(false)} />
-        )}
-        {summary.issue && issueBadge && (
-          <IssueBadge issue={summary.issue} onEnter={() => setCardOpen(false)} />
-        )}
-        <PrBadge summary={summary} onOpen={() => setCardOpen(false)} />
-        {summary.board && boardMark && onBoard(summary) && (
-          <BoardRowMark status={summary.board.status} onEnter={() => setCardOpen(false)} />
-        )}
-        {/* Huli: 静音通知. */}
-        {summary.muted && (
-          <span
-            role="img"
-            aria-label={t('row.muted')}
-            title={t('row.muted')}
-            className="grid shrink-0 place-items-center text-(--faint)"
-          >
-            <Glyph icon={NotificationOff03Icon} size={12} />
-          </span>
-        )}
-        {hasChildren && !expanded && (
-          <span
-            aria-label={t('row.subSessions', { count: children.length })}
-            className="shrink-0 text-[12px] font-normal text-(--faint) tabular-nums"
-          >
-            {children.length}
-          </span>
-        )}
-        {gone && <span className="sr-only">{gone}</span>}
-        {node.subagents.length > 0 && !away && (
-          <SubagentBadge
-            parent={summary}
-            subagents={node.subagents}
-            onOpen={() => setCardOpen(false)}
-          />
-        )}
-        <RowEnd>
-          {/* Huli: when a snoozed session comes back (会话整理). */}
-          {summary.snooze && (
-            <span
-              title={t(summary.snooze.reset ? 'tidy.backAtReset' : 'tidy.backAt', {
-                time: backTime(summary.snooze.until),
-              })}
-              className="shrink-0 text-[12px] font-normal text-(--faint) tabular-nums"
-            >
-              {backTime(summary.snooze.until)}
-            </span>
-          )}
-          {showHost && hostName && (
-            <span className="max-w-24 truncate text-[12px] font-normal text-(--faint)">
-              {hostName}
-            </span>
-          )}
-          {!away && <SessionIndicator status={status} expiring={expiring} waitingApart={waiting} />}
-        </RowEnd>
-      </RowBody>
+      ) : (
+        <>
+          {caret}
+          {rowBody}
+        </>
+      )}
     </button>
   )
 

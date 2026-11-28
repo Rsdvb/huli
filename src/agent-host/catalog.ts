@@ -92,6 +92,8 @@ export const FOLDER_PER_SESSION = '--folder-per-session'
 /** The router's flag naming the flag a session's process may start with when Kettu asks. */
 const SESSION_FLAG = '--session-flag='
 const DIR_FLAG = '--dir-flag='
+/** The router's flag naming a value flag (`--flag <value>`) a session's process may start with. */
+const SESSION_ARG = '--session-arg='
 
 export type LaunchKind =
   // Installed from npm into the data directory and run on the user's Node.js. With `perSession`,
@@ -126,7 +128,8 @@ export type LaunchKind =
     }
   // With `perSession`, through the session router, which starts each session's process in the
   // session's own folder, for a program that runs everything in the folder it started in, and
-  // with `sessionFlag` added for a session Kettu asks for it, once the program's help lists it.
+  // with `sessionFlag` / `sessionArgs` added for a session Kettu asks for them, once the
+  // program's help lists them.
   // Huli: `dirFlag` adds each further folder of a session's project, as `<flag> <folder>`.
   | {
       kind: 'binary'
@@ -134,6 +137,7 @@ export type LaunchKind =
       args: string[]
       perSession?: true
       sessionFlag?: string
+      sessionArgs?: readonly string[]
       dirFlag?: string
     }
   // Run as `uvx <package>==<version> <args>`, which installs the package on first use.
@@ -144,6 +148,7 @@ export type LaunchKind =
 /** How Kettu talks to an agent; each protocol has its driver in `drivers.ts`. */
 export type AgentProtocol =
   | 'acp'
+  | 'acp-folders'
   | 'claude-sdk'
   | 'cline-sdk'
   | 'codex-app-server'
@@ -173,6 +178,14 @@ export interface AgentDefinition {
   registryId: string
   /** The protocol it speaks; ACP when not given. */
   protocol?: AgentProtocol
+  /**
+   * The environment that turns a folder's own config off for every session of its process, which
+   * `acp-folders` runs it with until the user lets a folder's own settings apply; or what writes
+   * the files it names into Kettu's folder `dir` for the agent, before each start.
+   */
+  folderConfigOff?:
+    | Readonly<Record<string, string>>
+    | ((dir: string, env: Env, platform: Platform) => Promise<Record<string, string>>)
   preferred?: PreferredProtocol
   launch: LaunchKind
   requiresNode?: string
@@ -245,6 +258,8 @@ export interface AgentDefinition {
   terminalSignIn?: { replaces: readonly string[] }
   /** Huli: its own CLI's interactive UI, which a terminal of Kite's runs (`agent-terminal.ts`). */
   terminal?: TerminalCli
+  /** 是否支持从本地会话存储直接读取精确上下文分类构成（无需中断当前回合）。 */
+  readsContext?: boolean
   /** 是否在上下文弹窗中展示可加载 Skills 与 MCP 工具定义的 token 估算。 */
   contextEstimates?: boolean
 }
@@ -737,11 +752,19 @@ function routedDetection(
     ...(launch.sessionFlag ? [`${SESSION_FLAG}${launch.sessionFlag}`] : []),
     ...(launch.dirFlag ? [`${DIR_FLAG}${launch.dirFlag}`] : []),
   ]
+  const valueFlags = (launch.sessionArgs ?? []).map((name) => `${SESSION_ARG}${name}`)
   return {
     state: 'available',
     spec: {
       command: runtime.command,
-      args: [ctx.sessionRouterPath!, FOLDER_PER_SESSION, ...flag, program, ...launch.args],
+      args: [
+        ctx.sessionRouterPath!,
+        FOLDER_PER_SESSION,
+        ...flag,
+        ...valueFlags,
+        program,
+        ...launch.args,
+      ],
       env: { ...runtime.env, ...env },
       shell: false,
       display: { ...display, env },
@@ -1216,14 +1239,18 @@ async function detectInstall(def: AgentDefinition, ctx: DetectContext): Promise<
         if (!(await ctx.isExecutable(ctx.binaryOverride))) {
           return chosenUnusable(def, ctx.binaryOverride)
         }
+        if (launch.perSession && ctx.sessionRouterPath) {
+          return routedDetection(ctx.binaryOverride, launch, ctx, display, env)
+        }
         return binaryDetection(ctx.binaryOverride, launch.args, ctx.platform, display, env)
       }
       const program = await findCommand(launch.command, ctx)
-      // Huli: a program that serves one session a connection runs a process for each.
-      if (program && launch.perSession && ctx.sessionRouterPath) {
-        return routedDetection(program, launch, ctx, display, env)
+      if (program) {
+        if (launch.perSession && ctx.sessionRouterPath) {
+          return routedDetection(program, launch, ctx, display, env)
+        }
+        return binaryDetection(program, launch.args, ctx.platform, display, env)
       }
-      if (program) return binaryDetection(program, launch.args, ctx.platform, display, env)
       // The user's own copy wins, so their sign-in and configuration stay; without one,
       // Kettu's archive install runs: the version wanted, else the one that ran before.
       if (def.installs?.archive && choice) {

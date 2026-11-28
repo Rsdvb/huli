@@ -25,7 +25,7 @@ import { useTranslation } from 'react-i18next'
 import { entryShown } from '@renderer/lib/features'
 import { newSession, openProjectDialog } from '@renderer/app/actions'
 import { starFromPalette } from '@renderer/features/github-star/palette'
-import { FolderClosedMark, Icon } from '@renderer/components/affect/app-shell'
+import { Icon } from '@renderer/components/affect/app-shell'
 import {
   CommandMenu,
   type Command,
@@ -41,6 +41,7 @@ import { Dialog } from '@renderer/components/ui/dialog'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import type { ArtifactKind } from '@renderer/features/artifacts/model'
 import { keyCaps } from '@renderer/features/shell/shortcuts'
+import { ProjectMark } from '@renderer/features/shell/project-icon'
 import { artifactListShown, useArtifactsStore } from '@renderer/stores/artifacts'
 import { useOtherHosts } from '@renderer/stores/hosts'
 import { revealMessage } from '@renderer/stores/reveal'
@@ -83,7 +84,7 @@ export function SearchDialog() {
   return (
     <Dialog open={open} onOpenChange={showSearch}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className="kettu-search-scrim" />
+        <DialogPrimitive.Backdrop className="kettu-search-scrim app-region-no-drag" />
         <DialogPrimitive.Popup
           data-overlay-layer=""
           aria-label={t('nav.search')}
@@ -437,7 +438,7 @@ function commandOf(entry: SearchEntry): Command {
         detail: entry.snippet,
       }
     case 'project':
-      return { ...base, logo: <FolderClosedMark /> }
+      return { ...base, logo: <ProjectMark icon={entry.icon} /> }
     case 'artifact':
       return { ...base, icon: <Icon icon={KIND_ICON[entry.artifactKind]} size={16} /> }
     case 'routine':

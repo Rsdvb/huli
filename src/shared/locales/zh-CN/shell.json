@@ -129,6 +129,7 @@
       "devices": "移动设备",
       "files": "文件",
       "git": "Git",
+      "gitGraph": "分支图",
       "board": "看板",
       "sideChat": "侧聊",
       "requests": "请求",
@@ -171,6 +172,7 @@
   "turnNotice": {
     "open": "打开",
     "finished_other": "{{count}} 个会话已结束",
-    "waiting_other": "{{count}} 个会话需要你看一下"
+    "waiting_other": "{{count}} 个会话需要你看一下",
+    "andMore_other": "{{names}} 等另外 {{count}} 个会话"
   }
 }

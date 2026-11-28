@@ -90,10 +90,12 @@ export function RunningWorkList({
   sessions,
   terminals,
   now,
+  className,
 }: {
   sessions: BusySession[]
   terminals: BusyTerminal[]
   now: number
+  className?: string
 }) {
   const { t } = useTranslation('updates')
   const [typed, setTyped] = useState('')
@@ -115,7 +117,7 @@ export function RunningWorkList({
         .filter((group) => matches(query, group.title) || group.terminals.length > 0)
     : groups
   return (
-    <div className="mt-3.5 flex min-h-0 min-w-0 flex-col">
+    <div className={cn('mt-3.5 flex min-h-0 min-w-0 flex-col', className)}>
       {rows > FILTER_FROM && (
         <label className="mb-1.5 flex h-8 shrink-0 items-center gap-2 rounded-lg bg-subtle px-2.5 text-tertiary">
           <Glyph icon={Search01Icon} size={14} />

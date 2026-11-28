@@ -31,6 +31,14 @@
       "cannotAnswer": "{{agent}} cannot answer side questions for another session",
       "noAnswer": "{{agent}} gave no answer to this question"
     },
+    "delegate": {
+      "notUserSession": "Only a user session can delegate tasks to another agent",
+      "nestedSession": "A child session cannot delegate tasks to another agent",
+      "agentUnavailable": "{{agent}} cannot be delegated to on this host",
+      "modeUnsupported": "{{agent}} does not support choosing a permission mode here",
+      "modeInvalid": "{{agent}} has no startable permission mode {{mode}}",
+      "emptyPrompt": "Write a task before delegating"
+    },
     "cannotLoad": "{{agent}} can neither load nor resume sessions",
     "cannotSteer": "{{agent}} cannot take messages during a turn",
     "cannotFork": "{{agent}} cannot fork sessions",
@@ -59,6 +67,7 @@
     "otherConfigFolder": "This session was started with the configuration folder {{path}}, which its agent no longer uses, so it cannot continue here.",
     "topLevelOnly": "Only a top-level session can be pinned or archived",
     "archived": "This session is archived",
+    "projectArchived": "This session's project is archived",
     "worktreeGone": "This session's worktree and its branch were removed, so it can't continue.",
     "worktreeInterrupted": "The worktree's preparation was interrupted. Run it again or go on without it.",
     "untitled": "Untitled session",
@@ -139,6 +148,12 @@
       "routine": {
         "gone": "This Routine card is no longer waiting for an answer",
         "answered": "This Routine card was already answered"
+      },
+      "mcpChange": {
+        "gone": "This MCP server card is no longer waiting for an answer",
+        "answered": "This MCP server card was already answered",
+        "noChange": "This MCP server change is no longer on record",
+        "noUndo": "This change cannot be undone"
       },
       "step": {
         "gone": "This step is no longer waiting for an answer",
@@ -229,7 +244,15 @@
       "description": "Free up space on this computer. Until then the conversation stays in memory, and Kettu saves it once there is room."
     },
     "stopped": {
-      "title": "{{agent}} exited before finishing this turn"
+      "title": "{{agent}} exited before finishing this turn",
+      "diskFull": "The disk is full. Free up space on this computer, then resume.",
+      "diskFullWithDetail": "The disk is full. Free up space on this computer, then resume.\n{{detail}}",
+      "code": "Exited with code {{code}}.",
+      "codeWithDetail": "Exited with code {{code}}: {{detail}}",
+      "signal": "Stopped by signal {{signal}}.",
+      "signalWithDetail": "Stopped by signal {{signal}}: {{detail}}",
+      "closed": "The connection closed unexpectedly.",
+      "closedWithDetail": "The connection closed unexpectedly: {{detail}}"
     },
     "cancelUnconfirmed": {
       "title": "{{agent}} did not confirm the cancellation",
@@ -272,6 +295,23 @@
     "fullAccessNotCarried": {
       "title": "Full access was not carried over",
       "description": "This session ran in full access outside Kettu. Kettu does not attach a session in it, so it is in {{mode}} here."
+    },
+    "updateResumed": {
+      "title": "Resumed after update restart",
+      "description": "This session was interrupted when Kettu restarted to update, so Kettu continued it automatically."
+    },
+    "updateResumeBlocked": {
+      "title": "Could not resume automatically after update",
+      "archived": "This session is archived. Restore it and continue manually when ready.",
+      "projectArchived": "This session's project is archived. Restore the project and continue manually when ready.",
+      "awaitingUser": "This session was waiting for your approval or input before the update restart. Review the pending step or continue manually.",
+      "projectMissing": "The project folder {{path}} is no longer available. Restore it and continue manually.",
+      "worktreeMissing": "The session worktree {{path}} is no longer available. Restore it or continue manually.",
+      "agentDisabled": "{{agent}} is currently disabled. Re-enable it in Settings, then continue manually.",
+      "agentUnavailable": "{{agent}} is not installed or unavailable. Reinstall or fix it, then continue manually.",
+      "agentSignIn": "{{agent}} requires you to sign in before this session can continue.",
+      "heldOutside": "This session is open in an external terminal. Close it there, then continue manually.",
+      "failed": "Automatic resume failed: {{reason}}"
     },
     "signInNeededBody": "Sign in, and the message is sent again."
   },
@@ -316,6 +356,9 @@
     "routineUpdate": "Wants to change the Routine {{name}}",
     "routineDelete": "Wants to delete the Routine {{name}}",
     "routineRun": "Wants to run the Routine {{name}} now",
+    "mcpAdd": "Wants to add the MCP server {{name}}",
+    "mcpOn": "Wants to turn on the MCP server {{name}}",
+    "mcpOff": "Wants to turn off the MCP server {{name}}",
     "secretRequest": "Needs {{title}} from you",
     "themeChange": "Wants to change Kettu’s theme colors"
   },
@@ -688,10 +731,12 @@
     "notPullRequestUrl": "Not a GitHub pull request URL: {{url}}",
     "notIssueUrl": "Not a GitHub issue URL",
     "noIssue": "GitHub has no issue at this address, or it cannot be read",
+    "notStackUrl": "Not a GitHub pull request stack URL",
     "unexpected": {
       "pullRequestObject": "Unexpected gh output: not a pull request object",
       "pullRequestUrl": "Unexpected pull request URL: {{url}}",
       "issue": "Unexpected gh output: not an issue",
+      "stack": "Unexpected gh output: not a pull request stack",
       "pullRequestList": "Unexpected gh output: not a pull request list",
       "revList": "Unexpected rev-list count output: {{output}}",
       "show": "Unexpected git show output for {{oid}}"
@@ -1057,9 +1102,14 @@
       "fast": "Fast mode",
       "fastDescription": "1.5x speed, more usage",
       "speed": "Speed",
-      "speedDescription": "The speeds Codex offers for this model; faster ones use more",
-      "speedStandard": "Standard",
-      "fastTier": "Fast"
+      "speedDescription": "Processing speed tier for the session"
+    },
+    "speed": {
+      "standard": "Standard",
+      "standardDescription": "Standard speed and usage",
+      "fast": "Fast",
+      "ultrafast": "Ultrafast",
+      "ultrafastDescription": "Fastest available responses, highest usage"
     },
     "mode": {
       "read-only": {
@@ -1174,13 +1224,13 @@
     },
     "notice": {
       "rerouted": "Codex switched from {{from}} to {{to}}",
+      "configWarning": "Codex configuration warning",
       "reconnecting": "Reconnecting ({{attempt}}/{{max}})…",
       "reconnectingPlain": "Reconnecting…",
       "reconnected_one": "Reconnected after 1 retry",
       "reconnected_other": "Reconnected after {{count}} retries",
       "reconnectFailed_one": "Could not reconnect after 1 retry",
       "reconnectFailed_other": "Could not reconnect after {{count}} retries",
-      "config": "Codex config: {{summary}}",
       "worldWritable": "Folders anyone on this computer can write to",
       "worldWritableScan": "Codex could not check which folders anyone on this computer can write to",
       "andMore_one": "and {{count}} more",
@@ -1198,6 +1248,10 @@
       },
       "fast": {
         "description": "Toggle fast mode for the current session.",
+        "hint": "[on|off|status]"
+      },
+      "ultrafast": {
+        "description": "Toggle ultrafast mode for the current session.",
         "hint": "[on|off|status]"
       },
       "mcp": {
@@ -1358,6 +1412,15 @@
       "unsupportedNoModel": "The current model does not report fast mode support.",
       "usage": "Command \"/fast\" accepts no arguments, or `on`, `off`, or `status`."
     },
+    "ultrafast": {
+      "on": "Ultrafast mode is now on.",
+      "off": "Ultrafast mode is now off.",
+      "statusOn": "Ultrafast mode is on.",
+      "statusOff": "Ultrafast mode is off.",
+      "unsupported": "The current model ({{model}}) does not report ultrafast mode support.",
+      "unsupportedNoModel": "The current model does not report ultrafast mode support.",
+      "usage": "Command \"/ultrafast\" accepts no arguments, or `on`, `off`, or `status`."
+    },
     "noValue": "Codex has no value {{value}} for {{option}}",
     "cannotSignOut": "Codex cannot sign out here",
     "unknownError": "Unknown error",
@@ -1495,6 +1558,11 @@
       "noReply": "Pi does not have that reply in the session",
       "cancelled": "An extension of Pi cancelled the fork"
     },
+    "branch": {
+      "notFound": "Pi does not have that branch node in this session",
+      "cancelled": "An extension of Pi cancelled switching branches",
+      "unsupported": "This version of Pi does not support switching session branches"
+    },
     "session": {
       "notFound": "Pi has no session {{id}}",
       "id": "**Session:** `{{value}}`",
@@ -1601,6 +1669,9 @@
       "command": "Compact the session’s context",
       "nothing": "There’s nothing to compact yet.",
       "off": "Context compaction is turned off in Cline’s own settings."
+    },
+    "rewind": {
+      "compacted": "This message was folded into an earlier compaction and cannot be edited from"
     }
   },
   "question": {
@@ -2028,6 +2099,10 @@
     "draftNoAgent": "No agent is available to draft the description",
     "draftFailed": "{{agent}} could not draft the description: {{reason}}"
   },
+  "thought": {
+    "translateNoAgent": "No agent is available to translate this thinking summary; add one or turn one on in Settings",
+    "translateFailed": "{{agent}} could not translate this thinking summary: {{reason}}"
+  },
   "nodeRuntime": {
     "busy": "Kite’s Node.js is being installed or removed. Wait for it to finish.",
     "unsupported": "nodejs.org has no Node.js build for this computer. Install Node.js yourself.",
@@ -2404,7 +2479,8 @@
     "noRemoval": "the agent's hidden sessions cannot be removed without a trace",
     "noAnswer": "no answer within {{seconds}} s",
     "noCommitMessage": "its reply held no commit message",
-    "noPullRequestDraft": "its reply held no pull request title"
+    "noPullRequestDraft": "its reply held no pull request title",
+    "noTranslation": "its reply held no translation"
   },
   "threadDb": {
     "notOpen": "The thread database is not open",
@@ -2535,6 +2611,23 @@
     "nothing": "There is nothing to put back",
     "failed": "Could not go back to the edited message: {{reason}}"
   },
+  "branch": {
+    "unsupported": "{{agent}} does not support switching branches inside a session",
+    "subagent": "Subagent sessions do not have branches to switch",
+    "archived": "Restore the session to switch branches",
+    "running": "Wait for the current turn to finish before switching branches",
+    "starting": "Wait until the session has started before switching branches",
+    "switching": "Already switching branches in this session",
+    "rewound": "Finish or put back the pending message edit before switching branches",
+    "failed": "Could not switch branches: {{reason}}"
+  },
+  "turnUndo": {
+    "archived": "Restore the session to undo its file changes",
+    "busy": "Another undo is already running for this session",
+    "noWorkspace": "This session's working folder is no longer available",
+    "noEntries": "This turn's tool records are no longer in the session",
+    "crossTurn": "Undo can only target tool edits from a single turn"
+  },
   "usageRead": {
     "notSignedIn": "{{vendor}} is not signed in",
     "signInExpired": "{{vendor}}'s sign-in has expired",
@@ -2647,7 +2740,12 @@
     "notExist": "{{path}} does not exist",
     "notFolder": "{{path}} is not a folder",
     "noProject": "No project at {{path}}",
-    "moveBeforeItself": "A project cannot move before itself"
+    "moveBeforeItself": "A project cannot move before itself",
+    "atLeastOneFolder": "A project must keep at least one source folder",
+    "primaryFolderRequired": "The primary source folder cannot be removed",
+    "duplicateFolder": "{{path}} is already listed in this project",
+    "folderInOtherProject": "{{path}} already belongs to {{name}}",
+    "nameTooLong": "Project name must be at most {{max}} characters"
   },
   "process": {
     "toolTimedOut": "{{name}} did not finish within {{ms}} ms"

@@ -58,6 +58,7 @@ export interface AgentInfo {
 export interface CommandInfo {
   name: string
   description?: string
+  source?: string
 }
 
 export interface ServerInfo {

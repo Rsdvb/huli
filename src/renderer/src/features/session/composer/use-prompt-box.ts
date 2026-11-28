@@ -8,7 +8,9 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ATTACHMENT_LIMIT } from '@shared/attachments'
+import type { BrowserElementAnnotation } from '@shared/browser'
 import type { PluginMentionRef } from '@shared/plugin-refs'
+import { mentionedSkills } from '@shared/slash'
 import { putBackDraft } from '@renderer/app/actions'
 import { onAppEvent, type AppEvent } from '@renderer/app/events'
 import { usePane } from '@renderer/features/split/pane-context'
@@ -20,6 +22,29 @@ import {
   useAttachmentsStore,
   type DraftAttachment,
 } from '@renderer/stores/attachments'
+import {
+  draftArtifactAttachments,
+  hydrateDraftArtifactAttachments,
+  restoreDraftArtifactAttachments,
+  setDraftArtifactAttachments,
+  useDraftArtifactAttachments,
+  type AttachedArtifact,
+} from './artifact-attachments'
+import {
+  draftBrowserAnnotations,
+  hydrateDraftBrowserAnnotations,
+  restoreDraftBrowserAnnotations,
+  setDraftBrowserAnnotations,
+  useDraftBrowserAnnotations,
+} from './browser-annotations'
+import {
+  draftDelegateTarget,
+  hydrateDraftDelegateTarget,
+  restoreDraftDelegateTarget,
+  setDraftDelegateTarget,
+  useDraftDelegateTarget,
+  type DelegateTarget,
+} from './delegation'
 import {
   attachBrowserPage,
   attachFiles,
@@ -48,6 +73,9 @@ export interface Taken {
   prompt: string
   held: DraftAttachment[]
   mentions: readonly PluginMentionRef[]
+  artifacts: readonly AttachedArtifact[]
+  browserAnnotations: readonly BrowserElementAnnotation[]
+  delegateTarget: DelegateTarget | null
 }
 
 export type PromptBoxState = ReturnType<typeof usePromptBox>
@@ -92,6 +120,25 @@ export function useBoxText<T>(
 }
 
 /**
+ * Whether a `focus-composer` event targets this composer: explicit `paneId` matches that pane
+ * even before its focused state flushes; explicit `sessionId` matches that session; otherwise only
+ * the focused pane's composer responds.
+ */
+export function matchesFocusComposer(
+  event: { sessionId?: string | null; paneId?: string | null },
+  target: { sessionId: string | null; paneId: string | null; focused: boolean },
+): boolean {
+  if (event.paneId != null) {
+    return (
+      event.paneId === target.paneId &&
+      (event.sessionId == null || event.sessionId === target.sessionId)
+    )
+  }
+  if (event.sessionId != null) return event.sessionId === target.sessionId
+  return target.focused
+}
+
+/**
  * The box's state, kept in the draft `draft`. `sessionId` is the session whose `insert-into-composer`
  * events it takes besides those for no session; null for New session. While `disabled`, nothing
  * is attached.
@@ -100,6 +147,8 @@ export function usePromptBox({
   draft,
   sessionId,
   projectPath,
+  artifactProjectPath,
+  noProject = false,
   hostId,
   disabled,
   onActivity,
@@ -107,6 +156,10 @@ export function usePromptBox({
   draft: string
   sessionId: string | null
   projectPath: string | null
+  /** Canonical project path for scoping project artifacts (differs from projectPath in worktrees). */
+  artifactProjectPath?: string | null
+  /** True when the session or New session targets No project (scratch). */
+  noProject?: boolean
   /** The host the message goes to, null for this computer; a host without a project has one too. */
   hostId: string | null
   disabled: boolean
@@ -116,11 +169,16 @@ export function usePromptBox({
   const { t } = useTranslation('composer')
   const [source] = useState(() => {
     hydrateDraftMentions(draft)
+    hydrateDraftArtifactAttachments(draft)
+    hydrateDraftBrowserAnnotations(draft)
+    hydrateDraftDelegateTarget(draft)
     return new BoxText(readDraft(draft))
   })
   const [error, setError] = useState<string | null>(null)
   // Each Mod+Shift+A for this composer asks the plus menu to open once more.
   const [addRequest, setAddRequest] = useState(0)
+  const [artifactPickerOpen, setArtifactPickerOpen] = useState(false)
+  const [delegatePickerOpen, setDelegatePickerOpen] = useState(false)
   const editor = useRef<ComposerEditorHandle>(null)
   const {
     position: historyPosition,
@@ -140,12 +198,17 @@ export function usePromptBox({
     onError: () => setError(t('prompt.historyFailed')),
   })
   // Only the focused pane's composer takes the events sent to no session in particular.
-  const paneFocused = usePane()?.focused ?? true
+  const pane = usePane()
+  const paneId = pane?.paneId ?? null
+  const paneFocused = pane?.focused ?? true
   const focused = useRef(paneFocused)
   useEffect(() => {
     focused.current = paneFocused
   }, [paneFocused])
   const attachments = useAttachmentsStore(selectDraft(draft))
+  const artifacts = useDraftArtifactAttachments(draft)
+  const browserAnnotations = useDraftBrowserAnnotations(draft)
+  const delegateTarget = useDraftDelegateTarget(draft)
 
   useEffect(() => () => flushDraft(draft), [draft])
 
@@ -228,13 +291,28 @@ export function usePromptBox({
     [draft, source],
   )
 
-  /** Puts the command at the start of the text, unless it starts with it already. */
+  /**
+   * Puts an exclusive command at the start of the text unless it already starts with it, or
+   * appends a stackable skill unless the message already references it.
+   */
   const addCommand = useCallback(
-    (name: string) => {
+    (name: string, skill = false) => {
       const current = editor.current?.text() ?? ''
       const command = `/${name}`
-      const has = current.startsWith(command) && /^(\s|$)/.test(current.slice(command.length))
-      const next = has ? current : `${command} ${current.trimStart()}`
+      let next: string
+      if (skill) {
+        if (mentionedSkills(current, [name]).length > 0) {
+          next = current
+        } else if (current === '') {
+          next = `${command} `
+        } else {
+          const sep = /\s$/.test(current) ? '' : ' '
+          next = `${current}${sep}${command} `
+        }
+      } else {
+        const has = current.startsWith(command) && /^(\s|$)/.test(current.slice(command.length))
+        next = has ? current : `${command} ${current.trimStart()}`
+      }
       source.set(next, null)
       writeDraft(draft, next)
       editor.current?.setText(next)
@@ -247,7 +325,12 @@ export function usePromptBox({
     () =>
       onAppEvent((event) => {
         onEvent(event)
-        if (event.kind === 'focus-composer' && focused.current) editor.current?.focus()
+        if (
+          event.kind === 'focus-composer' &&
+          matchesFocusComposer(event, { sessionId, paneId, focused: focused.current })
+        ) {
+          editor.current?.focus()
+        }
         if (event.kind === 'draft-written' && event.draft === draft) {
           closeHistory()
           const next = readDraft(draft)
@@ -264,14 +347,14 @@ export function usePromptBox({
         }
         if (event.kind === 'command-into-composer' && event.sessionId === sessionId) {
           closeHistory()
-          addCommand(event.name)
+          addCommand(event.name, event.skill)
         }
         if (event.kind === 'mention-into-composer' && event.draft === draft) {
           closeHistory()
           addMention(event.mention)
         }
       }),
-    [draft, sessionId, source, closeHistory, addText, addCommand, addMention],
+    [draft, sessionId, paneId, source, closeHistory, addText, addCommand, addMention],
   )
 
   /** Typing changed the text: its state, its draft, and a slash list Esc closed. */
@@ -283,9 +366,11 @@ export function usePromptBox({
   }
   /** Puts `next` in the box with the caret at `at`, the end by default. */
   const update = (next: string, at = next.length) => {
-    changed(next)
+    closeHistory()
+    writeDraft(draft, next)
     editor.current?.setText(next, at)
     source.set(next, at)
+    onActivity?.()
   }
 
   /** Empties the box for a send. */
@@ -295,22 +380,45 @@ export function usePromptBox({
     const prompt = editor.current?.text() ?? source.text
     const held = attachments
     const mentions = draftMentions(draft)
+    const attachedArtifacts = draftArtifactAttachments(draft)
+    const annotations = draftBrowserAnnotations(draft)
+    const delegate = draftDelegateTarget(draft)
     editor.current?.setText('')
     // A draft put back after a failed send opens no mention until the caret moves.
     source.set('', null)
     clearDraft(draft)
     setDraftAttachments(draft, [])
     setDraftMentions(draft, [])
+    setDraftArtifactAttachments(draft, [])
+    setDraftBrowserAnnotations(draft, [])
+    setDraftDelegateTarget(draft, null)
     setError(null)
-    return { prompt, held, mentions }
+    return {
+      prompt,
+      held,
+      mentions,
+      artifacts: attachedArtifacts,
+      browserAnnotations: annotations,
+      delegateTarget: delegate,
+    }
   }
   /** A failed send's handler: its error, and its message back in the draft above what is there. */
   const restore =
-    ({ prompt, held, mentions }: Taken) =>
+    ({
+      prompt,
+      held,
+      mentions,
+      artifacts: attachedArtifacts,
+      browserAnnotations: annotations,
+      delegateTarget: delegate,
+    }: Taken) =>
     (e: unknown) => {
       setError(errorMessage(e))
       putBackDraft(draft, prompt, held)
       restoreDraftMentions(draft, mentions)
+      restoreDraftArtifactAttachments(draft, attachedArtifacts)
+      restoreDraftBrowserAnnotations(draft, annotations)
+      restoreDraftDelegateTarget(draft, delegate)
     }
 
   const onPaste = (event: ClipboardEvent): boolean => {
@@ -340,13 +448,36 @@ export function usePromptBox({
     requestAnimationFrame(() => editor.current?.focus())
   }
 
+  const openArtifactPicker = () => {
+    if (disabled) return
+    onActivity?.()
+    setArtifactPickerOpen(true)
+  }
+
+  const openDelegatePicker = () => {
+    if (disabled || !sessionId) return
+    onActivity?.()
+    setDelegatePickerOpen(true)
+  }
+
   return {
     draft,
     sessionId,
     projectPath,
+    artifactProjectPath: artifactProjectPath !== undefined ? artifactProjectPath : projectPath,
+    noProject,
     disabled,
     source,
     attachments,
+    artifacts,
+    browserAnnotations,
+    delegateTarget,
+    artifactPickerOpen,
+    setArtifactPickerOpen,
+    openArtifactPicker,
+    delegatePickerOpen,
+    setDelegatePickerOpen,
+    openDelegatePicker,
     error,
     setError,
     update,

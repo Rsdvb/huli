@@ -1,3 +1,4 @@
+import type { McpInstallEntry } from '@shared/mcp-discovery'
 import type { DeviceCall, DeviceCallAnswer } from '@shared/device-agent'
 import type { TerminalCall, TerminalCallAnswer } from '@shared/terminal-agent'
 import type { ClosedTerminal } from '@shared/terminal-idle'
@@ -55,12 +56,15 @@ import { isControlOutcome, type ControlOutcome } from '@shared/control'
 import type { MarketAccount, MarketCall, MarketCallAnswer } from '@shared/market-publish'
 import { isMediaType, MEDIA_TOKEN, type MediaGrantRecord } from '@shared/media'
 import { isPortError, PortRequestError } from '@shared/port-rpc'
+import { electronNodeRuntime } from '@shared/node-runtime'
 import type { PortDevice } from '@shared/remote/device'
 import { reportBuildResult, type ReportBuildResult } from '@shared/report'
 import type { HostSettings } from '@shared/settings'
+import { isUpdateResumeSession, type UpdateResumeSession } from '@shared/update-resume'
 import agentHostPath from '../agent-host/entry?modulePath'
 // The host's own bundle is built without electron-vite's worker plugin, so main builds this one.
 import clineHostPath from '../agent-host/cline/cline-host?modulePath'
+import { mcpBridgeFile } from '@shared/mcp-bridge'
 import sessionRouterPath from '../agent-host/session-router/router?modulePath'
 import threadWorkerPath from '../agent-host/threads/worker?modulePath'
 import usageWorkerPath from '../agent-host/usage/worker?modulePath'
@@ -111,6 +115,8 @@ export interface AgentHostDeps {
   onChatBridgeStatus?(statuses: unknown): void
   /** Huli: an account sent a bridge the binding's code; the store checks it. */
   onChatBridgeBind?(platform: unknown, code: unknown, account: unknown): void
+  /** The active Kettu account id for artifact ownership and isolation, or null when signed out. */
+  accountId?(): string | null
   /** The window's color mode, which follows init at each start. */
   colorMode(): 'light' | 'dark'
   /** On Windows, whether the computer runs on battery, which follows init at each start. */
@@ -122,6 +128,9 @@ export interface AgentHostDeps {
   /** Huli: an agent's theme tool reads or sets the agent theme, unchecked. */
   themeCall?: (call: unknown) => Promise<ThemeCallAnswer>
   /** Keeps a plugin's secret in the key store, or clears it; null once the store holds it. */
+  installMcp?(entries: McpInstallEntry[]): Promise<string | null>
+  /** Makes the key store's backup key if it has none: null once it is there, else why not. */
+  mcpBackupKey?(): Promise<string | null>
   pluginSecret?: (pluginId: unknown, key: unknown, value: unknown) => Promise<string | null>
   /** The host's first start found the programs of these harnesses; main adds their agents. */
   onFirstStart?(harnesses: unknown): void
@@ -239,9 +248,20 @@ function isContentFile(value: unknown): boolean {
   )
 }
 
+function isOwnerAccountId(value: unknown): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value === 'string' && value.length > 0 && value.length <= 64)
+  )
+}
+
 function isContentResult(value: unknown): value is ArtifactContentResult {
   if (typeof value !== 'object' || value === null) return false
-  const { kind, files, version, title, key, strict } = value as Record<string, unknown>
+  const { kind, files, version, title, key, strict, ownerAccountId } = value as Record<
+    string,
+    unknown
+  >
   if (kind === 'not_found' || kind === 'failed') return true
   return (
     kind === 'found' &&
@@ -254,7 +274,8 @@ function isContentResult(value: unknown): value is ArtifactContentResult {
     typeof title === 'string' &&
     typeof key === 'string' &&
     /^[0-9a-f]{64}$/.test(key) &&
-    isTypeInfo((value as Record<string, unknown>).type)
+    isTypeInfo((value as Record<string, unknown>).type) &&
+    isOwnerAccountId(ownerAccountId)
   )
 }
 
@@ -301,7 +322,10 @@ function failedExport(message = t('agentHost.down')): ArtifactExportResult {
 
 function isBrief(value: unknown): value is ArtifactBrief {
   if (typeof value !== 'object' || value === null) return false
-  const { id, version, createdAt, updatedAt, deleted } = value as Record<string, unknown>
+  const { id, version, createdAt, updatedAt, deleted, ownerAccountId } = value as Record<
+    string,
+    unknown
+  >
   return (
     typeof id === 'string' &&
     ARTIFACT_ID.test(id) &&
@@ -309,7 +333,8 @@ function isBrief(value: unknown): value is ArtifactBrief {
     (version as number) >= 1 &&
     Number.isFinite(createdAt) &&
     Number.isFinite(updatedAt) &&
-    typeof deleted === 'boolean'
+    typeof deleted === 'boolean' &&
+    isOwnerAccountId(ownerAccountId)
   )
 }
 
@@ -376,6 +401,11 @@ export class AgentHost {
   private agentProcesses: ProcessId[] = []
   private readonly busyRequests = new Map<number, (sessions: BusySession[]) => void>()
   private nextBusyId = 1
+  private readonly updateResumeRequests = new Map<
+    number,
+    (sessions: UpdateResumeSession[]) => void
+  >()
+  private nextUpdateResumeId = 1
   private readonly frameRequests = new Map<number, (frame: ComputerFrame | null) => void>()
   private nextFrameId = 1
   private readonly reportRequests = new Map<number, (result: ReportBuildResult) => void>()
@@ -415,7 +445,7 @@ export class AgentHost {
         appVersion: app.getVersion(),
         platform: process.platform,
         isPackaged: app.isPackaged,
-        nodeRuntime: { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
+        nodeRuntime: electronNodeRuntime(),
         // Huli: a development copy may run a bundled fake agent too, as a container needs one.
         fakeAgentPath:
           process.env.KETTU_FAKE_AGENT ??
@@ -425,16 +455,21 @@ export class AgentHost {
         // The router runs on the user's Node.js, which cannot read inside app.asar.
         sessionRouterPath: unpackedPath(sessionRouterPath),
         clineHostPath,
+        mcpBridgePath: app.isPackaged
+          ? join(process.resourcesPath, 'helpers', mcpBridgeFile(process.platform))
+          : join(app.getAppPath(), 'out', 'helpers', mcpBridgeFile(process.platform)),
         settings: deps.settings(),
         computer: computerHostOptions(),
         mihomoPath: mihomoPath(),
         userAgent: updaterUserAgent(app.getVersion(), process.platform, process.arch),
+        accountId: deps.accountId?.() ?? null,
       }),
       startMessages: () => {
         const onBattery = deps.onBattery?.() ?? null
         return [
           { type: 'host:market-keys', ...deps.marketKeys() },
           { type: 'host:market-account', account: deps.marketAccount() },
+          { type: 'host:account', accountId: deps.accountId?.() ?? null },
           { type: 'host:color-mode', mode: deps.colorMode() },
           ...(onBattery === null ? [] : [{ type: 'host:battery' as const, onBattery }]),
           ...(deps.chatBridge
@@ -546,6 +581,21 @@ export class AgentHost {
     this.host.post({ type: 'host:market-account', account })
   }
 
+  /**
+   * The active Kettu account changed: clears main's artifact content cache immediately so the
+   * protocol cannot serve the prior account's files, then updates the agent host.
+   */
+  pushAccount(accountId: string | null): void {
+    this.contents.clear()
+    this.host.post({ type: 'host:account', accountId })
+  }
+
+  /** Records Kettu account ownership onto an unowned local artifact once published to Kettu. */
+  claimArtifactOwner(id: string, accountId: string): void {
+    this.contents.clear()
+    this.host.post({ type: 'host:artifact-claim-owner', id, accountId })
+  }
+
   /** Allow once from a request's notification, which the host answers as its own window would. */
   answerPermission(sessionId: string, requestId: string, optionId: string): void {
     this.host.post({ type: 'host:permission-answer', sessionId, requestId, optionId })
@@ -588,6 +638,30 @@ export class AgentHost {
       if (!this.host.post({ type: 'host:busy-request', requestId })) {
         this.busyRequests.get(requestId)?.([])
         this.busyRequests.delete(requestId)
+      }
+    })
+  }
+
+  /**
+   * Running user sessions that would be interrupted by an immediate update restart, or none if the
+   * host is unavailable or does not answer within `timeoutMs`.
+   */
+  updateResumeSessions(timeoutMs: number): Promise<UpdateResumeSession[]> {
+    if (this.host.state !== 'ready') return Promise.resolve([])
+    const requestId = this.nextUpdateResumeId++
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.updateResumeRequests.delete(requestId)
+        log.warn(`No update-resume answer within ${timeoutMs} ms`)
+        resolve([])
+      }, timeoutMs)
+      this.updateResumeRequests.set(requestId, (sessions) => {
+        clearTimeout(timer)
+        resolve(sessions)
+      })
+      if (!this.host.post({ type: 'host:update-resume-request', requestId })) {
+        this.updateResumeRequests.get(requestId)?.([])
+        this.updateResumeRequests.delete(requestId)
       }
     })
   }
@@ -895,6 +969,24 @@ export class AgentHost {
           .then((answer) => this.host.post({ type: 'theme-result', callId, answer }))
         break
       }
+      case 'host:mcp-install': {
+        const { callId, entries } = message
+        if (!Number.isSafeInteger(callId)) break
+        const run = this.deps.installMcp
+        void (run ? run(entries) : Promise.resolve('This build cannot import MCP servers.')).then(
+          (error) => this.host.post({ type: 'mcp-install-result', callId, error }),
+        )
+        break
+      }
+      case 'host:mcp-backup-key': {
+        const { callId } = message
+        if (!Number.isSafeInteger(callId)) break
+        const run = this.deps.mcpBackupKey
+        void (run ? run() : Promise.resolve('This build keeps no backup key.')).then((error) =>
+          this.host.post({ type: 'mcp-backup-key-result', callId, error }),
+        )
+        break
+      }
       case 'host:plugin-secret': {
         const { callId } = message
         if (!Number.isSafeInteger(callId)) break
@@ -1040,6 +1132,15 @@ export class AgentHost {
         if (!resolve) break
         this.busyRequests.delete(message.requestId)
         resolve(Array.isArray(message.sessions) ? message.sessions.filter(isBusySession) : [])
+        break
+      }
+      case 'host:update-resume': {
+        const resolve = this.updateResumeRequests.get(message.requestId)
+        if (!resolve) break
+        this.updateResumeRequests.delete(message.requestId)
+        resolve(
+          Array.isArray(message.sessions) ? message.sessions.filter(isUpdateResumeSession) : [],
+        )
         break
       }
       case 'host:granted':
@@ -1210,6 +1311,8 @@ export class AgentHost {
     this.deps.pluginHost?.(false)
     for (const resolve of this.busyRequests.values()) resolve([])
     this.busyRequests.clear()
+    for (const resolve of this.updateResumeRequests.values()) resolve([])
+    this.updateResumeRequests.clear()
     this.grants.failAll()
     for (const resolve of this.contentRequests.values()) resolve({ kind: 'failed' })
     this.contentRequests.clear()

@@ -14,6 +14,9 @@ import { PLUGIN_SETTING_CHARS } from './plugins'
 import {
   BACKUP_KEEP_MAX,
   BACKUP_KEEP_MIN,
+  cjkFontKey,
+  CODE_SIZES,
+  CONVERSATION_WIDTHS,
   isBackupTime,
   isFontFamilyName,
   MAX_FONT_FAMILY_CHARS,
@@ -294,6 +297,31 @@ function userFont(role: UserFontRole): CatalogEntry {
       const fonts = { ...file.appearance.fonts }
       if (value === '' || value === null) delete fonts[role]
       else fonts[role] = String(value)
+      return { appearance: { fonts } }
+    },
+  }
+}
+
+/** An optional Chinese face for one kind of text; empty falls back to the system Chinese face. */
+function userCjkFont(role: UserFontRole): CatalogEntry {
+  const key = cjkFontKey(role)
+  return {
+    section: 'appearance',
+    row: `font-${role}-cjk`,
+    group: 'appearance.groups.fonts',
+    name: `appearance.fonts.${role}.cjkName`,
+    description: `appearance.fonts.${role}.cjkDescription`,
+    keywords: 'appearance.fonts.cjkKeywords',
+    part: 'desktop',
+    access: 'change',
+    kind: 'text',
+    chars: MAX_FONT_FAMILY_CHARS,
+    check: (value) => value === '' || isFontFamilyName(value),
+    get: (file) => file.appearance.fonts[key] ?? null,
+    patch: (value, file) => {
+      const fonts = { ...file.appearance.fonts }
+      if (value === '' || value === null) delete fonts[key]
+      else fonts[key] = String(value)
       return { appearance: { fonts } }
     },
   }
@@ -634,6 +662,17 @@ const ENTRIES = {
       choices(TOOL_CALL_VIEWS, (view) => `general.toolCalls.${view}`),
     ),
   },
+  'general.prompt-cache-drop-notice': {
+    section: 'general',
+    row: 'prompt-cache-drop-notice',
+    group: 'general.groups.thread',
+    name: 'general.promptCacheDropNotice.name',
+    description: 'general.promptCacheDropNotice.description',
+    keywords: 'general.promptCacheDropNotice.keywords',
+    part: 'desktop',
+    access: 'change',
+    ...flag('thread', 'promptCacheDropNotice', (file) => file.thread.promptCacheDropNotice),
+  },
   'general.open-at-login': {
     section: 'general',
     row: 'open-at-login',
@@ -729,9 +768,44 @@ const ENTRIES = {
       choices(['small', 'default', 'large'], (size) => `appearance.textSize.${size}`),
     ),
   },
+  'appearance.code-size': {
+    section: 'appearance',
+    row: 'code-size',
+    group: 'appearance.groups.scale',
+    name: 'appearance.codeSize.name',
+    description: 'appearance.codeSize.description',
+    keywords: 'appearance.codeSize.keywords',
+    part: 'desktop',
+    access: 'change',
+    ...pick(
+      'appearance',
+      'codeSize',
+      (file) => file.appearance.codeSize,
+      choices(CODE_SIZES, (size) => `appearance.codeSize.${size}`),
+    ),
+  },
   'appearance.font-ui': userFont('ui'),
+  'appearance.font-ui-cjk': userCjkFont('ui'),
   'appearance.font-prose': userFont('prose'),
+  'appearance.font-prose-cjk': userCjkFont('prose'),
   'appearance.font-code': userFont('code'),
+  'appearance.font-code-cjk': userCjkFont('code'),
+  'appearance.conversation-width': {
+    section: 'appearance',
+    row: 'conversation-width',
+    group: 'appearance.groups.conversation',
+    name: 'appearance.conversationWidth.name',
+    description: 'appearance.conversationWidth.description',
+    keywords: 'appearance.conversationWidth.keywords',
+    part: 'desktop',
+    access: 'change',
+    ...pick(
+      'appearance',
+      'conversationWidth',
+      (file) => file.appearance.conversationWidth,
+      choices(CONVERSATION_WIDTHS, (width) => `appearance.conversationWidth.${width}`),
+    ),
+  },
   'appearance.sidebar-hover': {
     section: 'appearance',
     row: 'sidebar-hover',
@@ -742,6 +816,21 @@ const ENTRIES = {
     part: 'desktop',
     access: 'change',
     ...flag('appearance', 'sidebarHover', (file) => file.appearance.sidebarHover),
+  },
+  'appearance.close-side-panel-with-last-tab': {
+    section: 'appearance',
+    row: 'close-side-panel-with-last-tab',
+    group: 'appearance.groups.sidebar',
+    name: 'appearance.closeSidePanelWithLastTab.name',
+    description: 'appearance.closeSidePanelWithLastTab.description',
+    keywords: 'appearance.closeSidePanelWithLastTab.keywords',
+    part: 'desktop',
+    access: 'change',
+    ...flag(
+      'appearance',
+      'closeSidePanelWithLastTab',
+      (file) => file.appearance.closeSidePanelWithLastTab,
+    ),
   },
   'appearance.sidebar-overview': sidebarPage('overview'),
   'appearance.sidebar-artifacts': sidebarPage('artifacts'),

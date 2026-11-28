@@ -59,6 +59,7 @@ import {
   type SessionNode,
   type SidebarTabStop,
 } from '@renderer/stores/sessions'
+import { isSessionInArchivedProject, useProjectsStore } from '@renderer/stores/projects'
 import { showAllRows, useViewStore } from '@renderer/stores/view'
 import { useDraggingFoldered, useFolderDrop } from './drag'
 import {
@@ -116,16 +117,23 @@ function FolderList({
       Object.values(s.byId).filter((x) => listedOrigin(x) && hostOfSession(x) === hostId),
     ),
   )
-  // A pinned session shows under Pinned, as it does for its project.
+  const projects = useProjectsStore((s) => s.projects)
+  // A pinned session shows under Pinned, as it does for its project; one of an archived project
+  // is out of the list with it.
   const roots = useMemo(() => {
     const nodes = liveTree(Object.fromEntries(summaries.map((x) => [x.id, x])))
     // Huli: and a snoozed or settled one in its group out of the list.
     return new Map(
       nodes
-        .filter((n) => !n.summary.pinnedAt && !isParked(n.summary))
+        .filter(
+          (n) =>
+            !n.summary.pinnedAt &&
+            !isParked(n.summary) &&
+            !isSessionInArchivedProject(n.summary, projects),
+        )
         .map((n) => [n.summary.id, n]),
     )
-  }, [summaries])
+  }, [summaries, projects])
   const place = useSessionFoldersStore((s) => s.place)
   const newFolder = () => askFolderDialog({ kind: 'create', hostId, sessionIds: [] })
 

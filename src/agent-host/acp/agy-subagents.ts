@@ -7,13 +7,14 @@
 // Kettu reads the store while a session's turn starts or messages sub-agents and while its children
 // run, shows each child it finds as a sub-agent, and loads it in the parent's process.
 
-import { stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type * as acp from '@agentclientprotocol/sdk/unstable'
 import type { SessionTarget } from '../connection'
 import { addEntry, toLf, type MapperOutput, type SubagentState } from '../session-updates'
 import { compareVersions } from '../versions'
+import { withAgySqliteReadOnly } from './agy-sqlite'
+import { DEFAULT_AGY_APP_DATA_DIR, isSafeAgyAppDataDir } from './agy-store'
 
 export const AGY_SUBAGENTS_VERSION = '1.5.15'
 
@@ -66,8 +67,72 @@ const REPLAY_DEPTH = 4
 const DESCRIPTION_LIMIT = 200
 
 /** agy's conversation store, under the home folder (1.5.15). */
-export function agyStoreFile(home = os.homedir()): string {
-  return path.join(home, '.gemini', 'antigravity-cli', 'conversation_summaries.db')
+export function agyStoreFile(home = os.homedir(), appDataDir = DEFAULT_AGY_APP_DATA_DIR): string {
+  const dir = isSafeAgyAppDataDir(appDataDir) ? appDataDir : DEFAULT_AGY_APP_DATA_DIR
+  return path.join(home, '.gemini', dir, 'conversation_summaries.db')
+}
+
+async function readChildrenFromFile(
+  file: string,
+  parentIds: readonly string[],
+): Promise<AgyChild[]> {
+  const result = await withAgySqliteReadOnly(file, (db) => {
+    const placeholders = parentIds.map(() => '?').join(', ')
+    const rows = db
+      .prepare(
+        `SELECT conversation_id, parent_conversation_id, status, killed, agent_name, title
+         FROM conversation_summaries
+         WHERE parent_conversation_id IN (${placeholders})
+         ORDER BY rowid`,
+      )
+      .all(...parentIds)
+    const byId = new Map<string, AgyChild>()
+    for (const row of rows) {
+      const id = row.conversation_id
+      const parentId = row.parent_conversation_id
+      if (typeof id !== 'string' || typeof parentId !== 'string' || id === '') continue
+      byId.set(id, {
+        id,
+        parentId,
+        status: typeof row.status === 'string' ? row.status : '',
+        killed: row.killed === 1 || row.killed === 1n,
+        agent: typeof row.agent_name === 'string' ? row.agent_name : '',
+        title: typeof row.title === 'string' ? row.title : '',
+      })
+    }
+
+    // 补充查询 conversation_parents 表（部分旁路提问或子会话的父子关系只写在该表）。
+    try {
+      const linked = db
+        .prepare(
+          `SELECT cp.conversation_id, cp.parent_id, cs.status, cs.killed, cs.agent_name, cs.title
+           FROM conversation_parents cp
+           LEFT JOIN conversation_summaries cs ON cs.conversation_id = cp.conversation_id
+           WHERE cp.parent_id IN (${placeholders})`,
+        )
+        .all(...parentIds)
+      for (const row of linked) {
+        const id = row.conversation_id
+        const parentId = row.parent_id
+        if (typeof id !== 'string' || typeof parentId !== 'string' || id === '' || byId.has(id)) {
+          continue
+        }
+        byId.set(id, {
+          id,
+          parentId,
+          status: typeof row.status === 'string' ? row.status : '',
+          killed: row.killed === 1 || row.killed === 1n,
+          agent: typeof row.agent_name === 'string' ? row.agent_name : '',
+          title: typeof row.title === 'string' ? row.title : '',
+        })
+      }
+    } catch {
+      // 旧库不含 conversation_parents 表时静默忽略。
+    }
+
+    return [...byId.values()]
+  })
+  return result ?? []
 }
 
 /**
@@ -75,43 +140,28 @@ export function agyStoreFile(home = os.homedir()): string {
  * writes the database. A lookup in a table of one row per conversation takes about a millisecond,
  * so it runs in the host; a store agy holds locked fails at once and is read again later.
  */
-export function agyStore(file = agyStoreFile()): AgyStore {
+export function agyStore(
+  file = agyStoreFile(),
+  fileForParent?: (parentId: string) => string | undefined,
+): AgyStore {
   return async (parentIds) => {
     if (parentIds.length === 0) return []
-    try {
-      await stat(file)
-    } catch {
-      return []
+    if (!fileForParent) return readChildrenFromFile(file, parentIds)
+    const groups = new Map<string, string[]>()
+    for (const parentId of parentIds) {
+      const target = fileForParent(parentId) ?? file
+      let list = groups.get(target)
+      if (!list) {
+        list = []
+        groups.set(target, list)
+      }
+      list.push(parentId)
     }
-    const { DatabaseSync } = await import('node:sqlite')
-    const db = new DatabaseSync(file, { readOnly: true, timeout: 0 })
-    try {
-      const rows = db
-        .prepare(
-          `SELECT conversation_id, parent_conversation_id, status, killed, agent_name, title
-           FROM conversation_summaries
-           WHERE parent_conversation_id IN (${parentIds.map(() => '?').join(', ')})
-           ORDER BY rowid`,
-        )
-        .all(...parentIds)
-      return rows.flatMap((row): AgyChild[] => {
-        const id = row.conversation_id
-        const parentId = row.parent_conversation_id
-        if (typeof id !== 'string' || typeof parentId !== 'string' || id === '') return []
-        return [
-          {
-            id,
-            parentId,
-            status: typeof row.status === 'string' ? row.status : '',
-            killed: row.killed === 1 || row.killed === 1n,
-            agent: typeof row.agent_name === 'string' ? row.agent_name : '',
-            title: typeof row.title === 'string' ? row.title : '',
-          },
-        ]
-      })
-    } finally {
-      db.close()
+    const out: AgyChild[] = []
+    for (const [storeFile, ids] of groups) {
+      out.push(...(await readChildrenFromFile(storeFile, ids)))
     }
+    return out
   }
 }
 
@@ -169,6 +219,8 @@ export interface SubagentHost {
   load(childId: string, parentId: string, quiet: boolean): Promise<void>
   /** The sub-agents under a session all stopped running. */
   settled(sessionId: string): void
+  /** A child sub-agent transitioned from running to idle/cancelled. */
+  childEnded?(parentId: string, childId: string): void
   log(level: 'info' | 'warn', message: string): void
 }
 
@@ -324,6 +376,7 @@ export class AgySubagents {
             }),
           )
           const root = this.rootOf(id)
+          this.host.childEnded?.(known.parentId, id)
           if (!this.running(root)) this.host.settled(root)
         }
       }
@@ -370,7 +423,10 @@ export class AgySubagents {
         .target(known.parentId)
         ?.apply(subagent(row.id, { state: running ? { kind: 'running' } : stopped(row) }))
       if (running && !known.loaded) await this.open(row, known, true)
-      if (!running && !this.running(this.rootOf(row.id))) this.host.settled(this.rootOf(row.id))
+      if (!running) {
+        this.host.childEnded?.(known.parentId, row.id)
+        if (!this.running(this.rootOf(row.id))) this.host.settled(this.rootOf(row.id))
+      }
       return
     }
     // A child agy has not given a status yet is read again.

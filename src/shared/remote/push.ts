@@ -329,11 +329,28 @@ export type PushEvent =
   | {
       kind: 'permission'
       sessionId: string
+      agentId?: string
       requestId?: string
       actions?: PushActions
       question?: PushQuestion
+      actionKind?: 'execute' | 'edit' | 'review' | 'question'
     }
-  | { kind: 'turn-ended' | 'error' | 'routine-ended'; sessionId: string }
+  | {
+      kind: 'turn-ended'
+      sessionId: string
+      agentId?: string
+      workedMs?: number
+      changedFiles?: number
+      project?: string
+    }
+  | {
+      kind: 'error'
+      sessionId: string
+      agentId?: string
+      exitCode?: number
+      project?: string
+    }
+  | { kind: 'routine-ended'; sessionId: string; agentId?: string }
   /**
    * Huli: a turn its plan limit stopped goes on, or a running turn looks stuck. A device from
    * before they were added shows their title and body, and opens the session.
@@ -347,10 +364,11 @@ export type PushEvent =
   /** An agent's routines paused near a plan limit; it opens the Routines page. */
   | { kind: 'routine-paused'; agentId: string }
   /**
-   * A plan window of an agent crossed 90% used or ran out; it opens the agent's usage. A device
-   * from before it was added shows its title and body, or its generic text.
+   * A plan window of an agent crossed 90% used (`warning`) or ran out (`reached`); it opens the
+   * agent's usage. A device from before it was added shows its title and body, or its generic
+   * text.
    */
-  | { kind: 'plan-limit'; agentId: string; window: string }
+  | { kind: 'plan-limit'; agentId: string; window: string; limitLevel?: 'warning' | 'reached' }
   /** A device of the account asks to be added; it opens the request's card. */
   | { kind: 'device-request'; requestId: number }
   /** A device joined the host, which the device may remove. */

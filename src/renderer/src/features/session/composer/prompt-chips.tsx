@@ -9,12 +9,14 @@ import {
 } from 'react'
 import { Popover } from '@base-ui/react/popover'
 import { useTranslation } from 'react-i18next'
-import type { SlashCommand } from '@shared/thread'
+import { isSkillCommand, type SlashCommand } from '@shared/thread'
 import { foldersOf } from '@renderer/features/session/composer/mentions'
 import { formatShortcut, isMod, isWeb } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import type { DraftAttachment } from '@renderer/stores/attachments'
 import { ensureFiles, openFile, useFilesStore } from '@renderer/stores/files'
+import { useGitStore } from '@renderer/stores/git'
+import { useOverlayPresence } from '@renderer/stores/overlays'
 import { revealSurface } from '@renderer/features/shell/open-surfaces'
 import { newSessionPanel } from '@renderer/stores/view'
 import { openViewer } from '@renderer/stores/viewer'
@@ -30,7 +32,7 @@ import type { ComposerEditorHandle } from './editor'
 import type { ChipHooks } from './editor-chips'
 import { useLinkOpener } from './link-opener'
 import { commandSourceName } from './command-source'
-import { leadingCommand } from './slash'
+import { activeSlashItems } from './slash'
 import { useBoxText, type BoxText } from './use-prompt-box'
 
 // The hover preview opens once the pointer rests on a chip, and stays while it moves between two.
@@ -65,6 +67,7 @@ export function projectOf(paths: readonly string[], known: ReadonlySet<string>) 
 export function usePromptChips({
   draft,
   sessionId,
+  hostId,
   source,
   attachments,
   commands,
@@ -77,6 +80,7 @@ export function usePromptChips({
 }: {
   draft: string
   sessionId: string | null
+  hostId: string | null
   source: BoxText
   attachments: readonly DraftAttachment[]
   commands: readonly SlashCommand[]
@@ -91,6 +95,16 @@ export function usePromptChips({
 }) {
   const { t } = useTranslation('composer')
   const files = useFilesStore((s) => (projectPath ? s.byProject[projectPath] : undefined))
+  const githubOwner = useGitStore((s) =>
+    projectPath ? (s.status[projectPath]?.remote?.github?.owner ?? null) : null,
+  )
+  const githubRepoName = useGitStore((s) =>
+    projectPath ? (s.status[projectPath]?.remote?.github?.repo ?? null) : null,
+  )
+  const githubRepo = useMemo(
+    () => (githubOwner && githubRepoName ? { owner: githubOwner, repo: githubRepoName } : null),
+    [githubOwner, githubRepoName],
+  )
   const mentions = useBoxText({ source }, (text) => /[@＠]/.test(text))
   useEffect(() => {
     if (projectPath && mentions) ensureFiles(projectPath)
@@ -103,7 +117,11 @@ export function usePromptChips({
     () => mentionResolver(attachments, project, surfaces, plugins),
     [attachments, project, surfaces, plugins],
   )
-  const names = useMemo(() => commands.map((c) => c.name), [commands])
+  const exclusiveNames = useMemo(
+    () => commands.filter((c) => !isSkillCommand(c)).map((c) => c.name),
+    [commands],
+  )
+  const skillNames = useMemo(() => commands.filter(isSkillCommand).map((c) => c.name), [commands])
 
   // The preview belongs to the text it was opened on: an edit can take its chip away.
   const [hover, setHover] = useState<{ chip: Chip; element: HTMLElement } | null>(null)
@@ -156,7 +174,7 @@ export function usePromptChips({
   const links = useLinkOpener(sessionId)
   const open = (chip: Chip) => {
     setHover(null)
-    if (chip.kind === 'command') return
+    if (chip.kind === 'command' || chip.kind === 'skill') return
     if (chip.kind === 'link') {
       links.open(chip.url)
       return
@@ -212,8 +230,10 @@ export function usePromptChips({
   })
   const chipContext = useMemo<ChipHooks>(
     () => ({
-      commands: names,
+      commands: exclusiveNames,
+      skills: skillNames,
       resolve,
+      githubRepo,
       onHover: (chip, element) => handlers.current.onHover(chip, element),
       onOpen: (chip) => handlers.current.open(chip),
       onLinkPasted: (from, to) => handlers.current.onLinkPasted(from, to),
@@ -221,8 +241,9 @@ export function usePromptChips({
       onMentionDeleted: (keys) => handlers.current.onMentionDeleted(keys),
       highlight: pasted,
       projectPath,
+      hostId,
     }),
-    [names, resolve, pasted, projectPath],
+    [exclusiveNames, skillNames, resolve, githubRepo, pasted, projectPath, hostId],
   )
 
   const keyDown = (event: KeyboardEvent): boolean => {
@@ -232,19 +253,39 @@ export function usePromptChips({
     return true
   }
 
-  const leadingName = useBoxText({ source }, (text) => {
-    const end = leadingCommand(text, names)
-    return end ? text.slice(1, end) : null
-  })
-  const leading = useMemo<Chip | null>(
-    () =>
-      leadingName === null
-        ? null
-        : { kind: 'command', from: 0, to: leadingName.length + 1, name: leadingName },
-    [leadingName],
+  // Track the leading exclusive command for the passive command strip. Stackable skills render
+  // directly as inline chips with hover previews (like file mentions), so selecting a skill does
+  // not keep a persistent floating box open above the composer.
+  const commandName = useBoxText(
+    { source },
+    (text) => activeSlashItems(text, commands).command?.name ?? '',
   )
-  const command = leadingName === null ? undefined : commands.find((c) => c.name === leadingName)
-  const strip = !!command && focused && !popoverOpen && !hover && !pasted
+  const activeCommand = useMemo(
+    () =>
+      commandName
+        ? (commands.find((c) => !isSkillCommand(c) && c.name === commandName) ?? null)
+        : null,
+    [commandName, commands],
+  )
+  const commandChip = useMemo<Chip | null>(
+    () =>
+      activeCommand
+        ? {
+            kind: 'command',
+            from: 0,
+            to: activeCommand.name.length + 1,
+            name: activeCommand.name,
+          }
+        : null,
+    [activeCommand],
+  )
+  const strip = activeCommand !== null && focused && !popoverOpen && !hover && !pasted
+
+  // Passive previews and status strips can overlap the native browser view, but do not dismiss on
+  // outside clicks and must not suspend window drag regions.
+  useOverlayPresence(!!hover)
+  useOverlayPresence(!!pasted)
+  useOverlayPresence(strip)
 
   const overlays: ReactNode = (
     <>
@@ -259,6 +300,7 @@ export function usePromptChips({
             className="pointer-events-none isolate z-(--layer-menu) outline-none"
           >
             <Popover.Popup
+              data-overlay-layer=""
               initialFocus={false}
               finalFocus={false}
               className={cn(POPUP, 'pointer-events-none')}
@@ -269,7 +311,10 @@ export function usePromptChips({
                   item={attachments.find(
                     (a) => 'attachmentKey' in hover.chip && a.key === hover.chip.attachmentKey,
                   )}
+                  commands={commands}
+                  agentName={agentName}
                   projectPath={projectPath}
+                  hostId={hostId}
                   inSession={!!sessionId && !isWeb}
                 />
               )}
@@ -286,9 +331,10 @@ export function usePromptChips({
             side="top"
             align="start"
             sideOffset={4}
-            className="isolate z-(--layer-menu) outline-none"
+            className="isolate z-(--layer-menu) outline-none app-region-no-drag"
           >
             <Popover.Popup
+              data-overlay-layer=""
               initialFocus={false}
               finalFocus={false}
               className="flex items-center gap-2.5 rounded-lg bg-toast py-1.5 pr-1.5 pl-2.5 text-hint text-toast-foreground shadow-toast outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 motion-reduce:animate-none"
@@ -314,9 +360,10 @@ export function usePromptChips({
             side="top"
             align="start"
             sideOffset={4}
-            className="pointer-events-none isolate z-40 w-(--anchor-width) outline-none"
+            className="pointer-events-none isolate z-(--layer-menu) w-(--anchor-width) outline-none"
           >
             <Popover.Popup
+              data-overlay-layer=""
               initialFocus={false}
               finalFocus={false}
               className={cn(
@@ -324,12 +371,15 @@ export function usePromptChips({
                 'pointer-events-none flex items-center gap-2 rounded-code px-2.5 py-1.75 text-hint text-secondary',
               )}
             >
-              {command && leading && (
+              {activeCommand && commandChip && (
                 <>
-                  <ChipView chip={leading} />
-                  <span className="min-w-0 flex-1 truncate">{command.description}</span>
+                  <ChipView chip={commandChip} />
+                  <span className="min-w-0 flex-1 truncate">{activeCommand.description}</span>
                   <span className="shrink-0 text-tertiary">
-                    {[commandSourceName(command.source, t) ?? agentName, command.inputHint]
+                    {[
+                      commandSourceName(activeCommand.source, t) ?? agentName,
+                      activeCommand.inputHint,
+                    ]
                       .filter(Boolean)
                       .join(' · ')}
                   </span>

@@ -102,16 +102,27 @@ function parseAnswer(value: unknown): { optionId: string; label: string } | null
     : null
 }
 
+const ACTION_KINDS = new Set(['execute', 'edit', 'review', 'question'])
+
 /**
  * An attention message from the host's parent, as the remote host reads it; null when it is not
  * one. The parent passes on the agent host's, so it is checked like any message across processes.
  */
 export function parseAttention(value: unknown): Attention | null {
   if (typeof value !== 'object' || value === null) return null
-  const { kind, sessionId, agentId, window, key, title, body, request, front } = value as Record<
-    string,
-    unknown
-  >
+  const {
+    kind,
+    sessionId,
+    agentId,
+    changedFiles,
+    window,
+    key,
+    level,
+    title,
+    body,
+    request,
+    front,
+  } = value as Record<string, unknown>
   if (typeof kind !== 'string' || !KINDS.includes(kind)) return null
   if (typeof title !== 'string' || typeof body !== 'string') return null
   if (title.length > MAX_TEXT || body.length > MAX_TEXT) return null
@@ -135,12 +146,23 @@ export function parseAttention(value: unknown): Attention | null {
     if (!isId(agentId) || !isId(named)) return null
     attention.agentId = agentId
     attention.window = named
+    if (level === 'near') attention.limitLevel = 'warning'
+    else if (level === 'reached') attention.limitLevel = level
   } else {
     if (!isId(sessionId)) return null
     attention.sessionId = sessionId
+    if (isId(agentId)) attention.agentId = agentId
+    if (
+      typeof changedFiles === 'number' &&
+      Number.isInteger(changedFiles) &&
+      changedFiles > 0 &&
+      changedFiles <= 10_000
+    ) {
+      attention.changedFiles = changedFiles
+    }
   }
   if (kind === 'permission' && typeof request === 'object' && request !== null) {
-    const { id, allow, deny, question } = request as Record<string, unknown>
+    const { id, allow, deny, question, actionKind } = request as Record<string, unknown>
     if (isId(id)) {
       attention.requestId = id
       const allowed = parseAnswer(allow)
@@ -151,6 +173,9 @@ export function parseAttention(value: unknown): Attention | null {
       }
       const asked = allowed ? null : parseQuestion(question)
       if (asked) attention.question = asked
+      if (typeof actionKind === 'string' && ACTION_KINDS.has(actionKind)) {
+        attention.actionKind = actionKind as 'execute' | 'edit' | 'review' | 'question'
+      }
     }
   }
   if (typeof front === 'object' && front !== null) {

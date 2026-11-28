@@ -77,10 +77,11 @@ export function EditConfirm({
           ? (facts.files > 0 || facts.commands) && (
               <Fact icon={File01Icon}>{t('editFrom.filesBack')}</Fact>
             )
-          : facts.files > 0 &&
-            token === null && (
-              <Fact icon={File01Icon}>{t('editFrom.files', { count: facts.files })}</Fact>
-            )}
+          : facts.files > 0
+            ? token === null && (
+                <Fact icon={File01Icon}>{t('editFrom.files', { count: facts.files })}</Fact>
+              )
+            : facts.commands && <Fact icon={File01Icon}>{t('editFrom.filesStay')}</Fact>}
         <CacheFact sessionId={sessionId} kept={facts.kept} />
       </ul>
       <RewindFilesPart sessionId={sessionId} target={target} agent={agent} onToken={heard} />

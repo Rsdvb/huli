@@ -9,12 +9,15 @@ import {
   mcpNoticeRecovered,
   mcpNoticeSaid,
   outOfCreditTurn,
+  parseFromSession,
   prependEntries,
   retryableTurn,
   shareEntries,
   textStep,
+  stripToolOutputMeta,
   threadEntries,
   threadFromSnapshot,
+  TOOL_OUTPUT_LIMIT,
   UnknownEntryError,
   type ConfigOption,
   type Patch,
@@ -166,6 +169,78 @@ describe('applyPatches', () => {
       { op: 'entry.appendText', id: 'c:1', text: 'B' },
     ])
     expect(after.byId['c:1']).toMatchObject({ summary: 'AB' })
+  })
+
+  it('appends streaming tool output with newline preservation, nested fences, and 64 KiB window', () => {
+    const tool: ToolEntry = {
+      kind: 'tool',
+      id: 't:1',
+      title: 'Run',
+      toolKind: 'execute',
+      status: 'in_progress',
+      content: [],
+      locations: [],
+      permission: null,
+      permissionResult: null,
+    }
+    // 尾换行保真与嵌套反引号围栏升级
+    const streamed = applyPatches(state([tool]), [
+      { op: 'entry.appendOutput', id: 't:1', text: 'line1\n' },
+      { op: 'entry.appendOutput', id: 't:1', text: '```\nline2\n' },
+      { op: 'entry.appendOutput', id: 't:1', text: 'line3' },
+    ])
+    const entry = streamed.byId['t:1']
+    expect(entry?.kind === 'tool' && entry.content).toEqual([
+      { type: 'markdown', markdown: '````\nline1\n```\nline2\nline3\n````' },
+    ])
+
+    // 末尾带换行时标记 trailingNewline，再追加不会丢换行；stripToolOutputMeta 可干净剥离
+    const withNewline = applyPatches(state([tool]), [
+      { op: 'entry.appendOutput', id: 't:1', text: 'a\n' },
+    ])
+    const withNewlineTool = withNewline.byId['t:1'] as ToolEntry
+    expect(withNewlineTool.content).toEqual([
+      { type: 'markdown', markdown: '```\na\n```', trailingNewline: true },
+    ])
+    expect(stripToolOutputMeta(withNewlineTool.content)).toEqual([
+      { type: 'markdown', markdown: '```\na\n```' },
+    ])
+    const nextLine = applyPatches(withNewline, [
+      { op: 'entry.appendOutput', id: 't:1', text: 'b\n' },
+    ])
+    expect((nextLine.byId['t:1'] as ToolEntry).content).toEqual([
+      { type: 'markdown', markdown: '```\na\nb\n```', trailingNewline: true },
+    ])
+
+    // 超过 64 KiB 滑窗时分批追加与一次性追加完全等价
+    const chunkA = 'a'.repeat(50_000) + '\n'
+    const chunkB = 'b'.repeat(30_000) + '\n'
+    const chunkC = 'tail-line'
+    const stepped = applyPatches(state([tool]), [
+      { op: 'entry.appendOutput', id: 't:1', text: chunkA },
+      { op: 'entry.appendOutput', id: 't:1', text: chunkB },
+      { op: 'entry.appendOutput', id: 't:1', text: chunkC },
+    ])
+    const combined = applyPatches(state([tool]), [
+      { op: 'entry.appendOutput', id: 't:1', text: chunkA + chunkB + chunkC },
+    ])
+    expect(stepped.byId['t:1']).toEqual(combined.byId['t:1'])
+    const md = ((stepped.byId['t:1'] as ToolEntry).content[0] as { markdown: string }).markdown
+    expect(md.startsWith('```\n…\n')).toBe(true)
+    expect(md.endsWith('tail-line\n```')).toBe(true)
+
+    // partial 模式下跳过未知条目；非 partial 抛 UnknownEntryError；非 tool 条目抛 Error
+    expect(
+      applyPatches(state([agent]), [{ op: 'entry.appendOutput', id: 't:missing', text: 'x' }], {
+        partial: true,
+      }).byId,
+    ).toEqual(state([agent]).byId)
+    expect(() =>
+      applyPatches(state([agent]), [{ op: 'entry.appendOutput', id: 't:missing', text: 'x' }]),
+    ).toThrow(UnknownEntryError)
+    expect(() =>
+      applyPatches(state([agent]), [{ op: 'entry.appendOutput', id: 'm:1', text: 'x' }]),
+    ).toThrow('entry.appendOutput')
   })
 })
 
@@ -352,6 +427,43 @@ describe('coalescePatches', () => {
       { op: 'entry.appendText', id: 'm:2', text: 'c' },
       { op: 'entry.appendText', id: 'm:1', text: 'd' },
     ])
+  })
+
+  it('merges consecutive tool output appends and caps oversized merged deltas equivalently', () => {
+    expect(
+      coalescePatches([
+        { op: 'entry.appendOutput', id: 't:1', text: 'a\n' },
+        { op: 'entry.appendOutput', id: 't:1', text: 'b\n' },
+        { op: 'entry.appendOutput', id: 't:2', text: 'c' },
+      ]),
+    ).toEqual([
+      { op: 'entry.appendOutput', id: 't:1', text: 'a\nb\n' },
+      { op: 'entry.appendOutput', id: 't:2', text: 'c' },
+    ])
+
+    // 超大连续输出合并后长度被封顶，且应用结果与逐条应用完全一致
+    const tool: ToolEntry = {
+      kind: 'tool',
+      id: 't:1',
+      title: 'Run',
+      toolKind: 'execute',
+      status: 'in_progress',
+      content: [],
+      locations: [],
+      permission: null,
+      permissionResult: null,
+    }
+    const bigPatches: Patch[] = [
+      { op: 'entry.appendOutput', id: 't:1', text: 'x'.repeat(TOOL_OUTPUT_LIMIT) },
+      { op: 'entry.appendOutput', id: 't:1', text: 'y'.repeat(TOOL_OUTPUT_LIMIT) },
+      { op: 'entry.appendOutput', id: 't:1', text: 'z'.repeat(100) },
+    ]
+    const merged = coalescePatches(bigPatches)
+    expect(merged).toHaveLength(1)
+    expect(merged[0]?.op === 'entry.appendOutput' && merged[0].text.length).toBe(
+      TOOL_OUTPUT_LIMIT + 1,
+    )
+    expect(applyPatches(state([tool]), merged)).toEqual(applyPatches(state([tool]), bigPatches))
   })
 })
 
@@ -619,6 +731,23 @@ describe('isThreadEntry', () => {
       planLimit: true,
       after: 'm:1',
     },
+    {
+      kind: 'notice',
+      id: 'e:12',
+      severity: 'info',
+      title: 'Resumed after update restart',
+      cause: 'update_resumed',
+      after: 'm:1',
+    },
+    {
+      kind: 'notice',
+      id: 'e:13',
+      severity: 'warning',
+      title: 'Could not resume automatically after update',
+      description: 'Folder missing',
+      cause: 'update_resume_blocked',
+      after: 'm:1',
+    },
     { kind: 'compaction', id: 'c:1', status: 'completed', summary: '' },
     { kind: 'turn_end', id: 'e:4', stopReason: 'end_turn', durationMs: 5 },
     { kind: 'turn_end', id: 'e:8', stopReason: 'cancelled', durationMs: 5, after: 't:1' },
@@ -809,6 +938,51 @@ describe('isThreadEntry', () => {
       after: 'm:1',
     },
     {
+      kind: 'mcp_change',
+      id: 'e:21',
+      action: 'add',
+      server: {
+        serverId: 'manual:1',
+        name: 'notes',
+        title: 'notes',
+        type: 'stdio',
+        transport: null,
+        target: 'npx -y notes-mcp',
+        oauth: false,
+        values: [
+          { name: 'NOTES_TOKEN', state: 'unset' },
+          { name: 'NOTES_URL', state: 'reference', reference: '${NOTES_URL}' },
+        ],
+        agents: ['codex'],
+      },
+      items: [],
+      restore: null,
+      expiresAt: 1_700_000_000_000,
+      outcome: { kind: 'done', check: { state: 'connected', tools: 4 } },
+      after: null,
+    },
+    {
+      kind: 'mcp_change',
+      id: 'e:22',
+      action: 'switch',
+      server: null,
+      items: [
+        {
+          serverId: 'github',
+          title: 'GitHub',
+          target: { kind: 'agent', agentId: 'codex' },
+          from: true,
+          to: false,
+        },
+      ],
+      restore: [
+        { serverId: 'github', before: { agents: 'all' }, after: { agents: ['claude-code'] } },
+      ],
+      expiresAt: 1_700_000_000_000,
+      outcome: { kind: 'done', undone: true },
+      after: 'm:1',
+    },
+    {
       kind: 'settings_change',
       id: 'e:21',
       items: [
@@ -894,6 +1068,28 @@ describe('isThreadEntry', () => {
       after: 't:1',
     },
     {
+      kind: 'project_mcp',
+      id: 'e:29',
+      servers: [{ name: 'db', target: 'npx db-mcp' }],
+      items: [
+        { kind: 'plugin', target: '.opencode/plugin/run.ts' },
+        { kind: 'env', target: 'OPENAI_BASE_URL' },
+      ],
+      files: ['.mcp.json', 'opencode.json'],
+      decision: 'use',
+      after: null,
+    },
+    {
+      kind: 'project_mcp',
+      id: 'e:30',
+      servers: [],
+      items: [{ kind: 'hook', target: '.github/hooks/start.json' }],
+      files: ['.github/hooks/start.json'],
+      notice: true,
+      decision: null,
+      after: null,
+    },
+    {
       kind: 'project_hooks',
       id: 'e:27',
       hooks: [{ event: 'PreToolUse', target: './check.sh' }],
@@ -935,6 +1131,16 @@ describe('isThreadEntry', () => {
     expect(isThreadEntry({ ...delivery, written: { agentId: 1 } })).toBe(false)
     const artifact = valid.find((entry) => entry.kind === 'artifact')!
     expect(isThreadEntry({ ...artifact, action: 'read' })).toBe(false)
+    const mcpSwitch = valid.find(
+      (entry) => entry.kind === 'mcp_change' && entry.action === 'switch',
+    )!
+    expect(isThreadEntry({ ...mcpSwitch, action: 'remove' })).toBe(false)
+    expect(
+      isThreadEntry({
+        ...mcpSwitch,
+        restore: [{ serverId: 'github', before: { spec: {} }, after: {} }],
+      }),
+    ).toBe(false)
     const routine = valid.find((entry) => entry.kind === 'routine_change')!
     expect(isThreadEntry({ ...routine, action: 'pause' })).toBe(false)
     expect(isThreadEntry({ ...routine, outcome: { kind: 'done' } })).toBe(false)
@@ -963,6 +1169,9 @@ describe('isThreadEntry', () => {
     expect(isThreadEntry({ ...mcp, servers: [{ name: 'db' }] })).toBe(false)
     expect(isThreadEntry({ ...mcp, decision: 'allow' })).toBe(false)
     expect(isThreadEntry({ ...mcp, after: undefined })).toBe(false)
+    expect(isThreadEntry({ ...mcp, items: [{ kind: 'secret', target: 'x' }] })).toBe(false)
+    expect(isThreadEntry({ ...mcp, items: [{ kind: 'env' }] })).toBe(false)
+    expect(isThreadEntry({ ...mcp, files: ['.mcp.json', 3] })).toBe(false)
     const hooks = valid.find((entry) => entry.kind === 'project_hooks')!
     expect(isThreadEntry({ ...hooks, hooks: [{ target: './check.sh' }] })).toBe(false)
     expect(isThreadEntry({ ...hooks, decision: 'once' })).toBe(false)
@@ -1004,6 +1213,37 @@ describe('isThreadEntry', () => {
       isThreadEntry({ kind: 'turn_end', id: 'e', stopReason: 'end_turn', durationMs: 1, after: 1 }),
     ).toBe(false)
     expect(
+      isThreadEntry({
+        kind: 'turn_end',
+        id: 'e',
+        stopReason: 'end_turn',
+        durationMs: 1000,
+        usage: {
+          models: [
+            {
+              model: 'claude-sonnet-4-6',
+              input: 500,
+              output: 200,
+              cacheRead: 1000,
+              cacheWrite: 0,
+              costUsd: 0.005,
+            },
+          ],
+          costUsd: 0.005,
+          subscription: true,
+        },
+      }),
+    ).toBe(true)
+    expect(
+      isThreadEntry({
+        kind: 'turn_end',
+        id: 'e',
+        stopReason: 'end_turn',
+        durationMs: 1000,
+        usage: { models: [], costUsd: null },
+      }),
+    ).toBe(false)
+    expect(
       isThreadEntry({ kind: 'notice', id: 'n', severity: 'error', title: 'x', cause: 'other' }),
     ).toBe(false)
     expect(
@@ -1037,6 +1277,61 @@ describe('isThreadEntry', () => {
     expect(isThreadEntry({ ...mcpNotice, mcpState: 'connected' })).toBe(false)
     expect(isThreadEntry({ ...mcpNotice, mcpRecovered: 'linear' })).toBe(false)
     expect(isThreadEntry({ ...mcpNotice, dismissed: false })).toBe(false)
+    expect(
+      isThreadEntry({
+        kind: 'notice',
+        id: 'n',
+        severity: 'warning',
+        title: 'Codex configuration warning',
+        description: '`[features].multi_agent` is deprecated.',
+        configWarning: {
+          agent: 'codex',
+          impact: 'deprecated',
+          sources: [{ layer: 'user', path: '/Users/dev/.codex/config.toml', line: 4, column: 1 }],
+          details: 'Use [agents] instead.',
+          docsUrl: 'https://developers.openai.com/codex/config-reference',
+        },
+      }),
+    ).toBe(true)
+    expect(
+      isThreadEntry({
+        kind: 'notice',
+        id: 'n',
+        severity: 'warning',
+        title: 'Codex configuration warning',
+        configWarning: { agent: 'other' },
+      }),
+    ).toBe(false)
+    expect(
+      isThreadEntry({
+        kind: 'notice',
+        id: 'n',
+        severity: 'warning',
+        title: 'Codex configuration warning',
+        configWarning: { agent: 'codex', impact: 'unknown' },
+      }),
+    ).toBe(false)
+    expect(
+      isThreadEntry({
+        kind: 'notice',
+        id: 'n',
+        severity: 'warning',
+        title: 'Codex configuration warning',
+        configWarning: {
+          agent: 'codex',
+          sources: [{ path: '/Users/dev/.codex/config.toml', line: 0 }],
+        },
+      }),
+    ).toBe(false)
+    expect(
+      isThreadEntry({
+        kind: 'notice',
+        id: 'n',
+        severity: 'warning',
+        title: 'x',
+        description: 123,
+      }),
+    ).toBe(false)
   })
 })
 
@@ -1093,6 +1388,33 @@ describe("Huli: an MCP server's notices", () => {
     const reopened = state(stored as ThreadEntry[])
     expect(mcpNoticeSaid(reopened, 'github', 'failed')).toBe(false)
     expect(mcpNoticeSaid(reopened, 'linear', 'failed')).toBe(true)
+  })
+})
+
+describe('Huli: parseFromSession', () => {
+  it("keeps a report of several turns, a manager's digest and the handoff mark", () => {
+    const ended = { agent: 'Codex', stopReason: 'end_turn', round: 2 }
+    const turn = (sessionId: string) => ({ sessionId, title: sessionId, ...ended })
+    const from = parseFromSession({
+      sessionId: 'a',
+      title: 'A',
+      ended,
+      reports: [turn('a'), { sessionId: 'x' }, turn('b')],
+      digest: [{ sessionId: 'w', name: 'W', status: 'approved', line: 'ok' }, { line: 1 }],
+      handoff: true,
+    })
+    expect(from).toEqual({
+      sessionId: 'a',
+      title: 'A',
+      ended,
+      reports: [turn('a'), turn('b')],
+      digest: [{ sessionId: 'w', name: 'W', status: 'approved', line: 'ok' }],
+      handoff: true,
+    })
+    expect(parseFromSession({ sessionId: 'a', title: 'A', reports: [turn('a')] })).toEqual({
+      sessionId: 'a',
+      title: 'A',
+    })
   })
 })
 

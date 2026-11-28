@@ -2,9 +2,11 @@
 // It never imports ACP types; only the mapper in src/agent-host/acp/ does.
 
 import { isAgentId, type AgentId } from './agents'
-import type { DigestItem } from './manager'
+import { DIGEST_ITEMS_MAX, isDigestItem, type DigestItem } from './manager'
 import type { LastRequest } from './model-requests'
 import type { PermissionRisk } from './risk'
+import type { PromptCacheDrop } from './prompt-cache'
+import { isTurnUsage, type TurnModelUsage, type TurnUsage } from './turn-usage'
 import type { BrowserOriginAnswer } from './browser'
 import {
   isControlOutcome,
@@ -50,6 +52,12 @@ import type { CatalogSection, SettingScalar } from './settings-catalog'
 import type { AgentThemeInstalled } from './theme-palette'
 import type { ReviewRun } from './review'
 import type { LimitPause, Stall } from './supervisor'
+import {
+  isMcpRestore,
+  isMcpSwitchTarget,
+  type McpRestore,
+  type McpSwitchTarget,
+} from './mcp-switch'
 import type { TaskDeliverable, Workflow } from './workflow'
 
 export {
@@ -65,6 +73,7 @@ export {
   type AgentId,
   type HarnessId,
 } from './agents'
+export type { TurnModelUsage, TurnUsage }
 
 export type SessionStatus =
   | 'starting' // agent starting, or session/new, load or resume in flight
@@ -104,6 +113,11 @@ export interface SessionView {
   routine: RoutineRef | null // set when origin is 'routine'
   queue: QueuedPrompt[] // prompts waiting for the running turn to end, oldest first
   queuePaused: boolean // after Stop, a failed turn or a restart, until the user resumes it
+  /**
+   * Ephemeral: the library's MCP servers added or changed since the agent attached, by name, which
+   * reach the session once it attaches again; absent or empty when none.
+   */
+  mcpChanged?: string[]
   /** Ephemeral: set while the session holds the computer, with the app it last used. */
   computer?: ComputerUseView | null
   /**
@@ -116,10 +130,20 @@ export interface SessionView {
    * can move to the background so the turn goes on. Absent for an agent that reports none.
    */
   foreground?: ForegroundTaskView[]
+  /**
+   * Ephemeral: the agent finished its reply and is idle waiting for background work (sub-agents,
+   * background commands, or scheduled timers) while its prompt stays open.
+   */
+  waitingBackground?: boolean
   /** Ephemeral: how fast the model writes, for an agent whose stream times its requests. */
   speed?: OutputSpeed
   /** Ephemeral: the main thread's latest request, for an agent whose stream counts its tokens. */
   lastRequest?: LastRequest
+  /**
+   * Ephemeral: measured prompt cache hit drop after the latest completed turn, compared against
+   * the prior comparable baseline; null once the next turn starts or when no drop occurred.
+   */
+  cacheDrop?: PromptCacheDrop | null
   /** Questions asked beside the session, never part of its conversation. Absent for subagents. */
   sideChat?: SideChatView
   /**
@@ -152,6 +176,11 @@ export interface SessionView {
    * counts them from the thread (`shared/traffic.ts`); absent from older hosts.
    */
   images?: ContextImages | null
+  /**
+   * Ephemeral: live extension status entries and text widgets for this session (such as Pi
+   * `setStatus` and `setWidget`). Absent or null when none are active.
+   */
+  extensionUi?: ExtensionUiView | null
 }
 
 /**
@@ -166,6 +195,28 @@ export interface ContextImages {
   /** Summed over the requests counted: the images each one carried, and their bytes. */
   sent: number
   sentBytes: number
+}
+
+/** Placement of an agent extension text widget relative to the session composer. */
+export type ExtensionWidgetPlacement = 'aboveEditor' | 'belowEditor'
+
+/** A live status entry published by a native agent extension (for example Pi `setStatus`). */
+export interface ExtensionStatusView {
+  key: string
+  text: string
+}
+
+/** A live text widget published by a native agent extension (for example Pi `setWidget`). */
+export interface ExtensionWidgetView {
+  key: string
+  lines: string[]
+  placement: ExtensionWidgetPlacement
+}
+
+/** Ephemeral per-session UI state published by native agent extensions. */
+export interface ExtensionUiView {
+  statuses: ExtensionStatusView[]
+  widgets: ExtensionWidgetView[]
 }
 
 export interface RewoundView {
@@ -236,6 +287,24 @@ export interface SideChatSaw {
   fellBackFrom: 'claude' | 'codex' | 'fork' | null
 }
 
+/** Optional schedule or monitor metadata for timers, recurring crons, and timeout-watched commands. */
+export interface BackgroundTaskSchedule {
+  /** One-shot countdown timer, recurring cron job, or timeout-monitored command. */
+  mode: 'timer' | 'cron' | 'timeout'
+  /** When a one-shot timer or next timeout check is due, in ms since epoch. */
+  fireAt?: number
+  /** Configured duration or notification timeout in seconds. */
+  durationSeconds?: number
+  /** Standard 5-field cron expression for recurring jobs. */
+  cron?: string
+  /** Early-cancel condition for one-shot timers (`never`, `any`, or sender id). */
+  condition?: string
+  /** Whether the task is a daemon that outlives its turn. */
+  daemon?: boolean
+  /** Maximum number of triggers for a bounded recurring job. */
+  maxIterations?: number
+}
+
 /** A command or monitor an agent runs beside its turn, as the session board lists it. */
 export interface BackgroundTaskView {
   id: string
@@ -260,6 +329,8 @@ export interface BackgroundTaskView {
    * while it does. Kettu can neither stop it nor read its output before the call ends.
    */
   entryId?: string
+  /** Optional timer, cron, or timeout-watch metadata. */
+  schedule?: BackgroundTaskSchedule
   /** Huli: a workflow's phases and the agents it runs, as far as its run reported them. */
   workflow?: WorkflowView
 }
@@ -397,6 +468,20 @@ export function isQueuedComments(value: unknown): value is QueuedComments {
   )
 }
 
+/** Kettu's report of a turn a started child session ended for its starter. */
+export interface FromSessionEnded {
+  agent: string
+  stopReason: StopReason | null
+  /** 1-based round number in the child session when this turn ended. */
+  round?: number
+  /** Epoch ms when the child session's round finished. */
+  completedAt?: number
+  /** Target entry id in the child session for this round (its starting user entry). */
+  entryId?: string
+  /** Stored position of `entryId` in the child session, for paged loading on jump. */
+  pos?: number
+}
+
 /** The session that started or messaged another one through the session tools. */
 export interface FromSession {
   sessionId: string
@@ -404,10 +489,11 @@ export interface FromSession {
   /** The sender asked not to be told when the turn this message begins ends. */
   report?: false
   /**
-   * Set on Kettu's report of a turn the receiver asked this session for: the agent's name and how
-   * the turn ended, null for a failure. The thread draws it from these, not from the message text.
+   * Set on Kettu's report of a turn the receiver asked this session for: the agent's name, how
+   * the turn ended (null for a failure), and optional round metadata. The thread and composer
+   * queue draw the notification from these, not from the message text.
    */
-  ended?: { agent: string; stopReason: StopReason | null }
+  ended?: FromSessionEnded
   /**
    * Huli: set on a report of several sessions' turns, which ended while the receiver was busy and
    * wait as one: each of them, oldest first. The first is also the one the fields above name.
@@ -422,29 +508,29 @@ export interface FromSession {
   handoff?: true
 }
 
-/** Huli: a turn the receiver asked another session for, as Kettu's report of its end tells it. */
-export interface ReportedTurn {
+/**
+ * Huli: a turn the receiver asked another session for, as Kettu's report of its end tells it,
+ * with the round metadata of `FromSessionEnded` where the report had it.
+ */
+export interface ReportedTurn extends FromSessionEnded {
   sessionId: string
   title: string
-  agent: string
-  stopReason: StopReason | null
 }
 
 /** Huli: the most turns one report tells of, as many as reports go between the user's messages. */
 export const REPORTED_TURNS_MAX = 10
 
-const STOP_REASONS: readonly (StopReason | null)[] = [
+const STOP_REASONS: ReadonlySet<unknown> = new Set<StopReason>([
   'end_turn',
   'max_tokens',
   'max_turn_requests',
   'refusal',
   'cancelled',
-  null,
-]
+])
 
-/** Huli: whether a value is a turn's stop reason, null not counted. */
+/** Whether a value is a turn's stop reason, null not counted. */
 export function isStopReason(value: unknown): value is StopReason {
-  return value !== null && STOP_REASONS.includes(value as StopReason | null)
+  return STOP_REASONS.has(value)
 }
 
 export function isReportedTurn(value: unknown): value is ReportedTurn {
@@ -454,7 +540,7 @@ export function isReportedTurn(value: unknown): value is ReportedTurn {
     typeof sessionId === 'string' &&
     typeof title === 'string' &&
     typeof agent === 'string' &&
-    STOP_REASONS.includes(stopReason as StopReason | null)
+    (stopReason === null || isStopReason(stopReason))
   )
 }
 
@@ -463,6 +549,72 @@ export function reportedTurns(from: FromSession | undefined): ReportedTurn[] {
   if (!from?.ended) return []
   if (from.reports && from.reports.length > 0) return from.reports
   return [{ sessionId: from.sessionId, title: from.title, ...from.ended }]
+}
+
+/** Parses and sanitizes report ending metadata, keeping legacy reports without round fields. */
+export function parseFromSessionEnded(value: unknown): FromSessionEnded | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const raw = value as Record<string, unknown>
+  if (typeof raw.agent !== 'string') return undefined
+  if (raw.stopReason !== null && !isStopReason(raw.stopReason)) return undefined
+  const round =
+    typeof raw.round === 'number' && Number.isSafeInteger(raw.round) && raw.round >= 1
+      ? raw.round
+      : undefined
+  const completedAt =
+    typeof raw.completedAt === 'number' && Number.isFinite(raw.completedAt) && raw.completedAt > 0
+      ? raw.completedAt
+      : undefined
+  const entryId = typeof raw.entryId === 'string' && raw.entryId !== '' ? raw.entryId : undefined
+  const pos =
+    typeof raw.pos === 'number' && Number.isSafeInteger(raw.pos) && raw.pos >= 0
+      ? raw.pos
+      : undefined
+  return {
+    agent: raw.agent,
+    stopReason: raw.stopReason,
+    ...(round !== undefined ? { round } : {}),
+    ...(completedAt !== undefined ? { completedAt } : {}),
+    ...(entryId !== undefined ? { entryId } : {}),
+    ...(pos !== undefined ? { pos } : {}),
+  }
+}
+
+/** Huli: one turn of a report of several, sanitized as `parseFromSessionEnded` does its end. */
+function parseReportedTurn(value: unknown): ReportedTurn | undefined {
+  if (!isReportedTurn(value)) return undefined
+  const ended = parseFromSessionEnded(value)
+  return ended ? { sessionId: value.sessionId, title: value.title, ...ended } : undefined
+}
+
+/**
+ * Parses a `FromSession` origin from stored or wire data, dropping malformed optional fields.
+ * Huli: it keeps a report of several turns (more than one, the latest `REPORTED_TURNS_MAX`), a
+ * manager's digest and the handoff mark.
+ */
+export function parseFromSession(value: unknown): FromSession | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const raw = value as Record<string, unknown>
+  if (typeof raw.sessionId !== 'string' || typeof raw.title !== 'string') return undefined
+  const ended = parseFromSessionEnded(raw.ended)
+  const reports = Array.isArray(raw.reports)
+    ? raw.reports
+        .map(parseReportedTurn)
+        .filter((turn): turn is ReportedTurn => turn !== undefined)
+        .slice(-REPORTED_TURNS_MAX)
+    : []
+  const digest = Array.isArray(raw.digest)
+    ? raw.digest.filter(isDigestItem).slice(0, DIGEST_ITEMS_MAX)
+    : []
+  return {
+    sessionId: raw.sessionId,
+    title: raw.title,
+    ...(raw.report === false ? { report: false as const } : {}),
+    ...(ended ? { ended } : {}),
+    ...(reports.length > 1 ? { reports } : {}),
+    ...(digest.length > 0 ? { digest } : {}),
+    ...(raw.handoff === true ? { handoff: true as const } : {}),
+  }
 }
 
 /** The paired device a message or answer came from, under the name the host lists it by. */
@@ -655,12 +807,25 @@ export function previewsCommand(command: string): boolean {
   return command.length > 60 || /&&|\|\||[;|\n]/.test(command)
 }
 
+/**
+ * Whether a slash entry is an exclusive leading command (like `/compact` or a `.md` command)
+ * or a stackable skill that can be combined multiple times in one message.
+ */
+export type SlashCommandKind = 'command' | 'skill'
+
 export interface SlashCommand {
   name: string
   description: string
   inputHint?: string
+  /** Defaults to `'command'` when omitted. */
+  kind?: SlashCommandKind
   /** Set on Kettu's own commands; an agent's carry none. */
   source?: CommandSource
+}
+
+/** Whether a slash entry is a stackable skill rather than an exclusive command. */
+export function isSkillCommand(command: Pick<SlashCommand, 'kind'>): boolean {
+  return command.kind === 'skill'
 }
 
 /**
@@ -762,11 +927,18 @@ export type ThreadEntry =
       severity: 'info' | 'warning' | 'error'
       title: string
       description?: string
-      // Each but reports_paused ends the turn: the agent exited mid-turn, its model provider is out
-      // of credit, or the turn of a message failed otherwise. reports_paused: reports from the
-      // sessions it started stopped waking this one. Huli: `sign_in`, the agent asks to sign in
-      // first, which the session's own card offers while the notice stays.
-      cause?: 'agent_stopped' | 'out_of_credit' | 'turn_failed' | 'reports_paused' | 'sign_in'
+      // agent_stopped, out_of_credit and turn_failed end the turn; reports_paused pauses started
+      // session reports; update_resumed and update_resume_blocked record post-update recovery.
+      // Huli: `sign_in`, the agent asks to sign in first, which the session's own card offers
+      // while the notice stays.
+      cause?:
+        | 'agent_stopped'
+        | 'out_of_credit'
+        | 'turn_failed'
+        | 'reports_paused'
+        | 'update_resumed'
+        | 'update_resume_blocked'
+        | 'sign_in'
       model?: string // out_of_credit: the session's model when the turn failed
       provider?: string // Huli: out_of_credit: the model provider that refused, when it is named
       // turn_failed: the agent's plan refused the turn because a usage window ran out.
@@ -782,6 +954,9 @@ export type ThreadEntry =
       // The agent's entry before it, to put it back after a replay: set on the notices Kettu
       // adds itself, never on an agent's, which its replay sends again.
       after?: string | null
+      // Structured metadata for an agent configuration warning; optional so older clients still
+      // render `title` and `description` cleanly.
+      configWarning?: ConfigWarningDetail
     }
   | {
       kind: 'compaction'
@@ -798,6 +973,7 @@ export type ThreadEntry =
       /** Huli: for a turn its model refused, why, as the agent reported it. */
       refusal?: TurnRefusal
       used?: number // the context in tokens as the turn ended, which an edit after it goes back to
+      usage?: TurnUsage // per-model token and cost breakdown for this turn
     }
   | TakeoverEntry // Kettu's own record of another agent taking the session over
   | GitEntry // Kettu's own observation of the repository, see the git design
@@ -816,6 +992,7 @@ export type ThreadEntry =
   | MarketPublishEntry // Kettu's own record of a publish to the Kettu Marketplace, and its outcome
   | SettingsChangeEntry // Kettu's own record of an agent's change to Kettu's settings, and its answer
   | RoutineChangeEntry // Kettu's own record of an agent's change to a Routine, and its answer
+  | McpChangeEntry // Kettu's own record of an agent adding or switching an MCP server, and its answer
   | TaskDeliveryEntry // Kettu's own record of a task this session started ending, and what it delivered
   | SecretRequestEntry // Kite's own record of an agent asking for secrets, never their values
   | ThemeChangeEntry // Kite's own record of an agent's change to the theme colors, and its undo
@@ -828,6 +1005,40 @@ export interface TurnRefusal {
   explanation: string | null
   category: string | null
   model: string | null
+}
+
+/** Source location of a configuration warning reported by an agent (e.g. Codex `config.toml`). */
+export interface ConfigWarningSource {
+  /** Configuration layer when reported (e.g. `user`, `project`, `system`, `profile`). */
+  layer?: string
+  /** Path to the configuration file that triggered the warning. */
+  path: string
+  /** 1-based start line, when the agent reported a range. */
+  line?: number
+  /** 1-based start column, when the agent reported a range. */
+  column?: number
+}
+
+/**
+ * Structured metadata for a configuration warning notice. Optional on `notice` entries so older
+ * desktop, web, and mobile clients still render `title` and `description` cleanly.
+ */
+export interface ConfigWarningDetail {
+  /** Agent harness that emitted the configuration warning. */
+  agent: 'codex'
+  /**
+   * High-level session impact inferred from the warning structure:
+   * - `deprecated`: deprecated setting that still takes effect
+   * - `ignored`: unrecognized or removed setting ignored by the agent
+   * - `invalid`: invalid configuration that fell back to defaults
+   */
+  impact?: 'deprecated' | 'ignored' | 'invalid'
+  /** Concrete config file locations reported by the protocol or structured warning lines. */
+  sources?: ConfigWarningSource[]
+  /** Optional details reported separately from the warning summary. */
+  details?: string
+  /** Official configuration documentation link for resolving the warning. */
+  docsUrl?: string
 }
 
 /** What one plugin attached to a message before it was sent. */
@@ -1076,14 +1287,32 @@ export interface DeclaredMcpServer {
 }
 
 /**
- * The folder's own MCP config declares servers the user has not answered for, which the agent does
- * not start until they do. `decision` is null while it waits, then the answer, `timeout` when none
- * came.
+ * Something other than an MCP server that a folder's own settings make an agent's harness run or
+ * change: a hook, plugin or command by what it runs, an environment variable by its name alone,
+ * never its value, a provider by its address, or another setting by its key.
+ */
+export interface DeclaredItem {
+  kind: 'hook' | 'plugin' | 'command' | 'env' | 'provider' | 'setting'
+  target: string
+}
+
+/**
+ * The folder's own config declares servers, or settings of the session's harness, the user has not
+ * answered for, which do not start or apply until they do. `items` and `files` (the folder's files
+ * they come from, relative to it) are set on a card that asks for a folder's settings as a whole;
+ * one without them asks for MCP servers alone. `decision` is null while it waits, then the answer,
+ * `timeout` when none came.
  */
 export interface ProjectMcpEntry {
   kind: 'project_mcp'
   id: string
   servers: DeclaredMcpServer[]
+  items?: DeclaredItem[]
+  files?: string[]
+  /** The servers the session's harness runs itself once allowed, which Kettu does not run. */
+  selfRun?: string[]
+  /** Only names what the harness runs anyway, with nothing to answer. */
+  notice?: true
   decision: ProjectMcpAnswer | null
   /** Set when a paired device gave the answer; the host's own windows give none. */
   device?: FromDevice
@@ -1442,6 +1671,81 @@ export interface RoutineChangeEntry {
   after: string | null
 }
 
+/**
+ * An environment variable or header of a server an agent adds, by its name: a reference to the
+ * environment such as `${GITHUB_TOKEN}`, one the user fills in on the server's page, or a fixed
+ * value the catalog set, which is never shown.
+ */
+export type McpAddValue =
+  | { name: string; state: 'reference'; reference: string }
+  | { name: string; state: 'unset' | 'fixed' }
+
+/** A server an agent adds, as its card shows it; it holds no key's value. */
+export interface McpAddServer {
+  /** The id it gets in the library. */
+  serverId: string
+  name: string
+  title: string
+  type: 'stdio' | 'http'
+  /** A remote server's transport; null for a command. */
+  transport: 'streamable-http' | 'sse' | null
+  /** The program and its arguments, or the remote server's address, with what reads as a key masked. */
+  target: string
+  /** A remote server Kettu signs in to with OAuth; null when the address could not be asked. */
+  oauth: boolean | null
+  values: McpAddValue[]
+  agents: 'all' | AgentId[]
+}
+
+/** One switch an agent asks to turn, with the server's title as the card shows it. */
+export interface McpSwitchItem {
+  serverId: string
+  title: string
+  target: McpSwitchTarget
+  from: boolean
+  to: boolean
+}
+
+/** What the check after an added server found, as the line under it says. */
+export type McpCheckSummary =
+  | { state: 'connected'; tools: number }
+  | { state: 'needs-sign-in' | 'project-only' }
+  | { state: 'error'; reason: string }
+
+/**
+ * What became of an MCP card: done (a switch later undone, or changed again since, which takes its
+ * Undo away; an added server with what its check found once it ends), not done because the user
+ * declined, nobody answered in time or the turn ended first, or refused when it was applied.
+ */
+export type McpChangeOutcome =
+  | { kind: 'done'; check?: McpCheckSummary; undone?: true; stale?: true }
+  | { kind: 'declined' | 'expired' | 'ended' }
+  | { kind: 'failed'; message: string }
+
+/**
+ * An agent's addition of a server to Kettu's MCP library, or its switches of library servers: a
+ * card while it waits for the user (`outcome` null), then the line it leaves. Every one asks, in
+ * Full access too.
+ */
+export interface McpChangeEntry {
+  kind: 'mcp_change'
+  id: string
+  action: 'add' | 'switch'
+  /** For an addition, the server; else null. */
+  server: McpAddServer | null
+  /** For switches, each switch, made all together or not at all; else empty. */
+  items: McpSwitchItem[]
+  /** What the switches did, set once they are made, for Undo; else null. */
+  restore: McpRestore[] | null
+  /** When an unanswered card counts as declined, in the host's milliseconds. */
+  expiresAt: number
+  outcome: McpChangeOutcome | null
+  /** Set when a paired device gave the answer; the host's own windows give none. */
+  device?: FromDevice
+  /** The agent's entry before it, to put it back after a replay. */
+  after: string | null
+}
+
 /** What a publish or an unlisting asks the user, whether in a session's card or a dialog. */
 export type MarketPublishAsk = Omit<
   MarketPublishEntry,
@@ -1544,6 +1848,8 @@ export interface ToolEntry {
   review?: ToolReview
   /** Huli: the latest progress a running call reported, such as an MCP tool's; kept once it ends. */
   progress?: string
+  /** True once the file changes produced by this tool call have been undone via turn undo. */
+  undone?: boolean
 }
 
 /** Huli: what an agent's automatic review made of a call: its verdict, the risk it saw, and why. */
@@ -1593,7 +1899,15 @@ export interface ToolDenial {
 }
 
 export type ToolContent =
-  | { type: 'markdown'; markdown: string }
+  | {
+      type: 'markdown'
+      markdown: string
+      /**
+       * 流式命令输出增量拼接时记录原文本末尾是否带 `\n`（围栏代码块会剥离末尾单个换行），
+       * 避免多段 `entry.appendOutput` 拼接丢失换行；终态覆盖或向旧设备降级时会清除。
+       */
+      trailingNewline?: boolean
+    }
   | { type: 'diff'; path: string; oldText: string | null; newText: string }
   | { type: 'ref'; ref: ContentRef }
 
@@ -1762,6 +2076,7 @@ export type EntryChanges = Partial<DistributiveOmit<ThreadEntry, 'kind' | 'id'>>
 export type Patch =
   | { op: 'entry.add'; entry: ThreadEntry }
   | { op: 'entry.appendText'; id: string; text: string } // agent and thought markdown, compaction summary
+  | { op: 'entry.appendOutput'; id: string; text: string } // 流式命令输出的增量片段
   | { op: 'entry.update'; id: string; changes: EntryChanges }
   | { op: 'session.update'; changes: Partial<SessionView> }
   | { op: 'thread.reset' } // before a session/load replay
@@ -2174,6 +2489,16 @@ export function applyPatches(
         writableById()[patch.id] = next
         break
       }
+      case 'entry.appendOutput': {
+        const entry = byId[patch.id]
+        if (!entry) {
+          if (partial) break
+          throw new UnknownEntryError(patch.id)
+        }
+        const next = appendToolOutput(entry, patch.text)
+        if (next !== entry) writableById()[patch.id] = next
+        break
+      }
       case 'entry.update': {
         const entry = byId[patch.id]
         if (!entry) {
@@ -2249,6 +2574,12 @@ export function applyPatchInPlace(state: ThreadState, patch: Patch): ThreadState
       state.byId[patch.id] = appendText(entry, patch.text)
       return state
     }
+    case 'entry.appendOutput': {
+      const entry = state.byId[patch.id]
+      if (!entry) throw new UnknownEntryError(patch.id)
+      state.byId[patch.id] = appendToolOutput(entry, patch.text)
+      return state
+    }
     case 'entry.update': {
       const entry = state.byId[patch.id]
       if (!entry) throw new UnknownEntryError(patch.id)
@@ -2305,6 +2636,85 @@ export interface TextStep {
 export function textStep(entry: ThreadEntry): TextStep {
   const append = appends.get(entry)
   return { id: textIdOf(entry), after: append?.after ?? null, appended: append?.text ?? '' }
+}
+
+/** 流式命令输出在线程中保留的最大字符数，超出后仅保留末尾窗口并在开头加省略行。 */
+export const TOOL_OUTPUT_LIMIT = 64 * 1024
+
+/** 按 64 KiB 滑窗截断命令输出文本，超长时在开头加 `…\n`。 */
+export function cutToolOutput(text: string): string {
+  return text.length > TOOL_OUTPUT_LIMIT
+    ? `…\n${text.slice(text.length - TOOL_OUTPUT_LIMIT)}`
+    : text
+}
+
+/** 将命令输出包装成围栏代码块，围栏反引号数严格大于正文内最长的连续反引号。 */
+export function fenceToolOutput(text: string): string {
+  let longest = 2
+  for (const match of text.matchAll(/^\s*(`{3,})/gm)) longest = Math.max(longest, match[1]!.length)
+  const fence = '`'.repeat(longest + 1)
+  return `${fence}\n${text.replace(/\n$/, '')}\n${fence}`
+}
+
+/**
+ * 裁剪单条 `entry.appendOutput` 的增量文本：
+ * 若增量本身已超过 `TOOL_OUTPUT_LIMIT + 1`，仅保留末尾 `TOOL_OUTPUT_LIMIT + 1` 字符，
+ * 确保应用到任意已有输出后都会触发 64 KiB 截断并得到逐字节等价的末尾窗口。
+ */
+export function trimToolOutputDelta(text: string): string {
+  const cap = TOOL_OUTPUT_LIMIT + 1
+  return text.length > cap ? text.slice(text.length - cap) : text
+}
+
+/** 清除工具输出块上的内部拼接元数据（`trailingNewline`），用于向旧设备降级输出标准内容。 */
+export function stripToolOutputMeta(content: readonly ToolContent[]): ToolContent[] {
+  let changed = false
+  const cleaned = content.map((item) => {
+    if (item.type === 'markdown' && item.trailingNewline !== undefined) {
+      changed = true
+      return { type: 'markdown' as const, markdown: item.markdown }
+    }
+    return item
+  })
+  return changed ? cleaned : [...content]
+}
+
+/** 从围栏代码块还原原始正文；若不是完整围栏结构则原样返回。 */
+function unwrapFencedOutput(markdown: string): string {
+  const open = /^(`{3,})\n/.exec(markdown)
+  if (!open) return markdown
+  const fence = open[1]!
+  const suffix = `\n${fence}`
+  if (!markdown.endsWith(suffix) || markdown.length < open[0].length + suffix.length) {
+    return markdown
+  }
+  return markdown.slice(open[0].length, markdown.length - suffix.length)
+}
+
+/** 将增量命令输出片段追加到工具条目的最后一个 markdown 围栏块，维护 64 KiB 尾窗。 */
+export function appendToolOutput(entry: ThreadEntry, text: string): ThreadEntry {
+  if (entry.kind !== 'tool') {
+    throw new Error(`entry.appendOutput does not apply to ${entry.kind} entries`)
+  }
+  if (text === '') return entry
+  const last = entry.content[entry.content.length - 1]
+  if (last?.type === 'markdown') {
+    const prev = unwrapFencedOutput(last.markdown) + (last.trailingNewline ? '\n' : '')
+    const next = cutToolOutput(prev + text)
+    const item: ToolContent = {
+      type: 'markdown',
+      markdown: fenceToolOutput(next),
+      ...(next.endsWith('\n') ? { trailingNewline: true } : {}),
+    }
+    return { ...entry, content: [...entry.content.slice(0, -1), item] }
+  }
+  const next = cutToolOutput(text)
+  const item: ToolContent = {
+    type: 'markdown',
+    markdown: fenceToolOutput(next),
+    ...(next.endsWith('\n') ? { trailingNewline: true } : {}),
+  }
+  return { ...entry, content: [...entry.content, item] }
 }
 
 function appendText(entry: ThreadEntry, text: string): ThreadEntry {
@@ -2423,7 +2833,10 @@ function isToolContent(value: unknown): value is ToolContent {
   if (!isRecord(value)) return false
   switch (value.type) {
     case 'markdown':
-      return typeof value.markdown === 'string'
+      return (
+        typeof value.markdown === 'string' &&
+        (value.trailingNewline === undefined || typeof value.trailingNewline === 'boolean')
+      )
     case 'diff':
       return (
         typeof value.path === 'string' &&
@@ -2471,6 +2884,32 @@ function isRecalledMemory(value: unknown): value is RecalledMemory {
   )
 }
 
+function isConfigWarningSource(value: unknown): value is ConfigWarningSource {
+  return (
+    isRecord(value) &&
+    typeof value.path === 'string' &&
+    (value.layer === undefined || typeof value.layer === 'string') &&
+    (value.line === undefined ||
+      (typeof value.line === 'number' && Number.isInteger(value.line) && value.line >= 1)) &&
+    (value.column === undefined ||
+      (typeof value.column === 'number' && Number.isInteger(value.column) && value.column >= 1))
+  )
+}
+
+function isConfigWarningDetail(value: unknown): value is ConfigWarningDetail {
+  return (
+    isRecord(value) &&
+    value.agent === 'codex' &&
+    (value.impact === undefined ||
+      value.impact === 'deprecated' ||
+      value.impact === 'ignored' ||
+      value.impact === 'invalid') &&
+    (value.sources === undefined || isListOf(value.sources, isConfigWarningSource)) &&
+    (value.details === undefined || typeof value.details === 'string') &&
+    (value.docsUrl === undefined || typeof value.docsUrl === 'string')
+  )
+}
+
 const isListOf = <T>(value: unknown, guard: (item: unknown) => item is T): value is T[] =>
   Array.isArray(value) && value.every(guard)
 
@@ -2507,6 +2946,7 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
         isListOf(value.content, isToolContent) &&
         isListOf(value.locations, isRecord) &&
         (value.description === undefined || typeof value.description === 'string') &&
+        (value.undone === undefined || typeof value.undone === 'boolean') &&
         (value.permission == null ||
           (isRecord(value.permission) && isListOf(value.permission.options, isRecord)))
       )
@@ -2528,11 +2968,14 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
       return (
         typeof value.severity === 'string' &&
         typeof value.title === 'string' &&
+        (value.description === undefined || typeof value.description === 'string') &&
         (value.cause === undefined ||
           value.cause === 'agent_stopped' ||
           value.cause === 'out_of_credit' ||
           value.cause === 'turn_failed' ||
-          value.cause === 'reports_paused') &&
+          value.cause === 'reports_paused' ||
+          value.cause === 'update_resumed' ||
+          value.cause === 'update_resume_blocked') &&
         (value.model === undefined || typeof value.model === 'string') &&
         (value.planLimit === undefined || value.planLimit === true) &&
         (value.mcpServers === undefined || isListOf(value.mcpServers, isString)) &&
@@ -2541,7 +2984,8 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
           value.mcpState === 'needs-auth') &&
         (value.mcpRecovered === undefined || isListOf(value.mcpRecovered, isString)) &&
         (value.dismissed === undefined || value.dismissed === true) &&
-        (value.after === undefined || value.after === null || typeof value.after === 'string')
+        (value.after === undefined || value.after === null || typeof value.after === 'string') &&
+        (value.configWarning === undefined || isConfigWarningDetail(value.configWarning))
       )
     case 'compaction':
       return typeof value.status === 'string' && typeof value.summary === 'string'
@@ -2550,7 +2994,8 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
         typeof value.stopReason === 'string' &&
         typeof value.durationMs === 'number' &&
         (value.after === undefined || value.after === null || typeof value.after === 'string') &&
-        (value.used === undefined || typeof value.used === 'number')
+        (value.used === undefined || typeof value.used === 'number') &&
+        (value.usage === undefined || isTurnUsage(value.usage))
       )
     case 'takeover':
       return (
@@ -2710,6 +3155,16 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
         (value.outcome === null || isRoutineChangeOutcome(value.outcome)) &&
         (value.after === null || typeof value.after === 'string')
       )
+    case 'mcp_change':
+      return (
+        (value.action === 'add' || value.action === 'switch') &&
+        (value.server === null || isMcpAddServer(value.server)) &&
+        isListOf(value.items, isMcpSwitchItem) &&
+        (value.restore === null || isListOf(value.restore, isMcpRestore)) &&
+        typeof value.expiresAt === 'number' &&
+        (value.outcome === null || isMcpChangeOutcome(value.outcome)) &&
+        (value.after === null || typeof value.after === 'string')
+      )
     case 'plugin_denial':
       return (
         typeof value.pluginId === 'string' &&
@@ -2745,6 +3200,12 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
           (item): item is DeclaredMcpServer =>
             isRecord(item) && typeof item.name === 'string' && typeof item.target === 'string',
         ) &&
+        (value.items === undefined || isListOf(value.items, isDeclaredItem)) &&
+        (value.files === undefined ||
+          isListOf(value.files, (item): item is string => typeof item === 'string')) &&
+        (value.selfRun === undefined ||
+          isListOf(value.selfRun, (item): item is string => typeof item === 'string')) &&
+        (value.notice === undefined || value.notice === true) &&
         (value.decision === null || isProjectAnswer(value.decision)) &&
         (value.after === null || typeof value.after === 'string')
       )
@@ -2762,6 +3223,18 @@ export function isThreadEntry(value: unknown): value is ThreadEntry {
       return false
   }
 }
+
+const DECLARED_KINDS: ReadonlySet<unknown> = new Set([
+  'hook',
+  'plugin',
+  'command',
+  'env',
+  'provider',
+  'setting',
+])
+
+const isDeclaredItem = (value: unknown): value is DeclaredItem =>
+  isRecord(value) && DECLARED_KINDS.has(value.kind) && typeof value.target === 'string'
 
 const isProjectAnswer = (value: unknown): value is ProjectMcpAnswer | ProjectHooksAnswer =>
   value === 'use' || value === 'all' || value === 'skip' || value === 'timeout'
@@ -2796,6 +3269,76 @@ function isSettingsChangeOutcome(value: unknown): value is SettingsChangeOutcome
   switch (value.kind) {
     case 'changed':
       return (
+        (value.undone === undefined || value.undone === true) &&
+        (value.stale === undefined || value.stale === true)
+      )
+    case 'declined':
+    case 'expired':
+    case 'ended':
+      return true
+    case 'failed':
+      return typeof value.message === 'string'
+    default:
+      return false
+  }
+}
+
+function isMcpAddValue(value: unknown): value is McpAddValue {
+  if (!isRecord(value) || typeof value.name !== 'string') return false
+  return value.state === 'reference'
+    ? typeof value.reference === 'string'
+    : value.state === 'unset' || value.state === 'fixed'
+}
+
+function isMcpAddServer(value: unknown): value is McpAddServer {
+  return (
+    isRecord(value) &&
+    typeof value.serverId === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.title === 'string' &&
+    (value.type === 'stdio' || value.type === 'http') &&
+    (value.transport === null ||
+      value.transport === 'streamable-http' ||
+      value.transport === 'sse') &&
+    typeof value.target === 'string' &&
+    (typeof value.oauth === 'boolean' || value.oauth === null) &&
+    isListOf(value.values, isMcpAddValue) &&
+    (value.agents === 'all' || (Array.isArray(value.agents) && value.agents.every(isAgentId)))
+  )
+}
+
+function isMcpSwitchItem(value: unknown): value is McpSwitchItem {
+  return (
+    isRecord(value) &&
+    typeof value.serverId === 'string' &&
+    typeof value.title === 'string' &&
+    isMcpSwitchTarget(value.target) &&
+    typeof value.from === 'boolean' &&
+    typeof value.to === 'boolean'
+  )
+}
+
+function isMcpCheckSummary(value: unknown): value is McpCheckSummary {
+  if (!isRecord(value)) return false
+  switch (value.state) {
+    case 'connected':
+      return typeof value.tools === 'number'
+    case 'needs-sign-in':
+    case 'project-only':
+      return true
+    case 'error':
+      return typeof value.reason === 'string'
+    default:
+      return false
+  }
+}
+
+function isMcpChangeOutcome(value: unknown): value is McpChangeOutcome {
+  if (!isRecord(value)) return false
+  switch (value.kind) {
+    case 'done':
+      return (
+        (value.check === undefined || isMcpCheckSummary(value.check)) &&
         (value.undone === undefined || value.undone === true) &&
         (value.stale === undefined || value.stale === true)
       )
@@ -2901,6 +3444,19 @@ export function coalescePatches(patches: readonly Patch[]): Patch[] {
             id: patch.id,
             text: last.text + patch.text,
           }
+        } else {
+          out.push(patch)
+        }
+        break
+      case 'entry.appendOutput':
+        open.delete(patch.id)
+        if (last?.op === 'entry.appendOutput' && last.id === patch.id) {
+          const combined = last.text + patch.text
+          // 合并后的增量超过两倍窗口时裁剪到末尾 `TOOL_OUTPUT_LIMIT + 1`，
+          // 既与逐条应用严格等价，又防止通道拥堵合批时内存无限增长。
+          const text =
+            combined.length > TOOL_OUTPUT_LIMIT * 2 ? trimToolOutputDelta(combined) : combined
+          out[out.length - 1] = { op: 'entry.appendOutput', id: patch.id, text }
         } else {
           out.push(patch)
         }

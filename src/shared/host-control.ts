@@ -1,3 +1,4 @@
+import type { McpInstallEntry } from './mcp-discovery'
 // Messages between main and the hosts: over `utilityProcess` messaging in the desktop app, or the
 // IPC of `child_process.fork` when a host runs under Node.js.
 
@@ -50,6 +51,7 @@ import type {
   TerminalSettings,
 } from './settings'
 import type { AgentId, HarnessId } from './thread'
+import type { UpdateResumeSession } from './update-resume'
 
 export type { ReportBuildResult }
 
@@ -84,7 +86,8 @@ export interface BusyCounts {
 
 /**
  * The program that runs a script as Node.js, for the shell probe and the agents that are scripts:
- * Electron's binary with ELECTRON_RUN_AS_NODE in the desktop app, Node.js itself under Node.js.
+ * Electron's binary (its LSUIElement Helper binary on macOS) with ELECTRON_RUN_AS_NODE in the
+ * desktop app, Node.js itself under Node.js.
  */
 export interface NodeRuntime {
   command: string
@@ -125,6 +128,10 @@ export type MainToHost =
       sessionRouterPath: string
       // The bundle of the process that runs Cline's SDK, which runs on `nodeRuntime`.
       clineHostPath: string
+      // The MCP bridge among the helpers, where the build has one; absent from older mains.
+      mcpBridgePath?: string | null
+      // The daemon's own `kettu`, which its entries in agents' files run; absent in the desktop app.
+      mcpCommandPath?: string | null
       settings: HostSettings
       // Under Node.js, the local socket the host takes its ports on; the desktop app hands them over.
       socketPath?: string
@@ -139,6 +146,8 @@ export type MainToHost =
       mihomoPath?: string
       // What the host's requests to Kettu's download service say they are: the app or the daemon.
       userAgent?: string
+      // The currently signed-in Kettu account id when Kettu's services are on; null when signed out.
+      accountId?: string | null
     }
   | { type: 'host:connect'; windowId: number } // the port travels in the transfer list
   // A paired device's session, which may do less than a window. In the desktop app the port
@@ -163,11 +172,17 @@ export type MainToHost =
       webhookSecrets?: Record<string, string>
       // The secrets the plugins declare, by plugin id then key; read by the plugin's own script only.
       pluginSecrets?: Record<string, Record<string, string>>
+      // The key that seals the backups of agents' MCP files, once host:mcp-backup-key made one.
+      backupKey?: string
     }
   // Huli: the chat bridges' credentials, bound accounts and the binding under way, whole, after
   // host:init at every start and whenever they change; only the agent host reads them.
   | { type: 'host:chat-bridge'; config: ChatBridgeConfig }
+  | { type: 'mcp-install-result'; callId: number; error: string | null }
+  | { type: 'mcp-backup-key-result'; callId: number; error: string | null }
   | { type: 'host:busy-request'; requestId: number }
+  // User sessions currently interrupted by an immediate update restart; answered by host:update-resume.
+  | { type: 'host:update-resume-request'; requestId: number }
   // A problem report's bundle, answered by host:report. The parent adds its own part; the host
   // reads the logs, its agents and sessions, and writes the zip under its data folder.
   | {
@@ -225,6 +240,11 @@ export type MainToHost =
   // The host's Kettu account while it is signed in with Kettu's services on, which lists the
   // Marketplace tools: right after host:init at every start, and whenever it changes.
   | { type: 'host:market-account'; account: MarketAccount | null }
+  // The active Kettu account id for account-scoped state (such as artifact ownership/isolation),
+  // null when signed out or when Kettu's services are off.
+  | { type: 'host:account'; accountId: string | null }
+  // Records Kettu account ownership for an unowned local artifact once published to Kettu.
+  | { type: 'host:artifact-claim-owner'; id: string; accountId: string }
   // The answer to a host:market-call.
   | { type: 'market-result'; callId: number; answer: MarketCallAnswer }
   // The answer to a host:trash-call: null once every path is in the trash, else why one is not.
@@ -304,6 +324,8 @@ export type ArtifactContentResult =
       files: ArtifactContentFile[]
       /** Made from a type: its viewer is served in place of the entry page. */
       type?: ArtifactTypeInfo | null
+      /** The Kettu account id owning this artifact, or null for an unowned local artifact. */
+      ownerAccountId?: string | null
     }
   | { kind: 'not_found' }
   | { kind: 'failed' }
@@ -322,6 +344,8 @@ export interface ArtifactBrief {
   updatedAt: number
   /** In Recently deleted. */
   deleted: boolean
+  /** The Kettu account id owning this artifact, or null for an unowned local artifact. */
+  ownerAccountId?: string | null
 }
 
 /** The host's answer to `host:artifact-list-request`. */
@@ -358,6 +382,8 @@ export interface AttentionRequest {
   allow?: AttentionAnswer
   deny?: AttentionAnswer
   question?: AttentionQuestion
+  /** The request's kind for the notification: a command, an edit, a review or a question. */
+  actionKind?: 'execute' | 'edit' | 'review' | 'question'
 }
 
 /** Who had the session in front when it happened: any window or device, and which devices. */
@@ -396,6 +422,9 @@ export type HostToMain =
   // Huli: a webhook routine's new secret for the key store to keep, or null to forget it; main
   // pushes host:market-keys again.
   | { type: 'host:webhook-secret'; routineId: string; secret: string | null }
+  | { type: 'host:mcp-install'; callId: number; entries: McpInstallEntry[] }
+  // Makes the key store's backup key if it has none; main pushes host:market-keys with it, then answers.
+  | { type: 'host:mcp-backup-key'; callId: number }
   | { type: 'host:ready' }
   // The harnesses whose user program the host's first start found, in the order to add them: the
   // settings' owner adds their default agents and records the first start as done.
@@ -422,6 +451,10 @@ export type HostToMain =
         | 'limit-resumed'
         | 'stalled'
         | 'note'
+      /** 触发通知的智能体标识，供移动端通知副标题展示。 */
+      agentId?: AgentId
+      /** 回合完成时改动的文件总数，供移动端通知副标题精炼呈现。 */
+      changedFiles?: number
       title: string
       body: string
       // A request the notification may allow once itself, without opening the session.
@@ -485,6 +518,7 @@ export type HostToMain =
   // Huli: whether the host is moving its stored data to a new format, which the backup waits out.
   | { type: 'host:migrating'; running: boolean }
   | { type: 'host:busy'; requestId: number; sessions: BusySession[] }
+  | { type: 'host:update-resume'; requestId: number; sessions: UpdateResumeSession[] }
   | { type: 'host:report'; requestId: number; result: ReportBuildResult }
   | { type: 'host:granted'; requestId: number }
   | { type: 'host:artifact-content'; requestId: number; result: ArtifactContentResult }
@@ -815,8 +849,8 @@ export type MainToRemoteHost =
       hostId: string
       sessionId: string
       forward: BrowserForward
-      // Huli: listens at the host's own port number when it is free here, as the user's forwards do.
-      samePort?: boolean
+      /** Local ports belonging to Kettu itself that the forward must never try to bind directly. */
+      reservedPorts?: number[]
     }
   // The session's page is gone: its forwards on that host close.
   | { type: 'remote-host:forward-close'; hostId: string; sessionId: string }
@@ -855,6 +889,9 @@ export type MainToRemoteHost =
       deviceId: string | null
       except?: string
     }
+  // Waits until every connected device's outbox has delivered prior admin events, then answers with
+  // remote-host:events-flushed under the same id.
+  | { type: 'remote-host:flush-events'; requestId: number }
   // What the agent host says needs the user, what waits and what was seen, for the devices'
   // notifications.
   | { type: 'remote-host:attention'; attention: Extract<HostToMain, { type: 'host:attention' }> }
@@ -981,6 +1018,7 @@ export type RemoteHostToMain =
       method: HostAdminMethod
       params: unknown
     }
+  | { type: 'remote-host:events-flushed'; requestId: number }
   | { type: 'remote-host:reset'; requestId: number }
   | { type: 'remote-host:stop-serving'; requestId: number }
   | { type: 'remote-host:stopped' }

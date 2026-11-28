@@ -1,4 +1,13 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { ArrowRight01Icon, Search01Icon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
@@ -34,13 +43,13 @@ import { EffortDial } from '@renderer/features/session/composer/effort-dial'
 import {
   dialStops,
   shownLevel,
-  splitName,
   type SelectOption,
 } from '@renderer/features/session/composer/levels'
 import {
   defaultUses,
   shownChoice,
   shownValue,
+  splitChoiceName,
 } from '@renderer/features/session/composer/model-list'
 import { ModelMark } from '@renderer/features/session/composer/model-mark'
 import { SwitchRows } from '@renderer/features/session/composer/switch-rows'
@@ -551,9 +560,9 @@ function AgentButtonLabel({
   }
   const model = config?.find((o) => o.category === 'model')
   const effort = config?.find((o) => o.category === 'thought_level')
-  const modelName = isSelect(model)
-    ? (shownChoice(model.choices, String(model.value))?.name ?? String(model.value))
-    : null
+  const modelChoice = isSelect(model) ? shownChoice(model.choices, String(model.value)) : undefined
+  const modelName = isSelect(model) ? (modelChoice?.name ?? String(model.value)) : null
+  const shownModelName = modelChoice ? splitChoiceName(modelChoice)[1] : modelName
   const levelName = isSelect(effort) ? shownLevel(effort, String(effort.value)) : null
   return (
     <>
@@ -562,9 +571,9 @@ function AgentButtonLabel({
       <span className="min-w-0 truncate text-foreground" title={agentName(agentId, hostId)}>
         {agentName(agentId, hostId)}
       </span>
-      {modelName && (
-        <span className="min-w-0 shrink-100 truncate text-secondary" title={modelName}>
-          {splitName(modelName)[1]}
+      {shownModelName && (
+        <span className="min-w-0 shrink-100 truncate text-secondary" title={modelName ?? undefined}>
+          {shownModelName}
         </span>
       )}
       {levelName && <span className="shrink-0 text-secondary">{levelName}</span>}
@@ -586,14 +595,14 @@ function ModelButtonLabel({
   const config = useStartConfig(agentId, values, hostId)
   const model = config?.find((o) => o.category === 'model')
   const effort = config?.find((o) => o.category === 'thought_level')
-  const modelName = isSelect(model)
-    ? (shownChoice(model.choices, String(model.value))?.name ?? String(model.value))
-    : null
+  const modelChoice = isSelect(model) ? shownChoice(model.choices, String(model.value)) : undefined
+  const modelName = isSelect(model) ? (modelChoice?.name ?? String(model.value)) : null
+  const shownModelName = modelChoice ? splitChoiceName(modelChoice)[1] : modelName
   const levelName = isSelect(effort) ? shownLevel(effort, String(effort.value)) : null
   return (
     <>
       <span className="min-w-0 truncate text-secondary" title={modelName ?? undefined}>
-        {modelName ? splitName(modelName)[1] : t('newSession.modelMenu.model')}
+        {shownModelName ?? t('newSession.modelMenu.model')}
       </span>
       {levelName && <span className="shrink-0">{levelName}</span>}
     </>
@@ -793,6 +802,8 @@ function Pane({
   const loading = !loaded || startingUp
   const model = config?.find((o) => o.category === 'model')
   const effort = config?.find((o) => o.category === 'thought_level')
+  const modelSelects =
+    config?.filter((o): o is SelectOption => o.category === 'model_config' && isSelect(o)) ?? []
   const switches = config?.filter((o) => o.type === 'boolean') ?? []
 
   const install = (
@@ -954,22 +965,63 @@ function Pane({
           {t('newSession.agentMenu.noMatch')}
         </p>
       )}
-      {!searching && config && (isSelect(effort) || switches.length > 0) && (
-        <div className="kettu-am-settings">
-          {isSelect(model) && <ComboboxSeparator />}
-          {isSelect(effort) && (
-            <PaneEffort effort={effort} onPick={(v) => onOption(status.id, effort.id, v)} />
-          )}
-          <SwitchRows
-            options={switches}
-            agent={status.harnessName}
-            valueOf={(o) => booleanConfigValue(o) === true}
-            onFlip={(o, on) => onOption(status.id, o.id, on)}
-            className="kettu-am-switches"
-          />
-        </div>
-      )}
+      {!searching &&
+        config &&
+        (isSelect(effort) || modelSelects.length > 0 || switches.length > 0) && (
+          <div className="kettu-am-settings">
+            {isSelect(model) && <ComboboxSeparator />}
+            {isSelect(effort) && (
+              <PaneEffort effort={effort} onPick={(v) => onOption(status.id, effort.id, v)} />
+            )}
+            {modelSelects.map((option) => (
+              <PaneSelect
+                key={option.id}
+                option={option}
+                onPick={(v) => onOption(status.id, option.id, v)}
+              />
+            ))}
+            <SwitchRows
+              options={switches}
+              agent={status.harnessName}
+              valueOf={(o) => booleanConfigValue(o) === true}
+              onFlip={(o, on) => onOption(status.id, o.id, on)}
+              className="kettu-am-switches"
+            />
+          </div>
+        )}
     </>
+  )
+}
+
+/** A model-config select (such as Codex Speed tiers) as a segmented row under the model list. */
+function PaneSelect({ option, onPick }: { option: SelectOption; onPick: (value: string) => void }) {
+  const labelId = useId()
+  const value = String(option.value)
+  const active = option.choices.find((c) => c.value === value)
+  return (
+    <div>
+      <div
+        id={labelId}
+        className="flex h-7 items-center px-2 text-xs font-medium text-muted-foreground"
+      >
+        {option.name}
+      </div>
+      <div className="px-2 pt-0.5 pb-1.5">
+        <SegmentedControl
+          aria-labelledby={labelId}
+          value={value}
+          segments={option.choices.map((c) => ({ value: c.value, label: c.name }))}
+          onChange={onPick}
+          className="w-full"
+          itemClassName="px-1.5"
+        />
+        {active?.description && (
+          <p className="mt-1 truncate px-0.5 text-[11px] text-muted-foreground">
+            {active.description}
+          </p>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -1012,7 +1064,7 @@ function PaneEffort({ effort, onPick }: { effort: SelectOption; onPick: (value: 
   )
 }
 
-function ModelGroup({
+export function ModelGroup({
   group,
   agent,
   searching,
@@ -1028,6 +1080,7 @@ function ModelGroup({
   const { t: tc } = useTranslation('composer')
   if (!agent) return null
   const lists = agentLists(agent)
+  const moreIndex = !searching && expanded ? group.items.findIndex(isMoreKey) : -1
   return (
     <ComboboxGroup items={group.items}>
       {searching ? (
@@ -1039,7 +1092,7 @@ function ModelGroup({
         agent.model && <ComboboxLabel>{agent.model.name}</ComboboxLabel>
       )}
       <ComboboxCollection>
-        {(key: string) => {
+        {(key: string, index: number) => {
           if (isMoreKey(key)) {
             return (
               <MoreRow key={key} value={key} count={lists?.more.length ?? 0} expanded={expanded} />
@@ -1058,17 +1111,40 @@ function ModelGroup({
           }
           const uses = read.isDefault ? defaultUses(read, lists.all) : null
           const tip = uses ? tc('controls.defaultUses', { model: uses }) : read.choice.description
-          return (
-            <Tooltip key={key}>
+          // Expanded More models group by provider when the agent lists several, matching ModelMenu.
+          const groupedMore = moreIndex >= 0 && index > moreIndex && lists.several
+          const prevKey = groupedMore && index > moreIndex + 1 ? group.items[index - 1] : undefined
+          const prevRead = prevKey
+            ? lists.all.find((r) => r.value === parseItemKey(prevKey).model)
+            : undefined
+          const showProviderHeading =
+            groupedMore && Boolean(read.provider) && read.provider !== prevRead?.provider
+          const [prefix, rest] = groupedMore ? ['', read.name] : splitChoiceName(read.choice)
+          const item = (
+            <Tooltip key={showProviderHeading ? undefined : key}>
               <TooltipTrigger render={<ComboboxItem value={key} className="items-center" />}>
                 <ModelMark read={read} agentId={agent.agentId} size={14} />
-                <ChoiceName name={read.choice.name} className="flex-1 font-normal" />
+                <ChoiceName name={rest} prefix={prefix} className="flex-1 font-normal" />
                 {read.value === lists.defaultValue && (
                   <span className="kettu-model-tag">{tc('controls.defaultTag')}</span>
                 )}
               </TooltipTrigger>
               {tip && <TooltipContent side="right">{tip}</TooltipContent>}
             </Tooltip>
+          )
+          if (!showProviderHeading) return item
+          return (
+            <Fragment key={key}>
+              <div
+                role="presentation"
+                data-provider-group={read.provider}
+                title={read.provider}
+                className="truncate px-2 pt-2 pb-0.5 text-[10px] leading-4 font-medium tracking-[0.5px] text-muted-foreground uppercase"
+              >
+                {read.provider}
+              </div>
+              {item}
+            </Fragment>
           )
         }}
       </ComboboxCollection>

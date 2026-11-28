@@ -8,8 +8,6 @@ import type { AgentId } from '@shared/thread'
 import { useEntry } from '@renderer/lib/features'
 import { newSession } from '@renderer/app/actions'
 import { retryHostState } from '@renderer/app/bootstrap'
-import { FolderClosedMark } from '@renderer/components/affect/app-shell'
-import { FolderMark } from '@renderer/components/affect/assistant-home'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -27,6 +25,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 import { HostSwitchBar } from '@renderer/features/account/host-switch'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { NO_PROJECT_ICON } from '@renderer/features/shell/no-project-icon'
+import { ProjectMark } from '@renderer/features/shell/project-icon'
 import { UpdateCardView } from '@renderer/features/updates/update-card'
 import { NoticeCard } from '@renderer/features/updates/update-notice'
 import { useUpdates } from '@renderer/features/updates/use-updates'
@@ -36,9 +35,14 @@ import { cn } from '@renderer/lib/utils'
 import { isAway, shownHosts, useOtherHost, useOtherHosts } from '@renderer/stores/hosts'
 import { useInsecureState } from '@renderer/stores/insecure-notice'
 import {
+  activeProjects,
+  findProjectForPath,
+  isProjectArchived,
+  isSessionInArchivedProject,
   noProjectKey,
   noProjectPinned,
   pinnedFolders,
+  projectFolders,
   useProjectsStore,
 } from '@renderer/stores/projects'
 import {
@@ -52,7 +56,8 @@ import {
   noProjectGroup,
   pinnedSummaries,
   pinnedTree,
-  projectSummaries,
+  projectGroupSummaries,
+  projectSessionTree,
   sessionTree,
   sidebarRows,
   sidebarTabStop,
@@ -76,9 +81,11 @@ import { SessionFolderDialogs } from '@renderer/features/session-folders/folder-
 import { FolderSection } from '@renderer/features/session-folders/folder-section'
 import { useUnfoldered } from '@renderer/features/session-folders/store'
 import { projectNameHints } from '@renderer/features/session/project-names'
-import { canOrder } from '@shared/session-order'
+import { ActivityView } from './activity-view'
 import { AddProjectButton } from './add-project'
 import { GroupOrderItems } from './group-order-menu'
+import { ArchiveProjectDialog } from './archive-project'
+import { EditProjectDialog } from './edit-project'
 import { HostEmpty, HostHeading, NeedsYouGroup } from './host-groups'
 import { useHostLabel } from './host-label'
 import { ImportSessionsDialog } from './import-sessions'
@@ -91,8 +98,9 @@ import { NoProjectMenuItems, ProjectMenuItems } from './project-menu'
 import { RemoveProjectDialog } from './remove-project'
 import { GroupRenameHints } from './rename-hints'
 import { RenameScope } from './rename-scope'
+import { collapsedFolderStatus, folderStatusText } from './folder-status'
 import { limitRows, rowInSight, ROWS_SHOWN } from './row-limit'
-import { RowEnd } from './session-indicator'
+import { RowEnd, SessionIndicator } from './session-indicator'
 import { SessionRow } from './session-row'
 import { sidePointer } from './side-pointer'
 import { SortableGroup, SortableList } from './sortable-list'
@@ -109,6 +117,7 @@ import { ParkedGroup } from './parked-group'
 export function SidebarList() {
   const { t } = useTranslation(['sidebar', 'common'])
   const projects = useProjectsStore((s) => s.projects)
+  const visibleProjects = useMemo(() => activeProjects(projects), [projects])
   const noProjects = useProjectsStore((s) => s.noProjects)
   const projectsLoaded = useProjectsStore((s) => s.loaded)
   const sessionsLoaded = useSessionsStore((s) => s.loaded)
@@ -119,6 +128,7 @@ export function SidebarList() {
   // list follows its Tab stop, and each group follows its own sessions.
   const tasks = useTasksStore((s) => s.summaries)
   const main = useViewStore((s) => s.main)
+  const sidebarView = useViewStore((s) => s.sidebarView)
   const collapsedProjects = useViewStore((s) => s.collapsedProjects)
   const expandedParents = useViewStore((s) => s.expandedParents)
   const others = useOtherHosts()
@@ -147,9 +157,18 @@ export function SidebarList() {
     ),
   )
   const stop = useMemo(() => tabStopOf(stopKey), [stopKey])
-  // One dialog serves every project; it mounts the first time a project asks for it.
+  // One dialog each serves every project; they mount the first time a project asks for them.
   const [importing, setImporting] = useState<{ project: Project; open: boolean } | null>(null)
+  const [editing, setEditing] = useState<{ path: string; open: boolean } | null>(null)
+  const [archiving, setArchiving] = useState<{ project: Project; open: boolean } | null>(null)
+  const [removing, setRemoving] = useState<{ project: Project; open: boolean } | null>(null)
   const importSessions = (project: Project) => setImporting({ project, open: true })
+  const editProject = (project: Project) => setEditing({ path: project.path, open: true })
+  const archiveProject = (project: Project) => setArchiving({ project, open: true })
+  const removeProject = (project: Project) => setRemoving({ project, open: true })
+  const editingProject = editing
+    ? (projects.find((item) => item.path === editing.path) ?? null)
+    : null
 
   return (
     <div ref={sidePointer} className="kettu-side-list" role="presentation" onKeyDown={moveRowFocus}>
@@ -183,15 +202,21 @@ export function SidebarList() {
               </div>
             ))}
           </div>
+        ) : sidebarView === 'activity' ? (
+          <ActivityView />
         ) : hosts ? (
           <>
             <NeedsYouGroup hosts={hosts} away={away} />
             <PinnedGroup
-              projects={projects}
+              projects={visibleProjects}
+              allProjects={projects}
               stop={stop}
               hosts={hosts}
               away={away}
+              onEdit={editProject}
               onImport={importSessions}
+              onArchive={archiveProject}
+              onRemove={removeProject}
             />
             <SortableList
               className="kettu-side-hosts"
@@ -204,9 +229,12 @@ export function SidebarList() {
                   hostId={hostId}
                   index={index}
                   movable={hosts.length > 1}
-                  projects={projects}
+                  projects={visibleProjects}
                   stop={stop}
+                  onEdit={editProject}
                   onImport={importSessions}
+                  onArchive={archiveProject}
+                  onRemove={removeProject}
                 />
               ))}
             </SortableList>
@@ -215,20 +243,42 @@ export function SidebarList() {
           </>
         ) : (
           <>
-            <PinnedGroup projects={projects} stop={stop} onImport={importSessions} />
+            <PinnedGroup
+              projects={visibleProjects}
+              allProjects={projects}
+              stop={stop}
+              onEdit={editProject}
+              onImport={importSessions}
+              onArchive={archiveProject}
+              onRemove={removeProject}
+            />
             <FolderSection hostId={null} at="above" stop={stop} />
             <div className="ui-as-side__group" role="group" aria-label={t('nav.projects')}>
               <div className="ui-as-side__label kettu-projects-label">
                 <span>{t('nav.projects')}</span>
                 <AddProjectButton />
               </div>
-              {projects.length === 0 && !scratch && (
+              {visibleProjects.length === 0 && !scratch && (
                 <span className="ui-as-side__empty">{t('nav.empty')}</span>
               )}
               {!noProjectPinned(noProjects, null) && (
-                <ProjectGroup project={null} stop={stop} onImport={importSessions} />
+                <ProjectGroup
+                  project={null}
+                  stop={stop}
+                  onEdit={editProject}
+                  onImport={importSessions}
+                  onArchive={archiveProject}
+                  onRemove={removeProject}
+                />
               )}
-              <ProjectList projects={projects} stop={stop} onImport={importSessions} />
+              <ProjectList
+                projects={visibleProjects}
+                stop={stop}
+                onEdit={editProject}
+                onImport={importSessions}
+                onArchive={archiveProject}
+                onRemove={removeProject}
+              />
             </div>
             <FolderSection hostId={null} at="below" stop={stop} />
             <ParkedGroup kind="snoozed" stop={stop} />
@@ -242,6 +292,28 @@ export function SidebarList() {
           project={importing.project}
           open={importing.open}
           onOpenChange={(open) => setImporting({ ...importing, open })}
+        />
+      )}
+      {editing && editingProject && (
+        <EditProjectDialog
+          project={editingProject}
+          open={editing.open}
+          onOpenChange={(open) => setEditing(open ? editing : { ...editing, open: false })}
+          onRequestRemove={removeProject}
+        />
+      )}
+      {archiving && (
+        <ArchiveProjectDialog
+          project={archiving.project}
+          open={archiving.open}
+          onOpenChange={(open) => setArchiving({ ...archiving, open })}
+        />
+      )}
+      {removing && (
+        <RemoveProjectDialog
+          project={removing.project}
+          open={removing.open}
+          onOpenChange={(open) => setRemoving({ ...removing, open })}
         />
       )}
     </div>
@@ -268,13 +340,19 @@ function moveHost(hosts: readonly (string | null)[], from: number, to: number): 
 function ProjectList({
   projects,
   stop,
+  onEdit,
   onImport,
+  onArchive,
+  onRemove,
   hostId = null,
   away = false,
 }: {
   projects: readonly Project[]
   stop: SidebarTabStop | null
+  onEdit: (project: Project) => void
   onImport: (project: Project) => void
+  onArchive: (project: Project) => void
+  onRemove: (project: Project) => void
   hostId?: string | null
   away?: boolean
 }) {
@@ -303,7 +381,10 @@ function ProjectList({
             <ProjectGroup
               project={project}
               stop={stop}
+              onEdit={onEdit}
               onImport={onImport}
+              onArchive={onArchive}
+              onRemove={onRemove}
               hostId={hostId}
               away={away}
               handleRef={handleRef}
@@ -322,14 +403,20 @@ function HostSection({
   movable,
   projects,
   stop,
+  onEdit,
   onImport,
+  onArchive,
+  onRemove,
 }: {
   hostId: string | null
   index: number
   movable: boolean
   projects: readonly Project[]
   stop: SidebarTabStop | null
+  onEdit: (project: Project) => void
   onImport: (project: Project) => void
+  onArchive: (project: Project) => void
+  onRemove: (project: Project) => void
 }) {
   const away = isAway(useOtherHost(hostId)?.connection ?? null)
   const own = projects.filter((project) => hostOfPath(project.path) === hostId)
@@ -366,7 +453,10 @@ function HostSection({
                 <ProjectGroup
                   project={null}
                   stop={stop}
+                  onEdit={onEdit}
                   onImport={onImport}
+                  onArchive={onArchive}
+                  onRemove={onRemove}
                   hostId={hostId}
                   away={away}
                 />
@@ -374,7 +464,10 @@ function HostSection({
               <ProjectList
                 projects={own}
                 stop={stop}
+                onEdit={onEdit}
                 onImport={onImport}
+                onArchive={onArchive}
+                onRemove={onRemove}
                 hostId={hostId}
                 away={away}
               />
@@ -395,7 +488,10 @@ function HostSection({
 function ProjectGroup({
   project,
   stop,
+  onEdit,
   onImport,
+  onArchive,
+  onRemove,
   hostId = null,
   away = false,
   showHost = false,
@@ -403,7 +499,10 @@ function ProjectGroup({
 }: {
   project: Project | null
   stop: SidebarTabStop | null
+  onEdit: (project: Project) => void
   onImport: (project: Project) => void
+  onArchive: (project: Project) => void
+  onRemove: (project: Project) => void
   hostId?: string | null
   away?: boolean
   showHost?: boolean
@@ -413,9 +512,12 @@ function ProjectGroup({
   const key = project?.path ?? noProjectGroup(hostId)
   const { t } = useTranslation('sidebar')
   const name = project?.name ?? t('project.noProject')
-  // What tells the project from another of the same name, as New session's project menu shows it.
-  const hint = useProjectsStore((s) =>
-    project ? projectNameHints(s.projects.map((p) => p.path)).get(project.path) : undefined,
+  const allProjects = useProjectsStore((s) => s.projects)
+  const visibleProjects = useMemo(() => activeProjects(allProjects), [allProjects])
+  // What tells the project from another of the same display name, as New session's project menu shows it.
+  const hint = useMemo(
+    () => (project ? projectNameHints(visibleProjects).get(project.path) : undefined),
+    [visibleProjects, project],
   )
   const hostName = useHostLabel(hostId)
   const open = useViewStore((s) => !s.collapsedProjects[key])
@@ -431,14 +533,13 @@ function ProjectGroup({
   )
   const [moreOpen, setMoreOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  // Null until Remove project is first asked for, so the dialog mounts only then.
-  const [removing, setRemoving] = useState<boolean | null>(null)
   const noProject = useProjectsStore((s) =>
     project ? undefined : s.noProjects[noProjectKey(hostId)],
   )
   const projectPath = project?.path ?? null
+  const folders = useMemo(() => (project ? projectFolders(project) : []), [project])
   const summaries = useSessionsStore(
-    useShallow((s) => projectSummaries(s.byId, projectPath, hostId)),
+    useShallow((s) => projectGroupSummaries(s.byId, project, hostId, allProjects)),
   )
   // Huli: a session in one of the user's folders shows there instead; the header takes it back.
   const listed = useUnfoldered(summaries, hostId)
@@ -452,14 +553,14 @@ function ProjectGroup({
     [ungroupTarget, handleRef],
   )
   const tree = useKeptNodes(
-    useMemo(
-      () => sessionTree(Object.fromEntries(listed.map((x) => [x.id, x])), projectPath, hostId),
-      [listed, projectPath, hostId],
-    ),
+    useMemo(() => {
+      const subset = Object.fromEntries(listed.map((x) => [x.id, x]))
+      return project
+        ? projectSessionTree(subset, project, allProjects)
+        : sessionTree(subset, null, hostId)
+    }, [listed, project, allProjects, hostId]),
   )
-  const tasks = useTasksStore(
-    useShallow((s) => (project ? listedTasks(s.summaries, project.path) : [])),
-  )
+  const tasks = useTasksStore(useShallow((s) => (project ? listedTasks(s.summaries, folders) : [])))
   const fold = useEntry('sidebar.runGroup')
   // Huli: the user's own order once a row was dragged (shared/session-order.ts), else activity.
   const order = project ? project.sessionOrder : noProject?.sessionOrder
@@ -485,13 +586,14 @@ function ProjectGroup({
       [key, project, hostId, projectPath, name, rowIds, order, away],
     ),
   )
+  const folderSummary = useMemo(
+    () => collapsedFolderStatus(tree, { collapsed: !open, away, tasks }),
+    [tree, open, away, tasks],
+  )
+  const folderLabel = folderSummary ? folderStatusText(t, folderSummary.counts) : undefined
   if (!project && tree.length === 0) return null
   const limited = limitRows(rows, allShown, (row) => rowInSight(row, shownId))
-  // Importing reads the agents' own lists, which only this computer's do.
   const local = hostId === null
-  // A host that cannot pin a group leaves its pin out; a project can always be removed.
-  const canPin = project ? project.pinnedAt !== undefined : noProject !== undefined
-  const hasMenu = local || !!project || canPin || canOrder(order)
 
   const toggle = () => toggleGroup(key)
   const groupStop = stop?.kind === 'group' && stop.key === key
@@ -517,7 +619,7 @@ function ProjectGroup({
         // A row being dragged from the keyboard moves with the arrows instead.
         if (event.defaultPrevented) return
         // The context menu key opens the More menu, the row's menu for the keyboard.
-        if (hasMenu && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) {
+        if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
           event.preventDefault()
           setMoreOpen(true)
         } else if (event.key === 'ArrowRight' && !open) toggle()
@@ -528,7 +630,11 @@ function ProjectGroup({
         (project?.missing || away) && 'text-(--faint)!',
       )}
     >
-      {!project ? <Glyph icon={NO_PROJECT_ICON} /> : open ? <FolderMark /> : <FolderClosedMark />}
+      {!project ? (
+        <Glyph icon={NO_PROJECT_ICON} />
+      ) : (
+        <ProjectMark icon={project.icon} open={open} />
+      )}
       <span className="ui-as-side__text">
         {name}
         {hint && <span className="ml-1.5 text-(--faint)">{hint}</span>}
@@ -546,15 +652,40 @@ function ProjectGroup({
             {hostName}
           </span>
         )}
+        {folderSummary && (
+          <SessionIndicator status={folderSummary.row} expiring={null} label={folderLabel} />
+        )}
       </RowEnd>
     </button>
   )
   const tooltip = project ? (
-    <TooltipContent side="right" className="max-w-sm font-mono break-all">
-      {hostPath(project.path)}
+    <TooltipContent side="right" className="max-w-sm">
+      <span className="flex flex-col gap-1">
+        <span className="font-mono break-all">
+          {folders.length > 1 ? (
+            <span className="flex flex-col gap-0.5">
+              {folders.map((folder) => (
+                <span key={folder}>{hostPath(folder)}</span>
+              ))}
+            </span>
+          ) : (
+            hostPath(project.path)
+          )}
+        </span>
+        {folderLabel && <span>{folderLabel}</span>}
+      </span>
     </TooltipContent>
   ) : (
-    <TooltipContent side="right">{t('project.noProjectTooltip')}</TooltipContent>
+    <TooltipContent side="right">
+      {folderLabel ? (
+        <span className="flex flex-col gap-1">
+          <span>{t('project.noProjectTooltip')}</span>
+          <span>{folderLabel}</span>
+        </span>
+      ) : (
+        t('project.noProjectTooltip')
+      )}
+    </TooltipContent>
   )
   const pin = async (pinned: boolean) => {
     try {
@@ -571,20 +702,22 @@ function ProjectGroup({
     }
   }
   const orderItems = <GroupOrderItems groupKey={key} order={order} disabled={away} />
-  const menuItems = !hasMenu ? null : project ? (
+  const menuItems = project ? (
     <ProjectMenuItems
       project={project}
       away={away}
+      onEdit={() => onEdit(project)}
       onPin={pin}
       onImport={() => onImport(project)}
-      onRemove={() => setRemoving(true)}
+      onArchive={() => onArchive(project)}
+      onRemove={() => onRemove(project)}
       orderItems={orderItems}
     />
   ) : (
     <NoProjectMenuItems
-      local={local}
+      hostId={hostId}
       pinned={noProject ? noProject.pinnedAt !== null : undefined}
-      pinDisabled={away}
+      away={away}
       onPin={pin}
       orderItems={orderItems}
     />
@@ -597,40 +730,31 @@ function ProjectGroup({
         data-menu={moreOpen || menuOpen || undefined}
         data-row-group-head={key}
       >
-        {hasMenu ? (
-          <ContextMenu onOpenChange={setMenuOpen}>
-            {/* A trigger's render must take its props, so the tooltip Root wraps the menu trigger. */}
-            <Tooltip>
-              <TooltipTrigger render={<ContextMenuTrigger render={row} />} delay={700} />
-              {tooltip}
-            </Tooltip>
-            <ContextMenuContent>{menuItems}</ContextMenuContent>
-          </ContextMenu>
-        ) : (
+        <ContextMenu onOpenChange={setMenuOpen}>
+          {/* A trigger's render must take its props, so the tooltip Root wraps the menu trigger. */}
           <Tooltip>
-            <TooltipTrigger render={row} delay={700} />
+            <TooltipTrigger render={<ContextMenuTrigger render={row} />} delay={700} />
             {tooltip}
           </Tooltip>
-        )}
+          <ContextMenuContent>{menuItems}</ContextMenuContent>
+        </ContextMenu>
         <span className="ui-as-chat-row__tools">
-          {hasMenu && (
-            <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
-              <DropdownMenuTrigger
-                render={
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    aria-label={t('row.moreFor', { title: name })}
-                    title={t('row.more')}
-                    className="ui-as-chat-row__tool"
-                  />
-                }
-              >
-                <Glyph icon={MoreHorizontalIcon} size={15} />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">{menuItems}</DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-label={t('row.moreFor', { title: name })}
+                  title={t('row.more')}
+                  className="ui-as-chat-row__tool"
+                />
+              }
+            >
+              <Glyph icon={MoreHorizontalIcon} size={15} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">{menuItems}</DropdownMenuContent>
+          </DropdownMenu>
           {canStart && (
             <button
               type="button"
@@ -671,9 +795,6 @@ function ProjectGroup({
           )}
           <GroupRenameHints scope={key} />
         </ul>
-      )}
-      {project && removing !== null && (
-        <RemoveProjectDialog project={project} open={removing} onOpenChange={setRemoving} />
       )}
     </>
   )
@@ -744,16 +865,24 @@ function toggleGroup(key: string): void {
  */
 function PinnedGroup({
   projects,
+  allProjects,
   stop,
   hosts,
   away,
+  onEdit,
   onImport,
+  onArchive,
+  onRemove,
 }: {
   projects: readonly Project[]
+  allProjects: readonly Project[]
   stop: SidebarTabStop | null
   hosts?: readonly (string | null)[]
   away?: readonly string[]
+  onEdit: (project: Project) => void
   onImport: (project: Project) => void
+  onArchive: (project: Project) => void
+  onRemove: (project: Project) => void
 }) {
   const { t } = useTranslation('sidebar')
   const open = useViewStore((s) => !s.collapsedProjects[PINNED_GROUP])
@@ -762,16 +891,20 @@ function PinnedGroup({
     useMemo(
       () =>
         pinnedTree(Object.fromEntries(summaries.map((x) => [x.id, x]))).filter(
-          (node) => !hosts || hosts.includes(hostOfSession(node.summary)),
+          (node) =>
+            (!hosts || hosts.includes(hostOfSession(node.summary))) &&
+            !isSessionInArchivedProject(node.summary, allProjects),
         ),
-      [summaries, hosts],
+      [summaries, hosts, allProjects],
     ),
   )
   const tasks = useTasksStore(
     useShallow((s) =>
-      pinnedTasks(s.summaries).filter(
-        (task) => !hosts || hosts.includes(hostOfPath(task.projectPath)),
-      ),
+      pinnedTasks(s.summaries).filter((task) => {
+        if (hosts && !hosts.includes(hostOfPath(task.projectPath))) return false
+        const owner = findProjectForPath(allProjects, task.projectPath)
+        return !(owner && isProjectArchived(owner))
+      }),
     ),
   )
   const fold = useEntry('sidebar.runGroup')
@@ -821,7 +954,10 @@ function PinnedGroup({
               key={project?.path ?? noProjectGroup(hostId)}
               project={project}
               stop={stop}
+              onEdit={onEdit}
               onImport={onImport}
+              onArchive={onArchive}
+              onRemove={onRemove}
               hostId={hostId}
               away={hostId !== null && away?.includes(hostId)}
               showHost={!!hosts}

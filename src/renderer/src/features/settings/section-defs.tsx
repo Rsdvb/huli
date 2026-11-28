@@ -46,7 +46,7 @@ import { agentName, awaitsPackage, harnessStatuses, usableAgents } from '@render
 import { useAccountStore } from '@renderer/stores/account'
 import { useDebugStore } from '@renderer/stores/debug'
 import { artifactListShown, useArtifactsStore } from '@renderer/stores/artifacts'
-import { useProjectsStore } from '@renderer/stores/projects'
+import { findProjectForPath, useProjectsStore } from '@renderer/stores/projects'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { loadHosts, useHostsStore } from '@renderer/stores/hosts'
 import { useWebHostStore } from '@renderer/stores/web-host'
@@ -92,7 +92,7 @@ import { useHostHasBin } from '@renderer/features/recycle-bin/support'
 import { CloudSwitchRow, OtherConnections } from './cloud-section'
 import { useCloudOffHere } from './use-cloud-off-here'
 import { DebugModeRow } from './debug-mode'
-import { FontFamily, UserFont } from './font-family'
+import { FontFamily, FontsCard } from './font-family'
 import { ConsentRow, ConsentsState } from './artifacts-section'
 import { GroupNote } from './rows'
 import { BROUGHT_SHOWN, useBroughtSites } from './brought-sites'
@@ -161,8 +161,11 @@ import {
   AllowedSitesState,
   BackgroundFetch,
   ClearBrowsingData,
+  CloseSidePanelWithLastTab,
+  CodeSize,
   ColorMode,
   ConfirmLinks,
+  ConversationWidth,
   DataFolderActions,
   DetailedRecords,
   LogsFolderActions,
@@ -183,6 +186,7 @@ import {
   OpenAtLogin,
   OpenLinksIn,
   OutlineSummaries,
+  PromptCacheDropNotice,
   Proxy,
   RecordSteps,
   ReduceMotion,
@@ -416,6 +420,12 @@ export function useGeneralSection(): SectionDef {
       // Huli: the import from the agents is a window's alone; a paired device may not list.
       ...(isWeb ? [] : [agentHistory]),
       {
+        id: 'prompt-cache-drop-notice',
+        setting: 'general.prompt-cache-drop-notice',
+        group: thread,
+        render: () => <PromptCacheDropNotice label={t('general.promptCacheDropNotice.name')} />,
+      },
+      {
         id: 'open-at-login',
         setting: 'general.open-at-login',
         description: openAtLoginDescription,
@@ -445,7 +455,9 @@ export function useGeneralSection(): SectionDef {
 export function useAppearanceSection(): SectionDef {
   const { t } = useTranslation('settings')
   const scale = group('scale', t('appearance.groups.scale'))
-  const fonts = group('fonts', t('appearance.groups.fonts'))
+  const fonts = group('fonts', t('appearance.groups.fonts'), {
+    card: () => <FontsCard />,
+  })
   const sidebar = group('sidebar', t('appearance.groups.sidebar'), {
     card: (rows) => <SidebarCard rows={rows} />,
   })
@@ -491,17 +503,46 @@ export function useAppearanceSection(): SectionDef {
         layout: 'bare',
         render: (text) => <TextSize label={text} />,
       },
-      ...USER_FONT_ROLES.map((role) => ({
-        id: `font-${role}`,
-        setting: `appearance.font-${role}` as const,
-        group: fonts,
-        render: () => <UserFont role={role} label={t(`appearance.fonts.${role}.name`)} />,
-      })),
+      {
+        id: 'code-size',
+        setting: 'appearance.code-size',
+        group: scale,
+        layout: 'bare',
+        render: (text) => <CodeSize label={text} />,
+      },
+      ...USER_FONT_ROLES.flatMap<RowDef>((role) => [
+        {
+          id: `font-${role}`,
+          setting: `appearance.font-${role}` as const,
+          group: fonts,
+          render: () => null,
+        },
+        {
+          id: `font-${role}-cjk`,
+          setting: `appearance.font-${role}-cjk` as const,
+          group: fonts,
+          render: () => null,
+        },
+      ]),
+      {
+        id: 'conversation-width',
+        setting: 'appearance.conversation-width',
+        group: group('conversation', t('appearance.groups.conversation')),
+        render: () => <ConversationWidth />,
+      },
       {
         id: 'sidebar-hover',
         setting: 'appearance.sidebar-hover',
         group: sidebar,
         render: () => <SidebarHover label={t('appearance.sidebarHover.name')} />,
+      },
+      {
+        id: 'close-side-panel-with-last-tab',
+        setting: 'appearance.close-side-panel-with-last-tab',
+        group: sidebar,
+        render: () => (
+          <CloseSidePanelWithLastTab label={t('appearance.closeSidePanelWithLastTab.name')} />
+        ),
       },
       // Drawn by the group's card, which puts them in the sidebar's order.
       ...sidebarOrder.map((page) => ({
@@ -1955,7 +1996,7 @@ export function useArtifactsSection(): SectionDef {
   const { rows, error, retry } = useConsents()
   const projects = useProjectsStore((s) => s.projects)
   const where = (row: ArtifactConsentRow): string =>
-    projects.find((p) => p.path === row.project)?.name ?? basename(row.project)
+    findProjectForPath(projects, row.project)?.name ?? basename(row.project)
   const list = group('page-permissions', t('artifacts.group'))
   return {
     id: 'artifacts',

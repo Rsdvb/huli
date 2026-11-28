@@ -1,12 +1,18 @@
 // What New session's agent picker and its list of recent sessions show.
 
-import type { AgentStatus, SessionSummary } from '@shared/agent-host'
+import {
+  isActivelyRunning,
+  type AgentStatus,
+  type Project,
+  type SessionSummary,
+} from '@shared/agent-host'
 import { planQuota } from '@shared/plan-quota'
 import { tightestLimit } from '@shared/session-groups'
 import { harnessProblem, programCopy, shortLabel } from '@renderer/features/agents/harness-problem'
 import { limitPhrase } from '@renderer/lib/format'
 import { i18n } from '@renderer/lib/i18n'
 import { limitPercent, type LimitView } from '@renderer/lib/plan-limit'
+import { isSessionInArchivedProject } from '@renderer/stores/projects'
 import { hostOfSession } from '@renderer/stores/sessions'
 import { quotaText } from '../plan-quota'
 import { agentNeed } from './start-options'
@@ -111,6 +117,7 @@ export function pickupSessions(
   byId: Readonly<Record<string, SessionSummary | undefined>>,
   hosts: readonly (string | null)[] | null,
   count = PICKUP,
+  projects?: readonly Project[],
 ): SessionSummary[] {
   return Object.values(byId)
     .filter(
@@ -120,7 +127,8 @@ export function pickupSessions(
         s.parentId === null &&
         s.archivedAt === null &&
         !s.prepared &&
-        (!hosts || hosts.includes(hostOfSession(s))),
+        (!hosts || hosts.includes(hostOfSession(s))) &&
+        (!projects || !isSessionInArchivedProject(s, projects)),
     )
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, count)
@@ -133,13 +141,13 @@ export type PickupState =
 export function pickupState(
   session: Pick<
     SessionSummary,
-    'status' | 'attention' | 'permissionCount' | 'limitPause' | 'stall'
+    'status' | 'phase' | 'attention' | 'permissionCount' | 'limitPause' | 'stall'
   >,
 ): PickupState {
   if (session.status === 'awaiting_permission' || session.permissionCount > 0) return 'waiting'
   // Huli: a turn that may be stuck, and one paused until its plan resets.
   if (session.stall) return 'stalled'
-  if (session.status === 'running' || session.status === 'starting') return 'working'
+  if (isActivelyRunning(session) || session.status === 'starting') return 'working'
   if (session.limitPause) return 'paused'
   if (session.status === 'failed' || session.attention === 'error') return 'failed'
   if (session.status === 'auth_required') return 'signIn'

@@ -463,6 +463,8 @@ export interface SlashCommandInfo {
   name: string
   description: string
   argumentHint?: string | string[]
+  source?: string
+  type?: string
 }
 
 export interface InitializeAnswer {

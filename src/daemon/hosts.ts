@@ -1,3 +1,4 @@
+import type { McpInstallEntry } from '@shared/mcp-discovery'
 // The daemon's side of the hosts, as main's AgentHost, TerminalHost and RemoteHost are the app's:
 // their init, what they ask of main, and what is left after a crash. The daemon has no windows,
 // notifications, tray or browser, so what serves those is not answered; remote access is always on,
@@ -24,6 +25,7 @@ import type {
   TerminalHostToMain,
 } from '@shared/host-control'
 import { pushedAttention } from '@shared/attention'
+import { mcpBridgeFile } from '@shared/mcp-bridge'
 import { BROWSER_UNAVAILABLE } from '@shared/browser'
 import { resolveLocale, type Locale } from '@shared/locale'
 import type { DeviceActivity } from '@shared/remote/activity'
@@ -141,6 +143,9 @@ export interface HostsOptions {
   /** An agent's settings tool reads or changes the daemon's settings. */
   settingsCall?(call: unknown): SettingsCallAnswer
   /** Keeps a plugin's secret in the key store, or clears it; null once the store holds it. */
+  installMcp?(entries: McpInstallEntry[]): Promise<string | null>
+  /** Makes the key store's backup key if it has none: null once it is there, else why not. */
+  mcpBackupKey?(): Promise<string | null>
   pluginSecret?(pluginId: unknown, key: unknown, value: unknown): Promise<string | null>
   /** The agent host's first start found the programs of these harnesses; the daemon adds their agents. */
   firstStart?(harnesses: unknown): void
@@ -257,13 +262,23 @@ export class Hosts {
         usageWorkerPath: bundle('usage-worker.cjs'),
         sessionRouterPath: bundle('session-router.cjs'),
         clineHostPath: bundle('cline-host.cjs'),
+        // The package keeps the helpers beside the daemon's own folder, as out/ does.
+        mcpBridgePath: path.join(
+          options.bundleDir,
+          '..',
+          'helpers',
+          mcpBridgeFile(process.platform),
+        ),
+        mcpCommandPath: path.join(options.bundleDir, '..', 'bin', 'kettu'),
         settings: hostSettings(options.settings(), options.systemLocale),
         socketPath: socketPath ?? undefined,
         userAgent: daemonUserAgent(options.version, process.platform, process.arch),
+        accountId: options.accountId?.() ?? null,
       }),
       startMessages: () => [
         { type: 'host:market-keys', ...options.marketKeys() },
         { type: 'host:market-account', account: options.marketAccount() },
+        { type: 'host:account', accountId: options.accountId?.() ?? null },
       ],
       shutdownMessage: { type: 'host:shutdown' },
       readyType: 'host:ready',
@@ -520,11 +535,13 @@ export class Hosts {
     return this.account
   }
 
-  /** The daemon signed in to another account, or out: the remote host hears it. */
+  /** The daemon signed in to another account, or out: the remote and agent hosts hear it. */
   accountChanged(): void {
     const account = this.options.accountId?.() ?? null
     if (account === this.account) return
-    if (this.remote.post({ type: 'remote-host:account', account })) this.account = account
+    this.account = account
+    this.agent.post({ type: 'host:account', accountId: account })
+    this.remote.post({ type: 'remote-host:account', account })
   }
 
   /**
@@ -1239,6 +1256,24 @@ export class Hosts {
           })
         }
         break
+      case 'host:mcp-install': {
+        const { callId, entries } = message
+        if (!Number.isSafeInteger(callId)) break
+        const run = this.options.installMcp
+        void (run ? run(entries) : Promise.resolve('The daemon cannot import MCP servers.')).then(
+          (error) => this.agent.post({ type: 'mcp-install-result', callId, error }),
+        )
+        break
+      }
+      case 'host:mcp-backup-key': {
+        const { callId } = message
+        if (!Number.isSafeInteger(callId)) break
+        const run = this.options.mcpBackupKey
+        void (run ? run() : Promise.resolve('The daemon keeps no backup key.')).then((error) =>
+          this.agent.post({ type: 'mcp-backup-key-result', callId, error }),
+        )
+        break
+      }
       case 'host:plugin-secret':
         if (Number.isSafeInteger(message.callId)) {
           const { callId } = message

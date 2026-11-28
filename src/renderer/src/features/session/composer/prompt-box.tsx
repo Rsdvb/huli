@@ -10,17 +10,28 @@ import {
   type ReactNode,
 } from 'react'
 import { Popover } from '@base-ui/react/popover'
+import { SparklesIcon } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
-import type { AgentId, SlashCommand } from '@shared/thread'
+import { isSkillCommand, type AgentId, type SlashCommand } from '@shared/thread'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
 import { Spinner } from '@renderer/components/ui/spinner'
+import { Glyph } from '@renderer/features/shell/glyph'
+import { menuCollisionPadding } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { PLUGIN_REF_LIMITS } from '@shared/plugin-refs'
+import { rememberReferenceSummary, useGitStore } from '@renderer/stores/git'
 import { loadKettuCommands } from '@renderer/stores/kettu-commands'
+import { useOverlayPresence } from '@renderer/stores/overlays'
 import { TextDialog, type TextDialogTarget } from '../attachments/text-dialog'
+import { ArtifactPickerPopover, AttachedArtifactChips } from './artifact-picker'
 import { AttachmentTray } from './attachment-tray'
 import { attachMention } from './attachments'
+import { BrowserAnnotationChips } from './browser-annotation-chips'
+import { DelegateAgentPickerPopover, DelegateRecipientChip } from './delegate-picker'
+import type { DelegateTarget } from './delegation'
 import { ComposerEditor, type GhostPrompt } from './editor'
+import { hashPickerShown, hashRefAt, replaceHashRef, type GitHubRefRow } from './github-picker'
+import { GitHubRefFooter, GitHubRefHeading, GitHubRefItem } from './github-ref-popover'
 import {
   MentionFooter,
   MentionItem,
@@ -38,12 +49,27 @@ import {
   replaceMention,
   type MentionRow,
 } from './mentions'
+import {
+  POPOVER_SIDE_OFFSET,
+  resolvePopoverPlacement,
+  viewportBounds,
+  type PopoverKind,
+  type PopoverSide,
+} from './popover-position'
 import { usePromptChips } from './prompt-chips'
 import { ResizeGrip } from './resize-grip'
 import { commandSourceName } from './command-source'
-import { orderSlashMatches, placeCommand, slashAt } from './slash'
+import {
+  applySlashChoice,
+  keepsCompletedSlash,
+  orderSlashMatches,
+  slashAt,
+  slashPopoverAt,
+  type CompletedSlash,
+} from './slash'
 import { slashKeys } from './slash-list'
 import { addDraftMention } from './plugin-mentions'
+import { useGitHubRefPicker, type GitHubRefPickerState } from './use-github-ref-picker'
 import { useMentionList, type MentionList } from './use-mention-list'
 import {
   usePluginMentions,
@@ -62,16 +88,19 @@ import {
 import { SessionMentionItem } from './session-mention-item'
 import { newSessionPanel } from '@renderer/stores/view'
 
-// The box both composers share, the session's and New session's: the text with its slash and `@`
-// popovers and the attachments, kept in a draft, inside the Chat Composer's writing area. What
-// sends, and how, is each one's own.
+// The box both composers share, the session's and New session's: the text with its slash, `@`,
+// and `#` popovers and the attachments, kept in a draft, inside the Chat Composer's writing area.
+// What sends, and how, is each one's own.
 
-type PopoverItem = SlashCommand | MentionRow | SessionMention | PluginRow
+type PopoverItem = SlashCommand | MentionRow | SessionMention | PluginRow | GitHubRefRow
 
 /** What the mention list shows: the project's files and what the plugins offer. */
 interface MentionView extends MentionList {
   plugins: PluginMentions
 }
+
+type PopoverView =
+  'slash' | { kind: 'mention'; view: MentionView } | { kind: 'hash'; view: GitHubRefPickerState }
 
 /** Why there are no commands to list yet: none reported so far, or no project chosen. */
 export type SlashNote = 'loading' | 'chooseProject'
@@ -79,8 +108,20 @@ export type SlashNote = 'loading' | 'chooseProject'
 const isMentionRow = (item: PopoverItem): item is MentionRow =>
   'positions' in item && !isSessionMention(item)
 const isPluginRow = (item: PopoverItem): item is PluginRow => 'plugin' in item
+const isGitHubRefRow = (item: PopoverItem): item is GitHubRefRow => 'githubRef' in item
 /** A source with no items still shows a line when it is searching or failed. */
 const shownNote = (group: PluginMentionGroup) => group.error !== null || group.searching
+
+// Confine the portaled popup to the viewport instead of clipping ancestors such as New session's
+// ColumnScroller, which starts below the top bar.
+const VIEWPORT_BOUNDARY: Element[] = []
+// Side placement is decided by `resolvePopoverPlacement` so normal New session boxes stay clear of
+// Send while tall composers fall back to the trigger line; `align: 'shift'` keeps mentions in view.
+const POPOVER_COLLISION_AVOIDANCE = {
+  side: 'none',
+  align: 'shift',
+  fallbackAxisSide: 'none',
+} as const
 
 /** The prompt box: what shows on its top edge, the attachments, then the text and its popovers. */
 export function PromptBox({
@@ -95,6 +136,8 @@ export function PromptBox({
   label,
   size,
   top,
+  canDelegate = false,
+  onDelegateSelect,
   onKeyDown,
 }: {
   box: PromptBoxState
@@ -113,6 +156,10 @@ export function PromptBox({
   size: { minHeight: string; padding: string; lineHeight?: string }
   /** What the box shows before the attachments, such as a notice. */
   top?: ReactNode
+  /** Whether this composer can delegate tasks to another agent. */
+  canDelegate?: boolean
+  /** Called after a delegation recipient is picked from the popover. */
+  onDelegateSelect?: (target: DelegateTarget) => void
   /** A key the popovers left to the composer, which calls preventDefault on one it takes. */
   onKeyDown: (event: KeyboardEvent) => void
 }) {
@@ -120,21 +167,40 @@ export function PromptBox({
   const { draft, projectPath, disabled, source, attachments, update, editor, setCaret } = box
   // The `/` whose list Esc or leaving the box closed.
   const [slashDismissed, setSlashDismissed] = useState<number | null>(null)
+  // The slash token just chosen from the list, kept suppressed if selection lands on its edge or
+  // the user deletes its trailing space before deleting the chip itself.
+  const [completedSlash, setCompletedSlash] = useState<CompletedSlash | null>(null)
   // The `@` whose popover Esc or a click elsewhere closed.
   const [mentionDismissed, setMentionDismissed] = useState<number | null>(null)
-  // While an input method composes: whether the mention popover was open when it started.
+  // The `#` whose GitHub reference picker Esc or a click elsewhere closed.
+  const [hashDismissed, setHashDismissed] = useState<number | null>(null)
+  // While an input method composes: whether a mention or `#` picker was open when it started.
   const [composition, setComposition] = useState<{ open: boolean } | null>(null)
-  const [popover, setPopover] = useState<'slash' | MentionView | null>(null)
+  const [popover, setPopover] = useState<PopoverView | null>(null)
   const [viewing, setViewing] = useState<TextDialogTarget | null>(null)
   // The highlighted row, for the list `list` names.
   const [highlight, setHighlight] = useState({ list: '', index: 0 })
   const group = useRef<HTMLDivElement>(null)
   const popup = useRef<HTMLDivElement>(null)
   const listId = useId()
+  const githubOwner = useGitStore((s) =>
+    !box.noProject && projectPath ? (s.status[projectPath]?.remote?.github?.owner ?? null) : null,
+  )
+  const githubRepoName = useGitStore((s) =>
+    !box.noProject && projectPath ? (s.status[projectPath]?.remote?.github?.repo ?? null) : null,
+  )
+  const githubRepo = useMemo(
+    () => (githubOwner && githubRepoName ? { owner: githubOwner, repo: githubRepoName } : null),
+    [githubOwner, githubRepoName],
+  )
 
   // Read from the text as values, so a key or a caret move renders the box only when one changes.
+  const completedAlive = useBoxText(box, (text, caret) =>
+    keepsCompletedSlash(text, completedSlash, slashAt(text, caret)),
+  )
+  if (completedSlash !== null && !completedAlive) setCompletedSlash(null)
   const slashKey = useBoxText(box, (text, caret) => {
-    const found = slashAt(text, caret)
+    const found = slashPopoverAt(text, caret, commands, completedSlash)
     return found ? `${found.start}:${found.query}` : null
   })
   const slash = useMemo(() => {
@@ -197,40 +263,129 @@ export function PromptBox({
       sessionRows.length > 0 ||
       plugins.visible ||
       (mention!.query !== '' && !filesReady))
+
+  const hashKey = useBoxText(box, (text, caret) => {
+    if (!githubRepo) return null
+    const found = hashRefAt(text, caret)
+    return found ? `${found.start}:${found.query}` : null
+  })
+  const hash = useMemo(() => {
+    if (hashKey === null) return null
+    const colon = hashKey.indexOf(':')
+    return { start: Number(hashKey.slice(0, colon)), query: hashKey.slice(colon + 1) }
+  }, [hashKey])
+  if (hashDismissed !== null && hash?.start !== hashDismissed) setHashDismissed(null)
+  const hashShown = githubRepo !== null && hashPickerShown(hash, hashDismissed, composition)
+  const githubRefs = useGitHubRefPicker(hostId, githubRepo, hashShown ? hash!.query : null)
+  const hashOpen = hashShown
+
+  const mentionPopover = useMemo<PopoverView>(
+    () => ({ kind: 'mention', view: mentions }),
+    [mentions],
+  )
+  const hashPopover = useMemo<PopoverView>(() => ({ kind: 'hash', view: githubRefs }), [githubRefs])
+
   // What the popup shows, kept after it closes so it fades out as it was.
-  const showing = slashOpen || slashNote ? 'slash' : mentionOpen ? mentions : popover
+  const showing: PopoverView | null =
+    slashOpen || slashNote
+      ? 'slash'
+      : mentionOpen
+        ? mentionPopover
+        : hashOpen
+          ? hashPopover
+          : popover
   if (showing !== popover) setPopover(showing)
-  // The mention list starts at its `@`, over the box, and stays there while it fades out.
+  // Keep the trigger index (`@`, `#`, or `/`) so the popup stays put while it fades out.
   const [atStart, setAtStart] = useState(0)
   if (mentionOpen && mention!.start !== atStart) setAtStart(mention!.start)
-  const atMention = useMemo(
-    () => ({
-      getBoundingClientRect: () => {
-        const box = group.current?.getBoundingClientRect() ?? new DOMRect()
-        const left = editor.current?.leftOf(atStart) ?? box.left
-        return new DOMRect(left, box.top, box.right - left, box.height)
-      },
-      get contextElement() {
-        return group.current ?? undefined
-      },
-    }),
-    [atStart, editor],
-  )
-  const listing = typeof showing === 'object' ? showing : null
-  const open = slashOpen || slashNote !== null || mentionOpen
+  const [hashStart, setHashStart] = useState(0)
+  if (hashOpen && hash!.start !== hashStart) setHashStart(hash!.start)
+  const [slashStart, setSlashStart] = useState(0)
+  if (slashOpen && slash!.start !== slashStart) setSlashStart(slash!.start)
+  else if (slashNote !== null && slash && slash.start !== slashStart) setSlashStart(slash.start)
+  const listing = showing !== 'slash' && showing?.kind === 'mention' ? showing.view : null
+  const hashListing = showing !== 'slash' && showing?.kind === 'hash' ? showing.view : null
+  const open = slashOpen || slashNote !== null || mentionOpen || hashOpen
   const sessionCount = listing && mentionOpen ? sessionRows.length : 0
   const rows: PopoverItem[] =
     showing === 'slash'
       ? slashMatches
       : listing
         ? [...(sessionCount > 0 ? sessionRows : []), ...listing.rows, ...listing.plugins.rows]
-        : []
+        : hashListing
+          ? hashListing.rows
+          : []
+  const popoverKind: PopoverKind =
+    showing === 'slash' ? 'slash' : showing?.kind === 'hash' ? 'hash' : 'mention'
+  const triggerStart =
+    popoverKind === 'slash' ? slashStart : popoverKind === 'hash' ? hashStart : atStart
+  const popoverCompact =
+    (popoverKind === 'slash' && rows.length === 0 && noteShown !== null) ||
+    (popoverKind === 'hash' && rows.length === 0)
+  const [popoverSide, setPopoverSide] = useState<PopoverSide>('top')
+  // Bumped when the editor's inner scroller moves while open so Floating UI re-reads the line.
+  const [scrollTick, setScrollTick] = useState(0)
+  useEffect(() => {
+    if (!open) return
+    const scroller = editor.current?.scrollElement()
+    if (!scroller) return
+    let frame = 0
+    const onScroll = () => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        setScrollTick((n) => n + 1)
+      })
+    }
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      scroller.removeEventListener('scroll', onScroll)
+      cancelAnimationFrame(frame)
+    }
+  }, [open, editor])
+  const measurePlacement = useCallback(() => {
+    const boxRect = group.current?.getBoundingClientRect() ?? new DOMRect()
+    const triggerRect = editor.current?.rectOf(triggerStart) ?? null
+    return resolvePopoverPlacement({
+      kind: popoverKind,
+      box: boxRect,
+      trigger: triggerRect,
+      viewport: viewportBounds(window.innerHeight, menuCollisionPadding),
+      sideOffset: POPOVER_SIDE_OFFSET,
+      compact: popoverCompact,
+    })
+  }, [editor, popoverCompact, popoverKind, triggerStart])
+  useLayoutEffect(() => {
+    if (!open) return
+    const sync = () => {
+      const next = measurePlacement()
+      setPopoverSide((current) => (current === next.side ? current : next.side))
+    }
+    sync()
+  }, [open, measurePlacement, scrollTick])
+  const popoverAnchor = useMemo(() => {
+    // Reading `scrollTick` makes a new virtual anchor on inner editor scrolls so Base UI updates.
+    const tick = scrollTick
+    return {
+      getBoundingClientRect: () => {
+        void tick
+        const next = measurePlacement()
+        setPopoverSide((current) => (current === next.side ? current : next.side))
+        return new DOMRect(next.anchor.x, next.anchor.y, next.anchor.width, next.anchor.height)
+      },
+      get contextElement() {
+        return group.current ?? undefined
+      },
+    }
+  }, [measurePlacement, scrollTick])
   // A list opens, and a new query starts, on its first row.
   const listKey = slashOpen
     ? `/${slash.start}:${slash.query}`
     : mentionOpen
       ? `@${mention!.start}:${mention!.query}`
-      : ''
+      : hashOpen
+        ? `#${hash!.start}:${hash!.query}`
+        : ''
   if (highlight.list !== listKey) setHighlight({ list: listKey, index: 0 })
   const active = rows.length === 0 ? -1 : Math.min(highlight.index, rows.length - 1)
   const optionId = (index: number) => `${listId}-${index}`
@@ -271,18 +426,25 @@ export function PromptBox({
     const next = replaceMention(source.text, mention, word)
     update(next.text, next.caret)
   }
+  const chooseGitHubRef = (row: GitHubRefRow) => {
+    if (!hash) return
+    rememberReferenceSummary(row.item, hostId)
+    const current = editor.current?.text() ?? source.text
+    const next = replaceHashRef(current, hash, row.item.url)
+    update(next.text, next.caret)
+  }
   const chooseItem = (item: PopoverItem | undefined) => {
     if (!item) return
     if (isSessionMention(item)) chooseSession(item)
+    else if (isGitHubRefRow(item)) chooseGitHubRef(item)
     else if (isPluginRow(item)) choosePlugin(item)
     else if (isMentionRow(item)) choose(item)
     else if (slash) {
-      const next = placeCommand(
-        source.text,
-        slash,
-        item.name,
-        commands.map((c) => c.name),
-      )
+      const current = editor.current?.text() ?? source.text
+      const next = applySlashChoice(current, slash, item, commands)
+      const insertedStart = isSkillCommand(item) ? slash.start : 0
+      setCompletedSlash({ start: insertedStart, name: item.name })
+      setSlashDismissed(insertedStart)
       update(next.text, next.caret)
     }
   }
@@ -292,11 +454,13 @@ export function PromptBox({
   const dismiss = () => {
     if (slash && (slashOpen || slashNote)) setSlashDismissed(slash.start)
     if (mentionOpen && mention) setMentionDismissed(mention.start)
+    if (hashOpen && hash) setHashDismissed(hash.start)
   }
   const [focused, setFocused] = useState(false)
   const chips = usePromptChips({
     draft,
     sessionId: box.sessionId,
+    hostId,
     source,
     attachments,
     commands,
@@ -324,6 +488,8 @@ export function PromptBox({
       slashOpen,
       mentionOpen,
       mentionRows: files.rows.length > 0 || sessionRows.length > 0 || plugins.rows.length > 0,
+      hashOpen,
+      hashRows: githubRefs.rows.length > 0,
     })
     // IME composition: no key reaches a popover, and Enter confirms the candidate, never sends.
     if (handling === 'block') return false
@@ -364,6 +530,7 @@ export function PromptBox({
     onKeyDown(event)
     return event.defaultPrevented
   }
+  useOverlayPresence(open, { dismissible: true })
   // Base UI closes on a press outside the popup; a press in the box, its anchor, only moves the caret.
   const openChange = (next: boolean, details: Popover.Root.ChangeEventDetails) => {
     if (next) return
@@ -393,6 +560,15 @@ export function PromptBox({
       >
         <ResizeGrip editor={editor} />
         {top}
+        <DelegateRecipientChip
+          draft={draft}
+          hostId={hostId}
+          visible={canDelegate}
+          onChange={box.openDelegatePicker}
+          onLeave={box.focus}
+        />
+        <AttachedArtifactChips draft={draft} sessionId={box.sessionId} onLeave={box.focus} />
+        <BrowserAnnotationChips draft={draft} onLeave={box.focus} />
         <AttachmentTray
           draft={draft}
           sessionId={box.sessionId}
@@ -426,7 +602,7 @@ export function PromptBox({
               box.onActivity?.()
             }}
             onBlur={blur}
-            onCompositionStart={() => setComposition({ open: mentionOpen })}
+            onCompositionStart={() => setComposition({ open: mentionOpen || hashOpen })}
             onCompositionEnd={() => setComposition(null)}
           />
         </div>
@@ -434,17 +610,18 @@ export function PromptBox({
       <Popover.Root open={open} onOpenChange={openChange}>
         <Popover.Portal>
           <Popover.Positioner
-            anchor={showing === 'slash' ? group : atMention}
-            side="top"
+            anchor={popoverAnchor}
+            side={popoverSide}
             align="start"
-            sideOffset={6}
-            // Shorter over the box rather than flipped under it, where it would hide Send: New
-            // session's box can sit high with little room above.
-            collisionAvoidance={{ side: 'none' }}
-            className="isolate z-(--layer-menu) outline-none"
+            sideOffset={POPOVER_SIDE_OFFSET}
+            collisionBoundary={VIEWPORT_BOUNDARY}
+            collisionPadding={menuCollisionPadding}
+            collisionAvoidance={POPOVER_COLLISION_AVOIDANCE}
+            className="isolate z-(--layer-menu) outline-none app-region-no-drag"
           >
             <Popover.Popup
               ref={popup}
+              data-overlay-layer=""
               initialFocus={false}
               finalFocus={false}
               className={cn(
@@ -452,35 +629,43 @@ export function PromptBox({
                 'rounded-xl p-1.25',
                 showing === 'slash'
                   ? 'w-[min(var(--anchor-width),540px)]'
-                  : 'w-85 max-w-(--available-width)',
+                  : hashListing
+                    ? 'w-96 max-w-(--available-width)'
+                    : 'w-85 max-w-(--available-width)',
               )}
             >
-              {(showing === 'slash'
-                ? rows.length > 0
-                : listing && listing.rows.length + sessionCount > 0) && (
-                <div
-                  id={`${listId}-label`}
-                  className="flex h-6.5 shrink-0 items-center px-2 text-small font-medium text-tertiary"
-                >
-                  {showing === 'slash'
-                    ? t('slash.heading')
-                    : sessionCount > 0
-                      ? t('mentions.sessions')
-                      : listing?.used
-                        ? t('mentions.used')
-                        : t('mentions.files')}
-                </div>
+              {hashListing ? (
+                <GitHubRefHeading id={`${listId}-label`} picker={hashListing} />
+              ) : (
+                (showing === 'slash'
+                  ? rows.length > 0
+                  : listing && listing.rows.length + sessionCount > 0) && (
+                  <div
+                    id={`${listId}-label`}
+                    className="flex h-6.5 shrink-0 items-center px-2 text-small font-medium text-tertiary"
+                  >
+                    {showing === 'slash'
+                      ? t('slash.heading')
+                      : sessionCount > 0
+                        ? t('mentions.sessions')
+                        : listing?.used
+                          ? t('mentions.used')
+                          : t('mentions.files')}
+                  </div>
+                )
               )}
               <div
                 role="listbox"
                 id={listId}
                 aria-labelledby={
-                  showing === 'slash' || (listing && listing.rows.length > 0)
+                  showing === 'slash' || hashListing || (listing && listing.rows.length > 0)
                     ? `${listId}-label`
                     : undefined
                 }
                 aria-label={
-                  showing !== 'slash' && listing && listing.rows.length === 0 ? label : undefined
+                  showing !== 'slash' && !hashListing && listing && listing.rows.length === 0
+                    ? label
+                    : undefined
                 }
                 className={cn(
                   'min-h-0 flex-1 scroll-fade-y overflow-y-auto overscroll-contain',
@@ -491,7 +676,16 @@ export function PromptBox({
                 )}
               >
                 {rows.map((item, index) =>
-                  isPluginRow(item) ? null : isSessionMention(item) ? (
+                  isPluginRow(item) ? null : isGitHubRefRow(item) ? (
+                    <GitHubRefItem
+                      key={`${item.item.kind}:${item.item.number}`}
+                      id={optionId(index)}
+                      row={item}
+                      highlighted={index === active}
+                      onHighlight={() => highlightRow(index)}
+                      onChoose={chooseGitHubRef}
+                    />
+                  ) : isSessionMention(item) ? (
                     <SessionMentionItem
                       key={`s:${item.sessionId}`}
                       id={optionId(index)}
@@ -567,6 +761,7 @@ export function PromptBox({
                 })}
               </div>
               {listing && <MentionFooter list={listing} more={listing.plugins.rows.length} />}
+              {hashListing && <GitHubRefFooter picker={hashListing} />}
               {showing === 'slash' && rows.length === 0 && noteShown && (
                 <p className="shrink-0 px-3 pt-1 pb-1.5 text-small text-tertiary">
                   {noteShown === 'loading' ? (
@@ -583,6 +778,28 @@ export function PromptBox({
           </Popover.Positioner>
         </Popover.Portal>
       </Popover.Root>
+      <ArtifactPickerPopover
+        open={box.artifactPickerOpen}
+        onOpenChange={box.setArtifactPickerOpen}
+        anchor={group}
+        draft={draft}
+        projectPath={box.artifactProjectPath}
+        noProject={box.noProject}
+        hostId={hostId}
+        onPicked={() => requestAnimationFrame(() => box.focus())}
+      />
+      {canDelegate && (
+        <DelegateAgentPickerPopover
+          open={box.delegatePickerOpen}
+          onOpenChange={box.setDelegatePickerOpen}
+          anchor={group}
+          draft={draft}
+          sessionId={box.sessionId}
+          hostId={hostId}
+          onSelect={onDelegateSelect}
+          onPicked={() => requestAnimationFrame(() => box.focus())}
+        />
+      )}
       {chips.overlays}
       <TextDialog target={viewing} onClose={() => setViewing(null)} />
     </>
@@ -608,21 +825,26 @@ function SlashItem({
   onHighlight: () => void
   onChoose: () => void
 }) {
+  const skill = isSkillCommand(command)
   return (
     <div
       role="option"
       id={id}
       aria-selected={highlighted}
       data-highlighted={highlighted ? '' : undefined}
+      data-slash-kind={skill ? 'skill' : 'command'}
       // Pressing a row keeps the focus, and with it the caret, in the box.
       onMouseDown={(event) => event.preventDefault()}
       onMouseMove={onHighlight}
       onClick={onChoose}
       className="col-span-3 grid h-8 cursor-default grid-cols-subgrid items-center gap-x-5 rounded-md px-2 text-menu outline-none select-none data-highlighted:bg-selected"
     >
-      <span className="truncate font-medium text-primary">
-        <span className="text-tertiary">/</span>
-        {command.name}
+      <span className="flex min-w-0 items-center gap-1.5 font-medium text-primary">
+        {skill && <Glyph icon={SparklesIcon} className="size-3.25 shrink-0 text-control-on" />}
+        <span className="truncate">
+          <span className="text-tertiary">/</span>
+          {command.name}
+        </span>
       </span>
       <span className="truncate text-hint text-tertiary">{command.description}</span>
       <SlashSource command={command} agentId={agentId} />
@@ -633,6 +855,22 @@ function SlashItem({
 function SlashSource({ command, agentId }: { command: SlashCommand; agentId: AgentId | null }) {
   const { t } = useTranslation('composer')
   const name = commandSourceName(command.source, t)
-  if (name === null) return agentId ? <AgentMark agent={agentId} size={14} /> : <span />
-  return <span className="max-w-32 truncate text-small text-tertiary">{name}</span>
+  const skill = isSkillCommand(command)
+  const origin =
+    name === null ? (
+      agentId ? (
+        <AgentMark agent={agentId} size={14} />
+      ) : null
+    ) : (
+      <span className="max-w-32 truncate text-small text-tertiary">{name}</span>
+    )
+  if (!skill) return origin ?? <span />
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="rounded bg-control-on-tint px-1.25 py-0.5 text-caption leading-none font-medium text-control-on">
+        {t('slash.skill')}
+      </span>
+      {origin}
+    </span>
+  )
 }

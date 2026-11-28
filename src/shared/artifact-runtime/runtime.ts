@@ -15,11 +15,14 @@ import {
 import { capabilityNamespace, type CapabilityTransport } from './capabilities'
 import { DECK_REPORT_EVENT } from './deck-sheet'
 import { DOC_REPORT_EVENT } from './document-sheet'
+import { findMarqueeElements, unionPageBoxes } from './marquee'
 import {
   RUNTIME_PATH,
   RUNTIME_VERSION,
+  type AnchorRectReport,
   type DriveMessage,
   type ElementStyle,
+  type PageBox,
   type PageSelection,
   PAGE_ERRORS,
   PAGE_KEYS,
@@ -30,6 +33,8 @@ import {
 const USE_WAIT_MS = 10_000
 const SOURCE = 'data-kettu-src'
 const TEXT_CHARS = 200
+/** Minimum interval between live anchor rect sync messages to stay well within host rate limits. */
+const ANCHOR_SYNC_MIN_MS = 16
 /** How long after the old page left the next version takes its scroll. */
 const SCROLL_KEPT_MS = 10_000
 
@@ -42,6 +47,22 @@ type Answer = {
   error?: unknown
   event?: unknown
   done?: unknown
+}
+
+/**
+ * The open pin anchored to the exact source element at `src`, if any: prefers the currently active
+ * open pin on that element, otherwise the latest one. Resolved (`done`) and lost pins are ignored
+ * so clicking an element with only resolved comments still starts a new draft.
+ */
+export function openPinForSource(pins: readonly Pin[], src: number | null): number | null {
+  if (src === null) return null
+  let fallback: number | null = null
+  for (const pin of pins) {
+    if (pin.src !== src || pin.kind === 'done' || pin.kind === 'lost') continue
+    if (pin.active) return pin.n
+    fallback = pin.n
+  }
+  return fallback
 }
 
 export function start(config: RuntimeConfig): void {
@@ -254,6 +275,8 @@ export function start(config: RuntimeConfig): void {
   let layer: ShadowRoot | null = null
   let hoverBox: HTMLElement | null = null
   let pickedBox: HTMLElement | null = null
+  let multiLayer: HTMLElement | null = null
+  let marqueeBox: HTMLElement | null = null
   let label: HTMLElement | null = null
   let pinLayer: HTMLElement | null = null
 
@@ -269,6 +292,8 @@ export function start(config: RuntimeConfig): void {
         '.box{position:fixed;box-sizing:border-box;border-radius:3px;display:none}' +
         '.hover{border:1.5px dashed var(--accent)}' +
         '.picked{border:2px solid var(--accent);box-shadow:0 0 0 1px rgb(255 255 255 / 60%)}' +
+        '.marquee{position:fixed;box-sizing:border-box;border-radius:3px;display:none;' +
+        'border:1.5px solid var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}' +
         '.label{position:fixed;display:none;padding:1px 6px;border-radius:4px;' +
         'background:var(--accent);color:white;font:500 11px/16px system-ui,sans-serif;white-space:nowrap}' +
         '.pin{position:fixed;box-sizing:border-box;width:20px;height:20px;border-radius:50%;' +
@@ -286,10 +311,13 @@ export function start(config: RuntimeConfig): void {
       hoverBox.className = 'box hover'
       pickedBox = document.createElement('div')
       pickedBox.className = 'box picked'
+      multiLayer = document.createElement('div')
+      marqueeBox = document.createElement('div')
+      marqueeBox.className = 'marquee'
       label = document.createElement('div')
       label.className = 'label'
       pinLayer = document.createElement('div')
-      layer.append(style, pinLayer, hoverBox, pickedBox, label)
+      layer.append(style, pinLayer, multiLayer, hoverBox, pickedBox, marqueeBox, label)
     }
     host.style.setProperty('--accent', accent)
     for (const [name, value] of Object.entries(pinColors)) host.style.setProperty(name, value)
@@ -310,6 +338,9 @@ export function start(config: RuntimeConfig): void {
   }
   let hovered: Element | null = null
   let picked: Element | null = null
+  let pickedMany: Element[] = []
+  let marqueeRect: PageBox | null = null
+  let marqueeHits: Element[] = []
   let keepScroll = false
   let passKeys = false
   let pins: Pin[] = []
@@ -320,6 +351,163 @@ export function start(config: RuntimeConfig): void {
   let frame = 0
   // What a preview changed on the picked element, to put back.
   let original: { element: Element; style: string | null; text: string | null } | null = null
+  // Live anchor tracking while a host popover is anchored to an element in this iframe.
+  let anchorTarget: number | 'picked' | null = null
+  let anchorChannel = ''
+  let anchorFrame = 0
+  let anchorTimer: ReturnType<typeof setTimeout> | null = null
+  let anchorLastSentAt = 0
+  let anchorLastKey: string | null = null
+  let anchorInFlight = false
+  let anchorDirty = false
+  let anchorListening = false
+
+  function rectBox(element: Element | null): PageBox | null {
+    if (!element || !element.isConnected) return null
+    const rect = element.getBoundingClientRect()
+    if (rect.width === 0 && rect.height === 0) return null
+    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
+  }
+
+  function resolveAnchorElement(target: number | 'picked' | null): Element | null {
+    if (target === null) return null
+    if (target === 'picked') return picked
+    return sourceElement(target)
+  }
+
+  function pickedManyUnionBox(): PageBox | null {
+    if (pickedMany.length === 0) return null
+    const boxes: PageBox[] = []
+    for (const el of pickedMany) {
+      const box = rectBox(el)
+      if (box) boxes.push(box)
+    }
+    return unionPageBoxes(boxes)
+  }
+
+  function anchorCenterElementForMany(): Element | null {
+    const union = pickedManyUnionBox()
+    if (!union) return pickedMany.find((el) => el.isConnected) ?? null
+    const cx = union.x + union.width / 2
+    const cy = union.y + union.height / 2
+    let best: Element | null = null
+    let bestDist = Infinity
+    for (const el of pickedMany) {
+      const box = rectBox(el)
+      if (!box) continue
+      const dx = box.x + box.width / 2 - cx
+      const dy = box.y + box.height / 2 - cy
+      const dist = dx * dx + dy * dy
+      if (dist < bestDist) {
+        bestDist = dist
+        best = el
+      }
+    }
+    return best
+  }
+
+  function snapHalf(n: number): number {
+    return Math.round(n * 2) / 2
+  }
+
+  function anchorSnapshot(): { report: AnchorRectReport; key: string } {
+    const box =
+      anchorTarget === 'picked' && pickedMany.length > 0
+        ? pickedManyUnionBox()
+        : rectBox(resolveAnchorElement(anchorTarget))
+    const viewport = { width: window.innerWidth, height: window.innerHeight }
+    const key = box
+      ? `${snapHalf(box.x)},${snapHalf(box.y)},${snapHalf(box.width)},${snapHalf(box.height)}|${viewport.width},${viewport.height}`
+      : `null|${viewport.width},${viewport.height}`
+    return { report: { box, viewport }, key }
+  }
+
+  function sendAnchorReport(force: boolean): void {
+    if (anchorTarget === null || !anchorChannel) return
+    const { report: anchor, key } = anchorSnapshot()
+    if (!force && key === anchorLastKey) return
+    if (config.transport === 'fetch' && anchorInFlight) {
+      anchorDirty = true
+      return
+    }
+    const now = Date.now()
+    const wait = ANCHOR_SYNC_MIN_MS - (now - anchorLastSentAt)
+    if (!force && wait > 0) {
+      if (anchorTimer === null) {
+        anchorTimer = setTimeout(() => {
+          anchorTimer = null
+          scheduleAnchorSync()
+        }, wait)
+      }
+      return
+    }
+    anchorLastKey = key
+    anchorLastSentAt = now
+    const message: Message = {
+      v: RUNTIME_VERSION,
+      id: nextId(),
+      kind: 'select',
+      channel: anchorChannel,
+      selection: null,
+      anchor,
+    }
+    if (config.transport === 'port') {
+      viaPort(message)
+      return
+    }
+    anchorInFlight = true
+    void request(message)
+      .catch(() => {})
+      .finally(() => {
+        anchorInFlight = false
+        if (anchorDirty && anchorTarget !== null) {
+          anchorDirty = false
+          scheduleAnchorSync()
+        }
+      })
+  }
+
+  function scheduleAnchorSync(): void {
+    if (anchorTarget === null || anchorFrame) return
+    anchorFrame = requestAnimationFrame(() => {
+      anchorFrame = 0
+      sendAnchorReport(false)
+    })
+  }
+
+  const onAnchorViewportChange = (): void => scheduleAnchorSync()
+
+  function setAnchorTracking(target: number | 'picked' | null, nextChannel?: string): void {
+    if (target === null) {
+      anchorTarget = null
+      anchorLastKey = null
+      anchorDirty = false
+      if (anchorFrame) {
+        cancelAnimationFrame(anchorFrame)
+        anchorFrame = 0
+      }
+      if (anchorTimer !== null) {
+        clearTimeout(anchorTimer)
+        anchorTimer = null
+      }
+      if (anchorListening) {
+        window.removeEventListener('scroll', onAnchorViewportChange, true)
+        window.removeEventListener('resize', onAnchorViewportChange)
+        anchorListening = false
+      }
+      return
+    }
+    anchorTarget = target
+    if (nextChannel) anchorChannel = nextChannel
+    else if (channel) anchorChannel = channel
+    if (!anchorListening) {
+      window.addEventListener('scroll', onAnchorViewportChange, { capture: true, passive: true })
+      window.addEventListener('resize', onAnchorViewportChange, { passive: true })
+      anchorListening = true
+    }
+    anchorLastKey = null
+    sendAnchorReport(true)
+  }
 
   function place(box: HTMLElement, element: Element | null): DOMRect | null {
     if (!element || !element.isConnected) {
@@ -335,25 +523,65 @@ export function start(config: RuntimeConfig): void {
     return rect
   }
 
+  function drawMulti(elements: readonly Element[], kind: 'hover' | 'picked'): void {
+    const connected = elements.filter((el) => el.isConnected)
+    while (multiLayer!.children.length > connected.length) multiLayer!.lastChild!.remove()
+    connected.forEach((element, i) => {
+      let box = multiLayer!.children[i] as HTMLElement | undefined
+      if (!box) {
+        box = document.createElement('div')
+        multiLayer!.append(box)
+      }
+      box.className = `box ${kind}`
+      place(box, element)
+    })
+  }
+
   function draw(): void {
     frame = 0
-    const showing = (mode !== null && (hovered !== null || picked !== null)) || pins.length > 0
+    const marqueeActive = mode === 'select' && marqueeRect !== null
+    const multiActive = mode === 'select' && pickedMany.length > 0
+    const showing =
+      (mode !== null && (hovered !== null || picked !== null || multiActive || marqueeActive)) ||
+      pins.length > 0
     if (!showing) {
       host?.remove()
       return
     }
     overlay()
-    place(hoverBox!, mode && hovered !== picked ? hovered : null)
-    const rect = place(pickedBox!, mode ? picked : null)
-    if (rect && picked) {
-      label!.style.display = 'block'
-      label!.textContent = picked.localName
-      label!.style.left = `${Math.max(0, rect.left - 2)}px`
-      label!.style.top = `${Math.max(0, rect.top - 22)}px`
-    } else {
+    if (marqueeActive && marqueeRect) {
+      marqueeBox!.style.display = 'block'
+      marqueeBox!.style.left = `${marqueeRect.x}px`
+      marqueeBox!.style.top = `${marqueeRect.y}px`
+      marqueeBox!.style.width = `${marqueeRect.width}px`
+      marqueeBox!.style.height = `${marqueeRect.height}px`
+      drawMulti(marqueeHits, 'hover')
+      place(hoverBox!, null)
+      place(pickedBox!, null)
       label!.style.display = 'none'
+    } else {
+      marqueeBox!.style.display = 'none'
+      if (multiActive) {
+        drawMulti(pickedMany, 'picked')
+        place(hoverBox!, hovered && !pickedMany.includes(hovered) ? hovered : null)
+        place(pickedBox!, null)
+        label!.style.display = 'none'
+      } else {
+        drawMulti([], 'picked')
+        place(hoverBox!, mode && hovered !== picked ? hovered : null)
+        const rect = place(pickedBox!, mode ? picked : null)
+        if (rect && picked) {
+          label!.style.display = 'block'
+          label!.textContent = picked.localName
+          label!.style.left = `${Math.max(0, rect.left - 2)}px`
+          label!.style.top = `${Math.max(0, rect.top - 22)}px`
+        } else {
+          label!.style.display = 'none'
+        }
+      }
     }
     drawPins()
+    if (anchorTarget !== null) sendAnchorReport(false)
     // Pages move as they scroll and animate, so the overlay follows them while it shows.
     frame = requestAnimationFrame(draw)
   }
@@ -443,17 +671,22 @@ export function start(config: RuntimeConfig): void {
     }
   }
 
-  function describe(element: Element): PageSelection {
+  function sourceOffset(element: Element): number | null {
     // An element from other markup the page put in, or one a script made, has no place here.
     const raw = element.getAttribute(SOURCE)
     const own = raw?.startsWith(`${config.mark}:`) ? raw.slice(config.mark.length + 1) : null
-    const src = own !== null && /^\d{1,9}$/.test(own) ? Number(own) : null
+    return own !== null && /^\d{1,9}$/.test(own) ? Number(own) : null
+  }
+
+  function describe(element: Element): PageSelection {
+    const src = sourceOffset(element)
     const text = (element as HTMLElement).innerText ?? element.textContent ?? ''
     const ancestors: string[] = []
     for (let up = element.parentElement; up && up !== document.body; up = up.parentElement) {
       if (up === document.documentElement) break
       ancestors.unshift(up.localName.toLowerCase())
     }
+    const box = rectBox(element)
     return {
       path: config.path,
       src,
@@ -462,6 +695,7 @@ export function start(config: RuntimeConfig): void {
       textOnly: element.childElementCount === 0,
       style: lookOf(element),
       ancestors: ancestors.slice(-8),
+      ...(box ? { box } : {}),
     }
   }
 
@@ -470,6 +704,22 @@ export function start(config: RuntimeConfig): void {
       (pin) => x >= pin.x && x <= pin.x + 20 && y >= pin.y && y <= pin.y + 20,
     )
     return hit ? hit.n : null
+  }
+
+  function sendPin(pin: number): void {
+    const entry = pins.find((p) => p.n === pin)
+    const pinBox = entry && entry.src !== null ? rectBox(sourceElement(entry.src)) : null
+    const answer: Message = {
+      v: RUNTIME_VERSION,
+      id: nextId(),
+      kind: 'select',
+      channel,
+      selection: null,
+      pin,
+      ...(pinBox ? { pinBox } : {}),
+    }
+    if (config.transport === 'port') viaPort(answer)
+    else void request(answer).catch(() => {})
   }
 
   function stopTyping(report: boolean): void {
@@ -524,6 +774,19 @@ export function start(config: RuntimeConfig): void {
     else void request(message).catch(() => {})
   }
 
+  function reportMany(selections: PageSelection[]): void {
+    const message: Message = {
+      v: RUNTIME_VERSION,
+      id: nextId(),
+      kind: 'select',
+      channel,
+      selection: null,
+      selections,
+    }
+    if (config.transport === 'port') viaPort(message)
+    else void request(message).catch(() => {})
+  }
+
   function resetPreview(): void {
     if (!original) return
     const { element, style, text } = original
@@ -539,10 +802,18 @@ export function start(config: RuntimeConfig): void {
     original = { element, style: element.getAttribute('style'), text: null }
   }
 
+  function clearMarquee(): void {
+    marqueeRect = null
+    marqueeHits = []
+  }
+
   function pick(element: Element | null, tell: boolean): void {
     if (picked !== element) resetPreview()
+    clearMarquee()
+    pickedMany = []
     picked = element
     if (tell) report(element ? describe(element) : null)
+    if (anchorTarget === 'picked') scheduleAnchorSync()
     redraw()
   }
 
@@ -595,6 +866,9 @@ export function start(config: RuntimeConfig): void {
           hovered = null
           stopTyping(true)
           pick(null, false)
+        } else if (mode !== 'select') {
+          clearMarquee()
+          pickedMany = []
         }
         redraw()
         return
@@ -611,32 +885,151 @@ export function start(config: RuntimeConfig): void {
         if (!mode) return
         const pin = pinAt(message.x, message.y)
         if (pin !== null) {
+          sendPin(pin)
+          return
+        }
+        const element = elementAt(message.x, message.y)
+        if (mode === 'comment' && element) {
+          const openPin = openPinForSource(pins, sourceOffset(element))
+          if (openPin !== null) {
+            sendPin(openPin)
+            return
+          }
+        }
+        if (typing && typing.element.contains(element)) return
+        stopTyping(true)
+        pick(element, true)
+        return
+      }
+      case 'select-marquee': {
+        if (mode !== 'select') return
+        const raw = message.rect
+        if (raw === null) {
+          clearMarquee()
+          redraw()
+          return
+        }
+        if (
+          !raw ||
+          typeof raw !== 'object' ||
+          !Number.isFinite(raw.x) ||
+          !Number.isFinite(raw.y) ||
+          !Number.isFinite(raw.width) ||
+          !Number.isFinite(raw.height)
+        ) {
+          return
+        }
+        const rect: PageBox = {
+          x: raw.width < 0 ? raw.x + raw.width : raw.x,
+          y: raw.height < 0 ? raw.y + raw.height : raw.y,
+          width: Math.abs(raw.width),
+          height: Math.abs(raw.height),
+        }
+        const hits = findMarqueeElements(
+          document,
+          rect,
+          { width: window.innerWidth, height: window.innerHeight },
+          typeof getComputedStyle === 'function' ? getComputedStyle : null,
+          host,
+        )
+        if (message.commit !== true) {
+          hovered = null
+          marqueeRect = rect
+          marqueeHits = hits
+          redraw()
+          return
+        }
+        stopTyping(true)
+        resetPreview()
+        clearMarquee()
+        hovered = null
+        picked = null
+        pickedMany = hits
+        if (hits.length > 0) reportMany(hits.map(describe))
+        else report(null)
+        if (anchorTarget === 'picked') scheduleAnchorSync()
+        redraw()
+        return
+      }
+      case 'select-remove': {
+        if (mode !== 'select' || !Number.isInteger(message.index)) return
+        if (message.index < 0 || message.index >= pickedMany.length) return
+        pickedMany.splice(message.index, 1)
+        redraw()
+        if (anchorTarget === 'picked') sendAnchorReport(true)
+        return
+      }
+      case 'select-reveal': {
+        const replyChannel =
+          typeof message.channel === 'string' && message.channel !== '' ? message.channel : null
+        if (replyChannel) channel = replyChannel
+        if (!Number.isSafeInteger(message.src)) return
+        const element = sourceElement(message.src)
+        if (element) {
+          const before = element.getBoundingClientRect()
+          const inView =
+            before.bottom > 0 &&
+            before.top < window.innerHeight &&
+            before.right > 0 &&
+            before.left < window.innerWidth
+          if (!inView) {
+            element.scrollIntoView({
+              block: 'center',
+              behavior: replyChannel ? 'instant' : 'smooth',
+            })
+            redraw()
+          }
+        }
+        if (replyChannel) {
+          const box = rectBox(element)
           const answer: Message = {
             v: RUNTIME_VERSION,
             id: nextId(),
             kind: 'select',
-            channel,
+            channel: replyChannel,
             selection: null,
-            pin,
+            located: { src: message.src, box },
           }
           if (config.transport === 'port') viaPort(answer)
           else void request(answer).catch(() => {})
-          return
         }
-        if (typing && typing.element.contains(elementAt(message.x, message.y))) return
-        stopTyping(true)
-        pick(elementAt(message.x, message.y), true)
+        if (anchorTarget !== null) scheduleAnchorSync()
         return
       }
-      case 'select-reveal':
-        if (Number.isSafeInteger(message.src)) {
-          sourceElement(message.src)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      case 'select-anchor': {
+        const replyChannel =
+          typeof message.channel === 'string' && message.channel !== '' ? message.channel : channel
+        if (
+          message.target === null ||
+          message.target === 'picked' ||
+          (typeof message.target === 'number' && Number.isSafeInteger(message.target))
+        ) {
+          setAnchorTracking(message.target, replyChannel)
         }
         return
+      }
+      case 'select-scroll-anchor': {
+        const target =
+          message.target === 'picked' ||
+          (typeof message.target === 'number' && Number.isSafeInteger(message.target))
+            ? message.target
+            : anchorTarget
+        const element =
+          target === 'picked' && pickedMany.length > 0
+            ? anchorCenterElementForMany()
+            : resolveAnchorElement(target)
+        if (element && element.isConnected) {
+          element.scrollIntoView?.({ block: 'center', inline: 'nearest', behavior: 'smooth' })
+          redraw()
+          scheduleAnchorSync()
+        }
+        return
+      }
       case 'select-scroll':
         if (Number.isFinite(message.dx) && Number.isFinite(message.dy)) {
           window.scrollBy({ left: message.dx, top: message.dy, behavior: 'instant' })
           redraw()
+          scheduleAnchorSync()
         }
         return
       case 'select-up': {
@@ -691,6 +1084,7 @@ export function start(config: RuntimeConfig): void {
         for (const [property, value] of Object.entries(message.style)) {
           if (typeof value === 'string') element.style.setProperty(property, value)
         }
+        scheduleAnchorSync()
         return
       }
       case 'preview-text':
@@ -700,9 +1094,11 @@ export function start(config: RuntimeConfig): void {
         remember(picked)
         original!.text ??= picked.textContent
         picked.textContent = message.text
+        scheduleAnchorSync()
         return
       case 'preview-reset':
         resetPreview()
+        scheduleAnchorSync()
         return
       case 'select-locate': {
         if (typeof message.channel === 'string' && message.channel !== '') channel = message.channel
@@ -735,6 +1131,7 @@ export function start(config: RuntimeConfig): void {
       case 'params':
         if (typeof message.values !== 'object' || message.values === null) return
         for (const [name, value] of Object.entries(message.values)) setParam(name, value)
+        scheduleAnchorSync()
         return
       case 'keep-scroll':
         keepScroll = true

@@ -2,7 +2,8 @@ import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { ApiIcon } from '@hugeicons/core-free-icons'
 import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
-import { cacheExpiry, knownExpiry } from '@shared/prompt-cache'
+import { cacheExpiry, knownExpiry, shouldShowCacheDropNotice } from '@shared/prompt-cache'
+import { DEFAULT_SETTINGS } from '@shared/settings'
 import {
   compactPrompt,
   QUEUED_COMMENTS_TEXT,
@@ -37,6 +38,7 @@ import {
 import { agentsOn, useAgentsStore, usePlanReadings } from '@renderer/stores/agents'
 import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
 import { taskFrom, useTasksStore } from '@renderer/stores/tasks'
+import { useSuggestionsStore } from '@renderer/stores/workflow-suggestions'
 import { AgentMarkHost } from '@renderer/components/agents/agent-mark-host'
 import { AgentMenu } from '@renderer/features/session/new-session/agent-menu'
 import { readFirstOptions } from '@renderer/features/session/new-session/prepared'
@@ -45,7 +47,7 @@ import { runningWorkOf, workItems, type WorkItem } from '@renderer/features/side
 import { setPaneSelection, useArtifactsStore } from '@renderer/stores/artifacts'
 import { useSettingsStore } from '@renderer/stores/settings'
 import { SANDBOX_OFF, type SandboxChoice } from '@shared/sandbox'
-import { showSending, useThreadsStore } from '@renderer/stores/threads'
+import { showSending, suppressSuggestion, useThreadsStore } from '@renderer/stores/threads'
 import { refreshLimits } from '@renderer/stores/usage'
 import { artifactShown, useViewStore } from '@renderer/stores/view'
 import { askSide, openSideChat, sideQuestionOf } from '@renderer/stores/side-chat'
@@ -59,8 +61,12 @@ import { commentsMessage } from '../entries/reply-quote'
 import { CommentList } from './comment-list'
 import { awaitsAnswer, endedOnRejection } from '../turn-phase'
 import { TrayStyles } from './affect-styles'
+import { formatAttachedArtifactsPrompt } from './artifact-attachments'
 import { attachmentContent, attachmentsBlock, type AttachmentsBlock } from './attachments'
+import { formatBrowserAnnotationsPrompt } from './browser-annotations'
 import { mentionResolver, NO_SURFACES, pluginRefs, surfaceRefs } from './chips'
+import { composerRunState } from './composer-state'
+import { canOfferDelegation, isDelegatableAgentStatus, setDraftDelegateTarget } from './delegation'
 import { mentionSurfacesOf } from './mention-surfaces'
 import { OptionMenu } from './control-row'
 import { useModeControl } from './mode-control'
@@ -91,7 +97,7 @@ import { CACHE_PER_MODEL, modelCacheRestarts } from './cache-restart'
 import { useAddMenu } from './add-menu'
 import { builtinCommands } from './builtin-commands'
 import { PromptBox } from './prompt-box'
-import { CACHE_NOTICE_MIN_TOKENS, CacheNotice } from './cache-notice'
+import { CACHE_NOTICE_MIN_TOKENS, CacheDropNotice, CacheNotice } from './cache-notice'
 import { QueueButton, SendButton, StopButton } from './send-button'
 import { SessionPlace } from './session-place'
 import { ProfileChip } from './profile-chip'
@@ -104,6 +110,7 @@ import { HandoffOfferStrip, TrafficHint } from './traffic-hint'
 import { LimitPauseStrip } from './limit-pause-strip'
 import { StallStrip } from './stall-strip'
 import { useFallback } from '../plan-quota'
+import { WorkflowEditStrip } from './workflow-edit-strip'
 import { SpeedButton } from './speed'
 import { CacheButton, ContextButton } from './usage'
 import { useOutOfCredit } from './use-out-of-credit'
@@ -153,11 +160,20 @@ export function Composer({
   agentName: string
   mustSwitch?: boolean
 }) {
-  const { t } = useTranslation(['composer', 'session'])
+  const { t, i18n } = useTranslation(['composer', 'session'])
   const { t: ta } = useTranslation('agents')
   const sessionId = session.id
   // A task this conversation started still runs; what is said here goes to this agent alone.
   const taskRunning = useTasksStore((s) => taskFrom(s.summaries, sessionId)?.status === 'running')
+  // Workflow suggestion card the user clicked Edit on, while it is still waiting for an answer.
+  const editingEntry = useSuggestionsStore((s) => s.editing[sessionId] ?? null)
+  const editingCard = useSuggestionsStore((s) =>
+    editingEntry ? (s.byId[editingEntry.cardId] ?? null) : null,
+  )
+  const editingSuggestion =
+    editingEntry && editingCard && editingCard.answer.kind === 'waiting'
+      ? { card: editingCard, nonce: editingEntry.nonce }
+      : null
   // Another agent picked to take the session over with the next message, shown as its own.
   const pending = useAgentSwitchStore((s) => s.pending[sessionId] ?? null)
   // Every agent here is one of the host the session is on.
@@ -233,15 +249,23 @@ export function Composer({
   const selection = beside ? picked : null
 
   const status = session.status
-  const starting = status === 'starting'
-  const running = status === 'running' || status === 'awaiting_permission'
-  const awaiting = status === 'awaiting_permission'
   // A terminal that has the session open writes to it, so nothing is sent until it lets go.
   const heldOutside = session.heldOutside === true
   // Huli: one that has it open but idle lets a message go after a confirmation.
   const openOutside = session.openOutside ?? null
-  // A closed session attaches to its agent as the message goes.
-  const idle = (status === 'ready' || status === 'closed') && !heldOutside
+  const {
+    starting,
+    waitingBackground,
+    activeRunning,
+    awaiting,
+    idle,
+    escapeCancels,
+    showStopWhenEmpty,
+  } = composerRunState({
+    status,
+    waitingBackground: session.waitingBackground,
+    heldOutside,
+  })
   // Huli: what a large context costs in traffic, and the ways out of it (省流量).
   const handedOff = useSessionsStore((s) => !!s.byId[sessionId]?.handedOffTo)
   const contextImages = session.images ?? null
@@ -261,29 +285,67 @@ export function Composer({
   // A turn ended with the context past the line: the card asks, where the user turned it on.
   const handoffOffered = offerHandoff && trafficHint.shown && canHandoff
   const folder = useSessionFolder(sessionId) ?? session.projectPath
+  const isScratch = useSessionsStore((s) => !!s.byId[sessionId]?.scratch)
   const box = usePromptBox({
     draft: sessionId,
     sessionId,
     projectPath: folder,
+    artifactProjectPath: session.projectPath,
+    noProject: isScratch,
     hostId,
     disabled: starting,
   })
-  const { attachments, error, setError } = box
+  const { attachments, artifacts, browserAnnotations, delegateTarget, error, setError } = box
+  const canDelegate = canOfferDelegation({
+    sessionId,
+    parentId: session.parentId,
+    origin: session.origin,
+    mustSwitch,
+    heldOutside,
+  })
+  const activeDelegate = canDelegate ? delegateTarget : null
+  const delegateLiveName = useAgentsStore((s) =>
+    activeDelegate ? agentsOn(s, hostId).byId[activeDelegate.agentId]?.name : undefined,
+  )
+  const delegateName = activeDelegate ? (delegateLiveName ?? activeDelegate.name) : null
+  const delegatableCount = useAgentsStore((s) => {
+    const hostAgents = agentsOn(s, hostId)
+    let count = 0
+    for (const id of hostAgents.order) {
+      const candidate = hostAgents.byId[id]
+      if (candidate && isDelegatableAgentStatus(candidate)) count++
+    }
+    return count
+  })
+  const agentsLoaded = useAgentsStore((s) => hostId !== null || s.loaded)
+  const delegateDisabled =
+    agentsLoaded && delegatableCount === 0 ? t('delegation.noAgents') : undefined
+  const [delegating, setDelegating] = useState(false)
   /** Whether a message can go now, as it is or into the queue. */
   const can = (holds: boolean, blocked: AttachmentsBlock | null) => ({
+    canDelegateSend:
+      activeDelegate !== null && !starting && !heldOutside && !delegating && holds && !blocked,
     canSend: idle && holds && !blocked && (!mustSwitch || pending !== null),
-    // During a turn the primary shortcut queues or steers by setting, and the secondary flips it.
-    canQueue: running && holds && !blocked && pending === null && !mustSwitch,
+    // During an active turn the primary shortcut queues or steers by setting; while idle-waiting
+    // on background work, follow-ups go straight into the session via `sessions.queue`.
+    canQueue:
+      (activeRunning || (waitingBackground && !heldOutside)) &&
+      holds &&
+      !blocked &&
+      pending === null &&
+      !mustSwitch,
   })
   // Comments on passages go with the message, so with one, Send works on an empty box.
   // Huli: so do the comments on diff lines and page elements waiting in the tray above.
   const noted = useNoteCount(sessionId) > 0
   const commented = useReplyComments(sessionId).length > 0 || noted
   // Read as values, so typing renders the composer only when one of them changes.
-  const holdsMessage = useBoxText(box, (text) => hasMessage(text, attachments)) || commented
+  const holdsMessage =
+    useBoxText(box, (text) => hasMessage(text, attachments, artifacts, browserAnnotations)) ||
+    commented
   const blockedBy = useBoxText(box, (text) => attachmentsBlock(attachments, text)?.message ?? null)
   const blocked = blockedBy === null ? null : attachmentsBlock(attachments, box.source.text)
-  const { canSend, canQueue } = can(holdsMessage, blocked)
+  const { canDelegateSend, canSend, canQueue } = can(holdsMessage, blocked)
   // The agent's predicted next prompt, faint in the empty box between turns until Esc puts it away.
   // A phone has no Tab to take it with.
   const empty = useBoxText(box, (text) => text === '')
@@ -295,6 +357,9 @@ export function Composer({
     idle &&
     empty &&
     attachments.length === 0 &&
+    artifacts.length === 0 &&
+    browserAnnotations.length === 0 &&
+    !activeDelegate &&
     !pending &&
     !mustSwitch &&
     !phone &&
@@ -306,15 +371,22 @@ export function Composer({
   useEffect(() => {
     const began = holdsMessage && !held.current
     held.current = holdsMessage
-    if (began && status === 'closed' && !heldOutside && !pending && !mustSwitch) {
+    if (
+      began &&
+      status === 'closed' &&
+      !heldOutside &&
+      !pending &&
+      !mustSwitch &&
+      !activeDelegate
+    ) {
       attachWhileTyping(sessionId)
     }
-  }, [holdsMessage, status, heldOutside, pending, mustSwitch, sessionId])
+  }, [holdsMessage, status, heldOutside, pending, mustSwitch, activeDelegate, sessionId])
   // The message as a key comes, from the editor itself, which a render may not have caught up with.
   const live = () => {
     const text = box.editor.current?.text() ?? box.source.text
     const holds =
-      hasMessage(text, attachments) ||
+      hasMessage(text, attachments, artifacts, browserAnnotations) ||
       commentsOf(sessionId).length > 0 ||
       readDraftNotes(sessionId).length + readDraftPageNotes(sessionId).length > 0
     return { holds, ...can(holds, attachmentsBlock(attachments, text)) }
@@ -338,7 +410,7 @@ export function Composer({
     if (!sideOn) return false
     const question = sideQuestionOf(box.editor.current?.text() ?? box.source.text)
     if (question === null) return false
-    if (attachments.length > 0) {
+    if (attachments.length > 0 || artifacts.length > 0 || browserAnnotations.length > 0) {
       setError(t('attachments.sideNoAttachments'))
       return true
     }
@@ -353,6 +425,7 @@ export function Composer({
     box,
     agentName,
     commands,
+    ...(canDelegate ? { onDelegate: box.openDelegatePicker, delegateDisabled } : {}),
     ...(sideOn ? { onSideChat: () => openSideChat(sessionId) } : {}),
   })
 
@@ -380,10 +453,18 @@ export function Composer({
     return turn?.reason === 'limit' ? turn.continuesAt : undefined
   })
   const switches = config.filter((o) => o.type === 'boolean')
+  const modelSelects = config.filter(
+    (o): o is SelectOption => o.category === 'model_config' && isSelect(o),
+  )
   // Huli: an option of the session's menu, such as Claude Code's output style, stays out of here.
   const others = config.filter(
     (o): o is SelectOption =>
-      isSelect(o) && o !== mode && o !== model && o !== effort && o.place !== 'menu',
+      isSelect(o) &&
+      o !== mode &&
+      o !== model &&
+      o !== effort &&
+      o.category !== 'model_config' &&
+      o.place !== 'menu',
   )
   const leftOthers = others.filter((o) => o.category === 'other')
   const rightOthers = others.filter((o) => o.category !== 'other')
@@ -418,7 +499,7 @@ export function Composer({
   const cacheRestartShown =
     cacheRestart !== null &&
     cacheRestart.at === lastRequestAt &&
-    !running &&
+    !activeRunning &&
     CACHE_PER_MODEL.has(harnessOf(session.agentId))
   const modeControl = useModeControl(mode, set)
 
@@ -501,17 +582,51 @@ export function Composer({
     if (document.activeElement === document.body) box.editor.current?.focus()
   }, [starting, ready, focused, box.editor, phone])
 
+  // Clicking Edit on a workflow card brings the composer into view, focuses it and pulses its ring.
+  const editingNonce = editingSuggestion?.nonce ?? 0
+  useEffect(() => {
+    if (editingNonce === 0) return
+    const el = root.current
+    if (!el) return
+    delete el.dataset.attention
+    let timer = 0
+    const frame = requestAnimationFrame(() => {
+      el.dataset.attention = ''
+      el.scrollIntoView({ block: 'nearest' })
+      box.editor.current?.focus()
+      timer = window.setTimeout(() => {
+        delete el.dataset.attention
+      }, 680)
+    })
+    return () => {
+      cancelAnimationFrame(frame)
+      if (timer) window.clearTimeout(timer)
+      delete el.dataset.attention
+    }
+  }, [editingNonce, box.editor])
+
   // Both go through the host's queue, which sends at once when the session is free; a message
-  // that hands the session to another agent goes as that agent's first turn.
-  const [outsideAsk, setOutsideAsk] = useState<{ canSend: boolean; canQueue: boolean } | null>(null)
-  const send = (now = { canSend, canQueue }) => {
+  // with a selected delegation recipient spawns a child session directly; a message that hands the
+  // session to another agent goes as that agent's first turn.
+  const [outsideAsk, setOutsideAsk] = useState<{
+    canDelegateSend: boolean
+    canSend: boolean
+    canQueue: boolean
+  } | null>(null)
+  const send = (now = { canDelegateSend, canSend, canQueue }) => {
+    if (activeDelegate) {
+      if (now.canDelegateSend) delegateNow()
+      return
+    }
     if (askBeside()) return
     if (openOutside && !heldOutside && now.canSend && !outsideConfirmed(sessionId)) {
       setOutsideAsk(now)
       return
     }
     if (pending && now.canSend) handOver()
-    else if (now.canSend || now.canQueue) queue(now.canQueue && steerDefault, now.canSend)
+    else if (now.canSend || now.canQueue) {
+      queue(now.canQueue && !waitingBackground && steerDefault, now.canSend || waitingBackground)
+    }
   }
   const blockedEnter = useBlockedEnter({
     reason: unsendable,
@@ -526,8 +641,10 @@ export function Composer({
     const taken = box.take()
     const comments = commentsOf(sessionId)
     keepComments(sessionId)
+    const withBrowser = formatBrowserAnnotationsPrompt(taken.prompt, taken.browserAnnotations)
+    const withArtifacts = formatAttachedArtifactsPrompt(withBrowser, taken.artifacts)
     const sent = selection && taken.prompt.trim() ? selection : null
-    const prompt = sent ? selectionPrompt(taken.prompt, sent) : taken.prompt
+    const prompt = sent ? selectionPrompt(withArtifacts, sent) : withArtifacts
     if (sent) setPaneSelection(null)
     // Huli: the comments on diff lines and page elements go after it, with their screenshots
     // after the message's own images; they leave the tray once the message went.
@@ -562,17 +679,19 @@ export function Composer({
         ref: { kind: 'attachment', attachment },
       })),
       // A terminal, tab or device the text mentions goes with it, which lets the agent use it.
-      ...surfaceRefs(prompt, mentionResolver([], null, mentionSurfacesOf(sessionId))).map(
+      ...surfaceRefs(taken.prompt, mentionResolver([], null, mentionSurfacesOf(sessionId))).map(
         (ref) => ({
           type: 'ref' as const,
           ref,
         }),
       ),
       // An item of a plugin the text mentions goes with it, and its content is read as it is sent.
-      ...pluginRefs(prompt, mentionResolver([], null, NO_SURFACES, taken.mentions)).map((ref) => ({
-        type: 'ref' as const,
-        ref: { kind: 'plugin' as const, ...ref },
-      })),
+      ...pluginRefs(taken.prompt, mentionResolver([], null, NO_SURFACES, taken.mentions)).map(
+        (ref) => ({
+          type: 'ref' as const,
+          ref: { kind: 'plugin' as const, ...ref },
+        }),
+      ),
     ]
     const commentIds = comments.map((c) => c.id)
     const noteIds = new Set([...notes, ...pageNotes].map((n) => n.id))
@@ -614,6 +733,8 @@ export function Composer({
     const now = useAgentSwitchStore.getState().pending[sessionId]
     if (!now) return
     const { taken, sent, content, commentIds, noteIds } = takeContent()
+    useSuggestionsStore.getState().stopEditing(sessionId)
+    const releaseSuggestion = suppressSuggestion(sessionId)
     const options = Object.keys(now.values).length > 0 ? { options: now.values } : {}
     host('sessions.switchAgent', {
       sessionId,
@@ -623,19 +744,52 @@ export function Composer({
       ...(now.summarize ? { summarize: true } : {}),
     })
       .then(() => {
+        releaseSuggestion(false)
         setPendingSwitch(sessionId, null)
         removeComments(sessionId, commentIds)
         dropSentNotes(noteIds)
       })
       .catch((reason: unknown) => {
+        releaseSuggestion(true)
         if (sent) setPaneSelection(sent)
         box.restore(taken)(reason)
+      })
+  }
+
+  // Spawns a delegated child session directly on the host, bypassing the current session's agent.
+  const delegateNow = () => {
+    if (!activeDelegate || delegating) return
+    const { taken, sent, content, commentIds, noteIds } = takeContent()
+    const target = taken.delegateTarget
+    if (!target) return
+    setDelegating(true)
+    useSuggestionsStore.getState().stopEditing(sessionId)
+    const releaseSuggestion = suppressSuggestion(sessionId)
+    host('sessions.delegate', {
+      sessionId,
+      agentId: target.agentId,
+      content,
+    })
+      .then((child) => {
+        releaseSuggestion(false)
+        removeComments(sessionId, commentIds)
+        dropSentNotes(noteIds)
+        useSessionsStore.getState().upsert(child)
+      })
+      .catch((reason: unknown) => {
+        releaseSuggestion(true)
+        if (sent) setPaneSelection(sent)
+        box.restore(taken)(reason)
+      })
+      .finally(() => {
+        setDelegating(false)
       })
   }
 
   // Picking a model of another agent makes it the pending one; the session's own agent undoes it.
   const chooseAgent = (agentId: AgentId, modelValue: string | null) => {
     setChoosingAgent(false)
+    setDraftDelegateTarget(sessionId, null)
     if (agentId === session.agentId && !mustSwitch) {
       setPendingSwitch(sessionId, null)
       const own = session.config.find((o) => o.category === 'model')
@@ -654,11 +808,14 @@ export function Composer({
   /** With `shown`, the session is free, so the message shows in the thread as it goes. */
   const queue = (steer: boolean, shown = false) => {
     const { taken, sent, content, commentIds, noteIds, summary } = takeContent()
+    useSuggestionsStore.getState().stopEditing(sessionId)
     const unshow = shown ? showSending(sessionId, content) : null
+    const releaseSuggestion = shown ? null : suppressSuggestion(sessionId)
     host('sessions.queue', { sessionId, content, ...(summary ? { comments: summary } : {}) })
       .then(({ itemId }) => {
         removeComments(sessionId, commentIds)
         dropSentNotes(noteIds)
+        releaseSuggestion?.(false)
         // It waits in the queue after all, which shows it there.
         if (itemId) unshow?.()
         // Once queued, a failed steer leaves the message in the queue, not lost.
@@ -669,7 +826,8 @@ export function Composer({
         }
       })
       .catch((reason: unknown) => {
-        unshow?.()
+        unshow?.({ restoreSuggestion: true })
+        releaseSuggestion?.(true)
         if (sent) setPaneSelection(sent)
         box.restore(taken)(reason)
       })
@@ -683,7 +841,7 @@ export function Composer({
   const paneId = usePane()?.paneId ?? null
   const sendFromReply = useEffectEvent(() => {
     const now = live()
-    if (now.canSend || now.canQueue) send(now)
+    if (now.canDelegateSend || now.canSend || now.canQueue) send(now)
   })
   useEffect(
     () =>
@@ -740,7 +898,12 @@ export function Composer({
       event.preventDefault()
       return
     }
-    if (event.key === 'Escape' && running) {
+    if (event.key === 'Escape' && editingSuggestion) {
+      event.preventDefault()
+      useSuggestionsStore.getState().stopEditing(sessionId, editingSuggestion.card.id)
+      return
+    }
+    if (event.key === 'Escape' && escapeCancels) {
       event.preventDefault()
       // A card waiting for the user takes Esc as its Deny, as its button shows, and the turn goes on;
       // with a message being written, Esc answers nothing, as Enter and the number keys do.
@@ -754,6 +917,7 @@ export function Composer({
     // With nothing written, Enter and Mod+Enter answer the waiting card, as its buttons show.
     const cardKey = isMod(event) ? 'confirm' : event.metaKey || event.ctrlKey ? null : 'enter'
     if (
+      !editingSuggestion &&
       !now.holds &&
       !event.shiftKey &&
       !event.altKey &&
@@ -768,11 +932,18 @@ export function Composer({
       sendKey === 'enter' ? !event.shiftKey && !isMod(event) : isMod(event) && !event.shiftKey
     const secondary =
       sendKey === 'enter' ? isMod(event) && !event.shiftKey : isMod(event) && event.shiftKey
+    if (activeDelegate) {
+      if (!primary && !secondary) return
+      event.preventDefault()
+      if (now.canDelegateSend) delegateNow()
+      else if (now.holds) blockedEnter.enter()
+      return
+    }
     if ((primary || secondary) && askBeside()) {
       event.preventDefault()
       return
     }
-    if (running && steering && secondary) {
+    if (activeRunning && steering && secondary) {
       event.preventDefault()
       if (now.canQueue) queue(!steerDefault)
       return
@@ -785,81 +956,130 @@ export function Composer({
 
   const placeholder = starting
     ? t('prompt.placeholder.starting', { agent: agentName })
-    : mustSwitch && !pending
-      ? t('prompt.placeholder.pickAgent')
-      : awaiting
-        ? t(asked ? 'prompt.placeholder.awaitingAnswer' : 'prompt.placeholder.awaiting')
-        : !running && reached?.resetsAt
-          ? t(
-              reached.extraUsage
-                ? 'prompt.placeholder.limitExtraUsage'
-                : typeof continuesAt === 'number'
-                  ? 'prompt.placeholder.limitReachedContinue'
-                  : 'prompt.placeholder.limitReached',
-              {
-                limit: limitPhrase(reached),
-                time: resetTime(typeof continuesAt === 'number' ? continuesAt : reached.resetsAt),
-              },
-            )
-          : !running && rejected
-            ? t('prompt.placeholder.denied')
-            : running
-              ? t(
-                  steerDefault
-                    ? phone
-                      ? 'prompt.placeholder.runningSteerTouch'
-                      : 'prompt.placeholder.runningSteer'
-                    : phone
-                      ? 'prompt.placeholder.runningTouch'
-                      : 'prompt.placeholder.runningQueue',
-                )
-              : taskRunning
-                ? t('prompt.placeholder.taskRunning')
-                : t('prompt.placeholder.ask')
+    : activeDelegate && delegateName
+      ? t('delegation.placeholder', { agent: delegateName })
+      : mustSwitch && !pending
+        ? t('prompt.placeholder.pickAgent')
+        : awaiting
+          ? t(asked ? 'prompt.placeholder.awaitingAnswer' : 'prompt.placeholder.awaiting')
+          : !activeRunning && reached?.resetsAt
+            ? t(
+                reached.extraUsage
+                  ? 'prompt.placeholder.limitExtraUsage'
+                  : typeof continuesAt === 'number'
+                    ? 'prompt.placeholder.limitReachedContinue'
+                    : 'prompt.placeholder.limitReached',
+                {
+                  limit: limitPhrase(reached),
+                  time: resetTime(typeof continuesAt === 'number' ? continuesAt : reached.resetsAt),
+                },
+              )
+            : !activeRunning && editingSuggestion
+              ? t('prompt.placeholder.editWorkflow', { agent: agentName })
+              : !activeRunning && rejected
+                ? t('prompt.placeholder.denied')
+                : activeRunning
+                  ? t(
+                      steerDefault
+                        ? phone
+                          ? 'prompt.placeholder.runningSteerTouch'
+                          : 'prompt.placeholder.runningSteer'
+                        : phone
+                          ? 'prompt.placeholder.runningTouch'
+                          : 'prompt.placeholder.runningQueue',
+                    )
+                  : taskRunning
+                    ? t('prompt.placeholder.taskRunning')
+                    : t('prompt.placeholder.ask')
 
   const cache = cacheExpiry(session, agent?.account ?? null)
   const timed = cache?.expiresAt != null ? cache : null
   const cachePhase = useCachePhase(knownExpiry(cache))
   // The cache write the notice was closed for, so it stays closed until the next one expires.
   const [noticeClosedFor, setNoticeClosedFor] = useState<number | null>(null)
+  const [dropClosedFor, setDropClosedFor] = useState<string | null>(null)
+  const cacheDropNoticeEnabled = useSettingsStore(
+    (s) => s.settings.thread.promptCacheDropNotice ?? DEFAULT_SETTINGS.thread.promptCacheDropNotice,
+  )
   const reread = session.usage?.used ?? 0
   const cacheNoticeShown =
     timed !== null &&
     cachePhase === 'expired' &&
     holdsMessage &&
-    !running &&
+    !activeRunning &&
     !starting &&
+    !activeDelegate &&
     pending === null &&
     !mustSwitch &&
     reread >= CACHE_NOTICE_MIN_TOKENS &&
     noticeClosedFor !== timed.lastRequestAt
+  const cacheDrop = session.cacheDrop ?? null
+  const cacheDropKey = cacheDrop ? `${sessionId}:${cacheDrop.at}` : null
+  const cacheDropNoticeShown =
+    !activeDelegate &&
+    shouldShowCacheDropNotice({
+      enabled: cacheDropNoticeEnabled,
+      drop: cacheDrop,
+      cacheNoticeShown,
+      activeRunning,
+      starting,
+      pendingSwitch: pending !== null,
+      mustSwitch,
+      dismissedKey: dropClosedFor,
+      noticeKey: cacheDropKey,
+    })
   const modelName = model
     ? (shownChoice(model.choices, String(model.value))?.name ?? String(model.value))
     : null
-  // While a turn runs, Stop shows with nothing written and Send once a message is.
-  const sendControl =
-    running && !holdsMessage ? (
-      <StopButton onStop={cancel} />
-    ) : running && canQueue ? (
-      <QueueButton
-        steering={steering}
-        steerDefault={steerDefault}
-        queueKey={queueKey}
-        steerKey={steerKey}
-        onQueue={() => queue(false)}
-        onSteer={() => queue(true)}
-      />
-    ) : blocked && holdsMessage ? (
-      // A disabled button takes no pointer, so the tooltip says why from around it.
+  // While a delegation recipient is selected, Send always spawns the delegated child session.
+  // Otherwise, while a turn actively runs, Stop shows with nothing written and Queue/Steer once a
+  // message is; while idle-waiting on background work, the composer matches the idle Send button.
+  const sendControl = activeDelegate ? (
+    blocked && holdsMessage ? (
       <Tooltip>
         <TooltipTrigger render={<span key="send" className="kettu-send-wrap" />}>
-          <SendButton disabled label={t('prompt.send')} />
+          <SendButton
+            disabled
+            label={t('delegation.sendLabel', { agent: delegateName ?? activeDelegate.name })}
+          />
         </TooltipTrigger>
         <TooltipContent>{blocked.message}</TooltipContent>
       </Tooltip>
     ) : (
-      <SendButton key="send" disabled={!canSend} label={t('prompt.send')} onClick={() => send()} />
+      <SendButton
+        key="send"
+        disabled={!canDelegateSend}
+        label={t('delegation.sendLabel', { agent: delegateName ?? activeDelegate.name })}
+        onClick={() => delegateNow()}
+      />
     )
+  ) : showStopWhenEmpty && !holdsMessage ? (
+    <StopButton onStop={cancel} />
+  ) : activeRunning && canQueue ? (
+    <QueueButton
+      steering={steering}
+      steerDefault={steerDefault}
+      queueKey={queueKey}
+      steerKey={steerKey}
+      onQueue={() => queue(false)}
+      onSteer={() => queue(true)}
+    />
+  ) : blocked && holdsMessage ? (
+    // A disabled button takes no pointer, so the tooltip says why from around it.
+    <Tooltip>
+      <TooltipTrigger render={<span key="send" className="kettu-send-wrap" />}>
+        <SendButton disabled label={t('prompt.send')} />
+      </TooltipTrigger>
+      <TooltipContent>{blocked.message}</TooltipContent>
+    </Tooltip>
+  ) : (
+    <SendButton
+      key="send"
+      disabled={!(canSend || (waitingBackground && canQueue))}
+      label={t('prompt.send')}
+      onClick={() => send()}
+    />
+  )
   const shownError =
     error ??
     (blocked && !blocked.adding ? blocked.message : null) ??
@@ -872,16 +1092,23 @@ export function Composer({
       data-composer=""
       className="kettu-composer"
       data-starting={starting || undefined}
+      data-editing-workflow={editingSuggestion ? '' : undefined}
     >
       <AnimatePresence initial={false}>
-        {cacheNoticeShown && (
+        {cacheNoticeShown ? (
           <CacheNotice
             key="cache-notice"
             estimate={timed.estimate}
             used={reread}
             onDismiss={() => setNoticeClosedFor(timed.lastRequestAt)}
           />
-        )}
+        ) : cacheDropNoticeShown && cacheDrop && cacheDropKey ? (
+          <CacheDropNotice
+            key={cacheDropKey}
+            drop={cacheDrop}
+            onDismiss={() => setDropClosedFor(cacheDropKey)}
+          />
+        ) : null}
       </AnimatePresence>
       <ChatComposer
         field={
@@ -905,6 +1132,8 @@ export function Composer({
               padding: '0',
               lineHeight: 'calc(var(--prose-size) + 7px)',
             }}
+            canDelegate={canDelegate}
+            onDelegateSelect={() => setPendingSwitch(sessionId, null)}
             onKeyDown={onKeyDown}
             top={
               <>
@@ -940,6 +1169,25 @@ export function Composer({
                       key="cache-restart"
                       model={cacheRestart.model}
                       onDismiss={() => setCacheRestart(null)}
+                    />
+                  )}
+                </AnimatePresence>
+                <AnimatePresence initial={false}>
+                  {editingSuggestion && (
+                    <WorkflowEditStrip
+                      key={editingSuggestion.card.id}
+                      workflowName={
+                        editingSuggestion.card.workflow.locales[i18n.language]?.name ??
+                        editingSuggestion.card.workflow.name
+                      }
+                      agentName={agentName}
+                      save={editingSuggestion.card.purpose === 'save'}
+                      onCancel={() => {
+                        useSuggestionsStore
+                          .getState()
+                          .stopEditing(sessionId, editingSuggestion.card.id)
+                        box.focus()
+                      }}
                     />
                   )}
                 </AnimatePresence>
@@ -1038,7 +1286,10 @@ export function Composer({
         modelSlot={
           !starting &&
           // An agent with no model menu switches from the agent menu itself.
-          (pending || choosingAgent || mustSwitch || !(model || effort || switches.length > 0) ? (
+          (pending ||
+          choosingAgent ||
+          mustSwitch ||
+          !(model || effort || switches.length > 0 || modelSelects.length > 0) ? (
             <AgentMenu
               agentId={pending?.agentId ?? (mustSwitch ? null : session.agentId)}
               values={pending ? pending.values : valuesOf(session.config)}
@@ -1054,7 +1305,7 @@ export function Composer({
               hostId={hostId}
               harness={agent?.harnessName ?? agentName}
               config={config}
-              running={running}
+              running={activeRunning}
               onSelect={set}
               open={modelMenuOpen}
               onOpenChange={setModelMenuOpen}
@@ -1075,6 +1326,9 @@ export function Composer({
           addMenu: t('attachments.add'),
           approvalMenu: t('controls.permissionMode'),
           selected: (label) => t('controls.selected', { label }),
+          voiceInput: t('controls.voiceInput'),
+          discardRecording: t('controls.discardRecording'),
+          useRecording: t('controls.useRecording'),
         }}
         foot={
           <>
@@ -1128,18 +1382,19 @@ export function Composer({
                 <CacheButton
                   cache={timed}
                   lastRequest={session.lastRequest}
-                  running={running}
+                  running={activeRunning}
                   used={session.usage?.used ?? 0}
                 />
                 <AgentMarkHost.Provider value={hostId}>
                   <ContextButton
                     sessionId={sessionId}
                     agentId={session.agentId}
-                    idle={!running && !starting}
+                    agentName={ownName}
+                    idle={!activeRunning && !starting}
                     closed={status === 'closed'}
                     reports={agent?.capabilities.context ?? false}
                     direct={agent?.capabilities.liveContext ?? false}
-                    live={running && (agent?.capabilities.liveContext ?? false)}
+                    live={activeRunning && (agent?.capabilities.liveContext ?? false)}
                     estimates={agent?.capabilities.contextEstimates}
                     usage={session.usage}
                     context={session.context}

@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { githubReferenceOf } from '@shared/git'
+import { sessionLinkProps, useLinkSessionId } from '@renderer/features/session/open-link'
+import { hostOfPath } from '@renderer/lib/host-paths'
 import { useGitStore } from '@renderer/stores/git'
 import { ReferenceHoverCard } from './gh-reference'
 import { PrIcon } from './pr-icon'
@@ -12,8 +14,15 @@ const CHECKS_KEY = {
 } as const
 
 /** The branch's pull request as a chip in the session's top bar; it opens it and shows its card. */
-export function PrBarChip({ projectPath }: { projectPath: string }) {
+export function PrBarChip({
+  projectPath,
+  sessionId,
+}: {
+  projectPath: string
+  sessionId?: string | null
+}) {
   const { t } = useTranslation('git')
+  const resolvedSessionId = useLinkSessionId(sessionId)
   const pr = useGitStore((s) => s.currentPr[projectPath] ?? null)
   if (!pr) return null
   const live = pr.state === 'open' || pr.state === 'draft'
@@ -23,9 +32,7 @@ export function PrBarChip({ projectPath }: { projectPath: string }) {
   const reference = githubReferenceOf(pr.url)
   const chip = (
     <a
-      href={pr.url}
-      target="_blank"
-      rel="noreferrer"
+      {...sessionLinkProps(pr.url, resolvedSessionId)}
       aria-label={label}
       className="ks-chip app-region-no-drag"
     >
@@ -34,5 +41,12 @@ export function PrBarChip({ projectPath }: { projectPath: string }) {
     </a>
   )
   if (!reference) return chip
-  return <ReferenceHoverCard reference={reference} trigger={chip} />
+  return (
+    <ReferenceHoverCard
+      reference={reference}
+      sessionId={resolvedSessionId}
+      hostId={hostOfPath(projectPath)}
+      trigger={chip}
+    />
+  )
 }

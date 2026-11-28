@@ -17,6 +17,7 @@ import type { TFunction } from 'i18next'
 import { DOCUMENT_ENTRY } from '@shared/artifact-document-anchors'
 import { ARTIFACT_ENTRY } from '@shared/artifact-files'
 import { NO_SESSION } from '@shared/artifacts'
+import { emitAppEvent } from '@renderer/app/events'
 import { Icon, type MenuItem } from '@renderer/components/affect/app-shell'
 import { Button } from '@renderer/components/affect/button'
 import { AgentCursorStyles } from '@renderer/components/affect/agent-cursors'
@@ -64,7 +65,7 @@ import {
   openSessionWithArtifact,
   useViewStore,
 } from '@renderer/stores/view'
-import { anchorOf } from './anchors'
+import { anchorOf, anchorsOfGroup } from './anchors'
 import { useArtifactHostConnected, useArtifactHostName, useArtifactShares } from './artifact-host'
 import { useArtifactWalk } from '@renderer/stores/artifact-walk'
 import { useChangeWalk } from './use-change-walk'
@@ -73,6 +74,7 @@ import { atMaxZoom, atMinZoom } from './camera'
 import { CanvasEditor, type CanvasStates } from './canvas-editor'
 import { CanvasControls, useCanvasState } from './canvas-controls'
 import { changeCount } from './change-words'
+import { canInlineDeckThread, canInlineDocThread } from './comment-threads'
 import type { PageActions } from './canvas-view'
 import { DeckPresent } from './deck-present'
 import { DeckSheet } from './deck-sheet'
@@ -315,14 +317,29 @@ export default function ArtifactViewer(place: ViewerPlace) {
   // What is picked beside a session is the context its composer offers, until something else is.
   const projectPath = panel?.projectPath ?? null
   useEffect(() => {
-    if (!projectPath || editing.mode !== 'select' || !editing.picked || !shown) return
+    if (!projectPath || editing.mode !== 'select' || !shown) return
+    if (editing.pickedGroup && editing.pickedGroup.selections.length > 0) {
+      const anchors = anchorsOfGroup(editing.pickedGroup, shown)
+      if (anchors[0]) {
+        setPaneSelection({
+          projectPath,
+          artifactId: id,
+          title,
+          anchor: anchors[0],
+          others: anchors.slice(1),
+        })
+        emitAppEvent({ kind: 'focus-composer' })
+      }
+      return
+    }
+    if (!editing.picked) return
     setPaneSelection({
       projectPath,
       artifactId: id,
       title,
       anchor: anchorOf(editing.picked, shown),
     })
-  }, [projectPath, editing.mode, editing.picked, shown, id, title])
+  }, [projectPath, editing.mode, editing.picked, editing.pickedGroup, shown, id, title])
   const choosePage = useCallback(
     (index: number) => {
       const page = shown?.canvas?.pages[index]
@@ -417,6 +434,8 @@ export default function ArtifactViewer(place: ViewerPlace) {
     return out
   }, [doc, threads])
 
+  const commentsShown = state.right === 'comments' || mode === 'comment'
+  const deckSlides = deck?.slides.length ?? 0
   const content = useMemo<ToolContent>(
     () =>
       shown?.canvas
@@ -428,14 +447,51 @@ export default function ArtifactViewer(place: ViewerPlace) {
             editor,
             focusLegacy: (index) => controls.commands?.focus(index),
           })
-        : isDocument || isDeck
+        : isDocument
           ? {
-              reveal: (_anchor, thread) => {
-                if (thread) setDocFocus((was) => ({ thread, seq: (was?.seq ?? 0) + 1 }))
+              reveal: (thread) => {
+                if (!canInlineDocThread(thread, { latest, commentsOpen: commentsShown })) {
+                  return null
+                }
+                setDocFocus((was) => ({ thread: thread.id, seq: (was?.seq ?? 0) + 1 }))
+                return 'inline'
               },
             }
-          : { reveal: (anchor) => anchor.offset !== null && editor?.reveal(null, anchor.offset) },
-    [id, doc, shown, panel?.panel, editor, controls, isDocument, isDeck],
+          : isDeck
+            ? {
+                reveal: (thread) => {
+                  if (
+                    !canInlineDeckThread(thread, {
+                      latest,
+                      commentsOpen: commentsShown,
+                      slideCount: deckSlides,
+                    })
+                  ) {
+                    return null
+                  }
+                  setDocFocus((was) => ({ thread: thread.id, seq: (was?.seq ?? 0) + 1 }))
+                  return 'inline'
+                },
+              }
+            : {
+                reveal: (thread) =>
+                  !thread.anchor.missing && thread.anchor.offset !== null && editor
+                    ? editor.revealPin(null, thread.anchor.offset)
+                    : null,
+              },
+    [
+      id,
+      doc,
+      shown,
+      panel?.panel,
+      editor,
+      controls,
+      isDocument,
+      isDeck,
+      latest,
+      commentsShown,
+      deckSlides,
+    ],
   )
   const tools = useViewerTools({
     id,

@@ -1,6 +1,7 @@
 // The git service's interface, as the rest of the agent host uses it.
 
 import type {
+  BranchGraphPage,
   BranchList,
   ChangedFile,
   CommitDetails,
@@ -11,10 +12,13 @@ import type {
   IssueLookup,
   LogCommit,
   PullRequest,
+  PullRequestStackLookup,
   PullRequestState,
+  ReferenceLookup,
+  RepositoryReferenceSearchResult,
   RepositoryVisibility,
 } from '@shared/git'
-import type { GitEntry, ToolKind } from '@shared/thread'
+import type { GitEntry, ToolEntry, ToolKind } from '@shared/thread'
 import type { CommitContext } from './commit-context'
 import type { PullRequestContext } from './pull-request-context'
 import type { StarCheck } from './star'
@@ -23,6 +27,15 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
 
 /** A git event for a session's thread; the session gives it its `g:<n>` id and `after`. */
 export type GitEventDraft = DistributiveOmit<GitEntry, 'id' | 'after'>
+
+/** What the git service reads from a finished tool call to attribute repository events. */
+export interface ToolCallOutcome {
+  toolKind: ToolKind
+  status: ToolEntry['status']
+  title?: string
+  rawInput?: string
+  output: string
+}
 
 export interface BranchPullRequest {
   number: number
@@ -99,10 +112,20 @@ export interface GitServiceApi {
   ): Promise<FileDiff>
   /** The local branches and the remotes; rejects outside a repository. */
   branches(projectPath: string): Promise<BranchList>
+  /** Read-only paginated commit history graph across branches, tags, and HEAD. */
+  graph(projectPath: string, options?: { limit?: number; skip?: number }): Promise<BranchGraphPage>
   /** Details for a pull request chip; `url` matches GITHUB_PULL_REQUEST_URL. */
   pullRequest(url: string): Promise<PullRequest>
   /** Details for an issue reference; `url` matches GITHUB_ISSUE_URL. */
   issue(url: string): Promise<IssueLookup>
+  /** Details for a pull request stack reference; `url` matches GITHUB_STACK_URL. */
+  stack(url: string, fresh?: boolean): Promise<PullRequestStackLookup>
+  /** Lists recent issues/PRs of `owner/repo` or searches them by number or title. */
+  searchReferences(
+    owner: string,
+    repo: string,
+    query: string,
+  ): Promise<RepositoryReferenceSearchResult>
   /** What is known of a session row's pull request without asking gh; asks in the background. */
   knownPullRequest(url: string): { state: PullRequestState; failing: boolean } | null
   /**
@@ -134,15 +157,14 @@ export interface GitServiceApi {
     projectPath: string,
     sessionId: string,
     toolCallId: string,
-    toolKind: ToolKind,
-    output: string,
+    outcome: ToolCallOutcome,
   ): void
   turnEnded(projectPath: string, sessionId: string): void
   onChanged(listener: (status: GitStatus) => void): () => void
   onPullRequest(listener: (projectPath: string, pr: PullRequest | null) => void): () => void
   onBranchPullRequests(listener: (projectPath: string) => void): () => void
-  /** A pull request or issue read changed what is known of it, or was read for the first time. */
-  onReferenceChanged(listener: (url: string, found: IssueLookup) => void): () => void
+  /** A pull request, issue, or stack read changed what is known of it, or was read for the first time. */
+  onReferenceChanged(listener: (url: string, found: ReferenceLookup) => void): () => void
   onSessionEvents(listener: (sessionId: string, events: GitEventDraft[]) => void): () => void
   onTools(listener: (tools: GitTools) => void): () => void
   dispose(): Promise<void>

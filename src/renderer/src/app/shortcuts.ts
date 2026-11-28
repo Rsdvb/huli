@@ -79,7 +79,9 @@ export function useKeyboardShortcuts(): void {
         if (document.querySelector(menuOpensTerminal())) return
         event.preventDefault()
         // The terminal of the side panel in view: its session's, or New session's in a project.
-        const panel = sessionsShown(view.main) ? shownPanel(view) : null
+        const panel = sessionsShown(view.main)
+          ? shownPanel(view, useProjectsStore.getState().projects)
+          : null
         if (!panel || view.settings.open) return
         if (bound === 'newTerminal') emitAppEvent({ kind: 'new-terminal' })
         else toggleTerminal(panel)

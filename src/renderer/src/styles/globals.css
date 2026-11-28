@@ -45,6 +45,8 @@
 /* A phone's width, where the web client lays each surface out for a phone (styles/phone.css). The
    desktop window is never this narrow. */
 @custom-variant phone (@media (max-width: 719px));
+/* Touch devices or phone widths where hover is absent or unreliable. */
+@custom-variant no-hover (@media (hover: none), (pointer: coarse), (max-width: 719px));
 
 /* Reduce motion follows the OS, and Settings › Appearance can force it on. */
 @custom-variant motion-reduce {
@@ -559,6 +561,12 @@
   --prose-size: 15px;
   /* The thread's prose, a pixel under the composer's; Text size moves both. */
   --thread-prose-size: calc(var(--prose-size) - 1px);
+  /* Code size adjustment: 0 px at default so existing textSize presets keep their exact rendering. */
+  --code-size-offset: 0px;
+  --code-line-height-offset: 0px;
+  /* Code editor, diffs and tool code blocks: 12 px / 20 px at default, stepped by Code size. */
+  --code-size: calc(var(--text-code) + var(--code-size-offset));
+  --code-line-height: calc(var(--text-code--line-height) + var(--code-line-height-offset));
   /* Font files load only when text uses their face. */
   --face-system:
     system-ui, 'Platform Chinese', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
@@ -578,13 +586,23 @@
     'Manrope Variable', 'Inter Variable', 'Platform Chinese', 'PingFang SC', 'Microsoft YaHei',
     'Noto Sans CJK SC', system-ui, sans-serif;
 
+  /* Pure-Latin prefixes of the system faces, used only when a custom Chinese face is set while the
+     primary face stays at the theme default so `system-ui` does not intercept Chinese glyphs. */
+  --face-system-latin:
+    'SF Pro Text', 'Helvetica Neue', 'Segoe UI', 'Liberation Sans', 'DejaVu Sans';
+  --face-system-mono-latin:
+    'SF Mono', 'Cascadia Code', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono';
+
   --theme-ui-face: var(--face-inter);
+  --theme-ui-latin: 'Inter Variable';
   --theme-prose-face: var(--face-inter);
+  --theme-prose-latin: 'Inter Variable';
   --display-face: var(--ui-face);
   --greeting-face:
     'Source Serif 4 Variable', 'Songti SC', STSong, SimSun, 'Noto Serif CJK SC', ui-serif, Georgia,
     serif;
   --theme-code-face: 'JetBrains Mono Variable', var(--face-system-mono);
+  --theme-code-latin: 'JetBrains Mono Variable', var(--face-system-mono-latin);
   /* A face the user picked in Settings comes first and the theme's fills in what it lacks. */
   --ui-face: var(--user-ui-face, var(--theme-ui-face));
   --prose-face: var(--user-prose-face, var(--theme-prose-face));
@@ -601,8 +619,8 @@
   /* Diffs: code at the code step, separators in Inter. @pierre/diffs reads these in its shadow
      root, where its own fallbacks are the platform's faces. */
   --diffs-font-family: var(--font-mono);
-  --diffs-font-size: var(--text-code);
-  --diffs-line-height: var(--text-code--line-height);
+  --diffs-font-size: var(--code-size);
+  --diffs-line-height: var(--code-line-height);
   --diffs-header-font-family: var(--font-sans);
 }
 
@@ -612,37 +630,46 @@
 }
 :root[data-font-ui='system'] {
   --theme-ui-face: var(--face-system);
+  --theme-ui-latin: var(--face-system-latin);
 }
 :root[data-font-ui='inter'] {
   --theme-ui-face: var(--face-inter);
+  --theme-ui-latin: 'Inter Variable';
 }
 :root[data-font-ui='source-serif-4'] {
   --theme-ui-face: var(--face-source-serif-4);
+  --theme-ui-latin: 'Source Serif 4 Variable';
 }
 :root[data-font-ui='jetbrains-mono'] {
   --theme-ui-face: var(--face-jetbrains-mono);
+  --theme-ui-latin: 'JetBrains Mono Variable';
 }
 :root[data-font-ui]:not([data-font-ui='inter']) {
   --ui-features: normal;
 }
 :root[data-font-prose='system'] {
   --theme-prose-face: var(--face-system);
+  --theme-prose-latin: var(--face-system-latin);
 }
 :root[data-font-prose='inter'] {
   --theme-prose-face: var(--face-inter);
+  --theme-prose-latin: 'Inter Variable';
 }
 :root[data-font-prose='source-serif-4'] {
   --theme-prose-face: var(--face-source-serif-4);
+  --theme-prose-latin: 'Source Serif 4 Variable';
   --prose-scale: 1.1;
 }
 :root[data-font-prose='jetbrains-mono'] {
   --theme-prose-face: var(--face-jetbrains-mono);
+  --theme-prose-latin: 'JetBrains Mono Variable';
 }
 :root[data-font-prose]:not([data-font-prose='inter']) {
   --prose-features: normal;
 }
 :root[data-font-code='system'] {
   --theme-code-face: var(--face-system-mono);
+  --theme-code-latin: var(--face-system-mono-latin);
 }
 :root[data-user-font-ui] {
   --ui-features: normal;
@@ -657,6 +684,14 @@
 }
 :root[data-text-size='large'] {
   --prose-size: 16px;
+}
+:root[data-code-size='small'] {
+  --code-size-offset: -1px;
+  --code-line-height-offset: -2px;
+}
+:root[data-code-size='large'] {
+  --code-size-offset: 1px;
+  --code-line-height-offset: 2px;
 }
 
 @layer base {
@@ -728,6 +763,9 @@
   ::highlight(reply-comment-hover) {
     background-color: var(--comment-mark-hover);
   }
+  ::highlight(file-note) {
+    background-color: var(--comment-mark);
+  }
   input,
   textarea,
   [contenteditable] {
@@ -766,6 +804,14 @@
 }
 
 @utility app-region-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Suspend window drag regions while a click-outside overlay (context menu, dropdown, popover,
+   select, combobox) is open so clicking empty bar space reaches the DOM instead of starting a
+   native Electron window drag. */
+:root[data-overlay-open] .app-region-drag,
+:root[data-overlay-open] .before\:app-region-drag::before {
   -webkit-app-region: no-drag;
 }
 
@@ -911,8 +957,60 @@
     }
   }
 }
+
+/* Top and bottom fades drawn as compositor-only overlays rather than masking the scroller:
+   Chromium repaints a masked scroller on every scroll frame. Goes on the scroller's positioned
+   parent sitting on --background; the scroller sets scroll-timeline: --scroll-fade-y y. */
+@utility scroll-fade-y-overlay {
+  timeline-scope: --scroll-fade-y;
+  &::before,
+  &::after {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset-inline: 0;
+    z-index: 1;
+    height: var(--scroll-fade-size);
+    opacity: 0;
+  }
+  &::before {
+    top: 0;
+    background: linear-gradient(to bottom, var(--background), transparent);
+    @supports (animation-timeline: scroll()) {
+      animation-name: scroll-fade-top-reveal;
+      animation-duration: 1ms;
+      animation-timing-function: ease-in-out;
+      animation-fill-mode: both;
+      animation-timeline: --scroll-fade-y;
+      animation-range: 0 calc(var(--spacing) * 24);
+    }
+  }
+  &::after {
+    bottom: 0;
+    background: linear-gradient(to top, var(--background), transparent);
+    @supports (animation-timeline: scroll()) {
+      animation-name: scroll-fade-bottom-reveal;
+      animation-duration: 1ms;
+      animation-timing-function: ease-in-out;
+      animation-fill-mode: both;
+      animation-timeline: --scroll-fade-y;
+      animation-range: calc(100% - var(--spacing) * 24) 100%;
+    }
+  }
+}
 @keyframes scroll-fade-top-reveal {
   from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes scroll-fade-bottom-reveal {
+  from {
+    opacity: 1;
+  }
+  to {
     opacity: 0;
   }
 }
@@ -1468,7 +1566,7 @@
     padding: 0.0667em 0.3333em;
     font-family: var(--font-mono);
     font-variant-ligatures: none;
-    font-size: 0.8667em;
+    font-size: calc(0.8667em + var(--code-size-offset));
   }
   & del {
     color: var(--text-tertiary);
@@ -1638,7 +1736,7 @@
     background: var(--bg-hover);
   }
   & [data-streamdown='table-cell'] [data-streamdown='inline-code'] {
-    font-size: calc(var(--prose-size) - 3px);
+    font-size: calc(var(--prose-size) - 3px + var(--code-size-offset));
   }
   & [data-table-footer] {
     display: flex;
@@ -1712,7 +1810,7 @@
     }
     & > code {
       font-family: var(--font-mono);
-      font-size: 0.8667em;
+      font-size: calc(0.8667em + var(--code-size-offset));
       white-space: pre-wrap;
     }
   }
@@ -1732,7 +1830,7 @@
   & [data-math-error] {
     font-family: var(--font-mono);
     font-variant-ligatures: none;
-    font-size: 0.8667em;
+    font-size: calc(0.8667em + var(--code-size-offset));
     & mark {
       border-radius: 2px;
       background: var(--danger-tint);
@@ -1890,10 +1988,22 @@
 .block-picture:focus-within > .block-picture-actions {
   opacity: 1;
 }
-@media (hover: none) {
+@media (hover: none), (pointer: coarse), (max-width: 719px) {
   .block-picture-actions {
     opacity: 1;
   }
+}
+/* Isolate Mermaid's temporary measurement container from the document flow and layout tree. */
+body > div[id^='dkettu-mermaid-'] {
+  position: fixed;
+  top: -100000px;
+  left: -100000px;
+  width: 1024px;
+  height: 768px;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  contain: strict;
 }
 /* Streamdown's code block inside the frame: only its highlighted body, with the line numbers in
    an 18 px column 14 px from the edge. */
@@ -1917,7 +2027,7 @@
   background: transparent;
   padding: 10px 0;
   font-family: var(--font-mono);
-  font-size: calc(var(--prose-size) - 2.5px);
+  font-size: calc(var(--prose-size) - 2.5px + var(--code-size-offset));
   font-variant-ligatures: none;
   line-height: 1.7;
 }
@@ -2002,7 +2112,7 @@
   background: transparent;
   padding: 3px 0;
   font-family: var(--font-mono);
-  font-size: calc(var(--prose-size) - 2.5px);
+  font-size: calc(var(--prose-size) - 2.5px + var(--code-size-offset));
   font-variant-ligatures: none;
   line-height: 1.7;
 }
@@ -2249,9 +2359,9 @@
   overflow: hidden;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: calc(11.5px + var(--code-size-offset));
   font-variant-ligatures: none;
-  line-height: 19px;
+  line-height: calc(19px + var(--code-line-height-offset));
   white-space: pre;
   text-overflow: ellipsis;
 }
@@ -2263,6 +2373,12 @@
 .diff {
   --diffs-light-bg: var(--bg-code-block);
   --diffs-dark-bg: var(--bg-code-block);
+}
+
+/* Compact line height for inline working-tree previews inside the Git changes list. */
+.git-inline-diff {
+  --diffs-line-height: var(--code-line-height);
+  font-variant-ligatures: none;
 }
 
 /* The Files pane keeps theme tints; lines picked to mention take the selection's fox tint. */
@@ -2286,8 +2402,12 @@
   /* The numbers of rows commented on for the agent. */
   --diff-note: var(--pane-fox);
   --diffs-header-font-family: var(--font-mono);
-  --diffs-line-height: 21px;
+  --diffs-line-height: calc(21px + var(--code-line-height-offset));
   /* A changed line's tint runs from the numbers into the code without a seam. */
   --diffs-gap-style: none;
   font-variant-ligatures: none;
+}
+.files-diff-hunk {
+  font-size: var(--code-size);
+  line-height: calc(21px + var(--code-line-height-offset));
 }

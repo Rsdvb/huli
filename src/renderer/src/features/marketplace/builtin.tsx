@@ -52,6 +52,7 @@ const GROUPS: { id: McpToolGroup; icon: IconSvgElement }[] = [
   { id: 'secrets', icon: Key01Icon },
   { id: 'theme', icon: PaintBoardIcon },
   { id: 'routines', icon: TimeScheduleIcon },
+  { id: 'mcp', icon: PlugSocketIcon },
   { id: 'plugins', icon: PlugSocketIcon },
 ]
 
@@ -91,7 +92,7 @@ export function BuiltinServerPage({ back }: { tab: MarketplaceTab; back: () => v
   return (
     <ListingFrame back={back} rise>
       <header className="k-mkt-head">
-        <BrandIcon size={64} className="k-pub-kettu" />
+        <BrandIcon size={64} icon="kettu" className="k-pub-kettu" />
         <span className="k-mkt-head__title">
           <span className="k-mkt-head__name">
             <h1>Kettu</h1>

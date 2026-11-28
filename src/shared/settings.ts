@@ -90,6 +90,7 @@ export interface SettingsFile {
   }
   thread: {
     outlineSummaries: boolean // a small model titles the outline's messages
+    promptCacheDropNotice: boolean // warn after a turn when measured prompt cache hits drop sharply
     confirmLinks: boolean // ask before opening a site that has no `alwaysOpenIn` entry
     openLinksIn: OpenLinksIn // where a click on a link in a reply opens it
     // By site: its registrable domain, or the whole host when that is the domain. Replaced whole.
@@ -102,10 +103,14 @@ export interface SettingsFile {
   appearance: {
     theme: 'system' | 'light' | 'dark' // the color mode, which picks a theme's variant
     colorTheme: string // an installed theme's id, or BUILTIN_THEME_ID
+    appIcon: AppIcon // the app's icon in the Dock, taskbar, windows and in-app brand marks
     textSize: 'small' | 'default' | 'large' // the composer: 14, 15 or 16 px; thread prose a pixel less
+    codeSize: CodeSize // step for code blocks, inline code, the editor and diffs (-1, 0 or +1 px)
+    conversationWidth: ConversationWidth // default column width preset for the thread and composer
     reduceMotion: 'system' | 'always'
     zoom: ZoomLevel // Chromium's page zoom of the whole window
     sidebarHover: boolean // pointing at the toggle of a collapsed sidebar shows it over the page
+    closeSidePanelWithLastTab: boolean // closing the last tab in the side panel collapses it instead of showing the panel list
     sidebarOrder: SidebarPage[] // every page once, as the sidebar lists them; replaced whole
     sidebarHidden: SidebarPage[] // pages the sidebar leaves out; replaced whole
     fonts: UserFonts // replaced whole; a role left out keeps the theme's face
@@ -312,8 +317,20 @@ export function readSidebarOrder(value: unknown): SidebarPage[] {
 
 export const USER_FONT_ROLES = ['ui', 'prose', 'code'] as const
 export type UserFontRole = (typeof USER_FONT_ROLES)[number]
-/** A face installed on the computer by role, each drawn before the theme's, which fills in. */
-export type UserFonts = Partial<Record<UserFontRole, string>>
+export type UserCjkFontKey = `${UserFontRole}Cjk`
+export const USER_FONT_KEYS = ['ui', 'prose', 'code', 'uiCjk', 'proseCjk', 'codeCjk'] as const
+export type UserFontKey = (typeof USER_FONT_KEYS)[number]
+
+/** The optional Chinese font key paired with a text role. */
+export function cjkFontKey(role: UserFontRole): UserCjkFontKey {
+  return `${role}Cjk`
+}
+
+/**
+ * Faces installed on the computer by role, each drawn before the theme's fallback. An optional
+ * `<role>Cjk` face follows the primary face for Chinese glyphs before falling back to the system.
+ */
+export type UserFonts = Partial<Record<UserFontKey, string>>
 
 /** One face name, safe to put in quotes in a CSS font stack: no quotes, separators or controls. */
 export function isFontFamilyName(value: string): boolean {
@@ -375,6 +392,43 @@ export const CONFIG_VARIABLES: Partial<Record<HarnessId, string>> = {
   codex: 'CODEX_HOME',
   deepseek: 'DSH_HOME',
   codebuddy: 'CODEBUDDY_CONFIG_DIR',
+}
+
+/** The six selectable desktop app icons, in picker order. */
+export const APP_ICONS = [
+  'kettu',
+  'ink',
+  'paper',
+  'orange-flat',
+  'ink-sheets',
+  'paper-sheets',
+] as const
+export type AppIcon = (typeof APP_ICONS)[number]
+
+export function isAppIcon(value: unknown): value is AppIcon {
+  return (APP_ICONS as readonly unknown[]).includes(value)
+}
+
+/** Accepts the six icon ids and the legacy `'default'` alias; returns null for anything else. */
+export function normalizeAppIcon(value: unknown): AppIcon | null {
+  if (value === 'default') return 'kettu'
+  return isAppIcon(value) ? value : null
+}
+
+/** The font size presets for code blocks, inline code, the editor and diffs. */
+export const CODE_SIZES = ['small', 'default', 'large'] as const
+export type CodeSize = (typeof CODE_SIZES)[number]
+
+export function isCodeSize(value: unknown): value is CodeSize {
+  return (CODE_SIZES as readonly unknown[]).includes(value)
+}
+
+/** The default width presets for the conversation column (thread and composer). */
+export const CONVERSATION_WIDTHS = ['standard', 'wide'] as const
+export type ConversationWidth = (typeof CONVERSATION_WIDTHS)[number]
+
+export function isConversationWidth(value: unknown): value is ConversationWidth {
+  return (CONVERSATION_WIDTHS as readonly unknown[]).includes(value)
 }
 
 /** Chrome's page zoom steps from 80% to 150%. */
@@ -475,6 +529,7 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   },
   thread: {
     outlineSummaries: true,
+    promptCacheDropNotice: false,
     confirmLinks: true,
     openLinksIn: 'browser',
     alwaysOpenIn: {},
@@ -484,10 +539,14 @@ export const DEFAULT_SETTINGS: SettingsFile = {
   appearance: {
     theme: 'system',
     colorTheme: BUILTIN_THEME_ID,
+    appIcon: 'kettu',
     textSize: 'default',
+    codeSize: 'default',
+    conversationWidth: 'standard',
     reduceMotion: 'system',
     zoom: 1.1,
     sidebarHover: true,
+    closeSidePanelWithLastTab: false,
     sidebarOrder: [...SIDEBAR_PAGES],
     sidebarHidden: [],
     fonts: {},

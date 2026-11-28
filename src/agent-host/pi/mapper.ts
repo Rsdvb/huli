@@ -3,15 +3,18 @@
 
 import path from 'node:path'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
-import type {
-  ThreadEntry,
-  TokenTotals,
-  ToolContent,
-  ToolEntry,
-  ToolKind,
-  UserContent,
+import {
+  cutToolOutput,
+  trimToolOutputDelta,
+  type ThreadEntry,
+  type TokenTotals,
+  type ToolContent,
+  type ToolEntry,
+  type ToolKind,
+  type UserContent,
 } from '@shared/thread'
 import { diffHunks } from '../codex/mapper'
+import type { RewindPoint } from '../connection'
 import { t } from '../i18n'
 import { isClaudeRowlessCall, isClaudeRowWhenFailed } from '../plan-tool'
 import {
@@ -44,8 +47,6 @@ import type {
   PiUsage,
 } from './protocol'
 
-/** Output a tool printed, its start cut once it grows past this. */
-const OUTPUT_LIMIT = 64 * 1024
 /** A running command's output reaches the thread at most this often. */
 const OUTPUT_EVERY_MS = 150
 const SHELL_TOOLS: ReadonlySet<string> = new Set(['bash', 'powershell'])
@@ -55,9 +56,7 @@ function output(): MapperOutput {
   return { patches: [], effects: [] }
 }
 
-function cut(text: string): string {
-  return text.length > OUTPUT_LIMIT ? `…\n${text.slice(text.length - OUTPUT_LIMIT)}` : text
-}
+const cut = cutToolOutput
 
 function record(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -302,6 +301,8 @@ interface Call {
   args: unknown
   /** When its running output last reached the thread. */
   shownAt: number
+  /** 已下发给线程的规范化累计输出文本，用于计算增量补丁。 */
+  shownText: string
 }
 
 interface Reply {
@@ -696,7 +697,12 @@ export class SessionMapper {
     replaying = false,
   ): void {
     const known = this.calls.get(callId)
-    this.calls.set(callId, { name, args: args ?? known?.args, shownAt: known?.shownAt ?? 0 })
+    this.calls.set(callId, {
+      name,
+      args: args ?? known?.args,
+      shownAt: known?.shownAt ?? 0,
+      shownText: known?.shownText ?? '',
+    })
     if (this.hidden(name)) return
     const id = `t:${callId}`
     const existing = ctx.thread.byId[id]
@@ -729,7 +735,7 @@ export class SessionMapper {
   ): void {
     const known = this.calls.get(callId)
     const input = args ?? known?.args ?? {}
-    this.calls.set(callId, { name, args: input, shownAt: 0 })
+    this.calls.set(callId, { name, args: input, shownAt: 0, shownText: '' })
     if (this.hidden(name)) return
     const id = `t:${callId}`
     const facts = toolFacts(name, input, this.cwd)
@@ -771,8 +777,16 @@ export class SessionMapper {
     if (!call || existing?.kind !== 'tool' || !SHELL_TOOLS.has(call.name)) return
     if (ctx.now - call.shownAt < OUTPUT_EVERY_MS) return
     const text = toLf(blockText(partial?.content))
-    if (text === '') return
+    if (text === '' || text === call.shownText) return
     call.shownAt = ctx.now
+    // 若本次快照在已下发文本末尾继续追加，则仅发增量补丁；若发生覆盖/回写则回退整段更新。
+    if (text.startsWith(call.shownText)) {
+      const delta = text.slice(call.shownText.length)
+      call.shownText = text
+      out.patches.push({ op: 'entry.appendOutput', id, text: trimToolOutputDelta(delta) })
+      return
+    }
+    call.shownText = text
     out.patches.push({
       op: 'entry.update',
       id,
@@ -789,7 +803,7 @@ export class SessionMapper {
     failed: boolean,
     before?: string | null,
   ): void {
-    const call = this.calls.get(callId) ?? { name, args: {}, shownAt: 0 }
+    const call = this.calls.get(callId) ?? { name, args: {}, shownAt: 0, shownText: '' }
     this.calls.delete(callId)
     const id = `t:${callId}`
     const existing = ctx.thread.byId[id]
@@ -881,7 +895,7 @@ export class SessionMapper {
     const out = output()
     switch (entry.type) {
       case 'message':
-        if (!entry.message || !this.stored(ctx, out, entry.message)) return null
+        if (!entry.message || !this.stored(ctx, out, entry.message, entry.id)) return null
         break
       case 'compaction':
         addEntry(ctx, out, {
@@ -906,10 +920,15 @@ export class SessionMapper {
     return out
   }
 
-  private stored(ctx: MapperContext, out: MapperOutput, message: PiMessage): boolean {
+  private stored(
+    ctx: MapperContext,
+    out: MapperOutput,
+    message: PiMessage,
+    entryId: string,
+  ): boolean {
     switch (message.role) {
       case 'user':
-        this.storedPrompt(ctx, out, message)
+        this.storedPrompt(ctx, out, message, entryId)
         return true
       case 'assistant': {
         this.blocks(ctx, out, String(message.timestamp ?? ctx.nextId()), message, true)
@@ -946,7 +965,12 @@ export class SessionMapper {
     }
   }
 
-  private storedPrompt(ctx: MapperContext, out: MapperOutput, message: PiMessage): void {
+  private storedPrompt(
+    ctx: MapperContext,
+    out: MapperOutput,
+    message: PiMessage,
+    entryId: string,
+  ): void {
     // Each stored prompt starts a turn, which scopes "current" plans.
     ctx.scope.planId = null
     const id = ctx.nextId()
@@ -981,7 +1005,12 @@ export class SessionMapper {
       }
     }
     if (content.length === 0) return
-    const entry: ThreadEntry = { kind: 'user', id, content }
+    const entry: ThreadEntry = {
+      kind: 'user',
+      id,
+      content,
+      ...(entryId ? { agentRef: entryId } : {}),
+    }
     addEntry(ctx, out, entry)
   }
 
@@ -1101,4 +1130,58 @@ export function forkEntry(
     .slice(at + 1)
     .find((entry) => entry.type === 'message' && entry.message?.role === 'user')
   return { found: true, entryId: next?.id ?? null }
+}
+
+/** Prefix for user message references recorded from live stream timestamps. */
+export const TIMESTAMP_REF_PREFIX = 'ts:'
+
+const CONVERSATION_ENTRY_TYPES: ReadonlySet<string> = new Set([
+  'message',
+  'compaction',
+  'branch_summary',
+  'custom_message',
+])
+
+/**
+ * The user entry an edit from a message cuts before on the active branch: found by its entry id
+ * (from history replay) or live message timestamp (`ts:<ms>`), else as the `occurrence`-th user
+ * message matching the prompt's first line. `hasPriorHistory` is false when no conversation entry
+ * precedes it on the branch (only metadata such as model or thinking level changes).
+ */
+export function rewindEntry(
+  branch: readonly PiEntry[],
+  point: RewindPoint,
+): { entry: PiEntry; hasPriorHistory: boolean } | null {
+  const isUser = (entry: PiEntry): boolean =>
+    entry.type === 'message' && entry.message?.role === 'user'
+
+  let at = -1
+  if (point.ref !== null) {
+    if (point.ref.startsWith(TIMESTAMP_REF_PREFIX)) {
+      const ts = point.ref.slice(TIMESTAMP_REF_PREFIX.length)
+      if (ts !== '') {
+        at = branch.findIndex((entry) => isUser(entry) && String(entry.message?.timestamp) === ts)
+      }
+    } else {
+      at = branch.findIndex((entry) => isUser(entry) && entry.id === point.ref)
+    }
+  }
+  if (at === -1) {
+    const line = point.text.trim()
+    let seen = 0
+    at = branch.findIndex((entry) => {
+      if (!isUser(entry)) return false
+      if (line !== '') {
+        const raw = blockText(entry.message?.content)
+        const shown = typedText(withoutAhead(raw))
+        if (!raw.includes(line) && !shown.includes(line)) return false
+      }
+      return ++seen === point.occurrence
+    })
+  }
+  if (at === -1) return null
+  const hasPriorHistory = branch
+    .slice(0, at)
+    .some((entry) => CONVERSATION_ENTRY_TYPES.has(entry.type))
+  return { entry: branch[at]!, hasPriorHistory }
 }

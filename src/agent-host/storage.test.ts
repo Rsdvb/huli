@@ -9,6 +9,7 @@ import {
   githubFlowFile,
   JsonFile,
   migrate,
+  observeStorageWrites,
   parseGithubFlowFile,
   parseAgentsFile,
   parseAgentUpdatesFile,
@@ -243,6 +244,65 @@ describe('JsonFile', () => {
     expect(await readFile(file, 'utf8')).toBe(newer)
     expect(logs.some((line) => line.includes('newer than this app'))).toBe(true)
   })
+
+  it('reports ENOSPC write failures and recoveries to both onWrite and root observers', async () => {
+    const file = path.join(dir, 'state', 'doc.json')
+    const enospc = Object.assign(new Error('ENOSPC: no space left on device, write'), {
+      code: 'ENOSPC',
+    })
+    let fail = true
+    const store = new JsonFile<Doc>({
+      file,
+      version: 1,
+      migrations: {},
+      parse: (data) => ({ version: 1, value: Number(data.value) }),
+      empty: () => ({ version: 1, value: 0 }),
+      log,
+      debounceMs: 0,
+      retryMs: 60_000,
+      writeFile: async (target, contents) => {
+        if (fail) throw enospc
+        await writeFileAtomic(target, contents)
+      },
+    })
+    const direct: { file: string; ok: boolean; code?: string }[] = []
+    const rootSeen: { file: string; ok: boolean; code?: string }[] = []
+    const otherRootSeen: string[] = []
+    const unsubDirect = store.onWrite((outcome) =>
+      direct.push({
+        file: outcome.file,
+        ok: outcome.ok,
+        code: (outcome.error as NodeJS.ErrnoException | undefined)?.code,
+      }),
+    )
+    const unsubRoot = observeStorageWrites(dir, (outcome) =>
+      rootSeen.push({
+        file: outcome.file,
+        ok: outcome.ok,
+        code: (outcome.error as NodeJS.ErrnoException | undefined)?.code,
+      }),
+    )
+    const unsubOther = observeStorageWrites(path.join(dir, 'other-host'), (outcome) =>
+      otherRootSeen.push(outcome.file),
+    )
+    try {
+      store.save({ version: 1, value: 1 })
+      expect(await store.flushWritten()).toBe(false)
+      expect(direct).toEqual([{ file, ok: false, code: 'ENOSPC' }])
+      expect(rootSeen).toEqual([{ file, ok: false, code: 'ENOSPC' }])
+      expect(otherRootSeen).toEqual([])
+
+      fail = false
+      store.save({ version: 1, value: 2 })
+      expect(await store.flushWritten()).toBe(true)
+      expect(direct.at(-1)).toEqual({ file, ok: true, code: undefined })
+      expect(rootSeen.at(-1)).toEqual({ file, ok: true, code: undefined })
+    } finally {
+      unsubDirect()
+      unsubRoot()
+      unsubOther()
+    }
+  })
 })
 
 describe('the host files', () => {
@@ -286,6 +346,17 @@ describe('the host files', () => {
 
   it('validates every session field', () => {
     expect(parseSessionsFile({ sessions: [session] })).toEqual({ version: 1, sessions: [session] })
+    for (const titleSource of ['agent', 'written', 'given'] as const) {
+      const sourced = { ...session, titleSource }
+      expect(parseSessionsFile({ sessions: [sourced] })).toEqual({
+        version: 1,
+        sessions: [sourced],
+      })
+    }
+    expect(parseSessionsFile({ sessions: [{ ...session, titleSource: 'other' }] })).toEqual({
+      version: 1,
+      sessions: [session],
+    })
     expect(parseSessionsFile({ sessions: [{ ...session, agentId: 'other' }] })).toBe(
       'session 0 is malformed',
     )
@@ -645,6 +716,75 @@ describe('the host files', () => {
     expect(parseSessionsFile({ sessions: [{ ...session, queue: [bad] }] })).toEqual({
       version: 1,
       sessions: [{ ...session, queue: [{ ...item, from: { sessionId: 's-a', title: 'Review' } }] }],
+    })
+  })
+
+  it('keeps completion report metadata on queued prompts, including legacy and sanitized forms', () => {
+    const item = { id: 'q1', content: [{ type: 'text' as const, text: 'Kettu: report' }], at: 100 }
+    const withRound = {
+      ...item,
+      from: {
+        sessionId: 's-child',
+        title: 'Child task',
+        ended: {
+          agent: 'Codex',
+          stopReason: 'end_turn' as const,
+          round: 2,
+          completedAt: 1_764_200_000_000,
+          entryId: 'e5',
+          pos: 4,
+        },
+      },
+    }
+    const legacy = {
+      ...item,
+      id: 'q2',
+      from: {
+        sessionId: 's-legacy',
+        title: 'Legacy child',
+        ended: { agent: 'Claude Code', stopReason: null },
+      },
+    }
+    const malformed = {
+      ...item,
+      id: 'q3',
+      from: {
+        sessionId: 's-dirty',
+        title: 'Dirty child',
+        ended: {
+          agent: 'Codex',
+          stopReason: 'cancelled',
+          round: 0,
+          completedAt: -5,
+          entryId: '',
+          pos: -1,
+        },
+      },
+    }
+    expect(
+      parseSessionsFile({
+        sessions: [{ ...session, queue: [withRound, legacy, malformed as never] }],
+      }),
+    ).toEqual({
+      version: 1,
+      sessions: [
+        {
+          ...session,
+          queue: [
+            withRound,
+            legacy,
+            {
+              ...item,
+              id: 'q3',
+              from: {
+                sessionId: 's-dirty',
+                title: 'Dirty child',
+                ended: { agent: 'Codex', stopReason: 'cancelled' },
+              },
+            },
+          ],
+        },
+      ],
     })
   })
 
@@ -1161,6 +1301,7 @@ describe('the host files', () => {
         missing: true,
         lastOpenedAt: 2,
         pinnedAt: null,
+        archivedAt: null,
         autoApprove: null,
         sandbox: null,
         folders: [],
@@ -1222,6 +1363,90 @@ describe('the host files', () => {
     expect(parseProjectsFile({ projects: [{ ...project, autoApprove: 'low' }] })).toEqual({
       version: 1,
       projects: [{ ...project, autoApprove: 'low' }],
+    })
+  })
+
+  it('persists project archive state, clears pin on archive, and unarchives on restore or re-add', async () => {
+    let time = 10
+    const registry = () =>
+      new Projects({
+        file: projectsFile(dir, log, 'linux'),
+        platform: 'linux',
+        now: () => time,
+        realpath: async (value) => value,
+        isDirectory: async () => true,
+      })
+
+    const first = registry()
+    await first.load()
+    await first.add('/work/repo')
+    await first.update(first.matchPrimary('/work/repo'), {
+      name: 'My Repo',
+      folders: ['/work/repo', '/work/repo-docs'],
+    })
+    first.pin(first.matchPrimary('/work/repo'), true)
+    expect(first.list()[0]).toMatchObject({ pinnedAt: 10, archivedAt: null })
+
+    time = 25
+    const archived = first.archive(first.matchPrimary('/work/repo'))
+    expect(archived).toMatchObject({
+      path: '/work/repo',
+      name: 'My Repo',
+      customName: true,
+      folders: [{ path: '/work/repo-docs', name: 'repo-docs', missing: false }],
+      pinnedAt: null,
+      archivedAt: 25,
+    })
+    // Pinning an archived project is ignored while it stays archived.
+    first.pin(first.matchPrimary('/work/repo'), true)
+    expect(first.list()[0]?.pinnedAt).toBeNull()
+    await first.flush()
+
+    const reloaded = registry()
+    await reloaded.load()
+    expect(reloaded.list()[0]).toMatchObject({
+      path: '/work/repo',
+      name: 'My Repo',
+      folders: [{ path: '/work/repo-docs', name: 'repo-docs', missing: false }],
+      pinnedAt: null,
+      archivedAt: 25,
+    })
+
+    // Unarchiving clears archivedAt and updates lastOpenedAt while preserving settings.
+    time = 40
+    const restored = reloaded.unarchive(reloaded.matchPrimary('/work/repo'))
+    expect(restored).toMatchObject({
+      path: '/work/repo',
+      name: 'My Repo',
+      archivedAt: null,
+      lastOpenedAt: 40,
+    })
+    await reloaded.flush()
+    expect((await projectsFile(dir, log, 'linux').load()).projects[0]?.archivedAt).toBeUndefined()
+
+    // Re-adding an archived project (via primary or extra folder) automatically unarchives it.
+    time = 50
+    reloaded.archive(reloaded.matchPrimary('/work/repo'))
+    time = 60
+    const reopened = await reloaded.add('/work/repo-docs')
+    expect(reopened).toMatchObject({
+      path: '/work/repo',
+      name: 'My Repo',
+      archivedAt: null,
+      lastOpenedAt: 60,
+    })
+
+    // Invalid archivedAt values are dropped cleanly without corrupting projects.json.
+    const base = { path: '/repo', name: 'repo', addedAt: 1, lastOpenedAt: 2 }
+    for (const bad of [-1, 'later', null, Number.NaN]) {
+      expect(parseProjectsFile({ projects: [{ ...base, archivedAt: bad }] }, 'linux')).toEqual({
+        version: 1,
+        projects: [base],
+      })
+    }
+    expect(parseProjectsFile({ projects: [{ ...base, archivedAt: 123 }] }, 'linux')).toEqual({
+      version: 1,
+      projects: [{ ...base, archivedAt: 123 }],
     })
   })
 
@@ -1400,6 +1625,170 @@ describe('the host files', () => {
     expect(parseProjectsFile({ projects: [project], noProjectSessionOrder: {} })).toEqual({
       version: 1,
       projects: [project],
+    })
+  })
+
+  it('persists custom project display names, falls back on clear, and manages multiple source folders', async () => {
+    const existingDirs = new Set(['/work/alpha/app', '/work/alpha/docs', '/work/beta/app'])
+    const symlinks = new Map([['/work/link-docs', '/work/alpha/docs']])
+    const registry = (time = 10) =>
+      new Projects({
+        file: projectsFile(dir, log, 'linux'),
+        platform: 'linux',
+        now: () => time,
+        realpath: async (value) => {
+          const target = symlinks.get(value) ?? value
+          if (!existingDirs.has(target)) throw new Error('ENOENT')
+          return target
+        },
+        isDirectory: async (value) => existingDirs.has(value),
+      })
+
+    const first = registry(10)
+    await first.load()
+    await first.add('/work/alpha/app')
+    await first.add('/work/beta/app')
+
+    // Set a custom display name, icon, and associate an additional source folder.
+    const updated = await first.update(first.matchPrimary('/work/alpha/app'), {
+      name: '  Client Portal  ',
+      folders: ['/work/alpha/app', '/work/alpha/docs'],
+      icon: { kind: 'icon', value: 'terminal', color: 'blue' },
+    })
+    expect(updated).toMatchObject({
+      path: '/work/alpha/app',
+      name: 'Client Portal',
+      customName: true,
+      icon: { kind: 'icon', value: 'terminal', color: 'blue' },
+      folders: [{ path: '/work/alpha/docs', name: 'docs', missing: false }],
+      missing: false,
+    })
+    expect(first.paths()).toEqual(['/work/alpha/app', '/work/alpha/docs', '/work/beta/app'])
+    // Adding an already-associated secondary folder touches the owning project instead of creating a duplicate.
+    const touched = await first.add('/work/alpha/docs')
+    expect(touched.path).toBe('/work/alpha/app')
+    expect(first.list()).toHaveLength(2)
+
+    // Reject duplicate folders (including via symlink), empty list, removing primary, missing folder, and folder owned by another project.
+    await expect(
+      first.update(first.matchPrimary('/work/alpha/app'), { folders: [] }),
+    ).rejects.toThrow(/at least one/)
+    await expect(
+      first.update(first.matchPrimary('/work/alpha/app'), { folders: ['/work/alpha/docs'] }),
+    ).rejects.toThrow(/primary/)
+    await expect(
+      first.update(first.matchPrimary('/work/alpha/app'), {
+        folders: ['/work/alpha/app', '/work/alpha/docs', '/work/link-docs'],
+      }),
+    ).rejects.toThrow(/already listed/)
+    await expect(
+      first.update(first.matchPrimary('/work/alpha/app'), {
+        folders: ['/work/alpha/app', '/work/missing'],
+      }),
+    ).rejects.toThrow(/does not exist/)
+    await expect(
+      first.update(first.matchPrimary('/work/alpha/app'), {
+        folders: ['/work/alpha/app', '/work/beta/app'],
+      }),
+    ).rejects.toThrow(/already belongs/)
+
+    await first.flush()
+
+    // Reload from disk and verify custom name, icon, folders, and missing-folder tracking persist.
+    existingDirs.delete('/work/alpha/docs')
+    const second = registry(20)
+    await second.load()
+    const reloaded = second.list().find((p) => p.path === '/work/alpha/app')!
+    expect(reloaded).toMatchObject({
+      path: '/work/alpha/app',
+      name: 'Client Portal',
+      customName: true,
+      icon: { kind: 'icon', value: 'terminal', color: 'blue' },
+      folders: [{ path: '/work/alpha/docs', name: 'docs', missing: true }],
+      missingFolders: ['/work/alpha/docs'],
+      missing: false,
+    })
+
+    // Updating name alone preserves the existing icon, and switching to emoji persists cleanly.
+    const renamed = await second.update(second.matchPrimary('/work/alpha/app'), {
+      name: 'Web Portal',
+      folders: ['/work/alpha/app', '/work/alpha/docs'],
+    })
+    expect(renamed.name).toBe('Web Portal')
+    expect(renamed.icon).toEqual({ kind: 'icon', value: 'terminal', color: 'blue' })
+    expect(renamed.folders).toEqual([{ path: '/work/alpha/docs', name: 'docs', missing: true }])
+
+    const emojified = await second.update(second.matchPrimary('/work/alpha/app'), {
+      icon: { kind: 'emoji', value: '🦊' },
+    })
+    expect(emojified.icon).toEqual({ kind: 'emoji', value: '🦊' })
+
+    // Invalid icon updates are rejected without mutating the existing record.
+    await expect(
+      second.update(second.matchPrimary('/work/alpha/app'), {
+        name: 'Should Not Stick',
+        icon: { kind: 'emoji', value: 'not-emoji' },
+      }),
+    ).rejects.toThrow(/emoji/)
+    expect(second.list().find((p) => p.path === '/work/alpha/app')).toMatchObject({
+      name: 'Web Portal',
+      icon: { kind: 'emoji', value: '🦊' },
+    })
+
+    // Clearing the display name and icon restores defaults, and removing the secondary
+    // folder returns the project to single-folder representation.
+    const reset = await second.update(second.matchPrimary('/work/alpha/app'), {
+      name: '   ',
+      folders: ['/work/alpha/app'],
+      icon: null,
+    })
+    expect(reset.name).toBe('app')
+    expect(reset.customName).toBeUndefined()
+    expect(reset.icon).toBeUndefined()
+    expect(reset.folders).toEqual([])
+    expect(reset.missingFolders).toBeUndefined()
+    await second.flush()
+
+    // Backwards-compatible parsing drops duplicates, self-references, and invalid icon entries cleanly.
+    const stored = {
+      projects: [
+        {
+          path: '/work/alpha/app',
+          name: 'Client Portal',
+          customName: true,
+          icon: { kind: 'icon', value: 'rocket', color: 'orange' },
+          folders: ['/work/alpha/app', '/work/alpha/docs', '/work/alpha/docs', '', 42],
+          addedAt: 1,
+          lastOpenedAt: 2,
+        },
+        {
+          path: '/work/beta/app',
+          name: 'Beta',
+          icon: { kind: 'icon', value: 'nonexistent', color: 'blue' },
+          addedAt: 3,
+          lastOpenedAt: 4,
+        },
+      ],
+    }
+    expect(parseProjectsFile(stored, 'linux')).toEqual({
+      version: 1,
+      projects: [
+        {
+          path: '/work/alpha/app',
+          name: 'Client Portal',
+          customName: true,
+          icon: { kind: 'icon', value: 'rocket', color: 'orange' },
+          folders: ['/work/alpha/docs'],
+          addedAt: 1,
+          lastOpenedAt: 2,
+        },
+        {
+          path: '/work/beta/app',
+          name: 'Beta',
+          addedAt: 3,
+          lastOpenedAt: 4,
+        },
+      ],
     })
   })
 

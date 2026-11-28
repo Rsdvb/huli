@@ -273,6 +273,7 @@ function RequestList({
           {system && (
             <SystemRow
               sessionId={sessionId}
+              source={source}
               system={system}
               open={systemOpen}
               onToggle={() => setSystemOpen(!systemOpen)}
@@ -552,11 +553,13 @@ function Totals({
 
 function SystemRow({
   sessionId,
+  source,
   system,
   open,
   onToggle,
 }: {
   sessionId: string
+  source: RequestsSource
   system: RequestsSystem
   open: boolean
   onToggle: () => void
@@ -629,7 +632,13 @@ function SystemRow({
           </Section>
           <Section
             label={t('detail.raw')}
-            meta={instructions ? t('system.codexRaw') : t('system.raw')}
+            meta={
+              instructions
+                ? t('system.codexRaw')
+                : source === 'pi'
+                  ? t('system.piRaw')
+                  : t('system.raw')
+            }
           >
             <RawJson sessionId={sessionId} raw="system" />
           </Section>

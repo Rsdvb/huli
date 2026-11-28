@@ -1,6 +1,6 @@
 import type { AgentStatus, PlanLimit, ProviderBalance } from '@shared/agent-host'
 import { limitHolds } from '@shared/plan-limits'
-import type { AgentId } from '@shared/thread'
+import type { AgentId, HarnessId } from '@shared/thread'
 import { joinPlanTier, planTier } from '@renderer/features/account/model'
 import { planName } from '@shared/session-groups'
 import { limitLevel, type LimitLevel } from '@renderer/lib/plan-limit'
@@ -98,6 +98,8 @@ export interface CardPlace {
 export interface UsageCard {
   key: string
   agentId: AgentId
+  /** The harness this card belongs to. */
+  harnessId: HarnessId
   /** The computer of `agentId`: the first shown that the card is on. */
   hostId: string | null
   /**
@@ -122,6 +124,11 @@ export interface UsageCard {
   resets: CardResets | null
   /** Huli: an API profile's balance, which has no plan windows to wait for. */
   balanceOnly?: true
+  /**
+   * True when multiple shown hosts report unidentified (`accountKey === null`) cards for this
+   * harness (or OpenCode provider), so the card displays its computer name explicitly.
+   */
+  showHostLabel: boolean
 }
 
 /** How the page's own read of a card's limits went, by the card's key. */
@@ -144,6 +151,9 @@ export function usageCards(
 ): { cards: UsageCard[]; unreported: AgentStatus[] } {
   const cards: UsageCard[] = []
   const unreported: AgentStatus[] = []
+  // Unidentified cards keyed by their disambiguation group (harness, or opencode provider) so we
+  // can mark cards that appear on more than one shown host with an explicit host label.
+  const unidentifiedGroups: { card: UsageCard; group: string }[] = []
   for (const { hostId, agents } of hosts) {
     const usedHere = used[hostId ?? ''] ?? []
     for (const agent of agents) {
@@ -155,6 +165,7 @@ export function usageCards(
         cards.push({
           key: ownKey(hostId, `${agent.id}:profile:${profile.id}`),
           agentId: agent.id,
+          harnessId: agent.harnessId,
           hostId,
           name: profile.name,
           email: null,
@@ -167,6 +178,7 @@ export function usageCards(
           places: [place],
           resets: null,
           balanceOnly: true,
+          showHostLabel: false,
         })
       }
       // A provider with only a balance, such as DeepSeek's, shows it in Settings, not as a card.
@@ -177,9 +189,10 @@ export function usageCards(
         for (const provider of providers) {
           const limits = provider.usage!.limits
           const rings = cardRings(limits, now)
-          cards.push({
+          const card: UsageCard = {
             key: ownKey(hostId, `${agent.id}:${provider.id}`),
             agentId: agent.id,
+            harnessId: agent.harnessId,
             hostId,
             name: planName(agent.harnessName, provider.name),
             email: null,
@@ -192,7 +205,10 @@ export function usageCards(
             readAt: readAtOf(limits),
             places: [place],
             resets: null,
-          })
+            showHostLabel: false,
+          }
+          cards.push(card)
+          unidentifiedGroups.push({ card, group: `${agent.harnessId}:${provider.id}` })
         }
         continue
       }
@@ -221,9 +237,10 @@ export function usageCards(
       const rings = cardRings(limits, now)
       const read = reads[key]
       const signedIn = agent.account?.kind === 'account' ? agent.account : null
-      cards.push({
+      const card: UsageCard = {
         key,
         agentId: agent.id,
+        harnessId: agent.harnessId,
         hostId,
         name: agent.name,
         email: account === null ? null : (agent.account?.email ?? null),
@@ -242,8 +259,23 @@ export function usageCards(
         readAt: readAtOf(limits),
         places: [place],
         resets: resetsOf(agent, hostId),
-      })
+        showHostLabel: false,
+      }
+      cards.push(card)
+      if (account === null) unidentifiedGroups.push({ card, group: agent.harnessId })
     }
+  }
+  const hostsByGroup = new Map<string, Set<string | null>>()
+  for (const { card, group } of unidentifiedGroups) {
+    let set = hostsByGroup.get(group)
+    if (!set) {
+      set = new Set()
+      hostsByGroup.set(group, set)
+    }
+    set.add(card.hostId)
+  }
+  for (const { card, group } of unidentifiedGroups) {
+    if (hostsByGroup.get(group)!.size > 1) card.showHostLabel = true
   }
   for (const card of cards) {
     const email = card.email?.trim()

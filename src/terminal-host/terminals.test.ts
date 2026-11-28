@@ -4,13 +4,17 @@ import type { TerminalInfo } from '@shared/terminal-host'
 import { ProjectRegistry } from './projects'
 import type { TtyModes } from './password'
 import { type PtyProcess, TerminalManager } from './terminals'
+import type { ProcessRow } from './processes'
 
 class FakePty implements PtyProcess {
-  readonly pid = 4242
+  readonly pid: number
   process = 'zsh'
   readonly ptsName = '/dev/ttys042'
   readonly written: string[] = []
   private data: ((data: string) => void) | null = null
+  constructor(pid = 4242) {
+    this.pid = pid
+  }
   onData(listener: (data: string) => void) {
     this.data = listener
     return { dispose: () => undefined }
@@ -700,5 +704,99 @@ describe('a terminal waiting for a password', () => {
         output: '% [sudo] password for me:',
       },
     })
+  })
+})
+
+describe('Windows busy terminal detection', () => {
+  function windowsHost(listProcesses: () => Promise<ProcessRow[]>) {
+    const ptys: FakePty[] = []
+    let nextPid = 1000
+    const projects = new ProjectRegistry('win32', async (path) => path)
+    projects.set(['C:\\work\\app'])
+    const manager = new TerminalManager({
+      platform: 'win32',
+      appVersion: '0.0.0',
+      env: { SystemRoot: 'C:\\Windows' },
+      projects,
+      findOnPath: async (program) =>
+        program === 'pwsh.exe' ? 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' : null,
+      loadPty: async () => () => {
+        const pty = new FakePty(nextPid++)
+        pty.process = 'pwsh.exe'
+        ptys.push(pty)
+        return pty
+      },
+      sink: {
+        data: () => undefined,
+        replay: () => undefined,
+        info: () => undefined,
+        removed: () => undefined,
+      },
+      listProcesses,
+    })
+    return { manager, ptys }
+  }
+
+  const row = (pid: number, ppid: number, name: string): ProcessRow => ({
+    pid,
+    ppid,
+    startedAt: 0,
+    name,
+  })
+
+  it('treats idle shells (even with conhost/OpenConsole helpers) as not busy and detects child commands', async () => {
+    const snapshot = vi.fn<() => Promise<ProcessRow[]>>()
+    const { manager, ptys } = windowsHost(snapshot)
+    // No live terminals yet: should not even enumerate Windows processes.
+    expect(await manager.busy()).toEqual([])
+    expect(snapshot).not.toHaveBeenCalled()
+
+    const idle = await manager.create('window', {
+      projectPath: 'C:\\work\\app',
+      sessionId: 's1',
+      cols: 80,
+      rows: 24,
+    })
+    const active = await manager.create('window', {
+      projectPath: 'C:\\work\\app',
+      sessionId: 's1',
+      cols: 80,
+      rows: 24,
+    })
+    const idlePid = ptys[0]!.pid
+    const activePid = ptys[1]!.pid
+
+    snapshot.mockResolvedValue([
+      row(idlePid, 500, 'pwsh.exe'),
+      row(2001, idlePid, 'conhost.exe'),
+      row(2002, idlePid, 'OpenConsole.exe'),
+      row(activePid, 500, 'pwsh.exe'),
+      row(3001, activePid, 'conhost.exe'),
+      row(3002, activePid, 'node.exe'),
+    ])
+
+    const busy = await manager.busy()
+    expect(snapshot).toHaveBeenCalledTimes(1)
+    expect(busy.map((item) => item.id)).toEqual([active.id])
+    expect(busy.map((item) => item.id)).not.toContain(idle.id)
+  })
+
+  it('skips terminals killed while the process snapshot is in flight', async () => {
+    let resolveSnapshot!: (value: ProcessRow[]) => void
+    const { manager, ptys } = windowsHost(
+      () => new Promise((resolve) => (resolveSnapshot = resolve)),
+    )
+    const created = await manager.create('window', {
+      projectPath: 'C:\\work\\app',
+      sessionId: 's1',
+      cols: 80,
+      rows: 24,
+    })
+    const shellPid = ptys[0]!.pid
+
+    const checking = manager.busy()
+    manager.kill(created.id)
+    resolveSnapshot([row(shellPid, 500, 'pwsh.exe'), row(9001, shellPid, 'node.exe')])
+    expect(await checking).toEqual([])
   })
 })

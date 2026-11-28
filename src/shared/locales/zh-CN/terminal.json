@@ -8,7 +8,12 @@
     "empty": "此项目还没有终端。",
     "split": "拆分",
     "unsplit": "取消拆分",
-    "close": "关闭面板"
+    "close": "关闭面板",
+    "hide": "隐藏终端",
+    "moveToBottom": "移到底部",
+    "moveToSide": "移回右侧",
+    "resize": "调整终端高度",
+    "resizeHint": "拖动以调整高度，双击恢复默认。"
   },
   "tab": {
     "rename": "重命名",
@@ -16,6 +21,7 @@
     "newOutput": "有新输出",
     "running": "正在运行",
     "close": "关闭 {{name}}",
+    "closeAll": "关闭所有终端",
     "owner": "· {{agent}}",
     "password": "在等密码"
   },
@@ -23,6 +29,12 @@
     "title": "结束此终端？",
     "body": "<title/> 仍在运行，关闭标签页会将其结束。",
     "confirm": "结束进程"
+  },
+  "closeAll": {
+    "title_other": "结束正在运行的终端？",
+    "body_other": "关闭所有终端会结束以下正在运行的进程：",
+    "confirm": "全部关闭",
+    "closed_other": "已关闭 {{count}} 个终端"
   },
   "view": {
     "askAgent": "询问 {{agent}}",
@@ -44,6 +56,6 @@
     "strip": "<b>在这里输入密码，按回车</b> · 输入时不显示，{{agent}} 也看不到",
     "stripNoAgent": "<b>在这里输入密码，按回车</b> · 输入时不显示",
     "label": "{{agent}} 请你在 <b>{{terminal}}</b> 输入密码",
-    "go": "去输入"
+    "go": "前往输入"
   }
 }

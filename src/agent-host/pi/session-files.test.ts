@@ -10,6 +10,8 @@ import {
   listAllSessionFiles,
   listSessionFiles,
   piFolders,
+  piSessionsDir,
+  piSessionsLocation,
   type PiFolders,
 } from './session-files'
 
@@ -48,14 +50,25 @@ describe("pi's folders", () => {
     const { root } = await folders()
     const agent = path.join(root, 'agent')
     await mkdir(agent, { recursive: true })
-    const env = { HOME: root, PI_CODING_AGENT_DIR: agent }
-    expect((await piFolders(env, 'darwin')).sessions).toBe(path.join(agent, 'sessions'))
+    const env = { HOME: root, USERPROFILE: root, PI_CODING_AGENT_DIR: agent }
+    expect((await piFolders(env, process.platform)).sessions).toBe(path.join(agent, 'sessions'))
     await writeFile(path.join(agent, 'settings.json'), JSON.stringify({ sessionDir: 'kept' }))
-    expect((await piFolders(env, 'darwin')).sessions).toBe(path.join(agent, 'kept'))
+    expect((await piFolders(env, process.platform)).sessions).toBe(path.join(agent, 'kept'))
     const named = { ...env, PI_CODING_AGENT_SESSION_DIR: path.join(root, 'elsewhere') }
-    expect((await piFolders(named, 'darwin')).sessions).toBe(path.join(root, 'elsewhere'))
-    expect((await piFolders(env, 'darwin')).adapterMap).toBe(
+    expect((await piFolders(named, process.platform)).sessions).toBe(path.join(root, 'elsewhere'))
+    expect((await piFolders(env, process.platform)).adapterMap).toBe(
       path.join(root, '.pi', 'pi-acp', 'session-map.json'),
+    )
+    expect(piSessionsLocation(env, root, process.platform)).toBe(path.join(agent, 'kept'))
+    expect(piSessionsLocation(named, root, process.platform)).toBe(path.join(root, 'elsewhere'))
+    expect(await piSessionsDir(env, root, process.platform)).toBe(path.join(agent, 'kept'))
+    // An explicit chosen configDir overrides PI_CODING_AGENT_DIR.
+    const chosen = path.join(root, 'chosen-agent')
+    expect(piSessionsLocation(env, root, process.platform, chosen)).toBe(
+      path.join(chosen, 'sessions'),
+    )
+    expect((await piFolders(env, process.platform, root, chosen)).sessions).toBe(
+      path.join(chosen, 'sessions'),
     )
   })
 })

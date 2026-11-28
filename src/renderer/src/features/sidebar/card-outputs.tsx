@@ -11,7 +11,8 @@ import { KindSketch } from '@renderer/features/artifacts/sketch'
 import { useThumbnail } from '@renderer/features/artifacts/thumbnails'
 import '@renderer/features/artifacts/artifact-card.css'
 import { ReferenceIcon } from '@renderer/features/git/gh-reference'
-import { useReferenceData } from '@renderer/features/git/gh-reference-data'
+import { referenceTitleOf, useReferenceData } from '@renderer/features/git/gh-reference-data'
+import { sessionLinkProps } from '@renderer/features/session/open-link'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { mediumAgo } from '@renderer/lib/format'
 import { learnArtifactHost } from '@renderer/lib/host'
@@ -33,7 +34,8 @@ function referencesOf(summary: SessionSummary, outputs: SessionOutputs): GitHubR
   const seen = new Set<string>()
   for (const url of [...(summary.prs ?? []).map((pr) => pr.url), ...outputs.references]) {
     const ref = githubReferenceOf(url)
-    const key = ref && `${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase()
+    const scope = ref?.kind === 'stack' ? 'stack:' : ''
+    const key = ref && `${scope}${ref.owner}/${ref.repo}#${ref.number}`.toLowerCase()
     if (!ref || !key || seen.has(key)) continue
     seen.add(key)
     refs.push(ref)
@@ -98,6 +100,7 @@ function Made({
   onOpen?: () => void
 }) {
   const { t } = useTranslation('sidebar')
+  const hostId = hostOfSession(summary)
   const artifacts = useLiveArtifacts(summary, outputs)
   const refs = useMemo(() => referencesOf(summary, outputs), [summary, outputs])
   const tiles = artifacts.slice(0, TILES)
@@ -134,7 +137,13 @@ function Made({
       {rows.length > 0 && (
         <div className="flex flex-col">
           {rows.map((ref) => (
-            <ReferenceRow key={ref.url} reference={ref} onOpen={onOpen} />
+            <ReferenceRow
+              key={ref.url}
+              reference={ref}
+              sessionId={summary.id}
+              hostId={hostId}
+              onOpen={onOpen}
+            />
           ))}
           {refs.length > rows.length && (
             <span className="flex h-[22px] items-center pl-[22px] text-small text-tertiary">
@@ -230,23 +239,33 @@ function ArtifactTile({
  * A pull request or issue as the sidebar's list writes one: its state, repo#number and title; a
  * click opens it on GitHub.
  */
-function ReferenceRow({ reference, onOpen }: { reference: GitHubReference; onOpen?: () => void }) {
-  const { data } = useReferenceData(reference)
-  useEffect(() => loadReference(reference), [reference])
-  const title = data ? (data.kind === 'pull' ? data.pr.title : data.issue.title) : null
+function ReferenceRow({
+  reference,
+  sessionId,
+  hostId,
+  onOpen,
+}: {
+  reference: GitHubReference
+  sessionId: string
+  hostId: string | null
+  onOpen?: () => void
+}) {
+  const { t } = useTranslation('git')
+  const { data } = useReferenceData(reference, hostId)
+  useEffect(() => loadReference(reference, false, hostId), [reference, hostId])
+  const title = referenceTitleOf(data, t)
+  const label =
+    reference.kind === 'stack'
+      ? `${reference.repo} Stack #${reference.number}`
+      : `${reference.repo}#${reference.number}`
   return (
     <a
-      href={reference.url}
-      target="_blank"
-      rel="noreferrer"
+      {...sessionLinkProps(reference.url, sessionId, { onOpen })}
       tabIndex={-1}
-      onClick={onOpen}
       className="-mx-1.5 flex h-6 min-w-0 items-center gap-2 rounded-md px-1.5 text-small no-underline outline-none hover:bg-hover"
     >
       <ReferenceIcon kind={reference.kind} data={data} size={14} />
-      <span className="shrink-0 font-medium text-primary tabular-nums">
-        {reference.repo}#{reference.number}
-      </span>
+      <span className="shrink-0 font-medium text-primary tabular-nums">{label}</span>
       {title && <span className="min-w-0 truncate text-tertiary">{title}</span>}
     </a>
   )

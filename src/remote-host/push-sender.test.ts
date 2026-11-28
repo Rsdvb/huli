@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import * as requestLog from '@shared/log/requests'
 import { currentPrimitives } from '@shared/remote/primitives'
 import {
   DEFAULT_CHOICES,
@@ -269,5 +270,105 @@ describe('sending a push', () => {
     t2.sender.send(job)
     await expect.poll(() => t2.logs.length).toBe(1)
     expect(t2.logs).toEqual(['warn: Gave up a notification for device phone after 3 tries: apns'])
+  })
+
+  it('记录推送从入队到网关接收的总耗时、网关耗时与重试次数', async () => {
+    let clock = 5000
+    const spy = vi.spyOn(requestLog, 'logDevicePush')
+    try {
+      const key = await importRelayKey(await newRelaySeed())
+      const hostId = await relayHostId(key.publicKey)
+      const device = await currentPrimitives().generateKeyPair(false)
+      let done: () => void = () => {}
+      const finished = new Promise<void>((resolve) => (done = resolve))
+      let call = 0
+      const sender = new PushSender({
+        url: URL,
+        key,
+        hostId,
+        hostName: () => 'Studio',
+        token: () => ACCESS_TOKEN,
+        device: () => ({
+          publicKey: Buffer.from(device.publicKey).toString('base64'),
+          push: {
+            target: { apns: { token: DEVICE_TOKEN, environment: 'sandbox' } },
+            choices: DEFAULT_CHOICES,
+          },
+        }),
+        unregistered: () => {},
+        log: () => {},
+        now: () => clock,
+        retry: { firstMs: 1, maxMs: 5, attempts: 3 },
+        fetch: async () => {
+          call++
+          if (call === 1) {
+            clock += 120
+            return Response.json({ error: 'apns' }, { status: 502 })
+          }
+          clock += 85
+          done()
+          return Response.json({ ok: true }, { status: 200 })
+        },
+      })
+      sender.send(job)
+      await finished
+      // 等待 attempt 返回后记录完成
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(spy).toHaveBeenCalledWith({
+        device: 'phone',
+        kind: 'alert',
+        ms: 205,
+        gatewayMs: 85,
+        attempts: 2,
+      })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('passes alert metadata on, and leaves it out without details', async () => {
+    const t = await setup([200])
+    t.sender.send({
+      deviceId: 'phone',
+      subject: 's-meta',
+      type: 'alert',
+      title: '导出格式确认',
+      body: '需要同时导出 CSV 吗？',
+      event: {
+        kind: 'permission',
+        sessionId: 's-meta',
+        agentId: 'codex',
+        requestId: 'req-meta',
+        actionKind: 'question',
+      },
+    })
+    await t.finished
+    const shown = await opened(t, t.requests[0]!.body)
+    expect(shown).toMatchObject({
+      kind: 'permission',
+      agentId: 'codex',
+      actionKind: 'question',
+    })
+
+    const tPrivate = await setup([200], { choices: { ...DEFAULT_CHOICES, details: false } })
+    tPrivate.sender.send({
+      deviceId: 'phone',
+      subject: 's-meta',
+      type: 'alert',
+      title: '机密标题',
+      body: '机密正文',
+      event: {
+        kind: 'turn-ended',
+        sessionId: 's-meta',
+        agentId: 'claude-code',
+        changedFiles: 4,
+      },
+    })
+    await tPrivate.finished
+    const redacted = await opened(tPrivate, tPrivate.requests[0]!.body)
+    expect(redacted).toMatchObject({ kind: 'turn-ended', sessionId: 's-meta' })
+    expect(redacted).not.toHaveProperty('title')
+    expect(redacted).not.toHaveProperty('agentId')
+    expect(redacted).not.toHaveProperty('changedFiles')
   })
 })

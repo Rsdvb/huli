@@ -1,9 +1,12 @@
+import type { McpImportChoice } from '@shared/mcp-discovery'
 // Hand-written guards for every request on the agent host port. A validator returns a fresh
 // params object with only the known fields, or throws `invalid_params` before anything runs.
 
+import { START_MODE_CHARS } from '@shared/agents'
 import {
   MAX_PINNED_MODELS,
   MAX_STATS_SESSIONS,
+  THOUGHT_TRANSLATE_MAX_CHARS,
   type AgentInstallMethod,
   type HostMethod,
   type HostParams,
@@ -44,6 +47,7 @@ import {
   type FileStamp,
 } from '@shared/files'
 import { IMAGE_CLEAR_DAYS } from '@shared/data-usage'
+import type { TurnUndoFileDigest } from '@shared/turn-undo'
 import {
   isMemoryScope,
   MEMORY_BODY_CHARS,
@@ -54,6 +58,8 @@ import {
   type MemoryScope,
 } from '@shared/memory'
 import { catalogSkillId, skillRepositoryId, type SkillSource } from '@shared/marketplace'
+import { MAX_TOOLS_OFF } from '@shared/mcp-insight'
+import { isTerminalTarget, type McpTerminalTarget } from '@shared/mcp-terminal'
 import {
   DIRECTORY_CURSOR,
   HANDLE,
@@ -68,6 +74,8 @@ import {
 } from '@shared/market-publish'
 import { isGithubEvent } from '@shared/github-flow'
 import {
+  GIT_GRAPH_MAX_LIMIT,
+  GIT_GRAPH_MAX_SKIP,
   GITHUB_ISSUE_URL,
   GITHUB_LOGIN,
   GITHUB_PULL_REQUEST_URL,
@@ -193,12 +201,19 @@ import {
   parseParams as parseViewParams,
   ViewDataError,
 } from './plugin-runtime/view-data'
+import { validateProjectIcon, type ProjectIcon } from '@shared/project-icon'
+import { MAX_PROJECT_FOLDERS, PROJECT_NAME_MAX } from './projects'
+import { TITLE_CHARS } from './session-tools'
 import { MAX_WORKTREE_COPY_PATHS } from './storage'
 import { checkIncludeEntry } from './worktrees/copy'
 import { branchFromTemplate, checkWorktreeBranch } from './worktrees/names'
 
 const ID_CHARS = 256
 const ACP_ID_CHARS = 1_024
+const TURN_UNDO_TOOL_LIMIT = 500
+const TURN_UNDO_DIGEST_LIMIT = 1_000
+const TURN_UNDO_PATH_CHARS = 4_096
+const SHA256_HEX = /^[0-9a-f]{64}$/
 // Windows extended-length paths go up to 32,767 characters.
 const PATH_CHARS = 32_767
 const TEXT_CHARS = 4_096
@@ -372,6 +387,12 @@ function removalSteps(value: unknown): string[] {
 function agentId(o: Fields, key = 'agentId'): AgentId {
   const value = string(o, key, ID_CHARS)
   if (!isAgentId(value)) throw invalidParams(t('agent.unknown', { agent: value }))
+  return value
+}
+
+function terminalTarget(o: Fields): McpTerminalTarget {
+  const value = string(o, 'target', ID_CHARS)
+  if (!isTerminalTarget(value)) throw invalidParams('target is not an agent or an app')
   return value
 }
 
@@ -1541,6 +1562,59 @@ function marketRead(params: unknown): { refresh?: boolean; cached?: boolean } {
 const REPORT_CHARS = 2_000
 
 /** A server Kettu keeps: a registry name, `manual:` and a UUID, or `kettu:` and a listing id. */
+function mcpChoices(params: unknown): { choices: McpImportChoice[] } {
+  const { choices } = fields(params)
+  if (!Array.isArray(choices) || choices.length === 0 || choices.length > 100) {
+    throw invalidParams('Choose between 1 and 100 MCP servers.')
+  }
+  return {
+    choices: choices.map((value: unknown) => {
+      const row = fields(value)
+      const id = string(row, 'id', ID_CHARS)
+      const name = string(row, 'name', 48)
+      const sourceId = row.sourceId === undefined ? undefined : string(row, 'sourceId', 64)
+      const another = optionalFlag(row, 'another')
+      const { agents } = row
+      if (agents !== 'all' && (!Array.isArray(agents) || agents.length > 250)) {
+        throw invalidParams('Pick all agents or a list of agents.')
+      }
+      return {
+        id,
+        name,
+        sourceId,
+        another,
+        agents:
+          agents === 'all' ? agents : agents.map((agent: unknown) => agentId({ agentId: agent })),
+      }
+    }),
+  }
+}
+
+/** A library server's id of any source; the host looks it up among those it keeps. */
+function libraryServerId(o: Fields): string {
+  return string(o, 'serverId', ID_CHARS)
+}
+
+/** Which of a server's calls to read: metadata only, so nothing here reaches a server. */
+function mcpCallQuery(params: unknown): import('@shared/mcp-insight').McpCallQuery {
+  const o = fields(params)
+  const query: import('@shared/mcp-insight').McpCallQuery = { serverId: libraryServerId(o) }
+  const failed = optionalFlag(o, 'failed')
+  if (failed !== undefined) query.failed = failed
+  if (o.since !== undefined) query.since = time(o, 'since')
+  if (o.before !== undefined) query.before = time(o, 'before')
+  const text = optionalString(o, 'query', 200)
+  if (text !== undefined) query.query = text
+  if (o.limit !== undefined) {
+    const limit = o.limit
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw invalidParams('limit must be a whole number from 1 to 500')
+    }
+    query.limit = limit
+  }
+  return query
+}
+
 function marketServerId(o: Fields): string {
   const id = string(o, 'serverId', ID_CHARS)
   if (
@@ -2049,7 +2123,16 @@ export function createValidators(platform: Platform): Validators {
       }
       return { agentId: agentId(o), change: { site: change.site } }
     },
-    'agents.refreshAccount': agentWithForce,
+    'agents.refreshAccount': (params) => {
+      const o = fields(params)
+      const force = optionalFlag(o, 'force')
+      const afterSignIn = optionalFlag(o, 'afterSignIn')
+      return {
+        agentId: agentId(o),
+        ...(force !== undefined ? { force } : {}),
+        ...(afterSignIn !== undefined ? { afterSignIn } : {}),
+      }
+    },
     'agents.readSignIn': (params) => {
       const o = fields(params)
       const watch = optionalFlag(o, 'watch')
@@ -2114,6 +2197,46 @@ export function createValidators(platform: Platform): Validators {
     },
     'sync.saveSnippets': (params) => ({ snippets: syncSnippets(fields(params).snippets) }),
     'market.keys': none,
+    'market.discoverMcp': none,
+    'market.mcpTerminal': none,
+    'market.mcpTerminalPlan': (params) => ({ target: terminalTarget(fields(params)) }),
+    'market.mcpTerminalOn': (params) => {
+      const o = fields(params)
+      const planId = string(o, 'planId', 64)
+      if (!/^[0-9a-f]{64}$/.test(planId)) throw invalidParams('planId is not a plan')
+      return { target: terminalTarget(o), planId }
+    },
+    'market.mcpTerminalOffPlan': (params) => ({ target: terminalTarget(fields(params)) }),
+    'market.mcpTerminalOff': (params) => ({ target: terminalTarget(fields(params)) }),
+    'market.mcpTerminalDrift': (params) => ({ target: terminalTarget(fields(params)) }),
+    'market.mcpTerminalResolve': (params) => {
+      const o = fields(params)
+      const choices = fields(o.choices)
+      const out: Record<string, 'file' | 'kettu'> = {}
+      const names = Object.keys(choices)
+      if (names.length > 1000) throw invalidParams('choices names too many entries')
+      for (const name of names) {
+        const choice = choices[name]
+        if (name.length > 256 || (choice !== 'file' && choice !== 'kettu')) {
+          throw invalidParams('choices must map entry names to "file" or "kettu"')
+        }
+        out[name] = choice
+      }
+      return { target: terminalTarget(o), choices: out }
+    },
+    'market.mcpTerminalBackups': (params) => ({ target: terminalTarget(fields(params)) }),
+    'market.mcpTerminalRestore': (params) => {
+      const o = fields(params)
+      const backupId = string(o, 'backupId', 64)
+      if (!/^[0-9a-f-]{36}$/.test(backupId)) throw invalidParams('backupId is not a backup')
+      return { target: terminalTarget(o), backupId }
+    },
+    'market.dismissMcpNotice': (params) => ({ id: string(fields(params), 'id', ID_CHARS) }),
+    'market.importMcp': mcpChoices,
+    'market.previewMcp': (params) => ({ text: string(fields(params), 'text', 131072) }),
+    'market.addMcp': mcpChoices,
+    'market.checkMcp': (params) => ({ serverId: marketServerId(fields(params)) }),
+    'market.mcpChecks': none,
     'market.connect': (params) => ({ serverId: marketServerId(fields(params)) }),
     'market.detectSignIn': (params) => {
       const o = fields(params)
@@ -2126,6 +2249,35 @@ export function createValidators(platform: Platform): Validators {
     },
     'market.disconnect': (params) => ({ serverId: marketServerId(fields(params)) }),
     'market.connections': none,
+    'market.mcpInsight': (params) => {
+      if (params === undefined || params === null) return {}
+      const o = fields(params)
+      return o.serverId === undefined ? {} : { serverId: libraryServerId(o) }
+    },
+    'market.mcpInstances': (params) => ({ serverId: libraryServerId(fields(params)) }),
+    'market.mcpCalls': mcpCallQuery,
+    'market.mcpLogs': (params) => ({ serverId: libraryServerId(fields(params)) }),
+    'market.mcpToolChanges': none,
+    'market.mcpToolDiff': (params) => ({ serverId: libraryServerId(fields(params)) }),
+    'market.acceptMcpTools': (params) => {
+      const o = fields(params)
+      const names = o.names
+      if (!Array.isArray(names) || names.length > MAX_TOOLS_OFF) {
+        throw invalidParams(`names must be a list of at most ${MAX_TOOLS_OFF} tool names`)
+      }
+      for (const name of names) {
+        if (typeof name !== 'string' || name.length === 0 || name.length > 128) {
+          throw invalidParams('names must hold tool names of 1 to 128 characters')
+        }
+      }
+      return { serverId: libraryServerId(o), names: [...new Set(names as string[])] }
+    },
+    'market.mcpStop': (params) => {
+      const o = fields(params)
+      const instance = string(o, 'instance', 32)
+      if (!/^i\d+$/.test(instance)) throw invalidParams('instance is not an instance id')
+      return { serverId: libraryServerId(o), instance }
+    },
     'market.ownPlugins': (params) => {
       const refresh = optionalFlag(
         params === undefined || params === null ? {} : fields(params),
@@ -2210,6 +2362,21 @@ export function createValidators(platform: Platform): Validators {
         ...(useSaved && o.decision === 'provide' ? { useSaved } : {}),
         ...(o.save === true && o.decision === 'provide' ? { save: true } : {}),
       }
+    },
+    'market.answerMcpChange': (params) => {
+      const o = fields(params)
+      if (o.decision !== 'confirm' && o.decision !== 'decline') {
+        throw invalidParams('decision must be confirm or decline')
+      }
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ID_CHARS),
+        decision: o.decision,
+      }
+    },
+    'market.undoMcpChange': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), entryId: string(o, 'entryId', ID_CHARS) }
     },
     'settings.undoChange': (params) => {
       const o = fields(params)
@@ -2374,11 +2541,71 @@ export function createValidators(platform: Platform): Validators {
         agentId: agentId(o),
         projectPath: absolutePath(o, 'projectPath', platform),
         ...(cursor !== undefined ? { cursor } : {}),
+        ...(o.allFolders === true ? { allFolders: true } : {}),
       }
     },
     'projects.list': none,
     'projects.add': folder,
+    'projects.update': (params) => {
+      const o = fields(params)
+      const path = absolutePath(o, 'path', platform)
+      let name: string | null | undefined
+      if (o.name !== undefined) {
+        if (o.name === null) {
+          name = null
+        } else if (typeof o.name === 'string') {
+          if (o.name.includes('\0')) throw invalidParams('name contains a NUL character')
+          if (o.name.trim().length > PROJECT_NAME_MAX) {
+            throw invalidParams(t('project.nameTooLong', { max: PROJECT_NAME_MAX }))
+          }
+          name = o.name
+        } else {
+          throw invalidParams('name must be a string or null')
+        }
+      }
+      let folders: string[] | undefined
+      if (o.folders !== undefined) {
+        if (!Array.isArray(o.folders)) throw invalidParams('folders must be a list')
+        if (o.folders.length === 0) throw invalidParams(t('project.atLeastOneFolder'))
+        if (o.folders.length > MAX_PROJECT_FOLDERS) {
+          throw invalidParams(`folders holds more than ${MAX_PROJECT_FOLDERS}`)
+        }
+        folders = o.folders.map((item, index) => {
+          if (typeof item !== 'string' || item.length === 0) {
+            throw invalidParams(`folders[${index}] must be a non-empty string`)
+          }
+          if (item.length > PATH_CHARS) {
+            throw invalidParams(
+              t('validate.tooLong', { key: `folders[${index}]`, max: PATH_CHARS }),
+            )
+          }
+          if (item.includes('\0')) throw invalidParams(`folders[${index}] contains a NUL character`)
+          if (!isAbsolutePath(item, platform)) {
+            throw invalidParams(`folders[${index}] must be an absolute path`)
+          }
+          return item
+        })
+      }
+      let icon: ProjectIcon | null | undefined
+      if (o.icon !== undefined) {
+        if (o.icon === null) {
+          icon = null
+        } else {
+          const checked = validateProjectIcon(o.icon)
+          if (!checked.ok) throw invalidParams(checked.reason)
+          icon = checked.icon
+        }
+      }
+      return {
+        path,
+        ...(name !== undefined ? { name } : {}),
+        ...(folders !== undefined ? { folders } : {}),
+        ...(icon !== undefined ? { icon } : {}),
+      }
+    },
     'projects.remove': folder,
+    'projects.archive': folder,
+    'projects.unarchive': folder,
     'projects.touch': folder,
     'projects.pin': (params) => {
       const o = fields(params)
@@ -2628,6 +2855,21 @@ export function createValidators(platform: Platform): Validators {
     },
     'sessions.outputs': session,
     'sessions.outlineTitles': session,
+    'sessions.translateThought': (params) => {
+      const o = fields(params)
+      const text = string(o, 'text', THOUGHT_TRANSLATE_MAX_CHARS)
+      if (text.trim() === '') throw invalidParams(t('validate.empty', { key: 'text' }))
+      const language = string(o, 'language', 35)
+      if (!/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(language)) {
+        throw invalidParams('language must be a language tag')
+      }
+      return {
+        sessionId: sessionId(o),
+        entryId: string(o, 'entryId', ACP_ID_CHARS),
+        text,
+        language,
+      }
+    },
     'sessions.watch': session,
     'sessions.unwatch': session,
     'sessions.show': (params) => {
@@ -2647,6 +2889,16 @@ export function createValidators(platform: Platform): Validators {
     'sessions.attachEarly': session,
     'sessions.cancel': session,
     'sessions.runningWork': (params) => {
+      const o = fields(params)
+      if (!Array.isArray(o.sessionIds)) throw invalidParams('sessionIds must be a list')
+      if (o.sessionIds.length > STAKED_SESSIONS) {
+        throw invalidParams(`sessionIds holds more than ${STAKED_SESSIONS}`)
+      }
+      return {
+        sessionIds: o.sessionIds.map((value) => sessionId({ sessionId: value })),
+      }
+    },
+    'sessions.usages': (params) => {
       const o = fields(params)
       if (!Array.isArray(o.sessionIds)) throw invalidParams('sessionIds must be a list')
       if (o.sessionIds.length > STAKED_SESSIONS) {
@@ -2689,6 +2941,70 @@ export function createValidators(platform: Platform): Validators {
       return { sessionId: sessionId(o), entryId: string(o, 'entryId', ACP_ID_CHARS), draft }
     },
     'sessions.putBack': session,
+    'sessions.previewUndoTurn': (params) => {
+      const o = fields(params)
+      if (!Array.isArray(o.toolIds) || o.toolIds.length === 0) {
+        throw invalidParams('toolIds must be a non-empty list')
+      }
+      if (o.toolIds.length > TURN_UNDO_TOOL_LIMIT) {
+        throw invalidParams(`toolIds must have at most ${TURN_UNDO_TOOL_LIMIT} items`)
+      }
+      const toolIds = o.toolIds.map((item, idx) => {
+        if (typeof item !== 'string' || item === '' || item.length > ACP_ID_CHARS) {
+          throw invalidParams(`toolIds[${idx}] must be a non-empty string`)
+        }
+        return item
+      })
+      return { sessionId: sessionId(o), toolIds }
+    },
+    'sessions.undoTurn': (params) => {
+      const o = fields(params)
+      if (!Array.isArray(o.toolIds) || o.toolIds.length === 0) {
+        throw invalidParams('toolIds must be a non-empty list')
+      }
+      if (o.toolIds.length > TURN_UNDO_TOOL_LIMIT) {
+        throw invalidParams(`toolIds must have at most ${TURN_UNDO_TOOL_LIMIT} items`)
+      }
+      const toolIds = o.toolIds.map((item, idx) => {
+        if (typeof item !== 'string' || item === '' || item.length > ACP_ID_CHARS) {
+          throw invalidParams(`toolIds[${idx}] must be a non-empty string`)
+        }
+        return item
+      })
+      if (!Array.isArray(o.expectedDigests)) {
+        throw invalidParams('expectedDigests must be a list')
+      }
+      if (o.expectedDigests.length > TURN_UNDO_DIGEST_LIMIT) {
+        throw invalidParams(`expectedDigests must have at most ${TURN_UNDO_DIGEST_LIMIT} items`)
+      }
+      const expectedDigests: TurnUndoFileDigest[] = o.expectedDigests.map((raw, idx) => {
+        const item = fields(raw)
+        if (
+          typeof item.path !== 'string' ||
+          item.path === '' ||
+          item.path.length > TURN_UNDO_PATH_CHARS ||
+          item.path.includes('\0')
+        ) {
+          throw invalidParams(`expectedDigests[${idx}].path must be a valid path string`)
+        }
+        if (typeof item.exists !== 'boolean') {
+          throw invalidParams(`expectedDigests[${idx}].exists must be a boolean`)
+        }
+        const sha256 = item.sha256
+        if (sha256 !== null && (typeof sha256 !== 'string' || !SHA256_HEX.test(sha256))) {
+          throw invalidParams(`expectedDigests[${idx}].sha256 must be a sha256 hex digest or null`)
+        }
+        const size = item.size
+        if (
+          size !== null &&
+          (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0)
+        ) {
+          throw invalidParams(`expectedDigests[${idx}].size must be a non-negative integer or null`)
+        }
+        return { path: item.path, exists: item.exists, sha256, size }
+      })
+      return { sessionId: sessionId(o), toolIds, expectedDigests }
+    },
     'sessions.sideAsk': (params) => {
       const o = fields(params)
       const question = string(o, 'question', SIDE_QUESTION_CHARS)
@@ -2775,6 +3091,11 @@ export function createValidators(platform: Platform): Validators {
       }
       return { sessionId: sessionId(o), backup: o.backup }
     },
+    'sessions.branches': session,
+    'sessions.switchBranch': (params) => {
+      const o = fields(params)
+      return { sessionId: sessionId(o), branchId: string(o, 'branchId', ACP_ID_CHARS) }
+    },
     'worktrees.inspect': session,
     'worktrees.remove': (params) => {
       const o = fields(params)
@@ -2826,6 +3147,22 @@ export function createValidators(platform: Platform): Validators {
         content: promptContent(o.content),
         ...(options !== undefined ? { options } : {}),
         ...(o.summarize === true ? { summarize: true } : {}),
+      }
+    },
+    'sessions.delegateAgents': session,
+    'sessions.delegate': (params) => {
+      const o = fields(params)
+      const mode = optionalString(o, 'mode', START_MODE_CHARS)
+      const title = optionalString(o, 'title', TITLE_CHARS)
+      if (title !== undefined && title.trim() === '') {
+        throw invalidParams('title must not be blank')
+      }
+      return {
+        sessionId: sessionId(o),
+        agentId: agentId(o),
+        content: promptContent(o.content),
+        ...(mode !== undefined ? { mode } : {}),
+        ...(title !== undefined ? { title } : {}),
       }
     },
     'sessions.context': session,
@@ -2944,6 +3281,16 @@ export function createValidators(platform: Platform): Validators {
       return { sessionId: sessionId(o), optionId: string(o, 'optionId', ID_CHARS), value }
     },
     'sessions.refreshModels': session,
+    'sessions.applyMcp': session,
+    'sessions.mcpServers': session,
+    'sessions.mcpServer': (params) => {
+      const o = fields(params)
+      const action = o.action
+      if (action !== 'reconnect' && action !== 'off' && action !== 'on') {
+        throw invalidParams('action must be reconnect, off or on')
+      }
+      return { sessionId: sessionId(o), serverId: libraryServerId(o), action }
+    },
     'sessions.rename': (params) => {
       const o = fields(params)
       return { sessionId: sessionId(o), title: o.title === null ? null : string(o, 'title', 200) }
@@ -3336,6 +3683,39 @@ export function createValidators(platform: Platform): Validators {
       }
     },
     'git.branches': project,
+    'git.graph': (params) => {
+      const o = fields(params)
+      const projectPath = absolutePath(o, 'projectPath', platform)
+      let limit: number | undefined
+      if (o.limit !== undefined) {
+        if (
+          typeof o.limit !== 'number' ||
+          !Number.isSafeInteger(o.limit) ||
+          o.limit < 1 ||
+          o.limit > GIT_GRAPH_MAX_LIMIT
+        ) {
+          throw invalidParams(`limit must be an integer between 1 and ${GIT_GRAPH_MAX_LIMIT}`)
+        }
+        limit = o.limit
+      }
+      let skip: number | undefined
+      if (o.skip !== undefined) {
+        if (
+          typeof o.skip !== 'number' ||
+          !Number.isSafeInteger(o.skip) ||
+          o.skip < 0 ||
+          o.skip > GIT_GRAPH_MAX_SKIP
+        ) {
+          throw invalidParams(`skip must be an integer between 0 and ${GIT_GRAPH_MAX_SKIP}`)
+        }
+        skip = o.skip
+      }
+      return {
+        projectPath,
+        ...(limit === undefined ? {} : { limit }),
+        ...(skip === undefined ? {} : { skip }),
+      }
+    },
     'git.switchBranch': (params) => {
       const o = fields(params)
       return {
@@ -3396,6 +3776,29 @@ export function createValidators(platform: Platform): Validators {
         ...(options === undefined ? {} : { options }),
         ...(worktree === undefined ? {} : { worktree }),
       }
+    },
+    'git.stack': (params) => {
+      const o = fields(params)
+      const url = string(o, 'url', URL_CHARS)
+      if (githubReferenceOf(url)?.kind !== 'stack') {
+        throw invalidParams('url is not a GitHub pull request stack')
+      }
+      if (o.fresh !== undefined && typeof o.fresh !== 'boolean') {
+        throw invalidParams('fresh must be a boolean')
+      }
+      return o.fresh === undefined ? { url } : { url, fresh: o.fresh }
+    },
+    'git.searchReferences': (params) => {
+      const o = fields(params)
+      const owner = string(o, 'owner', 128)
+      if (!GITHUB_LOGIN.test(owner)) throw invalidParams('owner is not a GitHub login')
+      const repo = string(o, 'repo', 128)
+      if (!isRepositoryName(repo)) throw invalidParams('repo is not a GitHub repository name')
+      const query = o.query
+      if (typeof query !== 'string') throw invalidParams('query must be a string')
+      if (query.length > 120) throw invalidParams(t('validate.tooLong', { key: 'query', max: 120 }))
+      if (query.includes('\0')) throw invalidParams('query contains a NUL character')
+      return { owner, repo, query }
     },
     'git.watchReferences': (params) => {
       const value = fields(params).urls
@@ -3614,6 +4017,7 @@ export function createValidators(platform: Platform): Validators {
       const deleted = optionalFlag(o, 'deleted')
       return deleted === undefined ? {} : { deleted }
     },
+    'artifacts.hidden': none,
     'artifacts.read': (params) => {
       const o = fields(params)
       return {
@@ -3680,6 +4084,10 @@ export function createValidators(platform: Platform): Validators {
     'artifacts.resolve': (params) => {
       const o = fields(params)
       return { id: artifactId(o), threadId: threadId(o), resolved: flag(o, 'resolved') }
+    },
+    'artifacts.deleteComment': (params) => {
+      const o = fields(params)
+      return { id: artifactId(o), threadId: threadId(o) }
     },
     'artifacts.repin': (params) => {
       const o = fields(params)

@@ -22,6 +22,7 @@ import {
   type SessionNode,
   type SidebarTabStop,
 } from '@renderer/stores/sessions'
+import { isSessionInArchivedProject, useProjectsStore } from '@renderer/stores/projects'
 import { SETTLED_GROUP, SNOOZED_GROUP, showAllRows, useViewStore } from '@renderer/stores/view'
 import { GroupRenameHints } from './rename-hints'
 import { RenameScope } from './rename-scope'
@@ -73,13 +74,16 @@ export function ParkedGroup({
   const summaries = useSessionsStore(
     useShallow((s) => Object.values(s.byId).filter((x) => inParkedTree(s.byId, x, kind))),
   )
+  const projects = useProjectsStore((s) => s.projects)
   const tree = useKeptNodes(
     useMemo(
       () =>
         parkedTree(Object.fromEntries(summaries.map((x) => [x.id, x])), kind).filter(
-          (node) => !hosts || hosts.includes(hostOfSession(node.summary)),
+          (node) =>
+            (!hosts || hosts.includes(hostOfSession(node.summary))) &&
+            !isSessionInArchivedProject(node.summary, projects),
         ),
-      [summaries, kind, hosts],
+      [summaries, kind, hosts, projects],
     ),
   )
   const fold = useEntry('sidebar.runGroup')

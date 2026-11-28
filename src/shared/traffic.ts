@@ -183,7 +183,7 @@ function eachImage(entry: ThreadEntry, storedSize: StoredSize, visit: (bytes: nu
       for (const item of entry.content) if (item.type === 'ref') look(item.ref)
       break
     case 'agent':
-      for (const ref of entry.attachments) look(ref)
+      for (const ref of entry.attachments ?? []) look(ref)
       break
   }
 }

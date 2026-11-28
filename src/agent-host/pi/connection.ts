@@ -4,8 +4,10 @@
 // pi makes. Pi asks no permission for its tools: only its extensions' dialogs wait for the user.
 
 import type { ChildProcess } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
+import type { SessionBranchesResult } from '@shared/agent-host'
 import type { Platform } from '@shared/platform'
 import type { ConfigOption, StopReason, TokenTotals, ToolEntry } from '@shared/thread'
 import {
@@ -21,6 +23,8 @@ import {
   type PermissionAnswer,
   type PromptBlock,
   type PromptResult,
+  type RewindPoint,
+  type RewoundSession,
   type SessionOptions,
   type SessionSetup,
   type SessionTarget,
@@ -37,9 +41,15 @@ import {
   statsMessage,
   type ParsedCommand,
 } from './commands'
+import { buildPiBranches, readPiSessionEntries, resolveEffectiveLeaf } from './branches'
 import { dialogOf } from './dialogs'
+import { PiExtensionUi } from './extension-ui'
 import {
   EXTENSION_SINCE,
+  NAVIGATE_COMMAND,
+  NAVIGATE_READY_STATUS,
+  NAVIGATE_STATUS,
+  NAVIGATE_VARIABLE,
   piExtension,
   piServers,
   SCOPE_STATUS,
@@ -50,7 +60,9 @@ import {
   activeBranch,
   blockText,
   forkEntry,
+  rewindEntry,
   SessionMapper,
+  TIMESTAMP_REF_PREFIX,
   tokenTotals,
   toolPath,
   writesFile,
@@ -81,6 +93,7 @@ import {
   listAllSessionFiles,
   listSessionFiles,
   piFolders,
+  piSessionDir,
   removeSessionFile,
   type PiFolders,
 } from './session-files'
@@ -115,6 +128,8 @@ interface Turn {
   started: boolean
   /** Started by pi itself between Kettu's turns, such as for a message left in its queue. */
   own: boolean
+  /** Reports the user prompt's timestamp reference once pi echoes it, for edit-from-here rewind. */
+  sent?: (ref: string) => void
 }
 
 interface Proc {
@@ -126,6 +141,13 @@ interface Proc {
   stopping: boolean
   /** The end of what it wrote to stderr, which says why a start failed. */
   stderr: string
+}
+
+/** Outcome emitted by Kettu's Pi extension after invoking `ctx.navigateTree`. */
+interface NavigationOutcome {
+  ok: boolean
+  cancelled?: boolean
+  error?: string
 }
 
 /** The text a file held before a `write` call: null for a new file, undefined when unknown. */
@@ -151,10 +173,18 @@ interface Session {
   cancelling: boolean
   /** One of Kettu's own commands for pi runs, which a stop ends as it does a turn. */
   busy: boolean
+  /** A native tree branch switch is in progress for this session. */
+  switching: boolean
+  /** Whether Kettu's extension registered its internal tree navigation command in this process. */
+  treeNavReady: boolean
+  /** Pending extension-based tree navigations, keyed by request id. */
+  navigations: Map<string, (outcome: NavigationOutcome) => void>
   /** Messages in pi's queue, which a settled run leaves there. */
   queued: number
   /** Dialogs waiting for the user, by pi's id for the request. */
   dialogs: Map<string, AbortController>
+  /** Ephemeral status entries and text widgets published by native Pi extensions. */
+  extensionUi: PiExtensionUi
   /** What the files of `write` calls held, by call. */
   befores: Map<string, { file: string; text: Promise<Before> }>
   /** The session's events are handled one after another. */
@@ -279,6 +309,8 @@ export class PiConnection implements AgentConnection {
   private readonly sessions = new Map<string, Session>()
   /** Each session's file once pi named it, kept after the session closed. */
   private readonly files = new Map<string, string>()
+  /** Selected native leaf id per session, kept across close/reconnect until a new turn writes. */
+  private readonly selectedLeaves = new Map<string, string | null>()
   /** The folder pi keeps each working directory's sessions in, once one named it. */
   private readonly sessionDirs = new Map<string, string>()
   private readonly targets = new Map<string, SessionTarget>()
@@ -323,7 +355,9 @@ export class PiConnection implements AgentConnection {
       const turn = session.turn
       session.turn = null
       turn?.reject(new AgentRequestError('closed', 'Pi stopped'))
+      this.endNavigations(session, 'Pi stopped')
       this.endDialogs(session)
+      this.clearExtensionUi(session)
       void this.stop(session)
     }
     this.resolveClosed()
@@ -351,6 +385,9 @@ export class PiConnection implements AgentConnection {
         deleteSession: true,
         forkSession: true,
         forkAtMessage: true,
+        // Pi cuts conversation history natively via RPC `fork`; disk file edits stay untouched.
+        rewind: true,
+        branches: true,
         ownTitles: null,
         logout: false,
         steering: this.since(STEERING_SINCE),
@@ -405,8 +442,12 @@ export class PiConnection implements AgentConnection {
       turn: null,
       cancelling: false,
       busy: false,
+      switching: false,
+      treeNavReady: false,
+      navigations: new Map(),
       queued: 0,
       dialogs: new Map(),
+      extensionUi: new PiExtensionUi(),
       befores: new Map(),
       events: Promise.resolve(),
       collected: null,
@@ -429,7 +470,11 @@ export class PiConnection implements AgentConnection {
       throw failure
     }
     this.sessions.set(session.id, session)
-    if (!session.hidden) this.announceCommands(session, proc)
+    if (!session.hidden) {
+      const target = this.targets.get(session.id)
+      if (target) this.syncExtensionUi(session, target)
+      this.announceCommands(session, proc)
+    }
   }
 
   async newSession(cwd: string, options: SessionOptions = {}): Promise<OpenedSession> {
@@ -446,6 +491,10 @@ export class PiConnection implements AgentConnection {
   ): Promise<SessionSetup> {
     this.assertOpen()
     const session = await this.attachSession(sessionId, cwd, options)
+    const preferred = this.preferredLeaf(sessionId, options)
+    if (typeof preferred === 'string' && preferred !== '') {
+      await this.syncPreferredLeaf(session, session.proc!, preferred)
+    }
     return { config: this.config(session), ...this.harness() }
   }
 
@@ -457,15 +506,9 @@ export class PiConnection implements AgentConnection {
     this.assertOpen()
     const session = await this.attachSession(sessionId, cwd, options)
     const proc = session.proc!
-    let history: { entries: PiEntry[]; leafId: string | null }
-    try {
-      history = await proc.rpc.request({ type: 'get_entries' })
-    } catch (error) {
-      throw commandError(error)
-    }
-    for (const entry of activeBranch(history.entries ?? [], history.leafId ?? null)) {
-      this.deliver(sessionId, (ctx) => session.mapper.entry(entry, ctx))
-    }
+    const preferred = this.preferredLeaf(sessionId, options)
+    const history = await this.syncPreferredLeaf(session, proc, preferred)
+    this.replayEntries(session, history.entries, history.leafId)
     await this.readStats(session, proc)
     return { config: this.config(session), ...this.harness() }
   }
@@ -477,7 +520,7 @@ export class PiConnection implements AgentConnection {
     options: SessionOptions,
   ): Promise<Session> {
     const existing = this.sessions.get(sessionId)
-    if (existing?.turn) {
+    if (existing?.turn || existing?.switching) {
       throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
     }
     if (existing) {
@@ -490,6 +533,241 @@ export class PiConnection implements AgentConnection {
     session.id = sessionId
     await this.open(session, { kind: 'resume', file })
     return session
+  }
+
+  /** Reads the native branch tree of a Pi session, live via RPC or directly from its JSONL file. */
+  async listBranches(
+    sessionId: string,
+    cwd: string,
+    preferredLeafId?: string | null,
+  ): Promise<SessionBranchesResult> {
+    this.assertOpen()
+    const existing = this.sessions.get(sessionId)
+    const proc = existing?.proc
+    if (existing && proc && !proc.stopping) {
+      try {
+        await proc.ready
+        const history = await proc.rpc.request<{ entries?: PiEntry[]; leafId?: string | null }>({
+          type: 'get_entries',
+        })
+        const entries = Array.isArray(history?.entries) ? history.entries : []
+        const leafId = resolveEffectiveLeaf(entries, history?.leafId ?? null)
+        return buildPiBranches(entries, leafId)
+      } catch (error) {
+        throw commandError(error)
+      }
+    }
+    const file = await this.fileOf(sessionId, existing?.cwd ?? cwd)
+    if (!file) {
+      return { activeLeafId: null, branchCount: 0, hasBranches: false, nodes: [] }
+    }
+    try {
+      const stored = await readPiSessionEntries(file)
+      const preferred =
+        preferredLeafId !== undefined ? preferredLeafId : this.selectedLeaves.get(sessionId)
+      const leafId = resolveEffectiveLeaf(stored.entries, stored.leafId, preferred)
+      return buildPiBranches(stored.entries, leafId)
+    } catch (error) {
+      throw new AgentRequestError('agent_error', (error as Error).message)
+    }
+  }
+
+  /**
+   * Switches a Pi session's native active branch to `branchId`, then replays the active root-to-leaf
+   * path to the registered target. Strictly rejects while a turn, dialog or switch is active.
+   */
+  async switchBranch(
+    sessionId: string,
+    cwd: string,
+    branchId: string,
+    options: SessionOptions = {},
+    beforeReplay?: () => void,
+  ): Promise<{ setup: SessionSetup; branches: SessionBranchesResult }> {
+    this.assertOpen()
+    const existing = this.sessions.get(sessionId)
+    if (
+      existing &&
+      (existing.turn || existing.busy || existing.switching || existing.dialogs.size > 0)
+    ) {
+      throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
+    }
+    const session =
+      existing && existing.proc && !existing.proc.stopping
+        ? existing
+        : await this.attachSession(sessionId, cwd, options)
+    if (session.turn || session.busy || session.switching || session.dialogs.size > 0) {
+      throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
+    }
+    session.switching = true
+    try {
+      const proc = await this.ready(session)
+      let history: { entries?: PiEntry[]; leafId?: string | null }
+      try {
+        history = await proc.rpc.request({ type: 'get_entries' })
+      } catch (error) {
+        throw commandError(error)
+      }
+      let entries = Array.isArray(history?.entries) ? history.entries : []
+      if (!entries.some((entry) => entry.id === branchId)) {
+        throw new AgentRequestError('agent_error', t('pi.branch.notFound'))
+      }
+      let leafId = history?.leafId ?? null
+      if (leafId !== branchId) {
+        await this.navigateProc(session, proc, branchId)
+        try {
+          history = await proc.rpc.request({ type: 'get_entries' })
+        } catch (error) {
+          throw commandError(error)
+        }
+        entries = Array.isArray(history?.entries) ? history.entries : []
+        leafId = history?.leafId ?? null
+        await this.refresh(session, proc).catch(() => {})
+      }
+      this.selectedLeaves.set(sessionId, leafId)
+      beforeReplay?.()
+      this.replayEntries(session, entries, leafId)
+      await this.readStats(session, proc)
+      return {
+        setup: { config: this.config(session), ...this.harness() },
+        branches: buildPiBranches(entries, leafId),
+      }
+    } finally {
+      session.switching = false
+    }
+  }
+
+  /** Replays the active branch into the session target with a fresh mapper state. */
+  private replayEntries(
+    session: Session,
+    entries: readonly PiEntry[],
+    leafId: string | null,
+  ): void {
+    session.mapper = new SessionMapper(session.cwd)
+    session.mapper.setContextWindow(session.model?.contextWindow)
+    for (const entry of activeBranch(entries, leafId)) {
+      this.deliver(session.id, (ctx) => session.mapper.entry(entry, ctx))
+    }
+  }
+
+  /** Remembered leaf preference: explicit option from host record wins over in-memory cache. */
+  private preferredLeaf(sessionId: string, options: SessionOptions): string | null | undefined {
+    if ('branchLeafId' in options && options.branchLeafId !== undefined) {
+      this.selectedLeaves.set(sessionId, options.branchLeafId)
+      return options.branchLeafId
+    }
+    return this.selectedLeaves.get(sessionId)
+  }
+
+  /**
+   * Reads `get_entries` from `proc` and, when a remembered `preferredLeafId` differs from Pi's
+   * default leaf and still exists in the tree, navigates Pi natively to restore that branch.
+   */
+  private async syncPreferredLeaf(
+    session: Session,
+    proc: Proc,
+    preferredLeafId: string | null | undefined,
+  ): Promise<{ entries: PiEntry[]; leafId: string | null }> {
+    let history: { entries?: PiEntry[]; leafId?: string | null }
+    try {
+      history = await proc.rpc.request({ type: 'get_entries' })
+    } catch (error) {
+      throw commandError(error)
+    }
+    let entries = Array.isArray(history?.entries) ? history.entries : []
+    let leafId = history?.leafId ?? null
+    if (
+      typeof preferredLeafId === 'string' &&
+      preferredLeafId !== '' &&
+      leafId !== preferredLeafId &&
+      entries.some((entry) => entry.id === preferredLeafId)
+    ) {
+      await this.navigateProc(session, proc, preferredLeafId)
+      try {
+        history = await proc.rpc.request({ type: 'get_entries' })
+      } catch (error) {
+        throw commandError(error)
+      }
+      entries = Array.isArray(history?.entries) ? history.entries : []
+      leafId = history?.leafId ?? null
+      await this.refresh(session, proc).catch(() => {})
+    }
+    return { entries, leafId }
+  }
+
+  /**
+   * Moves Pi's active native tree leaf via top-level RPC `navigate_tree` when supported, falling
+   * back to Kettu's extension command (`ctx.navigateTree`) for official Pi builds whose RPC mode
+   * exposes tree navigation only through extension command contexts.
+   */
+  private async navigateProc(session: Session, proc: Proc, targetId: string): Promise<void> {
+    try {
+      const result = await proc.rpc.request<{ cancelled?: boolean } | undefined>({
+        type: 'navigate_tree',
+        targetId,
+        summarize: false,
+      })
+      if (result?.cancelled) {
+        throw new AgentRequestError('agent_error', t('pi.branch.cancelled'))
+      }
+      return
+    } catch (error) {
+      if (
+        !(error instanceof PiCommandError) ||
+        !/unknown command|unsupported/i.test(error.message)
+      ) {
+        throw commandError(error)
+      }
+    }
+
+    if (!session.treeNavReady && this.extension) {
+      const listed = await proc.rpc
+        .request<{ commands?: PiCommandInfo[] }>({ type: 'get_commands' })
+        .then((data) => (Array.isArray(data?.commands) ? data.commands : []))
+        .catch(() => [] as PiCommandInfo[])
+      if (listed.some((cmd) => cmd.name === NAVIGATE_COMMAND)) session.treeNavReady = true
+    }
+    if (!session.treeNavReady) {
+      throw new AgentRequestError('agent_error', t('pi.branch.unsupported'))
+    }
+
+    const reqId = randomUUID()
+    let settled: NavigationOutcome | null = null
+    let resolveNav!: (outcome: NavigationOutcome) => void
+    const outcomePromise = new Promise<NavigationOutcome>((resolve) => {
+      resolveNav = (outcome) => {
+        settled = outcome
+        resolve(outcome)
+      }
+    })
+    session.navigations.set(reqId, resolveNav)
+    try {
+      await proc.rpc.request({
+        type: 'prompt',
+        message: `/${NAVIGATE_COMMAND} ${JSON.stringify({ reqId, targetId })}`,
+      })
+      await session.events
+      const outcome =
+        settled ??
+        (await Promise.race([
+          outcomePromise,
+          new Promise<NavigationOutcome>((resolve) =>
+            setTimeout(
+              () => resolve({ ok: false, error: t('pi.branch.unsupported') }),
+              STATS_TIMEOUT_MS,
+            ),
+          ),
+        ]))
+      if (!outcome.ok) {
+        throw new AgentRequestError('agent_error', outcome.error || t('pi.branch.unsupported'))
+      }
+      if (outcome.cancelled) {
+        throw new AgentRequestError('agent_error', t('pi.branch.cancelled'))
+      }
+    } catch (error) {
+      throw commandError(error)
+    } finally {
+      session.navigations.delete(reqId)
+    }
   }
 
   async forkSession(
@@ -542,6 +820,67 @@ export class PiConnection implements AgentConnection {
     }
   }
 
+  /**
+   * Cuts before the user message `point` names using Pi's native RPC `fork`, which copies only the
+   * active branch prefix into a new session file while leaving the original untouched and keeping
+   * disk files as they are. When nothing precedes the message, returns an empty id so the host
+   * starts a fresh session on the next send.
+   */
+  async rewindSession(
+    sessionId: string,
+    cwd: string,
+    point: RewindPoint,
+    title: string | null,
+  ): Promise<RewoundSession> {
+    this.assertOpen()
+    const existing = this.sessions.get(sessionId)
+    if (existing?.turn || existing?.switching) {
+      throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
+    }
+    const preferredLeaf = this.selectedLeaves.get(sessionId)
+    const sourceCwd = existing?.cwd ?? cwd
+    if (existing) await this.closeSession(sessionId)
+    const source = await this.fileOf(sessionId, sourceCwd)
+    if (!source) {
+      throw new AgentRequestError('agent_error', t('rewind.noPoint'))
+    }
+    const temp = this.blank(cwd, {})
+    temp.id = sessionId
+    const proc = await this.launch(temp, { kind: 'resume', file: source })
+    temp.proc = proc
+    try {
+      await proc.ready
+      const history = await proc.rpc.request<{ entries: PiEntry[]; leafId: string | null }>({
+        type: 'get_entries',
+      })
+      const entries = history.entries ?? []
+      const effectiveLeaf = resolveEffectiveLeaf(entries, history.leafId ?? null, preferredLeaf)
+      const target = rewindEntry(activeBranch(entries, effectiveLeaf), point)
+      if (!target) {
+        throw new AgentRequestError('agent_error', t('rewind.noPoint'))
+      }
+      if (!target.hasPriorHistory) return { sessionId: '' }
+      const forked = await proc.rpc.request<{ cancelled?: boolean }>({
+        type: 'fork',
+        entryId: target.entry.id,
+      })
+      if (forked?.cancelled) {
+        throw new AgentRequestError('agent_error', t('pi.fork.cancelled'))
+      }
+      const state = await proc.rpc.request<PiState>({ type: 'get_state' })
+      this.named(temp, state)
+      const name = title?.trim()
+      if (name) {
+        await proc.rpc.request({ type: 'set_session_name', name }).catch(() => {})
+      }
+      return { sessionId: temp.id }
+    } catch (error) {
+      throw this.startError(error, proc)
+    } finally {
+      await this.stop(temp, proc)
+    }
+  }
+
   /** Ends a session that never reached its caller, with the file pi wrote for it. */
   private async discard(session: Session): Promise<void> {
     this.sessions.delete(session.id)
@@ -558,7 +897,9 @@ export class PiConnection implements AgentConnection {
     const turn = session.turn
     session.turn = null
     turn?.resolve(this.result(turn, 'cancelled'))
+    this.endNavigations(session, 'Pi stopped')
     this.endDialogs(session)
+    this.clearExtensionUi(session)
     await this.stop(session)
   }
 
@@ -567,6 +908,7 @@ export class PiConnection implements AgentConnection {
     await this.closeSession(sessionId)
     const file = session?.file ?? (await this.fileOf(sessionId, session?.cwd ?? null))
     this.files.delete(sessionId)
+    this.selectedLeaves.delete(sessionId)
     if (!file) return
     try {
       await removeSessionFile(file)
@@ -589,9 +931,10 @@ export class PiConnection implements AgentConnection {
   }
 
   async listSessions(
-    cwd: string,
+    cwd: string | null,
     cursor: string | null,
   ): Promise<{ sessions: ListedSession[]; nextCursor: string | null }> {
+    if (cwd === null) return { sessions: [], nextCursor: null }
     const real = await realpath(cwd).catch(() => cwd)
     const all = await listSessionFiles(await this.piFolders(), real, this.dirOf(cwd, real))
     const offset = cursor ? Number.parseInt(cursor, 10) : 0
@@ -640,13 +983,16 @@ export class PiConnection implements AgentConnection {
     this.targets.set(sessionId, target)
     this.unregistered.delete(sessionId)
     const early = this.pending.get(sessionId)
-    if (!early) return
-    this.pending.delete(sessionId)
-    this.pendingCount -= early.length
-    for (const map of early) {
-      const output = map(target.context())
-      if (output) target.apply(output)
+    if (early) {
+      this.pending.delete(sessionId)
+      this.pendingCount -= early.length
+      for (const map of early) {
+        const output = map(target.context())
+        if (output) target.apply(output)
+      }
     }
+    const session = this.sessions.get(sessionId)
+    if (session) this.syncExtensionUi(session, target)
   }
 
   unregister(sessionId: string, target?: SessionTarget): void {
@@ -673,15 +1019,21 @@ export class PiConnection implements AgentConnection {
     if (this.extension) {
       args.push('-e', this.extension)
       extra[SCOPE_VARIABLE] = '1'
+      extra[NAVIGATE_VARIABLE] = '1'
       const servers = piServers(session.options.mcpServers ?? [])
       if (servers.length > 0) extra[SERVERS_VARIABLE] = JSON.stringify(servers)
     }
     for (const root of session.options.skillRoots ?? []) args.push('--skill', root)
     if (session.hidden && start.kind !== 'fork') args.push('--no-session')
-    else if (start.kind === 'fork') args.push('--fork', start.file)
-    else if (start.kind === 'resume') {
-      // Without a file pi was never prompted in it, and takes the id for a session it starts.
-      args.push(...(start.file ? ['--session', start.file] : ['--session-id', session.id]))
+    else {
+      // Where the user's own settings keep them, never where the folder's `.pi` says.
+      const own = { ...env, ...spec.env }
+      args.push('--session-dir', await piSessionDir(own, this.platform, session.cwd))
+      if (start.kind === 'fork') args.push('--fork', start.file)
+      else if (start.kind === 'resume') {
+        // Without a file pi was never prompted in it, and takes the id for a session it starts.
+        args.push(...(start.file ? ['--session', start.file] : ['--session-id', session.id]))
+      }
     }
     const stop = new AbortController()
     const child = this.context.spawn({
@@ -779,6 +1131,7 @@ export class PiConnection implements AgentConnection {
       .catch(() => [] as PiCommandInfo[])
       .then((listed) => {
         if (session.proc !== proc) return
+        if (listed.some((cmd) => cmd.name === NAVIGATE_COMMAND)) session.treeNavReady = true
         const commands = commandList(listed)
         this.deliver(session.id, () => ({
           patches: [{ op: 'session.update', changes: { commands } }],
@@ -799,6 +1152,10 @@ export class PiConnection implements AgentConnection {
     session.proc = proc
     try {
       await proc.ready
+      const preferred = this.selectedLeaves.get(session.id)
+      if (!session.hidden && typeof preferred === 'string' && preferred !== '') {
+        await this.syncPreferredLeaf(session, proc, preferred)
+      }
     } catch (error) {
       if (session.proc === proc) session.proc = null
       const failure = this.startError(error, proc)
@@ -825,7 +1182,10 @@ export class PiConnection implements AgentConnection {
   /** Ends a session's process: a stop of its run, EOF, then the host's stop of its tree. */
   private async stop(session: Session, proc = session.proc): Promise<void> {
     if (!proc) return
-    if (session.proc === proc) session.proc = null
+    if (session.proc === proc) {
+      session.proc = null
+      this.clearExtensionUi(session)
+    }
     if (proc.stopping) return
     proc.stopping = true
     proc.rpc.end()
@@ -834,8 +1194,13 @@ export class PiConnection implements AgentConnection {
   }
 
   private exited(session: Session, proc: Proc): void {
-    if (session.proc === proc) session.proc = null
+    if (session.proc === proc) {
+      session.proc = null
+      this.clearExtensionUi(session)
+    }
+    session.treeNavReady = false
     session.befores.clear()
+    this.endNavigations(session, 'Pi stopped')
     this.endDialogs(session)
     const turn = session.turn
     if (!turn) return
@@ -855,6 +1220,7 @@ export class PiConnection implements AgentConnection {
     own: boolean,
     resolve: Turn['resolve'],
     reject: Turn['reject'],
+    sent?: (ref: string) => void,
   ): Turn {
     const turn: Turn = {
       resolve,
@@ -865,19 +1231,28 @@ export class PiConnection implements AgentConnection {
       stop: null,
       started: false,
       own,
+      ...(sent ? { sent } : {}),
     }
     session.turn = turn
     return turn
   }
 
-  async prompt(sessionId: string, prompt: readonly PromptBlock[]): Promise<PromptResult> {
+  async prompt(
+    sessionId: string,
+    prompt: readonly PromptBlock[],
+    sent?: (ref: string) => void,
+  ): Promise<PromptResult> {
     const session = this.requireSession(sessionId)
-    if (session.turn) throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
+    if (session.turn || session.switching) {
+      throw new AgentRequestError('agent_error', t('agentRun.turnRunning'))
+    }
     const proc = await this.ready(session)
     const { message, images } = promptMessage(prompt)
     const command = images.length === 0 ? parseCommand(message) : null
     if (command) return this.runCommand(session, proc, command)
-    return this.run(session, proc, message, images)
+    const result = await this.run(session, proc, message, images, sent)
+    if (result.stopReason !== 'cancelled') this.selectedLeaves.delete(session.id)
+    return result
   }
 
   private async run(
@@ -885,11 +1260,14 @@ export class PiConnection implements AgentConnection {
     proc: Proc,
     text: string,
     images: readonly PiImage[],
+    sent?: (ref: string) => void,
   ): Promise<PromptResult> {
     session.cancelling = false
     const done = new Promise<PromptResult>((resolve, reject) => {
-      this.newTurn(session, false, resolve, reject)
+      this.newTurn(session, false, resolve, reject, sent)
     })
+    // Avoid unhandled rejection if the connection closes before `prompt` returns.
+    done.catch(() => {})
     const turn = session.turn!
     try {
       const answer = await proc.rpc.request<{ disposition?: PiDisposition } | undefined>({
@@ -1085,6 +1463,9 @@ export class PiConnection implements AgentConnection {
       case 'extension_ui_request':
         if (this.uiRequest(session, proc, event)) return
         break
+      case 'message_start':
+        this.noteUserRef(session, event.message)
+        break
       case 'message_update': {
         const call = event.assistantMessageEvent.toolCall
         if (event.assistantMessageEvent.type === 'toolcall_end' && call) {
@@ -1093,6 +1474,7 @@ export class PiConnection implements AgentConnection {
         break
       }
       case 'message_end':
+        this.noteUserRef(session, event.message)
         if (this.replied(session, event.message)) return
         break
       case 'tool_execution_start':
@@ -1126,6 +1508,15 @@ export class PiConnection implements AgentConnection {
     turn.started = true
     session.cancelling = false
     this.deliver(session.id, () => agentTurn('started'))
+  }
+
+  /** Records the turn's prompt timestamp once pi echoes it, ignoring later steered prompts. */
+  private noteUserRef(session: Session, message: PiMessage): void {
+    if (message.role !== 'user' || typeof message.timestamp !== 'number') return
+    const report = session.turn?.sent
+    if (!report) return
+    session.turn!.sent = undefined
+    report(`${TIMESTAMP_REF_PREFIX}${message.timestamp}`)
   }
 
   /** What a reply adds to its turn; true for a session whose replies are only collected. */
@@ -1256,6 +1647,27 @@ export class PiConnection implements AgentConnection {
           session.scope = scope
           // The first one comes before the session is known, and its options carry the scope.
           if (changed && this.sessions.get(session.id) === session) this.pushConfig(session)
+        } else if (request.statusKey === NAVIGATE_READY_STATUS) {
+          session.treeNavReady = true
+        } else if (request.statusKey === NAVIGATE_STATUS) {
+          this.takeNavigationOutcome(session, request.statusText)
+        } else if (
+          !session.hidden &&
+          !proc.stopping &&
+          (session.proc === null || session.proc === proc) &&
+          session.extensionUi.apply(request)
+        ) {
+          this.pushExtensionUi(session)
+        }
+        return true
+      case 'setWidget':
+        if (
+          !session.hidden &&
+          !proc.stopping &&
+          (session.proc === null || session.proc === proc) &&
+          session.extensionUi.apply(request)
+        ) {
+          this.pushExtensionUi(session)
         }
         return true
       case 'notify':
@@ -1267,9 +1679,41 @@ export class PiConnection implements AgentConnection {
         void this.ask(session, proc, request)
         return true
       default:
-        // Widgets, titles and editor text belong to pi's terminal UI.
+        // Titles, editor text and unsupported TUI hooks stay out of the transcript.
         return true
     }
+  }
+
+  private pushExtensionUi(session: Session): void {
+    if (session.hidden || !session.id || this.sessions.get(session.id) !== session) return
+    const target = this.targets.get(session.id)
+    if (!target) return
+    target.apply({
+      patches: [{ op: 'session.update', changes: { extensionUi: session.extensionUi.snapshot() } }],
+      effects: [],
+    })
+  }
+
+  private syncExtensionUi(session: Session, target: SessionTarget): void {
+    if (session.hidden) return
+    const next = session.extensionUi.snapshot()
+    const current = target.context().thread.session.extensionUi ?? null
+    if (next === null && current === null) return
+    target.apply({
+      patches: [{ op: 'session.update', changes: { extensionUi: next } }],
+      effects: [],
+    })
+  }
+
+  private clearExtensionUi(session: Session): void {
+    if (!session.extensionUi.clear()) return
+    if (session.hidden || !session.id) return
+    const target = this.targets.get(session.id)
+    if (!target) return
+    target.apply({
+      patches: [{ op: 'session.update', changes: { extensionUi: null } }],
+      effects: [],
+    })
   }
 
   private async ask(session: Session, proc: Proc, request: PiUiRequest): Promise<void> {
@@ -1341,6 +1785,34 @@ export class PiConnection implements AgentConnection {
   private endDialogs(session: Session): void {
     for (const abort of session.dialogs.values()) abort.abort(new Error('The run ended'))
     session.dialogs.clear()
+  }
+
+  private takeNavigationOutcome(session: Session, raw: string | undefined): void {
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw) as {
+        reqId?: unknown
+        ok?: unknown
+        cancelled?: unknown
+        error?: unknown
+      }
+      if (typeof parsed.reqId !== 'string') return
+      const resolve = session.navigations.get(parsed.reqId)
+      if (!resolve) return
+      session.navigations.delete(parsed.reqId)
+      resolve({
+        ok: parsed.ok === true,
+        ...(parsed.cancelled === true ? { cancelled: true } : {}),
+        ...(typeof parsed.error === 'string' ? { error: parsed.error } : {}),
+      })
+    } catch {
+      // Malformed status payload is ignored; the caller times out cleanly.
+    }
+  }
+
+  private endNavigations(session: Session, reason: string): void {
+    for (const resolve of session.navigations.values()) resolve({ ok: false, error: reason })
+    session.navigations.clear()
   }
 
   // Kettu's own commands for pi.

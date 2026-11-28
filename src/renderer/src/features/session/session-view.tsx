@@ -3,15 +3,12 @@ import { AlertCircleIcon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { AnimatePresence } from 'motion/react'
 import { useTranslation } from 'react-i18next'
-import type { SessionSummary } from '@shared/agent-host'
+import { isActivelyRunning, type SessionSummary } from '@shared/agent-host'
 import type { AgentId } from '@shared/thread'
 import { useEntry } from '@renderer/lib/features'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@renderer/components/ui/alert'
 import { SurfaceLight } from '@renderer/components/control/surface-light'
 import { Button } from '@renderer/components/ui/button'
-import { BrowserLabel } from '@renderer/features/browser/browser-label'
-import { DeviceLabels } from '@renderer/features/devices/device-label'
-import { TerminalLabels } from '@renderer/features/terminal/terminal-label'
 import { ProjectPathContext } from '@renderer/features/files/file-refs'
 import { HarnessPageButton } from '@renderer/features/agents/fix-button'
 import { harnessAtFault } from '@renderer/features/agents/problem-fix'
@@ -27,6 +24,11 @@ import { useMissingCopy } from '@renderer/features/settings/harness-install'
 import { agentName, agentsOn, useAgentsStore } from '@renderer/stores/agents'
 import { ensureFiles, ensureFreshFiles } from '@renderer/stores/files'
 import { isAway, useOtherHost } from '@renderer/stores/hosts'
+import {
+  findProjectForSession,
+  isProjectArchived,
+  useProjectsStore,
+} from '@renderer/stores/projects'
 import { hostOfSession, sessionArchived, useSessionsStore } from '@renderer/stores/sessions'
 import { focusSession, reloadSession, useThreadsStore } from '@renderer/stores/threads'
 import {
@@ -40,13 +42,16 @@ import { DropOverlay } from './attachments/drop-overlay'
 import { useFileDrop } from './attachments/use-file-drop'
 import { Composer } from './composer/composer'
 import { readDraft } from './composer/drafts'
+import { ExtensionStatusBar, ExtensionWidgets } from './extension-ui'
 import { preloadRenderers, useRenderersReady } from './markdown/preload'
-import { ComputerLabel } from './computer-bar'
+import { LinkSessionContext } from './open-link'
 import { QueueStack } from './queue-stack'
 import { ManagerStrip } from '@renderer/features/manager/manager-strip'
 import { SessionHeader } from './session-header'
+import { SessionLiveDock } from './session-live-dock'
 import {
   ArchivedComposer,
+  ArchivedProjectComposer,
   ColumnScroller,
   ComposerPlaceholder,
   FailedState,
@@ -75,7 +80,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
 
 function SessionBody({ summary }: { summary: SessionSummary }) {
   const managerStrip = useEntry('composer.managerStrip')
-  const { t } = useTranslation(['session', 'common', 'control'])
+  const { t } = useTranslation(['session', 'common'])
   const sessionId = summary.id
   const replicaStatus = useThreadsStore((s) => s.replicas[sessionId]?.status ?? 'loading')
   const replicaError = useThreadsStore((s) => s.replicas[sessionId]?.error ?? null)
@@ -96,7 +101,13 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
   const agentOff = useAgentsStore(
     (s) => agentsOn(s, hostId).byId[summary.agentId]?.disabled === true,
   )
-  const archived = useSessionsStore((s) => sessionArchived(s.byId, sessionId))
+  const sessionIsArchived = useSessionsStore((s) => sessionArchived(s.byId, sessionId))
+  const archivedProject = useProjectsStore((s) => {
+    if (summary.scratch) return null
+    const owner = findProjectForSession(s.projects, summary)
+    return owner && isProjectArchived(owner) ? owner : null
+  })
+  const archived = sessionIsArchived || archivedProject !== null
   const otherHost = useOtherHost(hostId)
   // Its host is offline: what the thread showed stays, and nothing goes to it.
   const away = otherHost && isAway(otherHost.connection) ? otherHost : null
@@ -125,7 +136,12 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
   const [queueError, setQueueError] = useState<string | null>(null)
   const gutter = useScrollbarGutter()
   const status = session?.status ?? summary.status
-  const running = status === 'running' || status === 'awaiting_permission'
+  // Idle-waiting on background tasks keeps the underlying prompt open, but the thread and
+  // composer present as stopped (matching Claude Code between turns with background work).
+  const waitingBackground =
+    status === 'running' &&
+    (session ? session.waitingBackground === true : summary.phase === 'waiting_background')
+  const running = (status === 'running' && !waitingBackground) || status === 'awaiting_permission'
   // File references in replies link to the project's files once their list is known: read when
   // the session shows, and again after a turn that changed the files.
   useEffect(() => {
@@ -228,186 +244,192 @@ function SessionBody({ summary }: { summary: SessionSummary }) {
   }
 
   return (
-    <div className="ks-session relative flex h-full min-h-0 flex-col" {...drop.handlers}>
-      <SessionHeader summary={summary} session={session} />
-      <div className="relative flex min-h-0 flex-1">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <ProjectPathContext value={folder}>
-            {/* The drop zone covers the thread and leaves the composer in view. */}
-            <div className="relative flex min-h-0 flex-1 flex-col">
-              {summary.task && <StepSentBack summary={summary} />}
-              {body}
-              <DropOverlay shown={drop.over} starting={status === 'starting'} agentName={name} />
-            </div>
-          </ProjectPathContext>
-          {/* Leaves the width the column's scrollbar takes, so the composer centres on the column. */}
-          <div style={{ paddingRight: gutter }}>
-            <div className="px-8 pb-6">
-              <div className="mx-auto flex w-full max-w-(--thread-column) flex-col gap-2">
-                {session &&
-                status === 'failed' &&
-                movedTo &&
-                agentStatus?.movedAccounts?.refused ? (
-                  <AccountMovedAlert
-                    agent={name}
-                    to={movedToName ?? movedTo}
-                    message={session.error?.message ?? t('view.couldNotContinue', { agent: name })}
-                    onRetry={retry}
-                    onOpen={() => {
-                      openHostSettings(hostId)
-                      openHarnessSettings(movedTo)
-                    }}
-                  />
-                ) : session && status === 'failed' ? (
-                  <FailedState
-                    title={t('view.stopped', { agent: name })}
-                    message={session.error?.message ?? t('view.couldNotContinue', { agent: name })}
-                    detail={session.error?.detail}
-                    onRetry={retry}
-                    action={
-                      missingCopy ? (
-                        <InstallCopyButton missing={missingCopy} />
-                      ) : (
-                        harnessAtFault(agentStatus) && (
-                          <HarnessPageButton status={agentStatus} hostId={hostId} />
+    <LinkSessionContext value={sessionId}>
+      <div className="ks-session relative flex h-full min-h-0 flex-col" {...drop.handlers}>
+        <SessionHeader summary={summary} session={session} />
+        <div className="relative flex min-h-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <ProjectPathContext value={folder}>
+              {/* The drop zone covers the thread and leaves the composer in view. */}
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                {summary.task && <StepSentBack summary={summary} />}
+                {body}
+                <DropOverlay shown={drop.over} starting={status === 'starting'} agentName={name} />
+              </div>
+            </ProjectPathContext>
+            {/* Leaves the width the column's scrollbar takes, so the composer centres on the column. */}
+            <div style={{ paddingRight: gutter }}>
+              <div className="px-8 pb-6">
+                <div className="mx-auto flex w-full max-w-(--thread-column) flex-col gap-2">
+                  {session &&
+                  status === 'failed' &&
+                  movedTo &&
+                  agentStatus?.movedAccounts?.refused ? (
+                    <AccountMovedAlert
+                      agent={name}
+                      to={movedToName ?? movedTo}
+                      message={
+                        session.error?.message ?? t('view.couldNotContinue', { agent: name })
+                      }
+                      onRetry={retry}
+                      onOpen={() => {
+                        openHostSettings(hostId)
+                        openHarnessSettings(movedTo)
+                      }}
+                    />
+                  ) : session && status === 'failed' ? (
+                    <FailedState
+                      title={t('view.stopped', { agent: name })}
+                      message={
+                        session.error?.message ?? t('view.couldNotContinue', { agent: name })
+                      }
+                      detail={session.error?.detail}
+                      onRetry={retry}
+                      action={
+                        missingCopy ? (
+                          <InstallCopyButton missing={missingCopy} />
+                        ) : (
+                          harnessAtFault(agentStatus) && (
+                            <HarnessPageButton status={agentStatus} hostId={hostId} />
+                          )
                         )
-                      )
-                    }
-                    report={{ hostId: otherHost?.id ?? null, sessionId, agentId: summary.agentId }}
-                  />
-                ) : null}
-                {session && status === 'auth_required' && !empty && (
-                  <SessionSignIn
+                      }
+                      report={{
+                        hostId: otherHost?.id ?? null,
+                        sessionId,
+                        agentId: summary.agentId,
+                      }}
+                    />
+                  ) : null}
+                  {session && status === 'auth_required' && !empty && (
+                    <SessionSignIn
+                      agentId={summary.agentId}
+                      hostId={hostId}
+                      panel={summary.id}
+                      name={name}
+                      onRetry={retry}
+                    />
+                  )}
+                  {agentRemoved && (
+                    <Alert variant="warning">
+                      <HugeiconsIcon icon={AlertCircleIcon} strokeWidth={1.9} aria-hidden />
+                      <AlertTitle>{t('view.agentRemoved', { agent: name })}</AlertTitle>
+                      <AlertDescription>{t('view.agentRemovedBody')}</AlertDescription>
+                      <AlertAction>
+                        <Button size="xs" variant="outline" onClick={() => openAgents(null)}>
+                          {t('view.openAgents')}
+                        </Button>
+                      </AlertAction>
+                    </Alert>
+                  )}
+                  {agentOff && !agentRemoved && (
+                    <Alert variant="warning">
+                      <HugeiconsIcon icon={AlertCircleIcon} strokeWidth={1.9} aria-hidden />
+                      <AlertTitle>{t('view.agentTurnedOff', { agent: name })}</AlertTitle>
+                      <AlertDescription>{t('view.agentTurnedOffBody')}</AlertDescription>
+                      <AlertAction>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => openAgents(summary.agentId)}
+                        >
+                          {t('view.openAgent')}
+                        </Button>
+                      </AlertAction>
+                    </Alert>
+                  )}
+                  {summary.worktree && !archived && summary.origin !== 'subagent' && (
+                    <WorktreeState sessionId={sessionId} worktree={summary.worktree} />
+                  )}
+                  {(actionError || queueError) && (
+                    <p role="alert" className="animate-in px-1 text-xs text-danger fade-in">
+                      {actionError ?? queueError}
+                    </p>
+                  )}
+                  <SessionLiveDock
+                    sessionId={sessionId}
                     agentId={summary.agentId}
                     hostId={hostId}
-                    panel={summary.id}
-                    name={name}
-                    onRetry={retry}
+                    computerView={session && computer ? (session.computer ?? null) : null}
+                    showSurfaces={!archived && !away && summary.origin !== 'subagent'}
+                    showBackground={!!session && !archived && !away && !running}
+                    onError={setQueueError}
                   />
-                )}
-                {agentRemoved && (
-                  <Alert variant="warning">
-                    <HugeiconsIcon icon={AlertCircleIcon} strokeWidth={1.9} aria-hidden />
-                    <AlertTitle>{t('view.agentRemoved', { agent: name })}</AlertTitle>
-                    <AlertDescription>{t('view.agentRemovedBody')}</AlertDescription>
-                    <AlertAction>
-                      <Button size="xs" variant="outline" onClick={() => openAgents(null)}>
-                        {t('view.openAgents')}
-                      </Button>
-                    </AlertAction>
-                  </Alert>
-                )}
-                {agentOff && !agentRemoved && (
-                  <Alert variant="warning">
-                    <HugeiconsIcon icon={AlertCircleIcon} strokeWidth={1.9} aria-hidden />
-                    <AlertTitle>{t('view.agentTurnedOff', { agent: name })}</AlertTitle>
-                    <AlertDescription>{t('view.agentTurnedOffBody')}</AlertDescription>
-                    <AlertAction>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        onClick={() => openAgents(summary.agentId)}
-                      >
-                        {t('view.openAgent')}
-                      </Button>
-                    </AlertAction>
-                  </Alert>
-                )}
-                {summary.worktree && !archived && summary.origin !== 'subagent' && (
-                  <WorktreeState sessionId={sessionId} worktree={summary.worktree} />
-                )}
-                {(actionError || queueError) && (
-                  <p role="alert" className="animate-in px-1 text-xs text-danger fade-in">
-                    {actionError ?? queueError}
-                  </p>
-                )}
-                <div className="flex flex-col">
-                  {/* Mounted only while something waits; its cards sit behind the composer. */}
-                  {session &&
-                    !archived &&
-                    summary.origin !== 'subagent' &&
-                    session.queue.length > 0 && (
-                      <QueueStack session={session} readOnly={!!away} onError={setQueueError} />
+                  <ExtensionWidgets
+                    sessionId={sessionId}
+                    placement="aboveEditor"
+                    enabled={!!session && !archived && !away}
+                  />
+                  <div className="flex flex-col">
+                    {/* Mounted only while something waits; its cards sit behind the composer. */}
+                    {session &&
+                      !archived &&
+                      summary.origin !== 'subagent' &&
+                      session.queue.length > 0 && (
+                        <QueueStack session={session} readOnly={!!away} onError={setQueueError} />
+                      )}
+                    {summary.manager && !archived && managerStrip && (
+                      <ManagerStrip sessionId={sessionId} />
                     )}
-                  {summary.manager && !archived && managerStrip && (
-                    <ManagerStrip sessionId={sessionId} />
-                  )}
-                  <div className="ctl-labels" role="group" aria-label={t('control:label.group')}>
-                    {session && (
-                      <ComputerLabel
-                        sessionId={sessionId}
-                        view={computer ? (session.computer ?? null) : null}
-                        agentId={summary.agentId}
-                        hostId={hostId}
-                        onError={setQueueError}
-                      />
-                    )}
-                    {!archived && !away && summary.origin !== 'subagent' && (
-                      <>
-                        <BrowserLabel
-                          sessionId={sessionId}
-                          agentId={summary.agentId}
-                          hostId={hostId}
+                    {/* Whatever takes the composer's place lies over the queue's tab as the
+                        composer does. The composer's menus open inside it, so while one is open
+                        it rises over the computer label. */}
+                    <div className="relative z-10 has-aria-expanded:z-20">
+                      {away ? (
+                        session && <HostAway host={away} inline />
+                      ) : summary.origin === 'subagent' ? (
+                        <SubagentBar summary={summary} session={session} />
+                      ) : sessionIsArchived && !summary.movedTo?.sameComputer ? (
+                        <ArchivedComposer sessionId={sessionId} />
+                      ) : summary.movedTo ? (
+                        // Huli: one moved within its computer is archived too, and says where
+                        // it went.
+                        <MovedComposer summary={summary} />
+                      ) : archivedProject ? (
+                        <ArchivedProjectComposer project={archivedProject} />
+                      ) : summary.worktree?.state === 'gone' ? (
+                        // Its history stays readable; nothing more can run without the branch.
+                        <WorktreeGoneComposer />
+                      ) : session ? (
+                        // An agent removed or turned off: the session goes on with another one.
+                        <Composer
+                          key={sessionId}
+                          session={session}
+                          agentName={name}
+                          mustSwitch={agentRemoved || agentOff}
                         />
-                        <DeviceLabels
-                          sessionId={sessionId}
-                          agentId={summary.agentId}
-                          hostId={hostId}
-                        />
-                        <TerminalLabels
-                          sessionId={sessionId}
-                          agentId={summary.agentId}
-                          hostId={hostId}
-                        />
-                      </>
-                    )}
+                      ) : (
+                        <ComposerPlaceholder agentId={summary.agentId} hostId={hostId} />
+                      )}
+                    </div>
                   </div>
-                  {/* Whatever takes the composer's place lies over the queue's tab as the composer
-                      does. The composer's menus open inside it, so while one is open it rises over
-                      the computer label. */}
-                  <div className="relative z-10 has-aria-expanded:z-20">
-                    {away ? (
-                      session && <HostAway host={away} inline />
-                    ) : summary.origin === 'subagent' ? (
-                      <SubagentBar summary={summary} session={session} />
-                    ) : archived && !summary.movedTo?.sameComputer ? (
-                      <ArchivedComposer sessionId={sessionId} />
-                    ) : summary.movedTo ? (
-                      // Huli: one moved within its computer is archived too, and says where it went.
-                      <MovedComposer summary={summary} />
-                    ) : summary.worktree?.state === 'gone' ? (
-                      // Its history stays readable; nothing more can run without the branch.
-                      <WorktreeGoneComposer />
-                    ) : session ? (
-                      // An agent removed or turned off: the session goes on with another one.
-                      <Composer
-                        key={sessionId}
-                        session={session}
-                        agentName={name}
-                        mustSwitch={agentRemoved || agentOff}
-                      />
-                    ) : (
-                      <ComposerPlaceholder agentId={summary.agentId} hostId={hostId} />
-                    )}
-                  </div>
+                  <ExtensionWidgets
+                    sessionId={sessionId}
+                    placement="belowEditor"
+                    enabled={!!session && !archived && !away}
+                  />
+                  <ExtensionStatusBar
+                    sessionId={sessionId}
+                    enabled={!!session && !archived && !away}
+                  />
                 </div>
               </div>
             </div>
           </div>
         </div>
+        <AnimatePresence>
+          {lit && (
+            <SurfaceLight
+              key="computer"
+              placement="inside"
+              act={session?.computer?.act?.seq ?? 0}
+              radius={SHEET_INSIDE_RADIUS}
+            />
+          )}
+        </AnimatePresence>
+        <Announcer summary={summary} name={name} />
       </div>
-      <AnimatePresence>
-        {lit && (
-          <SurfaceLight
-            key="computer"
-            placement="inside"
-            act={session?.computer?.act?.seq ?? 0}
-            radius={SHEET_INSIDE_RADIUS}
-          />
-        )}
-      </AnimatePresence>
-      <Announcer summary={summary} name={name} />
-    </div>
+    </LinkSessionContext>
   )
 }
 
@@ -423,8 +445,9 @@ function Announcer({ summary, name }: { summary: SessionSummary; name: string })
     if (summary.permissionCount > before.permissionCount) {
       setEvent(asked ? 'question' : 'approval')
     } else if (
-      (before.status === 'running' || before.status === 'awaiting_permission') &&
-      summary.status === 'ready'
+      isActivelyRunning(before) &&
+      !isActivelyRunning(summary) &&
+      (summary.status === 'ready' || summary.phase === 'waiting_background')
     ) {
       setEvent('finished')
     }

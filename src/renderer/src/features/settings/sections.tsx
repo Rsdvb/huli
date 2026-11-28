@@ -29,6 +29,7 @@ import {
   WEBHOOK_PORT_MIN,
 } from '@shared/routines'
 import {
+  CODE_SIZES,
   DEFAULT_SETTINGS,
   NEW_SESSION_LISTS,
   RUNNING_SENDS,
@@ -71,6 +72,7 @@ import { Kbd } from '@renderer/components/ui/kbd'
 import { toast } from '@renderer/components/ui/toast'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { harnessReason, programHere, shortLabel } from '@renderer/features/agents/harness-problem'
+import { splitChoiceName } from '@renderer/features/session/composer/model-list'
 import { forgetSite } from '@renderer/features/session/link-open'
 import { terminalFontStack } from '@renderer/features/terminal/font-stack'
 import { errorMessage } from '@renderer/lib/host'
@@ -91,7 +93,7 @@ import { useHostScope } from '@renderer/stores/host-scope'
 import { useOtherHost } from '@renderer/stores/hosts'
 import { homeStart } from '@renderer/web/host-path'
 import { askHostPath } from '@renderer/web/host-path-request'
-import { useProjectsStore } from '@renderer/stores/projects'
+import { findProjectForPath, useProjectsStore } from '@renderer/stores/projects'
 import { openReport, useReportStore } from '@renderer/stores/report'
 import { binnedToast } from '@renderer/features/recycle-bin/undo'
 import { useHostHasBin } from '@renderer/features/recycle-bin/support'
@@ -423,7 +425,11 @@ export function LightModelChoice({ label }: { label: string }) {
                                   key={model.value}
                                   value={pinnedValue(agent.agentId, model.value)}
                                 >
-                                  <span className="min-w-0 truncate">{model.name}</span>
+                                  <span className="min-w-0 truncate">
+                                    {group !== null && groups.length > 1
+                                      ? splitChoiceName(model)[1]
+                                      : model.name}
+                                  </span>
                                 </DropdownMenuRadioItem>
                               ))}
                             </DropdownMenuGroup>
@@ -490,6 +496,22 @@ export function OutlineSummaries({ label }: { label: string }) {
         label={label}
         checked={checked}
         onChange={(v) => apply({ thread: { outlineSummaries: v } })}
+      />
+    </>
+  )
+}
+
+export function PromptCacheDropNotice({ label }: { label: string }) {
+  const checked =
+    useSettings().thread.promptCacheDropNotice ?? DEFAULT_SETTINGS.thread.promptCacheDropNotice
+  const [apply, error] = useApply()
+  return (
+    <>
+      <ControlError error={error} />
+      <SettingSwitch
+        label={label}
+        checked={checked}
+        onChange={(v) => apply({ thread: { promptCacheDropNotice: v } })}
       />
     </>
   )
@@ -684,6 +706,56 @@ export function TextSize({ label }: { label: ReactNode }) {
   )
 }
 
+/** The row draws its own line, then a short code snippet at the chosen size under it. */
+export function CodeSize({ label }: { label: ReactNode }) {
+  const { t } = useTranslation('settings')
+  const value = useSettings().appearance.codeSize
+  const [apply, error] = useApply()
+  return (
+    <>
+      <div className="ui-sg-row">
+        {label}
+        <ControlError error={error} />
+        <Segmented
+          label={t('appearance.codeSize.name')}
+          value={value}
+          options={CODE_SIZES.map((size) => ({
+            value: size,
+            label: t(`appearance.codeSize.${size}`),
+          }))}
+          onChange={(v) => apply({ appearance: { codeSize: v } })}
+        />
+      </div>
+      <span aria-hidden className="k-preview-label">
+        {t('appearance.codeSize.previewLabel')}
+      </span>
+      <pre aria-hidden className="k-inset k-code-preview" data-testid="code-size-preview">
+        <code>{t('appearance.codeSize.preview')}</code>
+      </pre>
+    </>
+  )
+}
+
+export function ConversationWidth() {
+  const { t } = useTranslation('settings')
+  const value = useSettings().appearance.conversationWidth
+  const [apply, error] = useApply()
+  return (
+    <>
+      <ControlError error={error} />
+      <Segmented
+        label={t('appearance.conversationWidth.name')}
+        value={value}
+        options={[
+          { value: 'standard', label: t('appearance.conversationWidth.standard') },
+          { value: 'wide', label: t('appearance.conversationWidth.wide') },
+        ]}
+        onChange={(v) => apply({ appearance: { conversationWidth: v } })}
+      />
+    </>
+  )
+}
+
 export function ReduceMotion() {
   const { t } = useTranslation('settings')
   const value = useSettings().appearance.reduceMotion
@@ -734,6 +806,21 @@ export function SidebarHover({ label }: { label: string }) {
         label={label}
         checked={checked}
         onChange={(v) => apply({ appearance: { sidebarHover: v } })}
+      />
+    </>
+  )
+}
+
+export function CloseSidePanelWithLastTab({ label }: { label: string }) {
+  const checked = useSettings().appearance.closeSidePanelWithLastTab
+  const [apply, error] = useApply()
+  return (
+    <>
+      <ControlError error={error} />
+      <SettingSwitch
+        label={label}
+        checked={checked}
+        onChange={(v) => apply({ appearance: { closeSidePanelWithLastTab: v } })}
       />
     </>
   )
@@ -1490,7 +1577,7 @@ export function AllowedSiteRow({ site, onRemove }: { site: AllowedSite; onRemove
   const { t } = useTranslation('settings')
   const projects = useProjectsStore((s) => s.projects)
   const names = site.projects.map(
-    (path) => projects.find((project) => project.path === path)?.name ?? basename(path),
+    (path) => findProjectForPath(projects, path)?.name ?? basename(path),
   )
   const removing = site.removing
   return (

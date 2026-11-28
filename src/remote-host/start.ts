@@ -13,7 +13,7 @@ import type {
   RemoteHostToMain,
   SessionProgress,
 } from '@shared/host-control'
-import { isBrowserForward } from '@shared/browser'
+import { isBrowserForward, isBrowserForwardPort } from '@shared/browser'
 import { setLocale, t } from '@shared/hosts-text'
 import { isLocale } from '@shared/locale'
 import { writeLog } from '@shared/log/process-log'
@@ -595,6 +595,12 @@ export function startRemoteHost(
           return added !== null
         },
       },
+      isForwardPortReserved: (port) => {
+        const direct = live?.direct.status
+        if (direct?.state === 'listening' && direct.port === port) return true
+        if (live?.loopback?.port === port) return true
+        return false
+      },
       log,
     })
     // Started while the computer sleeps, as after a crash in a dark wake: nothing is tried yet.
@@ -949,6 +955,13 @@ export function startRemoteHost(
         withServing(({ server: s }) => s.adminEvent(event, deviceId, except))
         break
       }
+      case 'remote-host:flush-events': {
+        const { requestId } = message
+        if (!Number.isSafeInteger(requestId)) break
+        const done = (): void => send({ type: 'remote-host:events-flushed', requestId })
+        if (!withServing(({ server: s }) => void s.flushAdminEvents().then(done, done))) done()
+        break
+      }
       case 'remote-host:attention': {
         const attention = parseAttention(message.attention)
         if (!attention) {
@@ -1129,7 +1142,7 @@ export function startRemoteHost(
         break
       }
       case 'remote-host:forward': {
-        const { requestId, hostId, sessionId, forward, samePort } = message
+        const { requestId, hostId, sessionId, forward, reservedPorts } = message
         if (!Number.isSafeInteger(requestId)) break
         const answer = (port: number | null): void =>
           send({ type: 'remote-host:forwarding', requestId, port })
@@ -1141,10 +1154,11 @@ export function startRemoteHost(
           answer(null)
           break
         }
+        const reserved = Array.isArray(reservedPorts)
+          ? reservedPorts.filter(isBrowserForwardPort)
+          : undefined
         const started = withRunning(async () =>
-          answer(
-            client ? await client.forward(hostId, sessionId, forward, samePort === true) : null,
-          ),
+          answer(client ? await client.forward(hostId, sessionId, forward, reserved) : null),
         )
         if (!started) answer(null)
         break

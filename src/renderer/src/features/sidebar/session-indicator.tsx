@@ -6,7 +6,7 @@ import { BackgroundDots, TurnDots } from '@renderer/features/session/turn-dots'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { cn } from '@renderer/lib/utils'
 import { CacheRing } from './cache-status'
-import { backgroundText, type RowStatus } from './row-status'
+import { backgroundText, hasNamedBackground, type RowStatus } from './row-status'
 import { WaitingCount } from './waiting-mark'
 
 /**
@@ -19,6 +19,7 @@ export function SessionIndicator({
   status,
   expiring,
   waitingApart = false,
+  label,
   className,
 }: {
   status: RowStatus
@@ -26,61 +27,75 @@ export function SessionIndicator({
   expiring: KnownExpiry | null
   /** The row shows its wait as a button of its own over this slot, which then stays empty. */
   waitingApart?: boolean
+  /** Custom aria-label and hover title, used for aggregated folder status. */
+  label?: string
   className?: string
 }) {
   const { t } = useTranslation('sidebar')
 
   let mark = null
   if (status.waiting > 0) {
+    const text = label ?? t('indicator.waiting', { count: status.waiting })
     mark = waitingApart ? null : (
-      <span role="img" aria-label={t('indicator.waiting', { count: status.waiting })}>
+      <span role="img" aria-label={text} title={label}>
         <WaitingCount count={status.waiting} />
       </span>
     )
   } else if (status.stalled) {
+    const text = label ?? t('indicator.stalled')
     mark = (
-      <span role="img" aria-label={t('indicator.stalled')} className="grid text-warning">
+      <span role="img" aria-label={text} title={label} className="grid text-warning">
         <Glyph icon={HourglassIcon} size={14} />
       </span>
     )
   } else if (status.paused) {
+    const text = label ?? t('indicator.paused')
     mark = (
-      <span role="img" aria-label={t('indicator.paused')} className="grid text-warning">
+      <span role="img" aria-label={text} title={label} className="grid text-warning">
         <Glyph icon={Clock01Icon} size={14} />
       </span>
     )
   } else if (status.failed) {
+    const text = label ?? t('indicator.error')
     mark = (
-      <span role="img" aria-label={t('indicator.error')} className="grid text-danger">
+      <span role="img" aria-label={text} title={label} className="grid text-danger">
         <Glyph icon={Alert02Icon} size={14} />
       </span>
     )
   } else if (status.running) {
+    const text = label ?? t('indicator.running')
     mark = (
-      <span role="img" aria-label={t('indicator.running')} className="grid">
+      <span role="img" aria-label={text} title={label} className="grid">
         <TurnDots phase="working" />
       </span>
     )
   } else if (status.background) {
-    const label = t('indicator.background', { work: backgroundText(t, status.background) })
+    const text =
+      label ??
+      (hasNamedBackground(status.background)
+        ? t('indicator.background', { work: backgroundText(t, status.background) })
+        : t('indicator.backgroundUnnamed'))
     mark = (
-      <span role="img" aria-label={label} title={label} className="grid">
+      <span role="img" aria-label={text} title={text} className="grid">
         <BackgroundDots />
       </span>
     )
   } else if (status.starting) {
+    const text = label ?? t('indicator.starting')
     mark = (
-      <span role="img" aria-label={t('indicator.starting')} className="grid">
+      <span role="img" aria-label={text} title={label} className="grid">
         <TurnDots phase="thinking" />
       </span>
     )
   } else if (expiring) {
     mark = <CacheRing cache={expiring} />
   } else if (status.unread) {
+    const text = label ?? t('indicator.unread')
     mark = (
       <span
         role="img"
-        aria-label={t('indicator.unread')}
+        aria-label={text}
+        title={label}
         className="size-1.5 rounded-full bg-(--accent)"
       />
     )
@@ -99,8 +114,9 @@ export function SessionIndicator({
 }
 
 /**
- * What a row shows after its caret. Where the row's tools show over its end, this fades out
- * under them, so the title and badges keep their places (styles/affect.css).
+ * What a row shows after its caret. On plain rows this fades out under the hover tools through a
+ * mask; on badged rows its end slot expands on hover so badges slide clear of the tools
+ * (styles/affect.css).
  */
 export function RowBody({ children }: { children: ReactNode }) {
   return (

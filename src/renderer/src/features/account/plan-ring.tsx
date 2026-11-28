@@ -20,6 +20,7 @@ import {
   accountAgents,
   accountCardKey,
   accountKey,
+  focusUnidentifiedAccounts,
   ownKey,
   type AccountAgent,
 } from '@renderer/lib/plan-readings'
@@ -27,11 +28,14 @@ import { readJson, writeJson } from '@renderer/lib/storage'
 import { useNow } from '@renderer/lib/use-now'
 import { cn } from '@renderer/lib/utils'
 import { agentsOn, planReadingsOf, useAgentsStore, usePlanReadings } from '@renderer/stores/agents'
+import { useOverlayPresence } from '@renderer/stores/overlays'
 import { hostOfSession, useSessionsStore } from '@renderer/stores/sessions'
 import { planLimitWays, readLimitsThrough } from '@renderer/stores/usage'
 import { openUsage, useViewStore } from '@renderer/stores/view'
 import {
+  activeHostId,
   shownHostAgents,
+  useActiveHostId,
   useHostName,
   useShownHostAgents,
   useWindowHost,
@@ -52,9 +56,11 @@ import { PlanLimitCard } from './plan-limit-card'
  * host asks each agent at most once a minute.
  */
 function readLimits(): void {
-  const listed = new Set(
-    accountAgents(shownHostAgents(), planReadingsOf(useAgentsStore.getState())).map((a) => a.key),
+  const accounts = focusUnidentifiedAccounts(
+    accountAgents(shownHostAgents(), planReadingsOf(useAgentsStore.getState())),
+    activeHostId(),
   )
+  const listed = new Set(accounts.map((a) => a.key))
   for (const [key, ways] of planLimitWays()) {
     if (!listed.has(key)) continue
     // The user opened the popover: a read they asked for.
@@ -64,17 +70,20 @@ function readLimits(): void {
   }
 }
 
-/** The window's hosts' accounts with plan limits, an account once however many hosts it is on. */
+/**
+ * The window's hosts' accounts with plan limits, an account once however many hosts it is on.
+ * Unidentified multi-host harnesses focus onto the active host in compact surfaces.
+ */
 function useAccountsWithLimits(): AccountAgent[] {
   const shown = useShownHostAgents()
   const readings = usePlanReadings()
-  return useMemo(
-    () =>
-      accountAgents(shown, readings).filter(
-        (a) => a.limits.length > 0 || (a.agent.balances?.length ?? 0) > 0,
-      ),
-    [shown, readings],
-  )
+  const activeHost = useActiveHostId()
+  return useMemo(() => {
+    const withLimits = accountAgents(shown, readings).filter(
+      (a) => a.limits.length > 0 || (a.agent.balances?.length ?? 0) > 0,
+    )
+    return focusUnidentifiedAccounts(withLimits, activeHost)
+  }, [shown, readings, activeHost])
 }
 
 /** The agent of the focused session or New session's choice. */
@@ -136,14 +145,21 @@ export function PlanRing() {
   const now = useNow()
   const cards = planCards(useAccountsWithLimits(), now)
   const currentKey = useCurrentAccountKey()
+  const windowHost = useWindowHost()
+  const hostName = useHostName()
   const view = useLimitView()
   const [open, setOpen] = useState(false)
+  useOverlayPresence(open, { dismissible: true })
 
   const card = currentKey ? currentCard(cards, currentKey) : null
   const windows = card?.windows ?? []
   const balance = card && windows.length === 0 ? balanceTotal(card.balances) : null
   if (!card || (windows.length === 0 && !balance)) return null
 
+  const accountLabel =
+    windowHost.kind === 'all' && card.hostScoped
+      ? `${card.name} · ${hostName(card.hostId)}`
+      : card.name
   const units: Record<string, string> = {
     credits: t('usage:limits.units.credits'),
     requests: t('usage:limits.units.premiumRequests'),
@@ -154,16 +170,16 @@ export function PlanRing() {
     label =
       balance.wallets.length > 1
         ? t('sidebar:account.ringBalanceWallets', {
-            account: card.name,
+            account: accountLabel,
             amount,
             wallets: balance.wallets
               .map((w) => `${balanceLabel(w.label)} ${balanceText(w, units)}`)
               .join(' · '),
           })
-        : t('sidebar:account.ringBalance', { account: card.name, amount })
+        : t('sidebar:account.ringBalance', { account: accountLabel, amount })
   } else {
     label = t('sidebar:account.ring', {
-      account: card.name,
+      account: accountLabel,
       windows: [...windows]
         .reverse()
         .map((w) =>

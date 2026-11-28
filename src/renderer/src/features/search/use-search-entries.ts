@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { shortcutKeysOf } from '@renderer/lib/shortcut-keys'
 import { useTranslation } from 'react-i18next'
 import { useShallow } from 'zustand/react/shallow'
-import type { ConversationHit, SessionSummary } from '@shared/agent-host'
+import type { ConversationHit, Project, SessionSummary } from '@shared/agent-host'
 import { entryOn, type FeatureEntry } from '@shared/features'
 import { artifactKind, recency } from '@renderer/features/artifacts/model'
 import { settingRow } from '@renderer/features/marketplace/plugin-model'
@@ -26,7 +26,14 @@ import {
   usePluginSurfacesStore,
   type PluginSettingsSurface,
 } from '@renderer/stores/plugin-surfaces'
-import { useProjectsStore } from '@renderer/stores/projects'
+import {
+  findProjectForPath,
+  findProjectForSession,
+  isProjectArchived,
+  isSessionInArchivedProject,
+  projectFolders,
+  useProjectsStore,
+} from '@renderer/stores/projects'
 import { useSettingsStore } from '@renderer/stores/settings'
 import {
   hostOfSession,
@@ -76,12 +83,17 @@ const ACTION_SHORTCUT: Partial<Record<SearchAction, ShortcutAction>> = {
  * Sessions Search can find, as the sidebar lists them: no subagents, no prepared or missing
  * sessions, and nothing archived itself or under an archived parent.
  */
-function findable(summary: SessionSummary, byId: Record<string, SessionSummary>): boolean {
+function findable(
+  summary: SessionSummary,
+  byId: Record<string, SessionSummary>,
+  projects: readonly Project[],
+): boolean {
   return (
     summary.origin !== 'subagent' &&
     !summary.prepared &&
     !summary.missing &&
-    !sessionArchived(byId, summary.id)
+    !sessionArchived(byId, summary.id) &&
+    !isSessionInArchivedProject(summary, projects)
   )
 }
 
@@ -114,17 +126,19 @@ export function useSearchEntries(): SearchEntry[] {
  * A project's name by its path, with the parent folders that tell it from another of the same name
  * in brackets, and "No project" for the scratch folders.
  */
-function useProjectName(): (path: string | null) => string {
+function useProjectName(): (path: string | null, owner?: string) => string {
   const { t } = useTranslation('sidebar')
   const projects = useProjectsStore(useShallow((s) => s.projects))
   const noProject = t('project.noProject')
   return useMemo(() => {
-    const names = new Map(projects.map((project) => [project.path, project.name]))
-    const hints = projectNameHints(projects.map((project) => project.path))
-    return (path) => {
+    const hints = projectNameHints(projects)
+    return (path, owner) => {
       if (path === null) return noProject
-      const name = names.get(path) ?? basename(hostPath(path))
-      const hint = hints.get(path)
+      const project =
+        findProjectForPath(projects, path) ??
+        (owner ? projects.find((item) => item.path === owner) : undefined)
+      const name = project?.name ?? basename(hostPath(path))
+      const hint = project ? hints.get(project.path) : undefined
       return hint ? `${name} (${hint})` : name
     }
   }, [projects, noProject])
@@ -147,7 +161,10 @@ function useSessionLine(): (summary: SessionSummary) => {
     const hostName = (id: string | null) =>
       id === null ? thisComputer : (others.find((host) => host.id === id)?.name ?? unknown)
     return (summary) => {
-      const project = projectName(summary.scratch ? null : summary.projectPath)
+      const project = projectName(
+        summary.scratch ? null : summary.projectPath,
+        summary.projectOwner,
+      )
       const host = others.length > 0 && only === undefined ? hostName(hostOfSession(summary)) : null
       const meta = [project, host, summary.branch].filter(Boolean).join(' · ')
       return { title: sessionTitle(summary), project, host, meta }
@@ -157,12 +174,15 @@ function useSessionLine(): (summary: SessionSummary) => {
 
 function useSessionEntries(): SearchEntry[] {
   const byId = useSessionsStore((s) => s.byId)
+  const projects = useProjectsStore(useShallow((s) => s.projects))
   const lineOf = useSessionLine()
   const only = useOnlyHost()
 
   return useMemo(() => {
     return Object.values(byId)
-      .filter((summary) => findable(summary, byId) && onHost(only, hostOfSession(summary)))
+      .filter(
+        (summary) => findable(summary, byId, projects) && onHost(only, hostOfSession(summary)),
+      )
       .map((summary): SearchEntry => {
         const { title, project, host, meta } = lineOf(summary)
         const hostId = hostOfSession(summary)
@@ -180,19 +200,20 @@ function useSessionEntries(): SearchEntry[] {
           hostId,
         }
       })
-  }, [byId, lineOf, only])
+  }, [byId, projects, lineOf, only])
 }
 
 /** The sessions the hosts found by what was said in them, as Search's rows. */
 export function useConversationEntries(hits: readonly ConversationHit[]): SearchEntry[] {
   const { t } = useTranslation('sidebar')
   const byId = useSessionsStore((s) => s.byId)
+  const projects = useProjectsStore(useShallow((s) => s.projects))
   const lineOf = useSessionLine()
   return useMemo(
     () =>
       hits.flatMap((hit): SearchEntry[] => {
         const summary = byId[hit.sessionId]
-        if (!summary || !findable(summary, byId)) return []
+        if (!summary || !findable(summary, byId, projects)) return []
         const { title, meta } = lineOf(summary)
         const matches = hit.matches ?? 1
         return [
@@ -215,7 +236,7 @@ export function useConversationEntries(hits: readonly ConversationHit[]): Search
           },
         ]
       }),
-    [hits, byId, lineOf, t],
+    [hits, byId, projects, lineOf, t],
   )
 }
 
@@ -299,26 +320,32 @@ function useProjectEntries(): SearchEntry[] {
   return useMemo(() => {
     const counts = new Map<string, number>()
     for (const summary of Object.values(byId)) {
-      if (findable(summary, byId)) {
-        counts.set(summary.projectPath, (counts.get(summary.projectPath) ?? 0) + 1)
+      if (findable(summary, byId, projects) && !summary.scratch) {
+        const owner = findProjectForSession(projects, summary)?.path ?? summary.projectPath
+        counts.set(owner, (counts.get(owner) ?? 0) + 1)
       }
     }
     return projects
-      .filter((project) => !project.missing && onHost(only, hostOfPath(project.path)))
+      .filter(
+        (project) =>
+          !project.missing && !isProjectArchived(project) && onHost(only, hostOfPath(project.path)),
+      )
       .map((project): SearchEntry => {
         const hostId = hostOfPath(project.path)
         const folder = dirname(hostPath(project.path))
         const host = hostId === null ? null : (others.find((h) => h.id === hostId)?.name ?? unknown)
         const count = counts.get(project.path) ?? 0
+        const allPaths = projectFolders(project).map(hostPath).join(' ')
         return {
           kind: 'project',
           key: `project:${project.path}`,
           title: project.name,
           meta: host ? `${host} · ${folder}` : folder,
           trailing: count > 0 ? t('search.sessionCount', { count }) : null,
-          haystack: haystackOf(project.name, host, hostPath(project.path)),
+          haystack: haystackOf(project.name, host, allPaths),
           at: project.lastOpenedAt,
           path: project.path,
+          ...(project.icon ? { icon: project.icon } : {}),
         }
       })
   }, [projects, byId, others, unknown, t, only])

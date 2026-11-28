@@ -1,11 +1,11 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { hostSettingsPart, splitSettingsPatch, withHostSettings } from '@shared/remote/host-admin'
 import { DEFAULT_FEATURES, FEATURE_IDS } from '@shared/features'
 import { RELAY_URL } from '@shared/remote/relay'
-import { DEFAULT_SETTINGS } from '@shared/settings'
+import { APP_ICONS, CODE_SIZES, CONVERSATION_WIDTHS, DEFAULT_SETTINGS } from '@shared/settings'
 import { DEFAULT_PORT_BASE } from '@shared/worktree-ports'
 import { SettingsStore } from './settings'
 import {
@@ -746,6 +746,35 @@ describe("a plugin's items in a patch", () => {
   })
 })
 
+describe("a server's tools and projects in a patch", () => {
+  const server = {
+    id: 'manual:0b6e4f2c-6b7a-4f5e-9d2a-3c1b2a4d5e6f',
+    name: 'files',
+    title: 'Files',
+    source: 'manual',
+    version: null,
+    spec: { type: 'stdio', command: 'files-mcp', args: [], env: [] },
+    agents: 'all',
+    on: true,
+  }
+  const put = (extra: Record<string, unknown>) =>
+    validateSettingsPatch({ marketplace: { mcpEdit: { put: [{ ...server, ...extra }] } } })
+
+  it('keeps the tools turned off, each once, and the projects it goes to', () => {
+    const projects = { mode: 'only', paths: [resolve('/work/app')] }
+    expect(put({ toolsOff: ['erase', 'erase', 'move'], projects })).toEqual({
+      marketplace: { mcpEdit: { put: [{ ...server, toolsOff: ['erase', 'move'], projects }] } },
+    })
+  })
+
+  it('refuses a tool name that is no name, a relative project and an unknown mode', () => {
+    expect(() => put({ toolsOff: [''] })).toThrow()
+    expect(() => put({ toolsOff: 'erase' })).toThrow()
+    expect(() => put({ projects: { mode: 'only', paths: ['work/app'] } })).toThrow()
+    expect(() => put({ projects: { mode: 'some', paths: [] } })).toThrow()
+  })
+})
+
 describe('removing what a plugin brought', () => {
   const skill = {
     id: 'plugin:p0123456789ab:review',
@@ -863,6 +892,33 @@ describe('items from the Kettu Marketplace in a patch', () => {
     expect(validateSettingsPatch({ marketplace: { mcp: [server] } })).toEqual({
       marketplace: { mcp: [server] },
     })
+  })
+
+  it('keeps how a server runs, and refuses a mode or a time it does not know', () => {
+    const run = { mode: 'folder', idleMinutes: 30, startSeconds: 60 }
+    expect(validateSettingsPatch({ marketplace: { mcp: [{ ...server, run }] } })).toEqual({
+      marketplace: { mcp: [{ ...server, run }] },
+    })
+    const bad = (value: unknown) => () =>
+      validateSettingsPatch({ marketplace: { mcp: [{ ...server, run: value }] } })
+    expect(bad({ mode: 'shared' })).toThrow()
+    expect(bad({ idleMinutes: 0 })).toThrow()
+    expect(bad({ idleMinutes: 2.5 })).toThrow()
+    expect(bad({ startSeconds: 601 })).toThrow()
+    expect(bad({ mode: 'session', extra: true })).toThrow()
+  })
+
+  it('reads how a server runs from the file, dropping a key it does not know', async () => {
+    const run = { mode: 'agent', idleMinutes: 5, later: 1 }
+    await save({ version: 1, marketplace: { mcp: [{ ...server, run }], skills: [] } })
+    const store = await SettingsStore.load(dir)
+    expect(store.get().marketplace.mcp[0]?.run).toEqual({ mode: 'agent', idleMinutes: 5 })
+  })
+
+  it('stores no run settings for a server that keeps every default', async () => {
+    await save({ version: 1, marketplace: { mcp: [{ ...server, run: {} }], skills: [] } })
+    const store = await SettingsStore.load(dir)
+    expect(store.get().marketplace.mcp[0]).not.toHaveProperty('run')
   })
 
   it('keeps a bundle’s server on Kettu’s Node.js with its inputs’ labels and kinds', () => {
@@ -1304,15 +1360,26 @@ describe('the fonts the user picks', () => {
   })
 
   it('keeps stored faces and drops a set that could break out of a font stack on load', async () => {
-    const fonts = { ui: 'Segoe UI', prose: 'Microsoft YaHei', code: 'Maple Mono NF CN' }
+    const fonts = {
+      ui: 'Segoe UI',
+      uiCjk: 'PingFang SC',
+      prose: 'Source Serif 4',
+      proseCjk: '思源宋体 CN',
+      code: 'Maple Mono NF CN',
+      codeCjk: 'LXGW WenKai',
+    }
     await save({ version: 1, appearance: { fonts } })
     expect((await SettingsStore.load(dir)).get().appearance.fonts).toEqual(fonts)
     for (const bad of [
       { code: 'A", evil' },
       { ui: '' },
+      { uiCjk: '' },
       { prose: "A'; x" },
+      { proseCjk: 'A", evil' },
       { code: 7 },
+      { codeCjk: 7 },
       { heading: 'Inter' },
+      { headingCjk: 'PingFang SC' },
       ['Inter'],
       'Inter',
       null,
@@ -1323,17 +1390,28 @@ describe('the fonts the user picks', () => {
   })
 
   it('takes a set of face names in a change and refuses the rest', () => {
-    expect(validateSettingsPatch({ appearance: { fonts: { code: 'Maple Mono NF CN' } } })).toEqual({
-      appearance: { fonts: { code: 'Maple Mono NF CN' } },
+    expect(
+      validateSettingsPatch({
+        appearance: { fonts: { code: 'Maple Mono NF CN', codeCjk: 'LXGW WenKai' } },
+      }),
+    ).toEqual({
+      appearance: { fonts: { code: 'Maple Mono NF CN', codeCjk: 'LXGW WenKai' } },
+    })
+    expect(validateSettingsPatch({ appearance: { fonts: { uiCjk: 'PingFang SC' } } })).toEqual({
+      appearance: { fonts: { uiCjk: 'PingFang SC' } },
     })
     expect(validateSettingsPatch({ appearance: { fonts: {} } })).toEqual({
       appearance: { fonts: {} },
     })
     for (const bad of [
       { code: 'A, B' },
+      { codeCjk: 'A, B' },
       { ui: 'url(x)' },
+      { uiCjk: 'url(x)' },
       { prose: null },
+      { proseCjk: null },
       { mono: 'Menlo' },
+      { monoCjk: 'PingFang SC' },
       null,
       'Menlo',
     ]) {
@@ -1341,19 +1419,25 @@ describe('the fonts the user picks', () => {
     }
   })
 
-  it('replaces the whole set in a change', () => {
+  it('replaces the whole set in a change and clears optional Chinese fonts independently', () => {
     const both = mergeSettings(DEFAULT_SETTINGS, {
+      appearance: { fonts: { ui: 'Segoe UI', uiCjk: 'PingFang SC', code: 'Menlo' } },
+    })
+    expect(both.appearance.fonts).toEqual({ ui: 'Segoe UI', uiCjk: 'PingFang SC', code: 'Menlo' })
+    const clearedCjk = mergeSettings(both, {
       appearance: { fonts: { ui: 'Segoe UI', code: 'Menlo' } },
     })
-    expect(both.appearance.fonts).toEqual({ ui: 'Segoe UI', code: 'Menlo' })
-    const one = mergeSettings(both, { appearance: { fonts: { code: 'Menlo' } } })
+    expect(clearedCjk.appearance.fonts).toEqual({ ui: 'Segoe UI', code: 'Menlo' })
+    const one = mergeSettings(clearedCjk, { appearance: { fonts: { code: 'Menlo' } } })
     expect(one.appearance.fonts).toEqual({ code: 'Menlo' })
   })
 
   it('stays with the window that draws them, never on the host', () => {
-    const { host, client } = splitSettingsPatch({ appearance: { fonts: { code: 'Menlo' } } })
+    const { host, client } = splitSettingsPatch({
+      appearance: { fonts: { code: 'Menlo', codeCjk: 'LXGW WenKai' } },
+    })
     expect(host).toBeNull()
-    expect(client).toEqual({ appearance: { fonts: { code: 'Menlo' } } })
+    expect(client).toEqual({ appearance: { fonts: { code: 'Menlo', codeCjk: 'LXGW WenKai' } } })
   })
 })
 
@@ -1586,6 +1670,193 @@ describe('sending while a turn is running', () => {
     )
     for (const bad of ['now', '', false, null, 0]) {
       expect(() => validateSettingsPatch({ general: { runningSend: bad } })).toThrow()
+    }
+  })
+})
+
+describe('closing the side panel with its last tab', () => {
+  it('defaults to false and keeps a stored boolean on load', async () => {
+    expect((await SettingsStore.load(dir)).get().appearance.closeSidePanelWithLastTab).toBe(false)
+    await save({ version: 1, appearance: { closeSidePanelWithLastTab: true } })
+    expect((await SettingsStore.load(dir)).get().appearance.closeSidePanelWithLastTab).toBe(true)
+    await save({ version: 1, appearance: { closeSidePanelWithLastTab: false } })
+    expect((await SettingsStore.load(dir)).get().appearance.closeSidePanelWithLastTab).toBe(false)
+    for (const bad of ['yes', 1, null, {}]) {
+      await save({ version: 1, appearance: { closeSidePanelWithLastTab: bad } })
+      expect((await SettingsStore.load(dir)).get().appearance.closeSidePanelWithLastTab).toBe(false)
+    }
+  })
+
+  it('validates, merges, persists and keeps the setting on the client', async () => {
+    const patch = validateSettingsPatch({ appearance: { closeSidePanelWithLastTab: true } })
+    expect(patch).toEqual({ appearance: { closeSidePanelWithLastTab: true } })
+    const next = mergeSettings(DEFAULT_SETTINGS, patch)
+    expect(next.appearance.closeSidePanelWithLastTab).toBe(true)
+    expect(splitSettingsPatch(patch)).toEqual({ host: null, client: patch })
+    expect(
+      withHostSettings(next, hostSettingsPart(DEFAULT_SETTINGS)).appearance
+        .closeSidePanelWithLastTab,
+    ).toBe(true)
+
+    const store = await SettingsStore.load(dir)
+    store.update(patch)
+    await store.flush()
+    expect((await SettingsStore.load(dir)).get().appearance.closeSidePanelWithLastTab).toBe(true)
+
+    for (const bad of ['true', 1, null, []]) {
+      expect(() =>
+        validateSettingsPatch({ appearance: { closeSidePanelWithLastTab: bad } }),
+      ).toThrow()
+    }
+  })
+})
+
+describe('selectable desktop app icon', () => {
+  it('defaults to kettu, accepts all six icons and legacy default alias, and falls back on invalid values', async () => {
+    expect((await SettingsStore.load(dir)).get().appearance.appIcon).toBe('kettu')
+    for (const icon of APP_ICONS) {
+      await save({ version: 1, appearance: { appIcon: icon } })
+      expect((await SettingsStore.load(dir)).get().appearance.appIcon).toBe(icon)
+    }
+    await save({ version: 1, appearance: { appIcon: 'default' } })
+    expect((await SettingsStore.load(dir)).get().appearance.appIcon).toBe('kettu')
+    for (const bad of ['unknown', '', 42, null, {}]) {
+      await save({ version: 1, appearance: { appIcon: bad } })
+      expect((await SettingsStore.load(dir)).get().appearance.appIcon).toBe('kettu')
+    }
+  })
+
+  it('validates, normalizes, merges, persists and keeps the app icon on the client', async () => {
+    const patch = validateSettingsPatch({ appearance: { appIcon: 'ink-sheets' } })
+    expect(patch).toEqual({ appearance: { appIcon: 'ink-sheets' } })
+    const next = mergeSettings(DEFAULT_SETTINGS, patch)
+    expect(next.appearance.appIcon).toBe('ink-sheets')
+    expect(splitSettingsPatch(patch)).toEqual({ host: null, client: patch })
+    expect(withHostSettings(next, hostSettingsPart(DEFAULT_SETTINGS)).appearance.appIcon).toBe(
+      'ink-sheets',
+    )
+
+    const legacyPatch = validateSettingsPatch({ appearance: { appIcon: 'default' } })
+    expect(mergeSettings(next, legacyPatch).appearance.appIcon).toBe('kettu')
+
+    const store = await SettingsStore.load(dir)
+    store.update(patch)
+    await store.flush()
+    expect((await SettingsStore.load(dir)).get().appearance.appIcon).toBe('ink-sheets')
+
+    for (const bad of ['blue', '', 0, null, []]) {
+      expect(() => validateSettingsPatch({ appearance: { appIcon: bad } })).toThrow()
+    }
+  })
+})
+
+describe('prompt cache drop notice setting', () => {
+  it('defaults to false, loads stored booleans, and falls back to false on invalid values', async () => {
+    expect((await SettingsStore.load(dir)).get().thread.promptCacheDropNotice).toBe(false)
+    await save({ version: 1, thread: { promptCacheDropNotice: true } })
+    expect((await SettingsStore.load(dir)).get().thread.promptCacheDropNotice).toBe(true)
+    await save({ version: 1, thread: { promptCacheDropNotice: false } })
+    expect((await SettingsStore.load(dir)).get().thread.promptCacheDropNotice).toBe(false)
+    for (const bad of ['yes', 1, null, {}]) {
+      await save({ version: 1, thread: { promptCacheDropNotice: bad } })
+      expect((await SettingsStore.load(dir)).get().thread.promptCacheDropNotice).toBe(false)
+    }
+  })
+
+  it('validates, merges, persists and keeps the setting on the client', async () => {
+    const patch = validateSettingsPatch({ thread: { promptCacheDropNotice: true } })
+    expect(patch).toEqual({ thread: { promptCacheDropNotice: true } })
+    const next = mergeSettings(DEFAULT_SETTINGS, patch)
+    expect(next.thread.promptCacheDropNotice).toBe(true)
+    expect(splitSettingsPatch(patch)).toEqual({ host: null, client: patch })
+    expect(
+      withHostSettings(next, hostSettingsPart(DEFAULT_SETTINGS)).thread.promptCacheDropNotice,
+    ).toBe(true)
+
+    const store = await SettingsStore.load(dir)
+    store.update(patch)
+    await store.flush()
+    expect((await SettingsStore.load(dir)).get().thread.promptCacheDropNotice).toBe(true)
+
+    for (const bad of ['true', 1, null, []]) {
+      expect(() => validateSettingsPatch({ thread: { promptCacheDropNotice: bad } })).toThrow()
+    }
+  })
+})
+
+describe('conversation width preset', () => {
+  it('defaults to standard for fresh and legacy files, accepts valid presets, and sanitizes invalid values', async () => {
+    expect((await SettingsStore.load(dir)).get().appearance.conversationWidth).toBe('standard')
+    await save({ version: 1, appearance: { textSize: 'large' } })
+    expect((await SettingsStore.load(dir)).get().appearance.conversationWidth).toBe('standard')
+
+    for (const preset of CONVERSATION_WIDTHS) {
+      await save({ version: 1, appearance: { conversationWidth: preset } })
+      expect((await SettingsStore.load(dir)).get().appearance.conversationWidth).toBe(preset)
+    }
+    for (const bad of ['full', 'narrow', '', 1200, null, {}]) {
+      await save({ version: 1, appearance: { conversationWidth: bad } })
+      expect((await SettingsStore.load(dir)).get().appearance.conversationWidth).toBe('standard')
+    }
+  })
+
+  it('validates, merges, persists and keeps the preset on the client', async () => {
+    const patch = validateSettingsPatch({ appearance: { conversationWidth: 'wide' } })
+    expect(patch).toEqual({ appearance: { conversationWidth: 'wide' } })
+    const next = mergeSettings(DEFAULT_SETTINGS, patch)
+    expect(next.appearance.conversationWidth).toBe('wide')
+    expect(splitSettingsPatch(patch)).toEqual({ host: null, client: patch })
+    expect(
+      withHostSettings(next, hostSettingsPart(DEFAULT_SETTINGS)).appearance.conversationWidth,
+    ).toBe('wide')
+
+    const store = await SettingsStore.load(dir)
+    store.update(patch)
+    await store.flush()
+    expect((await SettingsStore.load(dir)).get().appearance.conversationWidth).toBe('wide')
+
+    for (const bad of ['full', 'compact', '', 1088, null, []]) {
+      expect(() => validateSettingsPatch({ appearance: { conversationWidth: bad } })).toThrow()
+    }
+  })
+})
+
+describe('code font size setting', () => {
+  it('defaults to default for fresh and legacy files, accepts valid presets, and sanitizes invalid values', async () => {
+    expect((await SettingsStore.load(dir)).get().appearance.codeSize).toBe('default')
+    await save({ version: 1, appearance: { textSize: 'large' } })
+    const legacy = (await SettingsStore.load(dir)).get()
+    expect(legacy.appearance.textSize).toBe('large')
+    expect(legacy.appearance.codeSize).toBe('default')
+
+    for (const preset of CODE_SIZES) {
+      await save({ version: 1, appearance: { codeSize: preset } })
+      expect((await SettingsStore.load(dir)).get().appearance.codeSize).toBe(preset)
+    }
+    for (const bad of ['medium', 'xlarge', '', 13, null, {}]) {
+      await save({ version: 1, appearance: { codeSize: bad } })
+      expect((await SettingsStore.load(dir)).get().appearance.codeSize).toBe('default')
+    }
+  })
+
+  it('validates, merges, persists and keeps the code size preset on the client', async () => {
+    const patch = validateSettingsPatch({ appearance: { codeSize: 'large' } })
+    expect(patch).toEqual({ appearance: { codeSize: 'large' } })
+    const next = mergeSettings(DEFAULT_SETTINGS, patch)
+    expect(next.appearance.codeSize).toBe('large')
+    expect(next.appearance.textSize).toBe('default')
+    expect(splitSettingsPatch(patch)).toEqual({ host: null, client: patch })
+    expect(withHostSettings(next, hostSettingsPart(DEFAULT_SETTINGS)).appearance.codeSize).toBe(
+      'large',
+    )
+
+    const store = await SettingsStore.load(dir)
+    store.update(patch)
+    await store.flush()
+    expect((await SettingsStore.load(dir)).get().appearance.codeSize).toBe('large')
+
+    for (const bad of ['medium', 'tiny', '', 14, null, []]) {
+      expect(() => validateSettingsPatch({ appearance: { codeSize: bad } })).toThrow()
     }
   })
 })

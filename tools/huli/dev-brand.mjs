@@ -9,10 +9,16 @@ import { ARTWORK, CODE, brandCode, brandLocale } from './brand-text.mjs'
 
 /**
  * Artwork an unpackaged run reads from the tree at run time, which a build has the rebrand copy
- * over: the window's icon and the tray's images, pointed at Kite's in ARTWORK instead.
+ * over: the window's and Dock's icon (Kettu's app icon picker, whose default Kite's mirror holds)
+ * and the tray's images, pointed at Kite's in ARTWORK instead.
  */
 const RUNTIME_ARTWORK = {
-  'src/main/window.ts': [["'build/icon.png'", `'${ARTWORK}/build/icon.png'`]],
+  'src/main/app-icon.ts': [
+    [
+      "join(paths?.appPath ?? app.getAppPath(), 'resources', 'app-icons')",
+      `join(paths?.appPath ?? app.getAppPath(), '${ARTWORK}/resources', 'app-icons')`,
+    ],
+  ],
   'src/main/tray.ts': [
     [
       "join(app.getAppPath(), 'resources', 'tray')",

@@ -1,3 +1,10 @@
+import { randomUUID as mcpId } from 'node:crypto'
+import type {
+  McpCheck,
+  McpConfigSource,
+  McpDiscoveryRow,
+  McpImportChoice,
+} from '@shared/mcp-discovery'
 // The agent host, assembled: state, agents, sessions, git and the ports. start.ts runs it in
 // the utility process or under Node.js; tests run it in-process with fakes for the launcher,
 // shell and git.
@@ -15,7 +22,7 @@ import { DeviceAccessStore } from './devices/access'
 import os from 'node:os'
 import path from 'node:path'
 import { LAUNCH_FILE, parseLaunchConfigs, type LaunchConfig } from '@shared/launch-configs'
-import { cp, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises'
 import type {
   AgentOptions,
   AgentStatus,
@@ -27,6 +34,16 @@ import type {
 import { OWNER } from '@shared/artifact-comments'
 import { DEFAULT_WEBHOOK_PORT, ROUTINE_ID } from '@shared/routines'
 import { flushLog, logFolder, redactLogText, writeLog } from '@shared/log/process-log'
+import {
+  carryOf,
+  servedInProject,
+  toolInfos,
+  turnTokens,
+  type McpRunState,
+  type McpServerInsight,
+  type McpToolInfo,
+  type SessionMcpServer,
+} from '@shared/mcp-insight'
 import { channelTrigger, PLUGIN_CHANNEL_EVENT } from '@shared/plugin-channels'
 import { PLUGIN_THEMES_FILE } from '@shared/plugin-themes'
 import type { AgentToPluginHost } from '@shared/plugin-host'
@@ -37,7 +54,7 @@ import { parseReportRequest } from '@shared/report'
 import { harnessOf, takesStartMode, type HarnessId } from '@shared/agents'
 import type { RuntimeAnswer } from '@shared/artifact-capabilities'
 import { ARTIFACT_ENTRY, artifactFileType } from '@shared/artifact-files'
-import { type ArtifactImportResult, type ArtifactSummary, NO_SESSION } from '@shared/artifacts'
+import { type ArtifactImportResult, NO_SESSION } from '@shared/artifacts'
 import type { AttachmentGrant } from '@shared/attachments'
 import {
   siteOf,
@@ -49,7 +66,6 @@ import { isControlOutcome, isControlStep, SURFACE_ACCESS_WAIT_MS } from '@shared
 import type {
   AgentProcess,
   AttentionFront,
-  ArtifactBrief,
   ArtifactContentResult,
   ArtifactExportResult,
   ArtifactListResult,
@@ -74,11 +90,13 @@ import { DEFAULT_AGENT_NETWORK } from '@shared/agent-network'
 import { featureOfMethod, featureOn, type FeatureId } from '@shared/features'
 import type { HostSettings } from '@shared/settings'
 import {
+  runOf,
   serverFor,
   serverName,
   specInputs,
   type CatalogServer,
   type MarketConnection,
+  MARKET_NAME,
   type MarketServer,
   type MarketSkill,
 } from '@shared/marketplace'
@@ -107,6 +125,7 @@ import { listedModels } from './claude/user-settings'
 import { STOP_TIMINGS } from './agent-process'
 import { AgentTrees } from './agent-trees'
 import { readImport } from './artifacts/import'
+import { readLegacyKettuOwners } from './artifacts/legacy-owners'
 import { PluginTemplates } from './artifacts/plugin-templates'
 import { ArtifactConsents } from './artifacts/runtime/consent'
 import type { DeclaredArtifact } from './artifacts/runtime/calls'
@@ -152,8 +171,10 @@ import { writeBranchSlug } from './session-titles'
 import { cleanSlug } from './worktrees/names'
 import { lightTarget } from './light-model'
 import { reportDraftPrompt, writeReportDraft } from './report-draft'
+import { resolveThoughtTranslationTarget, translateThoughtSummary } from './thought-translation'
 import { Diagnostics } from './diagnostics'
 import type { ContainerSandbox } from './sandbox/container'
+import { isDiskFullError } from './disk-full'
 import { HostError, invalidParams, isHostError, notFound } from './errors'
 import { setLocale, t } from './i18n'
 import { tSettings, tSettingsEnglish } from './settings-words'
@@ -170,7 +191,17 @@ import { MarketIcons } from './marketplace/icons'
 import { MarketConnectionsService } from './marketplace/connections'
 import { logText } from './localized-error'
 import { parseSignIns } from './marketplace/oauth'
-import { McpProxy } from './marketplace/proxy'
+import { createHash } from 'node:crypto'
+import { Answers, answersFile } from './mcp-router/answers'
+import { McpRouter } from './mcp-router/router'
+import { McpCalls } from './mcp-router/calls'
+import {
+  PROJECT_SERVER,
+  ToolChanges,
+  toolGuard,
+  toolsFile,
+  trustedSource,
+} from './mcp-router/tool-changes'
 import type { CodexRequest } from './codex/rpc'
 import { OwnPluginsService } from './marketplace/own-plugins'
 import { MarketSkillsService, skillFor, skillsCatalogFile } from './marketplace/skills'
@@ -184,6 +215,7 @@ import { PublishDrafts } from './marketplace/publish-drafts'
 import { PluginConverter } from './marketplace/plugin-conversions'
 import { MarketCallError, MarketTools } from './marketplace/publish-tools'
 import { ROUTINE_WAIT_MS, RoutineTools } from './routines/tools'
+import { MCP_WAIT_MS, McpStaleUndo, McpTools } from './marketplace/mcp-tools'
 import {
   SETTINGS_WAIT_MS,
   SettingsTools,
@@ -194,11 +226,23 @@ import {
 import {
   ALL_TRANSPORTS,
   keyState,
+  GATED_SERVER_BYTES,
   libraryServers,
+  serverMasker,
   parseMarketKeys,
+  serverCommand,
   serverHeaders,
   type MarketKeys,
 } from './marketplace/servers'
+import {
+  McpDiscoveryService,
+  readOwnMcpServers,
+  seenMcpFile,
+  type PreparedMcpImport,
+} from './marketplace/mcp-discovery'
+import { harnessProjectMcpPaths, mcpConfigPaths } from './marketplace/mcp-config-paths'
+import { parseMcpPaste } from './marketplace/mcp-paste'
+import { importedServer, type ConfiguredMcp, type McpConfigFile } from './marketplace/mcp-config'
 import { findCommand, isExecutableFile, type Env } from './find-command'
 import type { GitServiceApi, GitServiceDeps } from './git/api'
 import { createExec, type ExecRunner } from './git/exec'
@@ -216,12 +260,24 @@ import { InstalledScripts } from './plugin-runtime/installed'
 import { PluginRefs } from './plugin-runtime/refs'
 import { PluginViews } from './plugin-runtime/views'
 import { createPluginApi, type ColorMode, type PLUGIN_EVENTS } from './plugin-runtime/functions'
+import { createHttpsTransport, type HttpTransport } from './plugin-runtime/network'
 import { PluginStorage } from './plugin-runtime/storage'
 import { PluginTools } from './plugin-runtime/tools'
 import { PreparedRecords, preparedFile, settingsTargets } from './prepared'
 import { processControl, type ProcessControl } from './process-tree'
 import { ProjectCreate } from './project-create'
 import { ProjectHooksAnswers } from './project-hooks'
+import {
+  codexUntrusted,
+  folderNotice,
+  folderServers,
+  folderSettings,
+  geminiTrusted,
+  grokTrusted,
+  projectRoots,
+  type FolderDeclared,
+  type FolderServer,
+} from './project-settings'
 import { ProjectMcpAnswers } from './project-mcp'
 import { Projects } from './projects'
 import { claudeOutside, type OutsideReader } from './outside-sessions'
@@ -233,6 +289,7 @@ import { clineModelRequests } from './model-requests/cline'
 import { antigravityModelRequests } from './model-requests/antigravity'
 import { codexModelRequests } from './model-requests/codex'
 import { opencodeModelRequests } from './model-requests/opencode'
+import { piModelRequests } from './model-requests/pi'
 import { byHarness } from './model-requests/reader'
 import { AcpMessages, acpModelRequests } from './model-requests/acp-messages'
 import { IdleRelease } from './idle-release'
@@ -301,6 +358,7 @@ import {
   agentProcessesFile,
   agentsFile,
   agentUpdatesFile,
+  observeStorageWrites,
   projectsFile,
   projectHooksFile,
   projectMcpFile,
@@ -324,6 +382,8 @@ import { ThreadStore, type ThreadWorkerFactory } from './threads/store'
 import { watchMigration } from './migration-watch'
 import { UsageManager, type UsageTimings } from './usage/manager'
 import type { LogReader } from './usage/model'
+import { consumeUpdateResume } from './update-resume'
+import type { UpdateResumeFile } from '@shared/update-resume'
 import { LimitNotices, limitNoticeText, type LimitNotice } from './limit-notices'
 import { LOG_READERS } from './usage/readers'
 import { UsageStore, type UsageWorkerFactory } from './usage/store'
@@ -342,6 +402,25 @@ import { StaleThemeUndo, THEME_WAIT_MS, ThemeTools } from './theme/tools'
 import type { ThemeCall, ThemeCallAnswer, ThemeSnapshot } from '@shared/theme-palette'
 import { anyBridgeOn, parseChatBridgeConfig, type ChatBridgeConfig } from '@shared/chat-bridge'
 import type { ChatBridgeService } from './chat-bridge/service'
+import {
+  backupKey,
+  bridgeDataArg,
+  McpTerminal,
+  McpTerminalStale,
+  newTerminalKey,
+  terminalGets,
+  terminalLedgerFile,
+  writeConnectFile,
+} from './marketplace/mcp-terminal'
+import type { RouterCaller } from './mcp-router/router'
+import { installedTerminalApps } from './marketplace/mcp-terminal-apps'
+import {
+  isTerminalTarget,
+  MCP_TERMINAL_APPS,
+  terminalApp,
+  type McpTerminalApp,
+  type McpTerminalTarget,
+} from '@shared/mcp-terminal'
 
 // The agent menu reads a running agent's options again once they are older than this.
 const OPTIONS_FRESH_MS = 5 * 60_000
@@ -367,14 +446,6 @@ function browserApp(ctx: RequestContext): void {
   }
 }
 
-function brief(
-  artifact: Pick<ArtifactSummary, 'id' | 'version' | 'createdAt' | 'updatedAt'>,
-  deleted: boolean,
-): ArtifactBrief {
-  const { id, version, createdAt, updatedAt } = artifact
-  return { id, version, createdAt, updatedAt, deleted }
-}
-
 /**
  * A window, and a device that said so, read stored images by hash; other devices get bytes. Huli:
  * such a device gets a live thread's large images by hash too.
@@ -385,7 +456,8 @@ function imagesFor(device: PortDevice | null): ReadImages {
 }
 
 /**
- * A page as a device reads it: with long tool outputs and inputs as digests, when it said so.
+ * A desktop window, and a paired device that negotiated `TOOL_DIGESTS_FEATURE`, read long folded
+ * tool outputs and inputs as digests and fetch the full entry on demand via `sessions.entry`.
  * Huli: a lean read gets a lean page, whoever asks.
  */
 function digestsFor<T extends { entries: ThreadEntry[] }>(
@@ -394,7 +466,7 @@ function digestsFor<T extends { entries: ThreadEntry[] }>(
   lean?: boolean,
 ): T | (Omit<T, 'entries'> & { entries: DigestedThreadEntry[] }) {
   if (lean) return leanEntries(page)
-  return device?.toolDigests ? digestEntries(page) : page
+  return !device || device.toolDigests ? digestEntries(page) : page
 }
 
 /** What a message or answer from a paired device's port keeps of it; none from a window. */
@@ -414,6 +486,15 @@ const MEMORY_ERRORS: Record<MemoryErrorCode, PortErrorCode> = {
   off: 'unavailable',
 }
 
+/** How long a server checked after a failed call goes before another failure checks it again. */
+const FAILURE_CHECK_MS = 60_000
+
+/** How a session's agent reached a library server it was handed. */
+interface McpHanded {
+  name: string
+  how: 'router' | 'agent' | 'gateway'
+}
+
 /** Runs a memory request, its refusals crossing the port with `memory_<code>` as `data.reason`. */
 async function memoryCall<T>(run: () => Promise<T>): Promise<T> {
   try {
@@ -426,6 +507,15 @@ async function memoryCall<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
+/** The harnesses whose sessions hold a folder's own servers and settings for the user. */
+const FOLDER_HELD_HARNESSES: ReadonlySet<HarnessId> = new Set([
+  'claude-code',
+  'codex',
+  'opencode',
+  'kilo',
+  'qwen',
+])
+
 export interface HostOptions {
   userDataPath: string
   appVersion: string
@@ -436,6 +526,16 @@ export interface HostOptions {
   sessionRouterPath?: string | null
   /** The bundle of the process that runs Cline's SDK; without it Cline runs over ACP. */
   clineHostPath?: string | null
+  /**
+   * The MCP bridge, which stdio-only agents reach the library's servers by; without it they get
+   * commands.
+   */
+  mcpBridgePath?: string | null
+  /**
+   * What the daemon's own entries in agents' files run, its `kettu` command; the desktop app's
+   * run the bridge itself.
+   */
+  mcpCommandPath?: string | null
   settings: HostSettings
   baseEnv: Env
   send(message: HostToMain): void
@@ -485,6 +585,8 @@ export interface HostOptions {
   detectInterface?: NodeProxyDeps['detect']
   /** What the host's requests to Kettu's download service say they are: the app or the daemon. */
   userAgent?: string
+  /** Initial active Kettu account id for artifact ownership and isolation; null when signed out. */
+  accountId?: string | null
 }
 
 /** What the desktop app gives the host for computer use. */
@@ -562,6 +664,8 @@ export class AgentHost {
   private readonly lastFailed = new Map<AgentId, { sessionId: string; at: number }>()
   /** The session a used-up window stopped, by the window's key, which its reset opens. */
   private readonly stoppedBy = new Map<string, string>()
+  /** Post-update session recovery run for this launch; resolves immediately when none was pending. */
+  private updateResumePromise: Promise<void> = Promise.resolve()
   readonly env: EnvironmentService
   readonly projects: Projects
   /** Huli: Add project's clones and new empty projects. */
@@ -688,6 +792,33 @@ export class AgentHost {
   private readonly browserSites = new Map<string, string>()
   /** The values of the Marketplace servers' inputs from main, held only in memory. */
   private marketKeys: MarketKeys = new Map()
+  /**
+   * Servers of a folder's own files the user let start, which Kettu runs as it does the library's,
+   * by id, with the values their files give; kept in memory only, and read again at each attach.
+   */
+  private readonly projectServers = new Map<string, MarketServer>()
+  private readonly projectKeys = new Map<string, ReadonlyMap<string, string>>()
+  private readonly mcpDiscovery: McpDiscoveryService
+  private readonly mcpDrafts = new Map<string, Map<string, ConfiguredMcp>>()
+  private readonly mcpCheckStates = new Map<string, McpCheck>()
+  /** The checks going now, by server id, which a second ask joins. */
+  private readonly mcpChecking = new Map<string, Promise<McpCheck>>()
+  private readonly inFlightThoughtTranslations = new Map<
+    string,
+    Promise<{ translation: string; agent: string }>
+  >()
+  /** When each server was last checked after a failed call. */
+  private readonly failureChecks = new Map<string, number>()
+  private readonly mcpInstallCalls = new Map<number, (error: string | null) => void>()
+  private nextMcpInstall = 1
+  private readonly mcpTerminal: McpTerminal
+  /** The connect file's key, which a terminal's bridge brings; new at each start of the service. */
+  private terminalKey: string | null = null
+  private appsSeen: { at: number; apps: Promise<McpTerminalApp[]> } | null = null
+  private backupKey: Buffer | null = null
+  private readonly mcpBackupKeyCalls = new Map<number, (error: string | null) => void>()
+  /** Who waits for the library to hold a change, checked as each settings change arrives. */
+  private libraryWaiters = new Set<() => boolean>()
   private agentEnvKeys: Record<string, Record<string, string>> = {}
   /** Huli: the container tier's engine and image, loaded on its first use. */
   private containers: Promise<ContainerSandbox> | null = null
@@ -702,8 +833,17 @@ export class AgentHost {
   private readonly marketCatalog: MarketCatalogService
   /** The sign-ins of the Marketplace's OAuth servers. */
   private readonly marketConnections: MarketConnectionsService
-  /** Where agents reach the OAuth servers, with a fresh token. */
-  private readonly mcpProxy: McpProxy
+  private readonly mcpAnswers: Answers
+  private readonly mcpToolChanges: ToolChanges
+  private readonly mcpRouter: McpRouter
+  /** The record of tool calls through the router. */
+  private readonly mcpCalls: McpCalls
+  /** The library servers each session's agent was handed at its last attach, by server id. */
+  private readonly sessionMcp = new Map<string, Map<string, McpHanded>>()
+  /** The bridge program, once it is found where main said; null without one. */
+  private mcpBridge: string | null = null
+  /** The daemon's `kettu`, which its entries in agents' files run in place of the bridge. */
+  private mcpCommand: string | null = null
   /** The sign-ins sent to main that no push has carried back yet, by server id. */
   private readonly unkept = new Map<string, { state: string | null; pushes: number }>()
   /** The plugins Claude Code and Codex agents have of their own, which Kettu only lists. */
@@ -746,6 +886,8 @@ export class AgentHost {
   /** Huli: the values the user saved for each project, by project path, then name; host only. */
   private projectSecrets: Record<string, Record<string, string>> = {}
   private readonly routineTools: RoutineTools
+  /** The MCP library tools of Kettu's MCP service. */
+  private readonly mcpTools: McpTools
   /** What was put off or refused, to publish later. */
   private readonly publishDrafts: PublishDrafts
   /** The Marketplace tools of Kettu's MCP service. */
@@ -762,6 +904,8 @@ export class AgentHost {
   )
   /** The themes the plugins that are on bring, listed where main or the daemon reads them. */
   private readonly pluginThemes: PluginThemeIndex
+  /** The transport behind plugin scripts' `network.fetch`, through the agents' current proxy. */
+  private readonly pluginTransport: HttpTransport
   /** The plugin host, which runs the scripts of the installed plugins that are on. */
   private readonly pluginHost = new PluginHostClient({
     want: (run) => this.options.send({ type: 'host:plugin-host', run }),
@@ -798,6 +942,7 @@ export class AgentHost {
         answer: (pluginId, request, decision, from) =>
           this.pluginChannels.answer(pluginId, request, decision, from),
       },
+      transport: (request) => this.pluginTransport(request),
     }),
     onStatus: () => this.hub.broadcast({ type: 'plugins.changed' }),
     log: (level, message) => writeLog(level, 'plugins', message),
@@ -856,6 +1001,7 @@ export class AgentHost {
   private lastProcesses = '[]'
   private sentFolders: string | null = null
   private stopping: Promise<void> | null = null
+  private readonly stopStorageWatch: () => void
   private readonly catalog: readonly AgentDefinition[]
 
   private constructor(private readonly options: HostOptions) {
@@ -878,6 +1024,10 @@ export class AgentHost {
     this.execRunner = createExec(() => this.env.agentEnv() as NodeJS.ProcessEnv)
     this.checkpointGit = createGitRunner(() => this.env.agentEnv() as NodeJS.ProcessEnv, platform)
     const net = proxyFetch(() => this.env.agentEnv(), platform)
+    this.pluginTransport = createHttpsTransport({
+      env: () => this.env.agentEnv(),
+      platform,
+    })
     this.media = new MediaService({
       platform,
       homeDir: options.homeDir ?? os.homedir(),
@@ -1054,6 +1204,45 @@ export class AgentHost {
       settle: (sessionId, entryId, outcome) =>
         this.sessions.routineSettled(sessionId, entryId, outcome),
     })
+    this.mcpTools = new McpTools({
+      servers: () => this.settings.marketplace.mcp,
+      insight: (serverId) => this.mcpInsight(serverId)[0] ?? null,
+      lastCheck: (serverId) => this.mcpCheckStates.get(serverId) ?? null,
+      check: (server, project) =>
+        this.checkMcpServer(server, this.marketKeys.get(server.id) ?? new Map(), project),
+      failedCalls: (serverId, limit) => this.mcpCalls.list({ serverId, failed: true, limit }),
+      logs: (serverId) => this.mcpLogs().filter((log) => log.serverId === serverId),
+      mask: (serverId) => this.mcpMask(serverId),
+      keysSet: (serverId) =>
+        keyState(this.settings.marketplace.mcp, this.marketKeys)[serverId] ?? [],
+      agents: () => this.agents.statuses(),
+      project: async (value) => {
+        const found = this.projects.find(value)
+        if (found) return found.path
+        const canonical = await this.projects.resolveDirectory(value).catch(() => null)
+        return canonical === null ? null : (this.projects.find(canonical)?.path ?? null)
+      },
+      sessionFolder: (sessionId) =>
+        this.sessions.sessionFolder(sessionId) ?? this.sessions.sessionProject(sessionId),
+      detectSignIn: (url) => this.marketConnections.detect(url, {}),
+      catalogServer: async (id) => {
+        const catalog = await this.marketCatalog.catalog(false, true)
+        const listed = catalog.sections.flatMap((section) => section.items)
+        const found = listed.find((item) => item.id === id)
+        if (found) return found
+        const search = await this.marketCatalog.search(id.split('/').pop() ?? id)
+        return search.items.find((item) => item.id === id) ?? null
+      },
+      put: async (servers) => {
+        await this.settingsCall({
+          kind: 'change',
+          patch: { marketplace: { mcpEdit: { put: servers } } },
+        })
+      },
+      ask: (sessionId, ask) => this.sessions.mcpAsked(sessionId, ask, MCP_WAIT_MS),
+      settle: (sessionId, entryId, outcome, restore) =>
+        this.sessions.mcpSettled(sessionId, entryId, outcome, restore),
+    })
     this.scratch = new ScratchFolders(path.join(options.userDataPath, 'scratch'), platform)
     this.remembered = agentsFile(options.userDataPath, log)
     this.updates = agentUpdatesFile(options.userDataPath, log)
@@ -1087,20 +1276,140 @@ export class AgentHost {
     this.marketConnections = new MarketConnectionsService({
       log,
       servers: () => this.settings.marketplace.mcp,
-      headers: (server) => serverHeaders(server, this.marketKeys),
+      headers: (server) =>
+        serverHeaders(server, this.marketKeys, { env: this.env.agentEnv(), platform }),
       keep: (serverId, state) => this.keepSignIn(serverId, state),
       changed: (serverId, connection, loginId, error) =>
         this.connectionChanged(serverId, connection, loginId, error),
       fetch: net,
     })
-    this.mcpProxy = new McpProxy({
-      servers: () => this.settings.marketplace.mcp,
-      headers: (server) => serverHeaders(server, this.marketKeys),
+    const signsIn = (server: MarketServer): boolean =>
+      this.marketConnections.access(server) === 'proxy'
+    this.mcpCalls = new McpCalls(path.join(options.userDataPath, 'state', 'mcp-calls'), log)
+    const home = options.homeDir ?? os.homedir()
+    this.mcpAnswers = new Answers(answersFile(options.userDataPath, log))
+    this.mcpToolChanges = new ToolChanges(toolsFile(options.userDataPath, log), {
+      changed: (serverId) => this.mcpToolsChanged(serverId),
+    })
+    this.trees = new AgentTrees({
+      file: agentProcessesFile(options.userDataPath, log),
+      control: options.processControl ?? processControl(platform),
+      graceMs: STOP_TIMINGS.termMs,
+      ...(options.treeNoteMs !== undefined ? { noteMs: options.treeNoteMs } : {}),
+      log,
+    })
+    this.mcpRouter = new McpRouter({
+      servers: () => this.routedServers(),
+      command: (server) =>
+        serverCommand(
+          server,
+          this.routedKeys(),
+          this.env.agentEnv(),
+          options.nodeRuntime,
+          platform,
+        ),
+      headers: (server) =>
+        serverHeaders(server, this.routedKeys(), { env: this.env.agentEnv(), platform }),
+      signsIn,
       token: (serverId) => this.marketConnections.token(serverId),
       refused: (serverId, used) => this.marketConnections.refused(serverId, used),
+      answers: this.mcpAnswers,
+      tools: this.mcpToolChanges,
+      called: ({ serverId, sessionId, outcome, terminal }) => {
+        if (outcome.result === 'error') this.checkAfterFailure(serverId, sessionId)
+        void this.mcpCalls.add({
+          at: outcome.at,
+          serverId,
+          sessionId,
+          agentId: sessionId ? this.sessions.sessionAgent(sessionId) : (terminal?.agentId ?? null),
+          ...(terminal ? { folder: terminal.folder } : {}),
+          ...(terminal?.app ? { app: terminal.app } : {}),
+          tool: outcome.tool,
+          ms: outcome.ms,
+          bytes: outcome.bytes,
+          result: outcome.result,
+          ...(outcome.error !== undefined ? { error: this.mcpMask(serverId)(outcome.error) } : {}),
+        })
+      },
+      appVersion: options.appVersion,
+      home,
+      log,
       fetch: net,
+      processes: { platform, trees: this.trees },
     })
-    const home = options.homeDir ?? os.homedir()
+    this.mcpDiscovery = new McpDiscoveryService({
+      seen: seenMcpFile(options.userDataPath, log),
+      files: () =>
+        mcpConfigPaths(
+          platform,
+          home,
+          this.agents.mcpDiscoveryAgents(),
+          this.projects
+            .list()
+            .filter((project) => project.archivedAt == null)
+            .map(({ path }) => path),
+          (name, agent) => this.env.get(name, agent),
+        ),
+      library: () => this.settings.marketplace.mcp,
+      changed: () => {
+        this.hub.broadcast({ type: 'market.discoveryChanged' })
+        void this.mcpTerminal.rows().catch(() => {})
+      },
+    })
+    this.mcpTerminal = new McpTerminal({
+      dataPath: options.userDataPath,
+      log,
+      ledger: terminalLedgerFile(options.userDataPath, log),
+      library: () => this.settings.marketplace.mcp,
+      owners: async () => [
+        ...this.agents
+          .mcpDiscoveryAgents()
+          .map(({ id, harness, folder }) => ({ id, harness, app: null, folder })),
+        ...(await this.terminalApps()).map((app) => ({
+          id: `app:${app}` as const,
+          harness: null,
+          app,
+          folder: null,
+        })),
+      ],
+      files: (target) => {
+        const app = terminalApp(target)
+        const paths = (
+          agents: ReturnType<AgentManager['mcpDiscoveryAgents']>,
+          agentOnly: boolean,
+        ): McpConfigFile[] =>
+          mcpConfigPaths(
+            platform,
+            home,
+            agents,
+            [],
+            (name, agent) => this.env.get(name, agent),
+            agentOnly,
+          )
+        return app
+          ? paths([], false).filter((file) => file.app === MCP_TERMINAL_APPS[app] && !file.project)
+          : paths(
+              this.agents.mcpDiscoveryAgents().filter(({ id }) => id === target),
+              true,
+            )
+      },
+      claudeSettings: (agentId) => {
+        const configured = this.env.get('CLAUDE_CONFIG_DIR', agentId)?.trim()
+        const folder =
+          this.agents.configFolder(agentId) ??
+          (configured ? path.resolve(home, configured) : path.join(home, '.claude'))
+        return path.join(folder, 'settings.json')
+      },
+      launch: () => {
+        const command = this.mcpCommand ?? this.mcpBridge
+        return command ? { command, args: ['mcp', 'connect'] } : null
+      },
+      dataArg: () => bridgeDataArg(platform, home, process.env, options.userDataPath),
+      key: () => this.backupKey,
+      importOwn: (target, items) => this.importOwnMcp(target, items),
+      giveTo: (agentId, serverIds) => this.giveMcpTo(agentId, serverIds),
+      changed: () => this.hub.broadcast({ type: 'market.discoveryChanged' }),
+    })
     this.ownPlugins = new OwnPluginsService({
       platform,
       agents: () => this.installedAgents(['claude-code', 'codex']),
@@ -1169,13 +1478,6 @@ export class AgentHost {
             fetch: net,
           })),
       ))
-    this.trees = new AgentTrees({
-      file: agentProcessesFile(options.userDataPath, log),
-      control: options.processControl ?? processControl(platform),
-      graceMs: STOP_TIMINGS.termMs,
-      ...(options.treeNoteMs !== undefined ? { noteMs: options.treeNoteMs } : {}),
-      log,
-    })
     this.attachments = new Attachments({ userDataPath: options.userDataPath, log })
     const contentDir = path.join(options.userDataPath, 'artifacts', 'content')
     this.threads = options.threadWorker
@@ -1194,12 +1496,17 @@ export class AgentHost {
       threads: this.threads,
       contentDir,
       log,
+      initialAccountId: options.accountId ?? null,
       changed: () => {
         this.hub.broadcast({ type: 'artifacts.changed' })
         this.options.send({ type: 'host:artifacts-changed' })
       },
       keepDeletedMs: () => this.binKeepMs(),
       binChanged: () => this.recycleBin?.added(),
+      accountChanged: () => {
+        this.runtimeRequests.abortAll()
+        this.hub.broadcast({ type: 'artifacts.consentsChanged' })
+      },
       version: (portIds, id, version) =>
         this.hub.send(portIds, { type: 'artifacts.version', id, version }),
       // Each port hears of the other clients showing the artifact, named as it knows them.
@@ -1310,6 +1617,7 @@ export class AgentHost {
     this.memory.onChange(() => this.hub.broadcast({ type: 'memory.changed' }))
     this.workflowLibrary = new WorkflowLibrary({
       dir: path.join(options.userDataPath, 'workflows'),
+      approvedDir: path.join(options.userDataPath, 'workflow-approved'),
       file: workflowsFile(options.userDataPath, log),
       knownTools: () => ({
         mcp: new Set(this.settings.marketplace.mcp.flatMap((server) => [server.name, server.id])),
@@ -1474,6 +1782,7 @@ export class AgentHost {
       features: () => this.settings.features,
       webReader: { read: (caller, input) => this.webReader.read(caller, input) },
       routines: this.routineTools,
+      mcp: this.mcpTools,
       plugins: this.pluginTools,
       skills: {
         of: (sessionId) => {
@@ -1485,7 +1794,13 @@ export class AgentHost {
           return this.marketSkills.sessionSkills(agentId, [...step, ...added])
         },
       },
-      proxy: this.mcpProxy,
+      router: this.mcpRouter,
+      terminal: {
+        key: () => this.terminalKey,
+        caller: (agent, cwd) => this.terminalCaller(agent, cwd),
+      },
+      libraryServer: (serverId) =>
+        this.settings.marketplace.mcp.find((server) => server.id === serverId) ?? null,
       sessions: {
         info: (sessionId) => this.sessions.sessionInfo(sessionId),
         list: (projectPath) => this.sessions.toolSessions(projectPath),
@@ -1515,10 +1830,14 @@ export class AgentHost {
         history: (sessionId) => this.sessions.historyTurns(sessionId),
         mode: (sessionId) => this.sessions.toolMode(sessionId),
         starterRank: (sessionId) => this.sessions.starterRank(sessionId),
+        inheritanceScope: (callerId, target) => this.sessions.inheritanceScope(callerId, target),
+        offersFullAccess: (agentId) => this.agents.offersFullAccess(agentId),
         startMode: (agentId) => startModeIn(this.settings, agentId),
         sendRefusal: (callerId, sessionId) =>
           this.sessions.manager.sendRefusal(callerId, sessionId),
         referenced: (callerId, sessionId) => this.sessions.referencedBy(callerId, sessionId),
+        defaultMode: (agentId, callerId) =>
+          this.agents.defaultMode(agentId, this.sessions.workFolder(callerId)),
       },
       manager: () => this.sessions.manager,
       log,
@@ -1679,6 +1998,7 @@ export class AgentHost {
       agentProxyPort: (agentId) => this.nodeProxy.portFor(agentId),
       scratch: this.scratch,
       worktrees: this.worktrees,
+      artifactAccount: () => this.artifacts.account(),
       file: sessionsFile(options.userDataPath, log),
       returned: returnedFile(options.userDataPath, log),
       fileCheckpoints: new FileCheckpoints({
@@ -1692,6 +2012,116 @@ export class AgentHost {
       groupBinned: (group) => groupBinned(this, group),
       projectMcp: new ProjectMcpAnswers(projectMcpFile(options.userDataPath, log)),
       projectHooks: new ProjectHooksAnswers(projectHooksFile(options.userDataPath, log)),
+      folderDeclared: async (cwd, agentId) => {
+        // Grok loads a repository's own servers only where the user trusts it in Grok, by its
+        // root. Kettu never grants that trust, which Grok would keep for good, so it runs the ones
+        // the user allows, and none Grok starts itself in a repository the user trusted.
+        const grokDeclared = async (agent: AgentId, folder: string): Promise<FolderDeclared> => {
+          const root = (await projectRoots(folder, platform))[0] ?? folder
+          const store = path.join(
+            this.env.get('GROK_HOME', agent)?.trim() || path.join(home, '.grok'),
+            'trusted_folders.toml',
+          )
+          const [atRoot, here, trusted] = await Promise.all([
+            folderServers(root, platform),
+            root === folder ? Promise.resolve([]) : folderServers(folder, platform),
+            grokTrusted(store, folder, platform),
+          ])
+          const own = new Set(
+            harnessProjectMcpPaths('grok', root, platform).map((file) =>
+              path.relative(root, file.path),
+            ),
+          )
+          const selfRun = new Set(
+            trusted
+              ? atRoot
+                  .filter((server) => server.files.some((file) => own.has(file)))
+                  .map((server) => server.digest)
+              : [],
+          )
+          const seen = new Set(atRoot.map((server) => server.digest))
+          const servers = [...atRoot, ...here.filter((server) => !seen.has(server.digest))]
+          return {
+            servers: servers.filter((server) => !selfRun.has(server.digest)),
+            settings: null,
+            harnessServers: [],
+            harnessDigests: [],
+            turnsOff: true,
+          }
+        }
+        const codexUserUntrusted = (agent: AgentId, folder: string): Promise<boolean> => {
+          const config = mcpConfigPaths(
+            platform,
+            home,
+            this.agents.mcpDiscoveryAgents().filter(({ id }) => id === agent),
+            [],
+            (name, of) => this.env.get(name, of),
+            true,
+          ).find((file) => file.layout === 'codex')
+          return config ? codexUntrusted(config.path, folder, platform) : Promise.resolve(false)
+        }
+        const harness = harnessOf(agentId)
+        if (harness === 'grok') return grokDeclared(agentId, cwd)
+        if (harness === 'gemini') {
+          // Its own folder trust holds the folder; Kettu only keeps its `.env` from where it is
+          // not trusted.
+          const variable = (name: string) => this.env.get(name, agentId)
+          const gemini = path.join(home, '.gemini')
+          const ownTrust = await geminiTrusted(
+            {
+              trustList:
+                variable('GEMINI_CLI_TRUSTED_FOLDERS_PATH')?.trim() ||
+                path.join(gemini, 'trustedFolders.json'),
+              settings: path.join(gemini, 'settings.json'),
+            },
+            cwd,
+            variable,
+          )
+          return {
+            servers: [],
+            settings: null,
+            harnessServers: [],
+            harnessDigests: [],
+            turnsOff: true,
+            ownTrust,
+          }
+        }
+        // The other harnesses start what their own files declare, so Kettu running them too
+        // would start them twice.
+        if (!FOLDER_HELD_HARNESSES.has(harness)) {
+          return {
+            servers: [],
+            settings: null,
+            harnessServers: [],
+            harnessDigests: [],
+            turnsOff: true,
+            notice: await folderNotice(harness, cwd, platform),
+          }
+        }
+        const ownFiles = harnessProjectMcpPaths(harness, cwd, platform)
+        const [servers, found, own, untrusted] = await Promise.all([
+          folderServers(cwd, platform),
+          folderSettings(harness, cwd, platform),
+          readOwnMcpServers(ownFiles),
+          harness === 'codex' ? codexUserUntrusted(agentId, cwd) : false,
+        ])
+        // What the user's own Codex keeps untrusted never loads, so there is nothing to ask.
+        const settings = untrusted ? null : found
+        const relative = new Set(
+          ownFiles.map((file) => path.relative(cwd, file.path) || path.basename(file.path)),
+        )
+        return {
+          servers,
+          settings,
+          harnessServers: own.map((server) => server.name),
+          harnessDigests: servers
+            .filter((server) => server.files.some((file) => relative.has(file)))
+            .map((server) => server.digest),
+          // OpenCode and Kilo Code have no way to turn one of a folder's servers off that Kettu
+          // checked.
+          turnsOff: harness !== 'opencode' && harness !== 'kilo',
+        }
+      },
       portOpen: (portId) => this.hub.has(portId),
       portDevice: (portId) => this.hub.deviceOf(portId),
       profiles: this.profiles,
@@ -1728,31 +2158,93 @@ export class AgentHost {
               )
             : this.artifactService.servers(sessionId, record.projectPath, gateway, suggests)
         },
-        library: (sessionId, record, connection, transports, taken) =>
-          libraryServers(
-            this.settings.marketplace.mcp,
-            this.marketKeys,
-            record.agentId,
-            transports,
-            {
+        library: async (sessionId, record, connection, transports, taken, project = []) => {
+          const handed = new Map<string, McpHanded>()
+          this.sessionMcp.set(sessionId, handed)
+          const folder =
+            record.worktree && record.worktree.removed !== 'branch'
+              ? record.worktree.path
+              : record.projectPath
+          const library = [
+            ...this.settings.marketplace.mcp,
+            ...project.map((server) => this.projectServer(server, folder)),
+          ]
+          if (library.length === 0) return []
+          const realFolder = folder ? await realpath(folder).catch(() => null) : null
+          const projects = [...new Set([folder, realFolder].filter((p): p is string => Boolean(p)))]
+          const own = await readOwnMcpServers(
+            mcpConfigPaths(
               platform,
-              taken,
-              node: options.nodeRuntime,
-              also: [
-                ...(record.task ? (this.tasks.toolsOf(record.task)?.mcp ?? []) : []),
-                ...(record.commandTools?.mcp ?? []),
-              ],
-              oauth: {
-                access: (server) => this.marketConnections.access(server),
-                bearer: () =>
-                  this.artifactService.bearer(
-                    sessionId,
-                    record.projectPath,
-                    this.agents.mcpServersByName(record.agentId) ? connection : null,
-                  ),
-              },
-            },
-          ),
+              home,
+              this.agents.mcpDiscoveryAgents().filter(({ id }) => id === record.agentId),
+              projects,
+              (name, agent) => this.env.get(name, agent),
+              true,
+            ),
+          )
+          const projectOwn = folder
+            ? await readOwnMcpServers(
+                harnessProjectMcpPaths(harnessOf(record.agentId), folder, platform),
+              )
+            : []
+          return libraryServers(library, this.routedKeys(), record.agentId, transports, {
+            platform,
+            taken,
+            project: record.projectPath,
+            handed: (server, name, how) => handed.set(server.id, { name, how }),
+            own,
+            ...(projectOwn.length > 0 ? { projectOwn } : {}),
+            conflict: (server, name) =>
+              this.diagnostics.log(
+                'warn',
+                `MCP server ${server.name} replaces the configured ${name} in ${record.agentId}`,
+              ),
+            env: this.env.agentEnv(),
+            node: options.nodeRuntime,
+            also: [
+              ...(record.task ? (this.tasks.toolsOf(record.task)?.mcp ?? []) : []),
+              ...(record.commandTools?.mcp ?? []),
+            ],
+            oauth: { access: (server) => this.marketConnections.access(server) },
+            router: this.artifactService.routerAccess(
+              sessionId,
+              record.projectPath,
+              this.agents.mcpServersByName(record.agentId) ? connection : null,
+            ),
+            bridge: this.mcpBridge,
+            ...(this.agents.toolGateway(record.agentId)
+              ? { gateway: { known: (server) => this.mcpRouter.knownTools(server) } }
+              : {}),
+            fellBack: (server, why) =>
+              this.diagnostics.log(
+                'warn',
+                `MCP server ${server.name} for ${record.agentId}: ${why}`,
+              ),
+          })
+        },
+        libraryPrint: (record) => {
+          const also = [
+            ...(record.task ? (this.tasks.toolsOf(record.task)?.mcp ?? []) : []),
+            ...(record.commandTools?.mcp ?? []),
+          ]
+          const handed = this.settings.marketplace.mcp.filter((server) => {
+            const named = server.on && (also.includes(server.name) || also.includes(server.id))
+            return (
+              named ||
+              (serverFor(server, record.agentId) &&
+                servedInProject(server.projects, record.projectPath))
+            )
+          })
+          return Object.fromEntries(
+            handed.map((server) => [
+              server.name,
+              createHash('sha256')
+                .update(JSON.stringify([server.spec, runOf(server).mode === 'agent']))
+                .digest('hex')
+                .slice(0, 16),
+            ]),
+          )
+        },
         detached: (sessionId) => {
           this.artifactService.revoke(sessionId)
           this.artifacts.stopUsing(sessionId)
@@ -1774,6 +2266,7 @@ export class AgentHost {
           this.secretTools.turnEnded(sessionId)
           this.themeTools.turnEnded(sessionId)
           this.routineTools.turnEnded(sessionId)
+          this.mcpTools.turnEnded(sessionId)
           if (this.deviceTurns.delete(sessionId)) {
             this.options.send({ type: 'host:device-turn-ended', sessionId })
           }
@@ -1787,6 +2280,13 @@ export class AgentHost {
           ...(record.task ? (this.tasks.toolsOf(record.task)?.skills ?? []) : []),
           ...(record.commandTools?.skills ?? []),
         ]),
+      toolSkills: (record) =>
+        this.settings.mcp.kettu.off.includes(record.agentId)
+          ? null
+          : this.marketSkills.sessionSkills(record.agentId, [
+              ...(record.task ? (this.tasks.toolsOf(record.task)?.skills ?? []) : []),
+              ...(record.commandTools?.skills ?? []),
+            ]),
       roles: { resolve: (ref) => this.roles.resolve(ref) },
       plugins: this.pluginHooks,
       commands: {
@@ -1838,6 +2338,14 @@ export class AgentHost {
             },
           }),
           opencode: opencodeModelRequests({ sessions: (agentId) => this.agents.openCode(agentId) }),
+          pi: piModelRequests({
+            platform,
+            home: options.homeDir ?? os.homedir(),
+            env: async (agentId) => {
+              await this.env.ready()
+              return this.env.agentEnv(agentId)
+            },
+          }),
           cline: clineModelRequests({
             home: options.homeDir ?? os.homedir(),
             env: async () => {
@@ -1891,11 +2399,28 @@ export class AgentHost {
       },
       events: {
         // Huli: a device that reads stored images by hash gets a live thread's by hash too.
-        patches: (batch, portIds) =>
-          this.hub.send(portIds, { type: 'session.patches', batch }, () => ({
-            type: 'session.patches',
-            batch: hashedBatch(batch),
-          })),
+        patches: (batch, portIds, legacy) => {
+          const send = (ids: Iterable<string>, sent: typeof batch): void =>
+            this.hub.send(ids, { type: 'session.patches', batch: sent }, () => ({
+              type: 'session.patches',
+              batch: hashedBatch(sent),
+            }))
+          if (!legacy) {
+            send(portIds, batch)
+            return
+          }
+          const modern: string[] = []
+          const older: string[] = []
+          for (const portId of portIds) {
+            const device = this.hub.deviceOf(portId)
+            // 本地桌面窗口（device === null）与已协商 `tool-output-append` 的设备接收增量补丁；
+            // 未声明该能力的旧设备透明降级为完整 `entry.update`。
+            if (!device || device.toolOutputAppend) modern.push(portId)
+            else older.push(portId)
+          }
+          if (modern.length > 0) send(modern, batch)
+          if (older.length > 0) send(older, legacy())
+        },
         summary: (summary, portIds) => {
           if (portIds) {
             this.hub.send(portIds, { type: 'session.summary', summary })
@@ -1926,8 +2451,11 @@ export class AgentHost {
             this.hub.send([portId], { type: 'session.viewers', sessionId, viewers })
           }
         },
-        attention: (sessionId, kind, title, body, request, facts) => {
+        attention: (sessionId, kind, title, body, request, facts, meta) => {
           if (kind === 'error') this.sessionFailed(sessionId)
+          const agentId = this.sessions.has(sessionId)
+            ? this.sessions.summary(sessionId).agentId
+            : undefined
           if (kind !== 'turn-ended' && this.pluginHooks.wants('session.needsUser')) {
             this.pluginHooks.emit('session.needsUser', this.sessions.summary(sessionId), {
               reason: kind,
@@ -1938,6 +2466,8 @@ export class AgentHost {
               type: 'host:attention',
               sessionId,
               kind,
+              ...(agentId ? { agentId } : {}),
+              ...(meta?.changedFiles ? { changedFiles: meta.changedFiles } : {}),
               title,
               body,
               ...(request?.allow
@@ -2061,6 +2591,12 @@ export class AgentHost {
       changed: (status) => this.hub.sendToWindows({ type: 'webReader.changed', status }),
     })
     void this.env.setNodeSetup({ required: nodeRequired })
+    // Watch every state file under userDataPath so ENOSPC on sessions.json, agent-processes.json,
+    // and other host files surfaces the same disk-full warning as threads.db.
+    this.stopStorageWatch = observeStorageWrites(options.userDataPath, (outcome) => {
+      if (outcome.ok) this.sessions.noteDiskWriteSucceeded(outcome.file)
+      else if (isDiskFullError(outcome.error)) this.sessions.reportDiskFull(outcome.file)
+    })
     this.routines = new RoutinesManager({
       userDataPath: options.userDataPath,
       file: routinesFile(options.userDataPath, log),
@@ -2154,7 +2690,8 @@ export class AgentHost {
       library: this.workflowLibrary,
       sessions: {
         createStep: (params) => this.sessions.createStep(params),
-        send: (sessionId, text, due) => this.sessions.sendFromKettu(sessionId, text, due),
+        send: (sessionId, text, due, options) =>
+          this.sessions.sendFromKettu(sessionId, text, due, options),
         cancel: async (sessionId) => {
           await this.sessions.cancelContinue(sessionId).catch(() => {})
           await this.sessions.cancel(sessionId)
@@ -2411,7 +2948,7 @@ export class AgentHost {
       },
     })
     started = host
-    const [, , , remembered, updates, listing, manifest] = await Promise.all([
+    const [, , , remembered, updates, listing, manifest, pendingUpdateResume] = await Promise.all([
       host.scratch.ready(),
       host.projects.load(),
       host.sessions.load(),
@@ -2419,9 +2956,17 @@ export class AgentHost {
       host.updates.load(),
       host.registryListing.load(),
       host.harnessManifest.load(),
+      // Atomically consume update-resume.json before host:ready so a crash or restart can never
+      // trigger post-update recovery more than once.
+      consumeUpdateResume(options.userDataPath, {
+        log: (level, message) => writeLog(level, 'host', message),
+      }),
       host.trees.load(),
       host.agentOptions.load(),
       host.preparedRecords.load(),
+      host.mcpAnswers.load(),
+      host.mcpToolChanges.load(),
+      host.findBridge(options.mcpBridgePath ?? null),
       host.attachments.load(),
       host.artifactService.start(),
       host.routines.load(),
@@ -2458,25 +3003,42 @@ export class AgentHost {
     host.pluginScripts.sync(host.plugins.scripts())
     void host.pluginThemes.sync()
     host.sendFolders()
-    void host.sessions.checkWorktrees()
+    const worktreesChecked = host.sessions.checkWorktrees()
     host.usage.start()
+    const legacyOwners = await readLegacyKettuOwners(options.userDataPath)
+    if (legacyOwners.length > 0) {
+      await host.artifacts.claimOwners(legacyOwners).catch((error: unknown) => {
+        writeLog(
+          'warn',
+          'host',
+          `Could not backfill legacy artifact ownership: ${(error as Error).message}`,
+        )
+      })
+    }
     // Huli: the recycle bin's one timer purges deleted artifacts with the rest.
     host.recycleBin.start()
     host.idleRelease.start()
     host.nodeProxy.start()
     options.send({ type: 'host:service-port', port: host.artifactService.listeningPort })
+    await host.writeConnect()
     options.send({ type: 'host:ready' })
+    // Rewrites the bridge's path in agents' files when the app moved, and catches up on changes.
+    void host.mcpTerminal.sync()
     void host.trees.stopLeftovers()
     // Huli: harness installs an uninstall or update moved aside that a quit left undeleted.
     void host.agents.sweepTrash()
     host.agents.startLimitReads()
     host.agents.startSignInEndReads()
     void host.agents.removeAntigravityUsageServer()
-    void host.agents.detectAll().then(() => {
+    const agentsDetected = host.agents.detectAll()
+    void agentsDetected.then(() => {
       host.agents.scheduleUpdateChecks()
       host.agents.scheduleRegistryReads()
       host.firstStart()
     })
+    if (pendingUpdateResume) {
+      host.scheduleUpdateResume(pendingUpdateResume, worktreesChecked, agentsDetected)
+    }
     return host
   }
 
@@ -2775,6 +3337,7 @@ export class AgentHost {
 
   private portClosed(portId: string): void {
     this.load.portClosed(portId)
+    this.mcpDrafts.delete(portId)
     this.runtimeRequests.portClosed(portId)
     this.consents.portClosed(portId)
     this.deviceBrowser.portClosed(portId)
@@ -2831,6 +3394,9 @@ export class AgentHost {
     this.marketChanged(previous.marketplace.mcp, this.marketKeys)
     if (JSON.stringify(previous.marketplace.mcp) !== JSON.stringify(next.marketplace.mcp)) {
       void this.marketBundles.sweep()
+      for (const waiter of [...this.libraryWaiters])
+        if (waiter()) this.libraryWaiters.delete(waiter)
+      void this.mcpTerminal.sync()
     }
     if (JSON.stringify(previous.marketplace.skills) !== JSON.stringify(next.marketplace.skills)) {
       void this.skillsChanged(previous.marketplace.skills)
@@ -2956,6 +3522,21 @@ export class AgentHost {
       this.hub.broadcast({ type: 'market.publishedChanged' })
     }
     if ((before === null) !== (this.marketAccount === null)) void this.ownSkillsChanged()
+  }
+
+  /** `host:account`: updates the active Kettu account scoping artifact ownership and isolation. */
+  setAccount(accountId: string | null): void {
+    this.artifacts.setAccount(accountId)
+  }
+
+  /** `host:artifact-claim-owner`: binds Kettu account ownership onto an unowned local artifact. */
+  claimArtifactOwner(id: string, accountId: string): void {
+    void this.artifacts.claimOwner(id, accountId).catch((error: unknown) => {
+      this.diagnostics.log(
+        'warn',
+        `Could not record owner for artifact ${id}: ${(error as Error).message}`,
+      )
+    })
   }
 
   /**
@@ -3305,6 +3886,299 @@ export class AgentHost {
     this.sessions.settingsSettled(sessionId, entryId, { kind: 'changed', undone: true })
   }
 
+  /** Undo on the line of an agent's MCP switches: they go back, unless one changed again since. */
+  private async undoMcp(sessionId: string, entryId: string): Promise<void> {
+    const restore = this.sessions.mcpChange(sessionId, entryId)
+    try {
+      await this.mcpTools.undo(restore)
+    } catch (error) {
+      if (error instanceof McpStaleUndo) {
+        this.sessions.mcpSettled(sessionId, entryId, { kind: 'done', stale: true })
+        throw new HostError('conflict', error.message)
+      }
+      throw new HostError('unavailable', (error as Error).message)
+    }
+    this.sessions.mcpSettled(sessionId, entryId, { kind: 'done', undone: true })
+  }
+
+  private previewMcp(text: string, portId: string): McpDiscoveryRow[] {
+    this.mcpDrafts.delete(portId)
+    const drafts = new Map(parseMcpPaste(text).map((entry) => [mcpId(), entry]))
+    this.mcpDrafts.set(portId, drafts)
+    const names = new Set(this.settings.marketplace.mcp.map(({ name }) => name))
+    return [...drafts].map(([id, { name, spec, secrets }]) => ({
+      id,
+      name,
+      spec,
+      sources: [{ id, path: '', name, keys: Object.keys(secrets) }],
+      differentKeys: [],
+      existing: [],
+      isNew: false,
+      nameConflict: !MARKET_NAME.test(name) || names.has(name) || name === 'kettu',
+    }))
+  }
+
+  private async addMcp(choices: McpImportChoice[], portId: string): Promise<string[]> {
+    const drafts = this.mcpDrafts.get(portId)
+    const selected = new Set<string>()
+    const entries = choices.map(({ id, name, agents }) => {
+      const draft = drafts?.get(id)
+      if (!draft || selected.has(id) || !MARKET_NAME.test(name) || name === 'kettu') {
+        throw new HostError(
+          'invalid_params',
+          'Review each MCP server and choose an available name.',
+        )
+      }
+      selected.add(id)
+      const server = importedServer('manual:' + mcpId(), draft, name, agents, [])
+      delete server.importedFrom
+      return { server, secrets: draft.secrets }
+    })
+    const ids = await this.installMcp(entries)
+    if (this.mcpDrafts.get(portId) === drafts) this.mcpDrafts.delete(portId)
+    return ids
+  }
+
+  private async installMcp(entries: PreparedMcpImport[]): Promise<string[]> {
+    const callId = this.nextMcpInstall++
+    const error = await new Promise<string | null>((resolve) => {
+      this.mcpInstallCalls.set(callId, resolve)
+      this.options.send({ type: 'host:mcp-install', callId, entries })
+    })
+    if (error) throw new HostError('unavailable', error)
+    for (const { server, secrets, project } of entries) {
+      void this.checkMcpServer(server, new Map(Object.entries(secrets)), project)
+    }
+    this.hub.broadcast({ type: 'market.discoveryChanged' })
+    return entries.map(({ server }) => server.id)
+  }
+
+  /** A takeover call, its failures told apart: a file that changed, or one Kettu cannot write. */
+  private async mcpTerminalCall<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run()
+    } catch (error) {
+      if (error instanceof HostError) throw error
+      if (error instanceof McpTerminalStale) throw new HostError('conflict', error.message)
+      throw new HostError('unavailable', (error as Error).message)
+    }
+  }
+
+  mcpBackupKeyResult(callId: number, error: string | null): void {
+    const resolve = this.mcpBackupKeyCalls.get(callId)
+    this.mcpBackupKeyCalls.delete(callId)
+    resolve?.(error)
+  }
+
+  /** Has main make the key store's backup key, which arrives with host:market-keys. */
+  private async ensureBackupKey(): Promise<void> {
+    if (this.backupKey) return
+    const callId = this.nextMcpInstall++
+    const error = await new Promise<string | null>((resolve) => {
+      this.mcpBackupKeyCalls.set(callId, resolve)
+      this.options.send({ type: 'host:mcp-backup-key', callId })
+    })
+    if (error) throw new HostError('unavailable', error)
+    if (!this.backupKey) throw new HostError('unavailable', 'The key store sent no backup key')
+  }
+
+  /** Settles once the library holds what `done` looks for, or fails after a while. */
+  private waitForLibrary(done: () => boolean): Promise<void> {
+    if (done()) return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.libraryWaiters.delete(check)
+        reject(new HostError('unavailable', 'The MCP library did not change in time'))
+      }, 15_000)
+      const check = (): boolean => {
+        if (!done()) return false
+        clearTimeout(timer)
+        resolve()
+        return true
+      }
+      this.libraryWaiters.add(check)
+    })
+  }
+
+  /** The apps a takeover can change that are installed, looked for again after a minute. */
+  private terminalApps(): Promise<McpTerminalApp[]> {
+    const now = Date.now()
+    if (!this.appsSeen || now - this.appsSeen.at > 60_000) {
+      const { platform } = this.options
+      this.appsSeen = {
+        at: now,
+        apps: installedTerminalApps({
+          platform,
+          home: this.options.homeDir ?? os.homedir(),
+          env: this.env.agentEnv(),
+          find: (command) =>
+            findCommand(command, {
+              platform,
+              env: this.env.agentEnv() as Env,
+              isExecutable: (file) => isExecutableFile(file, platform),
+            }),
+        }),
+      }
+    }
+    return this.appsSeen.apps
+  }
+
+  /**
+   * A file's own entries into the library, as the import window would: an agent's for it alone,
+   * an app's for every agent, as the import window offers them.
+   */
+  private async importOwnMcp(
+    target: McpTerminalTarget,
+    items: readonly { source: McpConfigSource; name: string }[],
+  ): Promise<void> {
+    const discovery = await this.mcpDiscovery.scan()
+    const choices: McpImportChoice[] = items.map(({ source, name }) => {
+      for (const row of discovery.servers) {
+        const found = row.sources.find(
+          (item) =>
+            item.path === source.path &&
+            item.agentId === source.agentId &&
+            item.app === source.app &&
+            item.name === source.entryName &&
+            !item.project,
+        )
+        if (found) {
+          const agents = terminalApp(target) ? ('all' as const) : [target as AgentId]
+          return { id: row.id, sourceId: found.id, name, agents }
+        }
+      }
+      throw new McpTerminalStale(`${source.entryName ?? name} changed. Review it again.`)
+    })
+    const ids = await this.installMcp(this.mcpDiscovery.prepare(choices))
+    await this.waitForLibrary(() =>
+      ids.every((id) => this.settings.marketplace.mcp.some((server) => server.id === id)),
+    )
+  }
+
+  /** Library servers given to `agentId` too, for the agent's own entries they are. */
+  private async giveMcpTo(agentId: AgentId, serverIds: readonly string[]): Promise<void> {
+    const put = this.settings.marketplace.mcp
+      .filter((server) => serverIds.includes(server.id) && server.agents !== 'all')
+      .map((server) => ({
+        ...server,
+        agents: [...new Set([...(server.agents as AgentId[]), agentId])],
+      }))
+    if (put.length === 0) return
+    await this.settingsCall({ kind: 'change', patch: { marketplace: { mcpEdit: { put } } } })
+    await this.waitForLibrary(() =>
+      serverIds.every((id) => {
+        const server = this.settings.marketplace.mcp.find((item) => item.id === id)
+        return !server || serverFor(server, agentId)
+      }),
+    )
+  }
+
+  /** The connect file a terminal's bridge reads: this start's port and a fresh key. */
+  private async writeConnect(): Promise<void> {
+    const url = this.artifactService.url
+    if (!url) return
+    this.terminalKey ??= newTerminalKey()
+    try {
+      await writeConnectFile(this.options.userDataPath, new URL(url).origin, this.terminalKey)
+    } catch (error) {
+      this.diagnostics.log(
+        'warn',
+        `Could not write the MCP bridge's file: ${(error as Error).message}`,
+      )
+    }
+  }
+
+  /**
+   * Who a terminal's bridge stands for: the agent it names, while its takeover is on, in the
+   * folder it runs in, with the servers that agent gets there. Null answers it with no tools.
+   */
+  private terminalCaller(agent: string | null, cwd: string): RouterCaller | null {
+    if (!agent || !isTerminalTarget(agent) || !this.mcpTerminal.isOn(agent)) return null
+    const app = terminalApp(agent)
+    const folder = path.isAbsolute(cwd) ? path.resolve(cwd) : (this.options.homeDir ?? os.homedir())
+    const project = this.projects
+      .list()
+      .map((item) => item.path)
+      .filter(
+        (item) =>
+          folder === item || folder.startsWith(item.endsWith(path.sep) ? item : item + path.sep),
+      )
+      .sort((a, b) => b.length - a.length)[0]
+    const servers = this.settings.marketplace.mcp.filter(
+      (server) => terminalGets(server, agent) && servedInProject(server.projects, project ?? ''),
+    )
+    return {
+      key: `terminal:${mcpId()}`,
+      sessionId: null,
+      folder,
+      servers: new Set(servers.map((server) => server.id)),
+      terminal: app ? { agentId: null, app } : { agentId: agent as AgentId },
+    }
+  }
+
+  mcpInstallResult(callId: number, error: string | null): void {
+    const resolve = this.mcpInstallCalls.get(callId)
+    this.mcpInstallCalls.delete(callId)
+    resolve?.(error)
+  }
+
+  /**
+   * A call through the router failed: the server is checked once, as an agent would connect, so
+   * its page says why; not again within a minute, however many calls fail meanwhile.
+   */
+  private checkAfterFailure(serverId: string, sessionId: string | null): void {
+    const server = this.settings.marketplace.mcp.find((item) => item.id === serverId)
+    if (!server) return
+    const now = Date.now()
+    if (now - (this.failureChecks.get(serverId) ?? 0) < FAILURE_CHECK_MS) return
+    this.failureChecks.set(serverId, now)
+    const folder = sessionId
+      ? (this.sessions.sessionFolder(sessionId) ?? this.sessions.sessionProject(sessionId))
+      : null
+    void this.checkMcpServer(
+      server,
+      this.marketKeys.get(serverId) ?? new Map(),
+      folder ?? undefined,
+    )
+  }
+
+  /** Checks a server, or joins the check already going, and gives what it found. */
+  private checkMcpServer(
+    server: MarketServer,
+    keys: ReadonlyMap<string, string>,
+    project?: string,
+  ): Promise<McpCheck> {
+    const going = this.mcpChecking.get(server.id)
+    if (going) return going
+    const changed = (check: McpCheck): McpCheck => {
+      this.mcpCheckStates.set(server.id, check)
+      this.hub.broadcast({ type: 'market.mcpCheckChanged', serverId: server.id, check })
+      return check
+    }
+    changed({ state: 'checking' })
+    const env = this.env.agentEnv()
+    const token =
+      server.spec.type === 'http' && server.spec.oauth
+        ? this.marketConnections.token(server.id)
+        : null
+    const checked = Promise.all([token, import('./marketplace/mcp-check')])
+      .then(([bearer, { checkMcp }]) =>
+        checkMcp(server, keys, {
+          env,
+          home: this.options.homeDir ?? os.homedir(),
+          platform: this.options.platform,
+          project: project ?? server.importedWith?.project ?? server.importedFrom?.[0]?.project,
+          node: this.options.nodeRuntime,
+          bearer: bearer ?? undefined,
+          listed: (tools) => this.mcpToolChanges.seen(server.id, tools, 'list'),
+        }),
+      )
+      .then(changed, () => changed({ state: 'error', reason: 'cannot-connect' }))
+      .finally(() => this.mcpChecking.delete(server.id))
+    this.mcpChecking.set(server.id, checked)
+    return checked
+  }
+
   /** `market-result`: main's or the daemon's answer to a Marketplace call. */
   marketResult(callId: number, answer: MarketCallAnswer): void {
     const resolve = this.marketCalls.get(callId)
@@ -3322,7 +4196,9 @@ export class AgentHost {
     oauth?: unknown,
     agentEnv?: unknown,
     pluginSecrets?: unknown,
+    sealKey?: unknown,
   ): void {
+    if (sealKey !== undefined) this.backupKey = backupKey(sealKey)
     const keys = parseMarketKeys(values)
     const signIns = oauth === undefined ? undefined : parseSignIns(oauth)
     if (!keys || signIns === null) {
@@ -3507,22 +4383,237 @@ export class AgentHost {
   }
 
   /**
+   * The bridge where main or the daemon said it is; a build without one hands commands as
+   * before.
+   */
+  private async findBridge(file: string | null): Promise<void> {
+    const command = this.options.mcpCommandPath
+    if (command && (await isExecutableFile(command, this.options.platform))) {
+      this.mcpCommand = command
+    }
+    if (file && (await isExecutableFile(file, this.options.platform))) {
+      this.mcpBridge = file
+      return
+    }
+    this.diagnostics.log(
+      'warn',
+      `The MCP bridge is not in this build${file ? ` (${file})` : ''}; agents that speak only stdio get commands to run themselves`,
+    )
+  }
+
+  /**
    * The Marketplace's servers or keys may have changed from `servers` and `keys`: each agent whose
    * servers differ now has its prepared sessions replaced.
    */
-  private marketChanged(servers: HostSettings['marketplace']['mcp'], keys: MarketKeys): void {
-    // Proxied servers compare by where they go, without a session's bearer.
-    const oauth = {
-      access: (server: MarketServer) => this.marketConnections.access(server),
-      bearer: () => ({ origin: '', token: '' }),
+  /** The servers the router runs: the library's, then the folders' own the user let start. */
+  private routedServers(): MarketServer[] {
+    const library = this.settings.marketplace.mcp
+    return this.projectServers.size > 0 ? [...library, ...this.projectServers.values()] : library
+  }
+
+  private routedKeys(): MarketKeys {
+    return this.projectKeys.size > 0
+      ? new Map([...this.marketKeys, ...this.projectKeys])
+      : this.marketKeys
+  }
+
+  /**
+   * A folder's own server as the router runs it: by an id from its folder and content, so the
+   * same server of two folders, whose values may differ, runs as two. Its tool changes are held
+   * like those of a server added by hand.
+   */
+  private projectServer(server: FolderServer, folder: string): MarketServer {
+    const id = `${PROJECT_SERVER}${createHash('sha256')
+      .update(JSON.stringify([server.files, server.digest, server.secrets]))
+      .digest('hex')
+      .slice(0, 24)}`
+    const entry: MarketServer = {
+      id,
+      name: server.name,
+      title: server.name,
+      source: 'manual',
+      version: null,
+      spec: server.spec,
+      agents: 'all',
+      on: true,
     }
-    const options = { platform: this.options.platform, oauth, node: this.options.nodeRuntime }
+    this.projectServers.set(id, entry)
+    const keys = new Map(Object.entries(server.secrets))
+    this.projectKeys.set(id, keys)
+    // The list a first check sees once the user allowed it is what is accepted; later changes
+    // are held for the user in the session's context popover.
+    if (this.mcpToolChanges.latest(id) === null) void this.checkMcpServer(entry, keys, folder)
+    return entry
+  }
+
+  /** Masks a server's keys and fixed values, the host's own secrets and the home folder. */
+  private mcpMask(serverId: string): (text: string) => string {
+    const server = this.routedServers().find((item) => item.id === serverId)
+    return serverMasker(server, this.routedKeys(), redactLogText, {
+      env: this.env.agentEnv(),
+      platform: this.options.platform,
+    })
+  }
+
+  private mcpState(server: MarketServer): McpRunState {
+    const signs = server.spec.type === 'http' && server.spec.oauth !== undefined
+    if (signs && this.marketConnections.access(server) === null) return { state: 'needs-sign-in' }
+    return this.mcpRouter.state(server)
+  }
+
+  /** Each library server's state, its tools as last listed and what each agent pays for them. */
+  private mcpInsight(serverId?: string): McpServerInsight[] {
+    return this.settings.marketplace.mcp
+      .filter((server) => serverId === undefined || server.id === serverId)
+      .map((server) => {
+        const known = this.mcpRouter.knownTools(server)
+        const changes = this.mcpToolChanges.changes(server.id, toolGuard(server))
+        const tools = this.mcpToolInfos(server, known, changes)
+        const big = known === null || JSON.stringify(known).length > GATED_SERVER_BYTES
+        const agents = this.agents.ids().map((agentId) => {
+          const carry = carryOf(agentId, this.agents.toolGateway(agentId) && big)
+          return { agentId, carry, tokens: tools ? turnTokens(tools, carry, server.name) : 0 }
+        })
+        return { serverId: server.id, state: this.mcpState(server), tools, agents, changes }
+      })
+  }
+
+  /**
+   * A server's tools as its page lists them: as the router last heard them, with the new ones a
+   * check saw since; as the check saw them alone for a server the router never listed.
+   */
+  private mcpToolInfos(
+    server: MarketServer,
+    known: readonly unknown[] | null,
+    changes: ReturnType<ToolChanges['changes']>,
+  ): McpToolInfo[] | null {
+    const latest = this.mcpToolChanges.latest(server.id)
+    const listed: readonly unknown[] | null = known ?? latest
+    if (!listed) return null
+    const names = new Set(
+      listed.flatMap((tool) =>
+        typeof tool === 'object' && tool !== null && 'name' in tool ? [String(tool.name)] : [],
+      ),
+    )
+    const added = (latest ?? []).filter(
+      (tool) => changes?.added.includes(tool.name) === true && !names.has(tool.name),
+    )
+    return toolInfos([...listed, ...added], server.toolsOff, {
+      trusted: trustedSource(server),
+      changes,
+    })
+  }
+
+  /** A server's tools differ from what was accepted in another way: clients and agents hear. */
+  private mcpToolsChanged(serverId: string): void {
+    const server = this.routedServers().find((item) => item.id === serverId)
+    const changes = server ? this.mcpToolChanges.changes(serverId, toolGuard(server)) : null
+    this.hub.broadcast({ type: 'market.mcpToolsChanged', serverId, changes })
+    if (server && toolGuard(server) === 'hold') this.mcpRouter.heldChanged(serverId)
+  }
+
+  /** The library servers a session's agent was handed at its last attach. */
+  private sessionMcpServers(sessionId: string): SessionMcpServer[] {
+    const handed = this.sessionMcp.get(sessionId)
+    if (!handed) return []
+    const agentId = this.sessions.sessionAgent(sessionId)
+    const off = this.mcpRouter.offIn(sessionId)
+    const out: SessionMcpServer[] = []
+    const servers = this.routedServers()
+    for (const [id, { name, how }] of handed) {
+      const server = servers.find((item) => item.id === id)
+      if (!server) continue
+      const known = this.mcpRouter.knownTools(server)
+      const changes = this.mcpToolChanges.changes(server.id, toolGuard(server))
+      const tools = this.mcpToolInfos(server, known, changes)
+      const carry = agentId ? carryOf(agentId, how === 'gateway') : 'full'
+      const project = this.projectServers.has(id)
+      out.push({
+        serverId: id,
+        ...(project ? { project: true as const, changes } : {}),
+        // The library's name, though the agent may know it by another, such as with -kettu.
+        name: server.name,
+        title: server.title,
+        site: server.spec.type === 'http' ? server.spec.url : null,
+        state: how === 'agent' ? { state: 'by-agent' } : this.mcpState(server),
+        tools: tools ? tools.filter((tool) => !tool.off && !tool.held).length : null,
+        tokens: tools ? turnTokens(tools, carry, name) : null,
+        off: off.has(id),
+        routed: how !== 'agent',
+      })
+    }
+    return out
+  }
+
+  private async sessionMcpServer(
+    sessionId: string,
+    serverId: string,
+    action: 'reconnect' | 'off' | 'on',
+  ): Promise<void> {
+    const handed = this.sessionMcp.get(sessionId)?.get(serverId)
+    if (!handed) throw new HostError('not_found', 'The session was not handed this server')
+    if (handed.how === 'agent') {
+      throw new HostError(
+        'conflict',
+        'The agent runs this server itself, so Kettu cannot change it',
+      )
+    }
+    if (action === 'reconnect') return this.mcpRouter.reconnect(sessionId, serverId)
+    this.mcpRouter.setSessionOff(sessionId, serverId, action === 'off')
+  }
+
+  /** Every MCP server instance's stderr for a problem report, with keys masked. */
+  private mcpLogs(): NonNullable<DiagnosticsBundle['mcpLogs']> {
+    const servers = this.routedServers()
+    return this.mcpRouter.logsOf().map((log) => {
+      const server = servers.find((item) => item.id === log.serverId)
+      return {
+        ...log,
+        server: server?.name ?? log.serverId,
+        folder: redactLogText(log.folder),
+        text: this.mcpMask(log.serverId)(log.text),
+      }
+    })
+  }
+
+  private marketChanged(servers: HostSettings['marketplace']['mcp'], keys: MarketKeys): void {
+    // Routed servers compare by where they go, without a session's token.
+    const oauth = { access: (server: MarketServer) => this.marketConnections.access(server) }
+    const router = { origin: '', token: '', allow: () => undefined }
+    const options = {
+      platform: this.options.platform,
+      oauth,
+      router,
+      bridge: this.mcpBridge,
+      env: this.env.agentEnv(),
+      node: this.options.nodeRuntime,
+    }
     const of = (list: typeof servers, held: MarketKeys, agentId: AgentId): string =>
       JSON.stringify(libraryServers(list, held, agentId, ALL_TRANSPORTS, options))
     const now = this.settings.marketplace.mcp
     if (servers === now && keys === this.marketKeys) return
+    // A process runs with the keys and the command it started with, so a change stops it.
+    const before = new Map(servers.map((server) => [server.id, server]))
+    const changed = new Set(
+      now
+        .filter((server) => {
+          const was = before.get(server.id)
+          const runs = (item: MarketServer) => JSON.stringify([item.name, item.spec, item.run])
+          const inputs = (held: MarketKeys) => JSON.stringify([...(held.get(server.id) ?? [])])
+          return !was || runs(was) !== runs(server) || inputs(keys) !== inputs(this.marketKeys)
+        })
+        .map((server) => server.id),
+    )
+    this.mcpRouter.serversChanged(changed)
+    // Projects do not change what an agent is handed in general, only which sessions get it.
+    const projects = (list: typeof servers, agentId: AgentId): string =>
+      JSON.stringify(
+        list.filter((server) => serverFor(server, agentId)).map((server) => server.projects),
+      )
     this.sessions.libraryChanged(
-      (agentId) => of(servers, keys, agentId) !== of(now, this.marketKeys, agentId),
+      (agentId) =>
+        of(servers, keys, agentId) !== of(now, this.marketKeys, agentId) ||
+        projects(servers, agentId) !== projects(now, agentId),
     )
   }
 
@@ -3734,6 +4825,42 @@ export class AgentHost {
             : { code: 'internal', message: (error as Error)?.message ?? String(error) },
         }),
     )
+  }
+
+  updateResumeSnapshot(requestId: number): void {
+    this.options.send({
+      type: 'host:update-resume',
+      requestId,
+      sessions: this.sessions.interruptedByUpdate(),
+    })
+  }
+
+  /** Resolves once any post-update session recovery for this launch has finished. */
+  updateResumeReady(): Promise<void> {
+    return this.updateResumePromise
+  }
+
+  private scheduleUpdateResume(
+    pending: UpdateResumeFile,
+    worktreesChecked: Promise<void>,
+    agentsDetected: Promise<void>,
+  ): void {
+    writeLog(
+      'info',
+      'host',
+      `Resuming ${pending.sessions.length} session(s) interrupted by update from ${pending.fromVersion}`,
+    )
+    this.updateResumePromise = Promise.all([
+      worktreesChecked.catch(() => {}),
+      agentsDetected.catch(() => {}),
+    ])
+      .then(() => {
+        if (this.stopping) return
+        return this.sessions.resumeAfterUpdate(pending.sessions)
+      })
+      .catch((error: unknown) => {
+        writeLog('warn', 'host', `Post-update session recovery failed: ${String(error)}`)
+      })
   }
 
   /** The floating label's buttons and the stop shortcut, from main. */
@@ -4048,6 +5175,67 @@ export class AgentHost {
     }
   }
 
+  /**
+   * Translates a displayed thinking summary for a session using its lightweight task model
+   * without modifying the stored thread entry. Concurrent identical requests share one run.
+   */
+  private translateThought(
+    params: HostParams<'sessions.translateThought'>,
+  ): Promise<{ translation: string; agent: string }> {
+    if (!this.sessions.has(params.sessionId)) {
+      return Promise.reject(notFound(t('session.notFound')))
+    }
+    const digest = createHash('sha256').update(params.text).digest('hex')
+    const key = `${params.sessionId}\0${params.entryId}\0${params.language}\0${digest}`
+    const existing = this.inFlightThoughtTranslations.get(key)
+    if (existing) return existing
+
+    const run = this.runThoughtTranslation(params).finally(() => {
+      if (this.inFlightThoughtTranslations.get(key) === run) {
+        this.inFlightThoughtTranslations.delete(key)
+      }
+    })
+    this.inFlightThoughtTranslations.set(key, run)
+    return run
+  }
+
+  private async runThoughtTranslation(
+    params: HostParams<'sessions.translateThought'>,
+  ): Promise<{ translation: string; agent: string }> {
+    const session = this.sessions.summary(params.sessionId)
+    const target = resolveThoughtTranslationTarget({
+      lightModel: this.settings.lightModel,
+      sessionAgentId: session.agentId,
+      sessionAgentAvailable:
+        this.agents.has(session.agentId) && !this.agents.isDisabled(session.agentId),
+      sessionModel: session.model,
+      preferredAgentId: this.preferredAgent(session.scratch ? null : session.projectPath),
+      fallbackLightAgentId: this.sessions.lightAgents()[0]?.agentId ?? null,
+    })
+    if (target === null) throw new HostError('agent_error', t('thought.translateNoAgent'))
+    const agent = this.agents.name(target.agentId)
+    try {
+      const runtime = await this.agents.ensureReady(target.agentId)
+      const dir = path.join(this.options.userDataPath, 'agent-reports')
+      await mkdir(dir, { recursive: true })
+      const translation = await translateThoughtSummary(runtime, {
+        dir,
+        text: params.text,
+        language: params.language,
+        model: target.model,
+        log: (line) => this.diagnostics.log('warn', line),
+      })
+      return { translation, agent }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      this.diagnostics.log(
+        'warn',
+        `${agent}: could not translate a thinking summary: ${logText(error)}`,
+      )
+      throw new HostError('agent_error', t('thought.translateFailed', { agent, reason }))
+    }
+  }
+
   /** A page's question to the agent, in a hidden session with no tools in the reports' folder. */
   private async answerQuestion(agent: SampleAgent, question: SampleQuestion): Promise<string> {
     const runtime = await this.agents.ensureReady(agent.id as AgentId)
@@ -4064,13 +5252,9 @@ export class AgentHost {
   async artifactList(requestId: number): Promise<void> {
     let result: ArtifactListResult
     try {
-      const [kept, deleted] = await Promise.all([
-        this.artifacts.list({ deleted: false }),
-        this.artifacts.list({ deleted: true }),
-      ])
       result = {
         kind: 'listed',
-        artifacts: [...kept.map((a) => brief(a, false)), ...deleted.map((a) => brief(a, true))],
+        artifacts: await this.artifacts.briefs(),
       }
     } catch (error) {
       this.diagnostics.log('warn', `Could not list the artifacts: ${(error as Error).message}`)
@@ -4419,6 +5603,8 @@ export class AgentHost {
       })
     }
     this.marketCalls.clear()
+    for (const resolve of this.mcpInstallCalls.values()) resolve('The host stopped.')
+    this.mcpInstallCalls.clear()
     for (const resolve of this.trashCalls.values()) resolve('Kettu stopped before it answered.')
     this.trashCalls.clear()
     for (const resolve of this.pluginSecretCalls.values())
@@ -4443,10 +5629,13 @@ export class AgentHost {
       this.recycleBin.stop()
       this.execRunner.killAll()
       this.checkpointGit.stop()
+      this.mcpDiscovery.stop()
       this.fileWatches.stop()
       for (const unsubscribe of this.gitUnsubscribe) unsubscribe()
       await Promise.all([
         this.agents.stopAll(),
+        // Before the trees close, so the reaps of what its servers left are waited for.
+        this.mcpRouter.close(),
         this.git?.dispose().catch((error: unknown) => {
           this.diagnostics.log(
             'warn',
@@ -4472,6 +5661,7 @@ export class AgentHost {
         this.preparedRecords.flush(),
         this.attachments.flush(),
         this.marketCatalog.flush(),
+        this.mcpDiscovery.flush(),
         this.marketSkills.flush(),
         this.pluginDirectoryLoaded?.flush(),
         this.marketBundles.flush(),
@@ -4480,10 +5670,12 @@ export class AgentHost {
         this.sessionFolders.flush(),
         this.nodeRuntime.flush(),
         this.copies.flush(),
+        this.workflowLibrary.flush(),
         this.workflowSuggestions.flush(),
         this.threads?.close(),
         this.usage.close(),
       ])
+      this.stopStorageWatch()
       this.hub.closeAll()
       this.failBrowserCalls()
       this.options.send({ type: 'host:stopped' })
@@ -4542,6 +5734,7 @@ export class AgentHost {
       })),
       sessions: this.sessions.list(),
       log: this.diagnostics.logEntries(),
+      mcpLogs: this.mcpLogs(),
     }
   }
 
@@ -4576,7 +5769,13 @@ export class AgentHost {
    * scratch folder or a worktree a session works in: files, git and media are read nowhere else.
    */
   private assertOpenFolder(canonical: string): void {
-    if (this.scratch.contains(canonical) || this.sessions.isSessionWorktree(canonical)) return
+    if (
+      this.scratch.contains(canonical) ||
+      this.sessions.isSessionWorktree(canonical) ||
+      this.sessions.isSessionProjectPath(canonical)
+    ) {
+      return
+    }
     if (this.projects.isFolder(canonical)) return
     this.projects.match(canonical)
   }
@@ -4784,7 +5983,8 @@ export class AgentHost {
       'agents.setCodexSetting': ({ agentId, change }) =>
         agents.setCodexSetting(agentId, change, () => this.appServer(agentId)),
       'agents.setCodebuddySite': ({ agentId, change }) => agents.setCodebuddySite(agentId, change),
-      'agents.refreshAccount': ({ agentId, force }) => agents.refreshAccount(agentId, { force }),
+      'agents.refreshAccount': ({ agentId, force, afterSignIn }) =>
+        agents.refreshAccount(agentId, { force, afterSignIn }),
       'agents.readSignIn': ({ agentId, watch }) => agents.readSignIn(agentId, { watch }),
       'agents.options': () => this.agentOptions.list().map((o) => this.withStartMode(o)),
       'agents.pinModel': ({ agentId, model, pinned }) =>
@@ -4798,6 +5998,37 @@ export class AgentHost {
         this.marketCatalog.catalog(refresh === true, cached === true),
       'market.search': ({ query }) => this.marketCatalog.search(query),
       'market.keys': () => keyState(this.settings.marketplace.mcp, this.marketKeys),
+      'market.discoverMcp': () => this.mcpDiscovery.scan(),
+      'market.dismissMcpNotice': ({ id }) => this.mcpDiscovery.dismiss(id),
+      'market.importMcp': ({ choices }) => this.installMcp(this.mcpDiscovery.prepare(choices)),
+      'market.mcpTerminal': () => this.mcpTerminal.rows(),
+      'market.mcpTerminalPlan': async ({ target }) => {
+        await this.ensureBackupKey()
+        return this.mcpTerminalCall(() => this.mcpTerminal.plan(target))
+      },
+      'market.mcpTerminalOn': async ({ target, planId }) => {
+        await this.ensureBackupKey()
+        await this.mcpTerminalCall(() => this.mcpTerminal.turnOn(target, planId))
+      },
+      'market.mcpTerminalOffPlan': ({ target }) =>
+        this.mcpTerminalCall(() => this.mcpTerminal.offPlan(target)),
+      'market.mcpTerminalOff': ({ target }) =>
+        this.mcpTerminalCall(() => this.mcpTerminal.turnOff(target)),
+      'market.mcpTerminalDrift': ({ target }) =>
+        this.mcpTerminalCall(() => this.mcpTerminal.drifts(target)),
+      'market.mcpTerminalResolve': ({ target, choices }) =>
+        this.mcpTerminalCall(() => this.mcpTerminal.resolve(target, choices)),
+      'market.mcpTerminalBackups': ({ target }) => this.mcpTerminal.backups(target),
+      'market.mcpTerminalRestore': ({ target, backupId }) =>
+        this.mcpTerminalCall(() => this.mcpTerminal.restore(target, backupId)),
+      'market.previewMcp': ({ text }, { portId }) => this.previewMcp(text, portId),
+      'market.addMcp': ({ choices }, { portId }) => this.addMcp(choices, portId),
+      'market.checkMcp': ({ serverId }) => {
+        const server = this.settings.marketplace.mcp.find(({ id }) => id === serverId)
+        if (!server) throw new HostError('not_found', 'This MCP server is no longer installed.')
+        void this.checkMcpServer(server, this.marketKeys.get(server.id) ?? new Map())
+      },
+      'market.mcpChecks': () => Object.fromEntries(this.mcpCheckStates),
       'market.connect': ({ serverId }) => this.marketConnections.connect(serverId),
       'market.detectSignIn': async ({ url, headers }) => ({
         oauth: await this.marketConnections.detect(
@@ -4808,6 +6039,29 @@ export class AgentHost {
       'market.cancelConnect': ({ loginId }) => this.marketConnections.cancel(loginId),
       'market.disconnect': ({ serverId }) => this.marketConnections.disconnect(serverId),
       'market.connections': () => this.marketConnections.view(),
+      'market.mcpInsight': ({ serverId }) => this.mcpInsight(serverId),
+      'market.mcpInstances': ({ serverId }) => this.mcpRouter.instancesOf(serverId),
+      'market.mcpCalls': async (query) => ({ calls: await this.mcpCalls.list(query) }),
+      'market.mcpLogs': ({ serverId }) => this.mcpLogs().filter((log) => log.serverId === serverId),
+      'market.answerMcpChange': ({ sessionId, entryId, decision }, { device }) =>
+        this.sessions.answerMcp(sessionId, entryId, decision, fromDevice(device)),
+      'market.undoMcpChange': ({ sessionId, entryId }) => this.undoMcp(sessionId, entryId),
+      'market.mcpToolChanges': () =>
+        this.settings.marketplace.mcp.flatMap(
+          (server) => this.mcpToolChanges.changes(server.id, toolGuard(server)) ?? [],
+        ),
+      'market.mcpToolDiff': ({ serverId }) => this.mcpToolChanges.diff(serverId),
+      'market.acceptMcpTools': ({ serverId, names }) => {
+        if (!this.routedServers().some((server) => server.id === serverId)) {
+          throw new HostError('not_found', 'This MCP server is no longer installed.')
+        }
+        this.mcpToolChanges.accept(serverId, names)
+      },
+      'market.mcpStop': async ({ serverId, instance }) => {
+        if (!(await this.mcpRouter.stopInstance(serverId, instance))) {
+          throw new HostError('not_found', 'The server has no such instance')
+        }
+      },
       'market.ownPlugins': ({ refresh }) => this.ownPlugins.plugins(refresh === true),
       'market.skills': ({ refresh, cached }) =>
         this.marketSkills.skills(refresh === true, cached === true),
@@ -4885,28 +6139,46 @@ export class AgentHost {
       'mcp.retry': async () => {
         await this.artifactService.start()
         this.options.send({ type: 'host:service-port', port: this.artifactService.listeningPort })
+        await this.writeConnect()
         return this.mcpStatus()
       },
-      'agents.listSessions': ({ agentId, projectPath, cursor }) =>
-        sessions.listImportable(agentId, projectPath, cursor ?? null),
+      'agents.listSessions': ({ agentId, projectPath, cursor, allFolders }) =>
+        sessions.listImportable(agentId, projectPath, cursor ?? null, allFolders === true),
       'projects.list': () => {
         void projects.refreshMissing()
         return projects.list()
       },
       'projects.add': ({ path }) => projects.add(path),
+      'projects.update': ({ path, name, folders, icon }) =>
+        projects.update(projects.matchPrimary(path), {
+          ...(name !== undefined ? { name } : {}),
+          ...(folders !== undefined ? { folders } : {}),
+          ...(icon !== undefined ? { icon } : {}),
+        }),
       // Huli: into the recycle bin with its sessions; its folder on disk was never touched.
       'projects.remove': async ({ path }) => {
-        const record = projects.match(path)
-        await sessions.removeProject(record.path, binKey('project', record.path))
+        const record = projects.matchPrimary(path)
+        await sessions.removeProject(record.path, binKey('project', record.path), record.folders)
         projects.remove(record)
         this.options.send({ type: 'host:media-revoke', sessionId: null })
         this.recycleBin.added()
       },
+      'projects.archive': async ({ path }) => {
+        const record = projects.matchPrimary(path)
+        await sessions.archiveProject(record.path, record.folders)
+        return projects.archive(record)
+      },
+      'projects.unarchive': ({ path }) => projects.unarchive(projects.matchPrimary(path)),
       'projects.touch': ({ path }) => projects.touch(projects.match(path)),
       'projects.pin': ({ path, pinned }) =>
-        path === null ? projects.pinNoProject(pinned) : projects.pin(projects.match(path), pinned),
+        path === null
+          ? projects.pinNoProject(pinned)
+          : projects.pin(projects.matchPrimary(path), pinned),
       'projects.move': ({ path, before }) =>
-        projects.move(projects.match(path), before === null ? null : projects.match(before)),
+        projects.move(
+          projects.matchPrimary(path),
+          before === null ? null : projects.matchPrimary(before),
+        ),
       'projects.orderSessions': ({ path, ids }) =>
         projects.orderSessions(path === null ? null : projects.match(path), ids),
       'projects.noProject': () => projects.noProject(),
@@ -4997,6 +6269,7 @@ export class AgentHost {
       'sessions.find': ({ sessionId, query }) => sessions.find(sessionId, query),
       'sessions.outputs': ({ sessionId }) => sessions.outputs(sessionId),
       'sessions.outlineTitles': ({ sessionId }) => sessions.outlineTitles(sessionId),
+      'sessions.translateThought': (params) => this.translateThought(params),
       'sessions.watch': ({ sessionId }, { portId }) => sessions.watch(sessionId, portId),
       'sessions.unwatch': ({ sessionId }, { portId }) => sessions.unwatch(sessionId, portId),
       'sessions.show': ({ sessionIds }, { portId }) => sessions.show(sessionIds, portId),
@@ -5007,6 +6280,8 @@ export class AgentHost {
       'sessions.attachEarly': ({ sessionId }) => sessions.attachEarly(sessionId),
       'sessions.cancel': ({ sessionId }) => sessions.cancel(sessionId),
       'sessions.runningWork': ({ sessionIds }) => ({ sessions: sessions.runningWork(sessionIds) }),
+      'sessions.usages': ({ sessionIds }) =>
+        sessions.usages(sessionIds).then((list) => ({ sessions: list })),
       'sessions.idleRelease': () => this.idleRelease.state(),
       'host.load.watch': (_, { portId }) => this.load.watch(portId),
       'host.load.unwatch': (_, { portId }) => this.load.unwatch(portId),
@@ -5030,6 +6305,20 @@ export class AgentHost {
       'sessions.rewind': ({ sessionId, entryId, draft }) =>
         sessions.rewind(sessionId, entryId, draft),
       'sessions.putBack': ({ sessionId }) => sessions.putBack(sessionId),
+      'sessions.previewUndoTurn': ({ sessionId, toolIds }) =>
+        sessions.previewUndoTurn(sessionId, toolIds),
+      'sessions.undoTurn': async ({ sessionId, toolIds, expectedDigests }) => {
+        const { result, workDir } = await sessions.undoTurn(sessionId, toolIds, expectedDigests)
+        if (result.status === 'applied') {
+          this.fileWatches.notify(workDir)
+          const canonical = await realpath(workDir).catch(() => null)
+          if (canonical && canonical !== workDir) this.fileWatches.notify(canonical)
+          if (this.git) {
+            void this.git.status(canonical ?? workDir).catch(() => {})
+          }
+        }
+        return result
+      },
       'sessions.sideAsk': ({ sessionId, question, quote, agentId }) =>
         sessions.sideAsk(sessionId, question, quote ?? null, agentId ?? null),
       'sessions.sideStop': ({ sessionId }) => sessions.sideStop(sessionId),
@@ -5051,6 +6340,9 @@ export class AgentHost {
         sessions.restoreFiles(sessionId, entryId, token),
       'sessions.undoRewindFiles': ({ sessionId, backup }) =>
         sessions.undoRewindFiles(sessionId, backup),
+      'sessions.branches': ({ sessionId }) => sessions.branches(sessionId),
+      'sessions.switchBranch': ({ sessionId, branchId }) =>
+        sessions.switchBranch(sessionId, branchId),
       'worktrees.inspect': ({ sessionId }) =>
         this.gitCall(() => sessions.inspectWorktree(sessionId)),
       'worktrees.remove': ({ sessionId, branch, expected }) =>
@@ -5072,6 +6364,15 @@ export class AgentHost {
       'sessions.switchAgent': (params, { portId, device }) => {
         this.shareSurfaces(params.sessionId, params.content)
         return sessions.switchAgent(params, portId, fromDevice(device))
+      },
+      'sessions.delegateAgents': ({ sessionId }) =>
+        sessions.delegateAgents(sessionId, this.agents.statuses(), (agentId, callerId) =>
+          this.agents.defaultMode(agentId, sessions.workFolder(callerId)),
+        ),
+      'sessions.delegate': async (params, { device }) => {
+        const summary = await sessions.delegate(params, this.agents.statuses(), fromDevice(device))
+        this.shareSurfaces(summary.id, params.content)
+        return summary
       },
       'sessions.context': ({ sessionId }) => sessions.context(sessionId),
       'sessions.contextEstimates': ({ sessionId }) => sessions.contextEstimates(sessionId),
@@ -5110,6 +6411,10 @@ export class AgentHost {
       'sessions.setConfigOption': ({ sessionId, optionId, value }) =>
         sessions.setConfigOption(sessionId, optionId, value),
       'sessions.refreshModels': ({ sessionId }) => sessions.refreshModels(sessionId),
+      'sessions.applyMcp': ({ sessionId }) => sessions.applyLibrary(sessionId),
+      'sessions.mcpServers': ({ sessionId }) => this.sessionMcpServers(sessionId),
+      'sessions.mcpServer': ({ sessionId, serverId, action }) =>
+        this.sessionMcpServer(sessionId, serverId, action),
       'sessions.rename': ({ sessionId, title }) => sessions.rename(sessionId, title),
       'sessions.close': ({ sessionId }) => sessions.close(sessionId),
       'sessions.terminalCommand': async ({ sessionId, run }) => {
@@ -5323,6 +6628,8 @@ export class AgentHost {
         this.gitProjectCall(projectPath, (g, p) => g.fileDiff(p, path, oldPath, ref)),
       'git.branches': ({ projectPath }) =>
         this.gitProjectCall(projectPath, (g, p) => g.branches(p)),
+      'git.graph': ({ projectPath, limit, skip }) =>
+        this.gitProjectCall(projectPath, (g, p) => g.graph(p, { limit, skip })),
       'git.switchBranch': ({ projectPath, branch, create }) =>
         this.gitProjectCall(projectPath, (g, p) => g.switchBranch(p, branch, create)),
       'git.publishBranch': ({ projectPath, remote }) =>
@@ -5351,6 +6658,9 @@ export class AgentHost {
           portId,
         )
       },
+      'git.stack': ({ url, fresh }) => this.gitCall((g) => g.stack(url, fresh)),
+      'git.searchReferences': ({ owner, repo, query }) =>
+        this.gitCall((g) => g.searchReferences(owner, repo, query)),
       // Its first sweep probes gh, so it waits for the environment as every other git call does.
       'git.watchReferences': ({ urls }, { portId }) =>
         this.gitCall(async (g) => {
@@ -5496,6 +6806,7 @@ export class AgentHost {
             : { purgeAt: keep === null ? null : artifact.deletedAt + keep }),
         }))
       },
+      'artifacts.hidden': () => artifacts.hiddenIds(),
       'artifacts.read': async ({ id, version }) => {
         const [read, strict] = await Promise.all([
           artifacts.read(id, version === undefined ? {} : { version }),
@@ -5577,6 +6888,7 @@ export class AgentHost {
         artifacts.reply(id, threadId, { body, author: { person: OWNER, session: null } }),
       'artifacts.resolve': ({ id, threadId, resolved }) =>
         artifacts.resolve(id, threadId, resolved),
+      'artifacts.deleteComment': ({ id, threadId }) => artifacts.deleteThread(id, threadId),
       'artifacts.repin': ({ id, threadId, anchor }) => artifacts.repin(id, threadId, anchor),
       'artifacts.markSent': ({ id, threadIds, sessionId }) =>
         artifacts.markSent(id, threadIds, sessionId),
@@ -5666,8 +6978,8 @@ export class AgentHost {
       'sessions.answerProjectMcp': ({ sessionId, entryId, decision }, { device }) => {
         sessions.answerProjectMcp(sessionId, entryId, decision, fromDevice(device))
       },
-      'sessions.answerProjectHooks': ({ sessionId, entryId, decision }, { device }) => {
-        sessions.answerProjectHooks(sessionId, entryId, decision, fromDevice(device))
+      'sessions.answerProjectHooks': ({ sessionId, entryId }) => {
+        sessions.answerProjectHooks(sessionId, entryId)
       },
       'sessions.answerReport': ({ sessionId, entryId, outcome }, { device }) =>
         sessions.answerReport(sessionId, entryId, outcome, fromDevice(device)),

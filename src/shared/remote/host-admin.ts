@@ -32,7 +32,7 @@ import type {
   ThemeInstallResult,
   ThemeLoadFailure,
 } from '../themes'
-import type { UpdateStatus } from '../updates'
+import type { UpdateConfirmationAction, UpdateStatus } from '../updates'
 import type { DeviceActivity } from './activity'
 import type { DiscoveryRequestEvent, ReverseGrant, ReverseHost } from './discovery'
 import type { OwnRelayCheck, OwnRelayInput } from './own-relay'
@@ -205,6 +205,11 @@ export interface HostInfo extends AppInfo {
   /** Updating Kettu from Settings, which the desktop app has and the daemon does not. */
   updates: boolean
   /**
+   * Rich remote update lifecycle status and timing confirmation (`updates.confirm`); absent from
+   * older hosts.
+   */
+  remoteUpdateFlow?: boolean
+  /**
    * Turning remote access off, which the desktop app allows; the daemon is reached only through
    * it, so it always serves it.
    */
@@ -245,7 +250,8 @@ export interface HostInfo extends AppInfo {
  * `held` in presence. `links`: `places` in the artifact tools' results. `pageErrors`: the page
  * script the host serves its pages with reports their uncaught errors. `documentSheet`: comment
  * threads anchor on a document's blocks in its Markdown, and the page script passes on what the
- * document viewer reports of its layout. `repin`: `artifacts.repin`.
+ * document viewer reports of its layout. `repin`: `artifacts.repin`. `deleteComment`:
+ * `artifacts.deleteComment`.
  */
 export const ARTIFACT_RECORDS = [
   'seen',
@@ -255,6 +261,7 @@ export const ARTIFACT_RECORDS = [
   'pageErrors',
   'documentSheet',
   'repin',
+  'deleteComment',
 ] as const
 export type ArtifactRecord = (typeof ARTIFACT_RECORDS)[number]
 
@@ -371,9 +378,13 @@ export interface HostAdminContract {
   'sharing.setAuto': { params: { enabled: boolean }; result: SharingResult }
   'updates.status': { params: undefined; result: UpdateStatus }
   'updates.check': { params: undefined; result: UpdateStatus }
-  'updates.download': { params: undefined; result: null }
-  'updates.cancel': { params: undefined; result: null }
-  'updates.restart': { params: undefined; result: null }
+  'updates.download': { params: undefined; result: UpdateStatus }
+  'updates.cancel': { params: undefined; result: UpdateStatus }
+  'updates.restart': { params: undefined; result: UpdateStatus }
+  'updates.confirm': {
+    params: { requestId: string; action: UpdateConfirmationAction }
+    result: UpdateStatus
+  }
   'updates.dismiss': { params: undefined; result: null }
   'themes.get': { params: undefined; result: HostThemes }
   /** Installs a theme file the device read, named `file`, or names the theme it would replace. */
@@ -471,6 +482,7 @@ const METHODS: Record<HostAdminMethod, true> = {
   'updates.download': true,
   'updates.cancel': true,
   'updates.restart': true,
+  'updates.confirm': true,
   'updates.dismiss': true,
   'themes.get': true,
   'themes.add': true,

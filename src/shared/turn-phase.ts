@@ -22,7 +22,8 @@ export type TurnPhaseName =
  * the user's answer rather than approval.
  */
 export interface TurnPhase {
-  phase: TurnPhaseName | 'question'
+  /** Huli: `waiting_background` only here, never in a summary's `working`, which phones read. */
+  phase: TurnPhaseName | 'question' | 'waiting_background'
   count: number
 }
 
@@ -56,6 +57,7 @@ const QUIET = new Set([
   'git',
   'artifact',
   'subagent',
+  'session_started',
   'memory',
   'recall',
   'control_ask',
@@ -82,6 +84,8 @@ function readTurn(state: ThreadState | null | undefined): TurnRead {
   if (state.session.status === 'awaiting_permission') {
     return quiet({ phase: 'approval', count: 1, step: null })
   }
+  // Waiting only on background work, the turn does nothing of its own: work for the summary.
+  if (state.session.waitingBackground) return quiet(WORKING)
   const { order, byId } = state
   const running: ToolEntry[] = []
   let tools = false
@@ -95,6 +99,8 @@ function readTurn(state: ThreadState | null | undefined): TurnRead {
     }
     // A subagent's card after the message: the agent waits on it rather than writes.
     if (entry.kind === 'subagent' && !tools) return quiet(WORKING)
+    // A pending control request waits for the user instead of continuing an earlier writing phase.
+    if (entry.kind === 'control_ask' && entry.outcome === null && !tools) return quiet(WORKING)
     if (QUIET.has(entry.kind)) continue
     if (tools) break
     if (entry.kind === 'thought') {
@@ -215,10 +221,35 @@ export function turnDoing(state: ThreadState | null | undefined): TurnDoing {
 
 /** The phase alone, as the desktop, the summary's `phase` and the notch island read it. */
 export function turnPhase(state: ThreadState | null | undefined): TurnPhase {
+  if (state && state.session.status !== 'awaiting_permission' && state.session.waitingBackground) {
+    return { phase: 'waiting_background', count: 1 }
+  }
   const { phase, count } = turnWork(state)
   return phase === 'approval' && awaitsAnswer(state)
     ? { phase: 'question', count }
     : { phase, count }
+}
+
+/**
+ * The streaming agent message that currently owns the turn's `writing` phase, or null when another
+ * phase owns the turn. Shares `turnPhase`'s quiet-entry and boundary rules so an active running
+ * turn reports `phase === 'writing'` if and only if a streaming agent entry carries it.
+ */
+export function writingEntryId(state: ThreadState | null | undefined): string | null {
+  if (!state) return null
+  if (state.session.status !== 'running' || state.session.waitingBackground) return null
+  const { order, byId } = state
+  for (let i = order.length - 1; i >= Math.max(0, order.length - LOOKBACK); i--) {
+    const entry = byId[order[i]!]
+    if (!entry) continue
+    // A subagent's card after the message: the agent waits on it rather than writes.
+    if (entry.kind === 'subagent') return null
+    // A pending control request waits for the user, so TurnStatus owns the indicator.
+    if (entry.kind === 'control_ask' && entry.outcome === null) return null
+    if (QUIET.has(entry.kind)) continue
+    return entry.kind === 'agent' && entry.streaming ? entry.id : null
+  }
+  return null
 }
 
 /**

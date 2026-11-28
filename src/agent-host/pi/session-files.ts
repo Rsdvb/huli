@@ -3,6 +3,7 @@
 // the working directory. `pi --session` opens another folder's session only by its file, so a
 // session is resumed by the file found here.
 
+import { readFileSync } from 'node:fs'
 import { open, readdir, readFile, rm, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -24,27 +25,126 @@ export interface PiFolders {
   adapterMap: string
 }
 
-/** Pi's folders as its own environment and settings place them. */
-export async function piFolders(env: Env, platform: Platform): Promise<PiFolders> {
-  const home = getEnv(env, platform === 'win32' ? 'USERPROFILE' : 'HOME', platform) ?? os.homedir()
-  const named = getEnv(env, 'PI_CODING_AGENT_DIR', platform)?.trim()
-  const agentDir = named ? path.resolve(named) : path.join(home, '.pi', 'agent')
-  const adapterMap = path.join(home, ...ADAPTER_MAP)
-  const fromEnv = getEnv(env, 'PI_CODING_AGENT_SESSION_DIR', platform)?.trim()
-  if (fromEnv) return { sessions: path.resolve(fromEnv), adapterMap }
-  const fromSettings = await sessionDirSetting(agentDir)
-  return { sessions: fromSettings ?? path.join(agentDir, 'sessions'), adapterMap }
+function pathModule(platform: Platform): path.PlatformPath {
+  return platform === 'win32' ? path.win32 : path.posix
 }
 
-async function sessionDirSetting(agentDir: string): Promise<string | null> {
+function resolveHome(env: Env, platform: Platform, home?: string): string {
+  return (
+    home ?? getEnv(env, platform === 'win32' ? 'USERPROFILE' : 'HOME', platform) ?? os.homedir()
+  )
+}
+
+/** Pi's agent configuration folder: an explicit folder, `PI_CODING_AGENT_DIR`, or `<home>/.pi/agent`. */
+export function piAgentDir(
+  env: Env,
+  home: string,
+  platform: Platform,
+  chosen: string | null = null,
+): string {
+  const p = pathModule(platform)
+  const named = chosen?.trim() || getEnv(env, 'PI_CODING_AGENT_DIR', platform)?.trim()
+  return named ? p.resolve(home, named) : p.join(home, '.pi', 'agent')
+}
+
+function parseSessionDir(text: string, agentDir: string, platform: Platform): string | null {
   try {
-    const parsed: unknown = JSON.parse(await readFile(path.join(agentDir, 'settings.json'), 'utf8'))
+    const parsed: unknown = JSON.parse(text)
     const dir =
       typeof parsed === 'object' && parsed !== null
         ? (parsed as { sessionDir?: unknown }).sessionDir
         : null
     if (typeof dir !== 'string' || !dir.trim()) return null
-    return path.isAbsolute(dir) ? dir : path.resolve(agentDir, dir)
+    const p = pathModule(platform)
+    return p.isAbsolute(dir) ? dir : p.resolve(agentDir, dir)
+  } catch {
+    return null
+  }
+}
+
+/** Synchronous lookup of Pi's sessions folder, for Settings' log locations. */
+export function piSessionsLocation(
+  env: Env,
+  home: string,
+  platform: Platform,
+  chosen: string | null = null,
+): string {
+  const p = pathModule(platform)
+  const fromEnv = getEnv(env, 'PI_CODING_AGENT_SESSION_DIR', platform)?.trim()
+  if (fromEnv) return p.resolve(home, fromEnv)
+  const agentDir = piAgentDir(env, home, platform, chosen)
+  try {
+    const configured = parseSessionDir(
+      readFileSync(p.join(agentDir, 'settings.json'), 'utf8'),
+      agentDir,
+      platform,
+    )
+    if (configured) return configured
+  } catch {
+    // Missing or unreadable settings fall back to the default sessions folder.
+  }
+  return p.join(agentDir, 'sessions')
+}
+
+/** Async lookup of Pi's sessions folder, honoring environment variables and `<agentDir>/settings.json`. */
+export async function piSessionsDir(
+  env: Env,
+  home: string,
+  platform: Platform,
+  chosen: string | null = null,
+): Promise<string> {
+  const { sessions } = await placed(env, platform, home, chosen)
+  return sessions.dir
+}
+
+/** Pi's folders as its own environment and settings place them. */
+export async function piFolders(
+  env: Env,
+  platform: Platform,
+  home?: string,
+  chosen: string | null = null,
+): Promise<PiFolders> {
+  const { sessions, adapterMap } = await placed(env, platform, home, chosen)
+  return { sessions: sessions.dir, adapterMap }
+}
+
+async function placed(
+  env: Env,
+  platform: Platform,
+  homeOverride?: string,
+  chosen: string | null = null,
+): Promise<{ sessions: { dir: string; byFolder: boolean }; adapterMap: string }> {
+  const p = pathModule(platform)
+  const home = resolveHome(env, platform, homeOverride)
+  const agentDir = piAgentDir(env, home, platform, chosen)
+  const adapterMap = p.join(home, ...ADAPTER_MAP)
+  const fromEnv = getEnv(env, 'PI_CODING_AGENT_SESSION_DIR', platform)?.trim()
+  if (fromEnv) {
+    return { sessions: { dir: p.resolve(home, fromEnv), byFolder: false }, adapterMap }
+  }
+  const fromSettings = await sessionDirSetting(agentDir, platform)
+  if (fromSettings) return { sessions: { dir: fromSettings, byFolder: false }, adapterMap }
+  return { sessions: { dir: p.join(agentDir, 'sessions'), byFolder: true }, adapterMap }
+}
+
+/**
+ * The folder pi keeps `cwd`'s sessions in by the user's own environment and settings, which Kettu
+ * passes as `--session-dir`: a project's `.pi/settings.json` would otherwise move them into the
+ * repository, even in a folder pi does not trust.
+ */
+export async function piSessionDir(env: Env, platform: Platform, cwd: string): Promise<string> {
+  const { sessions } = await placed(env, platform)
+  return sessions.byFolder ? path.join(sessions.dir, folderName(path.resolve(cwd))) : sessions.dir
+}
+
+async function sessionDirSetting(agentDir: string, platform: Platform): Promise<string | null> {
+  try {
+    const p = pathModule(platform)
+    return parseSessionDir(
+      await readFile(p.join(agentDir, 'settings.json'), 'utf8'),
+      agentDir,
+      platform,
+    )
   } catch {
     return null
   }

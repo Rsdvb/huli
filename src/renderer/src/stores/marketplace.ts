@@ -1,3 +1,6 @@
+import type { McpCheck, McpDiscovery } from '@shared/mcp-discovery'
+import type { McpTerminalRow } from '@shared/mcp-terminal'
+import type { McpToolChanges } from '@shared/mcp-insight'
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import type { KettuApi } from '@shared/ipc'
 import type { HostEvent } from '@shared/agent-host'
@@ -84,6 +87,20 @@ export interface ConnectFlow {
 export type ConnectionEvent = Extract<HostEvent, { type: 'market.connectionChanged' }>
 
 export interface MarketplaceStore {
+  discovery: McpDiscovery | null
+  discoveryError: boolean
+  discoveryLoading: boolean
+  mcpChecks: Record<string, McpCheck>
+  /** How each server's tools differ from those the user accepted, for those that do. */
+  mcpToolChanges: Record<string, McpToolChanges>
+  loadDiscovery(): Promise<void>
+  /** Each agent's terminal and whether it uses Kettu's servers; null until the host answered. */
+  terminal: McpTerminalRow[] | null
+  terminalError: boolean
+  loadTerminal(): Promise<void>
+  loadMcpChecks(): Promise<void>
+  loadMcpToolChanges(): Promise<void>
+  mcpToolsChanged(serverId: string, changes: McpToolChanges | null): void
   /** The MCP catalog the host last answered with; null until it has. */
   catalog: MarketCatalog | null
   /** Why the host could not be asked for the catalog; the last one it gave stays. */
@@ -195,6 +212,9 @@ export function createMarketplaceStore(
   let catalogRead = 0
   let searchRead = 0
   let keysRead = 0
+  let discoveryRead = 0
+  let terminalRead = 0
+  let checkRevision = 0
   let connectionsRead = 0
   let ownPluginsRead = 0
   let pluginsRead = 0
@@ -212,6 +232,58 @@ export function createMarketplaceStore(
     refresh ? { refresh } : cached ? { cached } : {}
   const old = (kind: keyof typeof readAt) => Date.now() - readAt[kind] >= MARKET_KEPT_MS[kind]
   return create<MarketplaceStore>()((set, get) => ({
+    discovery: null,
+    discoveryError: false,
+    discoveryLoading: false,
+    mcpChecks: {},
+    mcpToolChanges: {},
+    async loadDiscovery() {
+      const read = ++discoveryRead
+      set({ discoveryLoading: true, discoveryError: false })
+      try {
+        const discovery = await request('market.discoverMcp', undefined)
+        if (read === discoveryRead) set({ discovery, discoveryLoading: false })
+      } catch {
+        if (read === discoveryRead) set({ discoveryError: true, discoveryLoading: false })
+      }
+    },
+    terminal: null,
+    terminalError: false,
+    async loadTerminal() {
+      const read = ++terminalRead
+      try {
+        const terminal = await request('market.mcpTerminal', undefined)
+        if (read === terminalRead) set({ terminal, terminalError: false })
+      } catch {
+        if (read === terminalRead) set({ terminalError: true })
+      }
+    },
+    async loadMcpChecks() {
+      const revision = ++checkRevision
+      try {
+        const checks = await request('market.mcpChecks', undefined)
+        if (revision === checkRevision)
+          set((state) => ({ mcpChecks: { ...checks, ...state.mcpChecks } }))
+      } catch {
+        // Hosts without connection checks still show their installed entries.
+      }
+    },
+    async loadMcpToolChanges() {
+      try {
+        const list = await request('market.mcpToolChanges', undefined)
+        set({ mcpToolChanges: Object.fromEntries(list.map((item) => [item.serverId, item])) })
+      } catch {
+        // A host from before tool changes were held has none to show.
+      }
+    },
+    mcpToolsChanged(serverId, changes) {
+      set((state) => {
+        const next = { ...state.mcpToolChanges }
+        if (changes) next[serverId] = changes
+        else delete next[serverId]
+        return { mcpToolChanges: next }
+      })
+    },
     catalog: null,
     catalogError: null,
     catalogLoading: false,

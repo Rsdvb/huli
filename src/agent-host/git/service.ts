@@ -6,17 +6,28 @@ import {
   GITHUB_ISSUE_URL,
   GITHUB_LOGIN,
   GITHUB_PULL_REQUEST_URL,
+  GITHUB_STACK_URL,
+  githubReferenceOf,
+  isRepositoryName,
   type ChangedFile,
   type GitOperation,
   type GitStatus,
   type GitTools,
   type IssueLookup,
   type PullRequest,
+  type PullRequestStackLookup,
   type PullRequestState,
   type PushTarget,
+  type ReferenceLookup,
+  type RepositoryReferenceSearchResult,
 } from '@shared/git'
-import type { ToolKind } from '@shared/thread'
-import type { BranchPullRequest, GitEventDraft, GitServiceApi, GitServiceDeps } from './api'
+import type {
+  BranchPullRequest,
+  GitEventDraft,
+  GitServiceApi,
+  GitServiceDeps,
+  ToolCallOutcome,
+} from './api'
 import { HostError } from '../errors'
 import { t } from '../i18n'
 import { logText } from '../localized-error'
@@ -25,15 +36,18 @@ import { createCoalescer } from './coalesce'
 import { readCommitContext } from './commit-context'
 import { readPullRequestContext } from './pull-request-context'
 import { readChanges, readCommitDetails, readFileDiff, readIncoming } from './details'
+import { readBranchGraph } from './graph'
 import { canChangeRepository, computeGitEvents, listNewCommits } from './events'
 import { CommandError, createExec, failureText, FETCH_TIMEOUT_MS, type Exec } from './exec'
 import {
   listBranchPullRequests,
   probeTools,
+  searchRepositoryReferences,
   viewAvatarUrl,
   viewCurrentPullRequest,
   viewIssueByUrl,
   viewPullRequestByUrl,
+  viewPullRequestStackByUrl,
 } from './gh'
 import { nextPollDelayMs } from './github'
 import {
@@ -63,6 +77,9 @@ export interface GitServiceOptions {
 const PULL_REQUEST_MIN_INTERVAL_MS = 60_000
 const PULL_REQUEST_CACHE_MS = 60_000
 const PULL_REQUEST_CACHE_SIZE = 200
+const REFERENCE_SEARCH_CACHE_MS = 60_000
+const REFERENCE_SEARCH_FAILURE_CACHE_MS = 10_000
+const REFERENCE_SEARCH_CACHE_SIZE = 100
 const AVATAR_URL_CACHE_SIZE = 200
 const UNREADABLE_RETRY_MS = 10 * 60_000
 const BACKGROUND_FETCH_INTERVAL_MS = 5 * 60_000
@@ -189,6 +206,13 @@ export function createGitService(
   const pullRequestLoads = new Map<string, Promise<PullRequest>>()
   const issueCache = new Map<string, { at: number; value: IssueLookup }>()
   const issueLoads = new Map<string, Promise<IssueLookup>>()
+  const stackCache = new Map<string, { at: number; value: PullRequestStackLookup }>()
+  const stackLoads = new Map<string, Promise<PullRequestStackLookup>>()
+  const referenceSearchCache = new Map<
+    string,
+    { at: number; value: RepositoryReferenceSearchResult }
+  >()
+  const referenceSearchLoads = new Map<string, Promise<RepositoryReferenceSearchResult>>()
   // Session rows' pull requests gh could not read, so a row does not ask again on every render.
   const unreadablePullRequests = new Map<string, number>()
   // Kept for the run: an avatar URL changes only when its user uploads a new picture.
@@ -201,6 +225,14 @@ export function createGitService(
         const entry = pullRequestCache.get(url)
         return entry && { at: entry.at, live: isLivePullRequest(entry.value) }
       }
+      if (GITHUB_STACK_URL.test(url)) {
+        const entry = stackCache.get(url)
+        if (!entry) return undefined
+        return {
+          at: entry.at,
+          live: entry.value.kind === 'stack' && entry.value.stack.state === 'open',
+        }
+      }
       const entry = issueCache.get(url)
       if (!entry) return undefined
       const found = entry.value
@@ -212,7 +244,12 @@ export function createGitService(
             : found.issue.state === 'open',
       }
     },
-    read: (url) => (GITHUB_PULL_REQUEST_URL.test(url) ? api.pullRequest(url) : api.issue(url)),
+    read: (url) =>
+      GITHUB_PULL_REQUEST_URL.test(url)
+        ? api.pullRequest(url)
+        : GITHUB_STACK_URL.test(url)
+          ? api.stack(url)
+          : api.issue(url),
   })
   let disposed = false
   let backgroundFetch: ReturnType<typeof setInterval> | null = null
@@ -223,7 +260,7 @@ export function createGitService(
   const changed = createEmitter<[GitStatus]>(reportListenerError)
   const pullRequestChanged = createEmitter<[string, PullRequest | null]>(reportListenerError)
   const branchPullRequestsChanged = createEmitter<[string]>(reportListenerError)
-  const referenceChanged = createEmitter<[string, IssueLookup]>(reportListenerError)
+  const referenceChanged = createEmitter<[string, ReferenceLookup]>(reportListenerError)
   const sessionEvents = createEmitter<[string, GitEventDraft[]]>(reportListenerError)
   const toolsChanged = createEmitter<[GitTools]>(reportListenerError)
 
@@ -624,6 +661,48 @@ export function createGitService(
     return value
   }
 
+  async function loadStack(url: string): Promise<PullRequestStackLookup> {
+    const tools = await getTools()
+    let value: PullRequestStackLookup
+    if (tools.gh.state === 'not-installed') {
+      value = { kind: 'unavailable', reason: 'gh-missing' }
+    } else if (tools.gh.state === 'signed-out') {
+      value = { kind: 'unavailable', reason: 'gh-signed-out' }
+    } else {
+      value = await viewPullRequestStackByUrl(exec, url, homedir())
+    }
+    const previous = stackCache.get(url)?.value
+    stackCache.set(url, { at: now(), value })
+    trimCache(stackCache)
+    if (!previous || !sameJson(previous, value)) referenceChanged.emit(url, value)
+    return value
+  }
+
+  async function loadReferenceSearch(
+    key: string,
+    owner: string,
+    repo: string,
+    query: string,
+  ): Promise<RepositoryReferenceSearchResult> {
+    const tools = await getTools()
+    let value: RepositoryReferenceSearchResult
+    if (tools.gh.state === 'not-installed') {
+      value = { kind: 'unavailable', reason: 'gh-missing' }
+    } else if (tools.gh.state === 'signed-out') {
+      value = { kind: 'unavailable', reason: 'gh-signed-out' }
+    } else {
+      value = await searchRepositoryReferences(exec, owner, repo, query, homedir())
+    }
+    referenceSearchCache.delete(key)
+    referenceSearchCache.set(key, { at: now(), value })
+    while (referenceSearchCache.size > REFERENCE_SEARCH_CACHE_SIZE) {
+      const oldest = referenceSearchCache.keys().next().value
+      if (oldest === undefined) break
+      referenceSearchCache.delete(oldest)
+    }
+    return value
+  }
+
   function trimCache(cache: Map<string, unknown>): void {
     while (cache.size > PULL_REQUEST_CACHE_SIZE) {
       const oldest = cache.keys().next().value
@@ -870,7 +949,7 @@ export function createGitService(
     state: ProjectState,
     call: ToolCall | undefined,
     sessionId: string,
-    output: string,
+    outcome: ToolCallOutcome,
     previous: Promise<void>,
   ): Promise<{ after: Snapshot; fresh: GitEventDraft[] } | null> {
     const after = await requestToolRefresh(state)
@@ -905,7 +984,13 @@ export function createGitService(
       before: before.status,
       after: after.status,
       newCommits,
-      output,
+      output: outcome.output,
+      tool: {
+        toolKind: outcome.toolKind,
+        status: outcome.status,
+        title: outcome.title,
+        rawInput: outcome.rawInput,
+      },
     })
     const fresh = events.filter((event) => {
       if (event.event !== 'pull_request') return true
@@ -971,7 +1056,12 @@ export function createGitService(
       if (disposed) return
       references.watch(
         subscriberId,
-        urls.filter((url) => GITHUB_PULL_REQUEST_URL.test(url) || GITHUB_ISSUE_URL.test(url)),
+        urls.filter(
+          (url) =>
+            GITHUB_PULL_REQUEST_URL.test(url) ||
+            GITHUB_ISSUE_URL.test(url) ||
+            GITHUB_STACK_URL.test(url),
+        ),
       )
     },
 
@@ -1155,6 +1245,13 @@ export function createGitService(
       return { branches, remoteBranches, remotes }
     },
 
+    async graph(projectPath, options) {
+      const state = projectFor(projectPath)
+      const status = await knownStatus(state)
+      if (!status.repo) throw new Error(t('git.notRepository'))
+      return readBranchGraph(exec, status.repo.root, options)
+    },
+
     async pullRequest(url) {
       if (disposed) throw new Error('The git service is disposed')
       if (!GITHUB_PULL_REQUEST_URL.test(url)) throw new Error('Not a GitHub pull request URL')
@@ -1177,6 +1274,56 @@ export function createGitService(
       if (!load) {
         load = track(loadIssue(url)).finally(() => issueLoads.delete(url))
         issueLoads.set(url, load)
+      }
+      return load
+    },
+
+    async stack(url, fresh = false) {
+      if (disposed) throw new Error('The git service is disposed')
+      if (githubReferenceOf(url)?.kind !== 'stack') {
+        throw new Error('Not a GitHub pull request stack URL')
+      }
+      const cached = stackCache.get(url)
+      if (cached && !fresh) {
+        // Repositories without Stacks or without access are cached longer so hover never spams gh.
+        const ttl =
+          cached.value.kind === 'unavailable' &&
+          (cached.value.reason === 'not-found' || cached.value.reason === 'forbidden')
+            ? UNREADABLE_RETRY_MS
+            : PULL_REQUEST_CACHE_MS
+        if (now() - cached.at < ttl) return cached.value
+      }
+      let load = stackLoads.get(url)
+      if (!load) {
+        load = track(loadStack(url)).finally(() => stackLoads.delete(url))
+        stackLoads.set(url, load)
+      }
+      return load
+    },
+
+    async searchReferences(owner, repo, query) {
+      if (disposed) throw new Error('The git service is disposed')
+      if (!GITHUB_LOGIN.test(owner) || !isRepositoryName(repo)) {
+        throw new Error('Not a GitHub repository')
+      }
+      const normalized = query.trim().slice(0, 100)
+      const key = `${owner.toLowerCase()}/${repo.toLowerCase()}\0${normalized.toLowerCase()}`
+      const cached = referenceSearchCache.get(key)
+      if (cached) {
+        const ttl =
+          cached.value.kind === 'ok'
+            ? REFERENCE_SEARCH_CACHE_MS
+            : cached.value.reason === 'gh-missing' || cached.value.reason === 'gh-signed-out'
+              ? REFERENCE_SEARCH_CACHE_MS
+              : REFERENCE_SEARCH_FAILURE_CACHE_MS
+        if (now() - cached.at < ttl) return cached.value
+      }
+      let load = referenceSearchLoads.get(key)
+      if (!load) {
+        load = track(loadReferenceSearch(key, owner, repo, normalized)).finally(() =>
+          referenceSearchLoads.delete(key),
+        )
+        referenceSearchLoads.set(key, load)
       }
       return load
     },
@@ -1227,6 +1374,22 @@ export function createGitService(
       const tools = await track(probeTools(exec, homedir()))
       if (!disposed) {
         setTools(tools)
+        for (const [url, entry] of stackCache) {
+          if (
+            entry.value.kind === 'unavailable' &&
+            (entry.value.reason === 'gh-missing' || entry.value.reason === 'gh-signed-out')
+          ) {
+            stackCache.delete(url)
+          }
+        }
+        for (const [key, entry] of referenceSearchCache) {
+          if (
+            entry.value.kind === 'unavailable' &&
+            (entry.value.reason === 'gh-missing' || entry.value.reason === 'gh-signed-out')
+          ) {
+            referenceSearchCache.delete(key)
+          }
+        }
         for (const state of projects.values()) {
           if (isLive(state)) background(requestPoll(state, true))
         }
@@ -1291,16 +1454,16 @@ export function createGitService(
       }
     },
 
-    toolCallEnded(projectPath, sessionId, toolCallId, toolKind: ToolKind, output) {
+    toolCallEnded(projectPath, sessionId, toolCallId, outcome) {
       const state = lookup(projectPath)
       if (!state || disposed) return
       const key = callKey(sessionId, toolCallId)
       const call = state.calls.get(key)
       state.calls.delete(key)
-      if (!canChangeRepository(toolKind)) return
+      if (!canChangeRepository(outcome.toolKind)) return
       const knownNoPullRequest =
         state.pullRequest?.value === null ? state.pullRequest.branch : undefined
-      const reported = track(reportToolEnd(state, call, sessionId, output, state.toolEnds))
+      const reported = track(reportToolEnd(state, call, sessionId, outcome, state.toolEnds))
       state.toolEnds = reported.then(
         () => undefined,
         () => undefined,

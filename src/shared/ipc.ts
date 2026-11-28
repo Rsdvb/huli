@@ -16,9 +16,10 @@ import type { BackupStatus, RestorePick } from './backup'
 import type { ChatBridgeView, ChatPlatform, ChatPlatformPatch } from './chat-bridge'
 import type {
   BrowserBounds,
+  BrowserElementAnnotatedEvent,
   BrowserOriginDecision,
   BrowserState,
-  PageSizeName,
+  PanePageSizeMode,
   SavedStateSummary,
 } from './browser'
 import type { PickColor, PickEvent } from './page-notes'
@@ -81,7 +82,7 @@ import type { PreparedReport, ReportFileView, ReportRequest, ReportSubmitResult 
 import type { CatalogInstallResult, CatalogState, ThemeInstallResult, ThemesState } from './themes'
 import type { IslandState } from './island'
 import type { AgentId, HarnessId } from './thread'
-import type { TrayTarget } from './tray'
+import type { TrayHostAgents, TrayTarget } from './tray'
 import type { UpdateStatus } from './updates'
 
 /** How a host of the account is connected to: alone, or in a batch under one code. */
@@ -373,6 +374,7 @@ export interface IpcInvokeContract {
   'report:dismiss-crash-notice': { args: []; result: void }
   'shell:show-data-folder': { args: []; result: void }
   'shell:show-item': { args: [path: string]; result: void }
+  'shell:open-file': { args: [path: string]; result: void }
   'editors:list': { args: []; result: EditorList }
   // `editorId`: one `editors:list` gave; `path`: an existing file or folder, absolute.
   'editors:open': { args: [editorId: string, path: string]; result: void }
@@ -584,13 +586,17 @@ export interface IpcInvokeContract {
   'browser:bounds': { args: [sessionId: string, bounds: BrowserBounds]; result: void }
   // A URL the renderer normalised; only http(s) ever reaches the page.
   'browser:navigate': { args: [sessionId: string, url: string]; result: void }
+  // Opens a session link: activates a matching tab without reloading, else opens a tab.
+  'browser:open-link': { args: [sessionId: string, url: string]; result: void }
   'browser:back': { args: [sessionId: string]; result: void }
   'browser:forward': { args: [sessionId: string]; result: void }
   'browser:reload': { args: [sessionId: string]; result: void }
   'browser:stop': { args: [sessionId: string]; result: void }
   'browser:open-external': { args: [sessionId: string]; result: void }
   // The size the selected tab's page keeps, picked in the pane; held back while the agent has it.
-  'browser:page-size': { args: [sessionId: string, size: PageSizeName]; result: void }
+  'browser:page-size': { args: [sessionId: string, size: PanePageSizeMode]; result: void }
+  // Toggles element annotation (pick & highlight) mode on the selected tab; returns active state.
+  'browser:set-annotate': { args: [sessionId: string, enabled: boolean]; result: boolean }
   // The page as it looks now, for the pane to show while an overlay would cover the view.
   'browser:freeze': { args: [sessionId: string]; result: string | null }
   'browser:capture': { args: [sessionId: string]; result: Uint8Array | null }
@@ -604,6 +610,8 @@ export interface IpcInvokeContract {
   'browser:take-over': { args: [sessionId: string]; result: void }
   /** Hand back: the agent goes on with the page. */
   'browser:hand-back': { args: [sessionId: string]; result: void }
+  /** Release takeover when the user closes the browser panel while holding the tab. */
+  'browser:release-takeover': { args: [sessionId: string]; result: void }
   /** Done or Skip on a step the agent asked the user to do on the page. */
   'browser:answer-ask': { args: [sessionId: string, outcome: ControlOutcome]; result: void }
   /** The pane's bar or the thread's card: what the user answered a new site's request. */
@@ -692,6 +700,8 @@ export interface IpcInvokeContract {
     args: [platform: ChatPlatform, accountId: string]
     result: ChatBridgeView
   }
+  /** Other connected hosts' agents for the menu bar panel, taken from the panel's page alone. */
+  'tray:host-agents': { args: []; result: TrayHostAgents[] }
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeContract
@@ -704,6 +714,8 @@ export interface IpcEventContract {
   'themes:changed': ThemesState
   'update:changed': UpdateStatus
   'app:confirm-quit': QuitRequest
+  /** Dismisses an open quit confirmation dialog when resolved remotely or cancelled by main. */
+  'app:confirm-quit-resolved': number
   'debug:changed': DebugStatus
   'app:command': AppCommand
   /** To the focused window: a session's turn ended, failed or waits, in place of a notification. */
@@ -739,6 +751,8 @@ export interface IpcEventContract {
   'sessions:move-progress': MoveProgress
   /** An agent's first navigation opened a session's page, so the pane may show it. */
   'browser:opened': { sessionId: string }
+  /** The user picked a page element in annotation mode to reference in the session composer. */
+  'browser:annotated': BrowserElementAnnotatedEvent
   /** A session's agent opened a mobile device, which the pane shows if the panel is free. */
   'devices:opened': { sessionId: string; deviceId: string }
   'terminals:ready': null
@@ -757,6 +771,8 @@ export interface IpcEventContract {
   'capture:image': CaptureImage
   /** Huli: to the main window: a screenshot to attach to the session in focus. */
   'capture:shot': CaptureShot
+  /** To the menu bar panel: another connected host's agents changed. */
+  'tray:host-agents-changed': TrayHostAgents[]
 }
 
 export type IpcEventChannel = keyof IpcEventContract
@@ -844,6 +860,7 @@ export interface KettuApi {
     captureRect(rect: PageRect): Promise<Uint8Array | null>
     respondQuit(id: number, answer: boolean | 'background' | 'when-idle'): Promise<void>
     onConfirmQuit(listener: (request: QuitRequest) => void): () => void
+    onConfirmQuitResolved(listener: (id: number) => void): () => void
     setUnsaved(files: UnsavedFile[]): void
     closeWindow(): void
     onCommand(listener: (command: AppCommand) => void): () => void
@@ -1191,6 +1208,8 @@ export interface KettuApi {
     showDataFolder(): Promise<void>
     /** Shows a file or folder in the system file manager; the path must be absolute. */
     showItem(path: string): Promise<void>
+    /** Opens an existing local regular file in the system's default app; the path must be absolute. */
+    openFile(path: string): Promise<void>
   }
   /** Open in editor: the code editors on this computer, which main finds and starts by id. */
   editors: {
@@ -1268,14 +1287,18 @@ export interface KettuApi {
     /** Where the pane's page sits, in device-independent pixels; null while it is not shown. */
     setBounds(sessionId: string, bounds: BrowserBounds): Promise<void>
     navigate(sessionId: string, url: string): Promise<void>
+    /** Opens a link in a matching tab without reloading it, else reuses a blank tab or opens a new one. */
+    openLink(sessionId: string, url: string): Promise<void>
     back(sessionId: string): Promise<void>
     forward(sessionId: string): Promise<void>
     reload(sessionId: string): Promise<void>
     stop(sessionId: string): Promise<void>
     /** Opens the page's current address in the system browser. */
     openExternal(sessionId: string): Promise<void>
-    /** The size the selected tab's page keeps; desktop lets one no agent used fill the pane. */
-    setPageSize(sessionId: string, size: PageSizeName): Promise<void>
+    /** The size mode the selected tab's page uses: native pane fill or a named device size. */
+    setPageSize(sessionId: string, size: PanePageSizeMode): Promise<void>
+    /** Enables or exits element annotation mode on the selected tab; resolves to the resulting state. */
+    setAnnotate(sessionId: string, enabled: boolean): Promise<boolean>
     /** A still of the page for the pane to show, after which main hides the view. */
     freeze(sessionId: string): Promise<string | null>
     thaw(sessionId: string): Promise<void>
@@ -1288,6 +1311,8 @@ export interface KettuApi {
     takeOver(sessionId: string): Promise<void>
     /** Hand back: the agent goes on with the page. */
     handBack(sessionId: string): Promise<void>
+    /** Release takeover when the user closes the browser panel while holding the tab. */
+    releaseTakeover(sessionId: string): Promise<void>
     /** Done or Skip on a step the agent asked the user to do on the page. */
     answerAsk(sessionId: string, outcome: ControlOutcome): Promise<void>
     /** The pane's bar or the thread's card: what the user answered a new site's request. */
@@ -1325,6 +1350,8 @@ export interface KettuApi {
     onState(listener: (state: BrowserState) => void): () => void
     /** An agent opened a session's page for the first time. */
     onOpened(listener: (event: { sessionId: string }) => void): () => void
+    /** The user picked a page element while annotation mode was active. */
+    onAnnotated(listener: (event: BrowserElementAnnotatedEvent) => void): () => void
   }
   /** Sign-ins brought from the user's own browsers into Kettu's, by site. */
   signIns: {

@@ -240,7 +240,7 @@ describe('a paired device', () => {
       type: 'welcome',
       protocol: 1,
       host: { name: 'Studio', platform: process.platform, version: '0.0.0-test' },
-      features: ['bytes', 'load', 'lean-threads'],
+      features: ['bytes', 'load', 'lean-threads', 'tool-output-append'],
       role: 'owner',
       device: { id: t.phone.id, name: 'Phone' },
       terminal: false,
@@ -597,7 +597,15 @@ describe("a device's notifications", () => {
     const device = await t.connect(undefined, { protocol: { min: 1, max: PROTOCOL_VERSION } })
     expect(await device.first).toMatchObject({
       protocol: 4,
-      features: ['bytes', 'load', 'lean-threads', 'push', 'web-push', 'standby'],
+      features: [
+        'bytes',
+        'load',
+        'lean-threads',
+        'tool-output-append',
+        'push',
+        'web-push',
+        'standby',
+      ],
     })
     const state = await ask(device, 'notifications.set', {
       target,
@@ -626,7 +634,7 @@ describe("a device's notifications", () => {
     const older = await t.connect(undefined, { protocol: { min: 1, max: 3 } })
     expect(await older.first).toMatchObject({
       protocol: 3,
-      features: ['bytes', 'load', 'lean-threads', 'standby'],
+      features: ['bytes', 'load', 'lean-threads', 'tool-output-append', 'standby'],
     })
     await expect(ask(older, 'notifications.get', undefined)).rejects.toMatchObject({
       code: 'unavailable',
@@ -634,7 +642,7 @@ describe("a device's notifications", () => {
     const plain = await setup()
     const device = await plain.connect(undefined, { protocol: { min: 1, max: PROTOCOL_VERSION } })
     expect(await device.first).toMatchObject({
-      features: ['bytes', 'load', 'lean-threads', 'standby'],
+      features: ['bytes', 'load', 'lean-threads', 'tool-output-append', 'standby'],
     })
     await expect(ask(device, 'notifications.set', { target })).rejects.toMatchObject({
       code: 'unavailable',
@@ -1656,6 +1664,35 @@ describe("the host's events", () => {
     await expect.poll(() => pad.port.events.filter(isHostAdminEvent)).toEqual([changed, pairing])
     await expect.poll(() => phone.port.events.filter(isHostAdminEvent)).toEqual([changed])
   })
+
+  it('flushes queued updates.changed admin events to connected devices before stopping', async () => {
+    const t = await setup()
+    const phone = await t.connect()
+    await phone.first
+    const restarting: HostAdminEvent = {
+      type: 'updates.changed',
+      status: {
+        state: { kind: 'ready', version: '0.1.29' },
+        mode: 'install',
+        readOnly: false,
+        current: '0.1.28',
+        updatedFrom: null,
+        dismissed: null,
+        restartWhenIdle: null,
+        phase: 'restarting',
+        requestId: 'req-1',
+        initiator: { kind: 'remote', deviceId: t.phone.id, deviceName: 'Phone' },
+        confirmation: null,
+        hostConfirmation: null,
+        outcome: null,
+        progress: null,
+      },
+    }
+    t.server.adminEvent(restarting, null)
+    await t.server.flushAdminEvents()
+    await t.server.stop('stopping')
+    expect(phone.port.events.filter(isHostAdminEvent)).toContainEqual(restarting)
+  })
 })
 
 describe("a phone's tool digests", () => {
@@ -1761,6 +1798,79 @@ describe("a desktop app's browser", () => {
       port: devPort,
     })
     expect(await app.closing).toEqual({ type: 'closing', reason: 'invalid' })
+  })
+
+  it('grants explicit companion forward_ports while still refusing undeclared ports', async () => {
+    const t = await setup()
+    const app = await t.connect(undefined, {
+      client: { kind: 'desktop', version: '1.0.0', platform: 'macOS 26.1' },
+      features: ['browser'],
+    })
+    await app.first
+    const created = await app.port.request('sessions.create', {
+      agentId: 'fake-agent',
+      projectPath: t.agent.project,
+      prompt: [{ type: 'text', text: 'Open the full-stack app' }],
+    })
+    await app.port.untilStatus(created.id, 'ready')
+
+    const frontendPort = await devServer('frontend-ok')
+    const backendPort = await devServer('backend-ok')
+    const unapprovedPort = await devServer('secret-service')
+
+    const answered = t.agent.host.browserCall({
+      callId: 23,
+      sessionId: created.id,
+      tool: 'browser_navigate',
+      args: {
+        url: `http://127.0.0.1:${frontendPort}/`,
+        forward_ports: [backendPort],
+      },
+      projectPath: t.agent.project,
+    })
+    await app.port.until(() => app.port.events.some((event) => event.type === 'browser.call'))
+
+    // Undeclared port stays forbidden even when companion ports are present.
+    await app.send({
+      type: 'forward.open',
+      stream: 1,
+      sessionId: created.id,
+      host: '127.0.0.1',
+      port: unapprovedPort,
+    })
+    await expect.poll(() => app.cancels.map((cancel) => cancel.stream)).toEqual([1])
+    expect(app.cancels[0]!.error).toMatchObject({ code: 'forbidden' })
+
+    // Both the main port and the explicitly declared companion port work.
+    await app.send({
+      type: 'forward.open',
+      stream: 3,
+      sessionId: created.id,
+      host: '127.0.0.1',
+      port: frontendPort,
+    })
+    await app.sendBytes(3, new TextEncoder().encode('GET / HTTP/1.0\r\n\r\n'))
+    expect(new TextDecoder().decode(await app.download(3))).toBe(
+      'HTTP/1.0 200 OK\r\n\r\nfrontend-ok',
+    )
+
+    await app.send({
+      type: 'forward.open',
+      stream: 5,
+      sessionId: created.id,
+      host: '127.0.0.1',
+      port: backendPort,
+    })
+    await app.sendBytes(5, new TextEncoder().encode('GET /api HTTP/1.0\r\n\r\n'))
+    expect(new TextDecoder().decode(await app.download(5))).toBe(
+      'HTTP/1.0 200 OK\r\n\r\nbackend-ok',
+    )
+
+    await app.port.request('browser.answer', {
+      callId: 23,
+      answer: { result: { text: 'Opened.', value: {} } },
+    })
+    expect(await answered).toEqual({ result: { text: 'Opened.', value: {} } })
   })
 
   it('is not one a phone’s port serves', async () => {

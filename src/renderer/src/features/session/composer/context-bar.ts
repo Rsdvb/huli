@@ -80,6 +80,100 @@ export interface ContextSegment {
   tokens: number
 }
 
+/** Compact summary metrics derived from session usage and any context breakdown rows. */
+export interface ContextSummary {
+  used: number
+  reserved: number
+  cap: number
+  free: number
+  over: number
+  share: number
+  percent: number
+  level: 'ok' | 'warn' | 'full'
+}
+
+/**
+ * Computes the displayed context totals, free/overflow room, percentage, and warning level.
+ * Reserved parts (such as the autocompact buffer) occupy space in the bar and reduce free space,
+ * without being counted as actively used context.
+ */
+export function contextSummary(
+  usage: Pick<SessionUsage, 'used' | 'size'>,
+  rows: readonly ContextRow[] | null,
+): ContextSummary {
+  const cap = Number.isFinite(usage.size) ? Math.max(0, usage.size) : 0
+  let used: number
+  let reserved = 0
+  if (rows) {
+    let sourceSum = 0
+    for (const row of rows) {
+      const value = Number.isFinite(row.tokens) ? Math.max(0, row.tokens) : 0
+      if (row.part.kind === 'source') sourceSum += value
+      else if (row.part.kind === 'buffer') reserved += value
+    }
+    used = sourceSum
+  } else {
+    used = Number.isFinite(usage.used) ? Math.max(0, usage.used) : 0
+  }
+  const share = cap > 0 ? used / cap : 0
+  const percent = Math.round(share * 100)
+  const free = Math.max(0, cap - used - reserved)
+  const over = Math.max(0, used - cap)
+  const level = percent >= 95 ? 'full' : percent >= 80 ? 'warn' : 'ok'
+  return { used, reserved, cap, free, over, share, percent, level }
+}
+
+export interface ContextBarSegment {
+  key: string
+  part: ContextPart | { kind: 'used' }
+  tokens: number
+  /** Percentage of the horizontal bar width (0 to 100). */
+  widthPercent: number
+}
+
+/**
+ * Visible filled segments for the horizontal context progress bar (excluding free space, which is
+ * represented by the bar track itself). When total occupied tokens exceed the window cap, segments
+ * scale proportionally so they stay within 100%.
+ */
+export function barSegments(
+  rows: readonly ContextRow[] | null,
+  used: number,
+  cap: number,
+): ContextBarSegment[] {
+  if (cap <= 0) return []
+  if (!rows) {
+    const safeUsed = Number.isFinite(used) ? Math.max(0, used) : 0
+    if (safeUsed <= 0) return []
+    return [
+      {
+        key: 'used',
+        part: { kind: 'used' },
+        tokens: safeUsed,
+        widthPercent: Math.min(100, (safeUsed / cap) * 100),
+      },
+    ]
+  }
+  const active = rows.filter((row) => row.part.kind !== 'free' && row.tokens > 0)
+  if (active.length === 0) return []
+  const occupied = active.reduce((sum, row) => sum + row.tokens, 0)
+  const scale = Math.max(cap, occupied)
+  return active.map((row) => ({
+    key: row.name,
+    part: row.part,
+    tokens: row.tokens,
+    widthPercent: (row.tokens / scale) * 100,
+  }))
+}
+
+/** Formats a single breakdown row's share of the context window compactly (e.g. "37%", "<1%"). */
+export function formatPartShare(partTokens: number, cap: number): string {
+  if (cap <= 0 || !Number.isFinite(partTokens) || partTokens <= 0) return '0%'
+  const pct = (partTokens / cap) * 100
+  if (pct < 1) return '<1%'
+  return `${Math.round(pct)}%`
+}
+
 /** The bar's segments in order. Without a breakdown, one neutral segment of what is used. */
 export function contextSegments(
   rows: readonly ContextRow[] | null,
@@ -150,6 +244,7 @@ export function breakdownView(
   if (live) {
     if (report && rows) return { kind: 'rows', rows, dimmed: false, stale: report.key !== key }
     if (report?.error) return { kind: 'error', error: report.error }
+    if (report && !report.loading) return { kind: 'none' }
     return { kind: 'loading' }
   }
   if (!idle) {
@@ -161,5 +256,19 @@ export function breakdownView(
   if (report && rows && (report.loading || report.key === key)) {
     return { kind: 'rows', rows, dimmed: report.loading, stale: false }
   }
+  // 对应当前 key 的一次读取已结束且无精确构成（如 Antigravity 新会话尚无 .db）时，不再停留在加载骨架屏。
+  if (report && !report.loading && report.key === key) {
+    return { kind: 'none' }
+  }
   return { kind: 'loading' }
+}
+
+/**
+ * 判断上下文弹层是否应显示「可加载的定义（估算）」区块：
+ * 仅当智能体支持估算且当前没有精确上下文明细、也没有正在读取精确明细时才展示，
+ * 避免与官方精确构成重复或加载瞬间闪烁，同时在暂无精确构成时平滑回退。
+ */
+export function showContextEstimates(estimates: boolean | undefined, view: BreakdownView): boolean {
+  if (!estimates) return false
+  return view.kind === 'none' || view.kind === 'error'
 }

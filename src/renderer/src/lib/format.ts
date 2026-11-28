@@ -46,6 +46,24 @@ function makeFormatters(locale: string) {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }),
+    usdTurn: new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 3,
+    }),
+    usdMicro: new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 4,
+    }),
+    usdExact: new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 5,
+    }),
     usdWhole: new Intl.NumberFormat(locale, {
       style: 'currency',
       currency: 'USD',
@@ -169,6 +187,29 @@ export function shortDuration(ms: number): string {
   const m = Math.floor(s / 60)
   if (m < 60) return i18n.t('time.minutesSecondsShort', { m, s: s % 60 })
   return i18n.t('time.hoursMinutesShort', { h: Math.floor(m / 60), m: m % 60 })
+}
+
+/**
+ * Compact elapsed duration for a completed turn: "< 1s", "3s", "1m", "1m 12s", "1h", "1h 4m".
+ * Returns null when the duration is missing, non-positive, or not finite.
+ */
+export function turnDuration(ms: number | null | undefined): string | null {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return null
+  if (ms < 1000) return i18n.t('time.underSecond')
+  const totalSeconds = Math.round(ms / 1000)
+  if (totalSeconds < 60) return i18n.t('time.secondsShort', { s: totalSeconds })
+  const totalMinutes = Math.floor(totalSeconds / 60)
+  if (totalMinutes < 60) {
+    const seconds = totalSeconds % 60
+    return seconds === 0
+      ? i18n.t('time.minutesCompact', { m: totalMinutes })
+      : i18n.t('time.minutesSecondsShort', { m: totalMinutes, s: seconds })
+  }
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return minutes === 0
+    ? i18n.t('time.hoursCompact', { h: hours })
+    : i18n.t('time.hoursMinutesShort', { h: hours, m: minutes })
 }
 
 /** How long a turn has run, to the minute once it passes one: "45 s", "4 m", "1 h 20 m". */
@@ -295,6 +336,27 @@ export function tokens(n: number): string {
 /** US dollars, with cents under $100: "$4.20", "$1,234". */
 export function usd(amount: number): string {
   return (amount < 100 ? format().usdCents : format().usdWhole).format(amount)
+}
+
+/**
+ * Single-turn USD cost with adaptive precision so sub-cent turns never round misleadingly to "$0.00":
+ * "$123", "$1.25", "$0.042", "$0.0042", "<$0.0001", or "$0.00" when genuinely zero.
+ */
+export function turnCost(amount: number): string {
+  if (amount === 0) return format().usdCents.format(0)
+  if (amount > 0 && amount < 0.0001) return `<${format().usdMicro.format(0.0001)}`
+  if (amount < 0.01) return format().usdMicro.format(amount)
+  if (amount < 1) return format().usdTurn.format(amount)
+  if (amount < 100) return format().usdCents.format(amount)
+  return format().usdWhole.format(amount)
+}
+
+/** High-precision USD cost for hover tooltips ("$0.04238", "<$0.00001"). */
+export function exactTurnCost(amount: number): string {
+  if (amount === 0) return format().usdCents.format(0)
+  if (amount > 0 && amount < 0.00001) return `<${format().usdExact.format(0.00001)}`
+  if (amount < 1) return format().usdExact.format(amount)
+  return format().usdCents.format(amount)
 }
 
 /** A rate or a time, whole from 10 up and to a tenth below: "82", "7.8". */

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { AgentId } from '@shared/thread'
 import type { TokenParts, UsageSource } from '@shared/usage'
 import { SCHEMA_VERSION, topSessions, UsageDb } from './db'
-import { PRICES, type UsageRow } from './model'
+import { PRICES, priceFor, type UsageRow } from './model'
 import { recordRows } from './record'
 
 const dirs: string[] = []
@@ -279,5 +279,336 @@ describe("the usage database's upgrade to version 3", () => {
     expect(bucket('pi')).toEqual({ input: 181_730 + 100 + 10, cache_read: 1_402_752 + 300 })
     expect(bucket('claude-code')).toEqual({ input: 8, cache_read: 80_289 })
     check.close()
+  })
+})
+
+describe('priceFor variant matching', () => {
+  it('strips reasoning effort and routing suffixes and falls back to -preview', () => {
+    expect(priceFor('gemini-4-argon-high')).toEqual(priceFor('gemini-4-argon'))
+    expect(priceFor('claude-opus-5-5-max')).toEqual(priceFor('claude-opus-5-5'))
+    expect(priceFor('gemini-3.8-flash-n')).toEqual(priceFor('gemini-3.8-flash'))
+    expect(priceFor('gemini-3.7-flash-tiered')).toEqual(priceFor('gemini-3.7-flash'))
+    expect(priceFor('gemini-3-flash-a')).toEqual(priceFor('gemini-3-flash-preview'))
+    expect(priceFor('non-existent-model-xyz')).toBeNull()
+  })
+})
+
+describe("Huli: the upgrade of Kite's version 4, with images, to the reported costs", () => {
+  it('keeps the rows and buckets with their images, priced from the list', () => {
+    const file = tempFile()
+    UsageDb.open(file, () => {}).close()
+    const raw = new DatabaseSync(file)
+    raw.exec(`
+      DROP TABLE usage;
+      DROP TABLE buckets;
+      CREATE TABLE usage (
+        key         TEXT PRIMARY KEY,
+        source      TEXT NOT NULL,
+        agent_id    TEXT NOT NULL,
+        session_id  TEXT,
+        project     TEXT,
+        model       TEXT NOT NULL,
+        at          INTEGER NOT NULL,
+        input       INTEGER NOT NULL,
+        output      INTEGER NOT NULL,
+        reasoning   INTEGER,
+        cache_read  INTEGER NOT NULL,
+        cache_write INTEGER NOT NULL,
+        cache_write_1h INTEGER NOT NULL,
+        turn        INTEGER NOT NULL,
+        images      INTEGER NOT NULL DEFAULT 0,
+        image_bytes INTEGER NOT NULL DEFAULT 0
+      ) STRICT, WITHOUT ROWID;
+      CREATE TABLE buckets (
+        quarter     INTEGER NOT NULL,
+        source      TEXT NOT NULL,
+        agent_id    TEXT NOT NULL,
+        model       TEXT NOT NULL,
+        project     TEXT NOT NULL,
+        rows        INTEGER NOT NULL,
+        input       INTEGER NOT NULL,
+        output      INTEGER NOT NULL,
+        reasoning   INTEGER NOT NULL,
+        cache_read  INTEGER NOT NULL,
+        cache_write INTEGER NOT NULL,
+        cache_write_1h INTEGER NOT NULL,
+        turns       INTEGER NOT NULL,
+        images      INTEGER NOT NULL DEFAULT 0,
+        image_bytes INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (quarter, source, agent_id, model, project)
+      ) STRICT, WITHOUT ROWID;
+      INSERT INTO usage VALUES (
+        'k1', 'kettu', 'claude-code', 's1', '/p', 'claude-opus-5-5', 900000,
+        1000, 200, NULL, 500, 0, 0, 1, 3, 1200
+      );
+      INSERT INTO buckets VALUES (
+        1, 'kettu', 'claude-code', 'claude-opus-5-5', '/p', 1, 1000, 200, 0, 500, 0, 0, 1, 3, 1200
+      );
+      PRAGMA user_version = 4;
+    `)
+    raw.close()
+
+    const db = UsageDb.open(file, () => {})
+    try {
+      expect(db.status).toBe('ok')
+      const [total] = db.totals(0, 1_800_000, { 'claude-code': 'kettu' })
+      expect(total).toMatchObject({ requests: 1, input: 1000, images: 3, imageBytes: 1200 })
+      expect(total!.cost).not.toBeNull()
+    } finally {
+      db.close()
+    }
+    const check = new DatabaseSync(file)
+    expect(check.prepare('PRAGMA user_version').get()!.user_version).toBe(SCHEMA_VERSION)
+    expect(check.prepare('SELECT images, image_bytes, cost FROM usage').get()).toEqual({
+      images: 3,
+      image_bytes: 1200,
+      cost: null,
+    })
+    check.close()
+  })
+})
+
+describe("the usage database upgrade to version 5 (Kettu's 4) and reported log costs", () => {
+  it('migrates v3 tables cleanly and preserves existing bucket figures', () => {
+    const file = tempFile()
+    UsageDb.open(file, () => {}).close()
+    const raw = new DatabaseSync(file)
+    raw.exec(`
+      DROP TABLE usage;
+      DROP TABLE buckets;
+      CREATE TABLE usage (
+        key         TEXT PRIMARY KEY,
+        source      TEXT NOT NULL,
+        agent_id    TEXT NOT NULL,
+        session_id  TEXT,
+        project     TEXT,
+        model       TEXT NOT NULL,
+        at          INTEGER NOT NULL,
+        input       INTEGER NOT NULL,
+        output      INTEGER NOT NULL,
+        reasoning   INTEGER,
+        cache_read  INTEGER NOT NULL,
+        cache_write INTEGER NOT NULL,
+        cache_write_1h INTEGER NOT NULL,
+        turn        INTEGER NOT NULL
+      ) STRICT, WITHOUT ROWID;
+      CREATE TABLE buckets (
+        quarter     INTEGER NOT NULL,
+        source      TEXT NOT NULL,
+        agent_id    TEXT NOT NULL,
+        model       TEXT NOT NULL,
+        project     TEXT NOT NULL,
+        rows        INTEGER NOT NULL,
+        input       INTEGER NOT NULL,
+        output      INTEGER NOT NULL,
+        reasoning   INTEGER NOT NULL,
+        cache_read  INTEGER NOT NULL,
+        cache_write INTEGER NOT NULL,
+        cache_write_1h INTEGER NOT NULL,
+        turns       INTEGER NOT NULL,
+        PRIMARY KEY (quarter, source, agent_id, model, project)
+      ) STRICT, WITHOUT ROWID;
+      INSERT INTO usage VALUES (
+        'k1', 'log', 'claude-code', 's1', '/p', 'claude-opus-5-5', 900000,
+        1000, 200, NULL, 500, 0, 0, 0
+      );
+      INSERT INTO buckets VALUES (
+        1, 'log', 'claude-code', 'claude-opus-5-5', '/p', 1, 1000, 200, 0, 500, 0, 0, 0
+      );
+      PRAGMA user_version = 3;
+    `)
+    raw.close()
+
+    const db = UsageDb.open(file, () => {})
+    try {
+      expect(db.status).toBe('ok')
+      const [total] = db.totals(0, 1_800_000, { 'claude-code': 'log' })
+      expect(total).toMatchObject({
+        agentId: 'claude-code',
+        requests: 1,
+        input: 1000,
+        output: 200,
+        cacheRead: 500,
+      })
+      expect(total!.cost).not.toBeNull()
+    } finally {
+      db.close()
+    }
+  })
+
+  it('uses confirmed log cost when present and falls back to price list or unpriced otherwise', () => {
+    const file = tempFile()
+    const db = UsageDb.open(file, () => {})
+    try {
+      const at = Date.parse('2026-11-20T10:00:00.000Z')
+      db.write([
+        // Unlisted model with confirmed cost from Pi log.
+        {
+          key: 'pi:priced-custom',
+          source: 'log',
+          agentId: 'pi',
+          sessionId: 's1',
+          project: '/repo',
+          model: 'custom-unlisted-model',
+          at,
+          input: 1000,
+          output: 200,
+          reasoning: null,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cacheWrite1h: 0,
+          turn: 0,
+          cost: 0.042,
+        },
+        // Same model and quarter without log cost should count as unpriced tokens.
+        {
+          key: 'pi:unpriced-custom',
+          source: 'log',
+          agentId: 'pi',
+          sessionId: 's1',
+          project: '/repo',
+          model: 'custom-unlisted-model',
+          at,
+          input: 500,
+          output: 100,
+          reasoning: null,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cacheWrite1h: 0,
+          turn: 0,
+          cost: null,
+        },
+      ])
+
+      const [total] = db.totals(
+        Date.parse('2026-11-20T00:00:00.000Z'),
+        Date.parse('2026-11-21T00:00:00.000Z'),
+        { pi: 'log' },
+      )
+      expect(total).toMatchObject({
+        agentId: 'pi',
+        requests: 2,
+        input: 1500,
+        output: 300,
+        unpricedTokens: 600,
+      })
+      expect(total!.cost).toBeCloseTo(0.042, 10)
+    } finally {
+      db.close()
+    }
+  })
+})
+
+describe('UsageDb.sessionTurnUsage', () => {
+  it('groups Kettu rows by turnEntryId with colon-containing IDs and ignores other sessions or logs', () => {
+    const file = tempFile()
+    const db = UsageDb.open(file, () => {})
+    const at = Date.parse('2026-11-26T12:00:00.000Z')
+    try {
+      db.write([
+        {
+          key: 'ob:s1:e:4:claude-sonnet-4-6',
+          source: 'kettu',
+          agentId: 'claude-code',
+          sessionId: 'acp-1',
+          project: '/repo',
+          model: 'claude-sonnet-4-6',
+          at,
+          input: 1000,
+          output: 400,
+          reasoning: null,
+          cacheRead: 8000,
+          cacheWrite: 1000,
+          cacheWrite1h: 0,
+          turn: 1,
+        },
+        {
+          key: 'ob:s1:e:4:claude-haiku-4-5',
+          source: 'kettu',
+          agentId: 'claude-code',
+          sessionId: 'acp-1',
+          project: '/repo',
+          model: 'claude-haiku-4-5',
+          at,
+          input: 200,
+          output: 100,
+          reasoning: null,
+          cacheRead: 500,
+          cacheWrite: 0,
+          cacheWrite1h: 0,
+          turn: 0,
+        },
+        {
+          key: 'ob:s1:e:9:unknown-custom-model',
+          source: 'kettu',
+          agentId: 'claude-code',
+          sessionId: 'acp-1',
+          project: '/repo',
+          model: 'unknown-custom-model',
+          at: at + 1000,
+          input: 600,
+          output: 200,
+          reasoning: null,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cacheWrite1h: 0,
+          turn: 1,
+        },
+        // Different session with shared prefix must not bleed into s1.
+        {
+          key: 'ob:s10:e:4:claude-sonnet-4-6',
+          source: 'kettu',
+          agentId: 'claude-code',
+          sessionId: 'acp-10',
+          project: '/repo',
+          model: 'claude-sonnet-4-6',
+          at,
+          input: 9999,
+          output: 9999,
+          reasoning: null,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cacheWrite1h: 0,
+          turn: 1,
+        },
+        // Imported log rows must not be matched even if a key starts similarly.
+        {
+          key: 'claude:msg-1',
+          source: 'log',
+          agentId: 'claude-code',
+          sessionId: 'acp-1',
+          project: '/repo',
+          model: 'claude-sonnet-4-6',
+          at,
+          input: 500,
+          output: 100,
+          reasoning: null,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cacheWrite1h: 0,
+          turn: 0,
+        },
+      ])
+
+      const byTurn = db.sessionTurnUsage('s1')
+      expect(Object.keys(byTurn).sort()).toEqual(['e:4', 'e:9'])
+      expect(byTurn['e:4']!.models).toHaveLength(2)
+      expect(byTurn['e:4']!.models.map((m) => m.model)).toContain('claude-sonnet-4-6')
+      expect(byTurn['e:4']!.models.map((m) => m.model)).toContain('claude-haiku-4-5')
+      expect(byTurn['e:4']!.costUsd).toBeGreaterThan(0)
+      expect(byTurn['e:9']!.costUsd).toBeNull()
+      expect(byTurn['e:9']!.models).toEqual([
+        {
+          model: 'unknown-custom-model',
+          input: 600,
+          output: 200,
+          cacheRead: 0,
+          cacheWrite: 0,
+          costUsd: null,
+        },
+      ])
+    } finally {
+      db.close()
+    }
   })
 })

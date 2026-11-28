@@ -3,14 +3,12 @@ import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
 import {
   CloudDownloadIcon,
   ComputerIcon,
-  Folder01Icon,
   FolderAddIcon,
   FolderOpenIcon,
   Search01Icon,
 } from '@hugeicons/core-free-icons'
 import { useTranslation } from 'react-i18next'
 import type { Project } from '@shared/agent-host'
-import { FolderMark } from '@renderer/components/affect/assistant-home'
 import { addProjectFromDialog } from '@renderer/app/actions'
 import { Button } from '@renderer/components/ui/button'
 import {
@@ -32,11 +30,11 @@ import { HostIcon } from '@renderer/features/settings/remote-parts'
 import { errorMessage } from '@renderer/lib/host'
 import { hostOfPath, hostPath } from '@renderer/lib/host-paths'
 import { formatShortcut } from '@renderer/lib/platform'
-import { FolderClosedMark } from '@renderer/components/affect/app-shell'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { NO_PROJECT_ICON } from '@renderer/features/shell/no-project-icon'
+import { ProjectMark } from '@renderer/features/shell/project-icon'
 import { isAway, useOtherHost, useOtherHosts, type OtherHost } from '@renderer/stores/hosts'
-import { useProjectsStore } from '@renderer/stores/projects'
+import { activeProjects, projectFolders, useProjectsStore } from '@renderer/stores/projects'
 import { chooseNewSessionProject } from '@renderer/stores/view'
 import { projectNameHints } from '../project-names'
 import { HostFolderDialog } from './host-folder-dialog'
@@ -133,11 +131,12 @@ export function ProjectMenu({
 }) {
   const { t } = useTranslation(['session', 'sidebar'])
   const choose = onChoose ?? chooseNewSessionProject
-  const projects = useProjectsStore((s) => s.projects)
+  const allProjects = useProjectsStore((s) => s.projects)
+  const projects = useMemo(() => activeProjects(allProjects), [allProjects])
   const hosts = useOtherHosts()
   const { contains } = useComboboxFilter()
   const byPath = useMemo(() => new Map(projects.map((p) => [p.path, p])), [projects])
-  const hints = useMemo(() => projectNameHints(projects.map((p) => p.path)), [projects])
+  const hints = useMemo(() => projectNameHints(projects), [projects])
   const groups = useMemo(() => projectGroups(projects, hosts, host), [projects, hosts, host])
   const listed = useMemo(
     () => (host === undefined ? projects : projects.filter((p) => hostOfPath(p.path) === host)),
@@ -205,14 +204,15 @@ export function ProjectMenu({
         else if (value) choose(value)
       }}
       itemToStringLabel={label}
-      filter={(value: string, query: string) =>
-        LOCAL_NEW.includes(value) ||
-        value.startsWith(OPEN_ON) ||
-        contains(
-          `${label(value)} ${hints.get(value) ?? ''} ${hosts.length > 0 ? hostName(hostOfPath(value)) : ''}`,
+      filter={(value: string, query: string) => {
+        if (LOCAL_NEW.includes(value) || value.startsWith(OPEN_ON)) return true
+        const item = byPath.get(value)
+        const paths = item ? projectFolders(item).map(hostPath).join(' ') : ''
+        return contains(
+          `${label(value)} ${hints.get(value) ?? ''} ${paths} ${hosts.length > 0 ? hostName(hostOfPath(value)) : ''}`,
           query,
         )
-      }
+      }}
     >
       {/* The tray's link names the project alone, without the select's chevron. */}
       <Trigger
@@ -251,10 +251,12 @@ export function ProjectMenu({
       >
         {noProject ? (
           <Glyph icon={NO_PROJECT_ICON} size={chip ? 14 : 16} />
-        ) : chip ? (
-          <FolderMark />
         ) : (
-          <Glyph icon={Folder01Icon} />
+          <ProjectMark
+            icon={project?.icon}
+            open={chip}
+            fallback={chip ? 'folder-mark' : 'folder-glyph'}
+          />
         )}
         <span className={chip ? 'kettu-tray-link__text' : 'truncate text-foreground'}>
           {noProject
@@ -325,7 +327,7 @@ export function ProjectMenu({
                             title={hostPath(path)}
                           >
                             <span className="kettu-menu-mark">
-                              <FolderClosedMark />
+                              <ProjectMark icon={p.icon} />
                             </span>
                             <ProjectName name={p.name} hint={hints.get(path)} />
                             {p.missing && (
@@ -439,7 +441,7 @@ function HostProjects({
                   title={hostPath(path)}
                 >
                   <span className="kettu-menu-mark">
-                    <FolderClosedMark />
+                    <ProjectMark icon={p.icon} />
                   </span>
                   <ProjectName name={p.name} hint={hints.get(path)} />
                   {p.missing && (

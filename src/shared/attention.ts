@@ -80,9 +80,10 @@ export function attentionTarget(
 type AttentionMessage = Extract<HostToMain, { type: 'host:attention' }>
 
 /**
- * What devices are pushed for an attention message: a workflow task's goes as its step's session,
- * which is what they open, and not at all when no step has a session. Huli: a plan limit at 90%
- * or used up is pushed too, as the phone shows it (its window from the key); a reset is not.
+ * What devices are pushed for an attention message: sessions, routines and plan-limit alerts go
+ * straight through (plan-limit is filtered per device by its `planLimits` switch); a workflow
+ * task goes as its step's session, which is what devices open, and not at all when no step has one.
+ * Huli: a plan limit's reset is not pushed; a limit at 90% or used up is, as the phone shows it.
  */
 export function pushedAttention(message: AttentionMessage): AttentionMessage | null {
   if (message.kind === 'plan-limit') return message.level === 'reset' ? null : message

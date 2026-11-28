@@ -3,12 +3,13 @@
 // every word in the current language. The helper sorts, counts and words nothing itself.
 
 import { basename, isAbsolute, relative } from 'node:path'
-import type {
-  AgentOptions,
-  AgentStatus,
-  PlanProgress,
-  SessionActivity,
-  SessionSummary,
+import {
+  isActivelyRunning,
+  type AgentOptions,
+  type AgentStatus,
+  type PlanProgress,
+  type SessionActivity,
+  type SessionSummary,
 } from '@shared/agent-host'
 import type { BrowserOriginDecision } from '@shared/browser'
 import type { ComputerAppDecision } from '@shared/computer-use'
@@ -443,6 +444,7 @@ const PHASES: Record<TurnPhase['phase'], IslandPhase | null> = {
   edit: 'edit',
   writing: 'write',
   compacting: 'compact',
+  waiting_background: 'think',
   working: 'execute',
   approval: null,
   question: null,
@@ -469,6 +471,7 @@ function phaseOf(summary: SessionSummary): IslandPhase {
 function runningLine(summary: SessionSummary): string {
   const phase = phaseOf(summary)
   if (phase === 'compact') return islandT('line.compacting')
+  if (summary.phase === 'waiting_background') return islandT('line.waitingBackground')
   if (summary.activity) return activityLine(summary.activity, summary.projectPath)
   if (phase === 'think') return islandT('line.thinking')
   if (phase === 'write') return islandT('line.writing')
@@ -505,7 +508,7 @@ function buildRow(
   const waiting = needsYou(summary)
   const status: IslandStatus = waiting
     ? 'waiting'
-    : summary.status === 'running'
+    : isActivelyRunning(summary)
       ? 'running'
       : summary.status === 'starting'
         ? 'starting'

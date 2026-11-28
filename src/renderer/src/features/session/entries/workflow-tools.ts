@@ -1,30 +1,16 @@
 // The calls of the workflow tools of Kettu's MCP server, which the thread draws as cards: what they
 // asked and what Kettu answered, and the card a suggestion or a workflow to keep shows.
 
+import type { SessionSummary } from '@shared/agent-host'
 import type { CheckLine, CheckNext, PickCheck, ReportCheck } from '@shared/workflow'
-import { KETTU_SERVER, mcpCallOf } from '@shared/mcp-call'
-import type { ThreadState, ToolEntry } from '@shared/thread'
+import { workflowToolOfTitle, type WorkflowCardTool } from '@shared/mcp-call'
+import { hasToolDigest, toolContentItems, type ThreadState, type ToolEntry } from '@shared/thread'
 import { useSuggestionsStore } from '@renderer/stores/workflow-suggestions'
 
-/** The tools' names on Kettu's MCP server, the one place they are written here. */
-const WORKFLOW_TOOLS = {
-  start: 'suggest_workflow',
-  create: 'create_workflow',
-  report: 'report_step',
-  pick: 'pick_step_agents',
-} as const
-
-export type WorkflowTool = keyof typeof WORKFLOW_TOOLS
-
-const BY_NAME = new Map(
-  Object.entries(WORKFLOW_TOOLS).map(([tool, name]) => [name, tool as WorkflowTool]),
-)
+export type WorkflowTool = WorkflowCardTool
 
 export function workflowToolOf(entry: Pick<ToolEntry, 'title'>): WorkflowTool | null {
-  const call = mcpCallOf(entry.title)
-  // A bare tool name, as some agents title a call, is Kettu's: no other tool has these names.
-  const name = call ? (call.server === KETTU_SERVER ? call.tool : null) : entry.title.trim()
-  return (name && BY_NAME.get(name as (typeof WORKFLOW_TOOLS)[WorkflowTool])) || null
+  return workflowToolOfTitle(entry.title)
 }
 
 type Fields = Record<string, unknown>
@@ -175,16 +161,57 @@ export function pickOf(entry: ToolEntry): PickCall {
   }
 }
 
+/** Whether any markdown output item of this tool call was replaced by a remote digest. */
+export function hasDigestedContent(entry: Pick<ToolEntry, 'content'>): boolean {
+  return toolContentItems(entry).some((item) => item.type === 'digest' && item.of === 'markdown')
+}
+
+/**
+ * Whether this workflow card entry still needs `sessions.entry` to restore digested fields
+ * (for example when connected to an older host that digested workflow tool output or input).
+ */
+export function needsFullWorkflowEntry(entry: ToolEntry): boolean {
+  const tool = workflowToolOf(entry)
+  if (!tool || entry.permission) return false
+  if (tool === 'start') {
+    return entry.status === 'completed' && cardIdOf(entry) === null && hasDigestedContent(entry)
+  }
+  if (tool === 'create') {
+    if (entry.status === 'completed') {
+      return cardIdOf(entry) === null && savedOf(entry) === null && hasDigestedContent(entry)
+    }
+    return entry.status === 'failed' && !entry.structured && hasDigestedContent(entry)
+  }
+  return (entry.status === 'completed' || entry.status === 'failed') && hasToolDigest(entry)
+}
+
+/** Fallback workflow name read from the tool entry when the host card record cannot be loaded. */
+export function suggestionFallbackName(entry: ToolEntry): string | null {
+  const given = isFields(entry.structured?.suggestion) ? entry.structured.suggestion : {}
+  const fromStructured = text(given.workflow_name) ?? text(given.title)
+  if (fromStructured) return fromStructured
+  const input = inputOf(entry)
+  const fromInput = text(input.title)
+  if (fromInput) return fromInput
+  const quoted = /"([^"\n]{1,120})"/.exec(resultText(entry))?.[1]
+  return text(quoted)
+}
+
 /**
  * The call is drawn as its workflow card once it ended: a suggestion or a workflow to keep when it
- * made one; a draft for a suggestion folds as work.
+ * made one (or while a digested output is being restored to inspect it); a draft for a suggestion
+ * folds as work.
  */
 export function workflowCardOf(entry: ToolEntry): WorkflowTool | null {
   const tool = workflowToolOf(entry)
   if (!tool || entry.permission) return null
-  if (tool === 'start') return entry.status === 'completed' && cardIdOf(entry) ? tool : null
+  if (tool === 'start') {
+    return entry.status === 'completed' && (cardIdOf(entry) || hasDigestedContent(entry))
+      ? tool
+      : null
+  }
   if (tool === 'create' && entry.status === 'completed') {
-    return cardIdOf(entry) || savedOf(entry) ? tool : null
+    return cardIdOf(entry) || savedOf(entry) || hasDigestedContent(entry) ? tool : null
   }
   return entry.status === 'completed' || entry.status === 'failed' ? tool : null
 }
@@ -206,4 +233,24 @@ export function openSuggestion(state: ThreadState): string | null {
     if (answer === 'waiting' || answer === 'failed') return entry.id
   }
   return null
+}
+
+/**
+ * Whether Edit on a workflow suggestion card can route the user to the session's composer: only
+ * while the card waits and the session actually renders a live composer.
+ */
+export function canEditSuggestion({
+  waiting,
+  away,
+  archived,
+  origin,
+  worktreeState,
+}: {
+  waiting: boolean
+  away: boolean
+  archived: boolean
+  origin: SessionSummary['origin'] | undefined
+  worktreeState: NonNullable<SessionSummary['worktree']>['state'] | undefined
+}): boolean {
+  return waiting && !away && !archived && origin !== 'subagent' && worktreeState !== 'gone'
 }

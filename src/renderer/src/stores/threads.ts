@@ -6,15 +6,22 @@ import {
   prependEntries,
   threadFromSnapshot,
   UnknownEntryError,
+  type ContentRef,
   type OlderPage,
+  type Patch,
   type PatchBatch,
   type PlanEntry,
+  type PromptSuggestion,
   type SessionSnapshot,
+  type SessionStatus,
   type ThreadEntry,
   type ThreadState,
   type UserContent,
 } from '@shared/thread'
 import { errorMessage, host, sessionHost } from '@renderer/lib/host'
+import { useWebHostStore } from '@renderer/stores/web-host'
+import { forgetOutline, invalidateOutlines } from '@renderer/features/session/outline/outline-cache'
+import { forgetReadingPosition } from '@renderer/features/session/reading-position'
 
 // The renderer's replicas of the sessions it shows. Each starts from a snapshot of the latest
 // page of the thread, takes older pages as the thread scrolls back, and applies patch batches in
@@ -95,13 +102,25 @@ type UserEntry = Extract<ThreadEntry, { kind: 'user' }>
 /** A message sent from this window that the host has not put in the thread yet. */
 interface Sending {
   entry: UserEntry
-  text: string
   sentAt: number
-  /** The thread's last entry when it was sent, if the replica was loaded. */
+  /** The thread's last real entry when it was sent, if the replica was loaded. */
   after: string | null
+  /** True when the replica was loaded and held no real entries yet at send time. */
+  empty: boolean
+  /** The suggestion cleared optimistically when this send started, for failure rollback. */
+  clearedSuggestion: PromptSuggestion | null
+  /** True once the host updates suggestion or leaves idle, preventing stale rollback. */
+  suggestionSuperseded: boolean
 }
 const sending = new Map<string, Sending[]>()
 let sendingCount = 0
+
+/** An in-flight send without an optimistic entry (such as an agent switch) that hides the old suggestion. */
+interface SuggestionHold {
+  clearedSuggestion: PromptSuggestion | null
+  superseded: boolean
+}
+const suggestionHolds = new Map<string, Set<SuggestionHold>>()
 // How far before the send a stored message's host time may lie and still be the send's own.
 const ECHO_SKEW_MS = 10_000
 let queue: PatchBatch[] = []
@@ -193,7 +212,11 @@ function receiveSnapshot(sessionId: string, snapshot: SessionSnapshot): void {
     state = applyPatches(state, batch.patches, { partial })
     seq = batch.seq
   }
+  if (sending.has(sessionId) || suggestionHolds.has(sessionId)) {
+    markSupersededFromSnapshot(sessionId, state)
+  }
   if (sending.has(sessionId)) state = settleSnapshot(sessionId, state)
+  if (suggestionHolds.has(sessionId)) state = withClearedSuggestion(state)
   setReplica(sessionId, {
     state,
     seq,
@@ -279,12 +302,25 @@ function flush(): void {
     }
     try {
       const live = replica.state.session.status !== 'starting'
-      const echoes = echoesOf(batch)
-      if (live) markFresh(batch, echoes)
+      const resets = batch.patches.some((patch) => patch.op === 'thread.reset')
+      if (sending.has(batch.sessionId) || suggestionHolds.has(batch.sessionId)) {
+        markSupersededFromPatches(batch.sessionId, batch.patches)
+      }
       let state = applyPatches(replica.state, batch.patches, {
         partial: replica.older !== null,
       })
-      if (sending.has(batch.sessionId)) state = settleSending(batch.sessionId, state, echoes)
+      if (resets) {
+        if (sending.has(batch.sessionId)) state = settleSnapshot(batch.sessionId, state)
+        if (suggestionHolds.has(batch.sessionId)) state = withClearedSuggestion(state)
+      } else {
+        const matched = matchBatchEchoes(batch)
+        if (live) markFresh(batch, matched.entries)
+        if (sending.has(batch.sessionId)) {
+          state = applySettledSending(batch.sessionId, state, matched, batch.patches)
+        } else if (suggestionHolds.has(batch.sessionId)) {
+          state = withClearedSuggestion(state)
+        }
+      }
       next ??= { ...replicas }
       next[batch.sessionId] = { ...replica, state, seq: batch.seq }
     } catch (error) {
@@ -315,11 +351,11 @@ function dropQueuedFor(sessionId: string): void {
   }
 }
 
-function markFresh(batch: PatchBatch, echoes: readonly UserEntry[]): void {
+function markFresh(batch: PatchBatch, echoes: ReadonlySet<UserEntry>): void {
   const now = performance.now()
   for (const patch of batch.patches) {
     // A message shown while it was sending is already in view.
-    if (patch.op !== 'entry.add' || echoes.includes(patch.entry as UserEntry)) continue
+    if (patch.op !== 'entry.add' || echoes.has(patch.entry as UserEntry)) continue
     let entries = fresh.get(batch.sessionId)
     if (!entries) fresh.set(batch.sessionId, (entries = new Map()))
     for (const [id, at] of entries) if (now - at >= FRESH_FOR_MS) entries.delete(id)
@@ -551,11 +587,13 @@ export function focusSession(sessionId: string): Promise<void> {
  * `only`, the sessions it picks, as those on a host whose connection opened again.
  */
 export function rewatchAll(only?: (sessionId: string) => boolean): void {
+  invalidateOutlines(only)
   // Huli: watched again at once, read one at a time, the latest shown first: a reconnect is no
   // burst of snapshots on a slow link, and a thread with nothing new answers in a few bytes.
   let chain = Promise.resolve()
   for (const sessionId of [...watched].reverse()) {
     if (only && !only(sessionId)) continue
+    forgetOutline(sessionId)
     const watching = host('sessions.watch', { sessionId }).catch(() => {})
     chain = chain.then(() => watching).then(() => fetchSnapshot(sessionId, 'sessions.snapshot'))
   }
@@ -565,6 +603,9 @@ export function forgetSession(sessionId: string): void {
   const at = watched.indexOf(sessionId)
   if (at >= 0) watched.splice(at, 1)
   clearSessionBuffers(sessionId)
+  suggestionHolds.delete(sessionId)
+  forgetOutline(sessionId)
+  forgetReadingPosition(sessionId)
   useThreadsStore.setState((s) => {
     if (!(sessionId in s.replicas)) return s
     const replicas = { ...s.replicas }
@@ -581,20 +622,192 @@ export function reloadSession(sessionId: string): Promise<void> {
 const textOf = (content: readonly UserContent[]) =>
   content.map((part) => (part.type === 'text' ? part.text : '')).join('')
 
+function refsOf(content: readonly UserContent[]): ContentRef[] {
+  const refs: ContentRef[] = []
+  for (const part of content) {
+    if (part.type === 'ref') refs.push(part.ref)
+  }
+  return refs
+}
+
+function sameRef(a: ContentRef, b: ContentRef): boolean {
+  switch (a.kind) {
+    case 'attachment':
+      if (b.kind !== 'attachment') return false
+      if (a.attachment.id && b.attachment.id) return a.attachment.id === b.attachment.id
+      return a.attachment.type === b.attachment.type && a.attachment.name === b.attachment.name
+    case 'image':
+      if (b.kind !== 'image' || a.mimeType !== b.mimeType) return false
+      if ('blob' in a && 'blob' in b) return a.blob === b.blob
+      if ('data' in a && 'data' in b) return a.data === b.data
+      return true
+    case 'audio':
+      return (
+        b.kind === 'audio' && a.mimeType === b.mimeType && a.size === b.size && a.name === b.name
+      )
+    case 'video':
+      return (
+        b.kind === 'video' && a.mimeType === b.mimeType && a.size === b.size && a.name === b.name
+      )
+    case 'link':
+      return b.kind === 'link' && a.uri === b.uri && a.name === b.name
+    case 'terminal':
+      return b.kind === 'terminal' && a.terminalId === b.terminalId
+    case 'page':
+      return b.kind === 'page' && a.tabId === b.tabId
+    case 'device':
+      return b.kind === 'device' && a.deviceId === b.deviceId
+    case 'session':
+      return b.kind === 'session' && a.sessionId === b.sessionId
+    case 'plugin':
+      return (
+        b.kind === 'plugin' &&
+        a.pluginId === b.pluginId &&
+        a.source === b.source &&
+        a.item === b.item
+      )
+    case 'unsupported':
+      return b.kind === 'unsupported' && a.label === b.label
+  }
+}
+
 /**
- * Shows a message the user sent at the end of the session's thread at once. The host's own entry
- * takes its place when it comes; the returned function takes it away before that, for a send that
- * failed or went to the queue.
+ * Whether a host user entry carries the same text and attachment/ref fingerprint as an optimistic
+ * send, allowing host-enriched fields such as expanded slash commands, settled attachment metadata,
+ * or stored image blobs.
  */
-export function showSending(sessionId: string, content: UserContent[]): () => void {
+function sameContent(a: readonly UserContent[], b: readonly UserContent[]): boolean {
+  if (textOf(a) !== textOf(b)) return false
+  const refsA = refsOf(a)
+  const refsB = refsOf(b)
+  if (refsA.length !== refsB.length) return false
+  return refsA.every((ref, i) => sameRef(ref, refsB[i]!))
+}
+
+function isIdleStatus(status: SessionStatus): boolean {
+  return status === 'ready' || status === 'closed'
+}
+
+function hasPendingSend(sessionId: string): boolean {
+  return (
+    (sending.get(sessionId)?.length ?? 0) > 0 || (suggestionHolds.get(sessionId)?.size ?? 0) > 0
+  )
+}
+
+function withClearedSuggestion(state: ThreadState): ThreadState {
+  if (state.session.suggestion == null) return state
+  return { ...state, session: { ...state.session, suggestion: null } }
+}
+
+function withRestoredSuggestion(
+  sessionId: string,
+  state: ThreadState,
+  previous: PromptSuggestion | null,
+  superseded: boolean,
+): ThreadState {
+  if (
+    previous === null ||
+    superseded ||
+    hasPendingSend(sessionId) ||
+    state.session.suggestion != null ||
+    !isIdleStatus(state.session.status)
+  ) {
+    return state
+  }
+  return { ...state, session: { ...state.session, suggestion: previous } }
+}
+
+function markSupersededFromPatches(sessionId: string, patches: readonly Patch[]): void {
+  const supersedes = patches.some(
+    (patch) =>
+      patch.op === 'session.update' &&
+      ('suggestion' in patch.changes ||
+        (patch.changes.status !== undefined && !isIdleStatus(patch.changes.status))),
+  )
+  if (!supersedes) return
+  for (const item of sending.get(sessionId) ?? []) item.suggestionSuperseded = true
+  for (const hold of suggestionHolds.get(sessionId) ?? []) hold.superseded = true
+}
+
+function markSupersededFromSnapshot(sessionId: string, state: ThreadState): void {
+  const idle = isIdleStatus(state.session.status)
+  // Huli: a suggestion is a `PromptSuggestion`, the same one as long as its id is.
+  const reported = state.session.suggestion?.id ?? null
+  for (const item of sending.get(sessionId) ?? []) {
+    if (!idle || reported !== (item.clearedSuggestion?.id ?? null)) {
+      item.suggestionSuperseded = true
+    }
+  }
+  for (const hold of suggestionHolds.get(sessionId) ?? []) {
+    if (!idle || reported !== (hold.clearedSuggestion?.id ?? null)) hold.superseded = true
+  }
+}
+
+function hasSuggestionAfter(patches: readonly Patch[], index: number): boolean {
+  let latest: PromptSuggestion | null | undefined
+  for (let i = index + 1; i < patches.length; i++) {
+    const patch = patches[i]!
+    if (patch.op === 'session.update' && 'suggestion' in patch.changes) {
+      latest = patch.changes.suggestion
+    }
+  }
+  return latest != null
+}
+
+/**
+ * Optimistically clears the session's next-message suggestion while a send without an optimistic
+ * thread entry (such as an agent switch) is in flight. Call the returned function with `true`
+ * when the send fails to restore the cleared suggestion if it was not superseded meanwhile.
+ */
+export function suppressSuggestion(sessionId: string): (restore?: boolean) => void {
+  const replica = useThreadsStore.getState().replicas[sessionId]
+  const hold: SuggestionHold = {
+    clearedSuggestion: replica?.state?.session.suggestion ?? null,
+    superseded: false,
+  }
+  let holds = suggestionHolds.get(sessionId)
+  if (!holds) suggestionHolds.set(sessionId, (holds = new Set()))
+  holds.add(hold)
+  if (replica?.state && replica.state.session.suggestion != null) {
+    setReplica(sessionId, { ...replica, state: withClearedSuggestion(replica.state) })
+  }
+  return (restore = false) => {
+    const currentHolds = suggestionHolds.get(sessionId)
+    if (!currentHolds?.delete(hold)) return
+    if (currentHolds.size === 0) suggestionHolds.delete(sessionId)
+    if (!restore) return
+    const current = useThreadsStore.getState().replicas[sessionId]
+    if (!current?.state) return
+    const next = withRestoredSuggestion(
+      sessionId,
+      current.state,
+      hold.clearedSuggestion,
+      hold.superseded,
+    )
+    if (next !== current.state) setReplica(sessionId, { ...current, state: next })
+  }
+}
+
+/**
+ * Shows a message the user sent at the end of the session's thread at once and clears any stale
+ * next-message suggestion on the replica. The host's own entry takes its place when it comes; the
+ * returned function takes it away before that, for a send that failed or went to the queue.
+ */
+export function showSending(
+  sessionId: string,
+  content: UserContent[],
+): (options?: { restoreSuggestion?: boolean }) => void {
   const replica = useThreadsStore.getState().replicas[sessionId]
   const order = replica?.state?.order ?? []
+  const after = replica?.state ? (order.findLast((id) => !id.startsWith('sending-')) ?? null) : null
   const list = sending.get(sessionId) ?? []
   const item: Sending = {
     entry: { kind: 'user', id: `sending-${++sendingCount}`, content, at: Date.now() },
-    text: textOf(content),
     sentAt: Date.now(),
-    after: replica?.state ? (order.findLast((id) => !id.startsWith('sending-')) ?? null) : null,
+    after,
+    empty: Boolean(replica?.state) && after === null,
+    clearedSuggestion: replica?.state?.session.suggestion ?? null,
+    suggestionSuperseded: false,
   }
   list.push(item)
   sending.set(sessionId, list)
@@ -603,7 +816,7 @@ export function showSending(sessionId: string, content: UserContent[]): () => vo
   entries.set(item.entry.id, performance.now())
   if (replica?.state)
     setReplica(sessionId, { ...replica, state: withSending(sessionId, replica.state) })
-  return () => {
+  return (options) => {
     const kept = sending.get(sessionId)
     const at = kept?.indexOf(item) ?? -1
     if (!kept || at < 0) return
@@ -611,44 +824,103 @@ export function showSending(sessionId: string, content: UserContent[]): () => vo
     if (kept.length === 0) sending.delete(sessionId)
     const current = useThreadsStore.getState().replicas[sessionId]
     if (current?.state) {
-      setReplica(sessionId, { ...current, state: withoutEntry(current.state, item.entry.id) })
+      let next = withoutEntry(current.state, item.entry.id)
+      if (options?.restoreSuggestion) {
+        next = withRestoredSuggestion(
+          sessionId,
+          next,
+          item.clearedSuggestion,
+          item.suggestionSuperseded,
+        )
+      }
+      setReplica(sessionId, { ...current, state: next })
     }
   }
 }
 
 /**
- * A message a person sent, which a send's entry is: from a window, or carrying this client's device
- * when the session's host is another computer or this is the web client.
+ * A message a person sent from this client: unmarked from a local window, or carrying `device`
+ * when this is the web client (matching this browser's device id once welcomed) or the session lives
+ * on another host. Excludes agent-to-agent (`from`), card approvals, and Kettu system messages, and
+ * includes `steered` echoes so an optimistic sending entry never leaks if a host delivers a
+ * follow-up as steered.
  */
-function isOwnMessage(entry: ThreadEntry): entry is UserEntry {
-  return entry.kind === 'user' && !entry.steered && !entry.from && !entry.approval && !entry.kettu
+function isOwnMessage(sessionId: string, entry: ThreadEntry): entry is UserEntry {
+  if (entry.kind !== 'user' || entry.from || entry.approval || entry.kettu) return false
+  if (isWebClient()) {
+    if (!entry.device) return false
+    const ownDeviceId = useWebHostStore.getState().host?.device.id ?? null
+    return ownDeviceId === null || entry.device.id === ownDeviceId
+  }
+  if (sessionHost(sessionId) !== null) return Boolean(entry.device)
+  return !entry.device
 }
 
-/** The batch's new messages that take the place of messages sending, oldest first. */
-function echoesOf(batch: PatchBatch): UserEntry[] {
-  const waiting = sending.get(batch.sessionId)?.length ?? 0
-  if (waiting === 0) return []
-  const echoes: UserEntry[] = []
-  for (const patch of batch.patches) {
-    if (patch.op === 'entry.add' && isOwnMessage(patch.entry)) echoes.push(patch.entry)
-    if (echoes.length === waiting) break
-  }
-  return echoes
+interface MatchedEchoes {
+  entries: Set<UserEntry>
+  settledIds: string[]
+  remaining: Sending[]
+  /** Index of the last patch in the batch that matched a pending optimistic send, or -1. */
+  lastEchoIndex: number
 }
 
-/** Takes away the messages `echoes` stand for, and keeps the others at the thread's end. */
-function settleSending(sessionId: string, state: ThreadState, echoes: readonly UserEntry[]) {
-  const list = sending.get(sessionId) ?? []
-  for (const echo of echoes) {
-    const text = textOf(echo.content)
-    const at = list.findIndex((item) => item.text === text)
-    const [gone] = list.splice(at >= 0 ? at : 0, 1)
-    if (gone) state = withoutEntry(state, gone.entry.id)
+const NO_ECHOES: MatchedEchoes = {
+  entries: new Set(),
+  settledIds: [],
+  remaining: [],
+  lastEchoIndex: -1,
+}
+
+/**
+ * Matches the batch's new user entries against pending optimistic sends, oldest first. Scans until
+ * every pending send has matched so an unrelated message earlier in the batch never hides a real
+ * echo that follows it.
+ */
+function matchBatchEchoes(batch: PatchBatch): MatchedEchoes {
+  const list = sending.get(batch.sessionId)
+  if (!list || list.length === 0) return NO_ECHOES
+  const remaining = [...list]
+  const entries = new Set<UserEntry>()
+  const settledIds: string[] = []
+  let lastEchoIndex = -1
+  for (let i = 0; i < batch.patches.length; i++) {
+    const patch = batch.patches[i]!
+    if (patch.op !== 'entry.add' || !isOwnMessage(batch.sessionId, patch.entry)) continue
+    const echo = patch.entry
+    const at = remaining.findIndex((item) => sameContent(item.entry.content, echo.content))
+    if (at < 0) continue
+    const [gone] = remaining.splice(at, 1)
+    if (gone) {
+      entries.add(echo)
+      settledIds.push(gone.entry.id)
+      lastEchoIndex = i
+    }
+    if (remaining.length === 0) break
   }
-  if (list.length === 0) {
+  return { entries, settledIds, remaining, lastEchoIndex }
+}
+
+/** Takes away the optimistic entries `matched` settled, and keeps the others at the thread's end. */
+function applySettledSending(
+  sessionId: string,
+  state: ThreadState,
+  matched: MatchedEchoes,
+  patches: readonly Patch[],
+): ThreadState {
+  for (const id of matched.settledIds) state = withoutEntry(state, id)
+  if (matched.remaining.length === 0) {
     sending.delete(sessionId)
+    if (
+      matched.lastEchoIndex >= 0 &&
+      state.session.suggestion != null &&
+      !hasSuggestionAfter(patches, matched.lastEchoIndex)
+    ) {
+      state = withClearedSuggestion(state)
+    }
+    if (suggestionHolds.has(sessionId)) state = withClearedSuggestion(state)
     return state
   }
+  sending.set(sessionId, matched.remaining)
   return withSending(sessionId, state)
 }
 
@@ -661,10 +933,11 @@ function settleSnapshot(sessionId: string, state: ThreadState): ThreadState {
     for (let i = state.order.length - 1; i > start; i--) {
       const id = state.order[i]!
       const entry = state.byId[id]
-      if (!entry || taken.has(id) || !isOwnMessage(entry)) continue
-      if (textOf(entry.content) !== item.text) continue
-      // Without the entry it followed, only a message from about the send's time is its own.
-      if (start < 0 && (entry.at ?? 0) < item.sentAt - ECHO_SKEW_MS) continue
+      if (!entry || taken.has(id) || !isOwnMessage(sessionId, entry)) continue
+      if (!sameContent(item.entry.content, entry.content)) continue
+      // Without the entry it followed (and when the thread already had history), only a message
+      // from about the send's time is its own.
+      if (start < 0 && !item.empty && (entry.at ?? 0) < item.sentAt - ECHO_SKEW_MS) continue
       taken.add(id)
       return true
     }
@@ -682,16 +955,20 @@ function settleSnapshot(sessionId: string, state: ThreadState): ThreadState {
 /** `state` with the messages still sending at its end, in the order they were sent. */
 function withSending(sessionId: string, state: ThreadState): ThreadState {
   const list = sending.get(sessionId) ?? []
+  const clearSuggestion = list.length > 0 && state.session.suggestion != null
   const ids = new Set(list.map((item) => item.entry.id))
   const tail = state.order.slice(state.order.length - list.length)
-  if (
-    list.every((item, i) => tail[i] === item.entry.id && state.byId[item.entry.id] === item.entry)
+  const entriesUnchanged = list.every(
+    (item, i) => tail[i] === item.entry.id && state.byId[item.entry.id] === item.entry,
   )
-    return state
+  if (entriesUnchanged && !clearSuggestion) return state
+  const session = clearSuggestion ? { ...state.session, suggestion: null } : state.session
+  if (entriesUnchanged) return { ...state, session }
   const byId = { ...state.byId }
   for (const item of list) byId[item.entry.id] = item.entry
   return {
     ...state,
+    session,
     byId,
     order: [...state.order.filter((id) => !ids.has(id)), ...list.map((item) => item.entry.id)],
   }

@@ -75,6 +75,7 @@ export interface SdkSessionRecord {
   provider: string
   model: string
   cwd: string
+  metadata?: Record<string, unknown>
 }
 
 /** Huli: a session as Cline's history lists it (`SessionHistoryRecord`). */
@@ -113,6 +114,7 @@ export interface SdkStartInput {
   interactive?: boolean
   initialMessages?: SdkMessage[]
   initialCompactionState?: unknown
+  sessionMetadata?: Record<string, unknown>
   toolPolicies?: Record<string, SdkToolPolicy>
 }
 
@@ -135,6 +137,7 @@ export interface SdkCore {
     options?: { hydrate?: boolean; includeSubagents?: boolean },
   ): Promise<SdkHistoryRecord[]>
   readMessages(sessionId: string): Promise<SdkMessage[]>
+  readLiveMessages?(sessionId: string): Promise<SdkMessage[]>
   readSessionCompactionState(sessionId: string): Promise<unknown>
   /** Keeps a compacted working context for the session; its stored messages stay as they are. */
   updateSessionCompactionState(sessionId: string, state: unknown): Promise<{ updated: boolean }>
@@ -189,6 +192,17 @@ export interface Sdk {
   buildWorkspaceMetadata(cwd: string): Promise<string>
   projectSessionCompactionState(state: unknown, messages: SdkMessage[]): SdkMessage[] | undefined
   createSessionCompactionState(input: Record<string, unknown>): unknown
+  /** Trims canonical history to the messages strictly before the 1-based user run. */
+  trimMessagesBeforeUserRun?(messages: SdkMessage[], runCount: number): SdkMessage[]
+  /** How many absolute root user runs a persisted message represents (0 for synthetic/tool rows). */
+  getUserRunSpan?(message: SdkMessage): number
+  createForkSessionMetadata?(input: {
+    metadata?: Record<string, unknown> | null
+    forkedFromSessionId: string
+    forkedAt: string
+    source: string
+    beforeRunCount?: number
+  }): Record<string, unknown>
   /** Undefined when the config does not compact. */
   createContextCompactionPrepareTurn(
     config: Record<string, unknown>,

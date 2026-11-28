@@ -3,6 +3,7 @@
 
 import type { Worker } from 'node:worker_threads'
 import type { OutlineTitle } from '@shared/agent-host'
+import type { SessionUsage } from '@shared/thread'
 import type { ArtifactState } from '@shared/artifacts'
 import type { ArtifactCall, ArtifactCallName, ArtifactCalls } from '../artifacts/model'
 import type { RuntimeCall, RuntimeCallName, RuntimeCalls } from '../artifacts/runtime/calls'
@@ -480,9 +481,24 @@ export class ThreadStore {
     return this.read({ op: 'outline', sessionId }, sessionId)
   }
 
+  /** The stored usage of each requested session, read after any writes in flight for them. */
+  usages(sessionIds: readonly string[]): Promise<Record<string, SessionUsage | null>> {
+    if (sessionIds.length === 0) return Promise.resolve({})
+    const unique = [...new Set(sessionIds)]
+    const writes = new Set<Promise<unknown>>()
+    for (const sessionId of unique) {
+      const pending = this.writes.get(sessionId)
+      if (pending) for (const write of pending) writes.add(write)
+    }
+    return this.readAfter(
+      { op: 'usages', sessionIds: unique },
+      writes.size > 0 ? writes : undefined,
+    )
+  }
+
   /** What the stored thread made; null when there is none. */
-  outputs(sessionId: string): Promise<StoredOutputs | null> {
-    return this.read({ op: 'outputs', sessionId }, sessionId)
+  outputs(sessionId: string, accountId: string | null = null): Promise<StoredOutputs | null> {
+    return this.read({ op: 'outputs', sessionId, accountId }, sessionId)
   }
 
   /** Stores outline titles; false when the session has no stored thread to keep them with. */

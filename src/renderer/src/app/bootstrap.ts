@@ -34,7 +34,7 @@ import { entryShown, whenEntryOn } from '@renderer/lib/features'
 import { whenHostHas } from '@renderer/lib/host-features'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { isHosted, isWeb, platform } from '@renderer/lib/platform'
-import { initAccount } from '@renderer/stores/account'
+import { initAccount, useAccountStore } from '@renderer/stores/account'
 import { receiveAgentNetwork } from '@renderer/stores/agent-network'
 import { receiveWebReader } from '@renderer/stores/web-reader'
 import { loadAgentOptions, receiveAgentOptions } from '@renderer/stores/agent-options'
@@ -42,11 +42,19 @@ import { initDevices } from '@renderer/stores/devices'
 import { initBrowser } from '@renderer/stores/browser'
 import { initForwards } from '@renderer/stores/forwards'
 import { autoForwarded } from '@renderer/features/ports/ports'
+import { clearPlaceOutlineCache } from '@renderer/features/artifacts/place-outline'
+import { clearArtifactThumbnailsCache } from '@renderer/features/artifacts/thumbnails'
+import { clearWaitingRepliesCache } from '@renderer/features/artifacts/waiting-replies'
+import {
+  clearArtifactChangesCache,
+  clearArtifactVersionReadsCache,
+} from '@renderer/features/session/entries/artifact-changes'
 import {
   hostRestarted,
   preparedRemoved,
   receivePrepared,
 } from '@renderer/features/session/new-session/prepared'
+import { clearSessionOutputsCache } from '@renderer/features/sidebar/use-outputs'
 import {
   hostAgentChanged,
   hostAgentRemoved,
@@ -56,28 +64,34 @@ import {
 } from '@renderer/stores/agents'
 import { receiveRemovalProgress } from '@renderer/stores/agent-removal'
 import { receiveCloneProgress } from '@renderer/features/new-project/store'
+import { clearArtifactViewerState } from '@renderer/stores/artifact-viewer'
 import {
+  artifactsAccountChanged,
   artifactsChanged,
   artifactsHostClosed,
   artifactsHostOpened,
+  onHiddenArtifacts,
   receiveArtifactEvent,
+  refreshLocalArtifacts,
 } from '@renderer/stores/artifacts'
 import { useConnectionStore } from '@renderer/stores/connection'
 import { filesChanged, rewatchFiles } from '@renderer/stores/files'
 import {
+  gitHostClosed,
   loadGitTools,
   receiveCurrentPr,
   receiveGitStatus,
+  receiveGitTools,
   receiveReference,
   refreshShownProject,
   rewatchGit,
   syncReferences,
-  useGitStore,
 } from '@renderer/stores/git'
 import { loadGitHubStar, receiveGitHubStar } from '@renderer/stores/github-star'
 import {
   marketConnectionChanged,
   marketKeysChanged,
+  useMarketplaceStore,
   marketPluginsChanged,
 } from '@renderer/stores/marketplace'
 import { marketPublishedChanged } from '@renderer/stores/market-published'
@@ -91,7 +105,7 @@ import { routinesHostClosed, routinesHostOpened, useRoutinesStore } from '@rende
 import { useIdleReleaseStore } from '@renderer/stores/idle-release'
 import { hostLoadClosed, hostLoadOpened, receiveLoad } from '@renderer/stores/host-load'
 import { useWorkflowsStore } from '@renderer/stores/workflows'
-import { useSuggestionsStore } from '@renderer/stores/workflow-suggestions'
+import { suggestionsHostOpened, useSuggestionsStore } from '@renderer/stores/workflow-suggestions'
 import { tasksHostClosed, tasksHostOpened, useTasksStore } from '@renderer/stores/tasks'
 import { useSessionsStore } from '@renderer/stores/sessions'
 import { initSettings, useSettingsStore } from '@renderer/stores/settings'
@@ -117,6 +131,7 @@ import {
   usageChanged,
 } from '@renderer/stores/usage'
 import {
+  closeHiddenArtifacts,
   lastSessionId,
   layoutSessions,
   openArtifact,
@@ -175,7 +190,10 @@ export function onHostEvent(event: HostEvent, hostId: string | null = null): voi
       receiveCurrentPr(event.projectPath, event.pr)
       return
     case 'git.reference':
-      receiveReference(event.url, event.found)
+      receiveReference(event.url, event.found, hostId)
+      return
+    case 'git.tools':
+      receiveGitTools(hostId, event.tools)
       return
     case 'agent.status':
       if (hostId === null) useAgentsStore.getState().setOne(event.status)
@@ -281,14 +299,25 @@ export function onHostEvent(event: HostEvent, hostId: string | null = null): voi
     case 'files.changed':
       filesChanged(event.projectPath)
       return
-    case 'git.tools':
-      useGitStore.setState({ tools: event.tools })
-      break
     case 'usage.changed':
       usageChanged()
       break
     case 'usage.status':
       receiveUsageStatus(event.status)
+      break
+    case 'market.discoveryChanged':
+      if (useMarketplaceStore.getState().discovery)
+        void useMarketplaceStore.getState().loadDiscovery()
+      if (useMarketplaceStore.getState().terminal)
+        void useMarketplaceStore.getState().loadTerminal()
+      break
+    case 'market.mcpCheckChanged':
+      useMarketplaceStore.setState((state) => ({
+        mcpChecks: { ...state.mcpChecks, [event.serverId]: event.check },
+      }))
+      break
+    case 'market.mcpToolsChanged':
+      useMarketplaceStore.getState().mcpToolsChanged(event.serverId, event.changes)
       break
     case 'market.keysChanged':
       marketKeysChanged()
@@ -345,6 +374,7 @@ function loadAgents(): Promise<void> {
 export async function loadHostState(): Promise<void> {
   useIdleReleaseStore.getState().reload(null)
   hostLoadOpened(null)
+  refreshLocalArtifacts()
   await Promise.allSettled([
     loadSessionState(),
     loadAgents(),
@@ -477,6 +507,7 @@ export function bootstrap(): Promise<unknown> {
     void removeEmptySessions()
     void loadHostState()
     artifactsChanged()
+    suggestionsHostOpened(null)
     hostRestarted(null)
     rewatchAll((sessionId) => sessionHost(sessionId) === null)
     showFront(true)
@@ -484,6 +515,28 @@ export function bootstrap(): Promise<unknown> {
     rewatchFiles(null)
   })
   useViewStore.subscribe(() => showFront())
+  onHiddenArtifacts((hidden) => {
+    closeHiddenArtifacts(hidden)
+    clearArtifactViewerState(hidden)
+  })
+  let seenAccountId: string | null | undefined = undefined
+  useAccountStore.subscribe((state) => {
+    if (state.status === null) return
+    const next = state.status.state === 'signed-in' ? state.status.account.id : null
+    if (seenAccountId === undefined) {
+      seenAccountId = next
+      return
+    }
+    if (next === seenAccountId) return
+    seenAccountId = next
+    clearArtifactChangesCache()
+    clearArtifactThumbnailsCache()
+    clearPlaceOutlineCache()
+    clearWaitingRepliesCache()
+    clearArtifactVersionReadsCache()
+    clearSessionOutputsCache()
+    artifactsAccountChanged()
+  })
   followShownSession()
   followUsageHosts()
   // A project list that fills after launch, as after a failed first read, leaves the launch view.
@@ -513,6 +566,7 @@ export function bootstrap(): Promise<unknown> {
         routinesHostOpened(hostId)
         tasksHostOpened(hostId)
         foldersHostOpened(hostId)
+        suggestionsHostOpened(hostId)
         hostScopeOpened(hostId)
         hostRequestsOpened(hostId)
         hostRestarted(hostId)
@@ -520,6 +574,7 @@ export function bootstrap(): Promise<unknown> {
         rewatchAll((sessionId) => sessionHost(sessionId) === hostId)
         showFront(true)
         rewatchGit(hostId)
+        void loadGitTools(hostId)
         rewatchFiles(hostId)
         if (waitingSessions.size > 0) closeUnlistedPanes(waitingSessions)
       },
@@ -529,6 +584,7 @@ export function bootstrap(): Promise<unknown> {
         routinesHostClosed(hostId)
         tasksHostClosed(hostId)
         hostLoadClosed(hostId)
+        gitHostClosed(hostId)
       },
       resync: (hostId) => rewatchAll((sessionId) => sessionHost(sessionId) === hostId),
     })
@@ -563,6 +619,7 @@ export function bootstrap(): Promise<unknown> {
     void hostAt(event.hostId, 'agents.refreshAccount', {
       agentId: event.agentId as AgentId,
       force: true,
+      afterSignIn: true,
     }).catch((error: unknown) =>
       console.warn(`Could not read the account after sign-in: ${errorMessage(error)}`),
     )
@@ -572,6 +629,7 @@ export function bootstrap(): Promise<unknown> {
   void takeReturnedMessages()
   // Asked first, so the host reads the threads before the ones the launch opens.
   void removeEmptySessions()
+  refreshLocalArtifacts()
   const sessionState = loadSessionState()
   void loadAgents()
   void loadGitTools()

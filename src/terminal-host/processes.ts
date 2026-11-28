@@ -6,6 +6,7 @@
 import { execFile } from 'node:child_process'
 import path from 'node:path'
 import type { Platform } from '@shared/platform'
+import { isConsoleHelper } from './windows-busy'
 
 export interface ProcessRow {
   pid: number
@@ -87,6 +88,9 @@ export function runningUnder(rows: readonly ProcessRow[], shellPid: number): Pro
       seen.add(child.pid)
       queue.push(child)
       if (parent === shell && PROMPT_HELPERS.test(child.name)) continue
+      // Windows' console hosts (conhost, OpenConsole) sit under an idle shell too; what runs
+      // under them still counts.
+      if (isConsoleHelper(child.name)) continue
       if (!earliest || child.startedAt < earliest.startedAt) earliest = child
     }
   }

@@ -19,12 +19,9 @@ import {
 import { isGithubEvent } from '@shared/github-flow'
 import type { Platform } from '@shared/platform'
 import {
-  DIGEST_ITEMS_MAX,
-  isDigestItem,
   readProjectManager,
   readStoredManager,
   readStoredWorker,
-  type DigestItem,
   type ProjectManagerSettings,
   type StoredManager,
   type StoredWorker,
@@ -38,16 +35,15 @@ import { storedOrder } from '@shared/session-order'
 import type { SettledBy } from '@shared/session-tidy'
 import { sandboxChoiceOf, type SandboxChoice } from '@shared/sandbox'
 import { limitPauseOf, type LimitPause } from '@shared/supervisor'
+import { parseProjectIcon, type ProjectIcon } from '@shared/project-icon'
 import type { SessionTaskRef } from '@shared/workflow'
 import type { PortBlock } from '@shared/worktree-ports'
 import {
   isAgentId,
   isQueuedComments,
-  isReportedTurn,
   isUserContent,
-  REPORTED_TURNS_MAX,
+  parseFromSession,
   type AgentId,
-  type FromSession,
   type PromptCache,
   type QueuedPrompt,
   type UserContent,
@@ -72,6 +68,7 @@ import {
 import type { AgentInit, RewindPoint } from './connection'
 import type { StoredTidy } from './session-tidy'
 import { isAbsolutePath, pathKey } from './paths'
+import type { StorageWriteOutcome } from './disk-full'
 import { isVersion } from './versions'
 
 export type LogFn = (level: 'info' | 'warn' | 'error', message: string) => void
@@ -109,26 +106,71 @@ export function migrate(
 
 const RETRYABLE = new Set(['EPERM', 'EACCES', 'EBUSY'])
 
+interface StorageWriteObserver {
+  root: string
+  listener: (outcome: StorageWriteOutcome) => void
+}
+
+const storageWriteObservers = new Set<StorageWriteObserver>()
+
+function isWithinRoot(file: string, root: string): boolean {
+  const resolved = path.resolve(file)
+  const rel = path.relative(root, resolved)
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)
+}
+
+/**
+ * Observes atomic and state-file writes under `rootDir` (typically a host's `userDataPath`),
+ * returning an unsubscribe callback. Scoped by root so concurrent test hosts never cross-talk.
+ */
+export function observeStorageWrites(
+  rootDir: string,
+  listener: (outcome: StorageWriteOutcome) => void,
+): () => void {
+  const observer: StorageWriteObserver = { root: path.resolve(rootDir), listener }
+  storageWriteObservers.add(observer)
+  return () => {
+    storageWriteObservers.delete(observer)
+  }
+}
+
+/** Reports a state-file write outcome to observers registered for its root folder. */
+export function notifyStorageWrite(file: string, ok: boolean, error?: unknown): void {
+  if (storageWriteObservers.size === 0) return
+  const outcome: StorageWriteOutcome = ok ? { file, ok: true } : { file, ok: false, error }
+  for (const observer of [...storageWriteObservers]) {
+    if (isWithinRoot(file, observer.root)) observer.listener(outcome)
+  }
+}
+
 /** Writes to `<file>.tmp`, flushes it to disk and renames it over the file. */
 export async function writeFileAtomic(file: string, contents: string): Promise<void> {
-  await mkdir(path.dirname(file), { recursive: true })
   const tmp = `${file}.tmp`
-  const handle = await open(tmp, 'w')
   try {
-    await handle.writeFile(contents, 'utf8')
-    await handle.sync()
-  } finally {
-    await handle.close()
+    await mkdir(path.dirname(file), { recursive: true })
+    const handle = await open(tmp, 'w')
+    try {
+      await handle.writeFile(contents, 'utf8')
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+  } catch (error) {
+    await rm(tmp, { force: true }).catch(() => {})
+    notifyStorageWrite(file, false, error)
+    throw error
   }
   // On Windows a scanner or indexer can hold the target open for a moment.
   for (let attempt = 0; ; attempt++) {
     try {
       await rename(tmp, file)
+      notifyStorageWrite(file, true)
       return
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code ?? ''
       if (attempt >= 4 || !RETRYABLE.has(code)) {
-        await rm(tmp, { force: true })
+        await rm(tmp, { force: true }).catch(() => {})
+        notifyStorageWrite(file, false, error)
         throw error
       }
       await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)))
@@ -154,6 +196,10 @@ export interface JsonFileOptions<T> {
   /** The first wait before a failed write is tried again; each failure after it doubles it. */
   retryMs?: number
   now?: () => number
+  /** Overrides `writeFileAtomic` for tests that inject filesystem failures such as ENOSPC. */
+  writeFile?: (file: string, contents: string) => Promise<void>
+  /** Called after every write attempt with whether it reached disk or failed. */
+  onWrite?: (outcome: StorageWriteOutcome) => void
 }
 
 /** The longest a failed write waits before it is tried again. */
@@ -173,15 +219,30 @@ export class JsonFile<T> {
   private failures = 0
   /** The writes in turn; each settles to whether it reached the disk. */
   private writing: Promise<boolean> = Promise.resolve(true)
+  private readonly writeListeners = new Set<(outcome: StorageWriteOutcome) => void>()
   /** A file from a newer version of the app is never overwritten. */
   readOnly = false
   status: LoadStatus = 'missing'
   backupPath: string | null = null
 
-  constructor(private readonly options: JsonFileOptions<T>) {}
+  constructor(private readonly options: JsonFileOptions<T>) {
+    if (options.onWrite) this.writeListeners.add(options.onWrite)
+  }
 
   get file(): string {
     return this.options.file
+  }
+
+  /** Subscribes to write completions and failures for this file. */
+  onWrite(listener: (outcome: StorageWriteOutcome) => void): () => void {
+    this.writeListeners.add(listener)
+    return () => {
+      this.writeListeners.delete(listener)
+    }
+  }
+
+  private emitWrite(outcome: StorageWriteOutcome): void {
+    for (const listener of [...this.writeListeners]) listener(outcome)
   }
 
   async load(): Promise<T> {
@@ -257,11 +318,15 @@ export class JsonFile<T> {
     const { serialize, compact } = this.options
     const json = JSON.stringify(serialize ? serialize(data) : data, null, compact ? undefined : 2)
     const contents = `${json}\n`
+    const writer = this.options.writeFile ?? writeFileAtomic
+    const customWriter = this.options.writeFile !== undefined
     this.writing = this.writing
-      .then(() => writeFileAtomic(this.options.file, contents))
+      .then(() => writer(this.options.file, contents))
       .then(
         () => {
           this.failures = 0
+          if (customWriter) notifyStorageWrite(this.options.file, true)
+          this.emitWrite({ file: this.options.file, ok: true })
           return true
         },
         (error: unknown) => {
@@ -269,6 +334,8 @@ export class JsonFile<T> {
             'error',
             `Could not write ${this.options.file}: ${(error as Error).message}`,
           )
+          if (customWriter) notifyStorageWrite(this.options.file, false, error)
+          this.emitWrite({ file: this.options.file, ok: false, error })
           // Kept for the next try, unless a later save has replaced it.
           this.pending ??= data
           this.retryLater()
@@ -309,15 +376,21 @@ export class JsonFile<T> {
 export interface ProjectRecord {
   path: string
   name: string
+  /** Set when `name` was chosen by the user rather than derived from the folder basename. */
+  customName?: true
+  /** Custom sidebar icon (built-in icon with optional color, or emoji). */
+  icon?: ProjectIcon
   addedAt: number
   lastOpenedAt: number
   pinnedAt?: number
+  archivedAt?: number // when the user archived it; hidden from the sidebar while set
   order?: number // its place once the user moved a project on this host; earlier ones come first
   worktree?: Partial<ProjectWorktreeSettings> // only what differs from the defaults
   autoApprove?: AutoApprove // Huli: absent keeps the settings' default
   manager?: ProjectManagerSettings // Huli: its own manager-mode roster and choices
   sandbox?: SandboxChoice // Huli: the sandbox its sessions start in; absent keeps the default
-  // Huli: further folders its sessions work in, absolute and resolved, each once; absent for none.
+  // Huli: further folders its sessions work in, absolute and resolved, each once, never `path`;
+  // a session may also start in one of them. Absent for none.
   folders?: string[]
   // Huli: the user's order of its sidebar rows by id (shared/session-order.ts); absent while they
   // go by latest activity.
@@ -363,8 +436,10 @@ export interface SessionRecord {
   agentId: AgentId
   acpSessionId: string
   projectPath: string
+  /** Primary path of the owning project when `projectPath` is an additional source folder. */
+  projectOwner?: string
   title: string | null
-  titleSource?: 'agent' | 'written' // absent: the cut first line (or none)
+  titleSource?: 'agent' | 'written' | 'given' // absent: the cut first line (or none); 'given': set explicitly by an agent, plugin or workflow
   createdAt: number
   updatedAt: number
   lastViewedAt: number | null
@@ -496,6 +571,10 @@ export interface SessionRecord {
   deletedKeepsAgent?: true
   /** Huli: restored with its project gone, so it is listed under No project in its folder. */
   noProject?: true
+  /** Native branch leaf id selected inside the session (Pi), kept across reopen/reconnect. */
+  branchLeafId?: string | null
+  /** Brought into Kettu via `sessions.import`, so its history comes from the agent on first open. */
+  imported?: true
 }
 
 /** An edit from a message, until the next send cuts the agent's own session or Put back undoes it. */
@@ -795,29 +874,43 @@ export interface AgentProcessesFile {
 
 /**
  * The user's answers about the MCP servers each folder declares itself, by the folder's path key:
- * the servers they let start (`all`: every one, later ones too) and those they refused.
+ * by each server's content digest, whether it may start (`all`: every one, later ones too).
+ * `earlier` holds answers an older version kept by a digest of the server's names alone, and
+ * `named` those kept by server name; the server they stand for takes them over the next time it is
+ * seen.
  */
 export interface ProjectMcpFile {
-  version: 1
-  folders: Record<string, { all?: true; use: string[]; skip: string[] }>
+  version: 3
+  folders: Record<string, ProjectMcpFolder>
+}
+
+export interface ProjectMcpFolder {
+  all?: true
+  servers: Record<string, boolean>
+  earlier?: Record<string, boolean>
+  named?: { use: string[]; skip: string[] }
 }
 
 /**
- * The user's answers about the hooks each folder's own Claude Code settings declare, by the
- * folder's path key: those hooks, by their digest (`use`), every one, later ones too (`all`), or
- * none (`skip`).
+ * The user's answers about what each folder's own settings make an agent run or change (hooks,
+ * plugins, commands, environment), by the folder's path key and then the harness: those settings,
+ * by their digest (`use`, or `skip` to refuse them), every one, later ones too (`all`), or, as an
+ * older version kept it, every one refused (`skip` without a digest).
  */
 export interface ProjectHooksFile {
-  version: 1
-  folders: Record<string, { decision: 'use'; digest: string } | { decision: 'all' | 'skip' }>
+  version: 2
+  folders: Record<string, Record<string, ProjectHooksAnswer>>
 }
+
+export type ProjectHooksAnswer =
+  { decision: 'use' | 'skip'; digest: string } | { decision: 'all' | 'skip' }
 
 export const PROJECTS_VERSION = 1
 export const SESSIONS_VERSION = 1
 export const AGENTS_VERSION = 1
 export const RETURNED_VERSION = 1
-export const PROJECT_MCP_VERSION = 1
-export const PROJECT_HOOKS_VERSION = 1
+export const PROJECT_MCP_VERSION = 3
+export const PROJECT_HOOKS_VERSION = 2
 export const AGENT_PROCESSES_VERSION = 1
 export const AGENT_UPDATES_VERSION = 1
 export const REGISTRY_LISTING_VERSION = 1
@@ -829,8 +922,48 @@ export const PROJECTS_MIGRATIONS: Readonly<Record<number, Migration>> = {}
 export const SESSIONS_MIGRATIONS: Readonly<Record<number, Migration>> = {}
 export const AGENTS_MIGRATIONS: Readonly<Record<number, Migration>> = {}
 export const RETURNED_MIGRATIONS: Readonly<Record<number, Migration>> = {}
-export const PROJECT_MCP_MIGRATIONS: Readonly<Record<number, Migration>> = {}
-export const PROJECT_HOOKS_MIGRATIONS: Readonly<Record<number, Migration>> = {}
+// Answers were kept by server name, which a repository could keep while changing the command.
+export const PROJECT_MCP_MIGRATIONS: Readonly<Record<number, Migration>> = {
+  1: (data) => {
+    const folders: Record<string, unknown> = {}
+    for (const [folder, value] of Object.entries(isRecord(data.folders) ? data.folders : {})) {
+      if (!isRecord(value)) continue
+      const names = (list: unknown) => (Array.isArray(list) ? list.filter(isString) : [])
+      const use = names(value.use)
+      const skip = names(value.skip)
+      folders[folder] = {
+        ...(value.all === true ? { all: true } : {}),
+        servers: {},
+        ...(use.length > 0 || skip.length > 0 ? { named: { use, skip } } : {}),
+      }
+    }
+    return { folders }
+  },
+  // Digests left out the values of a server's variables and headers, which can change what runs.
+  2: (data) => {
+    const folders: Record<string, unknown> = {}
+    for (const [folder, value] of Object.entries(isRecord(data.folders) ? data.folders : {})) {
+      if (!isRecord(value)) continue
+      const { servers, ...rest } = value
+      folders[folder] = {
+        ...rest,
+        servers: {},
+        ...(isRecord(servers) && Object.keys(servers).length > 0 ? { earlier: servers } : {}),
+      }
+    }
+    return { folders }
+  },
+}
+// Answers were Claude Code's alone; every harness now keeps its own under the folder.
+export const PROJECT_HOOKS_MIGRATIONS: Readonly<Record<number, Migration>> = {
+  1: (data) => {
+    const folders: Record<string, unknown> = {}
+    for (const [folder, value] of Object.entries(isRecord(data.folders) ? data.folders : {})) {
+      folders[folder] = { 'claude-code': value }
+    }
+    return { folders }
+  },
+}
 export const AGENT_PROCESSES_MIGRATIONS: Readonly<Record<number, Migration>> = {}
 export const AGENT_UPDATES_MIGRATIONS: Readonly<Record<number, Migration>> = {}
 export const REGISTRY_LISTING_MIGRATIONS: Readonly<Record<number, Migration>> = {}
@@ -864,12 +997,16 @@ export function parseProjectsFile(
     ) {
       return `project ${index} is malformed`
     }
+    const icon = parseProjectIcon(item.icon)
     projects.push({
       path: item.path,
       name: item.name,
+      ...(item.customName === true ? { customName: true as const } : {}),
+      ...(icon ? { icon } : {}),
       addedAt: item.addedAt,
       lastOpenedAt: item.lastOpenedAt,
       ...(isTime(item.pinnedAt) ? { pinnedAt: item.pinnedAt } : {}),
+      ...(isTime(item.archivedAt) ? { archivedAt: item.archivedAt } : {}),
       ...(Number.isSafeInteger(item.order) && (item.order as number) >= 0
         ? { order: item.order as number }
         : {}),
@@ -956,54 +1093,8 @@ function queueOf(value: unknown): { queue?: QueuedPrompt[] } {
 function withFrom(item: QueuedPrompt): QueuedPrompt {
   const { from, comments, ...kept } = item as QueuedPrompt & { from?: unknown; comments?: unknown }
   const rest = isQueuedComments(comments) ? { ...kept, comments } : kept
-  return isRecord(from) && isString(from.sessionId) && isString(from.title)
-    ? {
-        ...rest,
-        from: {
-          sessionId: from.sessionId,
-          title: from.title,
-          ...(from.report === false ? { report: false as const } : {}),
-          ...endedOf(from.ended),
-          ...reportsOf(from.reports),
-          ...digestOf(from.digest),
-        },
-      }
-    : rest
-}
-
-/**
- * Huli: a queued report keeps how the turn it tells of ended, which its row is drawn from rather
- * than from the words the agent gets.
- */
-function endedOf(value: unknown): Pick<FromSession, 'ended'> {
-  if (!isRecord(value)) return {}
-  const ended = { sessionId: '', title: '', agent: value.agent, stopReason: value.stopReason }
-  return isReportedTurn(ended)
-    ? { ended: { agent: ended.agent, stopReason: ended.stopReason } }
-    : {}
-}
-
-/** Huli: and a report of several turns each of them. */
-function reportsOf(value: unknown): Pick<FromSession, 'reports'> {
-  if (!Array.isArray(value)) return {}
-  const turns = value.filter(isReportedTurn).slice(-REPORTED_TURNS_MAX)
-  return turns.length > 1
-    ? {
-        reports: turns.map(({ sessionId, title, agent, stopReason }) => ({
-          sessionId,
-          title,
-          agent,
-          stopReason,
-        })),
-      }
-    : {}
-}
-
-/** Huli: a manager's queued digest keeps the workers it reports on. */
-function digestOf(value: unknown): { digest?: DigestItem[] } {
-  if (!Array.isArray(value)) return {}
-  const items = value.filter(isDigestItem).slice(0, DIGEST_ITEMS_MAX)
-  return items.length > 0 ? { digest: items } : {}
+  const parsedFrom = parseFromSession(from)
+  return parsedFrom ? { ...rest, from: parsedFrom } : rest
 }
 
 function roleOf(value: unknown): { role?: SessionRole } {
@@ -1445,8 +1536,13 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
       agentId: item.agentId as AgentId,
       acpSessionId: item.acpSessionId,
       projectPath: item.projectPath,
+      ...(isString(item.projectOwner) && item.projectOwner !== ''
+        ? { projectOwner: item.projectOwner }
+        : {}),
       title: item.title,
-      ...(item.titleSource === 'agent' || item.titleSource === 'written'
+      ...(item.titleSource === 'agent' ||
+      item.titleSource === 'written' ||
+      item.titleSource === 'given'
         ? { titleSource: item.titleSource }
         : {}),
       createdAt: item.createdAt,
@@ -1517,6 +1613,10 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
         : {}),
       ...(item.noRewind === true ? { noRewind: true as const } : {}),
       ...binnedOf(item),
+      ...(item.branchLeafId === null || (isString(item.branchLeafId) && item.branchLeafId !== '')
+        ? { branchLeafId: item.branchLeafId }
+        : {}),
+      ...(item.imported === true ? { imported: true as const } : {}),
     })
   }
   return {
@@ -1528,34 +1628,53 @@ export function parseSessionsFile(data: Record<string, unknown>): SessionsFile |
   }
 }
 
-// A message whose content does not parse is dropped rather than failing the whole file.
+// A folder or an answer that does not parse is dropped, which only asks again.
 export function parseProjectMcpFile(data: Record<string, unknown>): ProjectMcpFile | string {
   if (!isRecord(data.folders)) return 'folders is not an object'
   const folders: ProjectMcpFile['folders'] = {}
+  const names = (list: unknown) => (Array.isArray(list) ? list.filter(isString) : [])
   for (const [folder, value] of Object.entries(data.folders)) {
     if (!isRecord(value)) continue
+    const answers = (map: unknown) => {
+      const kept: Record<string, boolean> = {}
+      for (const [digest, allowed] of Object.entries(isRecord(map) ? map : {})) {
+        if (typeof allowed === 'boolean') kept[digest] = allowed
+      }
+      return kept
+    }
+    const servers = answers(value.servers)
+    const earlier = answers(value.earlier)
+    const named = isRecord(value.named)
+      ? { use: names(value.named.use), skip: names(value.named.skip) }
+      : null
     folders[folder] = {
       ...(value.all === true ? { all: true as const } : {}),
-      use: Array.isArray(value.use) ? value.use.filter(isString) : [],
-      skip: Array.isArray(value.skip) ? value.skip.filter(isString) : [],
+      servers,
+      ...(Object.keys(earlier).length > 0 ? { earlier } : {}),
+      ...(named && (named.use.length > 0 || named.skip.length > 0) ? { named } : {}),
     }
   }
-  return { version: 1, folders }
+  return { version: 3, folders }
 }
 
 // An answer that does not parse is dropped, which only asks again.
 export function parseProjectHooksFile(data: Record<string, unknown>): ProjectHooksFile | string {
   if (!isRecord(data.folders)) return 'folders is not an object'
   const folders: ProjectHooksFile['folders'] = {}
-  for (const [folder, value] of Object.entries(data.folders)) {
-    if (!isRecord(value)) continue
-    if (value.decision === 'use' && isString(value.digest)) {
-      folders[folder] = { decision: 'use', digest: value.digest }
-    } else if (value.decision === 'all' || value.decision === 'skip') {
-      folders[folder] = { decision: value.decision }
+  for (const [folder, harnesses] of Object.entries(data.folders)) {
+    if (!isRecord(harnesses)) continue
+    const answers: Record<string, ProjectHooksAnswer> = {}
+    for (const [harness, value] of Object.entries(harnesses)) {
+      if (!isRecord(value)) continue
+      if ((value.decision === 'use' || value.decision === 'skip') && isString(value.digest)) {
+        answers[harness] = { decision: value.decision, digest: value.digest }
+      } else if (value.decision === 'all' || value.decision === 'skip') {
+        answers[harness] = { decision: value.decision }
+      }
     }
+    folders[folder] = answers
   }
-  return { version: 1, folders }
+  return { version: 2, folders }
 }
 
 export function parseReturnedFile(data: Record<string, unknown>): ReturnedFile | string {
@@ -1973,7 +2092,7 @@ export function projectMcpFile(userDataPath: string, log: LogFn): JsonFile<Proje
     version: PROJECT_MCP_VERSION,
     migrations: PROJECT_MCP_MIGRATIONS,
     parse: parseProjectMcpFile,
-    empty: () => ({ version: 1, folders: {} }),
+    empty: () => ({ version: 3, folders: {} }),
     log,
     // Written at once: a refusal lost to a quit would start the server next time.
     debounceMs: 0,
@@ -1986,7 +2105,7 @@ export function projectHooksFile(userDataPath: string, log: LogFn): JsonFile<Pro
     version: PROJECT_HOOKS_VERSION,
     migrations: PROJECT_HOOKS_MIGRATIONS,
     parse: parseProjectHooksFile,
-    empty: () => ({ version: 1, folders: {} }),
+    empty: () => ({ version: 2, folders: {} }),
     log,
     // Written at once: a refusal lost to a quit would run the hooks next time.
     debounceMs: 0,

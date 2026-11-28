@@ -1,3 +1,4 @@
+import { parseJsonVersion } from '../agent-updates'
 import type { AgentDefinition } from '../catalog'
 import { AGY_CLI } from '../installed-cli'
 
@@ -16,6 +17,7 @@ export const ANTIGRAVITY: AgentDefinition = {
     sessionFlag: '--dangerously-skip-permissions',
     // Huli: `agy acp --add-dir <folder>`, repeatable, as 1.5.14's help lists it.
     dirFlag: '--add-dir',
+    sessionArgs: ['--app-data-dir'],
   },
   install: {
     hint: 'detect.hint.antigravity',
@@ -26,7 +28,22 @@ export const ANTIGRAVITY: AgentDefinition = {
     script: 'https://antigravity.google/cli/install.sh',
     scriptBin: ['.local', 'bin'],
     scriptHome: ['.local', 'bin'],
+    scriptHomeWin: ['AppData', 'Local', 'agy', 'bin'],
     selfUpdate: ['update'],
+    // The same release manifest the official install.sh and install.ps1 read.
+    versionCheck: {
+      urls: (platform, arch) => {
+        const osName = platform === 'win32' ? 'windows' : platform
+        const machine = arch === 'x64' ? 'amd64' : arch === 'arm64' ? 'arm64' : null
+        if (!machine || (osName !== 'darwin' && osName !== 'linux' && osName !== 'windows')) {
+          return []
+        }
+        return [
+          `https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/${osName}_${machine}.json`,
+        ]
+      },
+      parse: (body) => parseJsonVersion(body, ['version']),
+    },
     order: ['script'],
   },
   cli: AGY_CLI,
@@ -47,6 +64,7 @@ export const ANTIGRAVITY: AgentDefinition = {
   // agy 1.5.14 drops the largest MCP tools past its customization budget, and over ACP gives the
   // model no call_mcp_tool for a dropped one.
   toolGateway: true,
-  // 启用上下文弹窗中的 Skills 与 MCP 工具定义估算区。
+  // 启用本地精确上下文构成读取，并在新会话首轮前保留 Skills 与 MCP 工具定义估算区。
+  readsContext: true,
   contextEstimates: true,
 }

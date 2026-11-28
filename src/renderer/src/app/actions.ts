@@ -17,6 +17,21 @@ import {
   writeDraft,
 } from '@renderer/features/session/composer/drafts'
 import {
+  draftArtifactAttachments,
+  formatAttachedArtifactsPrompt,
+  restoreDraftArtifactAttachments,
+  setDraftArtifactAttachments,
+  splitAttachedArtifactsPrompt,
+  type AttachedArtifact,
+} from '@renderer/features/session/composer/artifact-attachments'
+import {
+  draftBrowserAnnotations,
+  formatBrowserAnnotationsPrompt,
+  restoreDraftBrowserAnnotations,
+  setDraftBrowserAnnotations,
+  splitBrowserAnnotationsPrompt,
+} from '@renderer/features/session/composer/browser-annotations'
+import {
   attachmentContent,
   contentAttachments,
   dropAttachments,
@@ -29,7 +44,7 @@ import { toast } from '@renderer/components/ui/toast'
 import { errorCode, errorMessage, forgetSessionHost, host, hostAt } from '@renderer/lib/host'
 import { i18n } from '@renderer/lib/i18n'
 import { hostOfPath } from '@renderer/lib/host-paths'
-import { adoptedPrepared } from '@renderer/features/session/new-session/prepared'
+import { sessionStarted } from '@renderer/features/session/new-session/prepared'
 import { clearManagerDraft, managerStart } from '@renderer/features/manager/draft'
 import { roleStarted } from '@renderer/features/session/new-session/role-choice'
 import { clearPicks, type OptionValues } from '@renderer/stores/agent-options'
@@ -39,7 +54,12 @@ import {
   type DraftAttachment,
 } from '@renderer/stores/attachments'
 import { agentName } from '@renderer/stores/agents'
-import { useProjectsStore } from '@renderer/stores/projects'
+import {
+  activeProjects,
+  findProjectForSession,
+  projectOwnsPath,
+  useProjectsStore,
+} from '@renderer/stores/projects'
 import {
   hostOfSession,
   isScratchFolder,
@@ -163,15 +183,22 @@ const promptText = (content: readonly UserContent[]): string =>
 function draftIsPrompt(prompt: readonly UserContent[]): boolean {
   const ids = contentAttachments(prompt).map((a) => a.id)
   const items = draftAttachments(NEW_SESSION_DRAFT).filter((item) => item.status !== 'failed')
+  const composed = formatAttachedArtifactsPrompt(
+    readDraft(NEW_SESSION_DRAFT),
+    draftArtifactAttachments(NEW_SESSION_DRAFT),
+  )
   return (
-    readDraft(NEW_SESSION_DRAFT).trim() === promptText(prompt).trim() &&
+    composed.trim() === promptText(prompt).trim() &&
     items.length === ids.length &&
     items.every((item, i) => item.attachment?.id === ids[i])
   )
 }
 
 const draftIsEmpty = (draft = NEW_SESSION_DRAFT) =>
-  !readDraft(draft).trim() && draftAttachments(draft).length === 0
+  !readDraft(draft).trim() &&
+  draftAttachments(draft).length === 0 &&
+  draftArtifactAttachments(draft).length === 0 &&
+  draftBrowserAnnotations(draft).length === 0
 
 /**
  * Puts a message whose send failed back in its draft: its text above what was written since,
@@ -255,10 +282,15 @@ export async function createSession(
   // leaves the draft as it goes, so a window reloaded meanwhile does not offer it again; a retry
   // leaves alone a draft written since. The host keeps the attachments' records for the message.
   let held: DraftAttachment[] | null = null
+  let heldText = ''
+  let heldArtifacts: readonly AttachedArtifact[] = []
   if (prompt !== null && draftIsPrompt(prompt)) {
+    heldText = readDraft(NEW_SESSION_DRAFT)
     held = draftAttachments(NEW_SESSION_DRAFT)
+    heldArtifacts = draftArtifactAttachments(NEW_SESSION_DRAFT)
     clearDraft(NEW_SESSION_DRAFT)
     setDraftAttachments(NEW_SESSION_DRAFT, [])
+    setDraftArtifactAttachments(NEW_SESSION_DRAFT, [])
   }
   // Huli: a manager starts in a session of its own, held to reading, never in the prepared one.
   const manager = managerStart(agentId, parentId)
@@ -276,13 +308,15 @@ export async function createSession(
       ...(manager ? { manager } : {}),
     })
     if (manager) clearManagerDraft()
-    // A session in a new worktree, as a role or a manager starts its own agent; the prepared one
-    // stays the window's.
-    if (preparedId && !worktree && !role && !manager) adoptedPrepared(summary.id)
+    const hostId = projectPath === null ? null : hostOfPath(projectPath)
+    // Drop the prepared session once a session starts: if adopted it is now that session, and if
+    // a fresh session started instead (such as a new worktree or role), discard it without keeping
+    // one-off choices like permission mode for the next New session.
+    sessionStarted(hostId, agentId, summary.id)
     if (role) roleStarted()
     if (worktree) writeSlug(null)
     // The host now remembers what carries over; the rest starts afresh next time.
-    if (options) clearPicks(projectPath === null ? null : hostOfPath(projectPath), agentId)
+    clearPicks(hostId, agentId)
     useSessionsStore.getState().upsert(summary)
     // The session shows with its thread and renderer ready, so no skeleton flashes in between.
     await Promise.all([focusSession(summary.id), loadMarkdown().catch(() => {})])
@@ -302,9 +336,17 @@ export async function createSession(
     // since a quit can close the window before a later write. The tiles it left with keep their
     // pixel sizes; a retry that left a draft written since alone puts back only into an empty one.
     if (prompt !== null && held) {
-      putBackDraft(NEW_SESSION_DRAFT, promptText(prompt), held)
+      putBackDraft(NEW_SESSION_DRAFT, heldText, held)
+      if (heldArtifacts.length > 0) {
+        restoreDraftArtifactAttachments(NEW_SESSION_DRAFT, heldArtifacts)
+      }
     } else if (prompt !== null && draftIsEmpty()) {
-      writeDraft(NEW_SESSION_DRAFT, promptText(prompt))
+      const raw = promptText(prompt)
+      const parsed = splitAttachedArtifactsPrompt(raw)
+      writeDraft(NEW_SESSION_DRAFT, parsed ? parsed.text : raw)
+      if (parsed && parsed.artifacts.length > 0) {
+        restoreDraftArtifactAttachments(NEW_SESSION_DRAFT, parsed.artifacts)
+      }
       restoreAttachments(NEW_SESSION_DRAFT, prompt)
       flushDraft(NEW_SESSION_DRAFT)
     }
@@ -338,15 +380,29 @@ export async function createSession(
  */
 export async function editFromMessage(sessionId: string, entryId: string): Promise<void> {
   const held = draftAttachments(sessionId).filter((item) => item.status === 'ready')
-  const text = readDraft(sessionId)
+  const withBrowser = formatBrowserAnnotationsPrompt(
+    readDraft(sessionId),
+    draftBrowserAnnotations(sessionId),
+  )
+  const text = formatAttachedArtifactsPrompt(withBrowser, draftArtifactAttachments(sessionId))
   const draft: UserContent[] = [
     ...(text.trim() ? [{ type: 'text' as const, text }] : []),
     ...attachmentContent(held),
   ]
   const { content } = await host('sessions.rewind', { sessionId, entryId, draft })
-  const message = promptText(content)
+  const rawMessage = promptText(content)
+  const parsedArtifacts = splitAttachedArtifactsPrompt(rawMessage)
+  const afterArtifacts = parsedArtifacts ? parsedArtifacts.text : rawMessage
+  const parsedBrowser = splitBrowserAnnotationsPrompt(afterArtifacts)
+  const message = parsedBrowser ? parsedBrowser.text : afterArtifacts
   const written = readDraft(sessionId)
   writeDraft(sessionId, !message ? written : written.trim() ? `${message}\n\n${written}` : message)
+  if (parsedArtifacts && parsedArtifacts.artifacts.length > 0) {
+    restoreDraftArtifactAttachments(sessionId, parsedArtifacts.artifacts)
+  }
+  if (parsedBrowser && parsedBrowser.annotations.length > 0) {
+    restoreDraftBrowserAnnotations(sessionId, parsedBrowser.annotations)
+  }
   const items = draftAttachments(sessionId)
   restoreAttachments(sessionId, content)
   // The message's attachments go in front of those the composer held.
@@ -373,7 +429,13 @@ export async function rewindToMessage(sessionId: string, entryId: string): Promi
 /** Put back: the turns an edit set aside return, and the composer holds what it did before it. */
 export async function putBackRewound(sessionId: string): Promise<void> {
   const { draft } = await host('sessions.putBack', { sessionId })
-  writeDraft(sessionId, promptText(draft))
+  const raw = promptText(draft)
+  const parsedArtifacts = splitAttachedArtifactsPrompt(raw)
+  const afterArtifacts = parsedArtifacts ? parsedArtifacts.text : raw
+  const parsedBrowser = splitBrowserAnnotationsPrompt(afterArtifacts)
+  writeDraft(sessionId, parsedBrowser ? parsedBrowser.text : afterArtifacts)
+  setDraftArtifactAttachments(sessionId, parsedArtifacts ? parsedArtifacts.artifacts : [])
+  setDraftBrowserAnnotations(sessionId, parsedBrowser ? parsedBrowser.annotations : [])
   resetAttachments(sessionId, draft)
   flushDraft(sessionId)
   emitAppEvent({ kind: 'draft-written', draft: sessionId })
@@ -410,9 +472,15 @@ export async function continueWith(
 function takeBackGiven(sessionId: string, content: readonly UserContent[]): void {
   const ids = new Set(contentAttachments(content).map((a) => a.id))
   const items = draftAttachments(sessionId)
-  if (draftIsEmpty(sessionId) || readDraft(sessionId).trim() !== promptText(content).trim()) return
+  const composed = formatAttachedArtifactsPrompt(
+    formatBrowserAnnotationsPrompt(readDraft(sessionId), draftBrowserAnnotations(sessionId)),
+    draftArtifactAttachments(sessionId),
+  )
+  if (draftIsEmpty(sessionId) || composed.trim() !== promptText(content).trim()) return
   if (!items.every((item) => item.attachment && ids.has(item.attachment.id))) return
   clearDraft(sessionId)
+  setDraftArtifactAttachments(sessionId, [])
+  setDraftBrowserAnnotations(sessionId, [])
   releaseResent(sessionId, content)
   emitAppEvent({ kind: 'draft-written', draft: sessionId })
 }
@@ -438,10 +506,20 @@ export async function takeReturnedMessages(
   }
   for (const { sessionId, content } of messages) {
     const draft = sessionId ?? NEW_SESSION_DRAFT
-    const text = promptText(content)
+    const raw = promptText(content)
+    const parsedArtifacts = splitAttachedArtifactsPrompt(raw)
+    const afterArtifacts = parsedArtifacts ? parsedArtifacts.text : raw
+    const parsedBrowser = splitBrowserAnnotationsPrompt(afterArtifacts)
+    const text = parsedBrowser ? parsedBrowser.text : afterArtifacts
     const written = readDraft(draft)
     const next = draftIsEmpty(draft) || !written ? text : text ? `${written}\n\n${text}` : written
     writeDraft(draft, next)
+    if (parsedArtifacts && parsedArtifacts.artifacts.length > 0) {
+      restoreDraftArtifactAttachments(draft, parsedArtifacts.artifacts)
+    }
+    if (parsedBrowser && parsedBrowser.annotations.length > 0) {
+      restoreDraftBrowserAnnotations(draft, parsedBrowser.annotations)
+    }
     restoreAttachments(draft, content)
     flushDraft(draft)
     emitAppEvent({ kind: 'draft-written', draft })
@@ -636,6 +714,57 @@ export async function unarchiveSession(sessionId: string): Promise<void> {
   await host('sessions.unarchive', { sessionId })
 }
 
+/**
+ * Archives a project so it leaves the sidebar while keeping its sessions and history.
+ * Closes split panes showing its active sessions and moves a single pane off them.
+ */
+export async function archiveProject(path: string): Promise<void> {
+  const before = useProjectsStore.getState().projects
+  const target = before.find((p) => p.path === path)
+  const { byId } = useSessionsStore.getState()
+  const ownIds = Object.values(byId)
+    .filter((summary) => !summary.scratch && findProjectForSession(before, summary)?.path === path)
+    .map((summary) => summary.id)
+  await useProjectsStore.getState().archive(path)
+  for (const id of ownIds) forgetSession(id)
+  const ownSet = new Set(ownIds)
+  const remaining = activeProjects(useProjectsStore.getState().projects)
+  const hostId = hostOfPath(path)
+  const fallbackProject =
+    remaining.find((p) => hostOfPath(p.path) === hostId)?.path ?? remaining[0]?.path ?? null
+  const ownsPath = (candidate: string | null | undefined): boolean =>
+    !!candidate && (candidate === path || (!!target && projectOwnsPath(target, candidate)))
+  useViewStore.setState((s) => {
+    const selectedOwns = ownsPath(s.projectPath)
+    const draftOwns = s.newSessionDraft !== null && ownsPath(s.newSessionDraft.projectPath)
+    if (!selectedOwns && !draftOwns) return s
+    return {
+      ...(selectedOwns ? { projectPath: fallbackProject } : {}),
+      ...(draftOwns
+        ? { newSessionDraft: { ...s.newSessionDraft!, projectPath: fallbackProject } }
+        : {}),
+    }
+  })
+  // Close split panes first so a split containing only this project's sessions leaves the final
+  // pane cleanly via New session below.
+  for (const id of ownIds) {
+    if (!sessionArchived(byId, id)) closeSessionInSplit(id)
+  }
+  const { main, layout } = useViewStore.getState()
+  if (
+    !isSplit(layout) &&
+    main.kind === 'session' &&
+    ownSet.has(main.sessionId) &&
+    !sessionArchived(byId, main.sessionId)
+  ) {
+    newSessionInPlace(fallbackProject)
+  }
+}
+
+export async function unarchiveProject(path: string): Promise<void> {
+  await useProjectsStore.getState().unarchive(path)
+}
+
 export async function markSessionUnread(sessionId: string, unread: boolean): Promise<void> {
   await host('sessions.markUnread', { sessionId, unread })
 }
@@ -650,6 +779,8 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await host('sessions.delete', { sessionId })
   forgetSession(sessionId)
   forgetDraft(sessionId)
+  setDraftArtifactAttachments(sessionId, [])
+  setDraftBrowserAnnotations(sessionId, [])
   dropAttachments(sessionId)
   useSessionsStore.getState().remove(sessionId)
   closeSessionInSplit(sessionId)
@@ -660,6 +791,8 @@ export function sessionRemoved(sessionId: string): void {
   useSessionsStore.getState().remove(sessionId)
   forgetSession(sessionId)
   forgetDraft(sessionId)
+  setDraftArtifactAttachments(sessionId, [])
+  setDraftBrowserAnnotations(sessionId, [])
   dropAttachments(sessionId)
   closeSessionInSplit(sessionId)
 }

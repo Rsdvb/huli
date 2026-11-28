@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   AiChat02Icon,
   ArrowLeft01Icon,
@@ -22,13 +22,17 @@ import { prFlowActive } from '@renderer/features/git/flow-model'
 import { HeaderTools, SessionMoreMenu } from '@renderer/features/shell/header-tools'
 import { StepRoundBadge, TaskCrumb, TaskCrumbLink } from '@renderer/features/tasks/step-crumb'
 import { useStepSessionTitle } from '@renderer/features/tasks/use-task'
+import { BranchNavigator } from './branch-navigator'
 import { PlanChip } from './plan-chip'
+import { SessionFamilyMenu } from './session-family-menu'
+import { resolveSessionFamily } from './session-family-model'
 import { ViewersChip } from './viewers-chip'
 import { WorktreeBarChip } from './worktree/worktree-tag'
 import { NoDrag, TopBar } from '@renderer/features/shell/top-bar'
 import { SessionTitleField } from '@renderer/features/sidebar/session-menu'
 import { useRenaming } from '@renderer/features/sidebar/use-renaming'
 import { agentName } from '@renderer/stores/agents'
+import { isSessionInArchivedProject, useProjectsStore } from '@renderer/stores/projects'
 import { useRoutinesStore } from '@renderer/stores/routines'
 import { taskFrom, useTasksStore } from '@renderer/stores/tasks'
 import {
@@ -94,7 +98,11 @@ export function SessionHeader({
 }) {
   const { t: ts } = useTranslation('session')
   const { t: tt } = useTranslation('tasks')
-  const parent = useSessionsStore((s) => (summary.parentId ? s.byId[summary.parentId] : undefined))
+  const sessionsById = useSessionsStore((s) => s.byId)
+  const family = useMemo(
+    () => resolveSessionFamily(sessionsById, summary.id),
+    [sessionsById, summary.id],
+  )
   const routine = useRoutinesStore((s) =>
     summary.routine ? s.byId[summary.routine.routineId] : undefined,
   )
@@ -110,7 +118,9 @@ export function SessionHeader({
   )
   const title = originTask ? tt('row.startedHere') : (stepTitle ?? sessionTitle(summary))
   const pane = usePane()
-  const archived = useSessionsStore((s) => sessionArchived(s.byId, summary.id))
+  const sessionIsArchived = useSessionsStore((s) => sessionArchived(s.byId, summary.id))
+  const projectIsArchived = useProjectsStore((s) => isSessionInArchivedProject(summary, s.projects))
+  const archived = sessionIsArchived || projectIsArchived
   const routineLink = useEntry('session.routineLink')
   const flowChips = useEntry('header.flowChips')
 
@@ -136,7 +146,7 @@ export function SessionHeader({
             </span>
           </>
         )}
-        {parent && <ParentLink parent={parent} />}
+        {family?.parent && <SessionFamilyMenu family={family} variant="crumb" />}
         {summary.task && <TaskCrumb summary={summary} />}
         {originTask && <TaskCrumbLink task={originTask} />}
         <span className="grid w-4 shrink-0 place-items-center">
@@ -183,9 +193,11 @@ export function SessionHeader({
           onNewSubSession={rename.menu.onLeave}
           menu={rename.menu}
         />
+        {family && !family.parent && <SessionFamilyMenu family={family} variant="chip" />}
+        <BranchNavigator summary={summary} session={session} archived={archived} />
         {summary.worktree && <WorktreeBarChip worktree={summary.worktree} />}
         {summary.issue && flowChips && <IssueBarChip issue={summary.issue} />}
-        <PrBarChip projectPath={sessionFolder(summary)} />
+        <PrBarChip projectPath={sessionFolder(summary)} sessionId={summary.id} />
         {flowChips &&
           summary.prFlow &&
           (prFlowActive(summary.prFlow) || summary.prFlow.state === 'failed') && (

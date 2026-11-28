@@ -1,3 +1,4 @@
+import { McpConfirmation, McpRunPreview } from './mcp-confirmation'
 // What Install asks before it runs: the agents that get the server, and a field for each value
 // it needs, a password field for a secret. Kettu keeps the server and hands it to those agents
 // when their sessions start.
@@ -9,7 +10,9 @@ import type { AgentId } from '@shared/thread'
 import { Button } from '@renderer/components/affect/button'
 import { TextField } from '@renderer/components/affect/text-field'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
-import type { AgentChoice } from './actions'
+import { useTextFieldLabels } from '@renderer/lib/text-field-labels'
+import { installServer, type AgentChoice } from './actions'
+import { useHostScope } from '@renderer/stores/host-scope'
 import { useChoosableAgents } from './hooks'
 
 /**
@@ -100,6 +103,7 @@ export function InstallForm({
   onDone: (agents: AgentChoice, values: Record<string, string>) => void
 }) {
   const { t } = useTranslation('marketplace')
+  const fieldLabels = useTextFieldLabels()
   const inputs = specInputs(server.spec)
   const [agents, setAgents] = useState<AgentChoice>('all')
   const [values, setValues] = useState<Record<string, string>>({})
@@ -114,8 +118,7 @@ export function InstallForm({
   }
   return (
     <form className="k-mkt-install" onSubmit={submit}>
-      <b>{t('install.title', { name: server.title })}</b>
-      <span>{t('install.note')}</span>
+      <McpRunPreview spec={server.spec} />
       <div className="k-mkt-install__field">
         <small>{t('install.useIn')}</small>
         <AgentPicker value={agents} onChange={setAgents} label={t('install.useIn')} />
@@ -125,6 +128,7 @@ export function InstallForm({
           key={input.name}
           size="sm"
           type={input.secret ? 'password' : 'text'}
+          labels={fieldLabels}
           autoFocus={i === 0}
           autoComplete="off"
           spellCheck={false}
@@ -138,8 +142,38 @@ export function InstallForm({
         />
       ))}
       <Button size="sm" type="submit" disabled={missing}>
-        {t('install.submit')}
+        {t('mcp.addAndCheck')}
       </Button>
     </form>
+  )
+}
+
+export function CatalogInstallConfirmation({
+  server,
+  open,
+  setOpen,
+}: {
+  server: CatalogServer
+  open: boolean
+  setOpen(open: boolean): void
+}) {
+  const { t } = useTranslation('marketplace')
+  const scope = useHostScope()
+  return (
+    <McpConfirmation
+      open={open}
+      onOpenChange={setOpen}
+      title={t('install.title', { name: server.title })}
+    >
+      <div className="kettu-sd__body">
+        <InstallForm
+          server={server}
+          onDone={(agents, values) => {
+            setOpen(false)
+            void installServer(scope, server, agents, values)
+          }}
+        />
+      </div>
+    </McpConfirmation>
   )
 }

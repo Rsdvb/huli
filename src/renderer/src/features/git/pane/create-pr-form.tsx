@@ -18,7 +18,6 @@ import { Textarea } from '@renderer/components/ui/textarea'
 import { Glyph } from '@renderer/features/shell/glyph'
 import { errorMessage, host } from '@renderer/lib/host'
 import { useSessionsStore } from '@renderer/stores/sessions'
-import { panelSession } from '@renderer/stores/view'
 import {
   clearPullRequestForm,
   createPullRequest,
@@ -29,6 +28,7 @@ import {
   useGitStore,
   type PullRequestForm,
 } from '@renderer/stores/git'
+import { panelSession } from '@renderer/stores/view'
 import { pushRequest, showCreatedPr } from '../steps'
 import { lastLine, pullRequestHead, pushTargetOf } from '../sync'
 import { Field, PAGE_PAD } from './pane-ui'
@@ -163,7 +163,7 @@ export function CreatePullRequest({ status, panel }: { status: GitStatus; panel:
         draft: form.draft,
       })
       clearPullRequestForm(projectPath)
-      showCreatedPr(projectPath, pr.number)
+      showCreatedPr(projectPath, pr.number, panelSession(panel))
     } catch (failure) {
       setError(errorMessage(failure))
     } finally {

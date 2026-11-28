@@ -11,6 +11,7 @@ import type {
   AskForApproval,
   CollaborationModeKind,
   Model,
+  ModelServiceTier,
   SandboxPolicy,
   ThreadSettings,
 } from './protocol'
@@ -20,8 +21,8 @@ export const COLLABORATION_ID = 'collaboration_mode'
 export const MODEL_ID = 'model'
 export const EFFORT_ID = 'reasoning_effort'
 export const FAST_ID = 'fast-mode'
-/** The speed choice for the standard tier, which turns send as `default`. */
-export const STANDARD_TIER = 'default'
+export const SERVICE_TIER_ID = 'service-tier'
+export const STANDARD_SERVICE_TIER = 'default'
 
 export type ModeId = 'read-only' | 'workspace-write' | 'agent' | 'agent-full-access'
 
@@ -95,35 +96,163 @@ export interface Settings {
   collaboration: CollaborationModeKind
   model: string
   effort: string | null
-  /** The service tier chosen, or null for the standard one. */
-  tier: string | null
+  /** Selected non-standard service tier id (e.g. `priority`, `fast`, `ultrafast`), or null for Standard. */
+  serviceTier: string | null
 }
 
-type Tier = NonNullable<Model['serviceTiers']>[number]
-
-/** The names Codex gives its fast tier across versions and config files. */
 const FAST_TIER_ALIASES = new Set(['fast', 'priority'])
+const ULTRAFAST_TIER_ALIASES = new Set(['ultrafast', 'ultra_fast', 'ultra-fast', 'ultra fast'])
+const STANDARD_TIER_ALIASES = new Set(['default', 'standard', 'off', 'normal'])
+
+export function isStandardTier(value: string | null | undefined): boolean {
+  if (!value) return true
+  const normalized = value.trim().toLowerCase()
+  return normalized === '' || STANDARD_TIER_ALIASES.has(normalized)
+}
+
+function isFastAlias(value: string): boolean {
+  return FAST_TIER_ALIASES.has(value.trim().toLowerCase())
+}
+
+function isUltrafastAlias(value: string): boolean {
+  return ULTRAFAST_TIER_ALIASES.has(value.trim().toLowerCase())
+}
+
+function isFastTier(tier: ModelServiceTier): boolean {
+  return isFastAlias(tier.id) || isFastAlias(tier.name)
+}
+
+function isUltrafastTier(tier: ModelServiceTier): boolean {
+  return isUltrafastAlias(tier.id) || isUltrafastAlias(tier.name)
+}
+
+function defaultTierName(id: string): string {
+  if (isFastAlias(id)) return t('codex.speed.fast')
+  if (isUltrafastAlias(id)) return t('codex.speed.ultrafast')
+  return id
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map(capitalize)
+    .join(' ')
+}
+
+function displayTierName(tier: ModelServiceTier): string {
+  if (isFastTier(tier) && isFastAlias(tier.name)) return t('codex.speed.fast')
+  if (isUltrafastTier(tier) && isUltrafastAlias(tier.name)) return t('codex.speed.ultrafast')
+  return tier.name
+}
+
+function defaultTierDescription(tier: Pick<ModelServiceTier, 'id' | 'name'>): string | undefined {
+  if (isFastAlias(tier.id) || isFastAlias(tier.name)) return t('codex.option.fastDescription')
+  if (isUltrafastAlias(tier.id) || isUltrafastAlias(tier.name)) {
+    return t('codex.speed.ultrafastDescription')
+  }
+  return undefined
+}
 
 /**
- * The faster service tiers a model offers, as Codex lists them, so a tier it adds for some plans,
- * such as Ultrafast, shows up without a change here. An older Codex names only `fast`.
+ * All non-standard speed tiers advertised by `model`, preferring `serviceTiers` and falling back
+ * to deprecated `additionalSpeedTiers`.
  */
-export function speedTiers(model: Model | undefined): Tier[] {
+export function modelSpeedTiers(model: Model | undefined): ModelServiceTier[] {
   if (!model) return []
-  const tiers = (model.serviceTiers ?? []).filter((tier) => tier.id && tier.id !== 'default')
-  if (tiers.length > 0) return tiers
-  const fast = model.additionalSpeedTiers?.find((item) =>
-    FAST_TIER_ALIASES.has(item.trim().toLowerCase()),
-  )
-  return fast ? [{ id: fast, name: t('codex.option.fastTier') }] : []
+  const seen = new Set<string>()
+  const result: ModelServiceTier[] = []
+  if (model.serviceTiers && model.serviceTiers.length > 0) {
+    for (const item of model.serviceTiers) {
+      const id = item.id.trim()
+      if (!id || isStandardTier(id)) continue
+      const key = id.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      const name = item.name.trim() || defaultTierName(id)
+      const description = item.description?.trim()
+      result.push({ id, name, ...(description ? { description } : {}) })
+    }
+    return result
+  }
+  for (const raw of model.additionalSpeedTiers ?? []) {
+    const id = raw.trim()
+    if (!id || isStandardTier(id)) continue
+    const key = id.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    const name = defaultTierName(id)
+    const description = defaultTierDescription({ id, name })
+    result.push({ id, name, ...(description ? { description } : {}) })
+  }
+  return result
 }
 
-/** The tier a turn on `model` runs with: the one chosen when it has it, else its first faster one. */
-export function tierFor(model: Model | undefined, wanted: string | null): string | null {
-  if (!wanted) return null
-  if (!model) return wanted
-  const tiers = speedTiers(model)
-  return tiers.find((tier) => tier.id === wanted)?.id ?? tiers[0]?.id ?? null
+/** The service tier that makes a model fast, or null for one that has none. */
+export function fastTier(model: Model | undefined): string | null {
+  return modelSpeedTiers(model).find(isFastTier)?.id ?? null
+}
+
+/** The service tier that makes a model ultrafast, or null for one that has none. */
+export function ultrafastTier(model: Model | undefined): string | null {
+  return modelSpeedTiers(model).find(isUltrafastTier)?.id ?? null
+}
+
+/**
+ * Resolves a requested or reported tier against the tiers advertised by `model`, normalizing
+ * `fast`/`priority` and `ultrafast` aliases to the model's exact advertised tier id.
+ * Returns null when the tier represents Standard or is not supported by `model`.
+ */
+export function resolveServiceTier(
+  tier: string | null | undefined,
+  model: Model | undefined,
+): string | null {
+  if (isStandardTier(tier)) return null
+  const tiers = modelSpeedTiers(model)
+  if (tiers.length === 0) return null
+  const norm = tier!.trim().toLowerCase()
+  const byId = tiers.find((item) => item.id.toLowerCase() === norm)
+  if (byId) return byId.id
+  const byName = tiers.find((item) => item.name.toLowerCase() === norm)
+  if (byName) return byName.id
+  if (isFastAlias(norm)) return fastTier(model)
+  if (isUltrafastAlias(norm)) return ultrafastTier(model)
+  return null
+}
+
+/** Reads a thread's initial/resumed `serviceTier` into `Settings.serviceTier`. */
+export function initialServiceTier(
+  tier: string | null | undefined,
+  model: Model | undefined,
+): string | null {
+  if (isStandardTier(tier)) return null
+  return resolveServiceTier(tier, model) ?? tier!.trim()
+}
+
+/**
+ * The `serviceTier` value to send on `turn/start` or `thread/settings/update`, or undefined to omit
+ * the field (when the model advertises no speed tiers or does not support the remembered tier).
+ */
+export function serviceTierParam(
+  settings: Pick<Settings, 'serviceTier'>,
+  model: Model | undefined,
+): string | undefined {
+  if (modelSpeedTiers(model).length === 0) return undefined
+  if (settings.serviceTier === null) return STANDARD_SERVICE_TIER
+  return resolveServiceTier(settings.serviceTier, model) ?? undefined
+}
+
+/**
+ * Whether a thread's reported service tier means fast mode: matches the model's advertised fast
+ * tier or the `fast` / `priority` aliases Codex uses across versions and config files.
+ */
+export function isFastServiceTier(
+  tier: string | null | undefined,
+  model: Model | undefined,
+): boolean {
+  if (isStandardTier(tier)) return false
+  const advertised = fastTier(model)
+  if (advertised) {
+    const resolved = resolveServiceTier(tier, model)
+    return resolved !== null && resolved.toLowerCase() === advertised.toLowerCase()
+  }
+  return isFastAlias(tier!)
 }
 
 /** A model's name as codex-acp showed it: `gpt-5.6-luna` as `5.6 Luna`. */
@@ -251,32 +380,40 @@ export function buildConfig(settings: Settings, models: readonly Model[]): Confi
       })),
     })
   }
-  const tiers = speedTiers(current)
-  const tier = tierFor(current, settings.tier)
-  if (tiers.length === 1) {
+  const speedTiers = modelSpeedTiers(current)
+  const activeTier = resolveServiceTier(settings.serviceTier, current)
+  if (speedTiers.length === 1 && isFastTier(speedTiers[0]!)) {
+    const only = speedTiers[0]!
     options.push({
       id: FAST_ID,
       name: t('codex.option.fast'),
-      description: tiers[0]!.description || t('codex.option.fastDescription'),
+      description: only.description || t('codex.option.fastDescription'),
       category: 'model_config',
       type: 'boolean',
-      value: tier !== null,
+      value: activeTier !== null && activeTier.toLowerCase() === only.id.toLowerCase(),
     })
-  } else if (tiers.length > 1) {
+  } else if (speedTiers.length > 0) {
     options.push({
-      id: FAST_ID,
+      id: SERVICE_TIER_ID,
       name: t('codex.option.speed'),
       description: t('codex.option.speedDescription'),
       category: 'model_config',
       type: 'select',
-      value: tier ?? STANDARD_TIER,
+      value: activeTier ?? STANDARD_SERVICE_TIER,
       choices: [
-        { value: STANDARD_TIER, name: t('codex.option.speedStandard') },
-        ...tiers.map((item) => ({
-          value: item.id,
-          name: item.name || item.id,
-          ...(item.description ? { description: item.description } : {}),
-        })),
+        {
+          value: STANDARD_SERVICE_TIER,
+          name: t('codex.speed.standard'),
+          description: t('codex.speed.standardDescription'),
+        },
+        ...speedTiers.map((tier) => {
+          const description = tier.description || defaultTierDescription(tier)
+          return {
+            value: tier.id,
+            name: displayTierName(tier),
+            ...(description ? { description } : {}),
+          }
+        }),
       ],
     })
   }
@@ -319,22 +456,32 @@ export function applyOption(
       return { ...settings, effort: value as string }
     }
     case FAST_ID: {
-      // codex-acp's select took `on` and `off`, which a stored choice may still hold.
-      if (value === false || value === 'off' || value === STANDARD_TIER) {
-        return { ...settings, tier: null }
-      }
       const model = models.find((item) => item.id === settings.model)
+      // codex-acp's select took `on` and `off`, which a stored choice may still hold.
       if (value === true || value === 'on') {
-        return { ...settings, tier: speedTiers(model)[0]?.id ?? 'fast' }
+        return { ...settings, serviceTier: fastTier(model) ?? 'priority' }
       }
-      // A tier of another model is kept too: a stored choice outlives the model it was made on,
-      // and a turn falls back to the model's own first tier.
-      const known =
-        typeof value === 'string' &&
-        value !== '' &&
-        (models.length === 0 || models.some((m) => speedTiers(m).some((x) => x.id === value)))
-      if (!known) throw new ConfigValueError(optionId, value)
-      return { ...settings, tier: value as string }
+      if (value === false || value === 'off') return { ...settings, serviceTier: null }
+      // Kite's speed menu kept a tier's id here, which a stored choice may still hold.
+      if (typeof value === 'string') return applyOption(settings, models, SERVICE_TIER_ID, value)
+      throw new ConfigValueError(optionId, value)
+    }
+    case SERVICE_TIER_ID: {
+      if (typeof value !== 'string') throw new ConfigValueError(optionId, value)
+      const trimmed = value.trim()
+      if (trimmed === '') throw new ConfigValueError(optionId, value)
+      if (isStandardTier(trimmed)) return { ...settings, serviceTier: null }
+      const model = models.find((item) => item.id === settings.model)
+      const tiers = modelSpeedTiers(model)
+      if (tiers.length > 0) {
+        const resolved = resolveServiceTier(trimmed, model)
+        if (!resolved) throw new ConfigValueError(optionId, value)
+        return { ...settings, serviceTier: resolved }
+      }
+      if (!model && (isFastAlias(trimmed) || isUltrafastAlias(trimmed))) {
+        return { ...settings, serviceTier: trimmed }
+      }
+      throw new ConfigValueError(optionId, value)
     }
     default:
       throw new ConfigValueError(optionId, value)

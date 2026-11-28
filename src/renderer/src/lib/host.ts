@@ -255,12 +255,19 @@ export function toHost(method: string, params: unknown, depth: number): unknown 
   if (Array.isArray(params)) return params.map((item) => toHost(method, item, depth + 1))
   const copy: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(params)) {
-    copy[key] =
+    if (
       typeof value === 'string' &&
       (key === 'projectPath' ||
         ((key === 'path' || key === 'folder' || key === 'before') && isProjectCall(method)))
-        ? hostPath(value)
-        : toHost(method, value, depth + 1)
+    ) {
+      copy[key] = hostPath(value)
+    } else if (key === 'folders' && isProjectCall(method) && Array.isArray(value)) {
+      copy[key] = value.map((item) =>
+        typeof item === 'string' ? hostPath(item) : toHost(method, item, depth + 1),
+      )
+    } else {
+      copy[key] = toHost(method, value, depth + 1)
+    }
   }
   return copy
 }
@@ -274,6 +281,9 @@ export function fromHost(hostId: string, method: string, result: unknown): unkno
   if (
     method === 'projects.list' ||
     method === 'projects.add' ||
+    method === 'projects.update' ||
+    method === 'projects.archive' ||
+    method === 'projects.unarchive' ||
     method === 'projects.addFolder' ||
     // Huli: a project cloned or made there.
     method === 'projects.clone' ||
@@ -284,6 +294,11 @@ export function fromHost(hostId: string, method: string, result: unknown): unkno
   // Huli: a suggested folder is that host's folder, which adding names again.
   if (method === 'projects.suggestFolders') qualifyProjects(hostId, result)
   if (method === 'artifacts.list') qualifyArtifacts(hostId, result)
+  if (method === 'artifacts.hidden' && Array.isArray(result)) {
+    for (const id of result) {
+      if (typeof id === 'string') learnArtifactHost(id, hostId)
+    }
+  }
   const added = (result as { id?: unknown } | null)?.id
   if (method === 'attachments.add' && typeof added === 'string') attachmentHosts.set(added, hostId)
   qualify(hostId, result, 0)
@@ -318,12 +333,29 @@ function qualifyArtifacts(hostId: string, value: unknown): void {
 function qualifyProjects(hostId: string, value: unknown): void {
   const list = Array.isArray(value) ? value : [value]
   for (const project of list) {
-    const record = project as { path?: unknown; folders?: unknown } | null
-    if (typeof record?.path === 'string') record.path = onHost(hostId, record.path)
-    // Huli: its further folders are that host's folders too, which its panes open.
-    for (const folder of Array.isArray(record?.folders) ? record.folders : []) {
-      const item = folder as { path?: unknown } | null
-      if (typeof item?.path === 'string') item.path = onHost(hostId, item.path)
+    const record = project as {
+      path?: unknown
+      folders?: unknown
+      missingFolders?: unknown
+    } | null
+    if (typeof record?.path === 'string' && hostOfPath(record.path) === null) {
+      record.path = onHost(hostId, record.path)
+    }
+    const onThisHost = (folder: unknown): unknown =>
+      typeof folder === 'string' && hostOfPath(folder) === null ? onHost(hostId, folder) : folder
+    if (Array.isArray(record?.folders)) {
+      record.folders = record.folders.map((folder: unknown) => {
+        // Huli: a further folder given as `{ path, name, missing }` is that host's folder too.
+        const item = folder as { path?: unknown } | null
+        if (typeof item === 'object' && item !== null && typeof item.path === 'string') {
+          item.path = onThisHost(item.path)
+          return item
+        }
+        return onThisHost(folder)
+      })
+    }
+    if (Array.isArray(record?.missingFolders)) {
+      record.missingFolders = record.missingFolders.map(onThisHost)
     }
   }
 }
@@ -343,6 +375,15 @@ function qualify(hostId: string, value: unknown, depth: number): void {
     if (typeof record.id === 'string' && typeof record.agentId === 'string') {
       sessionHosts.set(record.id, hostId)
     }
+  }
+  if (typeof record.projectOwner === 'string' && hostOfPath(record.projectOwner) === null) {
+    record.projectOwner = onHost(hostId, record.projectOwner)
+  }
+  if (
+    typeof record.importedProjectPath === 'string' &&
+    hostOfPath(record.importedProjectPath) === null
+  ) {
+    record.importedProjectPath = onHost(hostId, record.importedProjectPath)
   }
   // A session's worktrees are folders of its host too, which its panels open.
   for (const key of ['worktree', 'agentWorktree']) {

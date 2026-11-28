@@ -1,5 +1,10 @@
 import { create } from 'zustand'
-import type { NoProject, Project, SessionSummary } from '@shared/agent-host'
+import {
+  isActivelyRunning,
+  type NoProject,
+  type Project,
+  type SessionSummary,
+} from '@shared/agent-host'
 import { harnessOf, type HarnessId } from '@shared/thread'
 import type { TaskSummary } from '@shared/workflow'
 import type { SessionGroupRef } from '@shared/run-groups'
@@ -9,7 +14,19 @@ import { entryShown } from '@renderer/lib/features'
 import { errorMessage, host } from '@renderer/lib/host'
 import { hostOfPath } from '@renderer/lib/host-paths'
 import { i18n } from '@renderer/lib/i18n'
-import { noProjectKey, noProjectPinned, pinnedFolders, type PinnedFolder } from './projects'
+import {
+  activeProjects,
+  findProjectForPath,
+  findProjectForSession,
+  isProjectArchived,
+  isSessionInArchivedProject,
+  noProjectKey,
+  noProjectPinned,
+  pinnedFolders,
+  projectFolders,
+  projectOwnsPath,
+  type PinnedFolder,
+} from './projects'
 import { listedTasks, needingTasks, pinnedTasks, startedSteps, taskExpanded } from './tasks'
 import {
   NO_PROJECT_GROUP,
@@ -121,6 +138,7 @@ export interface HarnessSessionCount {
 
 interface SessionIndex {
   byProject: Map<string, SessionSummary[]>
+  byOwner: Map<string, SessionSummary[]>
   scratchByHost: Map<string | null, SessionSummary[]>
   hasListedScratchByHost: Set<string | null>
   pinnedRelated: SessionSummary[]
@@ -156,6 +174,7 @@ function indexOf(byId: Record<string, SessionSummary>): SessionIndex {
   if (index) return index
 
   const byProject = new Map<string, SessionSummary[]>()
+  const byOwner = new Map<string, SessionSummary[]>()
   const scratchByHost = new Map<string | null, SessionSummary[]>()
   const hasListedScratchByHost = new Set<string | null>()
   const pinnedRelated: SessionSummary[] = []
@@ -166,6 +185,12 @@ function indexOf(byId: Record<string, SessionSummary>): SessionIndex {
     let list = byProject.get(s.projectPath)
     if (!list) byProject.set(s.projectPath, (list = []))
     list.push(s)
+
+    if (s.projectOwner) {
+      let owned = byOwner.get(s.projectOwner)
+      if (!owned) byOwner.set(s.projectOwner, (owned = []))
+      owned.push(s)
+    }
 
     const hostId = hostOfSession(s)
     if (s.scratch) {
@@ -200,6 +225,7 @@ function indexOf(byId: Record<string, SessionSummary>): SessionIndex {
 
   index = {
     byProject,
+    byOwner,
     scratchByHost,
     hasListedScratchByHost,
     pinnedRelated,
@@ -222,6 +248,45 @@ export function projectSummaries(
   return projectPath === null
     ? (index.scratchByHost.get(hostId) ?? EMPTY_SUMMARIES)
     : (index.byProject.get(projectPath) ?? EMPTY_SUMMARIES)
+}
+
+/**
+ * Sessions belonging to a project group: across its primary path, any additional source folders,
+ * and historical sessions owned by it whose secondary folder was later removed (unless another
+ * project now directly owns that folder).
+ */
+export function projectGroupSummaries(
+  byId: Record<string, SessionSummary>,
+  project: Project | null,
+  hostId: string | null = null,
+  allProjects?: readonly Project[],
+): SessionSummary[] {
+  const index = indexOf(byId)
+  if (project === null) return index.scratchByHost.get(hostId) ?? EMPTY_SUMMARIES
+  const folders = projectFolders(project)
+  const owned = index.byOwner.get(project.path)
+  if (folders.length === 1 && (!owned || owned.length === 0)) {
+    return index.byProject.get(project.path) ?? EMPTY_SUMMARIES
+  }
+  const seen = new Set<string>()
+  const out: SessionSummary[] = []
+  for (const folder of folders) {
+    for (const s of index.byProject.get(folder) ?? EMPTY_SUMMARIES) {
+      if (seen.has(s.id)) continue
+      seen.add(s.id)
+      out.push(s)
+    }
+  }
+  for (const s of owned ?? EMPTY_SUMMARIES) {
+    if (seen.has(s.id) || s.scratch) continue
+    if (allProjects) {
+      const direct = findProjectForPath(allProjects, s.projectPath)
+      if (direct && direct.path !== project.path) continue
+    }
+    seen.add(s.id)
+    out.push(s)
+  }
+  return out
 }
 
 /** O(1) indexed lookup of sessions belonging to pinned trees. */
@@ -294,6 +359,7 @@ function updateIndexForUpsert(
 ): SessionIndex | null {
   if (
     prev.projectPath !== next.projectPath ||
+    prev.projectOwner !== next.projectOwner ||
     prev.scratch !== next.scratch ||
     prev.parentId !== next.parentId ||
     prev.origin !== next.origin ||
@@ -313,8 +379,17 @@ function updateIndexForUpsert(
   if (!prevProjectList) return null
   byProject.set(next.projectPath, replaceInList(prevProjectList, next.id, next))
 
+  let byOwner = prevIndex.byOwner
+  if (next.projectOwner) {
+    const prevOwnerList = byOwner.get(next.projectOwner)
+    if (!prevOwnerList) return null
+    byOwner = new Map(prevIndex.byOwner)
+    byOwner.set(next.projectOwner, replaceInList(prevOwnerList, next.id, next))
+  }
+
   const projectTrees = new Map(prevIndex.projectTrees)
   projectTrees.delete(next.projectPath)
+  if (next.projectOwner) projectTrees.delete(next.projectOwner)
 
   let scratchByHost = prevIndex.scratchByHost
   let scratchTrees = prevIndex.scratchTrees
@@ -351,6 +426,7 @@ function updateIndexForUpsert(
 
   return {
     byProject,
+    byOwner,
     scratchByHost,
     hasListedScratchByHost: prevIndex.hasListedScratchByHost,
     pinnedRelated: prevIndex.pinnedRelated,
@@ -523,6 +599,37 @@ export function sessionTree(
     index.projectTrees.set(projectPath, cached)
   }
   return cached
+}
+
+/**
+ * Session tree for a sidebar project group, combining its primary folder, additional source
+ * folders, and historical sessions owned by it whose secondary folder was later removed.
+ */
+export function projectSessionTree(
+  byId: Record<string, SessionSummary>,
+  project: Project,
+  allProjects?: readonly Project[],
+): SessionNode[] {
+  const index = indexOf(byId)
+  const folders = projectFolders(project)
+  const owned = index.byOwner.get(project.path)
+  if (folders.length === 1 && (!owned || owned.length === 0)) {
+    return sessionTree(byId, project.path)
+  }
+  const candidates = projectGroupSummaries(byId, project, null, allProjects)
+  return buildTree(
+    byId,
+    candidates,
+    (s) =>
+      listedOrigin(s) &&
+      !s.scratch &&
+      (projectOwnsPath(project, s.projectPath) ||
+        (s.projectOwner === project.path &&
+          (!allProjects ||
+            (findProjectForPath(allProjects, s.projectPath)?.path ?? project.path) ===
+              project.path))),
+    (s) => !s.pinnedAt && !s.archivedAt,
+  ).sort((a, b) => b.summary.updatedAt - a.summary.updatedAt)
 }
 
 /** The pinned sessions across the projects as trees, in the order they were pinned. */
@@ -745,7 +852,7 @@ function buildTree(
 }
 
 function isActive(summary: SessionSummary): boolean {
-  return summary.status === 'running' || summary.status === 'awaiting_permission'
+  return isActivelyRunning(summary)
 }
 
 /**
@@ -955,8 +1062,16 @@ export function visibleOrder(
 ): string[] {
   const expanded = (id: string) => view.expandedParents[id] ?? false
   const hosts = view.hosts ?? [null]
-  const shown = (node: SessionNode) => hosts.includes(hostOfSession(node.summary))
-  const shownTask = (task: TaskSummary) => hosts.includes(hostOfPath(task.projectPath))
+  const visibleProjects = activeProjects(projects)
+  const isArchivedPath = (path: string) => {
+    const owner = findProjectForPath(projects, path)
+    return owner !== undefined && isProjectArchived(owner)
+  }
+  const shown = (node: SessionNode) =>
+    hosts.includes(hostOfSession(node.summary)) &&
+    !isSessionInArchivedProject(node.summary, projects)
+  const shownTask = (task: TaskSummary) =>
+    hosts.includes(hostOfPath(task.projectPath)) && !isArchivedPath(task.projectPath)
   const reachable = (path: string) => !view.away?.includes(hostOfPath(path) ?? '')
   const flatten = (rows: SidebarRow[], open = true): string[] =>
     rows.flatMap((row) =>
@@ -982,8 +1097,8 @@ export function visibleOrder(
       ? []
       : flatten(
           sidebarRows(
-            sessionTree(byId, project.path),
-            listedTasks(tasks, project.path),
+            projectSessionTree(byId, project, projects),
+            listedTasks(tasks, projectFolders(project)),
             byGroupOrder(project.sessionOrder),
           ),
         )
@@ -1013,7 +1128,7 @@ export function visibleOrder(
     ...(view.collapsedProjects[PINNED_GROUP]
       ? []
       : [
-          ...pinnedFolders(projects, noProjects, hosts).flatMap(folderRows),
+          ...pinnedFolders(visibleProjects, noProjects, hosts).flatMap(folderRows),
           ...flatten(
             sidebarRows(
               pinnedTree(byId).filter(shown),
@@ -1027,7 +1142,7 @@ export function visibleOrder(
         ? []
         : [
             ...(noProjectPinned(noProjects, hostId) ? [] : noProjectRows(hostId)),
-            ...projects
+            ...visibleProjects
               .filter((p) => p.pinnedAt == null && hostOfPath(p.path) === hostId)
               .flatMap(projectRows),
           ],
@@ -1064,15 +1179,17 @@ function isFastVisibleSession(
   for (const key in tasks) {
     if (tasks[key]?.from?.sessionId === sessionId) return false
   }
-  if (s.pinnedAt) return !view.collapsedProjects[PINNED_GROUP]
+  if (s.pinnedAt) {
+    return !isSessionInArchivedProject(s, projects) && !view.collapsedProjects[PINNED_GROUP]
+  }
   if (s.scratch) {
     const pinned = noProjectPinned(noProjects, hostId)
     if (pinned && view.collapsedProjects[PINNED_GROUP]) return false
     if (!pinned && view.collapsedProjects[hostGroup(hostId)]) return false
     return !view.collapsedProjects[noProjectGroup(hostId)]
   }
-  const project = projects.find((p) => p.path === s.projectPath)
-  if (!project) return false
+  const project = findProjectForSession(projects, s)
+  if (!project || isProjectArchived(project)) return false
   if (project.pinnedAt != null) {
     if (view.collapsedProjects[PINNED_GROUP]) return false
   } else if (view.collapsedProjects[hostGroup(hostId)]) {
@@ -1109,11 +1226,19 @@ export function sidebarTabStop(
           : null
   if (front !== null && order.includes(front)) return { kind: 'session', id: front }
   const hosts = view.hosts ?? [null]
-  const shown = (node: SessionNode) => hosts.includes(hostOfSession(node.summary))
-  const shownTask = (task: TaskSummary) => hosts.includes(hostOfPath(task.projectPath))
+  const visibleProjects = activeProjects(projects)
+  const isArchivedPath = (path: string) => {
+    const owner = findProjectForPath(projects, path)
+    return owner !== undefined && isProjectArchived(owner)
+  }
+  const shown = (node: SessionNode) =>
+    hosts.includes(hostOfSession(node.summary)) &&
+    !isSessionInArchivedProject(node.summary, projects)
+  const shownTask = (task: TaskSummary) =>
+    hosts.includes(hostOfPath(task.projectPath)) && !isArchivedPath(task.projectPath)
   // A pinned No project shows only while it has sessions; a pinned project shows without.
   if (
-    pinnedFolders(projects, noProjects, hosts).some(
+    pinnedFolders(visibleProjects, noProjects, hosts).some(
       (folder) => folder.project || sessionTree(byId, null, folder.hostId).length > 0,
     ) ||
     pinnedTree(byId).some(shown) ||
@@ -1129,10 +1254,12 @@ export function sidebarTabStop(
     if (!noProjectPinned(noProjects, hostId) && sessionTree(byId, null, hostId).length > 0) {
       return { kind: 'group', key: noProjectGroup(hostId) }
     }
-    const own = projects.filter((p) => p.pinnedAt == null && hostOfPath(p.path) === hostId)
+    const own = visibleProjects.filter((p) => p.pinnedAt == null && hostOfPath(p.path) === hostId)
     firstProject ??= own[0]
     const project = own.find(
-      (p) => sessionTree(byId, p.path).length > 0 || listedTasks(tasks, p.path).length > 0,
+      (p) =>
+        projectSessionTree(byId, p, projects).length > 0 ||
+        listedTasks(tasks, projectFolders(p)).length > 0,
     )
     if (project) return { kind: 'group', key: project.path }
   }

@@ -126,6 +126,8 @@ export interface ChangedFile {
 
 export interface CommitDetails {
   oid: string
+  /** Parent commit OIDs in git's order (empty for root commits, 2+ for merges). Absent on older hosts. */
+  parents?: string[]
   subject: string
   body: string // the message after the subject line, trimmed
   authorName: string
@@ -133,6 +135,47 @@ export interface CommitDetails {
   authoredAt: number
   files: ChangedFile[]
 }
+
+export type BranchGraphRefKind = 'head' | 'local' | 'remote' | 'tag'
+
+/** A branch, tag, or detached HEAD label pointing at a commit in the branch graph. */
+export interface BranchGraphRef {
+  name: string
+  kind: BranchGraphRefKind
+  /** True for the currently checked-out local branch or detached HEAD. */
+  current: boolean
+}
+
+/** One commit node in a paginated repository branch graph. */
+export interface BranchGraphCommit {
+  oid: string
+  shortOid: string
+  parents: string[]
+  subject: string
+  authorName: string
+  authorEmail: string
+  authoredAt: number
+  refs: BranchGraphRef[]
+}
+
+/** One page of repository commit history across branches, in topological order. */
+export interface BranchGraphPage {
+  commits: BranchGraphCommit[]
+  /** Current HEAD commit OID, or null when the repository has no commits yet. */
+  headOid: string | null
+  /** Currently checked-out local branch name, or null when detached or unborn. */
+  currentBranch: string | null
+  /** True when HEAD points directly to a commit rather than a local branch. */
+  detached: boolean
+  /** True when older commits exist beyond this page. */
+  hasMore: boolean
+  /** Offset to pass as `skip` when loading the next page of older commits. */
+  nextSkip: number
+}
+
+export const GIT_GRAPH_DEFAULT_LIMIT = 80
+export const GIT_GRAPH_MAX_LIMIT = 200
+export const GIT_GRAPH_MAX_SKIP = 100_000
 
 /** The two sides of one file's change; a side is null where the file does not exist. */
 export interface FileDiff {
@@ -199,6 +242,8 @@ export const GITHUB_PULL_REQUEST_URL = /^https:\/\/github\.com\/([\w.-]+)\/([\w.
 
 export const GITHUB_ISSUE_URL = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/issues\/(\d+)$/
 
+export const GITHUB_STACK_URL = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/stacks\/(\d+)$/
+
 /** `completed` and `not_planned` are the two ways GitHub closes an issue. */
 export type IssueState = 'open' | 'completed' | 'not_planned'
 
@@ -227,28 +272,109 @@ export interface Issue {
 export type IssueLookup =
   { kind: 'issue'; issue: Issue } | { kind: 'pull'; pullRequest: PullRequest }
 
-/** A pull request or an issue a reply names, by its canonical URL. */
+export type PullRequestStackState = 'open' | 'closed'
+
+export interface PullRequestStackItem {
+  number: number
+  url: string
+  state: PullRequestState
+  /** Head branch name of this layer in the stack, when GitHub returns it. */
+  head: string | null
+  /** Pull request title, when returned by the endpoint. */
+  title: string | null
+}
+
+export interface PullRequestStack {
+  url: string
+  owner: string
+  repo: string
+  number: number
+  /** Optional title if GitHub includes one in the stack payload. */
+  title: string | null
+  state: PullRequestStackState
+  /** Target base branch at the bottom of the stack, such as `main`. */
+  base: string | null
+  /** Ordered pull requests in the stack, from bottom to top. */
+  pullRequests: PullRequestStackItem[]
+  createdAt: number | null
+  updatedAt: number | null
+}
+
+/** Why a pull request stack could not be read without treating it as a hard failure. */
+export type StackUnavailableReason =
+  'gh-missing' | 'gh-signed-out' | 'not-found' | 'forbidden' | 'timeout' | 'unavailable'
+
+/** What a pull request stack lookup returned: its chain, or why it fell back cleanly. */
+export type PullRequestStackLookup =
+  | { kind: 'stack'; stack: PullRequestStack }
+  | { kind: 'unavailable'; reason: StackUnavailableReason }
+
+/** What any watched GitHub reference lookup produces for the renderer cache. */
+export type ReferenceLookup = IssueLookup | PullRequestStackLookup
+
+/** A GitHub repository identified by its owner and repository name. */
+export interface GitHubRepository {
+  owner: string
+  repo: string
+}
+
+/** A compact issue or pull request entry returned for the composer `#` reference picker. */
+export type RepositoryReferenceItem =
+  | {
+      kind: 'issue'
+      owner: string
+      repo: string
+      number: number
+      title: string
+      url: string
+      state: IssueState
+      updatedAt: number
+    }
+  | {
+      kind: 'pull'
+      owner: string
+      repo: string
+      number: number
+      title: string
+      url: string
+      state: PullRequestState
+      updatedAt: number
+    }
+
+/** Why listing or searching repository issues/PRs degraded cleanly without blocking typing. */
+export type RepositoryReferenceUnavailableReason =
+  'gh-missing' | 'gh-signed-out' | 'timeout' | 'failed'
+
+/** Read-only repository issue/PR search outcome for the composer `#` picker. */
+export type RepositoryReferenceSearchResult =
+  | { kind: 'ok'; items: RepositoryReferenceItem[] }
+  | { kind: 'unavailable'; reason: RepositoryReferenceUnavailableReason; message?: string }
+
+/** A pull request, issue, or pull request stack a reply names, by its canonical URL. */
 export interface GitHubReference {
-  kind: 'pull' | 'issue'
+  kind: 'pull' | 'issue' | 'stack'
   owner: string
   repo: string
   number: number
   url: string
 }
 
-/** The reference a github.com pull request or issue URL names; null for anything else. */
+/** The reference a github.com pull request, issue, or stack URL names; null for anything else. */
 export function githubReferenceOf(url: string): GitHubReference | null {
   const pull = GITHUB_PULL_REQUEST_URL.exec(url)
-  const match = pull ?? GITHUB_ISSUE_URL.exec(url)
+  const issue = pull ? null : GITHUB_ISSUE_URL.exec(url)
+  const stack = pull || issue ? null : GITHUB_STACK_URL.exec(url)
+  const match = pull ?? issue ?? stack
   if (!match || !isRepositoryName(match[2]!) || !GITHUB_LOGIN.test(match[1]!)) return null
   const number = Number(match[3])
   if (!Number.isSafeInteger(number) || number < 1) return null
-  return { kind: pull ? 'pull' : 'issue', owner: match[1]!, repo: match[2]!, number, url }
+  const kind: GitHubReference['kind'] = pull ? 'pull' : issue ? 'issue' : 'stack'
+  return { kind, owner: match[1]!, repo: match[2]!, number, url }
 }
 
 /**
- * The pull request or issue a github.com link points into, such as its files tab or one of its
- * comments, by its canonical URL; null for any other link.
+ * The pull request, issue, or pull request stack a github.com link points into, such as its files
+ * tab or one of its comments, by its canonical URL; null for any other link.
  */
 export function githubReferenceFromLink(href: string): GitHubReference | null {
   const url = URL.parse(href)
@@ -256,7 +382,8 @@ export function githubReferenceFromLink(href: string): GitHubReference | null {
   if (url.hostname !== 'github.com' && url.hostname !== 'www.github.com') return null
   if (url.username || url.password) return null
   const [owner, repo, kind, number] = url.pathname.split('/').slice(1)
-  if (!owner || !repo || !number || (kind !== 'pull' && kind !== 'issues')) return null
+  if (!owner || !repo || !number || (kind !== 'pull' && kind !== 'issues' && kind !== 'stacks'))
+    return null
   if (!/^\d+$/.test(number)) return null
   return githubReferenceOf(`https://github.com/${owner}/${repo}/${kind}/${Number(number)}`)
 }
@@ -266,7 +393,7 @@ export function githubReferenceFromLink(href: string): GitHubReference | null {
 // holds, so `gist.github.com`, a path such as `src/github.com/...`, an email and an address
 // inside another link stay out; in ASCII, so CJK punctuation right after it stays out too.
 const SCHEMELESS_GITHUB_LINK =
-  /(?<![\w.@/:=?&%#~+-])(?:www\.)?github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+(?:[/?#][\w\-./?#=&%~+:@!$*,;]*)?(?![\w-])/g
+  /(?<![\w.@/:=?&%#~+-])(?:www\.)?github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull|stacks)\/\d+(?:[/?#][\w\-./?#=&%~+:@!$*,;]*)?(?![\w-])/g
 
 /** Where text writes a link, and the full address it stands for. */
 export interface TextLink {
@@ -301,6 +428,121 @@ export function schemelessGitHubUrl(text: string): string | null {
 /** A canonical URL for `owner/repo#number`; GitHub redirects `/issues/<n>` to a pull request. */
 export function githubIssueUrl(owner: string, repo: string, number: number): string {
   return `https://github.com/${owner}/${repo}/issues/${number}`
+}
+
+/** A backtick-delimited inline code span `[from, to)` inside a single text block. */
+export interface TextSpan {
+  from: number
+  to: number
+}
+
+/**
+ * Finds CommonMark inline code spans delimited by matching runs of backticks within `text`
+ * (without crossing a blank line). Unmatched backtick runs stay ordinary text.
+ */
+export function inlineCodeSpans(text: string): TextSpan[] {
+  const spans: TextSpan[] = []
+  let i = 0
+  while (i < text.length) {
+    if (text[i] !== '`') {
+      i++
+      continue
+    }
+    const openStart = i
+    while (i < text.length && text[i] === '`') i++
+    const ticks = i - openStart
+    let j = i
+    let matchedEnd = -1
+    while (j < text.length) {
+      if (
+        (text[j] === '\n' && text[j + 1] === '\n') ||
+        (text[j] === '\r' && text[j + 1] === '\n' && text[j + 2] === '\r' && text[j + 3] === '\n')
+      ) {
+        break
+      }
+      if (text[j] === '`') {
+        const closeStart = j
+        while (j < text.length && text[j] === '`') j++
+        if (j - closeStart === ticks) {
+          matchedEnd = j
+          break
+        }
+      } else {
+        j++
+      }
+    }
+    if (matchedEnd !== -1) {
+      spans.push({ from: openStart, to: matchedEnd })
+      i = matchedEnd
+    }
+  }
+  return spans
+}
+
+/** A `#123` or `owner/repo#123` GitHub reference found in prose text. */
+export interface TextGitHubReference {
+  from: number
+  to: number
+  owner: string | null
+  repo: string | null
+  number: number
+}
+
+// `owner/repo#12` or `#12`, starting with a non-zero digit so `#0` and `#000000` stay out, not
+// after identifier/path/entity/email/hash characters, and not followed by identifier/hyphen chars
+// so `#L10`, `#ff0000`, `foo#123`, `&#123;`, `##123`, and `#123-foo` stay plain text.
+const TEXT_GITHUB_REFERENCE =
+  /(?<![\w/&#.@-])(?:([A-Za-z0-9][A-Za-z0-9-]{0,38})\/([\w.-]{1,100}))?#([1-9]\d{0,8})(?![\w-])/g
+
+/**
+ * Finds `#123` and `owner/repo#123` references in `text`, optionally skipping CommonMark inline
+ * code spans. Callers without an associated repository should ignore bare (`owner === null`) refs.
+ */
+export function githubTextReferences(
+  text: string,
+  options?: { skipInlineCode?: boolean },
+): TextGitHubReference[] {
+  const skipSpans = options?.skipInlineCode ? inlineCodeSpans(text) : []
+  const inCode = (from: number, to: number) =>
+    skipSpans.some((span) => from < span.to && to > span.from)
+  const found: TextGitHubReference[] = []
+  for (const match of text.matchAll(TEXT_GITHUB_REFERENCE)) {
+    const [whole, owner, repo, rawNumber] = match
+    if (repo && !isRepositoryName(repo)) continue
+    const from = match.index
+    const to = from + whole.length
+    if (inCode(from, to)) continue
+    const number = Number(rawNumber)
+    if (!Number.isSafeInteger(number) || number < 1) continue
+    found.push({ from, to, owner: owner ?? null, repo: repo ?? null, number })
+  }
+  return found
+}
+
+/**
+ * Resolves `#123` (and `owner/repo#123`) text references to canonical GitHub URLs when `repo` is
+ * associated with the current project. Without an associated repository, returns an empty list so
+ * plain-text input stays untouched.
+ */
+export function githubShortReferenceLinks(
+  text: string,
+  repo: GitHubRepository | null,
+  options?: { skipInlineCode?: boolean },
+): TextLink[] {
+  if (!repo) return []
+  const refs = githubTextReferences(text, { skipInlineCode: options?.skipInlineCode ?? true })
+  return refs.map((ref) => ({
+    from: ref.from,
+    to: ref.to,
+    url: githubIssueUrl(ref.owner ?? repo.owner, ref.repo ?? repo.repo, ref.number),
+  }))
+}
+
+/** Canonical URL when `text` is exclusively a single `owner/repo#123` reference, else null. */
+export function qualifiedGitHubRefUrl(text: string): string | null {
+  const [ref] = githubTextReferences(text)
+  if (!ref || ref.from !== 0 || ref.to !== text.length || !ref.owner || !ref.repo) return null
+  return githubIssueUrl(ref.owner, ref.repo, ref.number)
 }
 
 /** A GitHub user's login, an enterprise one with its `_shortcode`, or a bot's `<slug>[bot]`. */

@@ -9,6 +9,7 @@ import { ArtifactDialogs } from '@renderer/features/artifacts/artifact-dialogs'
 import { AutoPublishNotice } from '@renderer/features/artifacts/auto-publish-notice'
 import { ArtifactConsentDialog } from '@renderer/features/artifacts/consent-dialog'
 import { GitDialogsHost } from '@renderer/features/git/git-dialogs'
+import { LinkConfirmHost } from '@renderer/features/session/link-confirm'
 import { MediaViewer } from '@renderer/features/session/media/media-viewer'
 import { SessionExportDialog } from '@renderer/features/session/export/export-dialog'
 import { useMoveStore } from '@renderer/features/session/move/move'
@@ -26,15 +27,18 @@ import {
   TitleBand,
 } from '@renderer/features/shell/top-bar'
 import { useSidebarPeek } from '@renderer/features/shell/sidebar-peek'
+import { useMobilePanelSwipe } from '@renderer/features/shell/use-mobile-swipe'
 import { QuitConfirm } from '@renderer/features/updates/quit-confirm'
 import { CommandConfirmDialog } from '@renderer/features/updates/command-confirm'
 import { useInstallWindow } from '@renderer/features/settings/harness-install'
 import { UpdateDialog } from '@renderer/features/updates/update-dialog'
 import { useAccountShell } from '@renderer/features/account/account-row'
 import { SidebarList, SidebarNotices } from '@renderer/features/sidebar/app-sidebar'
+import { SidebarHeadActions } from '@renderer/features/sidebar/sidebar-head-actions'
 import { useSidebarNav } from '@renderer/features/sidebar/sidebar-nav'
 import { ArchiveConfirmDialog } from '@renderer/features/sidebar/archive-confirm'
 import { ProjectApprovalsConfirm } from '@renderer/features/sidebar/project-approvals'
+import { CloseAllTerminalsDialog } from '@renderer/features/terminal/close-all-terminals'
 import { RemoveWorktreeDialog } from '@renderer/features/worktrees/remove-worktree-dialog'
 import { WorktreeSettingsDialog } from '@renderer/features/worktrees/worktree-settings-dialog'
 import { ProjectFoldersDialog } from '@renderer/features/sidebar/project-folders'
@@ -135,9 +139,9 @@ export function App() {
               onAnimationEnd={(event) => {
                 if (event.animationName === 'kettu-arrive-main') setArriving(false)
               }}
-              // On a phone the corner's controls, raised over the drawer, stay under what opens
-              // over the window.
-              className="absolute inset-0 phone:isolate"
+              // Isolate the workbench's own stacking layers (such as corner controls raised over a
+              // narrow or peeking sidebar) beneath full-window overlays like Settings and dialogs.
+              className="absolute inset-0 isolate"
             >
               {/* One drag scope for the sidebar and the main area: a session's row drags into
                   the split. */}
@@ -178,6 +182,7 @@ export function App() {
         <SearchDialog />
         <ArchiveConfirmDialog />
         <ProjectApprovalsConfirm />
+        <CloseAllTerminalsDialog />
         <RemoveWorktreeDialog />
         <WorktreeSettingsDialog />
         <ProjectFoldersDialog />
@@ -214,6 +219,7 @@ export function App() {
             <SnoozeDialog />
           </Suspense>
         )}
+        <LinkConfirmHost />
         <Toaster />
         <QuitHint />
       </div>
@@ -225,6 +231,7 @@ export function App() {
 const SIDEBAR_WIDTH = 'sidebar-width'
 
 // Made once, so the frame's renders for its own props pass over them; each follows its stores.
+const SIDEBAR_HEAD_ACTIONS = <SidebarHeadActions />
 const SIDEBAR_LIST = <SidebarList />
 const SIDEBAR_NOTICES = <SidebarNotices />
 const CORNER = <CornerControls />
@@ -243,6 +250,7 @@ function Workbench() {
   const peek = useViewStore((s) => s.sidebarPeek)
   const frame = useRef<HTMLDivElement>(null)
   useSidebarPeek(frame)
+  useMobilePanelSwipe(frame)
   const [initial] = useState(() => readJson(SIDEBAR_WIDTH, 0) || undefined)
   const save = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(save.current), [])
@@ -279,6 +287,7 @@ function Workbench() {
         {...account}
         list={SIDEBAR_LIST}
         footCards={SIDEBAR_NOTICES}
+        sidebarActions={SIDEBAR_HEAD_ACTIONS}
         onSearch={() => showSearch(true)}
         collapsed={collapsed}
         onCollapsedChange={(next) => useViewStore.setState({ sidebarCollapsed: next })}
@@ -297,7 +306,7 @@ function Workbench() {
           menu: t('nav.label'),
           resize: t('nav.resize'),
           account: t('account.signedOut'),
-          openSidebar: t('topBar.showSidebar', { ns: 'shell' }),
+          openSidebar: t('nav.openSidebar'),
         }}
       >
         {MAIN_FRAME}

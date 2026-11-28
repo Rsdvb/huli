@@ -7,11 +7,13 @@ import type { AgentAccount, PlanLimit } from '@shared/agent-host'
 import type { SlashCommand } from '@shared/thread'
 import type { PromptBlock } from '../connection'
 import { currentLocale, t } from '../i18n'
-import type { SkillMetadata, ThreadTokenUsage } from './protocol'
+import { fastTier, ultrafastTier } from './config'
+import type { Model, SkillMetadata, ThreadTokenUsage } from './protocol'
 
 const COMMANDS = [
   'plan',
   'fast',
+  'ultrafast',
   'mcp',
   'skills',
   'status',
@@ -28,6 +30,7 @@ export type CodexCommand = (typeof COMMANDS)[number]
 /** The commands that take text after their name. */
 const WITH_INPUT = [
   'fast',
+  'ultrafast',
   'mcp',
   'review',
   'review-branch',
@@ -79,10 +82,17 @@ export function parseCommand(prompt: readonly PromptBlock[]): ParsedCommand | nu
   return { name, rest: body.slice(word.length).trim() }
 }
 
-/** The commands a session offers: Codex's own, then a `$name` for each skill. */
-export function commandList(skills: readonly SkillMetadata[]): SlashCommand[] {
+/**
+ * The commands a session offers: Codex's own for `model` (aligning `/fast` and `/ultrafast` with
+ * its advertised speed tiers), then a `$name` for each skill.
+ */
+export function commandList(skills: readonly SkillMetadata[], model?: Model): SlashCommand[] {
+  const hasFast = fastTier(model) !== null
+  const hasUltrafast = ultrafastTier(model) !== null
   const commands = new Map<string, SlashCommand>()
   for (const name of COMMANDS) {
+    if (name === 'fast' && !hasFast) continue
+    if (name === 'ultrafast' && !hasUltrafast) continue
     const hint = hintOf(name)
     commands.set(name, {
       name,
@@ -96,6 +106,7 @@ export function commandList(skills: readonly SkillMetadata[]): SlashCommand[] {
     commands.set(name, {
       name,
       description: skill.shortDescription ?? skill.description ?? skill.name,
+      kind: 'skill',
     })
   }
   return [...commands.values()]

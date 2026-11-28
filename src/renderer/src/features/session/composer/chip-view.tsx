@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Alert02Icon,
   BrowserIcon,
@@ -9,18 +10,23 @@ import {
   GlobalIcon,
   BubbleChatIcon,
   PlugSocketIcon,
+  SparklesIcon,
 } from '@hugeicons/core-free-icons'
 import { githubReferenceFromLink, type GitHubReference } from '@shared/git'
 import { SiteIconImage } from '@renderer/components/site-icon-image'
 import { ProjectPathContext } from '@renderer/features/files/file-refs'
-import { ReferenceIcon } from '@renderer/features/git/gh-reference'
+import { ReferenceIcon, RepositoryReferenceIcon } from '@renderer/features/git/gh-reference'
 import {
+  GitHostContext,
+  referenceTitleOf,
   shortReference,
+  useGitHostId,
   useProjectRepository,
   useReferenceData,
 } from '@renderer/features/git/gh-reference-data'
+import { hostOfPath } from '@renderer/lib/host-paths'
 import { cn } from '@renderer/lib/utils'
-import { loadReference } from '@renderer/stores/git'
+import { loadReference, referenceSummaryOf, useGitStore } from '@renderer/stores/git'
 import { loadSiteIcons, useSiteIcon } from '@renderer/stores/site-icons'
 import { shortLinkPath, type Chip } from './chips'
 import { Glyph } from '@renderer/features/shell/glyph'
@@ -42,7 +48,8 @@ export function ChipView({
   state?: ChipState
   surface?: boolean
 }) {
-  const missing = chip.kind !== 'command' && chip.kind !== 'link' && !!chip.missing
+  const missing =
+    chip.kind !== 'command' && chip.kind !== 'skill' && chip.kind !== 'link' && !!chip.missing
   return (
     <span
       data-chip={chip.kind}
@@ -57,7 +64,9 @@ export function ChipView({
                 ? 'text-tertiary outline-1 -outline-offset-1 outline-border-strong outline-dashed'
                 : state === 'selected'
                   ? 'bg-[color-mix(in_srgb,var(--control-on)_6%,var(--bg-raised))] shadow-[0_0_0_1.5px_var(--control-on)]'
-                  : 'bg-raised shadow-[0_0_0_0.5px_var(--border-default),var(--elevation-raised)] hover:shadow-[0_0_0_0.5px_var(--border-strong),var(--elevation-raised)]',
+                  : chip.kind === 'skill'
+                    ? 'bg-[color-mix(in_srgb,var(--control-on)_6%,var(--bg-raised))] shadow-[0_0_0_0.5px_color-mix(in_srgb,var(--control-on)_28%,var(--border-default)),var(--elevation-raised)] hover:shadow-[0_0_0_0.5px_color-mix(in_srgb,var(--control-on)_45%,var(--border-strong)),var(--elevation-raised)]'
+                    : 'bg-raised shadow-[0_0_0_0.5px_var(--border-default),var(--elevation-raised)] hover:shadow-[0_0_0_0.5px_var(--border-strong),var(--elevation-raised)]',
             ),
       )}
     >
@@ -74,15 +83,24 @@ function SiteIcon({ url }: { url: string }) {
   return <SiteIconImage src={icon} className="size-3.5 shrink-0 rounded-sm object-contain" />
 }
 
-/** A GitHub issue or pull request as the thread's reference: its state, number and title. */
+/** A GitHub issue, pull request, or stack as the thread's reference: its state, number and title. */
 function ReferenceBody({ reference }: { reference: GitHubReference }) {
-  const { data } = useReferenceData(reference)
+  const { t } = useTranslation('git')
+  const hostId = useGitHostId()
+  const { data } = useReferenceData(reference, hostId)
+  const summary = useGitStore((s) =>
+    data ? undefined : referenceSummaryOf(s, hostId, reference.url),
+  )
   const repo = useProjectRepository()
-  useEffect(() => loadReference(reference), [reference])
-  const title = data?.kind === 'pull' ? data.pr.title : data?.issue.title
+  useEffect(() => loadReference(reference, false, hostId), [reference, hostId])
+  const title = referenceTitleOf(data, t) ?? summary?.title ?? null
   return (
     <>
-      <ReferenceIcon kind={reference.kind} data={data} size={14} />
+      {data || !summary ? (
+        <ReferenceIcon kind={reference.kind} data={data} size={14} />
+      ) : (
+        <RepositoryReferenceIcon item={summary} size={14} />
+      )}
       <span className="min-w-0 truncate">
         <span className="font-medium">{shortReference(reference, repo)}</span>
         {title && <span className="ml-1.5 text-tertiary">{title}</span>}
@@ -118,6 +136,14 @@ function ChipBody({ chip, missing }: { chip: Chip; missing: boolean }) {
         <span className="text-control-on/55">/</span>
         {chip.name}
       </span>
+    )
+  }
+  if (chip.kind === 'skill') {
+    return (
+      <>
+        <Glyph icon={SparklesIcon} className="size-3.25 shrink-0 text-control-on" />
+        <span className="min-w-0 truncate font-medium text-primary">{chip.name}</span>
+      </>
     )
   }
   if (chip.kind === 'link') return <LinkBody chip={chip} />
@@ -174,17 +200,22 @@ export function RenderedChip({
   chip,
   state,
   projectPath,
+  hostId,
   onRendered,
 }: {
   chip: Chip
   state: ChipState
   projectPath: string | null
+  hostId?: string | null
   onRendered: () => void
 }) {
   useLayoutEffect(onRendered)
+  const gitHostId = hostId ?? (projectPath ? hostOfPath(projectPath) : null)
   return (
-    <ProjectPathContext value={projectPath}>
-      <ChipView chip={chip} state={state} />
-    </ProjectPathContext>
+    <GitHostContext value={gitHostId}>
+      <ProjectPathContext value={projectPath}>
+        <ChipView chip={chip} state={state} />
+      </ProjectPathContext>
+    </GitHostContext>
   )
 }

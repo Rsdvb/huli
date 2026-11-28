@@ -83,6 +83,12 @@ export function drawsDigests(hello: Pick<Hello, 'client' | 'features'>): boolean
 }
 
 /**
+ * 增量工具输出补丁能力：客户端在 hello 中声明后，流式命令输出可发送 `entry.appendOutput` 增量补丁；
+ * 未声明的旧客户端由主机透明降级为完整 `entry.update`。
+ */
+export const TOOL_OUTPUT_APPEND_FEATURE = 'tool-output-append'
+
+/**
  * The welcome's feature of a host that reads its load: `host.load.watch` and `host.load.unwatch`.
  * An older host has neither.
  */

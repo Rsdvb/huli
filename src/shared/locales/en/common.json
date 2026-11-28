@@ -1,13 +1,16 @@
 {
   "actions": {
     "cancel": "Cancel",
+    "clear": "Clear",
     "close": "Close",
     "copy": "Copy",
     "copyCommand": "Copy command",
     "copied": "Copied",
     "dismiss": "Dismiss",
     "done": "Done",
-    "retry": "Retry"
+    "hidePassword": "Hide password",
+    "retry": "Retry",
+    "showPassword": "Show password"
   },
   "untitledSession": "Untitled session",
   "loading": "Loading",
@@ -26,10 +29,12 @@
     "daysAgo_other": "{{count}} days ago",
     "seconds": "{{s}} s",
     "secondsShort": "{{s}}s",
-    "underSecond": "<1s",
+    "underSecond": "< 1s",
+    "minutesCompact": "{{m}}m",
     "minutesSeconds": "{{m}} m {{s}} s",
     "minutesSecondsShort": "{{m}}m {{s}}s",
     "minutesLeft": "{{m}} min",
+    "hoursCompact": "{{h}}h",
     "hoursMinutes": "{{h}} h {{m}} m",
     "hoursMinutesShort": "{{h}}h {{m}}m",
     "minutes": "{{m}} m",

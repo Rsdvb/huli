@@ -62,6 +62,7 @@ import { addEntry, mergeConfig, type MapperEffect, type MapperOutput } from '../
 import { isWebUrl } from '../elicitation'
 import { shownError } from '../session-mcp/text'
 import { SIDE_INSTRUCTIONS, sideTurnText } from '../side-chat'
+import { projectRoots } from '../project-settings'
 import { errorStatus, isProviderQuota, providerName } from './provider-quota'
 import { workspaceWrite } from './settings'
 
@@ -95,17 +96,25 @@ import {
   ConfigValueError,
   DEFAULT_MODE,
   effortFor,
-  FAST_ID,
+  fastTier,
+  initialServiceTier,
   MODE_ID,
   modeFromPolicy,
   modeOf,
+  resolveServiceTier,
+  SERVICE_TIER_ID,
+  serviceTierParam,
+  STANDARD_SERVICE_TIER,
+  ultrafastTier,
   type Settings,
-  speedTiers,
-  STANDARD_TIER,
-  tierFor,
 } from './config'
 import { estimateMcpServers, estimateSkills } from './context'
 import { desktopConfig, desktopServers, readPluginServers, type DesktopServer } from './desktop-mcp'
+import {
+  configWarningDedupeKey,
+  parseConfigWarningNotification,
+  type CodexConfigWarningContext,
+} from './config-warning'
 import { childThreads, childTurnEffect, ThreadMapper } from './mapper'
 import { codexApps, codexMcpServers, codexServerName } from './mcp-panel'
 import {
@@ -120,6 +129,7 @@ import type {
   AppsListResponse,
   CollaborationMode,
   ConfigReadResponse,
+  ConfigWarningNotification,
   GetAccountRateLimitsResponse,
   GetAccountResponse,
   InitializeResponse,
@@ -216,6 +226,8 @@ const PENDING_UPDATES = 2_000
 const PENDING_TTL_MS = 60_000
 const CLOSED_THREADS = 256
 const KNOWN_CHILDREN = 1_000
+const RECENT_CONFIG_WARNINGS = 64
+const STARTUP_CONFIG_WARNINGS = 16
 
 // Codex starts the turn of a goal set on an idle thread by itself, right after the goal.
 const GOAL_TURN_GRACE_MS = 1_000
@@ -296,16 +308,6 @@ function codexWarning(method: string, p: Record<string, unknown>): CodexNotice |
   const text = (value: unknown): string | null =>
     typeof value === 'string' && value.trim() !== '' ? value.trim() : null
   switch (method) {
-    case 'configWarning': {
-      const summary = text(p.summary)
-      if (!summary) return null
-      const description = [text(p.details), text(p.path)].filter(Boolean).join('\n')
-      return {
-        severity: 'warning',
-        title: t('codex.notice.config', { summary }),
-        ...(description ? { description } : {}),
-      }
-    }
     case 'deprecationNotice': {
       const summary = text(p.summary)
       if (!summary) return null
@@ -420,20 +422,26 @@ function sandboxMode(policy: SandboxPolicy): SandboxMode {
 }
 
 /**
- * Per-session config Codex takes at start: the folder trusted, as codex-acp did, Kettu's MCP, the
- * question tool in Default mode, where Codex otherwise asks in plain text, and with Kettu's memory
- * Codex's own off, so it neither reads its memories nor makes them from it. Huli: `desktop` turns
- * the Codex desktop app's servers off, under any of Kite's own of the same name.
+ * Per-session config Codex takes at start: the folder trusted only once the user let its own
+ * `.codex` settings apply, and otherwise untrusted, which loads none of them and keeps app-server
+ * from writing the folder as trusted into the user's own `config.toml`; Kettu's MCP, with the
+ * folder's own servers off, since Kettu runs those the user let start; the question tool in
+ * Default mode, where Codex otherwise asks in plain text; and with Kettu's memory Codex's own off,
+ * so it neither reads its memories nor makes them from it. Huli: `desktop` turns the Codex desktop
+ * app's servers off, under any of Kite's own of the same name.
  */
 function sessionConfig(
   cwd: string,
   options: SessionOptions,
+  folders: readonly string[] = [cwd],
   desktop: Record<string, JsonValue> | null = null,
 ): Record<string, JsonValue> {
+  const trust_level = options.projectTrusted ? 'trusted' : 'untrusted'
   const features: Record<string, JsonValue> = { default_mode_request_user_input: true }
   const config: Record<string, JsonValue> = {
     ...desktop,
-    projects: { [cwd]: { trust_level: 'trusted' } },
+    // Codex keeps a folder's trust by its repository's root, which the user may have trusted.
+    projects: Object.fromEntries([cwd, ...folders].map((folder) => [folder, { trust_level }])),
     features,
     // Codex warns in the thread that an under-development feature is on.
     suppress_unstable_features_warning: true,
@@ -441,10 +449,17 @@ function sessionConfig(
     // lets go of it, so the user's own Codex cannot open it for that minute.
     thread_unload_delay_secs: 0,
   }
-  const entries = (options.mcpServers ?? []).flatMap((server) => {
+  const entries: [string, JsonValue][] = (options.mcpServers ?? []).flatMap((server) => {
     const entry = codexServer(server)
-    return entry ? [[server.name.replace(/\s+/g, '_'), entry] as const] : []
+    return entry ? [[server.name.replace(/\s+/g, '_'), entry] as [string, JsonValue]] : []
   })
+  // Codex merges an entry into its own one of the same name, so its own copy is only turned off.
+  const given = new Set(entries.map(([name]) => name))
+  const off = [
+    ...(options.mcpServers ?? []).flatMap((server) => server.replaces ?? []),
+    ...(options.projectServers ?? []),
+  ].filter((name) => !given.has(name))
+  for (const name of new Set(off)) entries.push([name, { enabled: false }])
   const servers = {
     ...(desktop?.mcp_servers as Record<string, JsonValue> | undefined),
     ...Object.fromEntries(entries),
@@ -536,6 +551,8 @@ interface ThreadRecord {
   id: string
   /** The folder the session was opened in; null for a thread Kettu only saw. */
   cwd: string | null
+  /** Whether history uses paginated item listing or legacy `thread/read` turns. */
+  historyMode?: string
   settings: Settings
   /** The settings are the session's own, from its open, not a guess for a thread Kettu saw. */
   known: boolean
@@ -547,6 +564,10 @@ interface ThreadRecord {
   prompting: Prompting | null
   /** The latest token use Codex reported. */
   usage: ThreadTokenUsage | null
+  /** The skills last read for this thread's folder; null until the first read completes. */
+  skills: SkillMetadata[] | null
+  /** Monotonic sequence for `skills/list` reads so an older response never overwrites a newer one. */
+  skillsSeq: number
   /** The commands last sent to the session, as JSON. */
   commands: string | null
   /** A command that answers without a turn, while it runs. */
@@ -575,6 +596,8 @@ function threadRecord(
     running: null,
     prompting: null,
     usage: null,
+    skills: null,
+    skillsSeq: 0,
     commands: null,
     command: null,
     watch: null,
@@ -645,7 +668,7 @@ const UNKNOWN_SETTINGS: Settings = {
   collaboration: 'default',
   model: '',
   effort: null,
-  tier: null,
+  serviceTier: null,
 }
 
 function stopped(stopReason: PromptResult['stopReason']): PromptResult {
@@ -680,6 +703,12 @@ export class CodexConnection implements AgentConnection {
   private initialized = false
   /** Huli: this Codex takes back a denial of its auto-review, which a denied call offers. */
   private appeals = false
+  /** The Codex home folder `initialize` reported, for recognizing user-level config files. */
+  private codexHome: string | null = null
+  /** Recent process-level `configWarning` notifications indexed by trimmed summary. */
+  private readonly recentConfigWarnings = new Map<string, ConfigWarningNotification>()
+  /** Startup parse/load `configWarning` notifications with file locations not repeated per thread. */
+  private readonly startupConfigWarnings = new Map<string, ConfigWarningNotification>()
   /** The skill folders last set on app-server, as JSON. */
   private skillRoots: string | null = null
   private account: AgentAccount | null = null
@@ -689,7 +718,6 @@ export class CodexConnection implements AgentConnection {
   private mcpReloading: Promise<void> | null = null
   /** Huli: this Codex starts a thread's servers turned off as the thread's configuration says. */
   private desktopMcp = false
-  private codexHome: string | null = null
   /** Huli: the servers each plugin version declares, by the folder Codex installed it in. */
   private readonly pluginDeclarations = new Map<string, Promise<Record<string, unknown>>>()
   /** Huli: the threads that started servers of the Codex desktop app turned off. */
@@ -820,14 +848,14 @@ export class CodexConnection implements AgentConnection {
       : answer)
     this.rpc.notify('initialized')
     this.initialized = true
+    this.codexHome =
+      typeof response.codexHome === 'string' && response.codexHome.trim()
+        ? response.codexHome.trim()
+        : null
     // `<client>/<Codex version> (...)`, the only place app-server says its version.
     const version = /^[^/\s]+\/(\S+)/.exec(response.userAgent ?? '')?.[1] ?? null
     this.appeals = versionAtLeast(version, APPEALS_VERSION)
     this.desktopMcp = versionAtLeast(version, DESKTOP_MCP_VERSION)
-    this.codexHome =
-      typeof response.codexHome === 'string' && response.codexHome !== ''
-        ? response.codexHome
-        : null
     void this.refreshAccount()
     return {
       name: 'Codex',
@@ -835,6 +863,7 @@ export class CodexConnection implements AgentConnection {
       capabilities: {
         loadSession: true,
         listSessions: true,
+        listAllSessions: true,
         resumeSession: true,
         closeSession: true,
         deleteSession: true,
@@ -850,6 +879,7 @@ export class CodexConnection implements AgentConnection {
         // Codex speaks streamable HTTP and stdio to MCP servers; it has no SSE client.
         mcpSse: false,
         mcpStdio: true,
+        mcpMergesSameName: true,
         prompt: { image: true, audio: false, embeddedContext: true },
       },
       authMethods: this.authMethods(),
@@ -957,6 +987,10 @@ export class CodexConnection implements AgentConnection {
       } while (cursor)
       this.knownModels = models
       this.modelsReadAt = Date.now()
+      for (const id of this.targets.keys()) {
+        const record = this.threads.get(id)
+        if (record && record.skills !== null) this.emitCommands(record, models)
+      }
       return models
     })()
       .catch((error: unknown) => {
@@ -993,19 +1027,20 @@ export class CodexConnection implements AgentConnection {
           collaboration: response.collaborationMode?.mode ?? 'default',
           model: modelId,
           effort: effortFor(model, response.reasoningEffort),
-          tier:
-            response.serviceTier && response.serviceTier !== STANDARD_TIER
-              ? tierFor(model, response.serviceTier)
-              : null,
+          serviceTier: initialServiceTier(response.serviceTier, model),
         }
     const seen = this.threads.get(id)
+    const configContext = { codexHome: this.codexHome, cwd }
+    const mapper = seen?.mapper ?? this.newMapper(configContext)
+    mapper.setConfigContext(configContext)
     const record = threadRecord(id, settings, {
       cwd,
       hidden,
       known: true,
       prompted: false,
-      mapper: seen?.mapper ?? this.newMapper(),
+      mapper,
     })
+    record.historyMode = response.thread.historyMode ?? seen?.historyMode
     record.usage = seen?.usage ?? null
     this.threads.set(id, record)
     void this.publishCommands(id)
@@ -1098,7 +1133,12 @@ export class CodexConnection implements AgentConnection {
       approvalPolicy: mode.approvalPolicy,
       approvalsReviewer: mode.approvalsReviewer,
       sandbox: sandboxMode(heldPolicy(mode.sandbox, sandbox)),
-      config: sessionConfig(cwd, options, desktopConfig(desktop, NO_SERVERS)),
+      config: sessionConfig(
+        cwd,
+        options,
+        await projectRoots(cwd),
+        desktopConfig(desktop, NO_SERVERS),
+      ),
       ...developerInstructions(options),
       ...workspaceRoots(cwd, options.folders),
       ephemeral: hidden,
@@ -1109,6 +1149,11 @@ export class CodexConnection implements AgentConnection {
     record.sandbox = sandbox
     record.folders = [...(options.folders ?? [])]
     this.keepDesktop(record.id, cwd, options, desktop, new Set())
+    if (!hidden && this.startupConfigWarnings.size > 0) {
+      for (const warning of this.startupConfigWarnings.values()) {
+        this.deliver(record.id, { method: 'configWarning', params: warning })
+      }
+    }
     return { sessionId: record.id, config: await this.config(record) }
   }
 
@@ -1140,7 +1185,7 @@ export class CodexConnection implements AgentConnection {
         : sandbox
           ? { sandbox: sandboxMode(heldPolicy(modeOf(DEFAULT_MODE)!.sandbox, sandbox)) }
           : {}),
-      config: sessionConfig(cwd, options, desktopConfig(desktop, allowed)),
+      config: sessionConfig(cwd, options, await projectRoots(cwd), desktopConfig(desktop, allowed)),
       ...developerInstructions(options),
       ...workspaceRoots(cwd, options.folders),
       excludeTurns: true,
@@ -1220,17 +1265,33 @@ export class CodexConnection implements AgentConnection {
 
   /** The thread's history, oldest first, each item with its turn. */
   private async items(threadId: string): Promise<ThreadItemsListResponse['data']> {
-    const entries: ThreadItemsListResponse['data'] = []
-    let cursor: string | null = null
-    do {
-      const page: ThreadItemsListResponse = await this.call<ThreadItemsListResponse>(
-        'thread/items/list',
-        { threadId, cursor, limit: 200, sortDirection: 'asc' },
-      )
-      entries.push(...page.data)
-      cursor = page.nextCursor
-    } while (cursor)
-    return entries
+    const readTurns = async (): Promise<ThreadItemsListResponse['data']> => {
+      const { thread } = await this.call<ThreadReadResponse>('thread/read', {
+        threadId,
+        includeTurns: true,
+      })
+      return thread.turns.flatMap((turn) => turn.items.map((item) => ({ turnId: turn.id, item })))
+    }
+    // Legacy rollouts store history in one file and serve turns through `thread/read`.
+    if (this.threads.get(threadId)?.historyMode === 'legacy') return readTurns()
+    try {
+      const entries: ThreadItemsListResponse['data'] = []
+      let cursor: string | null = null
+      do {
+        const page: ThreadItemsListResponse = await this.call<ThreadItemsListResponse>(
+          'thread/items/list',
+          { threadId, cursor, limit: 200, sortDirection: 'asc' },
+        )
+        entries.push(...page.data)
+        cursor = page.nextCursor
+      } while (cursor)
+      return entries
+    } catch (error) {
+      if (error instanceof AgentRequestError && error.code === METHOD_NOT_FOUND) {
+        return readTurns()
+      }
+      throw error
+    }
   }
 
   /** Replays a thread's items to its target; returns the subagents they name. */
@@ -1277,7 +1338,7 @@ export class CodexConnection implements AgentConnection {
       sandbox: sandboxMode(heldPolicy(mode.sandbox, sandbox)),
       // A fork takes the model and effort of the configuration, not of its source.
       ...(source ? { model: source.model } : {}),
-      config: sessionConfig(cwd, options, desktopConfig(desktop, allowed)),
+      config: sessionConfig(cwd, options, await projectRoots(cwd), desktopConfig(desktop, allowed)),
       ...developerInstructions(options),
       ...workspaceRoots(cwd, options.folders),
       ephemeral: hidden,
@@ -1421,7 +1482,12 @@ export class CodexConnection implements AgentConnection {
       approvalPolicy: 'never',
       sandbox: 'read-only',
       ...(source ? { model: source.model } : {}),
-      config: sessionConfig(cwd, { ...options, mcpServers: servers }, this.desktopOf(sessionId)),
+      config: sessionConfig(
+        cwd,
+        { ...options, mcpServers: servers },
+        await projectRoots(cwd),
+        this.desktopOf(sessionId),
+      ),
       developerInstructions: own ? `${own}\n\n${SIDE_INSTRUCTIONS}` : SIDE_INSTRUCTIONS,
       ...workspaceRoots(cwd, parent.folders),
       ephemeral: true,
@@ -1495,7 +1561,12 @@ export class CodexConnection implements AgentConnection {
       approvalPolicy: 'never',
       sandbox: 'read-only',
       ...(source ? { model: source.model } : {}),
-      config: sessionConfig(cwd, { ...options, mcpServers: servers }, this.desktopOf(sessionId)),
+      config: sessionConfig(
+        cwd,
+        { ...options, mcpServers: servers },
+        await projectRoots(cwd),
+        this.desktopOf(sessionId),
+      ),
       ...developerInstructions(options),
       ...workspaceRoots(cwd, parent.folders),
       ephemeral: true,
@@ -1537,7 +1608,7 @@ export class CodexConnection implements AgentConnection {
   }
 
   async listSessions(
-    cwd: string,
+    cwd: string | null,
     cursor: string | null,
   ): Promise<{ sessions: ListedSession[]; nextCursor: string | null }> {
     const response = await this.call<ThreadListResponse>('thread/list', {
@@ -1663,6 +1734,8 @@ export class CodexConnection implements AgentConnection {
     if (target && this.targets.get(sessionId) !== target) return
     this.targets.delete(sessionId)
     this.pending.delete(sessionId)
+    const record = this.threads.get(sessionId)
+    if (record) record.commands = null
     this.unregistered.add(sessionId)
     if (this.unregistered.size > CLOSED_THREADS) {
       this.unregistered.delete(this.unregistered.values().next().value!)
@@ -1693,12 +1766,13 @@ export class CodexConnection implements AgentConnection {
 
   private child(id: string, parent: string): ThreadRecord {
     const from = this.threads.get(parent)
+    const cwd = from?.cwd ?? null
     const record = threadRecord(id, from?.settings ?? UNKNOWN_SETTINGS, {
-      cwd: from?.cwd ?? null,
+      cwd,
       hidden: false,
       known: false,
       prompted: true,
-      mapper: this.newMapper(),
+      mapper: this.newMapper({ codexHome: this.codexHome, cwd }),
     })
     this.threads.set(id, record)
     return record
@@ -1714,7 +1788,7 @@ export class CodexConnection implements AgentConnection {
       hidden: false,
       known: false,
       prompted: true,
-      mapper: this.newMapper(),
+      mapper: this.newMapper({ codexHome: this.codexHome, cwd: null }),
     })
     this.threads.set(id, created)
     return created
@@ -1768,6 +1842,28 @@ export class CodexConnection implements AgentConnection {
     if (target) target.apply({ patches: [], effects } satisfies MapperOutput)
   }
 
+  private recordConfigWarning(warning: ConfigWarningNotification): void {
+    const summaryKey = warning.summary.trim()
+    if (summaryKey) {
+      this.recentConfigWarnings.delete(summaryKey)
+      this.recentConfigWarnings.set(summaryKey, warning)
+      if (this.recentConfigWarnings.size > RECENT_CONFIG_WARNINGS) {
+        this.recentConfigWarnings.delete(this.recentConfigWarnings.keys().next().value!)
+      }
+    }
+    // Keep startup parse/load config warnings that carry a concrete path so newly opened sessions
+    // surface them even when Codex does not repeat them as per-thread `warning` notifications.
+    if (this.threads.size === 0 && warning.path && (warning.range || warning.details)) {
+      const key = configWarningDedupeKey(warning)
+      if (
+        !this.startupConfigWarnings.has(key) &&
+        this.startupConfigWarnings.size < STARTUP_CONFIG_WARNINGS
+      ) {
+        this.startupConfigWarnings.set(key, warning)
+      }
+    }
+  }
+
   private onNotification(method: string, params: unknown): void {
     const p = (params ?? {}) as Record<string, unknown>
     switch (method) {
@@ -1800,7 +1896,6 @@ export class CodexConnection implements AgentConnection {
         if (typeof p.threadId === 'string') this.deliver(p.threadId, { method, params })
         return
       case 'deprecationNotice':
-      case 'configWarning':
         this.hooks.log('warn', `Codex: ${String(p.summary ?? p.message ?? method)}`)
         this.codexNotice(null, method, codexWarning(method, p))
         return
@@ -1814,6 +1909,18 @@ export class CodexConnection implements AgentConnection {
           return
         }
         break
+      case 'configWarning': {
+        const parsed = parseConfigWarningNotification(p)
+        const pathNote = parsed?.path ? ` (${parsed.path})` : ''
+        this.hooks.log('warn', `Codex: ${String(p.summary ?? p.message ?? method)}${pathNote}`)
+        if (!parsed) return
+        if (parsed.threadId) {
+          this.deliver(parsed.threadId, { method: 'configWarning', params: parsed })
+          return
+        }
+        this.recordConfigWarning(parsed)
+        return
+      }
     }
     const threadId = typeof p.threadId === 'string' ? p.threadId : null
     if (!threadId) {
@@ -1846,7 +1953,21 @@ export class CodexConnection implements AgentConnection {
         break
       }
     }
-    if (!quiet(method)) this.deliver(threadId, { method, params })
+    if (!quiet(method)) {
+      if (method === 'warning' && typeof p.message === 'string') {
+        const matched = this.recentConfigWarnings.get(p.message.trim())
+        if (matched) {
+          this.deliver(threadId, {
+            method: 'configWarning',
+            params: { ...matched, summary: p.message },
+          })
+        } else {
+          this.deliver(threadId, { method, params })
+        }
+      } else {
+        this.deliver(threadId, { method, params })
+      }
+    }
     if (method === 'item/started' || method === 'item/completed') {
       const item = p.item as ThreadItem
       if (isAsyncQuestion(item)) void this.askAsync(threadId, item)
@@ -2147,7 +2268,7 @@ export class CodexConnection implements AgentConnection {
         }
       : null
     const model = this.knownModels.find((item) => item.id === settings.model)
-    const tier = this.tierOf(settings)
+    const serviceTier = serviceTierParam(settings, model)
     return {
       threadId: record.id,
       approvalPolicy: mode.approvalPolicy,
@@ -2160,23 +2281,14 @@ export class CodexConnection implements AgentConnection {
       summary: 'auto',
       ...(settings.model ? { model: settings.model } : {}),
       ...(settings.effort ? { effort: settings.effort } : {}),
-      // A model that lists no faster tier gets none, so Codex keeps config.toml's; a tier chosen
-      // goes out even before the model list is read.
-      ...(tier !== null || speedTiers(model).length > 0
-        ? { serviceTier: tier ?? STANDARD_TIER }
-        : {}),
+      // Omit serviceTier when the model advertises no speed tiers or does not support the chosen tier.
+      ...(serviceTier !== undefined ? { serviceTier } : {}),
       ...(collaborationMode ? { collaborationMode } : {}),
     }
   }
 
   private turnParams(record: ThreadRecord, input: UserInput[]): Record<string, unknown> {
     return { ...this.settingsParams(record), input }
-  }
-
-  private tierOf(settings: Settings): string | null {
-    const model = this.knownModels.find((item) => item.id === settings.model)
-    // Without the model list, a tier goes out only when no model is known to lack it.
-    return model ? tierFor(model, settings.tier) : settings.tier
   }
 
   async prompt(
@@ -2252,8 +2364,8 @@ export class CodexConnection implements AgentConnection {
     return messages
   }
 
-  private newMapper(): ThreadMapper {
-    return new ThreadMapper({ appeals: this.appeals })
+  private newMapper(configContext: CodexConfigWarningContext): ThreadMapper {
+    return new ThreadMapper(configContext, { appeals: this.appeals })
   }
 
   /** Huli: when Kite first saw each background terminal listed, by its process id. */
@@ -2473,6 +2585,7 @@ export class CodexConnection implements AgentConnection {
     if (record.sandbox && optionId === MODE_ID && value === FULL_ACCESS_MODE) {
       throw new AgentRequestError('agent_error', t('sandbox.codexFullAccess'), -32602)
     }
+    const previousModel = record.settings.model
     try {
       record.settings = applyOption(record.settings, models, optionId, value)
     } catch (error) {
@@ -2481,28 +2594,53 @@ export class CodexConnection implements AgentConnection {
       }
       throw error
     }
+    if (record.settings.model !== previousModel) {
+      if (record.skills !== null) this.emitCommands(record, models)
+      else if (record.skillsSeq === 0) void this.publishCommands(sessionId)
+    }
     return buildConfig(record.settings, models)
   }
 
   // Commands: Codex's own, which run through app-server instead of going to the model as text.
 
-  /** Sends the session its commands, Codex's and a `$name` for each skill, when they changed. */
+  /** Emits the session's commands for its active model and last read skills, when they changed. */
+  private emitCommands(record: ThreadRecord, models: readonly Model[]): void {
+    if (record.hidden || record.cwd === null || this.parents.has(record.id)) return
+    const target = this.targets.get(record.id)
+    if (!target || this.threads.get(record.id) !== record) return
+    const model = models.find((item) => item.id === record.settings.model)
+    const commands = commandList(record.skills ?? [], model)
+    const key = JSON.stringify(commands)
+    if (record.commands === key) return
+    record.commands = key
+    target.apply({ patches: [{ op: 'session.update', changes: { commands } }], effects: [] })
+  }
+
+  /**
+   * Sends the session its commands, Codex's for the active model and a `$name` for each skill,
+   * when they changed.
+   */
   private async publishCommands(threadId: string): Promise<void> {
     const record = this.threads.get(threadId)
     if (!record || record.hidden || record.cwd === null || this.parents.has(threadId)) return
-    let skills: SkillMetadata[] = []
-    try {
-      skills = await this.skills(record.cwd)
-    } catch (error) {
-      if (this.isClosed) return
-      this.hooks.log('warn', `Could not list Codex's skills: ${(error as Error).message}`)
+    const seq = ++record.skillsSeq
+    const [models, skills] = await Promise.all([
+      this.listModels(),
+      this.skills(record.cwd).catch((error: unknown) => {
+        if (!this.isClosed) {
+          this.hooks.log('warn', `Could not list Codex's skills: ${(error as Error).message}`)
+        }
+        return null
+      }),
+    ])
+    if (this.isClosed || this.threads.get(threadId) !== record) return
+    if (seq === record.skillsSeq) {
+      if (skills !== null) record.skills = skills
+      else if (record.skills === null) record.skills = []
     }
-    const commands = commandList(skills)
-    const key = JSON.stringify(commands)
-    const target = this.targets.get(threadId)
-    if (!target || this.threads.get(threadId) !== record || record.commands === key) return
-    record.commands = key
-    target.apply({ patches: [{ op: 'session.update', changes: { commands } }], effects: [] })
+    // Prefer the latest catalog in case a model list refresh completed while skills were loading.
+    const currentModels = this.knownModels.length > 0 ? this.knownModels : models
+    this.emitCommands(record, currentModels)
   }
 
   private async skills(cwd: string | null): Promise<SkillMetadata[]> {
@@ -2791,7 +2929,9 @@ export class CodexConnection implements AgentConnection {
       case 'plan':
         return rest ? this.answer(record, usage) : this.togglePlan(record)
       case 'fast':
-        return this.answer(record, () => this.fastAnswer(record, rest))
+        return this.answer(record, () => this.speedAnswer(record, 'fast', rest))
+      case 'ultrafast':
+        return this.answer(record, () => this.speedAnswer(record, 'ultrafast', rest))
       case 'compact':
         return this.commandTurn(record, async () => {
           await this.call('thread/compact/start', { threadId: record.id })
@@ -2957,24 +3097,36 @@ export class CodexConnection implements AgentConnection {
     return stopped('end_turn')
   }
 
-  /** `/fast [on|off|status]`: toggles or inspects fast mode for models that advertise it. */
-  private async fastAnswer(record: ThreadRecord, rest: string): Promise<string> {
+  /** `/fast` or `/ultrafast [on|off|status]`: toggles or inspects a speed tier for the current model. */
+  private async speedAnswer(
+    record: ThreadRecord,
+    kind: 'fast' | 'ultrafast',
+    rest: string,
+  ): Promise<string> {
     const arg = parseFastArg(rest)
-    if (arg === 'invalid') return t('codex.fast.usage')
+    if (arg === 'invalid') return t(`codex.${kind}.usage`)
     const models = await this.listModels()
     const model = models.find((item) => item.id === record.settings.model)
-    if (speedTiers(model).length === 0) {
+    const tier = kind === 'fast' ? fastTier(model) : ultrafastTier(model)
+    if (!tier) {
       return record.settings.model
-        ? t('codex.fast.unsupported', { model: record.settings.model })
-        : t('codex.fast.unsupportedNoModel')
+        ? t(`codex.${kind}.unsupported`, { model: record.settings.model })
+        : t(`codex.${kind}.unsupportedNoModel`)
     }
-    // Huli: on is any faster tier, so on turns on the model's first one, as the Fast switch does.
-    const fast = tierFor(model, record.settings.tier) !== null
-    if (arg === 'status') return t(fast ? 'codex.fast.statusOn' : 'codex.fast.statusOff')
-    const next = arg === 'toggle' ? !fast : arg === 'on'
-    record.settings = applyOption(record.settings, models, FAST_ID, next)
+    const active = resolveServiceTier(record.settings.serviceTier, model)
+    const isOn = active !== null && active.toLowerCase() === tier.toLowerCase()
+    if (arg === 'status') {
+      return t(isOn ? `codex.${kind}.statusOn` : `codex.${kind}.statusOff`)
+    }
+    const next = arg === 'toggle' ? !isOn : arg === 'on'
+    record.settings = applyOption(
+      record.settings,
+      models,
+      SERVICE_TIER_ID,
+      next ? tier : STANDARD_SERVICE_TIER,
+    )
     this.publishConfig(record, models)
-    return t(next ? 'codex.fast.on' : 'codex.fast.off')
+    return t(next ? `codex.${kind}.on` : `codex.${kind}.off`)
   }
 
   /** Sets the collaboration mode of the session's next turns, and shows it in its options. */

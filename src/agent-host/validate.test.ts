@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { HOST_METHODS, REMOVED_PLUGIN_METHODS } from '@shared/agent-host'
+import {
+  HOST_METHODS,
+  REMOVED_PLUGIN_METHODS,
+  THOUGHT_TRANSLATE_MAX_CHARS,
+} from '@shared/agent-host'
 import { forbiddenToDevices } from '@shared/remote/allow-list'
 import { MAX_ORDERED_ROWS, ORDER_ID_CHARS } from '@shared/session-order'
 import { createValidators, promptContent } from './validate'
@@ -218,6 +222,21 @@ describe('createValidators', () => {
     rejects(() => posix['projects.create']({ ...base, parent: '~/code' }))
     expect(posix['projects.places']({})).toBeUndefined()
     rejects(() => posix['projects.places']({ parent: '/' }))
+  })
+
+  it('takes a bounded list of session ids for batch session usage lookups', () => {
+    expect(posix['sessions.usages']({ sessionIds: ['a', 'b'], extra: true })).toEqual({
+      sessionIds: ['a', 'b'],
+    })
+    expect(posix['sessions.usages']({ sessionIds: [] })).toEqual({ sessionIds: [] })
+    rejects(() => posix['sessions.usages']({}))
+    rejects(() => posix['sessions.usages']({ sessionIds: 'a' }))
+    rejects(() => posix['sessions.usages']({ sessionIds: [42] }))
+    rejects(() => posix['sessions.usages']({ sessionIds: [''] }))
+    rejects(() => posix['sessions.usages']({ sessionIds: ['x'.repeat(257)] }))
+    rejects(() =>
+      posix['sessions.usages']({ sessionIds: Array.from({ length: 10_001 }, () => 's') }),
+    )
   })
 
   it('takes a fork for an import only when asked', () => {
@@ -516,6 +535,18 @@ describe('createValidators', () => {
     for (const method of ['sync.read', 'sync.preview', 'sync.apply', 'sync.saveSnippets']) {
       expect(forbiddenToDevices(method, {})).toBe(true)
     }
+  })
+
+  it('takes a terminal takeover for an agent or a known app alone', () => {
+    expect(posix['market.mcpTerminalPlan']({ target: 'codex~work' })).toEqual({
+      target: 'codex~work',
+    })
+    expect(posix['market.mcpTerminalOff']({ target: 'app:vscode' })).toEqual({
+      target: 'app:vscode',
+    })
+    rejects(() => posix['market.mcpTerminalPlan']({ target: 'app:notepad' }))
+    rejects(() => posix['market.mcpTerminalPlan']({ target: 'app:__proto__' }))
+    rejects(() => posix['market.mcpTerminalPlan']({ agentId: 'codex' }))
   })
 
   it('checks the connection methods: servers Kettu keeps and logins of Connect', () => {
@@ -977,6 +1008,17 @@ describe('createValidators', () => {
     rejects(() => windows['paths.drives']({ letters: ['C', 'D'] }))
   })
 
+  it('requires an absolute project path to archive or unarchive a project', () => {
+    for (const method of ['projects.archive', 'projects.unarchive'] as const) {
+      expect(posix[method]({ path: '/Users/me/app' })).toEqual({ path: '/Users/me/app' })
+      rejects(() => posix[method]({ path: 'relative' }))
+      rejects(() => posix[method]({ path: '/app\0/x' }))
+      rejects(() => posix[method]({ path: 'C:\\app' }))
+      expect(windows[method]({ path: 'C:\\app' })).toEqual({ path: 'C:\\app' })
+      rejects(() => windows[method]({ path: '/posix' }))
+    }
+  })
+
   it('requires an absolute project path and an explicit boolean for pinning', () => {
     const pin = posix['projects.pin']
     expect(pin({ path: '/repo', pinned: false })).toEqual({ path: '/repo', pinned: false })
@@ -1022,6 +1064,53 @@ describe('createValidators', () => {
     expect(forbiddenToDevices('projects.orderSessions', { path: '/a', ids: [] })).toBe(false)
   })
 
+  it('validates display names and source folder lists when updating a project', () => {
+    const update = posix['projects.update']
+    expect(update({ path: '/a', name: 'My App', folders: ['/a', '/b'] })).toEqual({
+      path: '/a',
+      name: 'My App',
+      folders: ['/a', '/b'],
+    })
+    expect(update({ path: '/a', name: null })).toEqual({ path: '/a', name: null })
+    expect(update({ path: '/a', name: '' })).toEqual({ path: '/a', name: '' })
+    expect(update({ path: '/a', icon: null })).toEqual({ path: '/a', icon: null })
+    expect(
+      update({ path: '/a', icon: { kind: 'icon', value: 'terminal', color: 'blue' } }),
+    ).toEqual({
+      path: '/a',
+      icon: { kind: 'icon', value: 'terminal', color: 'blue' },
+    })
+    expect(update({ path: '/a', icon: { kind: 'icon', value: 'code' } })).toEqual({
+      path: '/a',
+      icon: { kind: 'icon', value: 'code' },
+    })
+    expect(update({ path: '/a', icon: { kind: 'emoji', value: ' 🚀 ' } })).toEqual({
+      path: '/a',
+      icon: { kind: 'emoji', value: '🚀' },
+    })
+    expect(windows['projects.update']({ path: 'C:\\a', folders: ['C:\\a', 'D:\\b'] })).toEqual({
+      path: 'C:\\a',
+      folders: ['C:\\a', 'D:\\b'],
+    })
+    rejects(() => update({ path: 'relative', name: 'x' }))
+    rejects(() => update({ path: '/a', name: 123 }))
+    rejects(() => update({ path: '/a', name: 'a\0b' }))
+    rejects(() => update({ path: '/a', name: 'x'.repeat(201) }))
+    rejects(() => update({ path: '/a', icon: 'rocket' }))
+    rejects(() => update({ path: '/a', icon: { kind: 'icon', value: 'not-supported' } }))
+    rejects(() => update({ path: '/a', icon: { kind: 'icon', value: 'code', color: '#ff0000' } }))
+    rejects(() => update({ path: '/a', icon: { kind: 'emoji', value: 'abc' } }))
+    rejects(() => update({ path: '/a', icon: { kind: 'emoji', value: '🚀🔥' } }))
+    rejects(() => update({ path: '/a', icon: { kind: 'emoji', value: '🚀', color: 'red' } }))
+    rejects(() => update({ path: '/a', folders: [] }))
+    rejects(() => update({ path: '/a', folders: 'not-an-array' }))
+    rejects(() => update({ path: '/a', folders: ['/a', 'relative'] }))
+    rejects(() => update({ path: '/a', folders: ['/a', '/b\0c'] }))
+    rejects(() => update({ path: '/a', folders: ['/a', ''] }))
+    rejects(() => update({ path: '/a', folders: Array.from({ length: 51 }, (_, i) => `/f/${i}`) }))
+    rejects(() => windows['projects.update']({ path: 'C:\\a', folders: ['/posix'] }))
+  })
+
   it('keeps optional fields out when absent', () => {
     expect(
       posix['sessions.create']({ agentId: 'codex', projectPath: '/p', parentId: undefined }),
@@ -1034,6 +1123,12 @@ describe('createValidators', () => {
     expect(
       posix['agents.listSessions']({ agentId: 'codex', projectPath: '/p', cursor: '10' }),
     ).toEqual({ agentId: 'codex', projectPath: '/p', cursor: '10' })
+    expect(
+      posix['agents.listSessions']({ agentId: 'codex', projectPath: '/p', allFolders: true }),
+    ).toEqual({ agentId: 'codex', projectPath: '/p', allFolders: true })
+    expect(
+      posix['agents.listSessions']({ agentId: 'codex', projectPath: '/p', allFolders: 'yes' }),
+    ).toEqual({ agentId: 'codex', projectPath: '/p' })
   })
 
   // Huli: a session's API provider profile, by id, or null for its agent's own sign-in.
@@ -1108,6 +1203,21 @@ describe('createValidators', () => {
     expect(refresh({ agentId: 'codex', force: true, extra: 1 })).toEqual({
       agentId: 'codex',
       force: true,
+    })
+  })
+
+  it('takes refreshAccount flags only as booleans', () => {
+    const refresh = posix['agents.refreshAccount']
+    expect(refresh({ agentId: 'antigravity' })).toEqual({ agentId: 'antigravity' })
+    expect(refresh({ agentId: 'antigravity', force: true, afterSignIn: true })).toEqual({
+      agentId: 'antigravity',
+      force: true,
+      afterSignIn: true,
+    })
+    rejects(() => refresh({ agentId: 'antigravity', afterSignIn: 'yes' }))
+    expect(refresh({ agentId: 'antigravity', afterSignIn: false, extra: 1 })).toEqual({
+      agentId: 'antigravity',
+      afterSignIn: false,
     })
   })
 
@@ -1208,6 +1318,40 @@ describe('createValidators', () => {
     rejects(() => switchAgent({ sessionId: 's', agentId: 'codex', content, summarize: 'yes' }))
     rejects(() => switchAgent({ sessionId: 's', agentId: 'codex', content, options: { a: {} } }))
     rejects(() => switchAgent({ agentId: 'codex', content }))
+  })
+
+  it('checks manual task delegation requests', () => {
+    const delegateAgents = posix['sessions.delegateAgents']
+    expect(delegateAgents({ sessionId: 's', extra: 1 })).toEqual({ sessionId: 's' })
+    rejects(() => delegateAgents({}))
+
+    const delegate = posix['sessions.delegate']
+    const content = [{ type: 'text', text: 'Run the test suite' }]
+    expect(delegate({ sessionId: 's', agentId: 'codex', content, extra: 1 })).toEqual({
+      sessionId: 's',
+      agentId: 'codex',
+      content,
+    })
+    expect(
+      delegate({
+        sessionId: 's',
+        agentId: 'codex',
+        content,
+        mode: 'workspace-write',
+        title: 'Test run',
+      }),
+    ).toEqual({
+      sessionId: 's',
+      agentId: 'codex',
+      content,
+      mode: 'workspace-write',
+      title: 'Test run',
+    })
+    rejects(() => delegate({ sessionId: 's', agentId: 'unknown', content }))
+    rejects(() => delegate({ sessionId: 's', agentId: 'codex' }))
+    rejects(() => delegate({ sessionId: 's', agentId: 'codex', content, title: '   ' }))
+    rejects(() => delegate({ sessionId: 's', agentId: 'codex', content, mode: '' }))
+    rejects(() => delegate({ agentId: 'codex', content }))
   })
 
   it('checks the file requests', () => {
@@ -2098,6 +2242,14 @@ describe('comment and direct edit requests', () => {
     )
   })
 
+  it('validates artifact and thread ids when deleting a comment thread', () => {
+    const threadId = 'thr_01J9Z3K4V5W6X7Y8Z9A0B1C2D3'
+    expect(posix['artifacts.deleteComment']({ id, threadId })).toEqual({ id, threadId })
+    rejects(() => posix['artifacts.deleteComment']({ id: 'art_bad', threadId }))
+    rejects(() => posix['artifacts.deleteComment']({ id, threadId: 'thr_bad' }))
+    rejects(() => posix['artifacts.deleteComment']({ id }))
+  })
+
   it('takes an edit of the editable properties only, to values that stay in the attribute', () => {
     const edit = { id, baseVersion: 3, path: 'index.html', offset: 0, text: null }
     expect(posix['artifacts.editElement']({ ...edit, style: { color: '#ffffff' } })).toEqual({
@@ -2281,6 +2433,36 @@ describe('computer use requests', () => {
     rejects(() => posix['git.suggestBranch']({ projectPath: '/p', agentId: 'nope!' }))
   })
 
+  it('validates git.graph projectPath and bounded integer pagination', () => {
+    expect(posix['git.graph']({ projectPath: '/p' })).toEqual({ projectPath: '/p' })
+    expect(posix['git.graph']({ projectPath: '/p', limit: 50, skip: 100, extra: true })).toEqual({
+      projectPath: '/p',
+      limit: 50,
+      skip: 100,
+    })
+    expect(posix['git.graph']({ projectPath: '/p', limit: 1, skip: 0 })).toEqual({
+      projectPath: '/p',
+      limit: 1,
+      skip: 0,
+    })
+    expect(posix['git.graph']({ projectPath: '/p', limit: 200, skip: 100_000 })).toEqual({
+      projectPath: '/p',
+      limit: 200,
+      skip: 100_000,
+    })
+    rejects(() => posix['git.graph']({}))
+    rejects(() => posix['git.graph']({ projectPath: 'relative/path' }))
+    rejects(() => posix['git.graph']({ projectPath: '/p', limit: 0 }))
+    rejects(() => posix['git.graph']({ projectPath: '/p', limit: -5 }))
+    rejects(() => posix['git.graph']({ projectPath: '/p', limit: 201 }))
+    rejects(() => posix['git.graph']({ projectPath: '/p', limit: 12.5 }))
+    rejects(() => posix['git.graph']({ projectPath: '/p', limit: '50' }))
+    rejects(() => posix['git.graph']({ projectPath: '/p', skip: -1 }))
+    rejects(() => posix['git.graph']({ projectPath: '/p', skip: 100_001 }))
+    rejects(() => posix['git.graph']({ projectPath: '/p', skip: 1.5 }))
+    rejects(() => posix['git.graph']({ projectPath: '/p', skip: '0' }))
+  })
+
   it('takes what became of a drafted problem report', () => {
     const sent = { kind: 'sent', reportId: 'R-7K2F' }
     expect(
@@ -2318,10 +2500,52 @@ describe('computer use requests', () => {
     rejects(() => posix['git.issue']({ url: `${url}\n` }))
   })
 
-  it('watches only github.com pull request and issue addresses, a bounded number', () => {
+  it('reads pull request stacks only from github.com stack addresses', () => {
+    const url = 'https://github.com/KettuAI/Kettu/stacks/42'
+    expect(posix['git.stack']({ url })).toEqual({ url })
+    expect(posix['git.stack']({ url, fresh: true })).toEqual({ url, fresh: true })
+    rejects(() => posix['git.stack']({}))
+    rejects(() => posix['git.stack']({ url, fresh: 'yes' }))
+    rejects(() => posix['git.stack']({ url: 'https://github.com/KettuAI/Kettu/pull/42' }))
+    rejects(() => posix['git.stack']({ url: 'https://github.com/KettuAI/Kettu/issues/42' }))
+    rejects(() => posix['git.stack']({ url: 'http://github.com/KettuAI/Kettu/stacks/42' }))
+    rejects(() => posix['git.stack']({ url: 'https://github.example.com/a/b/stacks/1' }))
+    rejects(() => posix['git.stack']({ url: 'https://github.com/a/b/stacks/1?x=--repo' }))
+    rejects(() => posix['git.stack']({ url: 'https://github.com/a/b/stacks/0' }))
+    rejects(() => posix['git.stack']({ url: 'https://github.com/a/b/stacks/new' }))
+    rejects(() => posix['git.stack']({ url: `${url}\n` }))
+  })
+
+  it('validates git.searchReferences repository owner, repo name, and bounded query', () => {
+    expect(posix['git.searchReferences']({ owner: 'KettuAI', repo: 'Kettu', query: '' })).toEqual({
+      owner: 'KettuAI',
+      repo: 'Kettu',
+      query: '',
+    })
+    expect(
+      posix['git.searchReferences']({ owner: 'octo-org', repo: 'app.ts', query: '2600' }),
+    ).toEqual({
+      owner: 'octo-org',
+      repo: 'app.ts',
+      query: '2600',
+    })
+    rejects(() => posix['git.searchReferences']({}))
+    rejects(() => posix['git.searchReferences']({ owner: '-bad', repo: 'Kettu', query: '' }))
+    rejects(() => posix['git.searchReferences']({ owner: 'KettuAI', repo: '..', query: '' }))
+    rejects(() => posix['git.searchReferences']({ owner: 'KettuAI', repo: 'a/b', query: '' }))
+    rejects(() => posix['git.searchReferences']({ owner: 'KettuAI', repo: 'Kettu', query: 'a\0b' }))
+    rejects(() =>
+      posix['git.searchReferences']({ owner: 'KettuAI', repo: 'Kettu', query: 'x'.repeat(121) }),
+    )
+  })
+
+  it('watches only github.com pull request, issue, and stack addresses, a bounded number', () => {
     const pull = 'https://github.com/KettuAI/Kettu/pull/546'
     const issue = 'https://github.com/KettuAI/Kettu/issues/546'
-    expect(posix['git.watchReferences']({ urls: [pull, issue] })).toEqual({ urls: [pull, issue] })
+    const stack = 'https://github.com/KettuAI/Kettu/stacks/42'
+    expect(posix['git.watchReferences']({ urls: [pull, issue, stack] })).toEqual({
+      urls: [pull, issue, stack],
+    })
     expect(posix['git.watchReferences']({ urls: [] })).toEqual({ urls: [] })
     rejects(() => posix['git.watchReferences']({}))
     rejects(() => posix['git.watchReferences']({ urls: pull }))
@@ -2612,6 +2836,21 @@ describe('worktree requests', () => {
     }
   })
 
+  it('validates session branch listing and branch switching parameters', () => {
+    expect(posix['sessions.branches']({ sessionId: 's' })).toEqual({ sessionId: 's' })
+    rejects(() => posix['sessions.branches']({}))
+    rejects(() => posix['sessions.branches']({ sessionId: '' }))
+
+    expect(posix['sessions.switchBranch']({ sessionId: 's', branchId: 'leaf-1' })).toEqual({
+      sessionId: 's',
+      branchId: 'leaf-1',
+    })
+    rejects(() => posix['sessions.switchBranch']({ sessionId: 's' }))
+    rejects(() => posix['sessions.switchBranch']({ sessionId: 's', branchId: '' }))
+    rejects(() => posix['sessions.switchBranch']({ sessionId: 's', branchId: 123 }))
+    rejects(() => posix['sessions.switchBranch']({ sessionId: 's', branchId: 'x'.repeat(1025) }))
+  })
+
   it('removes a worktree only against the state the user was shown', () => {
     const expected = {
       exists: true,
@@ -2769,6 +3008,102 @@ describe('worktree requests', () => {
       }),
     )
     rejects(() => posix['sessions.runCommand']({ sessionId: 's', command: 'ls' }))
+  })
+
+  it('validates sessions.previewUndoTurn and sessions.undoTurn payloads strictly', () => {
+    const sha = 'a'.repeat(64)
+    expect(
+      posix['sessions.previewUndoTurn']({ sessionId: 's', toolIds: ['t:1', 't:2'], extra: 1 }),
+    ).toEqual({ sessionId: 's', toolIds: ['t:1', 't:2'] })
+    rejects(() => posix['sessions.previewUndoTurn']({ sessionId: 's', toolIds: [] }))
+    rejects(() => posix['sessions.previewUndoTurn']({ sessionId: 's', toolIds: [''] }))
+
+    expect(
+      posix['sessions.undoTurn']({
+        sessionId: 's',
+        toolIds: ['t:1'],
+        expectedDigests: [
+          { path: 'a.ts', exists: true, sha256: sha, size: 12, extra: true },
+          { path: 'b.ts', exists: false, sha256: null, size: null },
+        ],
+      }),
+    ).toEqual({
+      sessionId: 's',
+      toolIds: ['t:1'],
+      expectedDigests: [
+        { path: 'a.ts', exists: true, sha256: sha, size: 12 },
+        { path: 'b.ts', exists: false, sha256: null, size: null },
+      ],
+    })
+    rejects(() =>
+      posix['sessions.undoTurn']({
+        sessionId: 's',
+        toolIds: ['t:1'],
+        expectedDigests: [{ path: 'a.ts', exists: true, sha256: 'not-a-sha', size: 1 }],
+      }),
+    )
+    rejects(() =>
+      posix['sessions.undoTurn']({
+        sessionId: 's',
+        toolIds: ['t:1'],
+        expectedDigests: [{ path: 'a\0.ts', exists: true, sha256: sha, size: 1 }],
+      }),
+    )
+    rejects(() =>
+      posix['sessions.undoTurn']({
+        sessionId: 's',
+        toolIds: ['t:1'],
+        expectedDigests: [{ path: 'a.ts', exists: true, sha256: sha, size: -1 }],
+      }),
+    )
+  })
+
+  it('validates sessions.translateThought payloads strictly', () => {
+    expect(
+      posix['sessions.translateThought']({
+        sessionId: 's1',
+        entryId: 'm:1#thought',
+        text: 'Inspecting files.',
+        language: 'zh-CN',
+        extra: true,
+      }),
+    ).toEqual({
+      sessionId: 's1',
+      entryId: 'm:1#thought',
+      text: 'Inspecting files.',
+      language: 'zh-CN',
+    })
+    rejects(() =>
+      posix['sessions.translateThought']({
+        sessionId: 's1',
+        entryId: 'm:1#thought',
+        text: '   \n  ',
+        language: 'zh-CN',
+      }),
+    )
+    rejects(() =>
+      posix['sessions.translateThought']({
+        sessionId: 's1',
+        entryId: 'm:1#thought',
+        text: 'x'.repeat(THOUGHT_TRANSLATE_MAX_CHARS + 1),
+        language: 'zh-CN',
+      }),
+    )
+    rejects(() =>
+      posix['sessions.translateThought']({
+        sessionId: 's1',
+        entryId: 'm:1#thought',
+        text: 'Inspecting files.',
+        language: 'zh_CN; rm -rf /',
+      }),
+    )
+    rejects(() =>
+      posix['sessions.translateThought']({
+        sessionId: 's1',
+        text: 'Inspecting files.',
+        language: 'en',
+      }),
+    )
   })
 })
 

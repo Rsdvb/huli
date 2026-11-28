@@ -25,6 +25,7 @@ import { isMac } from '@renderer/lib/platform'
 import { cn } from '@renderer/lib/utils'
 import { useDevicesStore } from '@renderer/stores/devices'
 import { useBrowserStore } from '@renderer/stores/browser'
+import { useProjectsStore } from '@renderer/stores/projects'
 import { sessionTitle, useSessionsStore } from '@renderer/stores/sessions'
 import { useSideChatNews } from '@renderer/stores/side-chat'
 import {
@@ -66,7 +67,8 @@ export function HeaderTools({
 }) {
   const sessionId = panelSession(panel)
   const pane = usePane()
-  const panelOpen = useViewStore((s) => shownPanel(s) === panel && !!s.sidePane[panel])
+  const projects = useProjectsStore((s) => s.projects)
+  const panelOpen = useViewStore((s) => shownPanel(s, projects) === panel && !!s.sidePane[panel])
   // 仅主会话拥有看板；新建会话尚未创建，子 Agent 页面展示父会话工作。
   const board = useSessionsStore((s) => {
     const origin = sessionId ? s.byId[sessionId]?.origin : undefined
@@ -156,7 +158,10 @@ function useBarTools({
   const { t } = useTranslation('shell')
   const { t: tb } = useTranslation('board')
   const context = usePane()
-  const shownPane = useViewStore((s) => (shownPanel(s) === panel ? s.sidePane[panel] : undefined))
+  const projects = useProjectsStore((s) => s.projects)
+  const shownPane = useViewStore((s) =>
+    shownPanel(s, projects) === panel ? s.sidePane[panel] : undefined,
+  )
   const activity = useBoardActivity(sessionId ?? '')
   const boardNews = useBoardNews(sessionId)
   const workersOn = useEntry('pane.workers')
@@ -274,7 +279,8 @@ function SidePanelButton({
   const { t } = useTranslation(['common', 'shell'])
   const context = usePane()
   const sessionId = panelSession(panel)
-  const shown = useViewStore((s) => shownPanel(s) === panel && !!s.sidePane[panel])
+  const projects = useProjectsStore((s) => s.projects)
+  const shown = useViewStore((s) => shownPanel(s, projects) === panel && !!s.sidePane[panel])
   const pageNews = useBrowserStore((s) => (sessionId ? !!s.unseen[sessionId] : false))
   const deviceNews = useDevicesStore((s) => (sessionId ? !!s.unseen[sessionId] : false))
   const chatNews = useSideChatNews(sessionId)

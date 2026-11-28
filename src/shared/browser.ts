@@ -1,5 +1,5 @@
 import type { BrowserEmulation } from './browser-args'
-import type { SurfaceControl } from './control'
+import type { ActiveControl, SurfaceControl } from './control'
 
 /** The partition every page in the side panel's browser uses, shared by all sessions. */
 export const BROWSER_PARTITION = 'persist:kettu-browser'
@@ -20,9 +20,13 @@ export interface BrowserViewport {
   height: number
 }
 
-/** The sizes a page can be given by name, by an agent's `browser_resize` or the pane's menu. */
+/** The sizes a page can be given by name, by an agent's `browser_resize`. */
 export const PAGE_SIZE_NAMES = ['desktop', 'tablet', 'phone'] as const
 export type PageSizeName = (typeof PAGE_SIZE_NAMES)[number]
+
+/** The size modes the pane's menu offers: native pane fill, or a named device size. */
+export const PANE_PAGE_SIZE_MODES = ['fit', ...PAGE_SIZE_NAMES] as const
+export type PanePageSizeMode = (typeof PANE_PAGE_SIZE_MODES)[number]
 
 /** A size a page keeps, and whether it lays out there as a phone or a tablet does. */
 export interface PageSize extends BrowserViewport {
@@ -82,6 +86,31 @@ export function samePageSize(a: PageSize | null, b: PageSize | null): boolean {
   return a.name === b.name && a.width === b.width && a.height === b.height && a.mobile === b.mobile
 }
 
+/** Whether a viewport keeps a fixed aspect frame with a caption underneath rather than filling the pane. */
+export function isFixedFrameViewport(viewport: PageSize | null): viewport is PageSize {
+  return viewport !== null && viewport.name !== 'desktop'
+}
+
+/**
+ * The logical desktop viewport that fills `frame` with zero empty space: native `frame` dimensions
+ * when the pane is at least desktop-wide, otherwise 1280px wide scaled to fit `frame.width` with
+ * its height expanded to cover `frame.height`.
+ */
+export function desktopViewportFor(frame: BrowserBounds): PageSize {
+  const width = Math.max(1, Math.round(frame.width))
+  const height = Math.max(1, Math.round(frame.height))
+  if (width >= PAGE_SIZES.desktop.width) {
+    return { name: 'desktop', width, height, mobile: false }
+  }
+  const scale = width / PAGE_SIZES.desktop.width
+  return {
+    name: 'desktop',
+    width: PAGE_SIZES.desktop.width,
+    height: Math.max(1, Math.round(height / scale)),
+    mobile: false,
+  }
+}
+
 /** The room kept under a page of a fixed size for the line with its size, in CSS pixels. */
 export const SIZE_LINE_ROOM = 36
 
@@ -96,6 +125,24 @@ export function fitViewport(
   below = 0,
 ): { bounds: BrowserBounds; scale: number } {
   const room = Math.max(1, frame.height - below)
+  // Avoid shrinking width by 1px when a viewport's rounded height already matches `room` at the
+  // width-derived scale (e.g. a desktop viewport computed by `desktopViewportFor`).
+  const widthScale = Math.min(1, frame.width / viewport.width)
+  if (Math.round(viewport.height * widthScale) <= room) {
+    const width = Math.max(1, Math.min(frame.width, Math.round(viewport.width * widthScale)))
+    const scale = width / viewport.width
+    const height = Math.max(1, Math.min(room, Math.round(viewport.height * scale)))
+    return {
+      bounds: {
+        x: frame.x + Math.floor((frame.width - width) / 2),
+        y: frame.y,
+        width,
+        height,
+        radius: frame.radius,
+      },
+      scale,
+    }
+  }
   const fit = Math.min(1, frame.width / viewport.width, room / viewport.height)
   const width = Math.max(1, Math.floor(viewport.width * fit))
   const scale = width / viewport.width
@@ -110,6 +157,22 @@ export function fitViewport(
     },
     scale,
   }
+}
+
+/**
+ * Fits `viewport` inside `frame`: desktop pages fill the full frame with no bottom caption strip,
+ * while fixed-aspect presets (tablet, phone, custom) reserve `sizeLineRoom` below for their size
+ * caption.
+ */
+export function fitPageViewport(
+  frame: BrowserBounds,
+  viewport: PageSize | null,
+  sizeLineRoom = SIZE_LINE_ROOM,
+): { bounds: BrowserBounds; scale: number; showSizeLine: boolean } {
+  if (!viewport) return { bounds: frame, scale: 1, showSizeLine: false }
+  const fixed = isFixedFrameViewport(viewport)
+  const { bounds, scale } = fitViewport(frame, viewport, fixed ? sizeLineRoom : 0)
+  return { bounds, scale, showSizeLine: fixed }
 }
 
 /**
@@ -155,6 +218,35 @@ export function siteOf(url: unknown): string | null {
   const parsed = URL.parse(url)
   if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) return null
   return parsed.host || null
+}
+
+/**
+ * Canonical form of an http(s) URL for matching an already-open session browser tab:
+ * lowercases scheme and host and strips default ports via `URL`, trims redundant trailing slashes
+ * on non-root paths, and drops an empty trailing `#` while preserving query strings and non-empty
+ * fragments so hash-routed pages and distinct anchors remain separate.
+ */
+export function canonicalBrowserUrl(url: string | null | undefined): string | null {
+  if (!url) return null
+  const parsed = URL.parse(url)
+  if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) return null
+  const pathname =
+    parsed.pathname.length > 1 ? parsed.pathname.replace(/\/+$/, '') || '/' : parsed.pathname
+  const auth =
+    parsed.username || parsed.password
+      ? `${parsed.username}${parsed.password ? `:${parsed.password}` : ''}@`
+      : ''
+  return `${parsed.protocol}//${auth}${parsed.host}${pathname}${parsed.search}${parsed.hash}`
+}
+
+/** Whether two http(s) URLs match the same session browser tab destination. */
+export function sameBrowserUrl(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const left = canonicalBrowserUrl(a)
+  if (left === null) return false
+  return left === canonicalBrowserUrl(b)
 }
 
 /** An origin without its scheme, as the pane and the thread name it to the user. */
@@ -213,6 +305,8 @@ export interface BrowserState {
   downloadRequest: BrowserDownloadRequest | null
   /** Huli: whose cookies and storage the session's pages use. */
   profile: BrowserProfile
+  /** Whether element annotation mode is active on the selected tab. */
+  annotating: boolean
 }
 
 /** Huli: a download above DOWNLOAD_ASK_BYTES that waits for the user. */
@@ -233,6 +327,160 @@ export interface BrowserProfile {
   kind: BrowserProfileKind
   /** The worktree folder's name for a worktree's profile. */
   label: string | null
+}
+
+/** Bounding box of an annotated page element in page viewport CSS pixels. */
+export interface BrowserElementRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** Page viewport size in CSS pixels when an element was annotated. */
+export interface BrowserElementViewport {
+  width: number
+  height: number
+}
+
+/** Visible, non-sensitive attributes extracted from an annotated page element. */
+export interface BrowserElementAttributes {
+  href?: string
+  alt?: string
+  placeholder?: string
+  title?: string
+  type?: string
+  value?: string
+}
+
+/**
+ * Structured reference to an element picked from the built-in browser in annotation mode.
+ * Carried over IPC, stored with a composer draft, previewed on hover, and serialized into prompts.
+ */
+export interface BrowserElementAnnotation {
+  id: string
+  url: string
+  pageTitle: string | null
+  selector: string
+  tag: string
+  domId: string | null
+  role: string | null
+  accessibleName: string | null
+  text: string | null
+  attributes: BrowserElementAttributes
+  rect: BrowserElementRect
+  viewport: BrowserElementViewport
+  tabId?: string
+}
+
+/** Event sent from main when the user picks an element in a session's browser annotation mode. */
+export interface BrowserElementAnnotatedEvent {
+  sessionId: string
+  tabId: string
+  annotation: BrowserElementAnnotation
+}
+
+/** Maximum browser element references attached to a single composer message. */
+export const MAX_BROWSER_ANNOTATIONS = 10
+
+/** Character limits for fields extracted from external web pages. */
+export const BROWSER_ANNOTATION_LIMITS = {
+  url: 2_048,
+  pageTitle: 200,
+  selector: 320,
+  tag: 64,
+  domId: 120,
+  role: 64,
+  accessibleName: 160,
+  text: 240,
+  attribute: 200,
+  value: 120,
+} as const
+
+/** Whether a URL points to an annotatable http(s) web page (excludes about:blank and internal URLs). */
+export function isAnnotatableBrowserUrl(url: string | null | undefined): boolean {
+  if (!url) return false
+  const parsed = URL.parse(url)
+  return parsed !== null && (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+}
+
+/** Stable deduplication key for a picked element: canonical page URL plus CSS selector. */
+export function browserAnnotationKey(
+  annotation: Pick<BrowserElementAnnotation, 'url' | 'selector'>,
+): string {
+  const normalizedUrl = canonicalBrowserUrl(annotation.url) ?? annotation.url.trim()
+  return `${normalizedUrl}\0${annotation.selector.trim()}`
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value)
+
+const isNullableString = (value: unknown): value is string | null =>
+  value === null || typeof value === 'string'
+
+const isOptionalString = (value: unknown): value is string | undefined =>
+  value === undefined || typeof value === 'string'
+
+/** Runtime type guard for persisted or IPC-transferred browser element annotations. */
+export function isBrowserElementAnnotation(value: unknown): value is BrowserElementAnnotation {
+  if (!isRecord(value)) return false
+  if (
+    typeof value.id !== 'string' ||
+    value.id.length === 0 ||
+    typeof value.url !== 'string' ||
+    !isAnnotatableBrowserUrl(value.url) ||
+    !isNullableString(value.pageTitle) ||
+    typeof value.selector !== 'string' ||
+    value.selector.trim().length === 0 ||
+    typeof value.tag !== 'string' ||
+    value.tag.trim().length === 0 ||
+    !isNullableString(value.domId) ||
+    !isNullableString(value.role) ||
+    !isNullableString(value.accessibleName) ||
+    !isNullableString(value.text) ||
+    !isOptionalString(value.tabId)
+  ) {
+    return false
+  }
+  const { attributes, rect, viewport } = value
+  if (!isRecord(attributes) || !isRecord(rect) || !isRecord(viewport)) return false
+  if (
+    !isOptionalString(attributes.href) ||
+    !isOptionalString(attributes.alt) ||
+    !isOptionalString(attributes.placeholder) ||
+    !isOptionalString(attributes.title) ||
+    !isOptionalString(attributes.type) ||
+    !isOptionalString(attributes.value)
+  ) {
+    return false
+  }
+  return (
+    isFiniteNumber(rect.x) &&
+    isFiniteNumber(rect.y) &&
+    isFiniteNumber(rect.width) &&
+    isFiniteNumber(rect.height) &&
+    isFiniteNumber(viewport.width) &&
+    isFiniteNumber(viewport.height)
+  )
+}
+
+/**
+ * The active browser control for UI surfaces (label, turn status). Returns null when idle or when
+ * takeover/ask control no longer has a live agent tab (all tabs closed or the agent tab is gone).
+ */
+export function activeBrowserControl(state: BrowserState | undefined): ActiveControl | null {
+  const control = state?.control
+  if (!control || control.kind === 'idle') return null
+  if (
+    (control.kind === 'you' || control.kind === 'asks') &&
+    (state.tabs.length === 0 || state.agentTab === null)
+  ) {
+    return null
+  }
+  return control
 }
 
 /** Huli: a saved sign-in state, as Settings and the pane list it; never what it holds. */
@@ -369,12 +617,25 @@ export interface BrowserForward {
   port: number
 }
 
+/** The lowest port a client forward tries to bind directly on loopback; privileged ports stay ephemeral. */
+export const MIN_PREFERRED_FORWARD_PORT = 1024
+
+/** The most companion dev server ports one `browser_navigate` call may request alongside its page. */
+export const MAX_COMPANION_FORWARDS = 8
+
+/** Whether a value is a valid TCP port number for a dev server forward. */
+export function isBrowserForwardPort(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value < 65_536
+}
+
 /**
  * A call for the desktop app that sent the turn, on another host than the agent's: a navigation to
  * a dev server there names the forward it needs, which the host grants that app's session.
  */
 export interface BrowserDeviceCall extends BrowserCallRequest {
   forward?: BrowserForward
+  /** Additional local dev server ports on the host explicitly requested alongside `forward`. */
+  forwards?: BrowserForward[]
 }
 
 /** The forward an address needs to reach a dev server on the agent's host; null for others. */
@@ -405,9 +666,6 @@ export function isBrowserForward(value: unknown): value is BrowserForward {
   if (typeof value !== 'object' || value === null) return false
   const { host, port } = value as Record<string, unknown>
   return (
-    (host === 'localhost' || host === '127.0.0.1' || host === '::1') &&
-    Number.isSafeInteger(port) &&
-    (port as number) > 0 &&
-    (port as number) < 65_536
+    (host === 'localhost' || host === '127.0.0.1' || host === '::1') && isBrowserForwardPort(port)
   )
 }

@@ -326,8 +326,9 @@ function EndedLine({ task, view }: { task: TaskSummary; view: TaskView | undefin
 }
 
 function PullLine({ task, reference }: { task: TaskSummary; reference: GitHubReference }) {
-  const { data } = useReferenceData(reference)
-  useEffect(() => loadReference(reference), [reference])
+  const hostId = hostOfPath(task.projectPath)
+  const { data } = useReferenceData(reference, hostId)
+  useEffect(() => loadReference(reference, false, hostId), [reference, hostId])
   return <EndedText task={task} merged={data?.kind === 'pull' && data.pr.state === 'merged'} />
 }
 
@@ -365,6 +366,7 @@ function NotesComposer({
   disabled: boolean
 }) {
   const { t } = useTranslation('tasks')
+  const { t: tc } = useTranslation('composer')
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -432,7 +434,13 @@ function NotesComposer({
               <Glyph icon={ArrowUp02Icon} size={16} />
             </button>
           }
-          labels={{ composer: t('composer.label'), add: t('composer.textOnly') }}
+          labels={{
+            composer: t('composer.label'),
+            add: t('composer.textOnly'),
+            voiceInput: tc('controls.voiceInput'),
+            discardRecording: tc('controls.discardRecording'),
+            useRecording: tc('controls.useRecording'),
+          }}
           foot={
             <div className="ui-as-composer__tray kettu-tray">
               <TrayStyles />

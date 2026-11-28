@@ -1,11 +1,17 @@
-import type { Project, SessionSummary } from '@shared/agent-host'
+import type { Project, ProjectIcon, SessionSummary } from '@shared/agent-host'
 import type { AgentId } from '@shared/thread'
 import { basename, clockTime, mediumAgo } from '@renderer/lib/format'
 import { hostPath } from '@renderer/lib/host-paths'
 import { currentLocale } from '@renderer/lib/i18n'
 import { readJson, writeJson } from '@renderer/lib/storage'
 import { agentName } from '@renderer/stores/agents'
-import { listedOrigin, sessionTitle } from '@renderer/stores/sessions'
+import { archivedProjects, findProjectForSession, projectFolders } from '@renderer/stores/projects'
+import {
+  listedOrigin,
+  projectGroupSummaries,
+  sessionArchived,
+  sessionTitle,
+} from '@renderer/stores/sessions'
 
 export type ArchivedGroupBy = 'date' | 'project'
 
@@ -24,6 +30,7 @@ export interface ArchivedEntry {
   title: string
   projectKey: string
   projectLabel: string
+  projectIcon?: ProjectIcon
   /** Worktree branch shown on the row when the session has one. */
   branch: string | null
   /** Branch text matched by search (worktree branch or last checked-out branch). */
@@ -43,6 +50,7 @@ export interface FacetOption {
   count: number
   /** True for the synthetic No project entry so it sorts after real projects when tied. */
   scratch?: boolean
+  icon?: ProjectIcon
 }
 
 export interface ArchivedGroup {
@@ -51,6 +59,7 @@ export interface ArchivedGroup {
   bucket?: ArchivedDateBucket
   projectKey?: string
   projectLabel?: string
+  projectIcon?: ProjectIcon
   scratch?: boolean
   entries: ArchivedEntry[]
 }
@@ -58,6 +67,25 @@ export interface ArchivedGroup {
 export interface TextPart {
   text: string
   match: boolean
+}
+
+export interface ArchivedProjectSession {
+  summary: SessionSummary
+  title: string
+  branch: string | null
+  subSessionCount: number
+  /** True when the session itself was archived individually before or after the project. */
+  sessionArchived: boolean
+  updatedAt: number
+  agentId: AgentId
+  agentLabel: string
+}
+
+export interface ArchivedProjectEntry {
+  project: Project
+  archivedAt: number
+  folders: string[]
+  sessions: ArchivedProjectSession[]
 }
 
 export function readArchivedGroupBy(): ArchivedGroupBy {
@@ -106,6 +134,44 @@ function archivedSubSessionCounts(byId: Record<string, SessionSummary>): Map<str
   return counts
 }
 
+/** Builds view entries for archived projects on `hostId`, with each project's retained history. */
+export function buildArchivedProjects(
+  projects: readonly Project[],
+  byId: Record<string, SessionSummary>,
+  hostId: string | null,
+): ArchivedProjectEntry[] {
+  const subCounts = archivedSubSessionCounts(byId)
+  return archivedProjects(projects, hostId).map((project) => {
+    const own = projectGroupSummaries(byId, project, hostId, projects)
+    const ownIds = new Set(own.map((s) => s.id))
+    const sessions = own
+      .filter(
+        (s) =>
+          listedOrigin(s) &&
+          s.origin !== 'subagent' &&
+          !s.prepared &&
+          !(s.parentId && ownIds.has(s.parentId)),
+      )
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((summary): ArchivedProjectSession => ({
+        summary,
+        title: sessionTitle(summary),
+        branch: summary.worktree?.branch ?? null,
+        subSessionCount: subCounts.get(summary.id) ?? 0,
+        sessionArchived: sessionArchived(byId, summary.id),
+        updatedAt: summary.updatedAt,
+        agentId: summary.agentId,
+        agentLabel: agentName(summary.agentId, hostId),
+      }))
+    return {
+      project,
+      archivedAt: project.archivedAt ?? project.lastOpenedAt,
+      folders: projectFolders(project),
+      sessions,
+    }
+  })
+}
+
 /** Builds view entries for the host's archived sessions (already sorted newest archived first). */
 export function buildArchivedEntries(
   archived: readonly SessionSummary[],
@@ -114,13 +180,13 @@ export function buildArchivedEntries(
   hostId: string | null,
   noProjectLabel: string,
 ): ArchivedEntry[] {
-  const projectNames = new Map(projects.map((p) => [p.path, p.name]))
   const subCounts = archivedSubSessionCounts(byId)
   return archived.map((summary) => {
-    const projectKey = summary.scratch ? NO_PROJECT_KEY : summary.projectPath
+    const owner = summary.scratch ? undefined : findProjectForSession(projects, summary)
+    const projectKey = summary.scratch ? NO_PROJECT_KEY : (owner?.path ?? summary.projectPath)
     const projectLabel = summary.scratch
       ? noProjectLabel
-      : (projectNames.get(summary.projectPath) ?? basename(hostPath(summary.projectPath)))
+      : (owner?.name ?? basename(hostPath(summary.projectPath)))
     const parent = summary.parentId ? byId[summary.parentId] : undefined
     const worktreeBranch = summary.worktree?.branch ?? null
     return {
@@ -128,6 +194,7 @@ export function buildArchivedEntries(
       title: sessionTitle(summary),
       projectKey,
       projectLabel,
+      ...(owner?.icon ? { projectIcon: owner.icon } : {}),
       branch: worktreeBranch,
       searchBranch: worktreeBranch ?? summary.branch ?? null,
       parentTitle: parent ? sessionTitle(parent) : null,
@@ -193,6 +260,7 @@ export function projectFacets(
         label: entry.projectLabel,
         count: 1,
         scratch: entry.summary.scratch,
+        ...(entry.projectIcon ? { icon: entry.projectIcon } : {}),
       })
     }
   }
@@ -317,6 +385,7 @@ export function groupArchivedEntries(
         kind: 'project',
         projectKey: entry.projectKey,
         projectLabel: entry.projectLabel,
+        ...(entry.projectIcon ? { projectIcon: entry.projectIcon } : {}),
         scratch: entry.summary.scratch,
         entries: [],
       }

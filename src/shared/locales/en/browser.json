@@ -126,12 +126,25 @@
     "newTab": "New tab",
     "closeTab": "Close {{name}}"
   },
+  "annotate": {
+    "start": "Annotate",
+    "startHint": "Annotate page element",
+    "exit": "Exit annotation mode",
+    "done": "Done",
+    "activeHint": "Click an element on the page to reference it in the composer",
+    "disabledNoPage": "Annotate · Open a web page first",
+    "disabledAgent": "Annotate · Take over the page from {{agent}} first"
+  },
   "viewport": {
     "size": "{{width}} × {{height}}",
     "scaled": "{{width}} × {{height}} · {{percent}}%",
     "hint": "This page keeps its own size. Resizing the panel only scales it.",
     "menu": "Page size",
+    "menuDetail": "{{label}} · {{detail}}",
+    "fit": "Fill pane",
+    "fitScale": "100%",
     "desktop": "Desktop",
+    "desktopNote": "1280px wide",
     "tablet": "Tablet",
     "phone": "Phone",
     "custom": "Custom",

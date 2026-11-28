@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { isFullAccessMode } from '@shared/agents'
 import {
   defaultMode,
+  FULL_ACCESS_RANK,
+  inheritedMode,
   modeRank,
+  resolveStartedScope,
   startableModes,
   startedCeiling,
   startedMode,
@@ -10,18 +13,25 @@ import {
   starterRank,
   type ModeRank,
   type RankedHarness,
+  type StartedScope,
 } from './started-mode'
 
-// The mode a started session gets when the starter asks for none: its agent's start mode or own
-// value, held to the ceiling.
+// The mode a started session gets when the starter asks for none:
+// - In cross-scope (the default), its agent's start mode or own value, held to the ceiling.
+// - In same-scope with a ranked starter, the parent's current effective permission tier directly.
 function started(
   starter: { harness: RankedHarness; mode: string; planning?: boolean },
   agent: { harness: RankedHarness; mode: string | null },
   wanted?: string,
+  scope: StartedScope = 'cross-scope',
 ): string {
   const rank = starterRank(starter.harness, starter.mode, starter.planning ?? false)
-  const ceiling = startedCeiling(rank, agent.harness, agent.mode)
-  return startedMode(agent.harness, wanted ?? agent.mode ?? 'default', ceiling)
+  const ceiling = startedCeiling(rank, agent.harness, agent.mode, scope)
+  const fallback =
+    scope === 'same-scope' && rank !== null
+      ? inheritedMode(agent.harness, ceiling)
+      : (agent.mode ?? defaultMode(agent.harness))
+  return startedMode(agent.harness, wanted ?? fallback, ceiling)
 }
 
 describe('the mode of a started session', () => {
@@ -122,5 +132,215 @@ describe('the mode of a started session', () => {
     expect(startedStartMode('codex', { mode: 'agent-full-access' })).toEqual({
       mode: 'agent-full-access',
     })
+  })
+
+  it('uses each ranked harness built-in default when agentMode is null instead of widening to 3', () => {
+    expect(defaultMode('claude-code')).toBe('default')
+    expect(defaultMode('codex')).toBe('agent')
+    expect(defaultMode('deepseek')).toBe('workspace-write')
+    expect(defaultMode('antigravity')).toBe('default')
+
+    // With no explicit Settings > Agents start mode or resolved override, null falls back to each
+    // harness's own built-in default so list_agents never promises wider modes than start_session.
+    expect(startedCeiling(4, 'claude-code', null)).toBe(1)
+    expect(startedCeiling(3, 'claude-code', null)).toBe(1)
+    expect(startedCeiling(4, 'antigravity', null)).toBe(1)
+    expect(startedCeiling(4, 'deepseek', null)).toBe(2)
+    expect(startedCeiling(4, 'codex', null)).toBe(3)
+    expect(startedCeiling(2, 'codex', null)).toBe(2)
+
+    // Explicit resolved defaults (such as Claude Code permissions.defaultMode) raise the ceiling
+    // up to STARTED_MAX (never full access), while staying bounded by the starter's rank.
+    expect(startedCeiling(3, 'claude-code', 'acceptEdits')).toBe(2)
+    expect(startedCeiling(3, 'claude-code', 'auto')).toBe(3)
+    expect(startedCeiling(4, 'claude-code', 'bypassPermissions')).toBe(3)
+    expect(startedCeiling(2, 'claude-code', 'auto')).toBe(2)
+    expect(startedCeiling(3, 'claude-code', 'plan')).toBe(1)
+    expect(startedCeiling(3, 'claude-code', 'dontAsk')).toBe(1)
+  })
+
+  it('keeps unranked harnesses uncapped as starters while ranking all four ranked harnesses consistently', () => {
+    for (const harness of ['opencode', 'pi', 'gemini', 'cursor'] as const) {
+      expect(starterRank(harness, 'default', false)).toBeNull()
+    }
+    expect(startedMode('claude-code', 'auto', startedCeiling(3, 'claude-code', null))).toBe(
+      'default',
+    )
+    expect(
+      startedMode('claude-code', 'acceptEdits', startedCeiling(3, 'claude-code', 'acceptEdits')),
+    ).toBe('acceptEdits')
+    expect(startedMode('deepseek', 'danger-full-access', startedCeiling(4, 'deepseek', null))).toBe(
+      'workspace-write',
+    )
+  })
+
+  it('inherits the parent effective permission rank (including Full access) under same-scope across harnesses', () => {
+    // Full access parent -> every ranked target harness inherits Full access by default even when
+    // the target agent's own default or Settings > Agents start mode is narrower.
+    expect(
+      started(
+        { harness: 'claude-code', mode: 'bypassPermissions' },
+        { harness: 'claude-code', mode: 'default' },
+        undefined,
+        'same-scope',
+      ),
+    ).toBe('bypassPermissions')
+    expect(
+      started(
+        { harness: 'claude-code', mode: 'bypassPermissions' },
+        { harness: 'codex', mode: 'read-only' },
+        undefined,
+        'same-scope',
+      ),
+    ).toBe('agent-full-access')
+    expect(
+      started(
+        { harness: 'claude-code', mode: 'bypassPermissions' },
+        { harness: 'antigravity', mode: 'default' },
+        undefined,
+        'same-scope',
+      ),
+    ).toBe('dangerously-skip-permissions')
+    expect(
+      started(
+        { harness: 'claude-code', mode: 'bypassPermissions' },
+        { harness: 'deepseek', mode: 'read-only' },
+        undefined,
+        'same-scope',
+      ),
+    ).toBe('danger-full-access')
+
+    // Reverse cross-harness: Antigravity Full access parent -> Claude Code & Codex Full access.
+    expect(
+      started(
+        { harness: 'antigravity', mode: 'dangerously-skip-permissions' },
+        { harness: 'claude-code', mode: null },
+        undefined,
+        'same-scope',
+      ),
+    ).toBe('bypassPermissions')
+    expect(
+      started(
+        { harness: 'codex', mode: 'agent-full-access' },
+        { harness: 'antigravity', mode: null },
+        undefined,
+        'same-scope',
+      ),
+    ).toBe('dangerously-skip-permissions')
+
+    // Lower parent modes map cleanly without escalating, and explicit narrower choices are honored.
+    expect(
+      started(
+        { harness: 'claude-code', mode: 'auto' },
+        { harness: 'deepseek', mode: null },
+        undefined,
+        'same-scope',
+      ),
+    ).toBe('workspace-write')
+    expect(
+      started(
+        { harness: 'claude-code', mode: 'acceptEdits' },
+        { harness: 'codex', mode: 'agent-full-access' },
+        'agent-full-access',
+        'same-scope',
+      ),
+    ).toBe('workspace-write')
+    expect(
+      started(
+        { harness: 'claude-code', mode: 'bypassPermissions' },
+        { harness: 'codex', mode: 'agent' },
+        'read-only',
+        'same-scope',
+      ),
+    ).toBe('read-only')
+    expect(
+      started(
+        { harness: 'claude-code', mode: 'bypassPermissions' },
+        { harness: 'antigravity', mode: 'default' },
+        'auto',
+        'same-scope',
+      ),
+    ).toBe('auto')
+  })
+
+  it('never grants Full access for unranked starters or when allowFullAccess is false', () => {
+    expect(startedCeiling(null, 'claude-code', 'bypassPermissions', 'same-scope')).toBe(3)
+    expect(startedCeiling(null, 'codex', 'agent-full-access', 'same-scope')).toBe(3)
+    expect(startableModes('claude-code', FULL_ACCESS_RANK, { allowFullAccess: false })).toEqual([
+      'default',
+      'acceptEdits',
+      'auto',
+    ])
+    expect(
+      startedMode('claude-code', 'bypassPermissions', FULL_ACCESS_RANK, { allowFullAccess: false }),
+    ).toBe('auto')
+    expect(inheritedMode('antigravity', FULL_ACCESS_RANK, { allowFullAccess: false })).toBe('auto')
+  })
+
+  it('resolves same-scope only when parent, host, and project identities all verify and match', () => {
+    const same = (a: string, b: string) => a === b
+    expect(
+      resolveStartedScope(
+        {
+          verifiedParent: true,
+          parentHostId: 'host-a',
+          targetHostId: 'host-a',
+          parentProject: '/repo',
+          targetProject: '/repo',
+        },
+        same,
+      ),
+    ).toBe('same-scope')
+    // Cross-project fails closed.
+    expect(
+      resolveStartedScope(
+        {
+          verifiedParent: true,
+          parentHostId: 'host-a',
+          targetHostId: 'host-a',
+          parentProject: '/repo',
+          targetProject: '/other-repo',
+        },
+        same,
+      ),
+    ).toBe('cross-scope')
+    // Cross-host fails closed even for identical path strings.
+    expect(
+      resolveStartedScope(
+        {
+          verifiedParent: true,
+          parentHostId: 'host-a',
+          targetHostId: 'host-b',
+          parentProject: '/repo',
+          targetProject: '/repo',
+        },
+        same,
+      ),
+    ).toBe('cross-scope')
+    // Unverified parent or missing identities fail closed.
+    expect(
+      resolveStartedScope(
+        {
+          verifiedParent: false,
+          parentHostId: 'host-a',
+          targetHostId: 'host-a',
+          parentProject: '/repo',
+          targetProject: '/repo',
+        },
+        same,
+      ),
+    ).toBe('cross-scope')
+    expect(
+      resolveStartedScope(
+        {
+          verifiedParent: true,
+          parentHostId: null,
+          targetHostId: 'host-a',
+          parentProject: '/repo',
+          targetProject: '/repo',
+        },
+        same,
+      ),
+    ).toBe('cross-scope')
   })
 })

@@ -67,10 +67,11 @@ export type ThreadRequest =
   | { id: number; op: 'clearImages'; sessionIds: string[]; dryRun: boolean }
   | { id: number; op: 'mentions'; sessionId: string; text: string }
   | { id: number; op: 'outline'; sessionId: string }
+  | { id: number; op: 'usages'; sessionIds: string[] }
   | { id: number; op: 'search'; words: string[] }
   | { id: number; op: 'find'; sessionId: string; words: string[]; limit: number }
   | { id: number; op: 'snippets'; words: string[]; picks: { sessionId: string; pos: number }[] }
-  | { id: number; op: 'outputs'; sessionId: string }
+  | { id: number; op: 'outputs'; sessionId: string; accountId?: string | null }
   | { id: number; op: 'setOutlineTitles'; sessionId: string; titles: OutlineTitle[] }
   | { id: number; op: 'origins'; sessionId: string }
   | { id: number; op: 'putOrigin'; sessionId: string; origin: StoredOrigin }

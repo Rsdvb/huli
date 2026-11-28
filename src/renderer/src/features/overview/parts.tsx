@@ -1,9 +1,10 @@
 // What every view of the Overview page shares: a row's mark, its steps as tags and what it made
 // as chips.
 
-import type { ReactNode } from 'react'
+import { Fragment, type ReactNode } from 'react'
 import {
   Cancel01Icon,
+  ComputerIcon,
   File01Icon,
   GitPullRequestIcon,
   Tick02Icon,
@@ -11,12 +12,13 @@ import {
 import { useTranslation } from 'react-i18next'
 import { Icon } from '@renderer/components/affect/app-shell'
 import { AgentMark } from '@renderer/components/agents/agent-mark'
+import { sessionLinkProps } from '@renderer/features/session/open-link'
 import { TurnDots } from '@renderer/features/session/turn-dots'
 import { TaskRing } from '@renderer/features/tasks/task-ring'
 import { mediumAgo, runningFor } from '@renderer/lib/format'
 import { useNow, useSeconds } from '@renderer/lib/use-now'
 import { openArtifact } from '@renderer/stores/view'
-import type { OverviewRow, OverviewStep, StepLook } from './model'
+import { rowSubParts, type OverviewRow, type OverviewStep, type StepLook } from './model'
 import type { RowFacts, RowOutput } from './use-row-facts'
 
 /** A task's ring or a session's agent. */
@@ -28,11 +30,63 @@ export function RowMark({ row, size = 16 }: { row: OverviewRow; size?: number })
   )
 }
 
-/** "habit-tracker · Feature development · dev-box" */
-export function RowSub({ facts, project = true }: { facts: RowFacts; project?: boolean }) {
+/**
+ * "habit-tracker · Feature development" + host pill ("dev-box").
+ * Truncates the project folder first so the agent/workflow and host stay visible in narrow rows.
+ */
+export function RowSub({
+  facts,
+  project = true,
+  extra = null,
+  inline = false,
+}: {
+  facts: RowFacts
+  project?: boolean
+  extra?: string | null
+  /** Renders as plain flowing text (e.g. Inbox detail pane) instead of single-line priority truncation. */
+  inline?: boolean
+}) {
   const { t } = useTranslation('overview')
-  const parts = [project ? facts.project : null, facts.by, facts.host].filter(Boolean)
-  return <>{parts.join(t('separator'))}</>
+  const separator = t('separator')
+  const parts = rowSubParts(facts, { project, extra, separator })
+  if (inline) return <>{parts.fullText}</>
+
+  const lead: { kind: 'project' | 'by'; text: string }[] = []
+  if (parts.project) lead.push({ kind: 'project', text: parts.project })
+  if (parts.by) lead.push({ kind: 'by', text: parts.by })
+
+  return (
+    <span className="k-ov-sub" title={parts.fullText}>
+      {(lead.length > 0 || parts.extra) && (
+        <span className="k-ov-sub__meta">
+          {lead.map((item, i) => (
+            <Fragment key={item.kind}>
+              {i > 0 && (
+                <span aria-hidden className="k-ov-sub__sep">
+                  {separator}
+                </span>
+              )}
+              <span className={`k-ov-sub__${item.kind}`} title={item.text}>
+                {item.text}
+              </span>
+            </Fragment>
+          ))}
+          {parts.extra && (
+            <span className="k-ov-sub__extra" title={parts.extra}>
+              {lead.length > 0 && <span aria-hidden>{separator}</span>}
+              {parts.extra}
+            </span>
+          )}
+        </span>
+      )}
+      {parts.host && (
+        <span className="k-ov-sub__host" title={parts.host}>
+          <Icon icon={ComputerIcon} size={11} />
+          <span>{parts.host}</span>
+        </span>
+      )}
+    </span>
+  )
 }
 
 /** How long a running row has been at what it does, or how long ago the others changed. */
@@ -110,7 +164,7 @@ export function Outputs({ outputs, max = 2 }: { outputs: RowOutput[]; max?: numb
 export function OutputChip({ output, children }: { output: RowOutput; children?: ReactNode }) {
   if (output.kind === 'pr') {
     return (
-      <a className="k-ov-out" data-kind="pr" href={output.url} target="_blank" rel="noreferrer">
+      <a className="k-ov-out" data-kind="pr" {...sessionLinkProps(output.url, output.sessionId)}>
         <Icon icon={GitPullRequestIcon} size={12} />
         <b>#{output.number}</b>
         {children}

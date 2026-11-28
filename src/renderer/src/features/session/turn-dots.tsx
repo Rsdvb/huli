@@ -55,14 +55,17 @@ export function TurnDots({
   phase,
   still = false,
   className,
+  slower = 1,
 }: {
   phase: RunningPhase
   still?: boolean
   className?: string
+  /** How many times longer than its phase's loop the walk takes, as in the live dock. */
+  slower?: number
 }) {
   const pattern = BY_PHASE[phase]
   const ref = useRef<HTMLSpanElement>(null)
-  useDotLoops(ref, pattern, 1, still)
+  useDotLoops(ref, pattern, slower, still)
   return (
     <span
       key={pattern}

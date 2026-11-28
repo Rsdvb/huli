@@ -37,6 +37,7 @@ import {
   RESUME_MS,
   RESUME_VERSION,
   TOOL_DIGESTS_FEATURE,
+  TOOL_OUTPUT_APPEND_FEATURE,
   parseClosing,
   parseWelcome,
   type ClosingReason,
@@ -254,9 +255,15 @@ export function hello(
     protocol: { min: MIN_PROTOCOL_VERSION, max: PROTOCOL_VERSION },
     client,
     ...(device ? { device } : {}),
-    // The web client loads stored images by hash and expands digested tool calls on demand.
-    // Huli: so does the phone, which draws every digest of a lean page too.
-    features: [IMAGE_REFS_FEATURE, TOOL_DIGESTS_FEATURE, LEAN_THREADS_FEATURE],
+    // The web client loads stored images by hash, expands digested tool calls on demand and
+    // applies incremental tool outputs. Huli: so does the phone, which draws every digest of a
+    // lean page too.
+    features: [
+      IMAGE_REFS_FEATURE,
+      TOOL_DIGESTS_FEATURE,
+      LEAN_THREADS_FEATURE,
+      TOOL_OUTPUT_APPEND_FEATURE,
+    ],
     ...(account ? { account } : {}),
   }
 }

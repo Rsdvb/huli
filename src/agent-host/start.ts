@@ -84,6 +84,8 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
       fakeAgentPath: message.fakeAgentPath,
       sessionRouterPath: message.sessionRouterPath,
       clineHostPath: message.clineHostPath,
+      mcpBridgePath: message.mcpBridgePath ?? null,
+      mcpCommandPath: message.mcpCommandPath ?? null,
       settings: message.settings,
       baseEnv: process.env,
       // A development run keeps its installs apart from the installed app's.
@@ -91,6 +93,7 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
       computer: message.computer ?? null,
       mihomoPath: message.mihomoPath ?? null,
       ...(message.userAgent ? { userAgent: message.userAgent } : {}),
+      accountId: message.accountId ?? null,
       send,
       git: (deps) => createGitService(deps),
       mirrorTraffic: !message.isPackaged && process.env.KETTU_ACP_LOG === '1',
@@ -142,7 +145,13 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
         break
       case 'host:market-keys':
         withHost((h) => {
-          h.setMarketKeys(message.values, message.oauth, message.agentEnv, message.pluginSecrets)
+          h.setMarketKeys(
+            message.values,
+            message.oauth,
+            message.agentEnv,
+            message.pluginSecrets,
+            message.backupKey,
+          )
           h.setProfiles(message.profiles)
           h.setProjectSecrets(message.projectSecrets)
           h.setWebhookSecrets(message.webhookSecrets)
@@ -153,6 +162,22 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
         break
       case 'host:market-account':
         withHost((h) => h.setMarketAccount(message.account))
+        break
+      case 'host:account':
+        if (message.accountId === null || typeof message.accountId === 'string') {
+          const { accountId } = message
+          withHost((h) => h.setAccount(accountId))
+        }
+        break
+      case 'host:artifact-claim-owner':
+        if (
+          ARTIFACT_ID.test(String(message.id)) &&
+          typeof message.accountId === 'string' &&
+          message.accountId.length > 0
+        ) {
+          const { id, accountId } = message
+          withHost((h) => h.claimArtifactOwner(id, accountId))
+        }
         break
       case 'market-result':
         if (
@@ -181,6 +206,22 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
           withHost((h) => h.settingsResult(message.callId, message.answer))
         }
         break
+      case 'mcp-backup-key-result':
+        if (
+          Number.isSafeInteger(message.callId) &&
+          (message.error === null || typeof message.error === 'string')
+        ) {
+          withHost((h) => h.mcpBackupKeyResult(message.callId, message.error))
+        }
+        break
+      case 'mcp-install-result':
+        if (
+          Number.isSafeInteger(message.callId) &&
+          (message.error === null || typeof message.error === 'string')
+        ) {
+          withHost((h) => h.mcpInstallResult(message.callId, message.error))
+        }
+        break
       case 'plugin-secret-result':
         if (
           Number.isSafeInteger(message.callId) &&
@@ -204,6 +245,9 @@ export function startAgentHost(control: ControlChannel<MainToHost, HostToMain>):
         if (Number.isSafeInteger(message.callId) && typeof message.method === 'string') {
           withHost((h) => h.mainCall(message.callId, message.method, message.params))
         }
+        break
+      case 'host:update-resume-request':
+        withHost((h) => h.updateResumeSnapshot(message.requestId))
         break
       case 'host:report-request':
         if (Number.isSafeInteger(message.requestId)) withHost((h) => void h.report(message))

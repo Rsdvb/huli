@@ -67,6 +67,35 @@
     "skip": "跳过",
     "stop": "停止"
   },
+  "dock": {
+    "manage": "展开",
+    "hide": "收起",
+    "popoverLabel": "活跃工具与后台任务",
+    "terminals_other": "{{count}} 个终端",
+    "devices_other": "{{count}} 台设备",
+    "groupTerminals_other": "正在使用 <b>{{count}} 个终端</b>",
+    "groupDevices_other": "正在使用 <b>{{count}} 台设备</b>",
+    "groupPreview": "{{names}}",
+    "groupPreviewMore": "{{names}} 等",
+    "nameSeparator": "、",
+    "summary": {
+      "computerWaiting": "等待授权 {{app}}",
+      "computerElevated": "以管理员权限操作 {{app}}",
+      "computerStopping": "正在收回电脑",
+      "computerAgent": "电脑 · {{app}}",
+      "computerActive": "电脑使用中",
+      "computerYou": "电脑 已接管",
+      "browserAsks": "浏览器 需操作",
+      "browserYou": "浏览器 已接管",
+      "browserAgent": "浏览器",
+      "deviceAsks": "{{name}} 需操作",
+      "deviceYou": "{{name}} 已接管",
+      "terminalPassword": "{{name}} 等密码",
+      "terminalAsks": "{{name}} 需操作",
+      "terminalYou": "{{name}} 已接管",
+      "terminalAgent": "终端 · {{name}}"
+    }
+  },
   "note": {
     "handedBack": {
       "browser": "你用了浏览器 <b>{{duration}}</b>，然后交还",
@@ -81,6 +110,10 @@
       "terminal": "<b>{{agent}}</b> 开始使用你的终端「<b>{{name}}</b>」",
       "browser": "<b>{{agent}}</b> 开始使用你的标签页「<b>{{name}}</b>」",
       "device": "<b>{{agent}}</b> 开始使用「<b>{{name}}</b>」"
+    },
+    "closed": {
+      "browserTab": "已关闭浏览器标签，接管已结束并已通知智能体",
+      "browserPanel": "已关闭浏览器面板，接管已结束并已通知智能体"
     }
   },
   "status": {

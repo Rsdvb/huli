@@ -45,6 +45,7 @@ import { Artifacts, disableDnsPrefetching } from './artifacts'
 import { artifactScheme } from './artifacts/protocol'
 import { RemoteArtifacts } from './artifacts/remote'
 import { AppStateStore } from './app-state'
+import { applyAppIcon, initAppIcon } from './app-icon'
 import { accountAvatarRequestUrl, Avatars } from './avatars'
 import { applyBadgeTo, setBadgeCount, setBadgeEnabled } from './badge'
 import { RemoteBrowser } from './browser/remote'
@@ -128,6 +129,7 @@ import { accessKeyEnd, relayChoiceInit } from '@shared/remote/own-relay'
 import { relayReport } from '@shared/remote/status'
 import { readJsonFile } from './json-file'
 import { MarketKeys, marketKeysFile } from './market-keys'
+import { installDiscoveredMcp } from './mcp-install'
 import { ChatBridgeStore, chatBridgeFile } from './chat-bridge'
 import { MarketUnauthorized, runMarketCall } from './market-api'
 import { computerModelForRun } from './system-model'
@@ -148,17 +150,21 @@ import { testInBackground } from './test-window'
 import { ThemeCatalog } from './theme-catalog'
 import { readPluginThemes, readThemeFolder, readThemeSources, ThemeStore } from './themes'
 import { KettuTray } from './tray'
+import { TrayHostAgentsFeed } from './tray-host-agents'
 import { openTrayTarget, TrayPanel } from './tray-panel'
 import { Updater } from './updater'
+import { clearUpdateResume, saveUpdateResume } from './update-resume'
 import { devUserDataPath, PACKAGED_DATA_FOLDER } from './user-data'
 import {
   applyVerbose,
   logsFolder,
+  markCleanExit,
   markRunning,
   openAppLog,
   watchConsole,
   watchProcesses,
 } from './app-log'
+import { WindowsSessionEndWatcher } from './windows-session-end'
 import { redactLogText } from '@shared/log/process-log'
 import { writeReport } from '@shared/log/report-bundle'
 import { PLUGIN_THEMES_FILE } from '@shared/plugin-themes'
@@ -166,10 +172,10 @@ import {
   applyTheme,
   applyWindowTheme,
   applyZoom,
+  appWindows,
   configureWindows,
   createMainWindow,
   currentWindow,
-  devIcon,
   isOverlayWindow,
   showMainWindow,
   watchTheme,
@@ -240,8 +246,7 @@ async function start(): Promise<void> {
   electronApp.setAppUserModelId(APP_USER_MODEL_ID)
   const wasOpenedAtLogin =
     process.platform === 'darwin' ? app.getLoginItemSettings().wasOpenedAtLogin : false
-  const icon = devIcon()
-  if (icon) app.dock?.setIcon(icon)
+  initAppIcon(appWindows)
   // The session holding the computer, which the overlay draws and the Computer pane shows.
   let computerHold: ComputerHold | null = null
   // The window's page only: the menu bar panel's needs no clipboard.
@@ -264,6 +269,7 @@ async function start(): Promise<void> {
   const localeOf = (file: SettingsFile): Locale =>
     resolveLocale(file.general.language, systemLocale)
   setLocale(localeOf(settings.get()))
+  applyAppIcon(settings.get().appearance.appIcon)
   applyTheme(settings.get().appearance.theme)
   applyZoom(settings.get().appearance.zoom)
   // The catalog's own session, so its requests follow the proxy setting and keep no cookies or
@@ -339,12 +345,15 @@ async function start(): Promise<void> {
     (process.platform !== 'linux' && systemPreferences.getAnimationSettings().prefersReducedMotion)
   // The panel's page reads its settings as it starts, so it opens only once main answers calls.
   let ipcReady = false
+  let trayHostAgents: TrayHostAgentsFeed | null = null
   const trayPanel =
     process.platform === 'darwin'
       ? new TrayPanel({
           systemLocale,
           open: (target) => openTrayTarget(target),
           quit: () => app.quit(),
+          onShown: () => trayHostAgents?.ensureLoaded(),
+          onClosed: () => trayHostAgents?.deactivate(),
         })
       : null
   // Huli: the mini window and the global screenshot, made here but loading nothing until used.
@@ -379,7 +388,6 @@ async function start(): Promise<void> {
   })
   // Huli: an agent's test copy puts no icon beside the owner's (test-window.ts).
   if (!testInBackground()) tray.start()
-  if (trayPanel) registerTrayIpc(trayPanel)
   registerMiniIpc(mini)
   registerCaptureIpc(screenCapture)
 
@@ -423,7 +431,14 @@ async function start(): Promise<void> {
     systemLocale,
     created: (tabId, contents, sessionId) => browserTools?.watch(tabId, contents, sessionId),
     closed: (tabId) => browserTools?.forgetTab(tabId),
-    ended: (sessionId) => browserTools?.forget(sessionId),
+    ended: (sessionId) => {
+      browserTools?.forget(sessionId)
+      remoteBrowser.pageClosed(sessionId)
+    },
+    agentTabClosed: (sessionId) => browserTools?.agentTabClosed(sessionId),
+    panelClosed: (sessionId) => {
+      browserTools?.releaseTakeover(sessionId)
+    },
     failed: (sessionId, kind, message) => browserTools?.pageFailed(sessionId, kind, message),
     origins: browserOrigins,
     originAsked: (request) => {
@@ -440,6 +455,7 @@ async function start(): Promise<void> {
       else siteIcons.visited(pageUrl)
     },
     picked: (event) => broadcast('browser:pick', event),
+    annotated: (event) => broadcast('browser:annotated', event),
     profileMode: () => settings.get().browserProfiles.mode,
     downloadNote: (sessionId, note) => browserTools?.cdp.downloadNote(sessionId, note),
   })
@@ -461,11 +477,19 @@ async function start(): Promise<void> {
       list: () => states().list(),
     },
   })
+  // Local artifacts service port; browser forwards never bind directly onto it.
+  let localServicePort: number | null = null
   // Other hosts' agents drive the pages of the turns this computer sends them.
   const remoteBrowser = new RemoteBrowser({
     run: (callId, sessionId, tool, args, projectPath, waiting, allowTab) =>
       browserTools!.call(callId, sessionId, tool, args, projectPath, waiting, allowTab),
-    forward: (hostId, sessionId, forward) => remoteHost.forward(hostId, sessionId, forward),
+    forward: (hostId, sessionId, forward) =>
+      remoteHost.forward(
+        hostId,
+        sessionId,
+        forward,
+        localServicePort === null ? undefined : [localServicePort],
+      ),
     closeForwards: (hostId, sessionId) => {
       remoteHost.closeForwards(hostId, sessionId)
       portForwards.sessionClosed(hostId, sessionId)
@@ -644,6 +668,12 @@ async function start(): Promise<void> {
         log.warn(`Could not save a webhook's secret: ${(error as Error).message}`)
       }),
     onBattery: () => (process.platform === 'win32' ? powerMonitor.isOnBatteryPower() : null),
+    installMcp: (entries) => installDiscoveredMcp(settings, marketKeys, entries),
+    mcpBackupKey: () =>
+      marketKeys.ensureBackupKey().then(
+        () => null,
+        (error: unknown) => (error as Error).message,
+      ),
     pluginSecret: (pluginId, key, value) =>
       marketKeys.setPluginSecret(pluginId, key, value).then(
         () => null,
@@ -711,7 +741,10 @@ async function start(): Promise<void> {
     onBrowserAskAnswer: (sessionId, outcome) => {
       if (!remoteBrowser.isRemote(sessionId)) browserTools?.answerAsk(sessionId, outcome)
     },
-    onServicePort: (port) => browserViews.setServicePort(port),
+    onServicePort: (port) => {
+      localServicePort = port
+      browserViews.setServicePort(port)
+    },
     onOriginDecided: (sessionId, requestId, decision) =>
       browserViews.answerOrigin(sessionId, requestId, decision),
     onComputerAppAllowed: (app) => settings.allowComputerApp(app),
@@ -743,6 +776,7 @@ async function start(): Promise<void> {
         changed: (patch) => actionLog.info('settings.update', { patch, by: 'agent' }),
       }),
     marketAccount: () => marketAccount(),
+    accountId: () => activeAccountId(),
     market: (call) =>
       runMarketCall(call, {
         base: accountBase,
@@ -764,8 +798,9 @@ async function start(): Promise<void> {
   })
   hostRef.current = agentHost
   const hostName = (): string => settings.get().remote.name ?? hostname()
-  // Set once the sharing service exists, which publishes with the account.
+  // Set once the sharing and artifacts services exist, which follow the signed-in account.
   let sharingKettuChanged: (() => void) | null = null
+  let artifactsAccountChanged: (() => void) | null = null
   let relayUrl = RELAY_URL
   try {
     relayUrl = relayUrlFrom(process.env[RELAY_URL_ENV])
@@ -801,6 +836,8 @@ async function start(): Promise<void> {
     failureText: () => t('account.browserFailed'),
     cloud: cloudOn,
     changed: (status) => {
+      agentHost.pushAccount(activeAccountId())
+      artifactsAccountChanged?.()
       broadcast('account:changed', status)
       sharingKettuChanged?.()
       accountChanged()
@@ -809,6 +846,10 @@ async function start(): Promise<void> {
     log: createLogger('account'),
   })
   const signedIn = (): boolean => account.status().state === 'signed-in'
+  /** The active Kettu account id scoping artifact ownership and isolation, or null. */
+  function activeAccountId(): string | null {
+    return cloudOn() ? (account.signedIn()?.id ?? null) : null
+  }
   /** The account the Marketplace tools publish with: a sign-in with Kettu's services on. */
   function marketAccount(): MarketAccount | null {
     const status = account.status()
@@ -961,10 +1002,20 @@ async function start(): Promise<void> {
       remoteArtifacts.ended(hostId)
       portForwards.hostEnded(hostId)
       island.remoteClosed(hostId)
+      trayHostAgents?.ended(hostId)
     },
-    opened: (hostId) => island.remoteOpened(hostId),
-    event: (hostId, event) => island.remoteEvent(hostId, event),
-    resync: (hostId) => island.remoteResync(hostId),
+    opened: (hostId) => {
+      island.remoteOpened(hostId)
+      trayHostAgents?.opened(hostId)
+    },
+    event: (hostId, event) => {
+      island.remoteEvent(hostId, event)
+      trayHostAgents?.event(hostId, event)
+    },
+    resync: (hostId) => {
+      island.remoteResync(hostId)
+      trayHostAgents?.resync(hostId)
+    },
     artifactEvent: (hostId, event) => {
       if (event.type === 'artifacts.runtime') remoteArtifacts.streamed(hostId, event)
       else if (event.type === 'artifacts.changed' || event.type === 'artifacts.version') {
@@ -973,11 +1024,25 @@ async function start(): Promise<void> {
     },
     media: hostMedia,
   })
+  if (trayPanel) {
+    trayHostAgents = new TrayHostAgentsFeed({
+      openHosts: () => hostSessions.openHosts(),
+      listAgents: (hostId) => hostSessions.call(hostId, 'agents.list', undefined),
+      changed: (hosts) => trayPanel.sendHostAgents(hosts),
+      warn: (message) => log.warn(message),
+    })
+  }
   const portForwards = new PortForwards({
     call: (hostId, method, params) => hostSessions.call(hostId, method, params),
     request: (hostId, method, params) => hostSessions.request(hostId, method, params),
     listen: (hostId, scope, port) =>
-      remoteHost.forward(hostId, scope, { host: 'localhost', port }, true),
+      // The host's own port number when free, as every forward now tries first.
+      remoteHost.forward(
+        hostId,
+        scope,
+        { host: 'localhost', port },
+        localServicePort === null ? undefined : [localServicePort],
+      ),
     stopListening: (hostId, scope, port) =>
       remoteHost.stopForward(hostId, scope, { host: 'localhost', port }),
     changed: (forwards) => broadcast('hosts:forwards', forwards),
@@ -1008,6 +1073,11 @@ async function start(): Promise<void> {
         .filter((host) => !host.removed)
         .map((host) => ({ id: host.id, name: host.name })),
     )
+    if (remoteHost.hosts !== null) {
+      trayHostAgents?.syncHosts(
+        remoteHost.hosts.filter((host) => !host.removed).map((host) => host.id),
+      )
+    }
     broadcast('hosts:changed', hostsStatus())
     relayToken.update()
   }
@@ -1117,6 +1187,7 @@ async function start(): Promise<void> {
     },
   })
   await artifacts.install(session.defaultSession)
+  artifactsAccountChanged = () => artifacts.accountChanged()
   // The window's page only: the menu bar panel's shows no media.
   serveMedia(session.defaultSession, mediaGrants, (url) => rendererPage(url) === 'index', hostMedia)
   // A session of its own, so publishing follows the proxy setting rather than the artifacts'
@@ -1129,6 +1200,7 @@ async function start(): Promise<void> {
     host: {
       content: (id, version) => agentHost.artifactContent(id, version),
       artifacts: () => agentHost.artifacts(),
+      claimOwner: (id, accountId) => agentHost.claimArtifactOwner(id, accountId),
     },
     kettu: {
       base: accountBase,
@@ -1176,9 +1248,17 @@ async function start(): Promise<void> {
   const updater = new Updater({
     appState,
     settings: () => settings.get(),
-    requestRestart: (confirmed) => quit?.request('update', confirmed) ?? false,
+    requestRestart: (confirmed, resumeAfterUpdate = true, options) =>
+      quit?.request('update', confirmed, resumeAfterUpdate, options) ?? false,
+    clearUpdateResume: () => clearUpdateResume(userDataPath),
     waitableSessions: async () => (await agentHost.busy(2000)).filter(restartWaitsFor).length,
-    requestMove: () => quit?.request('move'),
+    busyTerminals: async () => (await terminalHost.busy(2000)).length,
+    requestMove: (options) => quit?.request('move', false, false, options),
+    respondUpdateConfirmation: (requestId, action, by) =>
+      quit?.respondUpdate(requestId, action, by) ?? false,
+    cancelPendingUpdateConfirmation: (requestId, code) =>
+      quit?.cancelPendingUpdate(requestId, code) ?? false,
+    flushRemoteEvents: () => remoteHost.flushEvents(1500),
     changed: (status) => {
       hostAdmin?.updatesChanged(status)
       island.updatesChanged()
@@ -1202,10 +1282,19 @@ async function start(): Promise<void> {
       sendCommand({ kind: 'open-updates' }),
     )
   }
+  let windowsSessionEnd: WindowsSessionEndWatcher | null = null
   quit = new QuitFlow({
     settings: () => settings.get(),
     busySessions: (timeoutMs) => agentHost.busy(timeoutMs),
     busyTerminals: (timeoutMs) => terminalHost.busy(timeoutMs),
+    captureUpdateResume: async (timeoutMs) => {
+      const sessions = await agentHost.updateResumeSessions(timeoutMs)
+      await saveUpdateResume(userDataPath, {
+        fromVersion: app.getVersion(),
+        sessions,
+      })
+    },
+    clearUpdateResume: () => clearUpdateResume(userDataPath),
     shutDown: async () => {
       account.stop()
       relayToken.stop()
@@ -1231,12 +1320,20 @@ async function start(): Promise<void> {
         backup.flush(),
       ])
     },
+    onCleanExit: () => {
+      windowsSessionEnd?.stop()
+      markCleanExit()
+    },
     installUpdate: () => updater.installNow(),
     moveApp: () => updater.moveNow(),
-    restartWhenIdle: () =>
-      void updater.restartWhenIdle().catch((error: unknown) => {
+    restartWhenIdle: (initiator, requestId, busy) =>
+      void updater.restartWhenIdle(initiator, requestId, busy).catch((error: unknown) => {
         log.warn(`Could not wait to restart to update: ${String(error)}`)
       }),
+    updateVersion: () => updater.targetVersion(),
+    onUpdateConfirmation: (confirmation) => updater.handleUpdateConfirmation(confirmation),
+    onUpdateCancelled: (info) => updater.handleUpdateCancelled(info),
+    onUpdateRestarting: (info) => updater.prepareRestartForInstall(info),
   })
   const quitFlow = quit
   configurePageRecovery({
@@ -1302,6 +1399,7 @@ async function start(): Promise<void> {
       ...(await appInfo()),
       sharing: true,
       updates: updater.getStatus().state.kind !== 'off',
+      remoteUpdateFlow: updater.getStatus().state.kind !== 'off',
       remoteSwitch: true,
       remoteReset: true,
       ownRelay: true,
@@ -1398,6 +1496,8 @@ async function start(): Promise<void> {
       remoteHost.accountChanged()
       remoteHost.relayChanged()
       remoteHost.directChanged()
+      agentHost.pushAccount(activeAccountId())
+      artifacts.accountChanged()
       sharing.kettuChanged()
       remoteChanged()
       void remoteOffers.check()
@@ -1412,6 +1512,7 @@ async function start(): Promise<void> {
     }
     if (changed.has('appearance')) {
       tray.motionChanged()
+      applyAppIcon(next.appearance.appIcon)
       applyTheme(next.appearance.theme)
       applyZoom(next.appearance.zoom)
       themes.choose(next.appearance.colorTheme)
@@ -1482,15 +1583,29 @@ async function start(): Promise<void> {
       log: (level, message) => log[level](message),
     }),
   )
+  if (trayPanel && trayHostAgents) registerTrayIpc(trayPanel, trayHostAgents)
   ipcReady = true
   setReboundShortcuts(settings.get().keyboard.shortcuts, process.platform)
   screenCapture.setHotkey(settings.get().keyboard.screenshot)
   installMenu(menuDeps)
 
+  const handleSystemShutdown = (): void => {
+    markCleanExit()
+    windowsSessionEnd?.stop()
+    quitFlow.systemShutdown()
+    updater.systemShutdown()
+  }
+  windowsSessionEnd = new WindowsSessionEndWatcher({
+    onSessionEnd: handleSystemShutdown,
+  })
+  app.on('will-quit', () => windowsSessionEnd?.stop())
+
   app.on('browser-window-created', (_, window) => {
     // The thumbnails' offscreen windows load no app page and keep their own guards, and computer
     // use's windows over the desktop are none of the app's windows.
     if (window.webContents.isOffscreen() || isOverlayWindow(window)) return
+    // A real app window receives Windows session-end directly, so the tray-only fallback is not needed.
+    windowsSessionEnd?.dispose()
     // F12 toggles DevTools in development; reload shortcuts are disabled in production. Without
     // zoom: true it swallows Mod+- and Mod+Shift+=, which the menu and the renderer handle.
     optimizer.watchWindowShortcuts(window, { zoom: true })
@@ -1507,15 +1622,9 @@ async function start(): Promise<void> {
     })
     artifacts.watchWindow(window.webContents)
     window.once('show', () => applyBadgeTo(window))
-    window.on('session-end', () => {
-      quitFlow.systemShutdown()
-      updater.systemShutdown()
-    })
+    window.on('session-end', handleSystemShutdown)
   })
-  powerMonitor.on('shutdown', () => {
-    quitFlow.systemShutdown()
-    updater.systemShutdown()
-  })
+  powerMonitor.on('shutdown', handleSystemShutdown)
   // Huli: on macOS 'suspend' comes as the system leaves full wake and 'resume' as it enters it
   // again (IOKit tells apps of no dark wake), so links let go here stay down through Power Nap.
   powerMonitor.on('suspend', () => {
@@ -1559,7 +1668,13 @@ async function start(): Promise<void> {
     if (!quitFlow.quitting) showMainWindow()
   })
   app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin' && !quitFlow.staysInBackground) app.quit()
+    if (process.platform !== 'darwin' && !quitFlow.staysInBackground) {
+      app.quit()
+      return
+    }
+    if (process.platform === 'win32' && quitFlow.staysInBackground && !quitFlow.quitting) {
+      windowsSessionEnd?.ensureHiddenWatcher()
+    }
   })
 }
 

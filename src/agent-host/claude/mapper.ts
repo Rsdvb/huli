@@ -23,6 +23,7 @@ import {
 } from '@shared/thread'
 import { addSpeedSample, latestTime, timeRequest } from '@shared/output-speed'
 import { hasMessage, t } from '../i18n'
+import { isSleepToolName } from '../interruptible-wait'
 import {
   appendContent,
   attachmentCount,
@@ -113,6 +114,7 @@ const UNSUPPORTED_COMMANDS: ReadonlySet<string> = new Set([
 export function mapCommands(
   commands: readonly SlashCommandInfo[],
   terminal: ReadonlySet<string>,
+  skills?: ReadonlySet<string>,
 ): SlashCommand[] {
   const out: SlashCommand[] = []
   const seen = new Set<string>()
@@ -124,7 +126,14 @@ export function mapCommands(
     const hint = Array.isArray(command.argumentHint)
       ? command.argumentHint.join(' ')
       : command.argumentHint
-    out.push({ name, description: command.description ?? '', ...(hint ? { inputHint: hint } : {}) })
+    const isSkill =
+      command.source === 'skill' || command.type === 'skill' || (skills?.has(name) ?? false)
+    out.push({
+      name,
+      description: command.description ?? '',
+      ...(hint ? { inputHint: hint } : {}),
+      ...(isSkill ? { kind: 'skill' as const } : {}),
+    })
   }
   return out
 }
@@ -733,6 +742,9 @@ export class ClaudeMapper {
       if (complete && this.isPlan(block.input)) return out
     }
     const id = `t:${block.id}`
+    if (!ctx.replaying && isSleepToolName(name)) {
+      out.effects.push({ kind: 'interruptibleWait', id, active: true })
+    }
     const view = toolView(name, complete ? block.input : {}, this.cwd)
     const existing = ctx.thread.byId[id]
     const raw = complete ? rawInputText(block.input) : undefined
@@ -895,6 +907,9 @@ export class ClaudeMapper {
       return out
     }
     const id = `t:${block.tool_use_id}`
+    if (!ctx.replaying && isSleepToolName(name)) {
+      out.effects.push({ kind: 'interruptibleWait', id, active: false })
+    }
     const entry = ctx.thread.byId[id]
     if (!entry && tool && block.is_error === true && isClaudeRowWhenFailed(name)) {
       // A memory write that failed wrote nothing, so its call shows as a failed row.

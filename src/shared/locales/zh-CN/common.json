@@ -1,13 +1,16 @@
 {
   "actions": {
     "cancel": "取消",
+    "clear": "清除",
     "close": "关闭",
     "copy": "复制",
     "copyCommand": "复制命令",
     "copied": "已复制",
     "dismiss": "关闭提示",
     "done": "完成",
-    "retry": "重试"
+    "hidePassword": "隐藏密码",
+    "retry": "重试",
+    "showPassword": "显示密码"
   },
   "untitledSession": "未命名会话",
   "loading": "正在加载",
@@ -25,10 +28,12 @@
     "daysAgo_other": "{{count}} 天前",
     "seconds": "{{s}} 秒",
     "secondsShort": "{{s}} 秒",
-    "underSecond": "<1 秒",
+    "underSecond": "< 1 秒",
+    "minutesCompact": "{{m}} 分钟",
     "minutesSeconds": "{{m}} 分 {{s}} 秒",
     "minutesSecondsShort": "{{m}} 分 {{s}} 秒",
     "minutesLeft": "{{m}} 分钟",
+    "hoursCompact": "{{h}} 小时",
     "hoursMinutes": "{{h}} 小时 {{m}} 分",
     "hoursMinutesShort": "{{h}} 小时 {{m}} 分",
     "minutes": "{{m}} 分钟",

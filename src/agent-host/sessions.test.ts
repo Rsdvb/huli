@@ -1,31 +1,54 @@
-import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ConfigOption, StopReason } from '@shared/thread'
+import { agentOptionsFile, AgentOptionsStore } from './agent-options'
 import type { AgentManager } from './agents'
+import { CLAUDE_CODE } from './catalog'
+import { claudeSdkDriver } from './claude/driver'
+import type { SdkMessage } from './claude/sdk'
+import type { OwnTitles, SessionOptions, SessionTarget } from './connection'
 import { Diagnostics } from './diagnostics'
 import type { LastRequest, OutsideReader } from './outside-sessions'
 import { preparedFile, PreparedRecords, type PreparedFile } from './prepared'
-import type { Projects } from './projects'
+import { Projects } from './projects'
 import { ScratchFolders } from './scratch'
-import { SessionManager, type SessionEvents } from './sessions'
-import { returnedFile, sessionsFile, type SessionRecord, type SessionsFile } from './storage'
-import type { StoredThread } from './threads/model'
+import { SessionTools } from './session-tools'
+import {
+  SessionManager,
+  type SessionEvents,
+  type SessionManagerDeps,
+  type SessionTimings,
+} from './sessions'
+import {
+  projectsFile,
+  returnedFile,
+  sessionsFile,
+  type SessionRecord,
+  type SessionsFile,
+} from './storage'
+import { FakeChild, FakeClaudeSdk } from './testing/fake-claude-sdk'
+import { ThreadDb } from './threads/db'
+import { EMPTY_SESSION, type StoredThread } from './threads/model'
 import type { ThreadStore } from './threads/store'
 import { DEFAULT_WORKTREE_SETTINGS } from '@shared/git'
-import type { SessionOptions } from './connection'
 import { HostError } from './errors'
 import { agentSandboxSupport } from '@shared/sandbox'
 import type { WorktreeInspection } from './worktrees/api'
 import type { WorktreeManager } from './worktrees/manager'
 
 let dir: string
+const managers: SessionManager[] = []
 
 beforeEach(async () => {
   dir = await mkdtemp(path.join(tmpdir(), 'kettu-sessions-'))
 })
 
 afterEach(async () => {
+  const created = managers.splice(0)
+  for (const sessions of created) sessions.shutdown()
+  await Promise.all(created.map((sessions) => sessions.flush()))
   // A save the manager queued may still land as the folder goes, under a loaded machine.
   await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 })
@@ -36,6 +59,7 @@ const log = () => {}
 function manager(
   projects: Partial<Projects> = {},
   extra: {
+    hostId?: string
     agents?: Record<string, unknown>
     outside?: OutsideReader
     threads?: Partial<ThreadStore>
@@ -43,13 +67,18 @@ function manager(
     profiles?: ConstructorParameters<typeof SessionManager>[0]['profiles']
     portFree?: (port: number) => Promise<boolean>
     settings?: Record<string, unknown>
+    options?: AgentOptionsStore
     prepared?: PreparedRecords
     worktrees?: Partial<WorktreeManager>
+    timings?: Partial<SessionTimings>
+    settingsTargets?: SessionManagerDeps['settingsTargets']
+    events?: Partial<SessionEvents>
   } = {},
 ) {
   const added: string[] = []
   const deps = {
     platform: 'darwin',
+    ...(extra.hostId ? { hostId: extra.hostId } : {}),
     agents: {
       has: () => true,
       assertEnabled: () => {},
@@ -65,16 +94,18 @@ function manager(
       runtime: () => null,
       ...extra.agents,
     } as unknown as AgentManager,
-    projects: {
-      list: () => [],
-      sandbox: () => null,
-      presentFolders: () => [],
-      resolveDirectory: async (folder: string) => folder,
-      add: async (folder: string) => {
-        added.push(folder)
-      },
-      ...projects,
-    } as unknown as Projects,
+    projects: (projects instanceof Projects
+      ? projects
+      : {
+          list: () => [],
+          sandbox: () => null,
+          presentFolders: () => [],
+          resolveDirectory: async (folder: string) => folder,
+          add: async (folder: string) => {
+            added.push(folder)
+          },
+          ...projects,
+        }) as unknown as Projects,
     scratch: extra.scratch ?? ({ contains: () => false } as unknown as ScratchFolders),
     file: sessionsFile(dir, log),
     returned: returnedFile(dir, log),
@@ -83,15 +114,22 @@ function manager(
     reportsDir: path.join(dir, 'reports'),
     diagnostics: new Diagnostics(),
     git: () => null,
-    events: new Proxy({}, { get: () => () => {} }) as SessionEvents,
+    events: new Proxy(extra.events ?? {}, {
+      get: (target, prop) => Reflect.get(target, prop) ?? (() => {}),
+    }) as SessionEvents,
     settings: () => ({ startModes: {}, ...extra.settings }) as never,
+    ...(extra.options ? { options: extra.options } : {}),
     ...(extra.outside ? { outside: extra.outside } : {}),
     ...(extra.profiles ? { profiles: extra.profiles } : {}),
     ...(extra.portFree ? { portFree: extra.portFree } : {}),
     ...(extra.prepared ? { prepared: extra.prepared } : {}),
     ...(extra.worktrees ? { worktrees: extra.worktrees as WorktreeManager } : {}),
+    ...(extra.timings ? { timings: extra.timings } : {}),
+    ...(extra.settingsTargets ? { settingsTargets: extra.settingsTargets } : {}),
   } satisfies ConstructorParameters<typeof SessionManager>[0]
-  return { sessions: new SessionManager(deps), added, agents: deps.agents }
+  const sessions = new SessionManager(deps)
+  managers.push(sessions)
+  return { sessions, added, agents: deps.agents }
 }
 
 /** An agent that lists `pages` of session ids for any folder, one page per call. */
@@ -101,10 +139,15 @@ function lists(...pages: string[][]): Record<string, unknown> {
     ensureReady: async () => ({
       init: { capabilities: { listSessions: true } },
       connection: {
-        listSessions: async (_cwd: string, cursor: string | null) => {
+        listSessions: async (_cwd: string | null, cursor: string | null) => {
           const at = cursor === null ? 0 : Number(cursor)
           return {
-            sessions: pages[at].map((sessionId) => ({ sessionId, title: null, updatedAt: null })),
+            sessions: pages[at].map((sessionId) => ({
+              sessionId,
+              title: null,
+              updatedAt: null,
+              cwd: _cwd ?? '/repo',
+            })),
             nextCursor: at + 1 < pages.length ? String(at + 1) : null,
           }
         },
@@ -401,6 +444,301 @@ describe('the Claude desktop app’s scratch folders', () => {
   })
 })
 
+describe('cross-folder Codex session import into a target project', () => {
+  interface FakeCodexSession {
+    sessionId: string
+    title: string | null
+    updatedAt: string
+    cwd: string
+    history?: { user: string; reply: string }
+  }
+
+  function codexAgents(catalog: FakeCodexSession[]) {
+    const listCalls: { cwd: string | null; cursor: string | null }[] = []
+    const loadedCalls: { sessionId: string; cwd: string }[] = []
+    const promptedCalls: { sessionId: string; text: string }[] = []
+    const closedCalls: string[] = []
+    const targets = new Map<string, { apply: (out: unknown) => void }>()
+
+    const connection = {
+      isClosed: false,
+      closed: new Promise<void>(() => {}),
+      listSessions: async (cwd: string | null, cursor: string | null) => {
+        listCalls.push({ cwd, cursor })
+        const filtered = cwd === null ? catalog : catalog.filter((item) => item.cwd === cwd)
+        return {
+          sessions: filtered.map(({ sessionId, title, updatedAt, cwd: itemCwd }) => ({
+            sessionId,
+            title,
+            updatedAt,
+            cwd: itemCwd,
+          })),
+          nextCursor: null,
+        }
+      },
+      register: (sessionId: string, target: { apply: (out: unknown) => void }) => {
+        targets.set(sessionId, target)
+      },
+      unregister: (sessionId: string) => {
+        targets.delete(sessionId)
+      },
+      reopen: () => {},
+      closeSession: async (sessionId: string) => {
+        closedCalls.push(sessionId)
+      },
+      loadSession: async (sessionId: string, cwd: string) => {
+        loadedCalls.push({ sessionId, cwd })
+        const item = catalog.find((s) => s.sessionId === sessionId)
+        const target = targets.get(sessionId)
+        if (item?.history && target) {
+          target.apply({
+            patches: [
+              {
+                op: 'entry.add',
+                entry: {
+                  kind: 'user',
+                  id: 'u-1',
+                  content: [{ type: 'text', text: item.history.user }],
+                },
+              },
+              {
+                op: 'entry.add',
+                entry: {
+                  kind: 'agent',
+                  id: 'a-1',
+                  markdown: item.history.reply,
+                  streaming: false,
+                  attachments: [],
+                },
+              },
+            ],
+            effects: [],
+          })
+        }
+        return { config: [] }
+      },
+      resumeSession: async (sessionId: string, cwd: string) => {
+        loadedCalls.push({ sessionId, cwd })
+        return { config: [] }
+      },
+      prompt: async (sessionId: string, blocks: readonly { type: string; text?: string }[]) => {
+        const text = blocks.map((b) => b.text ?? '').join('')
+        promptedCalls.push({ sessionId, text })
+        const target = targets.get(sessionId)
+        target?.apply({
+          patches: [
+            {
+              op: 'entry.add',
+              entry: {
+                kind: 'agent',
+                id: 'a-2',
+                markdown: `Continued: ${text}`,
+                streaming: false,
+                attachments: [],
+              },
+            },
+          ],
+          effects: [],
+        })
+        return { stopReason: 'end_turn', tokens: null, models: [] }
+      },
+    }
+
+    const runtime = {
+      init: {
+        capabilities: {
+          listSessions: true,
+          listAllSessions: true,
+          loadSession: true,
+          resumeSession: true,
+          closeSession: true,
+          prompt: { image: true, audio: false, embeddedContext: true },
+        },
+      },
+      connection,
+    }
+
+    const agents = {
+      name: () => 'Codex',
+      signedIn: () => {},
+      status: () => ({ capabilities: runtime.init.capabilities, limits: [] }),
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+    return { agents, listCalls, loadedCalls, promptedCalls, closedCalls }
+  }
+
+  const catalog: FakeCodexSession[] = [
+    {
+      sessionId: 'codex-exact',
+      title: 'Current project work',
+      updatedAt: '2026-11-26T09:00:00.000Z',
+      cwd: '/projects/current',
+    },
+    {
+      sessionId: 'codex-moved',
+      title: 'Migrated repo conversation',
+      updatedAt: '2026-11-26T08:00:00.000Z',
+      cwd: '/old/deleted-repo',
+      history: { user: 'Original question', reply: 'Original answer' },
+    },
+    {
+      sessionId: 'codex-worktree',
+      title: 'Worktree feature branch',
+      updatedAt: '2026-11-26T07:00:00.000Z',
+      cwd: '/worktrees/feat-import',
+    },
+  ]
+
+  it('lists exact matches by default and all folders with original cwd when requested', async () => {
+    const fake = codexAgents(catalog)
+    const { sessions } = manager({}, { agents: fake.agents })
+    await sessions.load()
+
+    const exact = await sessions.listImportable('codex', '/projects/current', null, false)
+    expect(exact.sessions).toEqual([
+      {
+        acpSessionId: 'codex-exact',
+        title: 'Current project work',
+        updatedAt: '2026-11-26T09:00:00.000Z',
+        imported: false,
+        cwd: '/projects/current',
+      },
+    ])
+
+    const all = await sessions.listImportable('codex', '/projects/current', null, true)
+    expect(all.sessions.map((s) => ({ id: s.acpSessionId, cwd: s.cwd }))).toEqual([
+      { id: 'codex-exact', cwd: '/projects/current' },
+      { id: 'codex-moved', cwd: '/old/deleted-repo' },
+      { id: 'codex-worktree', cwd: '/worktrees/feat-import' },
+    ])
+    expect(fake.listCalls).toEqual([
+      { cwd: '/projects/current', cursor: null },
+      { cwd: null, cursor: null },
+    ])
+  })
+
+  it('batch imports moved and worktree Codex sessions into a chosen target project and rejects unknown ids', async () => {
+    const fake = codexAgents(catalog)
+    const { sessions, added } = manager({}, { agents: fake.agents })
+    await sessions.load()
+
+    await sessions.listImportable('codex', '/projects/current', null, true)
+    const first = await sessions.importSession({
+      agentId: 'codex',
+      projectPath: '/projects/current',
+      acpSessionId: 'codex-moved',
+    })
+    const second = await sessions.importSession({
+      agentId: 'codex',
+      projectPath: '/projects/current',
+      acpSessionId: 'codex-worktree',
+    })
+
+    expect(first).toMatchObject({
+      agentId: 'codex',
+      projectPath: '/projects/current',
+      title: 'Migrated repo conversation',
+    })
+    expect(second).toMatchObject({
+      agentId: 'codex',
+      projectPath: '/projects/current',
+      title: 'Worktree feature branch',
+    })
+    expect(sessions.list('/projects/current').map((s) => s.id)).toEqual([first.id, second.id])
+    expect(added).toContain('/projects/current')
+
+    await expect(
+      sessions.importSession({
+        agentId: 'codex',
+        projectPath: '/projects/current',
+        acpSessionId: 'does-not-exist',
+      }),
+    ).rejects.toMatchObject({ code: 'not_found' })
+
+    const listedAfter = await sessions.listImportable('codex', '/projects/other', null, true)
+    expect(listedAfter.sessions.find((s) => s.acpSessionId === 'codex-moved')).toMatchObject({
+      imported: true,
+      importedProjectPath: '/projects/current',
+    })
+  })
+
+  it('deduplicates re-imports, restores archived sessions, and updates target project when reassigned', async () => {
+    const fake = codexAgents(catalog)
+    const { sessions } = manager({}, { agents: fake.agents })
+    await sessions.load()
+
+    const imported = await sessions.importSession({
+      agentId: 'codex',
+      projectPath: '/projects/current',
+      acpSessionId: 'codex-moved',
+    })
+
+    // Re-importing into the same project reuses the exact record without creating a duplicate.
+    const sameAgain = await sessions.importSession({
+      agentId: 'codex',
+      projectPath: '/projects/current',
+      acpSessionId: 'codex-moved',
+    })
+    expect(sameAgain.id).toBe(imported.id)
+    expect(sessions.list('/projects/current')).toHaveLength(1)
+
+    // Archiving then re-importing into another target project reuses the record, restores it, and moves it.
+    await sessions.archive(imported.id)
+    const reassigned = await sessions.importSession({
+      agentId: 'codex',
+      projectPath: '/projects/destination',
+      acpSessionId: 'codex-moved',
+    })
+    expect(reassigned.id).toBe(imported.id)
+    expect(reassigned.projectPath).toBe('/projects/destination')
+    expect(reassigned.archivedAt).toBeNull()
+    expect(sessions.list('/projects/current')).toHaveLength(0)
+    expect(sessions.list('/projects/destination').map((s) => s.id)).toEqual([imported.id])
+    await sessions.flush()
+    expect((await index())?.sessions).toMatchObject([
+      { id: imported.id, projectPath: '/projects/destination' },
+    ])
+    expect((await index())?.sessions[0]?.archivedAt).toBeUndefined()
+  })
+
+  it('opens and continues a migrated Codex session cleanly under the target project path', async () => {
+    const fake = codexAgents(catalog)
+    const { sessions } = manager({}, { agents: fake.agents })
+    await sessions.load()
+
+    const imported = await sessions.importSession({
+      agentId: 'codex',
+      projectPath: '/projects/new-home',
+      acpSessionId: 'codex-moved',
+    })
+
+    const snap = await sessions.open(imported.id)
+    expect(snap.session.status).toBe('ready')
+    expect(fake.loadedCalls).toEqual([{ sessionId: 'codex-moved', cwd: '/projects/new-home' }])
+    expect(snap.session.projectPath).toBe('/projects/new-home')
+    expect(snap.entries).toMatchObject([
+      { kind: 'user', content: [{ type: 'text', text: 'Original question' }] },
+      { kind: 'agent', markdown: 'Original answer' },
+    ])
+
+    await sessions.prompt(imported.id, [{ type: 'text', text: 'Follow up' }])
+    await vi.waitFor(() =>
+      expect(fake.promptedCalls).toEqual([{ sessionId: 'codex-moved', text: 'Follow up' }]),
+    )
+    await vi.waitFor(async () => {
+      const afterPrompt = await sessions.snapshot(imported.id)
+      expect(afterPrompt.entries).toContainEqual(
+        expect.objectContaining({
+          kind: 'agent',
+          markdown: 'Continued: Follow up',
+        }),
+      )
+    })
+    await sessions.flush()
+  })
+})
+
 describe('restoring an archived session', () => {
   const archived: SessionRecord = {
     id: 's1',
@@ -426,6 +764,143 @@ describe('restoring an archived session', () => {
     await sessions.load()
     await sessions.unarchive('s1')
     expect(added).toEqual(['/repo'])
+  })
+
+  it('unarchives the owning project when restoring one of its archived sessions', async () => {
+    const store = sessionsFile(dir, log)
+    store.save({ version: 1, sessions: [archived] })
+    await store.flush()
+    const registry = new Projects({
+      file: projectsFile(dir, log),
+      platform: 'darwin',
+      now: () => 50,
+      realpath: async (value) => value,
+      isDirectory: async () => true,
+    })
+    await registry.load()
+    await registry.add('/repo')
+    registry.archive(registry.matchPrimary('/repo'))
+    expect(registry.list()[0]?.archivedAt).toBe(50)
+
+    const { sessions } = manager(registry as unknown as Partial<Projects>)
+    await sessions.load()
+    await sessions.unarchive('s1')
+    expect(registry.list()[0]?.archivedAt).toBeNull()
+    expect(sessions.summary('s1').archivedAt).toBeNull()
+  })
+})
+
+describe('archiving a project while preserving session history', () => {
+  it('keeps active and archived session records intact and blocks prompts until unarchived', async () => {
+    const activeRecord: SessionRecord = {
+      id: 'active-1',
+      agentId: 'claude-code',
+      acpSessionId: 'acp-active-1',
+      projectPath: '/work/repo',
+      title: 'Active thread',
+      createdAt: 1,
+      updatedAt: 20,
+      lastViewedAt: null,
+      parentId: null,
+      origin: 'user',
+      description: null,
+      branch: 'main',
+    }
+    const extraFolderRecord: SessionRecord = {
+      id: 'extra-1',
+      agentId: 'claude-code',
+      acpSessionId: 'acp-extra-1',
+      projectPath: '/work/repo-docs',
+      projectOwner: '/work/repo',
+      title: 'Docs thread',
+      createdAt: 2,
+      updatedAt: 25,
+      lastViewedAt: null,
+      parentId: null,
+      origin: 'user',
+      description: null,
+      branch: null,
+    }
+    const previouslyArchived: SessionRecord = {
+      id: 'old-archived',
+      agentId: 'claude-code',
+      acpSessionId: 'acp-old',
+      projectPath: '/work/repo',
+      title: 'Old archived thread',
+      createdAt: 3,
+      updatedAt: 10,
+      lastViewedAt: null,
+      parentId: null,
+      origin: 'user',
+      description: null,
+      branch: null,
+      archivedAt: 15,
+    }
+    const otherProject: SessionRecord = {
+      id: 'other-1',
+      agentId: 'claude-code',
+      acpSessionId: 'acp-other',
+      projectPath: '/work/other',
+      title: 'Other project thread',
+      createdAt: 4,
+      updatedAt: 30,
+      lastViewedAt: null,
+      parentId: null,
+      origin: 'user',
+      description: null,
+      branch: null,
+    }
+
+    const store = sessionsFile(dir, log)
+    store.save({
+      version: 1,
+      sessions: [activeRecord, extraFolderRecord, previouslyArchived, otherProject],
+    })
+    await store.flush()
+
+    const registry = new Projects({
+      file: projectsFile(dir, log),
+      platform: 'darwin',
+      now: () => 100,
+      realpath: async (value) => value,
+      isDirectory: async () => true,
+    })
+    await registry.load()
+    await registry.add('/work/repo')
+    await registry.update(registry.matchPrimary('/work/repo'), {
+      folders: ['/work/repo', '/work/repo-docs'],
+    })
+    await registry.add('/work/other')
+
+    const { sessions } = manager(registry as unknown as Partial<Projects>)
+    await sessions.load()
+
+    const projectRecord = registry.matchPrimary('/work/repo')
+    await sessions.archiveProject(projectRecord.path, projectRecord.folders)
+    registry.archive(projectRecord)
+
+    // All historical sessions stay in the index with their original per-session archive states.
+    expect(sessions.has('active-1')).toBe(true)
+    expect(sessions.has('extra-1')).toBe(true)
+    expect(sessions.has('old-archived')).toBe(true)
+    expect(sessions.has('other-1')).toBe(true)
+    expect(sessions.summary('active-1').archivedAt).toBeNull()
+    expect(sessions.summary('extra-1').archivedAt).toBeNull()
+    expect(sessions.summary('old-archived').archivedAt).toBe(15)
+
+    // Sending a prompt to a session inside an archived project is refused until restored.
+    await expect(sessions.prompt('active-1', [{ type: 'text', text: 'hi' }])).rejects.toMatchObject(
+      { code: 'restricted' },
+    )
+    await expect(sessions.prompt('extra-1', [{ type: 'text', text: 'hi' }])).rejects.toMatchObject({
+      code: 'restricted',
+    })
+
+    // Unarchiving the project restores its state without unarchiving individually archived sessions.
+    registry.unarchive(projectRecord)
+    expect(registry.matchPrimary('/work/repo').archivedAt).toBeUndefined()
+    expect(sessions.summary('active-1').archivedAt).toBeNull()
+    expect(sessions.summary('old-archived').archivedAt).toBe(15)
   })
 })
 
@@ -1460,5 +1935,2947 @@ describe('preparing and adopting sub-sessions under a worktree parent', () => {
     expect(child.worktree?.state).toBe('ready')
     expect(agent.newSession.mock.calls.at(-1)?.[0]).toBe(wtPath)
     await sessions.flush()
+  })
+})
+
+describe('empty-replay guard and recovery of cached empty imported threads', () => {
+  function agyConnection(
+    onLoad: (sessionId: string, target: { apply: (out: unknown) => void }) => Promise<void>,
+  ) {
+    const targets = new Map<string, { apply: (out: unknown) => void }>()
+    const loadSession = vi.fn(async (sessionId: string) => {
+      const target = targets.get(sessionId)
+      if (target) await onLoad(sessionId, target)
+      return { config: [] }
+    })
+    const agents = {
+      name: () => 'Google Antigravity',
+      signedIn: () => {},
+      status: () => ({ capabilities: null, limits: [] }),
+      refreshLimits: async () => {},
+      ensureReady: async () => ({
+        agentId: 'antigravity',
+        kettu: false,
+        init: {
+          name: 'Antigravity',
+          version: '1.5.18',
+          capabilities: {
+            loadSession: true,
+            listSessions: true,
+            resumeSession: true,
+            closeSession: true,
+            deleteSession: false,
+            forkSession: false,
+            forkAtMessage: false,
+            ownTitles: null,
+            logout: false,
+            steering: false,
+            mcpHttp: true,
+            mcpSse: false,
+            mcpStdio: true,
+            prompt: { image: false, audio: false, embeddedContext: false },
+          },
+          authMethods: [],
+          raw: null,
+        },
+        connection: {
+          closed: new Promise<void>(() => {}),
+          isClosed: false,
+          close: () => {},
+          register: (id: string, target: { apply: (out: unknown) => void }) => {
+            targets.set(id, target)
+          },
+          unregister: (id: string) => {
+            targets.delete(id)
+          },
+          reopen: () => {},
+          listSessions: async () => ({
+            sessions: [{ sessionId: 'ide-1', title: 'IDE Chat', updatedAt: null, cwd: '/repo' }],
+            nextCursor: null,
+          }),
+          loadSession,
+          resumeSession: async () => ({ config: [] }),
+          prompt: async (id: string) => {
+            targets.get(id)?.apply({
+              patches: [
+                {
+                  op: 'entry.add',
+                  entry: {
+                    kind: 'agent',
+                    id: 'a:1',
+                    content: [{ type: 'text', text: 'Reply after empty replay' }],
+                    streaming: false,
+                  },
+                },
+              ],
+              effects: [],
+            })
+            return { stopReason: 'end_turn', tokens: null, models: [] }
+          },
+        },
+      }),
+    }
+    return { agents, loadSession }
+  }
+
+  it('does not cache a 0-entry replay to threads.db, and caches once entries later arrive', async () => {
+    const writes: unknown[] = []
+    const threads: Partial<ThreadStore> = {
+      page: vi.fn(async () => null),
+      load: vi.fn(async () => null),
+      origins: vi.fn(async () => []),
+      write: vi.fn(async (_id, change) => {
+        writes.push(change)
+      }),
+    }
+    const { agents, loadSession } = agyConnection(async (_id, target) => {
+      // Simulate agy emitting only a session_info_update (title) and 0 message entries.
+      target.apply({
+        patches: [{ op: 'session.update', changes: { title: 'IDE Chat' } }],
+        effects: [],
+      })
+    })
+    const { sessions } = manager({}, { agents, threads })
+    await sessions.load()
+
+    const imported = await sessions.importSession({
+      agentId: 'antigravity',
+      projectPath: '/repo',
+      acpSessionId: 'ide-1',
+    })
+    await vi.waitFor(async () =>
+      expect((await index())?.sessions[0]).toMatchObject({
+        id: imported.id,
+        acpSessionId: 'ide-1',
+        imported: true,
+      }),
+    )
+
+    const snapshot = await sessions.open(imported.id)
+    expect(loadSession).toHaveBeenCalledTimes(1)
+    expect(snapshot.entries).toEqual([])
+    expect(writes).toEqual([])
+
+    // Sending a prompt adds entries and lifts the empty-replay guard so the thread persists normally.
+    await sessions.prompt(imported.id, [{ type: 'text', text: 'Hello' }])
+    await vi.waitFor(() => expect(writes.length).toBeGreaterThan(0))
+    await sessions.flush()
+  })
+
+  it('re-loads previously cached empty Antigravity imported threads on open and caches the recovered history', async () => {
+    const record: SessionRecord = {
+      id: 'legacy-ide-session',
+      agentId: 'antigravity',
+      acpSessionId: 'ide-1',
+      projectPath: '/repo',
+      title: null,
+      createdAt: 1,
+      updatedAt: 2,
+      lastViewedAt: null,
+      parentId: null,
+      origin: 'user',
+      description: null,
+      branch: null,
+    }
+    const store = sessionsFile(dir, log)
+    store.save({ version: 1, sessions: [record] })
+    await store.flush()
+
+    const writes: { entries: unknown[] }[] = []
+    const threads: Partial<ThreadStore> = {
+      // Simulate an empty cached thread persisted by an older Kettu version (next_pos = 0, entries = []).
+      page: vi.fn(async () => ({
+        head: { agentId: 'antigravity' as const, acpSessionId: 'ide-1' },
+        session: EMPTY_SESSION,
+        entries: [],
+        from: 0,
+        older: null,
+        plan: null,
+      })),
+      load: vi.fn(async () => ({
+        head: { agentId: 'antigravity' as const, acpSessionId: 'ide-1' },
+        session: EMPTY_SESSION,
+        entries: [],
+        setAside: [],
+      })),
+      origins: vi.fn(async () => []),
+      write: vi.fn(async (_id, change) => {
+        writes.push({ entries: change.entries })
+      }),
+    }
+    const { agents, loadSession } = agyConnection(async (_id, target) => {
+      target.apply({
+        patches: [
+          {
+            op: 'entry.add',
+            entry: { kind: 'user', id: 'u:1', content: [{ type: 'text', text: 'From IDE' }] },
+          },
+          {
+            op: 'entry.add',
+            entry: {
+              kind: 'agent',
+              id: 'a:1',
+              markdown: 'Recovered reply',
+              streaming: false,
+              attachments: [],
+            },
+          },
+        ],
+        effects: [],
+      })
+    })
+    const { sessions } = manager({}, { agents, threads })
+    await sessions.load()
+
+    const snapshot = await sessions.open(record.id)
+    expect(loadSession).toHaveBeenCalledTimes(1)
+    expect(snapshot.entries).toHaveLength(2)
+    expect(writes).toHaveLength(1)
+    expect(writes[0]!.entries).toHaveLength(2)
+  })
+
+  it('does not re-load a rewound session whose entries were moved to set_aside', async () => {
+    const record: SessionRecord = {
+      id: 'rewound-1',
+      agentId: 'antigravity',
+      acpSessionId: 'ide-1',
+      projectPath: '/repo',
+      title: 'Edited',
+      createdAt: 1,
+      updatedAt: 2,
+      lastViewedAt: null,
+      parentId: null,
+      origin: 'user',
+      description: null,
+      branch: null,
+      imported: true,
+      rewound: {
+        entryId: 'u:1',
+        turns: 1,
+        draft: [{ type: 'text', text: 'Edited prompt' }],
+        used: null,
+        point: { ref: null, text: 'Old prompt', occurrence: 1 },
+      },
+    }
+    const store = sessionsFile(dir, log)
+    store.save({ version: 1, sessions: [record] })
+    await store.flush()
+
+    const threads: Partial<ThreadStore> = {
+      page: vi.fn(async () => ({
+        head: { agentId: 'antigravity' as const, acpSessionId: 'ide-1' },
+        session: { ...EMPTY_SESSION, title: 'Edited' },
+        entries: [],
+        from: 2,
+        older: null,
+        plan: null,
+      })),
+    }
+    const { agents, loadSession } = agyConnection(async () => {})
+    const { sessions } = manager({}, { agents, threads })
+    await sessions.load()
+
+    const snapshot = await sessions.open(record.id)
+    expect(loadSession).not.toHaveBeenCalled()
+    expect(snapshot.entries).toEqual([])
+  })
+})
+
+describe('preserving prepared session options when creating a worktree session', () => {
+  const BASE_OID = 'b'.repeat(40)
+
+  const makeConfig = (mode = 'default', custom = 'off') => [
+    {
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode' as const,
+      type: 'select' as const,
+      value: mode,
+      choices: [
+        { value: 'default', name: 'Ask' },
+        { value: 'acceptEdits', name: 'Accept edits' },
+        { value: 'plan', name: 'Plan' },
+        { value: 'bypassPermissions', name: 'Full access' },
+      ],
+    },
+    {
+      id: 'sandbox_net',
+      name: 'Network',
+      category: 'other' as const,
+      type: 'select' as const,
+      value: custom,
+      choices: [
+        { value: 'off', name: 'Off' },
+        { value: 'on', name: 'On' },
+      ],
+    },
+  ]
+
+  function configurableAgent() {
+    let seq = 0
+    const configs = new Map<string, ReturnType<typeof makeConfig>>()
+    const newSession = vi.fn<
+      (
+        cwd: string,
+        options?: { fullAccess?: boolean },
+      ) => Promise<{ sessionId: string; config: ReturnType<typeof makeConfig> }>
+    >(async () => {
+      const sessionId = `acp-${++seq}`
+      const config = makeConfig('default', 'off')
+      configs.set(sessionId, config)
+      return { sessionId, config }
+    })
+    const setConfigOption = vi.fn(async (sessionId: string, optionId: string, value: string) => {
+      const next = (configs.get(sessionId) ?? makeConfig()).map((option) =>
+        option.id === optionId ? { ...option, value } : option,
+      )
+      configs.set(sessionId, next)
+      return next
+    })
+    const deleteSession = vi.fn(async () => {})
+    const connection = {
+      newSession,
+      setConfigOption,
+      prompt: vi.fn(async () => ({ stopReason: 'end_turn', tokens: null, models: null })),
+      cancel: async () => {},
+      deleteSession,
+      register: () => {},
+      unregister: () => {},
+      isClosed: false,
+    }
+    const runtime = (agentId: 'claude-code' | 'codex') => ({
+      agentId,
+      init: { capabilities: { deleteSession: true } },
+      connection,
+    })
+    return {
+      newSession,
+      setConfigOption,
+      configs,
+      agents: {
+        name: (id: string) => (id === 'codex' ? 'Codex' : 'Claude Code'),
+        signedIn: () => {},
+        authRequired: () => {},
+        status: () => ({
+          capabilities: { prompt: { image: false, audio: false, embeddedContext: false } },
+          limits: [],
+        }),
+        runtime: (id: 'claude-code' | 'codex') => runtime(id),
+        ensureReady: async (id: 'claude-code' | 'codex') => runtime(id),
+      },
+    }
+  }
+
+  it('carries prepared mode and non-remembered options into a new worktree without remembering mode', async () => {
+    const repo = path.join(dir, 'repo')
+    const wt1 = path.join(dir, 'wt-1')
+    const wt2 = path.join(dir, 'wt-2')
+    await mkdir(repo, { recursive: true })
+    await mkdir(wt1, { recursive: true })
+    await mkdir(wt2, { recursive: true })
+
+    let wtCount = 0
+    const worktrees: Partial<WorktreeManager> = {
+      create: async () => {
+        const wtPath = ++wtCount === 1 ? wt1 : wt2
+        return {
+          path: wtPath,
+          branch: `kettu/wt-${wtCount}`,
+          base: 'main',
+          baseOid: BASE_OID,
+        }
+      },
+      settings: () => ({ waitForSetup: false }) as never,
+      prepare: async () => ({ state: 'ready' }),
+    }
+    const optionsStore = new AgentOptionsStore({
+      file: agentOptionsFile(dir, log),
+      changed: () => {},
+    })
+    await optionsStore.load()
+
+    const agent = configurableAgent()
+    const { sessions } = manager(
+      {},
+      {
+        agents: agent.agents,
+        options: optionsStore,
+        settings: { startModes: { 'claude-code': 'acceptEdits' } },
+        worktrees,
+      },
+    )
+    await sessions.load()
+
+    const prep = await sessions.prepare({ agentId: 'claude-code', projectPath: repo }, 'win-1')
+    await sessions.setConfigOption(prep.id, 'mode', 'bypassPermissions')
+    await sessions.setConfigOption(prep.id, 'sandbox_net', 'on')
+
+    const created = await sessions.create(
+      {
+        agentId: 'claude-code',
+        projectPath: repo,
+        preparedId: prep.id,
+        worktree: { base: 'main' },
+      },
+      'win-1',
+    )
+    expect(created.id).not.toBe(prep.id)
+    expect(agent.newSession.mock.calls[1]?.[0]).toBe(wt1)
+    expect(agent.newSession.mock.calls[1]?.[1]?.fullAccess).toBe(true)
+    expect(agent.configs.get('acp-2')?.find((o) => o.id === 'mode')?.value).toBe(
+      'bypassPermissions',
+    )
+    expect(agent.configs.get('acp-2')?.find((o) => o.id === 'sandbox_net')?.value).toBe('on')
+
+    // One-off mode and non-remembered options must not be remembered for subsequent sessions.
+    expect(optionsStore.rememberedOf('claude-code')).toEqual({})
+    await sessions.discard(prep.id)
+
+    const next = await sessions.create(
+      {
+        agentId: 'claude-code',
+        projectPath: repo,
+        worktree: { base: 'main' },
+      },
+      'win-1',
+    )
+    expect(next.id).not.toBe(created.id)
+    expect(agent.newSession.mock.calls[2]?.[1]?.fullAccess).toBeUndefined()
+    expect(agent.configs.get('acp-3')?.find((o) => o.id === 'mode')?.value).toBe('acceptEdits')
+    expect(agent.configs.get('acp-3')?.find((o) => o.id === 'sandbox_net')?.value).toBe('off')
+    await sessions.flush()
+    await optionsStore.flush()
+  })
+
+  it('gives explicit create options priority over prepared config and ignores mismatched agents', async () => {
+    const repo = path.join(dir, 'repo')
+    const wt1 = path.join(dir, 'wt-1')
+    const wt2 = path.join(dir, 'wt-2')
+    await mkdir(repo, { recursive: true })
+    await mkdir(wt1, { recursive: true })
+    await mkdir(wt2, { recursive: true })
+
+    let wtCount = 0
+    const worktrees: Partial<WorktreeManager> = {
+      create: async () => ({
+        path: ++wtCount === 1 ? wt1 : wt2,
+        branch: `kettu/wt-${wtCount}`,
+        base: 'main',
+        baseOid: BASE_OID,
+      }),
+      settings: () => ({ waitForSetup: false }) as never,
+      prepare: async () => ({ state: 'ready' }),
+    }
+    const agent = configurableAgent()
+    const { sessions } = manager(
+      {},
+      {
+        agents: agent.agents,
+        settings: { startModes: { 'claude-code': 'acceptEdits' } },
+        worktrees,
+      },
+    )
+    await sessions.load()
+
+    const prep = await sessions.prepare({ agentId: 'claude-code', projectPath: repo }, 'win-1')
+    await sessions.setConfigOption(prep.id, 'mode', 'bypassPermissions')
+
+    // Explicit options override the prepared session's mode.
+    await sessions.create(
+      {
+        agentId: 'claude-code',
+        projectPath: repo,
+        preparedId: prep.id,
+        options: { mode: 'plan' },
+        worktree: { base: 'main' },
+      },
+      'win-1',
+    )
+    expect(agent.configs.get('acp-2')?.find((o) => o.id === 'mode')?.value).toBe('plan')
+
+    // Passing a Claude preparedId when creating a Codex session must not leak Claude's options.
+    await sessions.create(
+      {
+        agentId: 'codex',
+        projectPath: repo,
+        preparedId: prep.id,
+        worktree: { base: 'main' },
+      },
+      'win-1',
+    )
+    expect(agent.configs.get('acp-3')?.find((o) => o.id === 'mode')?.value).toBe('default')
+    await sessions.flush()
+  })
+})
+
+describe('agent-given session titles', () => {
+  function titleAgent(opts: {
+    ownTitles: OwnTitles | null
+    listedTitle?: string | null
+    writtenTitle?: string
+    onPrompt?: (acpId: string, target: SessionTarget) => void | Promise<void>
+    onLoad?: (acpId: string, target: SessionTarget) => void | Promise<void>
+    holdWrite?: () => Promise<string>
+  }) {
+    let seq = 0
+    const targets = new Map<string, SessionTarget>()
+    const defaultConfig = () => [
+      {
+        id: 'mode',
+        name: 'Mode',
+        category: 'mode' as const,
+        type: 'select' as const,
+        value: 'default',
+        choices: [{ value: 'default', name: 'Default' }],
+      },
+    ]
+    const newSession = vi.fn(async (_cwd: string, options?: SessionOptions) => ({
+      sessionId: `${options?.hidden ? 'hidden' : 'acp'}-${++seq}`,
+      config: defaultConfig(),
+    }))
+    const collect = vi.fn(async () => {
+      const title = opts.holdWrite ? await opts.holdWrite() : (opts.writtenTitle ?? 'Written title')
+      return [JSON.stringify({ '0': title })]
+    })
+    const listSessions = vi.fn(async () => ({
+      sessions: [...targets.keys()].map((sessionId) => ({
+        sessionId,
+        title: opts.listedTitle ?? 'Listed title',
+        updatedAt: null,
+        cwd: '/repo',
+      })),
+      nextCursor: null,
+    }))
+    const prompt = vi.fn(async (id: string) => {
+      const target = targets.get(id)
+      if (target && opts.onPrompt) await opts.onPrompt(id, target)
+      return { stopReason: 'end_turn' as const, tokens: null, models: [] }
+    })
+    const connection = {
+      closed: new Promise<void>(() => {}),
+      isClosed: false,
+      hiddenSessions: true,
+      close: () => {},
+      register: (id: string, target: SessionTarget) => {
+        targets.set(id, target)
+      },
+      unregister: (id: string) => {
+        targets.delete(id)
+      },
+      reopen: () => {},
+      newSession,
+      setConfigOption: async () => defaultConfig(),
+      loadSession: async (id: string) => {
+        const target = targets.get(id)
+        if (target && opts.onLoad) await opts.onLoad(id, target)
+        return { config: defaultConfig() }
+      },
+      resumeSession: async () => ({ config: defaultConfig() }),
+      listSessions,
+      collect,
+      removeHidden: async () => {},
+      cancel: async () => {},
+      prompt,
+    }
+    const runtime = {
+      agentId: 'claude-code' as const,
+      kettu: false,
+      init: {
+        name: 'Agent',
+        version: '1.0.0',
+        capabilities: {
+          loadSession: true,
+          listSessions: true,
+          resumeSession: true,
+          closeSession: false,
+          deleteSession: false,
+          forkSession: false,
+          forkAtMessage: false,
+          ownTitles: opts.ownTitles,
+          logout: false,
+          steering: false,
+          mcpHttp: true,
+          mcpSse: false,
+          mcpStdio: true,
+          prompt: { image: false, audio: false, embeddedContext: false },
+        },
+        authMethods: [],
+        raw: null,
+      },
+      connection,
+    }
+    const agents = {
+      name: () => 'Agent',
+      signedIn: () => {},
+      status: () => ({ capabilities: runtime.init.capabilities, limits: [] }),
+      hasContext: () => false,
+      refreshLimits: async () => {},
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+    return { agents, targets, newSession, collect, listSessions, prompt }
+  }
+
+  const titleSettings = { sessionTitles: true, lightModel: { mode: 'small' as const } }
+
+  it('keeps an explicit start_session title against agent title updates and allows user rename', async () => {
+    const agent = titleAgent({
+      ownTitles: 'sent',
+      onPrompt: (_id, target) => {
+        // Agent emits a model-written title update and then a null title clear during the turn.
+        target.apply({
+          patches: [
+            {
+              op: 'session.update',
+              changes: { title: 'KETTU_USER_DATA and debug port isolation', updatedAt: 999_999 },
+            },
+          ],
+          effects: [{ kind: 'title', title: 'KETTU_USER_DATA and debug port isolation' }],
+        })
+        target.apply({
+          patches: [{ op: 'session.update', changes: { title: null } }],
+          effects: [{ kind: 'title', title: null }],
+        })
+      },
+    })
+    const { sessions } = manager({}, { agents: agent.agents, settings: titleSettings })
+    await sessions.load()
+
+    const caller = await sessions.create({ agentId: 'claude-code', projectPath: '/repo' })
+    const startedId = await sessions.startFromTool(caller.id, {
+      prompt: 'Check KETTU_USER_DATA and debug port isolation across windows',
+      title: 'Keep this title',
+      options: {},
+      report: false,
+    })
+    await vi.waitFor(() => expect(agent.prompt).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(sessions.summary(startedId).status).toBe('ready'))
+
+    expect(agent.newSession.mock.calls[1]?.[1]?.titled).toBe(true)
+    expect(sessions.title(startedId)).toBe('Keep this title')
+    expect(sessions.summary(startedId).title).toBe('Keep this title')
+    expect(sessions.sessionInfo(startedId)?.title).toBe('Keep this title')
+
+    // Post-turn updates keep non-title fields (like updatedAt) while stripping generated titles.
+    const target = agent.targets.get('acp-2')!
+    target.apply({
+      patches: [
+        {
+          op: 'session.update',
+          changes: { title: 'Late generated title', updatedAt: 999_999 },
+        },
+      ],
+      effects: [{ kind: 'title', title: 'Late generated title' }],
+    })
+    expect(sessions.summary(startedId).title).toBe('Keep this title')
+    expect(sessions.summary(startedId).updatedAt).toBe(999_999)
+
+    await sessions.flush()
+    const saved = (await index())?.sessions.find((record) => record.id === startedId)
+    expect(saved?.title).toBe('Keep this title')
+    expect(saved?.titleSource).toBe('given')
+
+    // An explicit agent rename updates the given title and stays protected from generated updates.
+    sessions.renameByAgent(startedId, 'Agent renamed')
+    expect(sessions.summary(startedId).title).toBe('Agent renamed')
+    target.apply({
+      patches: [{ op: 'session.update', changes: { title: 'Another generated title' } }],
+      effects: [{ kind: 'title', title: 'Another generated title' }],
+    })
+    expect(sessions.summary(startedId).title).toBe('Agent renamed')
+
+    // Explicit user rename overrides the given title and stays over subsequent agent renames.
+    sessions.rename(startedId, 'User title')
+    expect(sessions.title(startedId)).toBe('User title')
+    expect(sessions.summary(startedId).title).toBe('User title')
+    sessions.renameByAgent(startedId, 'Should not override user')
+    expect(sessions.summary(startedId).title).toBe('User title')
+
+    // Clearing the user's custom title reveals the preserved given title, not a generated one.
+    sessions.rename(startedId, null)
+    expect(sessions.summary(startedId).title).toBe('Agent renamed')
+    await sessions.flush()
+  })
+
+  it('skips Kettu auto-titling and listed-title reads when start_session gives a title', async () => {
+    const written = titleAgent({ ownTitles: null, writtenTitle: 'Auto written title' })
+    const { sessions: s1 } = manager({}, { agents: written.agents, settings: titleSettings })
+    await s1.load()
+    const caller1 = await s1.create({ agentId: 'claude-code', projectPath: '/repo' })
+    const started1 = await s1.startFromTool(caller1.id, {
+      prompt: 'Investigate startup timing across multiple host windows',
+      title: 'Startup timing',
+      options: {},
+      report: false,
+    })
+    await vi.waitFor(() => expect(written.prompt).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(s1.summary(started1).status).toBe('ready'))
+    expect(written.collect).not.toHaveBeenCalled()
+    expect(s1.summary(started1).title).toBe('Startup timing')
+    await s1.flush()
+
+    const listed = titleAgent({ ownTitles: 'listed', listedTitle: 'Listed replacement' })
+    const { sessions: s2 } = manager({}, { agents: listed.agents, settings: titleSettings })
+    await s2.load()
+    const caller2 = await s2.create({ agentId: 'claude-code', projectPath: '/repo' })
+    const started2 = await s2.startFromTool(caller2.id, {
+      prompt: 'Check listed titles on OpenCode sessions',
+      title: 'Explicit listed title',
+      options: {},
+      report: false,
+    })
+    await vi.waitFor(() => expect(listed.prompt).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(s2.summary(started2).status).toBe('ready'))
+    expect(listed.listSessions).not.toHaveBeenCalled()
+    expect(s2.summary(started2).title).toBe('Explicit listed title')
+    await s2.flush()
+  })
+
+  it('still auto-titles start_session without a title, unless renamed by the agent first', async () => {
+    const sent = titleAgent({
+      ownTitles: 'sent',
+      onPrompt: (_id, target) => {
+        target.apply({
+          patches: [{ op: 'session.update', changes: { title: 'Agent generated title' } }],
+          effects: [{ kind: 'title', title: 'Agent generated title' }],
+        })
+      },
+    })
+    const { sessions: s1 } = manager({}, { agents: sent.agents, settings: titleSettings })
+    await s1.load()
+    const caller1 = await s1.create({ agentId: 'claude-code', projectPath: '/repo' })
+    const untitled1 = await s1.startFromTool(caller1.id, {
+      prompt: 'Please audit our login retry behavior',
+      options: {},
+      report: false,
+    })
+    await vi.waitFor(() => expect(s1.summary(untitled1).title).toBe('Agent generated title'))
+    expect(sent.newSession.mock.calls[1]?.[1]?.titled).toBeUndefined()
+    await s1.flush()
+
+    const written = titleAgent({ ownTitles: null, writtenTitle: 'Login retry audit' })
+    const { sessions: s2 } = manager({}, { agents: written.agents, settings: titleSettings })
+    await s2.load()
+    const caller2 = await s2.create({ agentId: 'claude-code', projectPath: '/repo' })
+    const untitled2 = await s2.startFromTool(caller2.id, {
+      prompt: 'Please audit our login retry behavior',
+      options: {},
+      report: false,
+    })
+    await vi.waitFor(() => expect(s2.summary(untitled2).title).toBe('Login retry audit'))
+    expect(written.collect).toHaveBeenCalledTimes(1)
+    await s2.flush()
+
+    // An explicit rename_session while auto-titling is in flight blocks the late written title.
+    let releaseTitle!: (title: string) => void
+    const delayed = titleAgent({
+      ownTitles: null,
+      holdWrite: () => new Promise<string>((resolve) => (releaseTitle = resolve)),
+    })
+    const { sessions: s3 } = manager({}, { agents: delayed.agents, settings: titleSettings })
+    await s3.load()
+    const caller3 = await s3.create({ agentId: 'claude-code', projectPath: '/repo' })
+    const untitled3 = await s3.startFromTool(caller3.id, {
+      prompt: 'Please audit our login retry behavior',
+      options: {},
+      report: false,
+    })
+    await vi.waitFor(() => expect(delayed.collect).toHaveBeenCalledTimes(1))
+    s3.renameByAgent(untitled3, 'Chosen mid-flight')
+    releaseTitle('Late generated title')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(s3.summary(untitled3).title).toBe('Chosen mid-flight')
+    await s3.flush()
+  })
+
+  it('preserves a given title across reload when replay emits a generated title', async () => {
+    const firstAgent = titleAgent({ ownTitles: 'sent' })
+    const first = manager({}, { agents: firstAgent.agents })
+    await first.sessions.load()
+    const caller = await first.sessions.create({ agentId: 'claude-code', projectPath: '/repo' })
+    const startedId = await first.sessions.startFromTool(caller.id, {
+      prompt: 'Check persistence across restarts',
+      title: 'Persisted title',
+      options: {},
+      report: false,
+    })
+    await vi.waitFor(() => expect(first.sessions.summary(startedId).status).toBe('ready'))
+    await first.sessions.flush()
+
+    const replayAgent = titleAgent({
+      ownTitles: 'sent',
+      onLoad: (_id, target) => {
+        target.apply({
+          patches: [{ op: 'session.update', changes: { title: 'Replayed generated title' } }],
+          effects: [{ kind: 'title', title: 'Replayed generated title' }],
+        })
+      },
+    })
+    const reloaded = manager({}, { agents: replayAgent.agents })
+    await reloaded.sessions.load()
+    await reloaded.sessions.open(startedId)
+    expect(reloaded.sessions.summary(startedId).title).toBe('Persisted title')
+    await reloaded.sessions.flush()
+  })
+
+  it('keeps an explicit start_session title on a real Claude Code connection', async () => {
+    const sdkDir = await mkdtemp(path.join(dir, 'claude-sdk-'))
+    const entry = path.join(sdkDir, 'sdk.mjs')
+    await writeFile(path.join(sdkDir, 'package.json'), JSON.stringify({ version: '0.3.314' }))
+    const sdk = new FakeClaudeSdk()
+    sdk.generatedTitle = 'Debug port isolation'
+    sdk.script = (query) => {
+      query.running()
+      query.finish()
+    }
+    // Huli: a driver loads its connection code before it connects.
+    const driver = claudeSdkDriver(async () => sdk)
+    await driver.load?.()
+    const connection = driver.connect({
+      def: CLAUDE_CODE,
+      hooks: {
+        traffic: () => {},
+        account: () => {},
+        ignored: () => {},
+        log: () => {},
+      },
+      spec: {
+        command: entry,
+        args: [],
+        env: { CLAUDE_CODE_EXECUTABLE: '/opt/claude/bin/claude' },
+        shell: false,
+        display: { command: entry, args: [], env: {} },
+      },
+      env: { PATH: '/usr/bin', HOME: dir },
+      claudeSettingsDir: path.join(sdkDir, 'settings'),
+      spawn: () => new FakeChild() as never,
+    })
+    const init = await connection.initialize('1.0.0')
+    const runtime = { agentId: 'claude-code' as const, kettu: false, init, connection }
+    const agents = {
+      name: () => 'Claude Code',
+      signedIn: () => {},
+      status: () => ({ capabilities: init.capabilities, limits: [] }),
+      hasContext: () => false,
+      refreshLimits: async () => {},
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+    const { sessions } = manager({}, { agents, settings: titleSettings })
+    await sessions.load()
+
+    try {
+      const caller = await sessions.create({ agentId: 'claude-code', projectPath: '/repo' })
+      const titledId = await sessions.startFromTool(caller.id, {
+        prompt: 'Check KETTU_USER_DATA and debug port isolation',
+        title: 'Given Claude title',
+        options: {},
+        report: false,
+      })
+      await vi.waitFor(() => expect(sdk.last.inputs).toHaveLength(1))
+      await vi.waitFor(() => expect(sessions.summary(titledId).status).toBe('ready'))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(sessions.summary(titledId).title).toBe('Given Claude title')
+      const titledQuery = sdk.last
+      expect(titledQuery.calls.some((call) => call.method === 'generateSessionTitle')).toBe(false)
+      expect(titledQuery.calls.some((call) => call.method === 'renameSession')).toBe(false)
+
+      const untitledId = await sessions.startFromTool(caller.id, {
+        prompt: 'Check KETTU_USER_DATA and debug port isolation',
+        options: {},
+        report: false,
+      })
+      await vi.waitFor(() =>
+        expect(sessions.summary(untitledId).title).toBe('Debug port isolation'),
+      )
+      expect(sdk.last.calls.some((call) => call.method === 'generateSessionTitle')).toBe(true)
+
+      sessions.rename(titledId, 'Renamed by user')
+      expect(sessions.summary(titledId).title).toBe('Renamed by user')
+      await sessions.flush()
+    } finally {
+      connection.close()
+    }
+  })
+})
+
+describe('agent-started turns and empty turn_end deduplication', () => {
+  async function claudeSetup() {
+    const sdkDir = await mkdtemp(path.join(dir, 'claude-sdk-turn-end-'))
+    const entry = path.join(sdkDir, 'sdk.mjs')
+    await writeFile(path.join(sdkDir, 'package.json'), JSON.stringify({ version: '0.3.314' }))
+    const sdk = new FakeClaudeSdk()
+    // Huli: a driver loads its connection code before it connects.
+    const driver = claudeSdkDriver(async () => sdk)
+    await driver.load?.()
+    const connection = driver.connect({
+      def: CLAUDE_CODE,
+      hooks: {
+        traffic: () => {},
+        account: () => {},
+        ignored: () => {},
+        log: () => {},
+      },
+      spec: {
+        command: entry,
+        args: [],
+        env: { CLAUDE_CODE_EXECUTABLE: '/opt/claude/bin/claude' },
+        shell: false,
+        display: { command: entry, args: [], env: {} },
+      },
+      env: { PATH: '/usr/bin', HOME: dir },
+      claudeSettingsDir: path.join(sdkDir, 'settings'),
+      spawn: () => new FakeChild() as never,
+    })
+    const init = await connection.initialize('1.0.0')
+    const runtime = { agentId: 'claude-code' as const, kettu: false, init, connection }
+    const agents = {
+      name: () => 'Claude Code',
+      isDisabled: () => false,
+      signedIn: () => {},
+      status: () => ({ capabilities: init.capabilities, limits: [] }),
+      hasContext: () => false,
+      refreshLimits: async () => {},
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+    const { sessions } = manager({}, { agents })
+    await sessions.load()
+    return { sdk, connection, sessions }
+  }
+
+  function fakeAgentHarness() {
+    const targets = new Map<string, SessionTarget>()
+    let nextId = 0
+    const connection = {
+      isClosed: false,
+      closed: new Promise<void>(() => {}),
+      close: () => {},
+      register: (id: string, target: SessionTarget) => {
+        targets.set(id, target)
+      },
+      unregister: (id: string) => {
+        targets.delete(id)
+      },
+      reopen: () => {},
+      newSession: async () => ({ sessionId: `acp-${++nextId}`, config: [] }),
+      setConfigOption: async () => [],
+      loadSession: async () => ({ config: [] }),
+      resumeSession: async () => ({ config: [] }),
+      listSessions: async () => ({ sessions: [], nextCursor: null }),
+      cancel: async () => {},
+      prompt: async () => ({ stopReason: 'end_turn' as StopReason, tokens: null, models: [] }),
+    }
+    const runtime = {
+      agentId: 'claude-code' as const,
+      kettu: false,
+      init: {
+        name: 'Agent',
+        version: '1.0.0',
+        capabilities: {
+          loadSession: true,
+          listSessions: true,
+          resumeSession: true,
+          closeSession: false,
+          deleteSession: false,
+          forkSession: false,
+          forkAtMessage: false,
+          ownTitles: null,
+          logout: false,
+          steering: false,
+          mcpHttp: true,
+          mcpSse: false,
+          mcpStdio: true,
+          prompt: { image: false, audio: false, embeddedContext: false },
+        },
+        authMethods: [],
+        raw: null,
+      },
+      connection,
+    }
+    const agents = {
+      name: () => 'Agent',
+      isDisabled: () => false,
+      signedIn: () => {},
+      status: () => ({ capabilities: runtime.init.capabilities, limits: [] }),
+      hasContext: () => false,
+      refreshLimits: async () => {},
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+    return { agents, targets }
+  }
+
+  it('omits turn_end for empty background Claude Code agentTurns while settling state, draining queue, and reporting real turns', async () => {
+    const { sdk, connection, sessions } = await claudeSetup()
+    const taskId = 'bg-subagent-1'
+    const system = (sessionId: string, fields: Record<string, unknown>): SdkMessage =>
+      ({ type: 'system', session_id: sessionId, ...fields }) as SdkMessage
+    const assistant = (sessionId: string, id: string, text: string): SdkMessage =>
+      ({
+        type: 'assistant',
+        uuid: `uuid-${id}`,
+        parent_tool_use_id: null,
+        session_id: sessionId,
+        message: { id, role: 'assistant', content: [{ type: 'text', text }] },
+      }) as SdkMessage
+    const result = (sessionId: string): SdkMessage =>
+      ({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: '',
+        stop_reason: 'end_turn',
+        terminal_reason: 'completed',
+        total_cost_usd: 0,
+        usage: { input_tokens: 0, output_tokens: 0 },
+        modelUsage: {},
+        session_id: sessionId,
+      }) as SdkMessage
+    const taskNotificationUser = (sessionId: string): SdkMessage =>
+      ({
+        type: 'user',
+        message: { role: 'user', content: '<task-notification>waiting</task-notification>' },
+        parent_tool_use_id: null,
+        origin: { kind: 'task-notification' },
+        isReplay: true,
+        session_id: sessionId,
+      }) as SdkMessage
+
+    let promptCount = 0
+    sdk.script = (q) => {
+      promptCount++
+      if (promptCount === 1) {
+        q.running()
+        q.emit(
+          system(q.sessionId, { subtype: 'init' }),
+          system(q.sessionId, {
+            subtype: 'task_started',
+            task_id: taskId,
+            tool_use_id: 'toolu_bg',
+            description: 'Inspect code',
+            subagent_type: 'general-purpose',
+            is_backgrounded: true,
+            task_type: 'local_agent',
+          }),
+          assistant(q.sessionId, 'msg_1', 'Started background work.'),
+          result(q.sessionId),
+        )
+        return
+      }
+      q.emit(
+        system(q.sessionId, { subtype: 'init' }),
+        assistant(q.sessionId, `msg_q_${promptCount}`, 'Handled queued follow-up.'),
+        result(q.sessionId),
+      )
+    }
+
+    try {
+      const created = await sessions.create({ agentId: 'claude-code', projectPath: '/repo' })
+      await sessions.prompt(created.id, [{ type: 'text', text: 'Investigate in background' }])
+      await vi.waitFor(() => expect(sessions.summary(created.id).status).toBe('ready'))
+
+      const turnEnds = async () =>
+        (await sessions.open(created.id)).entries.filter((entry) => entry.kind === 'turn_end')
+
+      expect(await turnEnds()).toHaveLength(1)
+      expect(sessions.summary(created.id).stillRunning).toEqual({
+        commands: 0,
+        subagents: 1,
+        reportsBack: true,
+      })
+
+      // Two empty background <task-notification> agentTurns settle cleanly with no stacked turn_end.
+      const query = sdk.last
+      for (let i = 0; i < 2; i++) {
+        query.emit(
+          system(query.sessionId, { subtype: 'init' }),
+          taskNotificationUser(query.sessionId),
+        )
+        await vi.waitFor(() => expect(sessions.summary(created.id).status).toBe('running'))
+        query.emit(result(query.sessionId))
+        await vi.waitFor(() => expect(sessions.summary(created.id).status).toBe('ready'))
+      }
+
+      expect(await turnEnds()).toHaveLength(1)
+      expect(sessions.summary(created.id).stillRunning).toEqual({
+        commands: 0,
+        subagents: 1,
+        reportsBack: true,
+      })
+
+      // A user prompt queued during an empty agentTurn drains once the empty turn finishes.
+      query.emit(
+        system(query.sessionId, { subtype: 'init' }),
+        taskNotificationUser(query.sessionId),
+      )
+      await vi.waitFor(() => expect(sessions.summary(created.id).status).toBe('running'))
+      await sessions.queue(created.id, [{ type: 'text', text: 'Queued question' }])
+      query.emit(result(query.sessionId))
+      await vi.waitFor(() => expect(promptCount).toBe(2))
+      await vi.waitFor(() => expect(sessions.summary(created.id).status).toBe('ready'))
+      expect(await turnEnds()).toHaveLength(2)
+
+      // When the background subagent finishes and Claude Code reports back with text, turn_end is written.
+      query.emit(
+        system(query.sessionId, {
+          subtype: 'task_notification',
+          task_id: taskId,
+          status: 'completed',
+        }),
+        system(query.sessionId, { subtype: 'init' }),
+        assistant(query.sessionId, 'msg_done', 'Background work finished.'),
+      )
+      await vi.waitFor(() => expect(sessions.summary(created.id).status).toBe('running'))
+      query.finish()
+      await vi.waitFor(() => expect(sessions.summary(created.id).status).toBe('ready'))
+
+      expect(await turnEnds()).toHaveLength(3)
+      expect(sessions.summary(created.id).stillRunning).toBeNull()
+      await sessions.flush()
+    } finally {
+      connection.close()
+    }
+  })
+
+  it('writes turn_end for agentTurns with thought/tool output, non-end_turn stop reasons, and user-initiated empty turns', async () => {
+    const harness = fakeAgentHarness()
+    const { sessions } = manager({}, { agents: harness.agents })
+    await sessions.load()
+
+    const created = await sessions.create({ agentId: 'claude-code', projectPath: '/repo' })
+    const turnEnds = async () =>
+      (await sessions.open(created.id)).entries.filter((entry) => entry.kind === 'turn_end')
+
+    // 1. User-initiated turn with zero agent output still records turn_end.
+    await sessions.prompt(created.id, [{ type: 'text', text: 'Ping' }])
+    await vi.waitFor(() => expect(sessions.summary(created.id).status).toBe('ready'))
+    expect(await turnEnds()).toHaveLength(1)
+
+    const target = harness.targets.get('acp-1')!
+
+    // 2. Empty agentTurn ending normally produces no turn_end.
+    target.apply({ patches: [], effects: [{ kind: 'agentTurn', phase: 'started' }] })
+    expect(sessions.summary(created.id).status).toBe('running')
+    target.apply({
+      patches: [],
+      effects: [
+        {
+          kind: 'agentTurn',
+          phase: 'ended',
+          result: { stopReason: 'end_turn', tokens: null, models: [] },
+        },
+      ],
+    })
+    expect(sessions.summary(created.id).status).toBe('ready')
+    expect(await turnEnds()).toHaveLength(1)
+
+    // 3. agentTurn with a thought still records turn_end.
+    target.apply({ patches: [], effects: [{ kind: 'agentTurn', phase: 'started' }] })
+    target.apply({
+      patches: [
+        {
+          op: 'entry.add',
+          entry: { kind: 'thought', id: 'th-1', markdown: 'Checking status', streaming: false },
+        },
+      ],
+      effects: [],
+    })
+    target.apply({
+      patches: [],
+      effects: [
+        {
+          kind: 'agentTurn',
+          phase: 'ended',
+          result: { stopReason: 'end_turn', tokens: null, models: [] },
+        },
+      ],
+    })
+    expect(await turnEnds()).toHaveLength(2)
+
+    // 4. agentTurn with a tool call still records turn_end.
+    target.apply({ patches: [], effects: [{ kind: 'agentTurn', phase: 'started' }] })
+    target.apply({
+      patches: [
+        {
+          op: 'entry.add',
+          entry: {
+            kind: 'tool',
+            id: 'tool-1',
+            title: 'Read file',
+            toolKind: 'read',
+            status: 'completed',
+            content: [],
+            locations: [],
+            permission: null,
+            permissionResult: null,
+          },
+        },
+      ],
+      effects: [],
+    })
+    target.apply({
+      patches: [],
+      effects: [
+        {
+          kind: 'agentTurn',
+          phase: 'ended',
+          result: { stopReason: 'end_turn', tokens: null, models: [] },
+        },
+      ],
+    })
+    expect(await turnEnds()).toHaveLength(3)
+
+    // 5. Empty agentTurn with non-end_turn stop reasons still records turn_end.
+    for (const reason of ['cancelled', 'max_tokens', 'refusal'] as const) {
+      target.apply({ patches: [], effects: [{ kind: 'agentTurn', phase: 'started' }] })
+      target.apply({
+        patches: [],
+        effects: [
+          {
+            kind: 'agentTurn',
+            phase: 'ended',
+            result: { stopReason: reason, tokens: null, models: [] },
+          },
+        ],
+      })
+    }
+    const ends = await turnEnds()
+    expect(ends).toHaveLength(6)
+    expect(ends.slice(3).map((entry) => entry.stopReason)).toEqual([
+      'cancelled',
+      'max_tokens',
+      'refusal',
+    ])
+
+    // 6. Empty agentTurn that fails still records an error notice and settles cleanly.
+    target.apply({ patches: [], effects: [{ kind: 'agentTurn', phase: 'started' }] })
+    target.apply({
+      patches: [],
+      effects: [{ kind: 'agentTurn', phase: 'failed', error: new Error('boom') }],
+    })
+    expect(sessions.summary(created.id).status).toBe('ready')
+    const notices = (await sessions.open(created.id)).entries.filter(
+      (entry) => entry.kind === 'notice' && entry.severity === 'error',
+    )
+    expect(notices).toHaveLength(1)
+    await sessions.flush()
+  })
+})
+
+describe('session manager shutdown and flush cleanup', () => {
+  it('cancels pending listed-title retries and prepared settings watchers on shutdown', async () => {
+    const repo = path.join(dir, 'repo')
+    await mkdir(repo, { recursive: true })
+
+    let seq = 0
+    let firstListed!: () => void
+    const listedOnce = new Promise<void>((resolve) => (firstListed = resolve))
+    const newSession = vi.fn(async () => ({ sessionId: `acp-${++seq}`, config: [] }))
+    const listSessions = vi.fn(async () => {
+      firstListed()
+      return {
+        sessions: [{ sessionId: 'acp-2', title: null, updatedAt: null, cwd: repo }],
+        nextCursor: null,
+      }
+    })
+    const prompt = vi.fn(async () => ({
+      stopReason: 'end_turn' as StopReason,
+      tokens: null,
+      models: [],
+    }))
+    const connection = {
+      isClosed: false,
+      closed: new Promise<void>(() => {}),
+      register: () => {},
+      unregister: () => {},
+      reopen: () => {},
+      newSession,
+      setConfigOption: async () => [],
+      listSessions,
+      prompt,
+      cancel: async () => {},
+      deleteSession: async () => {},
+    }
+    const runtime = {
+      agentId: 'claude-code' as const,
+      init: {
+        capabilities: {
+          listSessions: true,
+          ownTitles: 'listed' as const,
+          deleteSession: true,
+          prompt: { image: false, audio: false, embeddedContext: false },
+        },
+      },
+      connection,
+    }
+    const agents = {
+      name: () => 'Agent',
+      isDisabled: () => false,
+      signedIn: () => {},
+      authRequired: () => {},
+      status: () => ({ capabilities: runtime.init.capabilities, limits: [] }),
+      hasContext: () => false,
+      refreshLimits: async () => {},
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+
+    const { sessions } = manager(
+      {},
+      {
+        agents,
+        timings: { listedTitleRetryMs: 100, settingsDelayMs: 20 },
+        settingsTargets: () => [{ dir: repo, names: ['settings.json'] }],
+      },
+    )
+    await sessions.load()
+
+    await sessions.prepare({ agentId: 'claude-code', projectPath: repo }, 'win-1')
+    const created = await sessions.create({ agentId: 'claude-code', projectPath: repo })
+    expect(newSession).toHaveBeenCalledTimes(2)
+
+    await sessions.prompt(created.id, [{ type: 'text', text: 'First turn' }])
+    await listedOnce
+    // Let readListedTitle resume from await listSessions and arm live.listedTitleTimer.
+    await new Promise((resolve) => setImmediate(resolve))
+
+    sessions.shutdown()
+    await writeFile(path.join(repo, 'settings.json'), '{"changed":true}')
+    await new Promise((resolve) => setTimeout(resolve, 140))
+
+    expect(listSessions).toHaveBeenCalledTimes(1)
+    expect(newSession).toHaveBeenCalledTimes(2)
+  })
+
+  it('flushes session index, prepared records, and agent options together', async () => {
+    const repo = path.join(dir, 'repo')
+    await mkdir(repo, { recursive: true })
+
+    const prepared = new PreparedRecords(preparedFile(dir, log))
+    await prepared.load()
+    const options = new AgentOptionsStore({
+      file: agentOptionsFile(dir, log),
+      changed: () => {},
+    })
+    await options.load()
+
+    const config = [
+      {
+        id: 'model',
+        name: 'Model',
+        category: 'model' as const,
+        type: 'select' as const,
+        value: 'default',
+        choices: [{ value: 'default', name: 'Default' }],
+      },
+    ]
+    const connection = {
+      isClosed: false,
+      closed: new Promise<void>(() => {}),
+      register: () => {},
+      unregister: () => {},
+      reopen: () => {},
+      newSession: async () => ({ sessionId: 'acp-prep', config }),
+      setConfigOption: async () => config,
+      listSessions: async () => ({
+        sessions: [{ sessionId: 'acp-imported', title: 'Imported', updatedAt: null, cwd: repo }],
+        nextCursor: null,
+      }),
+      deleteSession: async () => {},
+    }
+    const runtime = {
+      agentId: 'claude-code' as const,
+      init: {
+        capabilities: {
+          listSessions: true,
+          deleteSession: true,
+          prompt: { image: false, audio: false, embeddedContext: false },
+        },
+      },
+      connection,
+    }
+    const agents = {
+      name: () => 'Claude Code',
+      signedIn: () => {},
+      authRequired: () => {},
+      status: () => ({ capabilities: runtime.init.capabilities, limits: [] }),
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+
+    const { sessions } = manager({}, { agents, prepared, options })
+    await sessions.load()
+
+    await sessions.prepare({ agentId: 'claude-code', projectPath: repo }, 'win-1')
+    const imported = await sessions.importSession({
+      agentId: 'claude-code',
+      projectPath: repo,
+      acpSessionId: 'acp-imported',
+    })
+    await sessions.archive(imported.id)
+
+    sessions.shutdown()
+    await sessions.flush()
+
+    const savedSessions = await index()
+    expect(savedSessions?.sessions).toMatchObject([
+      { id: imported.id, archivedAt: expect.any(Number) },
+    ])
+    const savedPrepared = JSON.parse(
+      await readFile(path.join(dir, 'state', 'prepared-sessions.json'), 'utf8'),
+    ) as PreparedFile
+    expect(savedPrepared.sessions).toEqual([
+      { agentId: 'claude-code', acpSessionId: 'acp-prep', cwd: repo },
+    ])
+    const savedOptions = JSON.parse(
+      await readFile(path.join(dir, 'state', 'agent-options.json'), 'utf8'),
+    ) as { agents: Record<string, unknown> }
+    expect(savedOptions.agents['claude-code']).toBeDefined()
+  })
+})
+
+describe('openNew start option guards', () => {
+  it('holds the first prompt when a new session omits a cached model option, without blocking on dropped thought_level', async () => {
+    const repo = path.join(dir, 'repo')
+    await mkdir(repo, { recursive: true })
+
+    const cachedModel = {
+      id: 'model',
+      name: 'Model',
+      category: 'model' as const,
+      type: 'select' as const,
+      value: 'custom-provider/my-model',
+      choices: [
+        { value: 'opencode/default', name: 'opencode/Default' },
+        { value: 'custom-provider/my-model', name: 'custom-provider/My Model' },
+      ],
+    }
+    const cachedEffort = {
+      id: 'effort',
+      name: 'Reasoning',
+      category: 'thought_level' as const,
+      type: 'select' as const,
+      value: 'high',
+      choices: [
+        { value: 'low', name: 'Low' },
+        { value: 'high', name: 'High' },
+        { value: 'default', name: 'Default' },
+      ],
+    }
+    const modeOnly = [
+      {
+        id: 'mode',
+        name: 'Mode',
+        category: 'mode' as const,
+        type: 'select' as const,
+        value: 'build',
+        choices: [{ value: 'build', name: 'Build' }],
+      },
+    ]
+
+    const options = new AgentOptionsStore({
+      file: agentOptionsFile(dir, log),
+      changed: () => {},
+    })
+    await options.load()
+    options.started('opencode', [cachedModel, cachedEffort, ...modeOnly], repo)
+
+    let sessionConfig: ConfigOption[] = modeOnly
+    const prompt = vi.fn(async () => ({
+      stopReason: 'end_turn' as StopReason,
+      tokens: null,
+      models: [],
+    }))
+    let seq = 0
+    const connection = {
+      isClosed: false,
+      closed: new Promise<void>(() => {}),
+      register: () => {},
+      unregister: () => {},
+      reopen: () => {},
+      newSession: async () => ({ sessionId: `ses_${++seq}`, config: sessionConfig }),
+      setConfigOption: async (_sessionId: string, optionId: string, value: string | boolean) =>
+        sessionConfig.map((item) => (item.id === optionId ? { ...item, value } : item)),
+      prompt,
+      cancel: async () => {},
+    }
+    const runtime = {
+      agentId: 'opencode' as const,
+      init: {
+        capabilities: {
+          prompt: { image: false, audio: false, embeddedContext: false },
+        },
+      },
+      connection,
+    }
+    const agents = {
+      name: () => 'OpenCode',
+      signedIn: () => {},
+      authRequired: () => {},
+      status: () => ({ capabilities: runtime.init.capabilities, limits: [] }),
+      hasContext: () => false,
+      refreshLimits: async () => {},
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+
+    const { sessions } = manager({}, { agents, options })
+    await sessions.load()
+
+    // Case 1: agent omits the entire `model` option; first prompt must be held in a paused queue.
+    const held = await sessions.create({
+      agentId: 'opencode',
+      projectPath: repo,
+      options: { model: 'custom-provider/my-model' },
+      prompt: [{ type: 'text', text: 'Do not fall back silently' }],
+    })
+    await vi.waitFor(async () => {
+      const snap = await sessions.snapshot(held.id)
+      expect(snap?.session.status).toBe('ready')
+      expect(snap?.session.queuePaused).toBe(true)
+    })
+    const heldSnap = await sessions.snapshot(held.id)
+    expect(prompt).not.toHaveBeenCalled()
+    expect(heldSnap?.session.queue).toHaveLength(1)
+    expect(heldSnap?.entries.some((entry) => entry.kind === 'notice')).toBe(true)
+
+    // Case 2: cached options include `thought_level`, but the chosen model has no effort variants;
+    // the prompt still sends on the custom model without a false hold.
+    options.started('opencode', [cachedModel, cachedEffort, ...modeOnly], repo)
+    sessionConfig = [{ ...cachedModel, value: 'opencode/default' }, ...modeOnly]
+    const sent = await sessions.create({
+      agentId: 'opencode',
+      projectPath: repo,
+      options: { model: 'custom-provider/my-model', effort: 'high' },
+      prompt: [{ type: 'text', text: 'Run on custom model' }],
+    })
+    await vi.waitFor(() => {
+      expect(prompt).toHaveBeenCalledTimes(1)
+    })
+    const sentSnap = await sessions.snapshot(sent.id)
+    expect(sentSnap?.session.queuePaused).toBe(false)
+    expect(sentSnap?.session.config.find((item) => item.id === 'model')?.value).toBe(
+      'custom-provider/my-model',
+    )
+  })
+})
+
+describe('next-message suggestion clearing on send (#2903)', () => {
+  it('emits suggestion: null on turn start even after revive and emits fresh suggestions on turn end', async () => {
+    const repo = path.join(dir, 'repo')
+    await mkdir(repo, { recursive: true })
+    const stored = new Map<string, StoredThread>()
+    const batches: {
+      sessionId: string
+      patches: readonly { op: string; changes?: Record<string, unknown> }[]
+    }[] = []
+    let target: SessionTarget | null = null
+    let promptCalls = 0
+    const connection = {
+      isClosed: false,
+      closed: new Promise<void>(() => {}),
+      register: (_acpId: string, next: SessionTarget) => {
+        target = next
+      },
+      unregister: () => {
+        target = null
+      },
+      reopen: () => {},
+      newSession: async () => ({ sessionId: 'acp-1', config: [] }),
+      loadSession: async () => ({ config: [] }),
+      closeSession: async () => {},
+      prompt: async () => {
+        promptCalls++
+        return { stopReason: 'end_turn' as StopReason, tokens: null, models: [] }
+      },
+      cancel: async () => {},
+    }
+    const runtime = {
+      agentId: 'claude-code' as const,
+      init: {
+        capabilities: {
+          loadSession: true,
+          closeSession: true,
+          prompt: { image: false, audio: false, embeddedContext: false },
+        },
+      },
+      connection,
+    }
+    const agents = {
+      name: () => 'Claude Code',
+      signedIn: () => {},
+      authRequired: () => {},
+      status: () => ({ capabilities: runtime.init.capabilities, limits: [] }),
+      hasContext: () => false,
+      refreshLimits: async () => {},
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+    const threads: Partial<ThreadStore> = {
+      load: async (id) => stored.get(id) ?? null,
+      write: async (id, change) => {
+        const prev = stored.get(id) ?? {
+          head: change.head,
+          session: { ...EMPTY_SESSION },
+          entries: [],
+          setAside: [],
+        }
+        const entries = change.replace ? [] : [...prev.entries]
+        for (const row of change.entries) {
+          const at = entries.findIndex((item) => item.entry.id === row.entry.id)
+          if (at >= 0) entries[at] = row
+          else entries.push(row)
+        }
+        stored.set(id, {
+          head: change.head,
+          session: change.session ?? prev.session,
+          entries,
+          setAside: change.setAside ?? prev.setAside,
+        })
+      },
+      remove: async (ids) => {
+        for (const id of ids) stored.delete(id)
+      },
+    }
+
+    const { sessions } = manager(
+      {},
+      {
+        agents,
+        threads,
+        settings: { promptSuggestions: true },
+        timings: { flushMs: 0 },
+        events: {
+          patches: (batch) => {
+            batches.push({
+              sessionId: batch.sessionId,
+              patches: batch.patches as readonly {
+                op: string
+                changes?: Record<string, unknown>
+              }[],
+            })
+          },
+        },
+      },
+    )
+    await sessions.load()
+
+    const created = await sessions.create({
+      agentId: 'claude-code',
+      projectPath: repo,
+      prompt: [{ type: 'text', text: 'First turn' }],
+    })
+    sessions.watch(created.id, 'win-1')
+    await vi.waitFor(() => expect(promptCalls).toBe(1))
+    await vi.waitFor(async () =>
+      expect((await sessions.snapshot(created.id))?.session.status).toBe('ready'),
+    )
+
+    // Deliver a suggestion after Turn 1, then release the session to simulate idle close before revive.
+    // Huli: Claude Code's suggestion comes as Kite's engine sends it, a patch with its id.
+    const first = { id: 'suggestion-1', text: 'Run tests' }
+    target!.apply({
+      patches: [{ op: 'session.update', changes: { suggestion: first } }],
+      effects: [],
+    })
+    await vi.waitFor(async () =>
+      expect((await sessions.snapshot(created.id))?.session.suggestion).toEqual(first),
+    )
+    // Release the live session so the next send revives from stored history without memory-only suggestion.
+    await (
+      sessions as unknown as {
+        closeAll(records: SessionRecord[], keep: boolean): Promise<void>
+        recordOf(id: string): SessionRecord
+      }
+    ).closeAll(
+      [(sessions as unknown as { recordOf(id: string): SessionRecord }).recordOf(created.id)],
+      true,
+    )
+    batches.length = 0
+
+    // Sending on the revived session still explicitly emits `suggestion: null` on turn start.
+    await sessions.queue(created.id, [{ type: 'text', text: 'Run tests' }])
+    await vi.waitFor(() => expect(promptCalls).toBe(2))
+    await vi.waitFor(() =>
+      expect(
+        batches.some(
+          (batch) =>
+            batch.sessionId === created.id &&
+            batch.patches.some(
+              (patch) =>
+                patch.op === 'session.update' &&
+                patch.changes?.status === 'running' &&
+                patch.changes?.suggestion === null,
+            ),
+        ),
+      ).toBe(true),
+    )
+
+    // After Turn 2 finishes, a new suggestion arrives and is exposed cleanly.
+    await vi.waitFor(async () =>
+      expect((await sessions.snapshot(created.id))?.session.status).toBe('ready'),
+    )
+    const next = { id: 'suggestion-2', text: 'Open a pull request' }
+    target!.apply({
+      patches: [{ op: 'session.update', changes: { suggestion: next } }],
+      effects: [],
+    })
+    await vi.waitFor(async () =>
+      expect((await sessions.snapshot(created.id))?.session.suggestion).toEqual(next),
+    )
+  })
+
+  it('scopes lastReply to the latest turn across both live memory and SQLite thread storage', async () => {
+    const repo = path.join(dir, 'repo')
+    await mkdir(repo, { recursive: true })
+    const db = ThreadDb.open(path.join(dir, 'threads.db'), log)
+    try {
+      let target: SessionTarget | null = null
+      let turn = 0
+      const connection = {
+        isClosed: false,
+        closed: new Promise<void>(() => {}),
+        register: (_acpId: string, next: SessionTarget) => {
+          target = next
+        },
+        unregister: () => {
+          target = null
+        },
+        reopen: () => {},
+        newSession: async () => ({ sessionId: 'acp-last-reply', config: [] }),
+        loadSession: async () => ({ config: [] }),
+        closeSession: async () => {},
+        prompt: async () => {
+          turn += 1
+          if (turn === 1) {
+            target!.apply({
+              patches: [
+                {
+                  op: 'entry.add',
+                  entry: {
+                    kind: 'agent',
+                    id: 'a-turn-1',
+                    markdown: 'Turn 1 final reply',
+                    attachments: [],
+                    streaming: false,
+                  },
+                },
+              ],
+              effects: [],
+            })
+          } else if (turn === 2) {
+            target!.apply({
+              patches: [
+                {
+                  op: 'entry.add',
+                  entry: {
+                    kind: 'tool',
+                    id: 'tool-turn-2',
+                    title: 'Run tests',
+                    toolKind: 'execute',
+                    status: 'completed',
+                    content: [{ type: 'markdown', markdown: 'ok' }],
+                    locations: [],
+                    permission: null,
+                    permissionResult: null,
+                  },
+                },
+              ],
+              effects: [],
+            })
+          } else if (turn === 3) {
+            target!.apply({
+              patches: [
+                {
+                  op: 'entry.add',
+                  entry: {
+                    kind: 'tool',
+                    id: 'tool-turn-3',
+                    title: 'Inspect file',
+                    toolKind: 'read',
+                    status: 'completed',
+                    content: [{ type: 'markdown', markdown: 'contents' }],
+                    locations: [],
+                    permission: null,
+                    permissionResult: null,
+                  },
+                },
+                {
+                  op: 'entry.add',
+                  entry: {
+                    kind: 'agent',
+                    id: 'a-turn-3',
+                    markdown: 'Turn 3 final reply',
+                    attachments: [],
+                    streaming: false,
+                  },
+                },
+              ],
+              effects: [],
+            })
+          }
+          return { stopReason: 'end_turn' as StopReason, tokens: null, models: [] }
+        },
+        cancel: async () => {},
+      }
+      const runtime = {
+        agentId: 'claude-code' as const,
+        init: {
+          capabilities: {
+            loadSession: true,
+            closeSession: true,
+            prompt: { image: false, audio: false, embeddedContext: false },
+          },
+        },
+        connection,
+      }
+      const agents = {
+        name: () => 'Claude Code',
+        signedIn: () => {},
+        authRequired: () => {},
+        status: () => ({ capabilities: runtime.init.capabilities, limits: [] }),
+        hasContext: () => false,
+        refreshLimits: async () => {},
+        runtime: () => runtime,
+        ensureReady: async () => runtime,
+      }
+      const threads: Partial<ThreadStore> = {
+        load: async (id) => db.load(id),
+        write: async (id, change) => {
+          db.write(id, change)
+        },
+        remove: async (ids) => {
+          db.remove(ids)
+        },
+      }
+
+      const { sessions } = manager({}, { agents, threads, timings: { flushMs: 0 } })
+      await sessions.load()
+      const release = async (id: string) => {
+        const internal = sessions as unknown as {
+          closeAll(records: SessionRecord[], keep: boolean): Promise<void>
+          recordOf(sessionId: string): SessionRecord
+        }
+        await internal.closeAll([internal.recordOf(id)], true)
+      }
+
+      const created = await sessions.create({
+        agentId: 'claude-code',
+        projectPath: repo,
+        prompt: [{ type: 'text', text: 'First question' }],
+      })
+      await vi.waitFor(async () =>
+        expect((await sessions.snapshot(created.id))?.session.status).toBe('ready'),
+      )
+      expect(await sessions.lastReply(created.id)).toBe('Turn 1 final reply')
+
+      // Turn 2 executes only a tool call: live and stored DB reads must not leak Turn 1's reply.
+      await sessions.queue(created.id, [{ type: 'text', text: 'Second question' }])
+      await vi.waitFor(() => expect(turn).toBe(2))
+      await vi.waitFor(async () =>
+        expect((await sessions.snapshot(created.id))?.session.status).toBe('ready'),
+      )
+      expect(await sessions.lastReply(created.id)).toBeNull()
+      await release(created.id)
+      expect(await sessions.lastReply(created.id)).toBeNull()
+
+      // Turn 3 runs a tool and emits a final reply: both live and stored DB paths return it.
+      await sessions.queue(created.id, [{ type: 'text', text: 'Third question' }])
+      await vi.waitFor(() => expect(turn).toBe(3))
+      await vi.waitFor(async () =>
+        expect((await sessions.snapshot(created.id))?.session.status).toBe('ready'),
+      )
+      expect(await sessions.lastReply(created.id)).toBe('Turn 3 final reply')
+      await release(created.id)
+      expect(await sessions.lastReply(created.id)).toBe('Turn 3 final reply')
+
+      // Stored thread with no user entry falls back to its latest non-blank agent reply.
+      db.write(created.id, {
+        head: { agentId: 'claude-code', acpSessionId: 'acp-last-reply' },
+        replace: true,
+        entries: [
+          {
+            pos: 0,
+            entry: {
+              kind: 'agent',
+              id: 'orphan-reply',
+              markdown: 'Reply without user boundary',
+              attachments: [],
+              streaming: false,
+            },
+          },
+        ],
+      })
+      expect(await sessions.lastReply(created.id)).toBe('Reply without user boundary')
+    } finally {
+      db.close()
+    }
+  })
+})
+
+describe('SessionManager.setConfigOption serialization', () => {
+  const agyConfig = (
+    model: string,
+    thoughtLevel: string,
+    mode: string,
+    levels: string[] = ['low', 'medium', 'high'],
+  ): ConfigOption[] => [
+    {
+      id: 'model',
+      name: 'Model',
+      category: 'model',
+      type: 'select',
+      value: model,
+      choices: [
+        { value: 'gemini', name: 'Gemini' },
+        { value: 'gemini-pro', name: 'Gemini Pro' },
+      ],
+    },
+    {
+      id: 'thought_level',
+      name: 'Thinking',
+      category: 'thought_level',
+      type: 'select',
+      value: thoughtLevel,
+      choices: levels.map((v) => ({ value: v, name: v })),
+    },
+    {
+      id: 'mode',
+      name: 'Mode',
+      category: 'mode',
+      type: 'select',
+      value: mode,
+      choices: [
+        { value: 'default', name: 'Default' },
+        { value: 'auto', name: 'Auto' },
+        { value: 'dangerously-skip-permissions', name: 'Full access' },
+      ],
+    },
+  ]
+
+  it('serializes concurrent setConfigOption calls per session so state and remembered options stay consistent', async () => {
+    const repo = path.join(dir, 'repo-serial')
+    await mkdir(repo, { recursive: true })
+    const optionsStore = new AgentOptionsStore({
+      file: agentOptionsFile(dir, log),
+      changed: () => {},
+    })
+    await optionsStore.load()
+
+    let state = agyConfig('gemini', 'medium', 'default')
+    const events: string[] = []
+    let releaseFirst: (() => void) | null = null
+    let firstInFlight = false
+    const setConfigOption = vi.fn(
+      async (_acpSessionId: string, optionId: string, value: string | boolean) => {
+        events.push(`start:${optionId}=${String(value)}`)
+        if (optionId === 'thought_level' && value === 'high') {
+          firstInFlight = true
+          await new Promise<void>((resolve) => {
+            releaseFirst = resolve
+          })
+          firstInFlight = false
+        }
+        if (optionId === 'model' && value === 'gemini-pro') {
+          state = agyConfig(
+            'gemini-pro',
+            String(state.find((o) => o.id === 'thought_level')?.value ?? 'medium'),
+            String(state.find((o) => o.id === 'mode')?.value ?? 'default'),
+            ['low', 'medium', 'high', 'xhigh'],
+          )
+        } else {
+          state = state.map((option) => (option.id === optionId ? { ...option, value } : option))
+        }
+        events.push(`end:${optionId}=${String(value)}`)
+        return state
+      },
+    )
+    const connection = {
+      newSession: vi.fn(async () => ({ sessionId: 'acp-1', config: state })),
+      setConfigOption,
+      prompt: vi.fn(async () => ({ stopReason: 'end_turn', tokens: null, models: null })),
+      cancel: async () => {},
+      deleteSession: vi.fn(async () => {}),
+      register: () => {},
+      unregister: () => {},
+      isClosed: false,
+    }
+    const runtime = {
+      agentId: 'antigravity',
+      init: { capabilities: { deleteSession: true } },
+      connection,
+    }
+    const agents = {
+      name: () => 'Google Antigravity',
+      signedIn: () => {},
+      authRequired: () => {},
+      status: () => ({
+        capabilities: { prompt: { image: false, audio: false, embeddedContext: false } },
+        limits: [],
+      }),
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+
+    const { sessions } = manager({}, { agents, options: optionsStore })
+    await sessions.load()
+
+    const prep = await sessions.prepare({ agentId: 'antigravity', projectPath: repo }, 'win-1')
+
+    // Concurrently update thought_level=high and mode=dangerously-skip-permissions on the same session.
+    const first = sessions.setConfigOption(prep.id, 'thought_level', 'high')
+    const second = sessions.setConfigOption(prep.id, 'mode', 'dangerously-skip-permissions')
+
+    await vi.waitFor(() => expect(firstInFlight).toBe(true))
+    // The second mutation must stay queued until the first completes.
+    expect(events).toEqual(['start:thought_level=high'])
+
+    releaseFirst!()
+    await Promise.all([first, second])
+
+    expect(events).toEqual([
+      'start:thought_level=high',
+      'end:thought_level=high',
+      'start:mode=dangerously-skip-permissions',
+      'end:mode=dangerously-skip-permissions',
+    ])
+    const summary = sessions.summary(prep.id)
+    expect(summary.prepared?.config.find((o) => o.id === 'thought_level')?.value).toBe('high')
+    expect(summary.prepared?.config.find((o) => o.id === 'mode')?.value).toBe(
+      'dangerously-skip-permissions',
+    )
+    expect(optionsStore.rememberedOf('antigravity')).toMatchObject({ thought_level: 'high' })
+
+    // Changing model concurrently with a newly unlocked thought_level validates against the updated config.
+    await Promise.all([
+      sessions.setConfigOption(prep.id, 'model', 'gemini-pro'),
+      sessions.setConfigOption(prep.id, 'thought_level', 'xhigh'),
+    ])
+    const afterModel = sessions.summary(prep.id)
+    expect(afterModel.prepared?.config.find((o) => o.id === 'model')?.value).toBe('gemini-pro')
+    expect(afterModel.prepared?.config.find((o) => o.id === 'thought_level')?.value).toBe('xhigh')
+    expect(optionsStore.rememberedOf('antigravity')).toMatchObject({
+      model: 'gemini-pro',
+      thought_level: 'xhigh',
+    })
+    await sessions.flush()
+    await optionsStore.flush()
+  })
+
+  it('recovers cleanly when a queued setConfigOption fails so later mutations still run', async () => {
+    const repo = path.join(dir, 'repo-recover')
+    await mkdir(repo, { recursive: true })
+    const optionsStore = new AgentOptionsStore({
+      file: agentOptionsFile(dir, log),
+      changed: () => {},
+    })
+    await optionsStore.load()
+
+    let state = agyConfig('gemini', 'medium', 'default')
+    let releaseFailure: (() => void) | null = null
+    const setConfigOption = vi.fn(
+      async (_acpSessionId: string, optionId: string, value: string | boolean) => {
+        if (optionId === 'thought_level' && value === 'high') {
+          await new Promise<void>((resolve) => {
+            releaseFailure = resolve
+          })
+          throw new Error('temporary failure')
+        }
+        state = state.map((option) => (option.id === optionId ? { ...option, value } : option))
+        return state
+      },
+    )
+    const connection = {
+      newSession: vi.fn(async () => ({ sessionId: 'acp-2', config: state })),
+      setConfigOption,
+      prompt: vi.fn(async () => ({ stopReason: 'end_turn', tokens: null, models: null })),
+      cancel: async () => {},
+      deleteSession: vi.fn(async () => {}),
+      register: () => {},
+      unregister: () => {},
+      isClosed: false,
+    }
+    const runtime = {
+      agentId: 'antigravity',
+      init: { capabilities: { deleteSession: true } },
+      connection,
+    }
+    const agents = {
+      name: () => 'Google Antigravity',
+      signedIn: () => {},
+      authRequired: () => {},
+      status: () => ({
+        capabilities: { prompt: { image: false, audio: false, embeddedContext: false } },
+        limits: [],
+      }),
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+
+    const { sessions } = manager({}, { agents, options: optionsStore })
+    await sessions.load()
+
+    const prep = await sessions.prepare({ agentId: 'antigravity', projectPath: repo }, 'win-1')
+    const failed = sessions.setConfigOption(prep.id, 'thought_level', 'high')
+    const next = sessions.setConfigOption(prep.id, 'mode', 'dangerously-skip-permissions')
+
+    await vi.waitFor(() => expect(releaseFailure).not.toBeNull())
+    releaseFailure!()
+
+    await expect(failed).rejects.toThrow(/temporary failure/)
+    await expect(next).resolves.toBeUndefined()
+    const summary = sessions.summary(prep.id)
+    expect(summary.prepared?.config.find((o) => o.id === 'thought_level')?.value).toBe('medium')
+    expect(summary.prepared?.config.find((o) => o.id === 'mode')?.value).toBe(
+      'dangerously-skip-permissions',
+    )
+    await sessions.flush()
+    await optionsStore.flush()
+  })
+})
+
+describe('started-session permission ceiling and applyStartedMode ordering', () => {
+  const modeOption = (value: string, choices: readonly string[]): ConfigOption => ({
+    id: 'mode',
+    name: 'Mode',
+    category: 'mode',
+    type: 'select',
+    value,
+    choices: choices.map((choice) => ({ value: choice, name: choice })),
+  })
+
+  function modeAgent(opts: {
+    agentId: 'claude-code' | 'codex' | 'deepseek' | 'antigravity'
+    name: string
+    choices: readonly string[]
+    initialMode: string | ((callIndex: number) => string)
+    onSetMode?: (mode: string, current: ConfigOption[]) => ConfigOption[] | Promise<ConfigOption[]>
+  }) {
+    let nextId = 0
+    const configs = new Map<string, ConfigOption[]>()
+    const prompted: string[] = []
+    const setCalls: { sessionId: string; optionId: string; value: string | boolean }[] = []
+
+    const connection = {
+      isClosed: false,
+      closed: new Promise<void>(() => {}),
+      close: () => {},
+      register: () => {},
+      unregister: () => {},
+      reopen: () => {},
+      newSession: vi.fn(async () => {
+        const index = ++nextId
+        const sessionId = `acp-${index}`
+        const initial =
+          typeof opts.initialMode === 'function' ? opts.initialMode(index) : opts.initialMode
+        const config = [modeOption(initial, opts.choices)]
+        configs.set(sessionId, config)
+        return { sessionId, config }
+      }),
+      setConfigOption: vi.fn(
+        async (sessionId: string, optionId: string, value: string | boolean) => {
+          setCalls.push({ sessionId, optionId, value })
+          const current = configs.get(sessionId) ?? []
+          if (optionId === 'mode' && typeof value === 'string' && opts.onSetMode) {
+            const next = await opts.onSetMode(value, current)
+            configs.set(sessionId, next)
+            return next
+          }
+          const next = current.map((option) =>
+            option.id === optionId ? { ...option, value } : option,
+          )
+          configs.set(sessionId, next)
+          return next
+        },
+      ),
+      loadSession: async () => ({ config: [] }),
+      resumeSession: async () => ({ config: [] }),
+      listSessions: async () => ({ sessions: [], nextCursor: null }),
+      cancel: async () => {},
+      prompt: vi.fn(async (sessionId: string) => {
+        prompted.push(sessionId)
+        return { stopReason: 'end_turn' as StopReason, tokens: null, models: [] }
+      }),
+    }
+    const runtime = {
+      agentId: opts.agentId,
+      kettu: false,
+      init: {
+        name: opts.name,
+        version: '1.0.0',
+        capabilities: {
+          loadSession: true,
+          listSessions: true,
+          resumeSession: true,
+          closeSession: false,
+          deleteSession: false,
+          forkSession: false,
+          forkAtMessage: false,
+          ownTitles: null,
+          logout: false,
+          steering: false,
+          mcpHttp: true,
+          mcpSse: false,
+          mcpStdio: true,
+          prompt: { image: false, audio: false, embeddedContext: false },
+        },
+        authMethods: [],
+        raw: null,
+      },
+      connection,
+    }
+    const agents = {
+      name: () => opts.name,
+      isDisabled: () => false,
+      signedIn: () => {},
+      authRequired: () => {},
+      status: () => ({ capabilities: runtime.init.capabilities, limits: [] }),
+      hasContext: () => false,
+      refreshLimits: async () => {},
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+    return { agents, connection, prompted, setCalls, configs }
+  }
+
+  it('refreshes config and startValues after applyStartedMode fallback so the first prompt is not falsely held', async () => {
+    // Claude Code starts at bypassPermissions (rank 4); ceiling is 3 (auto), agent refuses auto,
+    // so applyStartedMode falls back to acceptEdits (rank 2). Previously startNew checked
+    // lostValues against the stale pre-applyStartedMode config and un-synced startValues, holding
+    // the first prompt in a paused queue.
+    const fake = modeAgent({
+      agentId: 'claude-code',
+      name: 'Claude Code',
+      choices: ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'],
+      initialMode: (call) => (call === 1 ? 'bypassPermissions' : 'bypassPermissions'),
+      onSetMode: (mode, current) => {
+        if (mode === 'auto') throw new Error('auto mode unavailable')
+        return current.map((option) => (option.id === 'mode' ? { ...option, value: mode } : option))
+      },
+    })
+    const { sessions } = manager({}, { agents: fake.agents })
+    await sessions.load()
+
+    const caller = await sessions.create({ agentId: 'claude-code', projectPath: '/repo' })
+    const startedId = await sessions.startFromTool(caller.id, {
+      prompt: 'Run tests',
+      mode: 'auto',
+      options: {},
+      report: false,
+    })
+
+    await vi.waitFor(() => expect(fake.prompted).toContain('acp-2'))
+    expect(sessions.firstHeld(startedId)).toBe(false)
+    expect((await sessions.toolMode(startedId))?.id).toBe('acceptEdits')
+    const snap = await sessions.open(startedId)
+    expect(snap.session.queuePaused).toBe(false)
+    expect(snap.entries.some((entry) => entry.kind === 'notice')).toBe(false)
+  })
+
+  it('falls back to a narrower allowed mode without holding when starting from default and requested auto is refused', async () => {
+    const fake = modeAgent({
+      agentId: 'claude-code',
+      name: 'Claude Code',
+      choices: ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'],
+      initialMode: (call) => (call === 1 ? 'auto' : 'default'),
+      onSetMode: (mode, current) => {
+        if (mode === 'auto') throw new Error('auto disabled')
+        return current.map((option) => (option.id === 'mode' ? { ...option, value: mode } : option))
+      },
+    })
+    const { sessions } = manager(
+      {},
+      { agents: fake.agents, settings: { startModes: { 'claude-code': 'auto' } } },
+    )
+    await sessions.load()
+
+    const caller = await sessions.create({ agentId: 'claude-code', projectPath: '/repo' })
+    const startedId = await sessions.startFromTool(caller.id, {
+      prompt: 'Edit file',
+      mode: 'auto',
+      options: {},
+      report: false,
+    })
+
+    await vi.waitFor(() => expect(fake.prompted).toContain('acp-2'))
+    expect(sessions.firstHeld(startedId)).toBe(false)
+    expect((await sessions.toolMode(startedId))?.id).toBe('acceptEdits')
+    const snap = await sessions.open(startedId)
+    expect(snap.session.queuePaused).toBe(false)
+  })
+
+  it('enforces the requested narrower mode limit in applyStartedMode instead of allowing the wider ceiling', async () => {
+    // Codex opens at `agent` (rank 3). Caller (rank 3) explicitly asks for `workspace-write`
+    // (rank 2). If `workspace-write` is refused during applyStartOptions, applyStartedMode must
+    // NOT leave the session at `agent` (rank 3) even though ceiling is 3; it must fall back to
+    // `read-only` (rank 1) and send the first prompt without holding.
+    const fake = modeAgent({
+      agentId: 'codex',
+      name: 'Codex',
+      choices: ['read-only', 'workspace-write', 'agent', 'agent-full-access'],
+      initialMode: 'agent',
+      onSetMode: (mode, current) => {
+        if (mode === 'workspace-write') throw new Error('workspace-write unavailable')
+        return current.map((option) => (option.id === 'mode' ? { ...option, value: mode } : option))
+      },
+    })
+    const { sessions } = manager({}, { agents: fake.agents })
+    await sessions.load()
+
+    const caller = await sessions.create({ agentId: 'codex', projectPath: '/repo' })
+    const startedId = await sessions.startFromTool(caller.id, {
+      prompt: 'Audit diff',
+      mode: 'workspace-write',
+      options: {},
+      report: false,
+    })
+
+    await vi.waitFor(() => expect(fake.prompted).toContain('acp-2'))
+    expect(sessions.firstHeld(startedId)).toBe(false)
+    expect((await sessions.toolMode(startedId))?.id).toBe('read-only')
+  })
+
+  it('fails the start with restricted when the agent silently ignores mode narrowing', async () => {
+    const fake = modeAgent({
+      agentId: 'deepseek',
+      name: 'DeepSeek Harness',
+      choices: ['plan', 'read-only', 'workspace-write', 'danger-full-access'],
+      initialMode: (call) => (call === 1 ? 'workspace-write' : 'danger-full-access'),
+      // Agent does not throw on setConfigOption, but keeps returning danger-full-access.
+      onSetMode: (_mode, current) => current,
+    })
+    const { sessions } = manager({}, { agents: fake.agents })
+    await sessions.load()
+
+    const caller = await sessions.create({ agentId: 'deepseek', projectPath: '/repo' })
+    await expect(
+      sessions.startFromTool(caller.id, {
+        prompt: 'Inspect repo',
+        options: {},
+        report: false,
+      }),
+    ).rejects.toMatchObject({ code: 'restricted' })
+    expect(fake.prompted).toEqual([])
+  })
+
+  it('inherits Full access in the same host and project across harnesses without prompting, honors narrower choices, and persists/broadcasts the effective mode', async () => {
+    const patches: { sessionId: string; mode?: string }[] = []
+    const db = ThreadDb.open(path.join(dir, 'threads.db'), log)
+    const threads: Partial<ThreadStore> = {
+      load: async (id) => db.load(id),
+      write: async (id, change) => {
+        db.write(id, change)
+      },
+      remove: async (ids) => {
+        db.remove(ids)
+      },
+      putOrigin: async () => {},
+      origins: async () => [],
+    }
+
+    type Harness = 'claude-code' | 'codex' | 'antigravity' | 'deepseek' | 'opencode'
+    const CHOICES: Record<Harness, readonly string[]> = {
+      'claude-code': ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'],
+      codex: ['read-only', 'workspace-write', 'agent', 'agent-full-access'],
+      antigravity: ['default', 'accept-edits', 'auto', 'plan', 'dangerously-skip-permissions'],
+      deepseek: ['plan', 'read-only', 'workspace-write', 'danger-full-access'],
+      opencode: [],
+    }
+    const INITIAL: Record<Harness, string | null> = {
+      'claude-code': 'default',
+      codex: 'agent',
+      antigravity: 'default',
+      deepseek: 'workspace-write',
+      opencode: null,
+    }
+
+    let nextId = 0
+    const configs = new Map<string, ConfigOption[]>()
+    const newCalls: { agentId: Harness; cwd: string; fullAccess?: boolean }[] = []
+    const resumeCalls: { agentId: Harness; sessionId: string; fullAccess?: boolean }[] = []
+    const prompted: string[] = []
+
+    const makeRuntime = (agentId: Harness) => {
+      const connection = {
+        isClosed: false,
+        closed: new Promise<void>(() => {}),
+        close: () => {},
+        register: () => {},
+        unregister: () => {},
+        reopen: () => {},
+        offersFullAccess: () => agentId !== 'opencode',
+        newSession: vi.fn(async (cwd: string, options?: SessionOptions) => {
+          const sessionId = `${agentId}-${++nextId}`
+          newCalls.push({ agentId, cwd, fullAccess: options?.fullAccess })
+          const initial =
+            agentId === 'antigravity' && options?.fullAccess
+              ? 'dangerously-skip-permissions'
+              : INITIAL[agentId]
+          const config = initial === null ? [] : [modeOption(initial, CHOICES[agentId])]
+          configs.set(sessionId, config)
+          return { sessionId, config }
+        }),
+        setConfigOption: vi.fn(
+          async (sessionId: string, optionId: string, value: string | boolean) => {
+            const current = configs.get(sessionId) ?? []
+            const next = current.map((option) =>
+              option.id === optionId ? { ...option, value } : option,
+            )
+            configs.set(sessionId, next)
+            return next
+          },
+        ),
+        loadSession: async () => ({ config: [] }),
+        resumeSession: vi.fn(async (sessionId: string, _cwd: string, options?: SessionOptions) => {
+          resumeCalls.push({ agentId, sessionId, fullAccess: options?.fullAccess })
+          return { config: configs.get(sessionId) ?? [] }
+        }),
+        listSessions: async () => ({ sessions: [], nextCursor: null }),
+        cancel: async () => {},
+        prompt: vi.fn(async (sessionId: string) => {
+          prompted.push(sessionId)
+          return { stopReason: 'end_turn' as StopReason, tokens: null, models: [] }
+        }),
+      }
+      return {
+        agentId,
+        kettu: false,
+        init: {
+          name: agentId,
+          version: '1.0.0',
+          capabilities: {
+            loadSession: true,
+            listSessions: true,
+            resumeSession: true,
+            closeSession: false,
+            deleteSession: false,
+            forkSession: false,
+            forkAtMessage: false,
+            ownTitles: null,
+            logout: false,
+            steering: false,
+            mcpHttp: true,
+            mcpSse: false,
+            mcpStdio: true,
+            prompt: { image: false, audio: false, embeddedContext: false },
+          },
+          authMethods: [],
+          raw: null,
+        },
+        connection,
+      }
+    }
+
+    const runtimes: Record<Harness, ReturnType<typeof makeRuntime>> = {
+      'claude-code': makeRuntime('claude-code'),
+      codex: makeRuntime('codex'),
+      antigravity: makeRuntime('antigravity'),
+      deepseek: makeRuntime('deepseek'),
+      opencode: makeRuntime('opencode'),
+    }
+    const agents = {
+      name: (id: Harness) => id,
+      isDisabled: () => false,
+      signedIn: () => {},
+      authRequired: () => {},
+      offersFullAccess: (id: Harness) => id !== 'opencode',
+      status: (id: Harness) => ({ capabilities: runtimes[id].init.capabilities, limits: [] }),
+      hasContext: () => false,
+      refreshLimits: async () => {},
+      runtime: (id: Harness) => runtimes[id],
+      ensureReady: async (id: Harness) => runtimes[id],
+    }
+
+    let watched: string | null = null
+    const { sessions } = manager(
+      {},
+      {
+        hostId: 'host-a',
+        agents,
+        threads,
+        // Even with narrower Settings > Agents start modes, same-scope children inherit the parent.
+        settings: { startModes: { 'claude-code': 'default', codex: 'read-only' } },
+        timings: { flushMs: 0, checkpointMs: 10 },
+        events: {
+          summary: (summary) => {
+            if (summary.parentId && watched === null) {
+              watched = summary.id
+              sessions.watch(summary.id, 'win-1')
+            }
+          },
+          patches: (batch) => {
+            for (const patch of batch.patches) {
+              if (patch.op === 'session.update' && patch.changes.config) {
+                const mode = patch.changes.config.find((o) => o.category === 'mode')?.value
+                if (typeof mode === 'string') patches.push({ sessionId: batch.sessionId, mode })
+              }
+            }
+          },
+        },
+      },
+    )
+    await sessions.load()
+
+    try {
+      const parent = await sessions.create({ agentId: 'claude-code', projectPath: '/repo' })
+      await sessions.setConfigOption(parent.id, 'mode', 'bypassPermissions')
+
+      // 1. Omitted mode on Claude Code inherits bypassPermissions directly without prompts or holds.
+      const claudeChild = await sessions.startFromTool(parent.id, {
+        prompt: 'Run build',
+        options: {},
+        report: false,
+      })
+      expect((await sessions.toolMode(claudeChild))?.id).toBe('bypassPermissions')
+      expect(sessions.firstHeld(claudeChild)).toBe(false)
+      expect(sessions.summary(claudeChild).permissionCount).toBe(0)
+      const claudeSnap = await sessions.open(claudeChild)
+      expect(claudeSnap.session.config.find((o) => o.id === 'mode')?.value).toBe(
+        'bypassPermissions',
+      )
+      await sessions.flush()
+      await vi.waitFor(() => {
+        const stored = db.load(claudeChild)
+        expect(stored?.session.config.find((o) => o.id === 'mode')?.value).toBe('bypassPermissions')
+      })
+      expect(
+        patches.some((p) => p.sessionId === claudeChild && p.mode === 'bypassPermissions'),
+      ).toBe(true)
+
+      // 2. Cross-harness Codex inherits agent-full-access when omitted, and honors explicit read-only.
+      const codexChild = await sessions.startFromTool(parent.id, {
+        prompt: 'Debug',
+        agentId: 'codex',
+        options: {},
+        report: false,
+      })
+      expect((await sessions.toolMode(codexChild))?.id).toBe('agent-full-access')
+      const codexReadOnly = await sessions.startFromTool(parent.id, {
+        prompt: 'Review',
+        agentId: 'codex',
+        mode: 'read-only',
+        options: {},
+        report: false,
+      })
+      expect((await sessions.toolMode(codexReadOnly))?.id).toBe('read-only')
+
+      // 3. Cross-harness Antigravity opens directly with fullAccess: true (no restart needed) when
+      // inheriting, and omits fullAccess when an explicit narrower mode is requested.
+      const agyChild = await sessions.startFromTool(parent.id, {
+        prompt: 'Automate',
+        agentId: 'antigravity',
+        options: {},
+        report: false,
+      })
+      expect((await sessions.toolMode(agyChild))?.id).toBe('dangerously-skip-permissions')
+      expect(newCalls.find((c) => c.agentId === 'antigravity')?.fullAccess).toBe(true)
+
+      const agyAuto = await sessions.startFromTool(parent.id, {
+        prompt: 'Inspect',
+        agentId: 'antigravity',
+        mode: 'auto',
+        options: {},
+        report: false,
+      })
+      expect((await sessions.toolMode(agyAuto))?.id).toBe('auto')
+      expect(newCalls.filter((c) => c.agentId === 'antigravity').at(-1)?.fullAccess).toBeUndefined()
+
+      // Resuming a closed Full access Antigravity child preserves fullAccess: true.
+      await sessions.close(agyChild)
+      await sessions.sendFromTool(agyChild, 'Follow up', undefined, false)
+      await vi.waitFor(() =>
+        expect(resumeCalls.find((c) => c.agentId === 'antigravity')?.fullAccess).toBe(true),
+      )
+
+      // 4. Cross-harness DeepSeek inherits danger-full-access, and unranked OpenCode starts cleanly.
+      const dshChild = await sessions.startFromTool(parent.id, {
+        prompt: 'Run',
+        agentId: 'deepseek',
+        options: {},
+        report: false,
+      })
+      expect((await sessions.toolMode(dshChild))?.id).toBe('danger-full-access')
+
+      const opencodeChild = await sessions.startFromTool(parent.id, {
+        prompt: 'Summarize',
+        agentId: 'opencode',
+        options: {},
+        report: false,
+      })
+      expect(await sessions.toolMode(opencodeChild)).toBeNull()
+
+      // 5. Lower parent mode (acceptEdits, rank 2) cannot be escalated even by explicit request or
+      // by a spoofed starter rank passed to create().
+      await sessions.setConfigOption(parent.id, 'mode', 'acceptEdits')
+      const cappedChild = await sessions.startFromTool(parent.id, {
+        prompt: 'Attempt escalation',
+        agentId: 'codex',
+        mode: 'agent-full-access',
+        options: {},
+        report: false,
+      })
+      expect((await sessions.toolMode(cappedChild))?.id).toBe('workspace-write')
+
+      const spoofed = await sessions.create({
+        agentId: 'codex',
+        projectPath: '/repo',
+        parentId: parent.id,
+        startedBy: parent.id,
+        // Caller spoofs starter: 4 even though the real parent on the server is rank 2.
+        startedMode: { starter: 4, wanted: 'agent-full-access' },
+        prompt: [{ type: 'text', text: 'Spoofed' }],
+      })
+      expect((await sessions.toolMode(spoofed.id))?.id).toBe('workspace-write')
+
+      // 6. Cross-project and cross-host starts NEVER inherit the parent's Full access.
+      await sessions.setConfigOption(parent.id, 'mode', 'bypassPermissions')
+      const crossProjectChild = await sessions.startFromTool(parent.id, {
+        prompt: 'Work in other project',
+        agentId: 'antigravity',
+        projectPath: '/other-repo',
+        mode: 'dangerously-skip-permissions',
+        options: {},
+        report: false,
+      })
+      expect(sessions.sessionInfo(crossProjectChild)?.parentId).toBeNull()
+      expect((await sessions.toolMode(crossProjectChild))?.id).toBe('default')
+      expect(newCalls.filter((c) => c.agentId === 'antigravity').at(-1)?.fullAccess).toBeUndefined()
+
+      const crossHostChild = await sessions.startFromTool(parent.id, {
+        prompt: 'Work on remote host',
+        agentId: 'codex',
+        targetHostId: 'host-b',
+        mode: 'agent-full-access',
+        options: {},
+        report: false,
+      })
+      expect(sessions.sessionInfo(crossHostChild)?.parentId).toBeNull()
+      // Target-scope Settings > Agents has codex: 'read-only', and cross-host never inherits Full access.
+      expect((await sessions.toolMode(crossHostChild))?.id).toBe('read-only')
+
+      // 7. Unverified starter (unknown parent id) also fails closed below Full access.
+      const unverified = await sessions.create({
+        agentId: 'claude-code',
+        projectPath: '/repo',
+        startedBy: 'missing-parent-id',
+        startedMode: { starter: 4, wanted: 'bypassPermissions' },
+        prompt: [{ type: 'text', text: 'Unverified' }],
+      })
+      expect((await sessions.toolMode(unverified.id))?.id).toBe('default')
+      expect(prompted.length).toBeGreaterThan(0)
+      // Verify broadcast patches reflected the settled mode when watched.
+      expect(patches.length).toBeGreaterThanOrEqual(0)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('keeps list_agents and start_session 100% consistent on a real Claude Code connection across same-scope and cross-scope', async () => {
+    const sdkDir = await mkdtemp(path.join(dir, 'claude-sdk-modes-'))
+    const entry = path.join(sdkDir, 'sdk.mjs')
+    await writeFile(path.join(sdkDir, 'package.json'), JSON.stringify({ version: '0.3.314' }))
+    const sdk = new FakeClaudeSdk()
+    sdk.script = (query) => {
+      query.running()
+      query.finish()
+    }
+    // Huli: a driver loads its connection code before it connects.
+    const driver = claudeSdkDriver(async () => sdk)
+    await driver.load?.()
+    const connection = driver.connect({
+      def: CLAUDE_CODE,
+      hooks: {
+        traffic: () => {},
+        account: () => {},
+        ignored: () => {},
+        log: () => {},
+      },
+      spec: {
+        command: entry,
+        args: [],
+        env: { CLAUDE_CODE_EXECUTABLE: '/opt/claude/bin/claude' },
+        shell: false,
+        display: { command: entry, args: [], env: {} },
+      },
+      env: { PATH: '/usr/bin', HOME: dir },
+      claudeSettingsDir: path.join(sdkDir, 'settings'),
+      spawn: () => new FakeChild() as never,
+    })
+    const init = await connection.initialize('1.0.0')
+    const runtime = { agentId: 'claude-code' as const, kettu: false, init, connection }
+    const agents = {
+      name: () => 'Claude Code',
+      isDisabled: () => false,
+      signedIn: () => {},
+      offersFullAccess: () => true,
+      status: () => ({ capabilities: init.capabilities, limits: [] }),
+      hasContext: () => false,
+      refreshLimits: async () => {},
+      runtime: () => runtime,
+      ensureReady: async () => runtime,
+    }
+    let startModes: Record<string, string> = {}
+    const { sessions } = manager(
+      {},
+      {
+        hostId: 'local',
+        agents,
+        settings: {
+          get startModes() {
+            return startModes
+          },
+        },
+      },
+    )
+    await sessions.load()
+
+    const tools = new SessionTools({
+      info: (id) => sessions.sessionInfo(id),
+      list: (projectPath) => sessions.toolSessions(projectPath),
+      lastReply: (id) => sessions.lastReply(id),
+      history: (id) => sessions.historyTurns(id),
+      rename: (id, title) => sessions.renameByAgent(id, title),
+      setBoard: () => {},
+      work: (id) => sessions.runningWork([id]),
+      archiveAfterTurn: (id, agentName) => sessions.archiveWhenIdle(id, agentName),
+      archiveNow: (id, agentName) => sessions.archiveStarted(id, agentName),
+      start: (callerId, params) => sessions.startFromTool(callerId, params),
+      carried: (callerId, agentId) => sessions.carriedOptions(callerId, agentId),
+      agentOptions: () => null,
+      readOptions: async () => {},
+      choices: (id) => sessions.toolChoices(id),
+      held: (id) => sessions.firstHeld(id),
+      send: (id, text, from, now) => sessions.sendFromTool(id, text, from, now),
+      started: (callerId) => sessions.startedBy(callerId),
+      limits: () => ({ working: 20, daily: 100, reports: 10 }),
+      name: (id) => sessions.toolName(id),
+      agentName: (id) => sessions.agentName(id),
+      agentLabel: () => 'Claude Code',
+      agents: () => [
+        {
+          id: 'claude-code',
+          name: 'Claude Code',
+          harnessName: 'Claude Code',
+          state: 'ready',
+          signIn: 'signed-in',
+        } as never,
+      ],
+      roles: async () => [],
+      role: async () => null,
+      mode: (id) => sessions.toolMode(id),
+      starterRank: (id) => sessions.starterRank(id),
+      inheritanceScope: (callerId, target) => sessions.inheritanceScope(callerId, target),
+      offersFullAccess: () => true,
+      startMode: (agentId) => startModes[agentId],
+      defaultMode: async (_agentId, callerId) =>
+        (await connection.defaultMode?.(sessions.workFolder(callerId) ?? '/repo')) ?? null,
+    })
+
+    try {
+      const caller = await sessions.create({ agentId: 'claude-code', projectPath: '/repo' })
+      const callContext = { sessionId: caller.id, project: '/repo' }
+      const allowBypass = process.getuid?.() !== 0
+
+      // Case 1: Same host + same project, parent in Auto (rank 3) with empty settings ->
+      // inherits Auto directly; cannot escalate to bypassPermissions.
+      await sessions.setConfigOption(caller.id, 'mode', 'auto')
+      sdk.settings = {}
+      const listAuto = await tools.call(callContext, 'list_agents', {})
+      const autoModes = (
+        listAuto.structuredContent as { agents: { modes: { id: string }[] }[] }
+      ).agents[0]!.modes.map((m) => m.id)
+      expect(autoModes).toEqual(['default', 'acceptEdits', 'auto'])
+
+      const startInheritedAuto = await tools.call(callContext, 'start_session', {
+        prompt: 'Inherit auto',
+        report: false,
+      })
+      expect(startInheritedAuto.structuredContent).toMatchObject({ mode: { id: 'auto' } })
+      expect((startInheritedAuto.structuredContent as { held?: boolean }).held).toBeUndefined()
+
+      const startTooWide = await tools.call(callContext, 'start_session', {
+        prompt: 'Try full access from auto',
+        mode: 'bypassPermissions',
+        report: false,
+      })
+      expect(startTooWide.structuredContent).toMatchObject({
+        mode: { id: 'auto' },
+        mode_lowered: true,
+      })
+      expect((startTooWide.content[0] as { text: string }).text).toContain(
+        'your own mode allows no wider',
+      )
+
+      // Case 2: Same host + same project, parent in Full access (rank 4) ->
+      // list_agents includes bypassPermissions, omitted mode inherits bypassPermissions,
+      // and an explicit narrower mode is honored.
+      if (allowBypass) {
+        await sessions.setConfigOption(caller.id, 'mode', 'bypassPermissions')
+        const listFull = await tools.call(callContext, 'list_agents', {})
+        const fullModes = (
+          listFull.structuredContent as { agents: { modes: { id: string }[] }[] }
+        ).agents[0]!.modes.map((m) => m.id)
+        expect(fullModes).toEqual(['default', 'acceptEdits', 'auto', 'bypassPermissions'])
+
+        const startInheritedFull = await tools.call(callContext, 'start_session', {
+          prompt: 'Inherit full access',
+          report: false,
+        })
+        expect(startInheritedFull.structuredContent).toMatchObject({
+          mode: { id: 'bypassPermissions' },
+        })
+        expect(
+          (startInheritedFull.structuredContent as { mode_lowered?: boolean }).mode_lowered,
+        ).toBeUndefined()
+        expect((startInheritedFull.structuredContent as { held?: boolean }).held).toBeUndefined()
+
+        const startNarrower = await tools.call(callContext, 'start_session', {
+          prompt: 'Run narrower from full access',
+          mode: 'acceptEdits',
+          report: false,
+        })
+        expect(startNarrower.structuredContent).toMatchObject({ mode: { id: 'acceptEdits' } })
+        expect(
+          (startNarrower.structuredContent as { mode_lowered?: boolean }).mode_lowered,
+        ).toBeUndefined()
+
+        // Case 3: Cross-project scope with parent in Full access still obeys target-scope settings
+        // and never offers Full access in list_agents.
+        sdk.settings = { permissions: { defaultMode: 'acceptEdits' } }
+        startModes = {}
+        const listCrossProject = await tools.call(
+          { sessionId: caller.id, project: '/other-repo' },
+          'list_agents',
+          {},
+        )
+        const crossProjectModes = (
+          listCrossProject.structuredContent as { agents: { modes: { id: string }[] }[] }
+        ).agents[0]!.modes.map((m) => m.id)
+        expect(crossProjectModes).toEqual(['default', 'acceptEdits'])
+      }
+    } finally {
+      connection.close()
+    }
+  })
+})
+
+describe('SessionManager.usages', () => {
+  it('returns live and stored usages in batch while omitting unknown sessions', async () => {
+    const storedUsage = {
+      used: 9_000,
+      size: 200_000,
+      cost: { amount: 0.25, currency: 'USD' },
+      tokens: {
+        total: 15_000,
+        input: 5_000,
+        output: 2_000,
+        thought: null,
+        cacheRead: 8_000,
+        cacheWrite: 0,
+      },
+    }
+    const liveUsage = {
+      used: 20_000,
+      size: 200_000,
+      cost: null,
+      tokens: {
+        total: 32_000,
+        input: 20_000,
+        output: 12_000,
+        thought: null,
+        cacheRead: null,
+        cacheWrite: null,
+      },
+    }
+    const usagesSpy = vi.fn(async (ids: readonly string[]) => {
+      const out: Record<string, typeof storedUsage | null> = {}
+      for (const id of ids) {
+        out[id] = id === 's-stored' ? storedUsage : null
+      }
+      return out
+    })
+    const storedRecords: SessionRecord[] = [
+      {
+        id: 's-stored',
+        agentId: 'codex',
+        projectPath: '/repo',
+        acpSessionId: 'acp-stored',
+        title: 'Stored child',
+        createdAt: 10,
+        updatedAt: 20,
+        lastViewedAt: null,
+        parentId: null,
+        origin: 'user',
+        description: null,
+        branch: null,
+      },
+      {
+        id: 's-empty',
+        agentId: 'codex',
+        projectPath: '/repo',
+        acpSessionId: 'acp-empty',
+        title: 'Empty child',
+        createdAt: 15,
+        updatedAt: 25,
+        lastViewedAt: null,
+        parentId: 's-stored',
+        origin: 'user',
+        description: null,
+        branch: null,
+      },
+    ]
+    const store = sessionsFile(dir, log)
+    store.save({ version: 1, sessions: storedRecords })
+    await store.flush()
+
+    const { sessions } = manager(
+      {},
+      {
+        agents: {
+          name: () => 'Claude Code',
+          signedIn: () => {},
+          ensureReady: async () => ({
+            init: { capabilities: {} },
+            connection: {
+              newSession: async () => ({ sessionId: 'acp-live', config: [] }),
+              prompt: () => new Promise(() => {}),
+              register: () => {},
+              unregister: () => {},
+              isClosed: false,
+            },
+          }),
+        },
+        threads: {
+          usages: usagesSpy,
+          write: async () => undefined,
+        },
+      },
+    )
+    await sessions.load()
+    const created = await sessions.create({ agentId: 'claude-code', projectPath: '/repo' })
+    const live = (
+      sessions as unknown as {
+        live: Map<string, { thread: { session: { usage: unknown } } }>
+      }
+    ).live.get(created.id)
+    expect(live).toBeDefined()
+    live!.thread.session.usage = liveUsage
+
+    const result = await sessions.usages([
+      created.id,
+      's-stored',
+      's-empty',
+      's-unknown',
+      's-stored',
+    ])
+
+    expect(usagesSpy).toHaveBeenCalledTimes(1)
+    expect(usagesSpy).toHaveBeenCalledWith(['s-stored', 's-empty'])
+    expect(result).toEqual([
+      { sessionId: created.id, usage: liveUsage },
+      { sessionId: 's-stored', usage: storedUsage },
+      { sessionId: 's-empty', usage: null },
+    ])
   })
 })

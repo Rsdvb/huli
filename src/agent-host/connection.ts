@@ -9,6 +9,7 @@ import type {
   PlanLimit,
   PromptCapabilities,
   ProviderBalance,
+  SessionBranchesResult,
 } from '@shared/agent-host'
 import type { ContextEstimates } from '@shared/context'
 import type { SessionMcpActions, SessionMcpApp, SessionMcpServer } from '@shared/session-mcp'
@@ -16,7 +17,6 @@ import type {
   BackgroundTaskView,
   ConfigOption,
   DeclaredHook,
-  DeclaredMcpServer,
   FormValues,
   PendingElicitation,
   PendingPermission,
@@ -196,6 +196,8 @@ export interface AgentInit {
   capabilities: {
     loadSession: boolean
     listSessions: boolean
+    /** Can list sessions across every folder when `listSessions` receives a null `cwd`. */
+    listAllSessions?: boolean
     resumeSession: boolean
     closeSession: boolean
     deleteSession: boolean
@@ -214,12 +216,19 @@ export interface AgentInit {
     rewind?: boolean
     /** The cut also takes back the files the agent changed since, staged as the edit goes back. */
     rewindFiles?: boolean
+    /** Browses and switches native branches inside a single session (Pi). */
+    branches?: boolean
     /** MCP servers over HTTP, which the artifacts service needs. */
     mcpHttp: boolean
     /** MCP servers over the older SSE transport. */
     mcpSse: boolean
     /** MCP servers the agent starts as programs and talks to over stdio. */
     mcpStdio: boolean
+    /**
+     * Merges a server it is handed key by key into a server of the same name in its own
+     * configuration instead of replacing it, so a library server must not take that name.
+     */
+    mcpMergesSameName?: boolean
     prompt: PromptCapabilities
   }
   authMethods: AuthMethodInfo[]
@@ -373,6 +382,8 @@ export type McpServer =
       prompt?: string
       /** Holds a token or a value from the key store, so it must never reach a command line. */
       secret?: boolean
+      /** Servers of the agent's own configuration this one stands in for, off for the session. */
+      replaces?: string[]
     }
   | {
       type: 'stdio'
@@ -381,6 +392,7 @@ export type McpServer =
       args: string[]
       env: { name: string; value: string }[]
       secret?: boolean
+      replaces?: string[]
     }
 
 /** A content block of a prompt, as Kettu sends it; each protocol converts it for its wire. */
@@ -452,6 +464,15 @@ export function sessionNotice(sessionId: string, name: string): string {
   return t('content.sessionRef', { name, id: sessionId })
 }
 
+/** What an agent using Kettu's `read_skill` tool reads when the prompt selects Kettu skills. */
+export function skillNotice(names: readonly string[]): string {
+  if (names.length === 1) {
+    return `[The user selected the skill "${names[0]}": read it with read_skill before continuing.]`
+  }
+  const list = names.map((name) => `"${name}"`).join(', ')
+  return `[The user selected these skills: ${list}. Read each one with read_skill before continuing.]`
+}
+
 /** A message of the conversation before an agent took a session over, as it is carried to it. */
 export interface HistoryMessage {
   role: 'user' | 'assistant'
@@ -484,8 +505,16 @@ export interface SessionOptions {
   localPlugins?: readonly string[]
   /** Set for a session Kettu opens for itself, which no thread shows and nobody sees. */
   hidden?: HiddenPurpose
-  /** The user's answers about the MCP servers the folder declares itself; without it none start. */
-  projectMcp?: ProjectMcpGate
+  /**
+   * The user let the folder's own settings for this agent's harness apply, which the harness then
+   * loads; without it, a harness Kettu can hold them for starts the session without them.
+   */
+  projectTrusted?: true
+  /**
+   * The names of the MCP servers the folder's own files declare for this harness, which it must
+   * not start itself: Kettu runs those the user let start and hands them in `mcpServers`.
+   */
+  projectServers?: readonly string[]
   /** The user's answers about the hooks the folder declares itself; without it none run. */
   projectHooks?: ProjectHooksGate
   /**
@@ -553,6 +582,10 @@ export interface SessionOptions {
    * agy's flag, which would otherwise cost a restart right after `session/new`.
    */
   fullAccess?: boolean
+  /** The session already has a fixed title, so the agent does not need to generate one. */
+  titled?: boolean
+  /** Native branch leaf id to restore when reopening or reconnecting the session (Pi). */
+  branchLeafId?: string | null
 }
 
 /** Huli: the MCP servers a session's agent has, as it reports them, and what it can do with them. */
@@ -567,17 +600,6 @@ export interface AgentMcp {
 export interface SessionMemory {
   /** The index of both layers and how to use them, marked as reference data. */
   text: string
-}
-
-/** Decides which of the MCP servers a session's folder declares itself may start. */
-export interface ProjectMcpGate {
-  /**
-   * Of `servers`, the names that may not start in `cwd`; those nobody answered for yet wait for
-   * the user in the session's thread.
-   */
-  hold(cwd: string, servers: readonly DeclaredMcpServer[]): Promise<string[]>
-  /** Of `names`, those that still may not start in `cwd`, without asking. */
-  held(cwd: string, names: readonly string[]): Promise<string[]>
 }
 
 /** The hooks a folder's own settings declare, and a digest of them that any change changes. */
@@ -634,6 +656,14 @@ export interface AgentConnection {
   readAuthStatus?(): Promise<void>
   logout(): Promise<void>
 
+  /**
+   * The permission mode a new session in `cwd` opens with when Settings > Agents sets none, read
+   * without opening a session.
+   */
+  defaultMode?(cwd: string): Promise<string>
+  /** Whether this live connection currently supports Full access mode. */
+  offersFullAccess?(): boolean
+
   newSession(cwd: string, options?: SessionOptions): Promise<OpenedSession>
   /** Opens a session again, replaying its history to its target. */
   loadSession(sessionId: string, cwd: string, options?: SessionOptions): Promise<SessionSetup>
@@ -654,7 +684,7 @@ export interface AgentConnection {
   closeSession(sessionId: string): Promise<void>
   deleteSession(sessionId: string): Promise<void>
   listSessions(
-    cwd: string,
+    cwd: string | null,
     cursor: string | null,
   ): Promise<{ sessions: ListedSession[]; nextCursor: string | null }>
   /** Huli: every folder's sessions, where the agent lists them without one. */
@@ -688,6 +718,23 @@ export interface AgentConnection {
   stageRewind?(sessionId: string, cwd: string, point: RewindPoint): Promise<void>
   /** Clears what `stageRewind` staged, which returns the files it took back. */
   unstageRewind?(sessionId: string, cwd: string): Promise<void>
+  /** Reads the native branch tree of a session, whether currently live or stored on disk. */
+  listBranches?(
+    sessionId: string,
+    cwd: string,
+    preferredLeafId?: string | null,
+  ): Promise<SessionBranchesResult>
+  /**
+   * Switches a session's active native branch to `branchId`. Invokes `beforeReplay` once the
+   * native switch succeeds and immediately before replaying the target branch to its target.
+   */
+  switchBranch?(
+    sessionId: string,
+    cwd: string,
+    branchId: string,
+    options?: SessionOptions,
+    beforeReplay?: () => void,
+  ): Promise<{ setup: SessionSetup; branches: SessionBranchesResult }>
 
   /** Routes a session's updates to `target`, first replaying any that arrived early. */
   register(sessionId: string, target: SessionTarget): void
@@ -827,7 +874,11 @@ export interface AgentConnection {
    * What fills a session's context, answered by the agent itself. Without it the host runs the
    * agent's report command in a hidden fork of the session.
    */
-  readContext?(sessionId: string, cwd: string, options: SessionOptions): Promise<ContextBreakdown>
+  readContext?(
+    sessionId: string,
+    cwd: string,
+    options: SessionOptions,
+  ): Promise<ContextBreakdown | null>
   readContextEstimates?(sessionId: string, cwd: string): Promise<ContextEstimates>
 
   /**

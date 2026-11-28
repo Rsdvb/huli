@@ -93,15 +93,20 @@ it('gives a lean page what folded steps show, and the rest on demand', async () 
   const phone = host.connect(PHONE)
   const id = await heavySession(host, window)
 
-  const full = await window.request('sessions.snapshot', { sessionId: id, from: 0 })
+  // A window reads digests too since Kettu's #2794, so the whole thread is what a device without
+  // digests or image refs reads.
+  const full = await host
+    .connect({ id: 'c'.repeat(32), name: 'Old phone' })
+    .request('sessions.snapshot', { sessionId: id, from: 0 })
   const lean = (await phone.request('sessions.snapshot', {
     sessionId: id,
     from: 0,
     lean: true,
   })) as DigestedSnapshot
-  const old = await host
-    .connect({ id: 'c'.repeat(32), name: 'Old phone' })
-    .request('sessions.snapshot', { sessionId: id, from: 0 })
+  const fromWindow = (await window.request('sessions.snapshot', {
+    sessionId: id,
+    from: 0,
+  })) as DigestedSnapshot
   expect(tools(full.entries)).toHaveLength(CALLS)
   expect(tools(lean.entries)).toHaveLength(CALLS)
   expect(bytes(lean)).toBeLessThan(bytes(full) / 20)
@@ -145,8 +150,10 @@ it('gives a lean page what folded steps show, and the rest on demand', async () 
   expect(Buffer.from(blob.bytes).toString('base64')).toBe((original as { data: string }).data)
 
   // A device without image refs still gets the bytes; a window gets them as before.
-  expect(imagesIn(old.entries).every((image) => 'data' in image)).toBe(true)
   expect(shots.every((image) => 'data' in image)).toBe(true)
+  const windowShots = imagesIn(tools(fromWindow.entries))
+  expect(windowShots).toHaveLength(CALLS / SHOTS)
+  expect(windowShots.every((image) => 'data' in image)).toBe(true)
 
   // A page without `lean` is as the port's features make it: digests, no preview or cut title.
   const digested = (await phone.request('sessions.snapshot', {

@@ -21,8 +21,11 @@ import {
 } from '@codemirror/view'
 import type { EditorState, Line } from '@codemirror/state'
 import { createRoot, type Root } from 'react-dom/client'
+import { findSkillTokens } from '@shared/slash'
 import { RenderedChip, type ChipState } from './chip-view'
 import { findChips, findLinks, mentionEndingAt, type Chip, type ChipContext } from './chips'
+import { fencedCodeLines, hashRefAt } from './github-picker'
+import { slashAt } from './slash'
 
 export interface ChipHooks extends ChipContext {
   /** The pointer rests on a chip, or left the one it was on. */
@@ -39,6 +42,8 @@ export interface ChipHooks extends ChipContext {
   highlight?: { from: number; to: number } | null
   /** The project a GitHub reference in a chip is short for. */
   projectPath?: string | null
+  /** The host whose GitHub CLI resolves references in chips. */
+  hostId?: string | null
 }
 
 export const chipHooks = Facet.define<ChipHooks, ChipHooks | null>({
@@ -73,6 +78,7 @@ class ChipWidget extends WidgetType {
     readonly chip: Chip,
     readonly state: ChipState,
     readonly projectPath: string | null,
+    readonly hostId: string | null,
   ) {
     super()
   }
@@ -80,6 +86,7 @@ class ChipWidget extends WidgetType {
     return (
       other.state === this.state &&
       other.projectPath === this.projectPath &&
+      other.hostId === this.hostId &&
       sameChip(other.chip, this.chip)
     )
   }
@@ -89,6 +96,7 @@ class ChipWidget extends WidgetType {
         chip={this.chip}
         state={this.state}
         projectPath={this.projectPath}
+        hostId={this.hostId}
         onRendered={() => view.requestMeasure()}
       />,
     )
@@ -123,6 +131,9 @@ function sameChip(a: Chip, b: Chip): boolean {
   if (a.kind === 'command' || b.kind === 'command') {
     return a.kind === b.kind && 'name' in a && 'name' in b && a.name === b.name
   }
+  if (a.kind === 'skill' || b.kind === 'skill') {
+    return a.kind === 'skill' && b.kind === 'skill' && a.name === b.name
+  }
   if (a.kind === 'link' || b.kind === 'link') {
     return a.kind === 'link' && b.kind === 'link' && a.url === b.url
   }
@@ -150,9 +161,18 @@ interface Drawn {
 const within = (chip: { from: number; to: number }, range: { from: number; to: number } | null) =>
   !!range && range.from <= chip.from && range.to >= chip.to && range.to > range.from
 
-/** The chips on one line; only the first line can start with a command. */
-function chipsOfLine(line: Line, hooks: ChipHooks): Chip[] {
-  const context = line.number === 1 ? hooks : { commands: [], resolve: hooks.resolve }
+/** The chips on one line; only the first line can start with an exclusive command. */
+function chipsOfLine(line: Line, hooks: ChipHooks, inCodeFence = false): Chip[] {
+  const githubRepo = inCodeFence ? null : (hooks.githubRepo ?? null)
+  const context: ChipContext =
+    line.number === 1
+      ? { ...hooks, githubRepo }
+      : {
+          commands: [],
+          ...(hooks.skills ? { skills: hooks.skills } : {}),
+          resolve: hooks.resolve,
+          githubRepo,
+        }
   const chips = findChips(line.text, context)
   if (line.from === 0) return chips
   return chips.map((chip) => ({ ...chip, from: chip.from + line.from, to: chip.to + line.from }))
@@ -162,8 +182,11 @@ function chipsOfLine(line: Line, hooks: ChipHooks): Chip[] {
 function findAll(state: EditorState): Chip[] {
   const hooks = state.facet(chipHooks)
   if (!hooks) return []
+  const fenced = hooks.githubRepo ? fencedCodeLines(state.doc.toString()) : null
   const chips: Chip[] = []
-  for (let n = 1; n <= state.doc.lines; n++) chips.push(...chipsOfLine(state.doc.line(n), hooks))
+  for (let n = 1; n <= state.doc.lines; n++) {
+    chips.push(...chipsOfLine(state.doc.line(n), hooks, fenced?.has(n) ?? false))
+  }
   return chips
 }
 
@@ -172,6 +195,18 @@ function refind(found: readonly Chip[], update: ViewUpdate): Chip[] {
   const hooks = update.state.facet(chipHooks)
   if (!hooks) return []
   const { doc } = update.state
+  if (hooks.githubRepo) {
+    const text = doc.toString()
+    const beforeText = update.startState.doc.toString()
+    if (
+      text.includes('```') ||
+      text.includes('~~~') ||
+      beforeText.includes('```') ||
+      beforeText.includes('~~~')
+    ) {
+      return findAll(update.state)
+    }
+  }
   const touched: { from: number; to: number }[] = []
   update.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
     const from = doc.lineAt(fromB).from
@@ -252,7 +287,7 @@ function draw(
       within(chip, selection) || within(chip, hooks.highlight ?? null) ? 'selected' : 'default'
     widgets.push(
       Decoration.replace({
-        widget: new ChipWidget(chip, state, hooks.projectPath ?? null),
+        widget: new ChipWidget(chip, state, hooks.projectPath ?? null, hooks.hostId ?? null),
       }).range(chip.from, chip.to),
     )
     chips.push(chip)
@@ -268,16 +303,42 @@ function mentionAt(view: EditorView, head: number): { from: number; to: number }
   return start < 0 ? null : { from: line.from + start, to: head }
 }
 
-/** The link or mention the caret is typing: the one it is in or at the end of, if any. */
-function typingAt(view: EditorView, head: number): { from: number; to: number } | null {
+/**
+ * The `/word` the caret is currently typing, which stays text until the caret leaves it. Once a
+ * complete known skill token is followed by a non-whitespace separator (such as CJK prose or
+ * sentence punctuation), the caret has moved past the skill and it renders as a chip immediately.
+ */
+function slashTypingAt(view: EditorView, head: number): { from: number; to: number } | null {
   const line = view.state.doc.lineAt(head)
-  for (const link of findLinks(line.text)) {
+  const rel = head - line.from
+  const found = slashAt(line.text, rel)
+  if (!found) return null
+  const hooks = view.state.facet(chipHooks)
+  if (hooks?.skills && hooks.skills.length > 0) {
+    for (const token of findSkillTokens(line.text, hooks.skills)) {
+      if (token.from === found.start && rel > token.to) return null
+    }
+  }
+  return { from: line.from + found.start, to: line.from + found.start + 1 + found.query.length }
+}
+
+/** The link, mention, hash ref, or slash token the caret is typing: the one it is in or at the end of, if any. */
+function typingAt(view: EditorView, head: number): { from: number; to: number } | null {
+  const hooks = view.state.facet(chipHooks)
+  const line = view.state.doc.lineAt(head)
+  for (const link of findLinks(line.text, hooks?.githubRepo ?? null)) {
     const from = line.from + link.from
     const to = line.from + link.to
     if (head >= from && head <= to) return { from, to }
   }
   const mention = mentionAt(view, head)
   if (mention) return mention
+  if (hooks?.githubRepo) {
+    const hash = hashRefAt(line.text, head - line.from)
+    if (hash) return { from: line.from + hash.start, to: head }
+  }
+  const slash = slashTypingAt(view, head)
+  if (slash) return slash
   // A link still being typed, such as `https:/`, is not a link yet but will be.
   const before = line.text.slice(0, head - line.from)
   const start = before.search(/\S+$/)
@@ -325,7 +386,12 @@ const chipPlugin = ViewPlugin.fromClass(
       const hooks = update.state.facet(chipHooks)
       const before = update.startState.facet(chipHooks)
       // What resolves a chip changed, so every one is looked at again.
-      const rescan = hooks?.commands !== before?.commands || hooks?.resolve !== before?.resolve
+      const rescan =
+        hooks?.commands !== before?.commands ||
+        hooks?.skills !== before?.skills ||
+        hooks?.resolve !== before?.resolve ||
+        hooks?.githubRepo?.owner !== before?.githubRepo?.owner ||
+        hooks?.githubRepo?.repo !== before?.githubRepo?.repo
       const deleted = update.docChanged ? wholeChipsDeleted(update, this.found) : null
       if (rescan) this.found = findAll(update.state)
       else if (update.docChanged) this.found = refind(this.found, update)

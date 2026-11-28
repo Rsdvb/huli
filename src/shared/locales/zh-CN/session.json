@@ -60,14 +60,25 @@
   "stillRunning": {
     "line": "后台还在跑 {{work}}",
     "lineReports_other": "后台还在跑 {{work}} · 跑完会接着汇报",
+    "lineUnnamed": "后台还有任务在运行",
+    "lineUnnamedReports": "后台还有任务在运行 · 跑完会接着汇报",
+    "dockRunning": "{{work}}运行中",
+    "dockUnnamed": "后台任务运行中",
+    "reportsBack": "完成后会自动汇报",
+    "summaryUnnamed": "后台任务",
     "subagents_other": "{{count}} 个子智能体",
     "commands_other": "{{count}} 条命令",
+    "monitors_other": "{{count}} 个监控任务",
+    "scheduled_other": "{{count}} 个定时任务",
+    "timerLeft": "定时器（剩余 {{left}}）",
+    "cronExpr": "定时任务（{{cron}}）",
+    "listSeparator": "、",
     "both": "{{subagents}}和 {{commands}}",
     "three": "{{first}}、{{second}}和 {{third}}",
     "workflow": "工作流",
     "workflows_other": "{{count}} 个工作流",
     "withAgents": "{{workflow}} · {{agents}}",
-    "openBoard": "打开看板"
+    "openBoard": "查看看板"
   },
   "tool": {
     "verb": {
@@ -255,7 +266,12 @@
     "create_routine": "新建定时任务",
     "update_routine": "修改定时任务",
     "delete_routine": "删除定时任务",
-    "run_routine": "运行定时任务"
+    "run_routine": "运行定时任务",
+    "list_mcp_servers": "列出 MCP 服务器",
+    "read_mcp_server": "查看 MCP 服务器",
+    "check_mcp_server": "检查 MCP 服务器",
+    "add_mcp_server": "添加 MCP 服务器",
+    "switch_mcp_servers": "开关 MCP 服务器"
   },
   "agyTool": {
     "invoke_subagent": "启动子智能体",
@@ -440,6 +456,19 @@
   },
   "projectMcp": {
     "where": "来自项目的 .mcp.json；使用后它们在这台电脑上以你的权限运行。",
+    "whereFiles": "来自项目的 {{files}}；使用后它们在这台电脑上以你的权限运行，在那之前这个会话照常工作，不用它们。",
+    "selfRun_one": "使用后 {{names}} 由 {{agent}} 自己运行，Kettu 看不到它的调用和工具变化。",
+    "selfRun_other": "使用后 {{names}} 由 {{agent}} 自己运行，Kettu 看不到它们的调用和工具变化。",
+    "everything": "这个项目会运行或改动的",
+    "kind": {
+      "server": "MCP 服务器",
+      "hook": "Hook",
+      "plugin": "插件",
+      "command": "命令",
+      "env": "环境变量",
+      "provider": "地址",
+      "setting": "设置"
+    },
     "servers": "服务器",
     "decision": {
       "use": "使用",
@@ -451,7 +480,8 @@
       "all": "已使用这个项目的全部",
       "skip": "未使用",
       "timeout": "未回答"
-    }
+    },
+    "notice": "<b>{{agent}}</b> 会在第一条消息时运行这个项目的 {{names}}，没有开关能拦住。来自 {{files}}。"
   },
   "projectHooks": {
     "where": "这个项目的 .claude 设置会在特定时刻自动执行这些命令，比如会话开始时，以你的权限在这台电脑上运行。允许之前，这个会话不会自动执行任何命令，包括你自己设置的。",
@@ -612,6 +642,55 @@
     "back": "返回 {{title}}",
     "startedFrom": "从 <parent>{{title}}</parent> 开始"
   },
+  "sessionFamily": {
+    "title": "同组会话",
+    "listLabel": "同组会话列表",
+    "triggerChild": "{{title}}（同组共 {{count}} 个会话）",
+    "triggerParent_other": "同组含 {{count}} 个子会话",
+    "subSessionCount_other": "{{count}} 个子会话",
+    "memberCount_other": "共 {{count}} 个",
+    "parentBadge": "父会话",
+    "currentBadge": "当前",
+    "activity": {
+      "waiting": "{{count}} 个待确认",
+      "running": "{{count}} 个运行中",
+      "background": "{{count}} 个后台运行",
+      "error": "{{count}} 个出错"
+    },
+    "status": {
+      "waiting": "待确认",
+      "error": "出错",
+      "auth": "需登录",
+      "running": "运行中",
+      "background": "后台运行",
+      "starting": "启动中",
+      "unread": "有更新",
+      "idle": "空闲"
+    },
+    "usage": {
+      "totalTokens": "同组 Token",
+      "totalCost": "同组费用",
+      "ioSummary": "输入 {{input}} · 输出 {{output}}",
+      "partial": "部分汇总",
+      "unavailable": "无数据",
+      "unavailableShort": "无数据",
+      "noTokensShort": "无 Token",
+      "noCostShort": "无费用",
+      "tokensUnavailable": "缺失 Token 数据",
+      "costUnavailable": "缺失费用数据",
+      "rowUnavailable": "该会话暂无可用用量数据",
+      "rowLoadFailed": "无法加载该会话的用量数据",
+      "loadingRow": "正在加载用量数据…",
+      "rowTokensDetail": "{{total}} tokens（输入 {{input}} · 输出 {{output}}）",
+      "loading_other": "正在加载 {{count}} 个会话的用量…",
+      "loadFailed": "无法加载同组用量数据。",
+      "allUnavailable": "同组会话暂无已上报的用量数据。",
+      "missingBoth_other": "不含 {{count}} 个缺失用量数据的会话。",
+      "missingTokens_other": "Token 汇总不含 {{count}} 个缺失 Token 数据的会话。",
+      "missingCost_other": "费用汇总不含 {{count}} 个缺失费用数据的会话。",
+      "missingMixed": "不含 {{tokensCount}} 个缺失 Token 数据和 {{costCount}} 个缺失费用数据的会话。"
+    }
+  },
   "sessionMessage": {
     "from": "来自 {{title}}",
     "fromParent": "来自父会话"
@@ -668,7 +747,15 @@
     "tag": "回报",
     "tellNow": "现在就告诉它",
     "tellNowSteer": "插入正在进行的回合",
-    "tellNowStop": "停止本轮，接着告诉它"
+    "tellNowStop": "停止本轮，接着告诉它",
+    "round": "第 {{round}} 轮",
+    "openSession": "打开 {{title}}",
+    "openRound": "打开 {{title}} 的第 {{round}} 轮",
+    "agent": "该会话",
+    "finished": "{{agent}} 做完了",
+    "stopped": "{{agent}} 被停止了",
+    "failed": "{{agent}} 出错了",
+    "failedWith": "{{agent}} 出错了 · {{reason}}"
   },
   "sessionStarted": {
     "label": "已启动 <title>{{title}}</title>",
@@ -730,6 +817,7 @@
     "title": "从这里重新编辑？",
     "body_other": "这条消息和它之后的对话都会拿掉，一共 {{count}} 轮。消息回到输入框。",
     "files_other": "之后改过的 {{count}} 个文件保持原样",
+    "filesStay": "之后的文件改动保持原样",
     "filesBack": "之后改过的文件会退回原样，放回原处可以恢复",
     "stopsTurn": "会停掉正在跑的一轮",
     "stopsTasks_other": "会停掉 {{count}} 个后台任务",
@@ -752,16 +840,82 @@
     "revertConfirm": "撤销这一轮",
     "revertDraftKept": "输入框里已有草稿，撤销的消息没有放回去",
     "copyMessage": "复制消息",
-    "label": "回复操作"
+    "label": "回复操作",
+    "durationTitleWithTime": "{{duration}} · 完成于 {{time}}"
+  },
+  "turnUsage": {
+    "title": "本轮用量",
+    "triggerLabel": "本轮用量：{{summary}}",
+    "tokensShort": "{{tokens}} token",
+    "totalTokens": "总 Token",
+    "cacheHit": "缓存命中率",
+    "models_other": "{{count}} 个模型",
+    "unknownModel": "未知模型",
+    "noPrice": "无价格",
+    "unavailable": "—",
+    "input": "输入",
+    "output": "输出",
+    "reasoning": "推理",
+    "cacheRead": "缓存读取",
+    "cacheWrite": "缓存写入",
+    "cacheHitRate": "缓存命中率",
+    "subscriptionNote": "按 API 价格估算，非实际扣费。",
+    "partialCostNote": "未计入暂无 API 价格的模型。",
+    "unpricedNote": "本轮所用模型暂无可用的 API 价格。"
   },
   "changes": {
     "label": "改动",
     "files_other": "{{count}} 个文件有改动",
+    "undo": "撤销更改",
+    "undone": "已撤销",
+    "alreadyUndone": "这一轮的文件改动已撤销",
+    "undoBusy": "会话运行中，结束后可撤销",
     "review": "查看",
     "commit": "提交并创建 PR",
     "more_other": "再显示 {{count}} 个文件",
     "fewer": "收起",
     "openInFiles": "在文件面板中打开"
+  },
+  "undoTurn": {
+    "title": "撤销本轮更改",
+    "description": "核对受影响的文件与将要反向应用的改动。若任何改动与后来编辑冲突，整次操作不会写入任何文件。",
+    "confirm": "确认撤销",
+    "applying": "正在撤销…",
+    "recheck": "重新核对",
+    "applied_other": "已撤销 {{count}} 个文件的改动",
+    "alreadyUndone": "这一轮的文件改动已经撤销过了。",
+    "noChanges": "这一轮没有可撤销的文件改动记录。",
+    "errorTitle": "无法撤销本轮更改",
+    "staleTitle": "预览后文件有变化，已重新核对",
+    "staleBody": "为避免误覆盖，本次未写入任何文件。请核对以下已变化文件的最新状态后再确认：",
+    "conflictTitle_other": "有 {{count}} 个文件发生冲突，本次不会写入任何文件",
+    "conflictBody": "请先处理这些文件上的后续改动，再撤销本轮更改。",
+    "deleteHint": "这个文件是在本轮新建的，撤销后将被删除。",
+    "restoreHint": "这个文件是在本轮删除的，撤销后将被恢复。",
+    "action": {
+      "revert": "恢复修改",
+      "delete": "删除文件",
+      "restore": "恢复文件"
+    },
+    "status": {
+      "conflict": "冲突",
+      "unsupported": "无法撤销"
+    },
+    "reasons": {
+      "content_mismatch": "当前文件内容与后续编辑存在冲突。",
+      "ambiguous_match": "文件中有多处相同片段，无法唯一确定撤销位置。",
+      "modified_after_turn": "这个新建文件在本轮之后又被编辑过。",
+      "file_missing": "这个文件在磁盘上已不存在。",
+      "file_already_exists": "目标路径上已有同名文件，无法恢复被删文件。",
+      "missing_before_snapshot": "这次改动缺少修改前的完整记录，无法安全撤销。",
+      "replace_all_unsupported": "批量全文替换改动无法安全反向撤销。",
+      "binary_or_unreadable": "该文件为二进制文件或非有效 UTF-8 文本。",
+      "outside_workspace": "文件路径超出当前会话工作区范围。",
+      "symlink_not_allowed": "不允许通过符号链接撤销或删除文件。",
+      "directory_in_way": "目标路径当前是一个目录。",
+      "too_large": "文件过大，无法安全核对。",
+      "unsupported_operation": "暂不支持自动撤销此类文件操作。"
+    }
   },
   "queue": {
     "label": "排队中的消息：{{count}} 条",
@@ -816,6 +970,9 @@
     "send": "发送",
     "host": "电脑",
     "project": "项目",
+    "sourceFolder": "源文件夹",
+    "sourceFolderLabel": "工作目录",
+    "sourceFolderPrimary": "主目录",
     "chooseProjectShort": "选择项目",
     "missing": "未找到",
     "openProject": "打开项目…",
@@ -1099,7 +1256,9 @@
     "agentTurnedOffBody": "历史仍留在这里。到设置里启用这个智能体，或在输入框里选另一个智能体接着做。",
     "openAgent": "打开智能体",
     "archivedComposer": "这个会话已归档，不能再发消息。",
+    "archivedProjectComposer": "此会话所属的项目（{{project}}）已归档，不能再发消息。",
     "restore": "恢复",
+    "restoreProject": "恢复项目",
     "openAgents": "打开智能体设置",
     "announceApproval": "{{agent}} 需要你的授权",
     "announceQuestion": "{{agent}} 有问题要问你",
@@ -1142,6 +1301,7 @@
       "compacting": "正在压缩上下文",
       "approval": "等待你的授权",
       "question": "等待你的回答",
+      "waiting_background": "等待后台任务",
       "working": "处理中",
       "subagent": "子 Agent 在等你处理"
     },
@@ -1164,8 +1324,45 @@
       "details": "详情",
       "copy": "复制原始信息"
     },
+    "configWarning": {
+      "title": "Codex 配置警告",
+      "impact": {
+        "deprecated": {
+          "badge": "已弃用 · 仍生效",
+          "note": "该配置项已弃用，但当前会话仍会按它生效，建议按文档迁移或清理。"
+        },
+        "ignored": {
+          "badge": "已移除 · 已忽略",
+          "note": "该配置项未被识别或已移除，已被 Codex 忽略，不会影响当前会话。"
+        },
+        "invalid": {
+          "badge": "配置无效 · 使用默认",
+          "note": "Codex 无法解析该配置，已回退为默认设置。"
+        }
+      },
+      "layer": {
+        "user": "用户配置",
+        "project": "项目配置",
+        "system": "系统配置",
+        "profile": "配置文件",
+        "managed": "托管配置",
+        "mdm": "托管配置"
+      },
+      "sourceLabel": "配置文件",
+      "openConfig": "打开配置文件",
+      "viewInFiles": "在文件栏查看",
+      "openShort": "打开",
+      "viewShort": "查看",
+      "copyPath": "复制路径",
+      "docs": "Codex 配置文档"
+    },
     "width": {
-      "label": "调整内容宽度"
+      "label": "调整内容宽度",
+      "hint": "拖动调整宽度，双击恢复{{preset}}宽度",
+      "presets": {
+        "standard": "标准",
+        "wide": "宽版"
+      }
     },
     "outline": {
       "label_other": "大纲，{{count}} 条消息",
@@ -1473,6 +1670,7 @@
       "terminalRename": "给你的终端改名",
       "app": "使用应用",
       "projectMcp": "启动 MCP 服务器",
+      "projectSettings": "用这个项目自己的设置",
       "projectHooks": "运行这个项目设为自动执行的命令",
       "projectEnv": "使用这个项目设置的环境变量",
       "projectHooksEnv": "运行这个项目设为自动执行的命令，并使用它设置的环境变量"
@@ -1486,6 +1684,16 @@
     "newTrigger": "工作树 · <name>{{branch}}</name>",
     "localWorks": "在项目文件夹里的 <name>{{branch}}</name> 上工作",
     "localHint": "这个项目的别的会话改的是同一批文件。选新工作树，这个会话就有自己的分支和文件夹。",
+    "switchBranch": "切换分支",
+    "findOrCreateBranch": "查找或新建分支",
+    "createBranch": "新建“{{name}}”",
+    "inWorktreeBadge": "工作树中",
+    "checkedOutIn": "{{branch}} 已在 {{folder}} 中检出",
+    "switching": "切换中…",
+    "switchWorktreeHint": "请先提交或暂存更改，或改用新工作树。",
+    "useNewWorktree": "改用新工作树",
+    "showLog": "查看日志",
+    "localRunningWarning_other": "此文件夹有 {{count}} 个会话正在运行，切换分支会改动它们的文件。",
     "basedOn": "基于",
     "auto": "自动",
     "autoHint": "按你的消息起名",
@@ -1611,6 +1819,8 @@
       "notNow": "不要",
       "doItHere": "直接在这里做",
       "edit": "改一下",
+      "editingHint": "在下方输入框告诉 {{agent}} 要怎么改。",
+      "cancelEdit": "取消",
       "details": "详情",
       "source": {
         "library": "用你装的「{{name}}」工作流",
@@ -1631,6 +1841,9 @@
       "viewFile": "查看工作流文件",
       "another": "换一个做法",
       "reading": "正在读取…",
+      "loadFailed": "无法加载这条工作流建议",
+      "unavailable": "这条工作流建议已不在主机上",
+      "unavailableNamed": "「{{name}}」工作流建议已不在主机上",
       "openTask": "打开",
       "declined": "没有用工作流，就在这里做",
       "useInstead": "改用它",
@@ -2591,5 +2804,121 @@
     "notDone_delete": "没有删除定时任务 <b>{{name}}</b>",
     "notDone_run": "没有运行定时任务 <b>{{name}}</b>",
     "open": "打开"
+  },
+  "mcpChange": {
+    "title_add": "添加 MCP 服务器",
+    "title_on": "开启 MCP 服务器",
+    "title_off": "关闭 MCP 服务器",
+    "whoMac_add": "{{agent}} 想在这台 Mac 上添加一个 MCP 服务器",
+    "whoComputer_add": "{{agent}} 想在这台电脑上添加一个 MCP 服务器",
+    "whoOther_add": "{{agent}} 想在 {{computer}} 上添加一个 MCP 服务器",
+    "whoMac_switch": "{{agent}} 想修改这台 Mac 上的 MCP 服务器",
+    "whoComputer_switch": "{{agent}} 想修改这台电脑上的 MCP 服务器",
+    "whoOther_switch": "{{agent}} 想修改 {{computer}} 上的 MCP 服务器",
+    "rows": "要改的内容",
+    "name": "名称",
+    "command": "命令",
+    "address": "地址",
+    "runs": "运行",
+    "runsCommand": "由 Kettu 在这台电脑上、每个会话的文件夹里启动",
+    "runsRemote_streamable-http": "远程，经 HTTP",
+    "runsRemote_sse": "远程，经 SSE",
+    "signIn": "登录",
+    "signInOAuth": "由 Kettu 用 OAuth 登录",
+    "signInHeaders": "用下面的 header",
+    "signInNone": "不用登录",
+    "signInUnknown": "检查后才知道",
+    "agents": "给",
+    "everyAgent": "所有智能体",
+    "unset": "没设",
+    "fixed": "固定值，不显示",
+    "yourPermissions": "它以你的权限运行。",
+    "unsetNote": "没设的密钥在添加以后到服务器页的“更改…”里填，不经过智能体。",
+    "on": "开",
+    "off": "关",
+    "whole": "整个服务器",
+    "forAgent": "对 {{agent}}",
+    "inProject": "在 {{project}}",
+    "tool": "工具 {{tool}}",
+    "view": "打开服务器页",
+    "decline": "不做",
+    "add": "添加",
+    "turnOn": "开启",
+    "turnOff": "关闭",
+    "doing": "正在处理…",
+    "added": "已添加 MCP 服务器 <b>{{name}}</b>",
+    "notAdded": "没有添加 MCP 服务器 <b>{{name}}</b>",
+    "checking": "正在检查…",
+    "connected_other": "已连接，{{count}} 个工具",
+    "needsSignIn": "需要登录",
+    "projectOnly": "只能在项目文件夹里用",
+    "checkFailed": "出错：{{reason}}",
+    "reason": {
+      "command-not-found": "找不到命令",
+      "exited": "进程退出了",
+      "timeout": "没有及时回应",
+      "http": "服务器返回了 HTTP 错误",
+      "cannot-connect": "连不上",
+      "missing-variable": "有环境变量没设"
+    },
+    "signInButton": "登录",
+    "open": "打开",
+    "switched_server_on": "已开启 <b>{{name}}</b>",
+    "switched_server_off": "已关闭 <b>{{name}}</b>",
+    "switched_agent_on": "已对 {{agent}} 开启 <b>{{name}}</b>",
+    "switched_agent_off": "已对 {{agent}} 关掉 <b>{{name}}</b>",
+    "switched_project_on": "已在 {{project}} 开启 <b>{{name}}</b>",
+    "switched_project_off": "已在 {{project}} 关掉 <b>{{name}}</b>",
+    "switched_tool_on": "已开启 <b>{{name}}</b> 的工具 {{tool}}",
+    "switched_tool_off": "已关掉 <b>{{name}}</b> 的工具 {{tool}}",
+    "switchedMany_other": "已修改 {{count}} 项",
+    "undone": "已撤销：{{what}}",
+    "undoneMany_other": "已撤销 {{count}} 项",
+    "notSwitched": "没有修改：{{what}}",
+    "notSwitchedMany_other": "没有修改 {{count}} 项",
+    "row": "{{server}} · {{target}}：{{from}} → {{to}}",
+    "showRows": "显示每一项",
+    "undo": "撤销",
+    "undoLabel": "撤销对 {{name}} 的修改"
+  },
+  "thoughtTranslation": {
+    "translate": "翻译",
+    "translating": "翻译中…",
+    "original": "原文",
+    "translation": "译文",
+    "translated": "译文",
+    "switchLabel": "思考摘要原文与译文切换",
+    "failed": "翻译失败",
+    "empty": "没有返回译文。"
+  },
+  "branches": {
+    "title": "分支",
+    "triggerLabel": "会话分支",
+    "triggerCount_other": "{{count}} 个分支",
+    "triggerLocked": "分支（运行中禁止切换）",
+    "listLabel": "原生会话分支",
+    "currentBadge": "当前",
+    "forkPoint": "分叉点",
+    "turns_other": "{{count}} 轮",
+    "empty": "暂无分支记录。发送消息或从历史消息重新编辑后即可在此浏览分支。",
+    "loading": "正在加载分支…",
+    "switching": "正在切换…",
+    "retry": "重试",
+    "loadFailed": "加载分支失败：{{error}}",
+    "switchFailed": "切换分支失败：{{error}}",
+    "blockedRunning": "智能体运行中，暂时禁止切换分支。",
+    "blockedStarting": "请等待会话启动完成后再切换分支。",
+    "blockedRewound": "请先完成或撤销当前的重新编辑，再切换分支。",
+    "blockedArchived": "请先恢复会话，再切换分支。",
+    "fallback": {
+      "user": "用户消息",
+      "assistant": "助手回复",
+      "summary": "分支摘要",
+      "system": "会话节点"
+    }
+  },
+  "extensionUi": {
+    "statusLabel": "扩展状态",
+    "widgetsLabel": "扩展部件"
   }
 }

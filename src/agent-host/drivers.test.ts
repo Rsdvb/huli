@@ -139,7 +139,8 @@ describe('a start over the preferred interface', () => {
 describe('the harnesses the pages name as running on an interface of their own', () => {
   it('are those whose protocol or preferred interface is not ACP, Claude Code’s SDK aside', () => {
     const own = buildCatalog(null)
-      .filter((def) => (def.protocol ?? 'acp') !== 'acp' || def.preferred)
+      // `acp-folders` is ACP too, with a session's folders as its own.
+      .filter((def) => !['acp', 'acp-folders'].includes(def.protocol ?? 'acp') || def.preferred)
       .map((def) => def.id)
       .filter((id) => id !== 'claude-code')
     expect([...own].sort()).toEqual([...OWN_INTERFACE_HARNESSES].sort())

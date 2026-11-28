@@ -107,12 +107,12 @@ describe('ClientForwards listeners', () => {
   it('listens at the host’s own port when it is free, and at another when it is not', async () => {
     const forwards = client()
     const port = await freePort()
-    expect(await forwards.listen('', { host: 'localhost', port }, true)).toBe(port)
+    expect(await forwards.listen('', { host: 'localhost', port })).toBe(port)
     const taken = net.createServer()
     servers.push(taken)
     await new Promise<void>((done) => taken.listen(0, '127.0.0.1', done))
     const busy = (taken.address() as net.AddressInfo).port
-    const other = await forwards.listen('', { host: 'localhost', port: busy }, true)
+    const other = await forwards.listen('', { host: 'localhost', port: busy })
     expect(other).not.toBeNull()
     expect(other).not.toBe(busy)
   })
@@ -120,9 +120,9 @@ describe('ClientForwards listeners', () => {
   it('stops one listener, which listens again when asked', async () => {
     const forwards = client()
     const port = await freePort()
-    expect(await forwards.listen('s1', { host: 'localhost', port }, true)).toBe(port)
+    expect(await forwards.listen('s1', { host: 'localhost', port })).toBe(port)
     forwards.stopOne('s1', { host: 'localhost', port })
     await new Promise((done) => setTimeout(done, 20))
-    expect(await forwards.listen('s1', { host: 'localhost', port }, true)).toBe(port)
+    expect(await forwards.listen('s1', { host: 'localhost', port })).toBe(port)
   })
 })

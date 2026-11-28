@@ -25,6 +25,7 @@ import {
   Clock01Icon,
   GitCompareIcon,
   Layout2ColumnIcon,
+  LayoutBottomIcon,
   MessageAdd01Icon,
   PencilEdit02Icon,
   PinIcon,
@@ -87,13 +88,20 @@ import { markOf, rowOf, statusOf, useAddable } from '@renderer/features/devices/
 import { DeviceRow } from '@renderer/features/devices/device-row'
 import { useSessionView } from '@renderer/features/session/use-thread'
 import { runSessionMenuAccelerator } from '@renderer/features/sidebar/session-menu-model'
+import { requestCloseAllTerminals } from '@renderer/features/terminal/close-all-terminals-model'
+import { toast } from '@renderer/components/ui/toast'
 import { hostOfPath } from '@renderer/lib/host-paths'
+import { i18n } from '@renderer/lib/i18n'
 import { hasBand, isMac, isWeb } from '@renderer/lib/platform'
 import { runningFor } from '@renderer/lib/format'
 import { cn } from '@renderer/lib/utils'
 import { agentName } from '@renderer/stores/agents'
 import { useArtifactsStore } from '@renderer/stores/artifacts'
-import { restorePages, useBrowserStore } from '@renderer/stores/browser'
+import {
+  markTakenOverBrowserTabClosing,
+  restorePages,
+  useBrowserStore,
+} from '@renderer/stores/browser'
 import {
   closeDevice,
   devicesOf,
@@ -111,6 +119,7 @@ import {
   foldSurface,
   isSurfaceKind,
   moveSurfaceTab,
+  nextAfterClose,
   recordSurfaceOrder,
   surfaceKey,
   type TabKind,
@@ -135,6 +144,7 @@ import {
   docRoot,
   isDocKind,
   keepDoc,
+  leaveEmptySidePanel,
   noteSelectedTab,
   panelSession,
   removeSideTab,
@@ -145,6 +155,7 @@ import {
   type DocTab,
 } from '@renderer/stores/view'
 import { usePhoneWindow } from './narrow'
+import { moveTerminalPlacement } from './open-surfaces'
 import { SurfaceList, SurfaceMenuItems } from './surface-list'
 import {
   focusSurfaceList,
@@ -434,7 +445,12 @@ function useSingleItems(panel: string, hostId: string | null): SurfaceItem[] {
 }
 
 /** The panel's tabs in the row's order, with what each shows and who uses it. */
-function useSurfaceItems(panel: string, projectPath: string, kinds: SurfaceKinds): SurfaceItem[] {
+function useSurfaceItems(
+  panel: string,
+  projectPath: string,
+  kinds: SurfaceKinds,
+  includeTerminals: boolean,
+): SurfaceItem[] {
   const { t } = useTranslation(['terminal', 'browser', 'devices', 'shell'])
   const { t: td } = useTranslation('devices')
   const { t: tb } = useTranslation('browser')
@@ -442,7 +458,9 @@ function useSurfaceItems(panel: string, projectPath: string, kinds: SurfaceKinds
   const hostId = hostOfPath(projectPath)
   const shown = useViewStore((s) => s.sidePane[panel])
   const terminals = useTerminalsStore(
-    useShallow((s) => (kinds.terminal ? terminalsOf(s.byId, panel, s.order[panel]) : [])),
+    useShallow((s) =>
+      includeTerminals && kinds.terminal ? terminalsOf(s.byId, panel, s.order[panel]) : [],
+    ),
   )
   const activeId = useTerminalsStore((s) => s.active[panel])
   const rightId = useTerminalsStore((s) => s.split[panel] ?? null)
@@ -754,8 +772,11 @@ export function SurfaceTabs({
 }) {
   const { t } = useTranslation(['shell', 'terminal', 'browser', 'devices', 'common'])
   const sessionId = panelSession(panel)
+  const phone = usePhoneWindow()
+  const terminalPlacement = useViewStore((s) => s.terminalPlacement)
+  const terminalInBottom = terminalPlacement === 'bottom' && !phone
   const kinds = useSurfaceKinds(panel, projectPath)
-  const items = useSurfaceItems(panel, projectPath, kinds)
+  const items = useSurfaceItems(panel, projectPath, kinds, !terminalInBottom)
   useGonePluginPanes(panel, hostOfPath(projectPath))
   const browserTabs = useBrowserStore((s) => (sessionId ? s.bySession[sessionId]?.tabs.length : 0))
   // Tabs whose close waits for the user's answer, the first one asked about.
@@ -805,7 +826,6 @@ export function SurfaceTabs({
   const before = useRef({ pages, devices })
   // On macOS, maximized with the sidebar collapsed, the head is the window's top left corner; on a
   // phone the panel always covers the area and the corner always holds the sidebar's toggle.
-  const phone = usePhoneWindow()
   const cornered = (useViewStore((s) => s.sidebarCollapsed) || phone) && maximized && !hasBand
 
   // A tab newly selected, from the list, a shortcut or an agent's new terminal, scrolls into view:
@@ -852,6 +872,15 @@ export function SurfaceTabs({
         else void killTerminal(item.id)
       } else if (item.kind === 'browser') {
         if (!sessionId) return
+        const state = useBrowserStore.getState().bySession[sessionId]
+        const closingTab = state?.tabs.find((tab) => tab.id === item.id)
+        const endsTakeover =
+          item.control === 'you' &&
+          (pagesLeft <= 1 || (state?.agentTab === item.id && !closingTab?.opener))
+        if (endsTakeover) {
+          markTakenOverBrowserTabClosing(sessionId)
+          toast(i18n.t('control:note.closed.browserTab'), undefined, { tone: 'info' })
+        }
         // The last tab closes the page with it.
         if (pagesLeft > 1) void window.kettu.browser.closeTab(sessionId, item.id)
         else void window.kettu.browser.close(sessionId)
@@ -865,20 +894,19 @@ export function SurfaceTabs({
     [panel, projectPath, sessionId],
   )
 
-  // The selected tab hands the panel to its neighbour, of any kind; the last one to the list.
+  // The selected tab hands the panel to its neighbour, of any kind; closing the last one either
+  // collapses the side panel or shows the pane list, according to the user's setting.
   const close = useCallback(
     (item: SurfaceItem) => {
-      if (item.selected) {
-        const index = items.findIndex((other) => other.key === item.key)
-        const neighbor = [...items.slice(index + 1), ...items.slice(0, index).reverse()].find(
-          (other) => !other.selected,
-        )
-        if (neighbor) selectSurface(panel, neighbor)
-        else toggleSidePane(panel, 'surfaces', true)
+      const next = nextAfterClose(items, item)
+      if (next === 'empty' && item.kind === 'browser' && item.control === 'you' && sessionId) {
+        markTakenOverBrowserTabClosing(sessionId)
       }
+      if (next === 'empty') leaveEmptySidePanel(panel)
+      else if (next !== 'keep') selectSurface(panel, next.select)
       drop(item, browserTabs ?? 0)
     },
-    [items, panel, browserTabs, drop],
+    [items, panel, sessionId, browserTabs, drop],
   )
 
   // A shell still running asks first, as do a file with unsaved edits and an artifact with
@@ -943,13 +971,17 @@ export function SurfaceTabs({
             (item.kind !== 'terminal' || (focused ? item.id === focused : item.id !== right)),
         )
         if (target) requestClose(target)
-        else toggleSidePane(panel, 'surfaces', true)
+        else leaveEmptySidePanel(panel)
       }),
     [items, requestClose, panel],
   )
 
   const newTerminal = () => {
     toggleTerminal(panel, true)
+    if (terminalInBottom) {
+      void createTerminal(projectPath, panel)
+      return
+    }
     const slow = window.setTimeout(() => setStarting(true), SLOW_START_MS)
     void createTerminal(projectPath, panel).finally(() => {
       window.clearTimeout(slow)
@@ -1017,6 +1049,14 @@ export function SurfaceTabs({
                   }
                   onCloseRight={
                     index < items.length - 1 ? () => closeMany(items.slice(index + 1), item) : null
+                  }
+                  onCloseAllTerminals={
+                    item.kind === 'terminal' ? () => void requestCloseAllTerminals(panel) : null
+                  }
+                  onMoveTerminalToBottom={
+                    item.kind === 'terminal' && !phone
+                      ? () => moveTerminalPlacement('bottom', panel)
+                      : null
                   }
                 />
               ))}
@@ -1100,6 +1140,14 @@ export function SurfaceTabs({
             }}
           />
         )}
+        {!phone && !terminalInBottom && shown === 'terminal' && (
+          <PanelButton
+            label={t('terminal:panel.moveToBottom')}
+            onClick={() => moveTerminalPlacement('bottom', panel)}
+          >
+            <PaneIcon icon={LayoutBottomIcon} size={16} />
+          </PanelButton>
+        )}
         {!phone && (
           <PanelButton
             label={maximized ? t('common:pane.restore') : t('common:pane.maximize')}
@@ -1153,6 +1201,8 @@ function SurfaceTab({
   onClose,
   onCloseOthers,
   onCloseRight,
+  onCloseAllTerminals,
+  onMoveTerminalToBottom,
 }: {
   panel: string
   projectPath: string
@@ -1165,6 +1215,10 @@ function SurfaceTab({
   /** Null where the row has no other tab, or none after this one. */
   onCloseOthers: (() => void) | null
   onCloseRight: (() => void) | null
+  /** Present on terminal tabs to close every terminal belonging to this panel. */
+  onCloseAllTerminals: (() => void) | null
+  /** Present on terminal tabs on non-phone viewports to move terminals to the bottom dock. */
+  onMoveTerminalToBottom: (() => void) | null
 }) {
   const { t } = useTranslation(['terminal', 'browser', 'devices', 'common', 'shell'])
   const [editing, setEditing] = useState(false)
@@ -1305,6 +1359,12 @@ function SurfaceTab({
               <PaneIcon icon={Layout2ColumnIcon} size={16} />
               {split ? t('terminal:panel.unsplit') : t('terminal:panel.split')}
             </ContextMenuItem>
+            {onMoveTerminalToBottom && (
+              <ContextMenuItem onClick={onMoveTerminalToBottom}>
+                <PaneIcon icon={LayoutBottomIcon} size={16} />
+                {t('terminal:panel.moveToBottom')}
+              </ContextMenuItem>
+            )}
           </>
         )}
         {mention && (
@@ -1356,6 +1416,12 @@ function SurfaceTab({
           <PaneIcon icon={ArrowRight01Icon} size={16} />
           {t('shell:surfaces.closeRight')}
         </ContextMenuItem>
+        {onCloseAllTerminals && (
+          <ContextMenuItem onClick={onCloseAllTerminals}>
+            <PaneIcon icon={CancelCircleIcon} size={16} />
+            {t('terminal:tab.closeAll')}
+          </ContextMenuItem>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   )
@@ -1715,7 +1781,7 @@ function EndTerminal({
   return (
     <AlertDialog open={!!closing} onOpenChange={(open) => !open && onCancel()}>
       <AlertDialogPrimitive.Portal container={container}>
-        <AlertDialogPrimitive.Backdrop className="kp-confirm" />
+        <AlertDialogPrimitive.Backdrop className="kp-confirm app-region-no-drag" />
         <AlertDialogPrimitive.Popup className="kp-confirm__card" data-overlay-layer="">
           <AlertDialogPrimitive.Title>{t('closeDialog.title')}</AlertDialogPrimitive.Title>
           <AlertDialogPrimitive.Description>

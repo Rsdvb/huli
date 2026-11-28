@@ -46,6 +46,7 @@ import {
   pathLookup,
   resolveShell,
   shellEnvironment,
+  type ShellLog,
   type ShellSpec,
 } from './shell'
 
@@ -121,6 +122,7 @@ export interface TerminalManagerOptions {
   listProcesses?: () => Promise<ProcessRow[]>
   /** Huli: agent terminals of a session sat idle and were closed; its thread notes them. */
   idleClosed?: (sessionId: string, terminals: ClosedTerminal[]) => void
+  log?: ShellLog
   /** Whether a port serves a paired device, which never pauses the pty; none do when absent. */
   isDevicePort?: (port: string) => boolean
   /** The user handed back a terminal an agent's turn uses, after holding it for `durationMs`. */
@@ -292,7 +294,8 @@ export class TerminalManager {
   private readonly controls: SurfaceControls
 
   constructor(private readonly options: TerminalManagerOptions) {
-    this.findOnPath = options.findOnPath ?? pathLookup(options.env, options.platform)
+    this.findOnPath =
+      options.findOnPath ?? pathLookup(options.env, options.platform, { log: options.log })
     this.controls = new SurfaceControls({
       changed: (id) => {
         const terminal = this.terminals.get(id)
@@ -364,6 +367,7 @@ export class TerminalManager {
       this.options.env,
       this.shellPath,
       this.findOnPath,
+      this.options.log,
     )
     const terminal: Terminal = {
       info: {
@@ -865,6 +869,7 @@ export class TerminalManager {
       this.options.env,
       this.shellPath,
       this.findOnPath,
+      this.options.log,
     )
     // The name the user or the agent gave the tab stays; the new shell has run nothing yet.
     Object.assign(terminal.info, {
@@ -910,21 +915,25 @@ export class TerminalManager {
   async busy(): Promise<BusyTerminal[]> {
     const live = [...this.terminals.values()].filter((terminal) => terminal.pty)
     const checks = await this.childChecks(live, this.now() - LISTING_REUSE_MS, BUSY_LISTING_MS)
-    return live
-      .filter((terminal) => this.runsInShell(terminal) || checks.get(terminal)?.running !== false)
-      .map((terminal) => {
-        const { info } = terminal
-        return {
-          id: info.id,
-          projectPath: info.projectPath,
-          title: info.title,
-          sessionId: sessionOf(terminal),
-          name: info.name,
-          folder: terminal.cwd,
-          opener: openerOf(info),
-          since: checks.get(terminal)?.since ?? null,
-        }
-      })
+    return (
+      live
+        // A terminal killed while the listing ran no longer runs anything.
+        .filter((terminal) => this.terminals.get(terminal.info.id) === terminal && terminal.pty)
+        .filter((terminal) => this.runsInShell(terminal) || checks.get(terminal)?.running !== false)
+        .map((terminal) => {
+          const { info } = terminal
+          return {
+            id: info.id,
+            projectPath: info.projectPath,
+            title: info.title,
+            sessionId: sessionOf(terminal),
+            name: info.name,
+            folder: terminal.cwd,
+            opener: openerOf(info),
+            since: checks.get(terminal)?.since ?? null,
+          }
+        })
+    )
   }
 
   /**
