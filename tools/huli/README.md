@@ -3164,6 +3164,31 @@ on an iOS simulator, an Android emulator or phone (and, where noted, an iPhone).
   emulator and Xcode read too), and the device claims, shared on purpose with other agent-device
   users.
 
+### Traffic with images in the context (流量估算算上图片)
+
+The traffic estimate (`src/shared/traffic.ts`, its formula in the comment at the top) counts the
+images in the agent's context by their size as base64 rather than by the ~1.6K tokens an image
+counts as: a request uploads `max(0, tokens - images x 1600) x 4 + the images' base64`.
+
+- The agent host counts them (`imagesInContext`): the prompts' sent image attachments, the tool
+  results' and replies' images since the latest completed compaction (or a takeover). An inline
+  image is its base64's length; one the thread store keeps by hash takes the size its `media` row
+  (or a version 9 `blobs` row's `length(data)`) records, which `ThreadDb.load` reads with the thread
+  (`imageSizes`), never the bytes. It counts again only for a patch `touchesImages` says can change
+  them, after a replay and when a stored thread goes live; no timer.
+- Each `request` effect adds the images in the context then to `SessionView.images.sent` and
+  `sentBytes`, stored with the session view; a turn whose agent reports no request counts one.
+- The usage database's version 4 adds `images` and `image_bytes` to its rows and buckets: Kite's
+  record puts a turn's on its first row, and the Claude Code log reader gives each request the images
+  its log's context held then (prompts and tool results since the last `compact_boundary`, not a
+  sidechain's), its cursor keeping them between reads. Rows before version 4, other agents' logs and
+  a log's images before its cursor at the upgrade count none.
+- Shown in the context card (per request, its images apart), the composer's hint (also from 2 MB
+  per request, offering to compact, which drops old images, or hand off), the Usage page's
+  traffic, and the phone's context sheet. Limits: images Claude Code clears from old tool results
+  on its own, and a session's images before it went live with this host, are not seen.
+- The fake agent's `/image-context --shots <n>` puts screenshots of ~640 KB of base64 in the context.
+
 ## Merging Kettu
 
 What every merge of Kettu's main follows, whether the nightly `huli-sync.yml` makes it or, after a
@@ -3188,6 +3213,9 @@ conflict, someone on a branch:
   `SET_ASIDE`, `ARTIFACT_SEEN`, `TOKENS_APART`), and so does a test that builds a database
   at the version before one (`schemaAt(13)` for `TOKENS_APART`). Never renumber a migration an
   installed Kite has run.
+- The usage database: Kite's schema 4 is the image columns (`addImageColumns`), so a usage migration
+  of Kettu's takes the next number up, and `SCHEMA_VERSION` with it; `addImageColumns` adds only
+  what is missing, so it may run after Kettu's.
 - Code of Kettu's that lists the kinds of a union Kite extended drops Kite's: `coalescePatches`
   dropped Kite's `entry.remove` until it got its case. Read such switches in a merge's diff.
 
