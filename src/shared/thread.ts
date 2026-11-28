@@ -147,6 +147,25 @@ export interface SessionView {
   noRewind?: boolean
   /** Huli: the latest review of the session's changes and its findings; absent from older hosts. */
   review?: ReviewRun | null
+  /**
+   * Huli: the images in the agent's context and what the requests uploaded of them, as the host
+   * counts them from the thread (`shared/traffic.ts`); absent from older hosts.
+   */
+  images?: ContextImages | null
+}
+
+/**
+ * Huli: the images a session's context holds, by the size of their base64, which every request
+ * uploads again, and what the requests the host counted carried of them.
+ */
+export interface ContextImages {
+  /** The images in the context now, since its latest compaction. */
+  count: number
+  /** Their bytes as base64; an image whose size is unknown adds none. */
+  bytes: number
+  /** Summed over the requests counted: the images each one carried, and their bytes. */
+  sent: number
+  sentBytes: number
 }
 
 export interface RewoundView {
