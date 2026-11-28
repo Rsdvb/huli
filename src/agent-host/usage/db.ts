@@ -19,7 +19,7 @@ import { transaction } from '../sqlite'
 import { PRICES, type FileCursor, type UsageRow } from './model'
 import { keepsNewer } from './rows'
 
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 /** Every time zone's offset is a multiple of 15 minutes, so a local day is a range of these. */
 export const QUARTER_MS = 900_000
@@ -39,7 +39,9 @@ const SCHEMA = `
     cache_read  INTEGER NOT NULL,
     cache_write INTEGER NOT NULL,
     cache_write_1h INTEGER NOT NULL,
-    turn        INTEGER NOT NULL
+    turn        INTEGER NOT NULL,
+    images      INTEGER NOT NULL DEFAULT 0,
+    image_bytes INTEGER NOT NULL DEFAULT 0
   ) STRICT, WITHOUT ROWID;
   CREATE INDEX usage_by_agent ON usage (source, agent_id);
   CREATE TABLE buckets (
@@ -56,6 +58,8 @@ const SCHEMA = `
     cache_write INTEGER NOT NULL,
     cache_write_1h INTEGER NOT NULL,
     turns       INTEGER NOT NULL,
+    images      INTEGER NOT NULL DEFAULT 0,
+    image_bytes INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (quarter, source, agent_id, model, project)
   ) STRICT, WITHOUT ROWID;
   CREATE TABLE cursors (
@@ -117,6 +121,22 @@ const UPGRADE_2 = `
     AND cache_read + cache_write > 0 AND input >= cache_read + cache_write;
   ${KETTU_BUCKETS}
 `
+
+/**
+ * Huli: version 4 counts the images the requests uploaded again and their bytes, for the traffic
+ * estimate (`shared/traffic.ts`). The rows before it carry none. Added only where missing, since a
+ * file of an earlier version was made with the columns when a test or a downgrade set it back.
+ */
+function addImageColumns(db: DatabaseSync): void {
+  for (const table of ['usage', 'buckets']) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all()
+    if (columns.some((column) => column.name === 'images')) continue
+    db.exec(`
+      ALTER TABLE ${table} ADD COLUMN images INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE ${table} ADD COLUMN image_bytes INTEGER NOT NULL DEFAULT 0;
+    `)
+  }
+}
 
 /** The price list the queries join, in a temporary table of this connection. */
 function fillPrices(db: DatabaseSync): void {
@@ -208,6 +228,8 @@ function parts(row: Row): TokenParts {
     cost: row.cost === null || row.cost === undefined ? null : num(row.cost),
     unpricedTokens: num(row.unpriced_tokens),
     cacheSaved: num(row.cache_saved),
+    images: num(row.images),
+    imageBytes: num(row.image_bytes),
   }
 }
 
@@ -234,6 +256,8 @@ const SUMS = `
   SUM(b.reasoning) AS reasoning,
   SUM(b.cache_read) AS cache_read,
   SUM(b.cache_write) AS cache_write,
+  SUM(b.images) AS images,
+  SUM(b.image_bytes) AS image_bytes,
   SUM(CASE WHEN ${PRICED} THEN
     b.input * ${INPUT_PRICE}
     + (b.output + b.reasoning) * ${OUTPUT_PRICE}
@@ -256,16 +280,17 @@ function prepareAll(db: DatabaseSync) {
     row: sql('SELECT * FROM usage WHERE key = ?'),
     insertRow: sql(`
       INSERT INTO usage (key, source, agent_id, session_id, project, model, at, input, output,
-        reasoning, cache_read, cache_write, cache_write_1h, turn)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+        reasoning, cache_read, cache_write, cache_write_1h, turn, images, image_bytes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     updateRow: sql(`
       UPDATE usage SET session_id = ?, project = ?, model = ?, at = ?, input = ?, output = ?,
-        reasoning = ?, cache_read = ?, cache_write = ?, cache_write_1h = ?, turn = ?
+        reasoning = ?, cache_read = ?, cache_write = ?, cache_write_1h = ?, turn = ?, images = ?,
+        image_bytes = ?
       WHERE key = ?`),
     addBucket: sql(`
       INSERT INTO buckets (quarter, source, agent_id, model, project, rows, input, output,
-        reasoning, cache_read, cache_write, cache_write_1h, turns)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        reasoning, cache_read, cache_write, cache_write_1h, turns, images, image_bytes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (quarter, source, agent_id, model, project) DO UPDATE SET
         rows = rows + excluded.rows,
         input = input + excluded.input,
@@ -274,7 +299,9 @@ function prepareAll(db: DatabaseSync) {
         cache_read = cache_read + excluded.cache_read,
         cache_write = cache_write + excluded.cache_write,
         cache_write_1h = cache_write_1h + excluded.cache_write_1h,
-        turns = turns + excluded.turns`),
+        turns = turns + excluded.turns,
+        images = images + excluded.images,
+        image_bytes = image_bytes + excluded.image_bytes`),
     dropEmptyBucket: sql(
       `DELETE FROM buckets
       WHERE quarter = ? AND source = ? AND agent_id = ? AND model = ? AND project = ? AND rows <= 0`,
@@ -318,7 +345,8 @@ function prepareAll(db: DatabaseSync) {
         ${SUMS}
       FROM (
         SELECT agent_id, source, session_id, project, at, model, 1 AS rows, turn AS turns, input,
-          output, COALESCE(reasoning, 0) AS reasoning, cache_read, cache_write, cache_write_1h
+          output, COALESCE(reasoning, 0) AS reasoning, cache_read, cache_write, cache_write_1h,
+          images, image_bytes
         FROM usage WHERE at >= ? AND at < ? AND session_id IS NOT NULL AND session_id != ''
       ) AS b ${PRICE_JOIN}
       GROUP BY b.agent_id, b.source, b.session_id`),
@@ -406,6 +434,7 @@ export class UsageDb {
     transaction(db, () => {
       if (from === 1) db.exec(UPGRADE_1)
       if (from <= 2) db.exec(UPGRADE_2)
+      if (from <= 3) addImageColumns(db)
       db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
     })
   }
@@ -464,6 +493,8 @@ export class UsageDb {
       sign * row.cacheWrite,
       sign * row.cacheWrite1h,
       sign * row.turn,
+      sign * (row.images ?? 0),
+      sign * (row.imageBytes ?? 0),
     )
     if (sign < 0) sql.dropEmptyBucket.run(quarter, row.source, row.agentId, row.model, project)
   }
@@ -494,6 +525,8 @@ export class UsageDb {
               row.cacheWrite,
               row.cacheWrite1h,
               row.turn,
+              row.images ?? 0,
+              row.imageBytes ?? 0,
             )
             this.bucket(sql, row, 1)
             changed++
@@ -513,6 +546,8 @@ export class UsageDb {
             row.cacheWrite,
             row.cacheWrite1h,
             row.turn,
+            row.images ?? 0,
+            row.imageBytes ?? 0,
             row.key,
           )
           this.bucket(sql, previous, -1)
@@ -753,6 +788,8 @@ function addParts(sum: TokenParts, add: TokenParts): void {
   sum.turns += add.turns
   sum.unpricedTokens += add.unpricedTokens
   sum.cacheSaved += add.cacheSaved
+  sum.images = (sum.images ?? 0) + (add.images ?? 0)
+  sum.imageBytes = (sum.imageBytes ?? 0) + (add.imageBytes ?? 0)
   // Priced groups add up; the sum stays null while every group it holds is unpriced.
   if (add.cost !== null) sum.cost = (sum.cost ?? 0) + add.cost
 }
@@ -773,5 +810,7 @@ function fromRow(row: Row): UsageRow {
     cacheWrite: num(row.cache_write),
     cacheWrite1h: num(row.cache_write_1h),
     turn: num(row.turn),
+    images: num(row.images),
+    imageBytes: num(row.image_bytes),
   }
 }

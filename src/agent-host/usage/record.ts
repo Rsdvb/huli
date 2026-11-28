@@ -21,6 +21,8 @@ export interface RecordedTurn {
   models: ModelTokens[]
   /** The session's model at the turn's end, for an agent that names none per turn. */
   model: string | null
+  /** Huli: the images the turn's requests carried and their bytes as base64; none when absent. */
+  images?: { sent: number; bytes: number }
 }
 
 export function recordRows(turn: RecordedTurn): UsageRow[] {
@@ -63,5 +65,10 @@ export function recordRows(turn: RecordedTurn): UsageRow[] {
   )
   // The page counts turns by one row each; the models of a turn share its time and key prefix.
   if (recorded[0]) recorded[0].turn = 1
+  // Huli: and the turn's images by the same row, since its requests are not split by model.
+  if (recorded[0] && turn.images && turn.images.sent > 0) {
+    recorded[0].images = turn.images.sent
+    recorded[0].imageBytes = turn.images.bytes
+  }
   return recorded
 }

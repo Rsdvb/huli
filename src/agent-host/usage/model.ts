@@ -32,6 +32,12 @@ export interface UsageRow {
   cacheWrite1h: number
   /** 1 on one row of each of Kettu's turns, else 0. */
   turn: number
+  /**
+   * Huli: the images the row's requests uploaded again, one per image a request carried, and
+   * their bytes as base64, for the traffic estimate; 0 when absent.
+   */
+  images?: number
+  imageBytes?: number
 }
 
 /** How far a log file, or a reader's database, has been read. */

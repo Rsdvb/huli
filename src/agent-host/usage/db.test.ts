@@ -7,6 +7,7 @@ import type { AgentId } from '@shared/thread'
 import type { TokenParts, UsageSource } from '@shared/usage'
 import { SCHEMA_VERSION, topSessions, UsageDb } from './db'
 import { PRICES, type UsageRow } from './model'
+import { recordRows } from './record'
 
 const dirs: string[] = []
 const dbs: UsageDb[] = []
@@ -142,6 +143,94 @@ describe('topSessions', () => {
     const list = [session('a', 'codex', { input: 3, requests: 1 })]
     expect(topSessions(list, 20)).toHaveLength(1)
     expect(topSessions([session('b', 'codex', {})], 20)).toEqual([])
+  })
+})
+
+describe('the images the requests uploaded', () => {
+  it('sums them with the tokens, in the buckets and the sessions', () => {
+    const db = openDb()
+    db.write([
+      row({ at: DAY + HOUR, input: 100, images: 7, imageBytes: 2_800_000 }),
+      row({ at: DAY + 2 * HOUR, input: 50, images: 3, imageBytes: 1_200_000, turn: 0 }),
+      row({ at: DAY + 2 * HOUR, input: 5 }),
+    ])
+    const summary = db.summary([DAY, DAY + 24 * HOUR], DAY, DAY + 24 * HOUR, sources('kettu'))
+    expect(summary.days).toMatchObject([{ input: 155, images: 10, imageBytes: 4_000_000 }])
+    expect(summary.sessions).toMatchObject([{ images: 10, imageBytes: 4_000_000 }])
+    expect(db.totals(DAY, DAY + 24 * HOUR, sources('kettu'))).toMatchObject([
+      { images: 10, imageBytes: 4_000_000 },
+    ])
+  })
+
+  it('moves a grown row by its difference, images too', () => {
+    const db = openDb()
+    const first = row({ at: DAY + HOUR, source: 'log', output: 1, images: 2, imageBytes: 800 })
+    db.write([first])
+    db.write([{ ...first, output: 5, images: 3, imageBytes: 1200 }])
+    const { days } = db.summary([DAY, DAY + 24 * HOUR], DAY, DAY + 24 * HOUR, sources('log'))
+    expect(days).toMatchObject([{ output: 5, images: 3, imageBytes: 1200, requests: 1 }])
+  })
+
+  it('takes the turn’s images on its first row', () => {
+    const rows = recordRows({
+      sessionId: 's1',
+      acpSessionId: 'acp-1',
+      agentId: 'claude-code',
+      project: null,
+      turnEntryId: 'end-1',
+      at: DAY,
+      tokens: null,
+      models: [
+        {
+          model: 'a',
+          tokens: { total: 10, input: 10, output: 0, thought: null, cacheRead: 0, cacheWrite: 0 },
+        },
+        {
+          model: 'b',
+          tokens: { total: 5, input: 5, output: 0, thought: null, cacheRead: 0, cacheWrite: 0 },
+        },
+      ],
+      model: null,
+      images: { sent: 4, bytes: 1_600_000 },
+    })
+    expect(rows.map((r) => [r.turn, r.images ?? 0, r.imageBytes ?? 0])).toEqual([
+      [1, 4, 1_600_000],
+      [0, 0, 0],
+    ])
+  })
+})
+
+describe("the usage database's upgrade to version 4", () => {
+  it('adds the image columns to a file of version 3, its rows counting none', () => {
+    const file = tempFile()
+    UsageDb.open(file, () => {}).close()
+    const raw = new DatabaseSync(file)
+    for (const table of ['usage', 'buckets']) {
+      raw.exec(
+        `ALTER TABLE ${table} DROP COLUMN images; ALTER TABLE ${table} DROP COLUMN image_bytes`,
+      )
+    }
+    raw
+      .prepare(
+        `INSERT INTO usage (key, source, agent_id, session_id, project, model, at, input, output,
+          reasoning, cache_read, cache_write, cache_write_1h, turn)
+        VALUES ('old', 'kettu', 'claude-code', 's', '/p', 'm', 0, 5, 1, NULL, 0, 0, 0, 1)`,
+      )
+      .run()
+    raw.exec('PRAGMA user_version = 3')
+    raw.close()
+
+    const db = UsageDb.open(file, () => {})
+    expect(db.status).toBe('ok')
+    db.write([row({ key: 'new', at: 0, input: 1, images: 2, imageBytes: 900 })])
+    db.close()
+    const check = new DatabaseSync(file)
+    expect(check.prepare('PRAGMA user_version').get()!.user_version).toBe(SCHEMA_VERSION)
+    expect(check.prepare('SELECT key, images, image_bytes FROM usage ORDER BY key').all()).toEqual([
+      { key: 'new', images: 2, image_bytes: 900 },
+      { key: 'old', images: 0, image_bytes: 0 },
+    ])
+    check.close()
   })
 })
 
